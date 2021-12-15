@@ -8,10 +8,50 @@ use smithay::reexports::{
 use anyhow::{Context, Result};
 use slog::Drain;
 
+pub mod backend;
 pub mod state;
+pub mod utils;
 
 fn main() -> Result<()> {
     // setup logger
+    let _guard = init_logger();
+    slog_scope::info!("Cosmic starting up!");
+
+    // init event loop
+    let mut event_loop = EventLoop::try_new().with_context(|| "Failed to initialize event loop")?;
+    // init wayland
+    let display = init_wayland_display(&mut event_loop)?;
+    // init state
+    let mut state = state::State::new(display);
+    // init backend
+    backend::init_backend_auto(&mut event_loop, &mut state)?;
+
+    // run the event loop
+    let signal = event_loop.get_signal();
+    event_loop.run(None, &mut state, |state| {
+        // shall we shut down?
+        if state.spaces.outputs().next().is_none() || state.should_stop {
+            slog_scope::info!("Shutting down");
+            signal.stop();
+            signal.wakeup();
+            return;
+        }
+
+        // trigger routines
+        state
+            .spaces
+            .send_frames(false, state.start_time.elapsed().as_millis() as u32);
+        state.spaces.refresh();
+
+        // send out events
+        let display = state.display.clone();
+        display.borrow_mut().flush_clients(state);
+    })?;
+
+    Ok(())
+}
+
+fn init_logger() -> Result<slog_scope::GlobalLoggerGuard> {
     let decorator = slog_term::TermDecorator::new().stderr().build();
     // usually we would not want to use a Mutex here, but this is usefull for a prototype,
     // to make sure we do not miss any in-flight messages, when we crash.
@@ -24,7 +64,7 @@ fn main() -> Result<()> {
         .fuse(),
         slog::o!(),
     );
-    let _guard = slog_scope::set_global_logger(logger);
+    let guard = slog_scope::set_global_logger(logger);
     slog_stdlog::init().unwrap();
 
     slog_scope::info!("Version: {}", std::env!("CARGO_PKG_VERSION"));
@@ -34,14 +74,15 @@ fn main() -> Result<()> {
             std::option_env!("GIT_HASH").unwrap_or("Unknown")
         );
     }
-    slog_scope::info!("Cosmic starting up!");
 
-    // init event loop
-    let mut event_loop = EventLoop::try_new().with_context(|| "Failed to initialize event loop")?;
+    Ok(guard)
+}
 
-    // add wayland socket
+fn init_wayland_display(event_loop: &mut EventLoop<state::State>) -> Result<Display> {
     let mut display = Display::new();
     let socket_name = display.add_socket_auto()?;
+
+    slog_scope::info!("Listening on {:?}", socket_name);
     event_loop
         .handle()
         .insert_source(
@@ -59,25 +100,7 @@ fn main() -> Result<()> {
                 }
             },
         )
-        .expect("Failed to init the wayland event source.");
-    slog_scope::info!("Listening on {:?}", socket_name);
+        .with_context(|| "Failed to init the wayland event source.")?;
 
-    // init state
-    let mut state = state::State::new(display);
-
-    // run the event loop
-    let signal = event_loop.get_signal();
-    event_loop.run(None, &mut state, |state| {
-        // shall we shut down?
-        if state.should_stop {
-            signal.stop();
-            return;
-        }
-
-        // send out events
-        let display = state.display.clone();
-        display.borrow_mut().flush_clients(state);
-    })?;
-
-    Ok(())
+    Ok(display)
 }
