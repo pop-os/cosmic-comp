@@ -6,6 +6,12 @@ license = "GPL-3.0-only"
 authors = ["Victoria Brekenfeld"]
 
 [dependencies]
+anyhow = "1.0.51"
+slog = "2.7"
+slog-term = "2.8"
+slog-async = "2.7"
+slog-scope = "4.4"
+slog-stdlog = "4.1"
 
 [dependencies.smithay]
 version = "0.3"
