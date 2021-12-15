@@ -1,0 +1,15 @@
+[package]
+name = "cosmic-comp"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+authors = ["Victoria Brekenfeld"]
+
+[dependencies]
+
+[dependencies.smithay]
+version = "0.3"
+git = "https://github.com/Smithay/smithay.git"
+rev = "87ab37a1"
+default-features = false
+features = ["backend_x11", "backend_egl", "desktop", "renderer_gl", "wayland_frontend"]
