@@ -9,6 +9,7 @@ use anyhow::{Context, Result};
 use slog::Drain;
 
 pub mod backend;
+pub mod shell;
 pub mod state;
 pub mod utils;
 
@@ -38,9 +39,6 @@ fn main() -> Result<()> {
         }
 
         // trigger routines
-        state
-            .spaces
-            .send_frames(false, state.start_time.elapsed().as_millis() as u32);
         state.spaces.refresh();
 
         // send out events

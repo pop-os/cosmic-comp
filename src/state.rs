@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::backend::x11::X11State;
-use smithay::{desktop::Space, reexports::wayland_server::Display};
+use crate::{backend::x11::X11State, shell::workspaces::Workspaces};
+use smithay::reexports::wayland_server::Display;
 use std::{cell::RefCell, rc::Rc, time::Instant};
 
 pub struct State {
     pub display: Rc<RefCell<Display>>,
-    pub spaces: Space, //TODO: Multiple workspaces
+    pub spaces: Workspaces,
 
     pub start_time: Instant,
     pub should_stop: bool,
@@ -34,7 +34,7 @@ impl State {
     pub fn new(display: Display) -> State {
         State {
             display: Rc::new(RefCell::new(display)),
-            spaces: Space::new(slog_scope::logger() /*TODO*/),
+            spaces: Workspaces::new(),
 
             start_time: Instant::now(),
             should_stop: false,

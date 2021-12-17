@@ -31,14 +31,15 @@ use std::{
     cell::RefCell,
     rc::Rc,
     sync::{Arc, Mutex},
+    time::Instant,
 };
 
 pub struct X11State {
-    handle: X11Handle,
     allocator: Arc<Mutex<GbmDevice<DrmNode>>>,
     _egl: EGLDisplay,
     renderer: Rc<RefCell<Gles2Renderer>>,
     surfaces: Vec<Surface>,
+    handle: X11Handle,
 }
 
 impl X11State {
@@ -51,7 +52,7 @@ impl X11State {
             .title("COSMIC")
             .build(&self.handle)
             .with_context(|| "Failed to create window")?;
-        let fourcc = window.format().unwrap();
+        let fourcc = window.format();
         let surface = self
             .handle
             .create_surface(
@@ -93,9 +94,11 @@ impl X11State {
                     .iter_mut()
                     .find(|s| s.output == output_ref)
                 {
-                    if let Err(err) = surface
-                        .render_from_space(&mut *x11_state.renderer.borrow_mut(), &mut state.spaces)
-                    {
+                    if let Err(err) = surface.render_from_space(
+                        &mut *x11_state.renderer.borrow_mut(),
+                        state.spaces.active_space_mut(&output_ref),
+                        &state.start_time,
+                    ) {
                         slog_scope::error!("Error rendering: {}", err);
                     }
                 }
@@ -129,6 +132,7 @@ impl Surface {
         &mut self,
         renderer: &mut Gles2Renderer,
         space: &mut Space,
+        start_time: &Instant,
     ) -> Result<()> {
         let (buffer, age) = self
             .surface
@@ -145,6 +149,7 @@ impl Surface {
         ) {
             Ok(true) => {
                 slog_scope::trace!("Finished rendering");
+                space.send_frames(false, start_time.elapsed().as_millis() as u32);
                 self.surface
                     .submit()
                     .with_context(|| "Failed to submit buffer for display")?;
@@ -198,9 +203,7 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
         .x11()
         .add_window(&mut *state.display.borrow_mut(), event_loop.handle())
         .with_context(|| "Failed to create wl_output")?;
-    state
-        .spaces
-        .map_output(&output, 1.0, (0, 0).into() /* TODO */);
+    state.spaces.map_output(&output);
 
     event_loop
         .handle()
@@ -255,7 +258,7 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
 
             X11Event::Input(event) => { /*TODO*/ }
         })
-        .expect("Failed to insert X11 Backend into event loop");
+        .map_err(|_| anyhow::anyhow!("Failed to insert X11 Backend into event loop"))?;
 
     Ok(())
 }
