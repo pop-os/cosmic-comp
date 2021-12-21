@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-pub use smithay::{desktop::Space, wayland::output::Output};
+pub use smithay::{
+    desktop::Space, reexports::wayland_server::protocol::wl_surface::WlSurface,
+    wayland::output::Output,
+};
 use std::{cell::Cell, mem::MaybeUninit};
 
 const MAX_WORKSPACES: usize = 10; // TODO?
@@ -224,9 +227,27 @@ impl Workspaces {
         }
     }
 
+    pub fn space_for_surface(&self, surface: &WlSurface) -> Option<&Space> {
+        self.spaces
+            .iter()
+            .find(|space| space.window_for_surface(surface).is_some())
+    }
+
+    pub fn space_for_surface_mut(&mut self, surface: &WlSurface) -> Option<&mut Space> {
+        self.spaces
+            .iter_mut()
+            .find(|space| space.window_for_surface(surface).is_some())
+    }
+
     pub fn refresh(&mut self) {
         for space in &mut self.spaces {
             space.refresh()
+        }
+    }
+
+    pub fn commit(&mut self, surface: &WlSurface) {
+        for space in &mut self.spaces {
+            space.commit(surface)
         }
     }
 }
