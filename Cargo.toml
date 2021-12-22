@@ -6,7 +6,7 @@ license = "GPL-3.0-only"
 authors = ["Victoria Brekenfeld"]
 
 [dependencies]
-anyhow = "1.0.51"
+anyhow = { version = "1.0.51", features = ["backtrace"] }
 slog = "2.7"
 slog-term = "2.8"
 slog-async = "2.7"
@@ -16,6 +16,6 @@ slog-stdlog = "4.1"
 [dependencies.smithay]
 version = "0.3"
 git = "https://github.com/Smithay/smithay.git"
-rev = "b683f7d"
+rev = "4d40da5"
 default-features = false
 features = ["backend_x11", "backend_egl", "desktop", "use_system_lib", "renderer_gl", "wayland_frontend"]
