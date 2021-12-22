@@ -9,6 +9,7 @@ use anyhow::{Context, Result};
 use slog::Drain;
 
 pub mod backend;
+pub mod input;
 pub mod shell;
 pub mod state;
 pub mod utils;

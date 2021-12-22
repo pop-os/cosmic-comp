@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 pub use smithay::{
-    desktop::Space, reexports::wayland_server::protocol::wl_surface::WlSurface,
+    desktop::Space,
+    reexports::wayland_server::protocol::wl_surface::WlSurface,
+    utils::{Logical, Rectangle, Size},
     wayland::output::Output,
 };
 use std::{cell::Cell, mem::MaybeUninit};
@@ -113,6 +115,31 @@ impl Workspaces {
                 // TODO move windows and outputs farther on the right / or load save config for remaining monitors
             }
         }
+    }
+
+    pub fn output_size(&self, output: &Output) -> Size<i32, Logical> {
+        let space = self.active_space(output);
+        space
+            .output_geometry(&output)
+            .unwrap_or(Rectangle::from_loc_and_size((0, 0), (0, 0)))
+            .size
+    }
+
+    pub fn output_geometry(&self, output: &Output) -> Rectangle<i32, Logical> {
+        // due to our different modes, we cannot just ask the space for the global output coordinates,
+        // because for `Mode::OutputBound` the origin will always be (0, 0)
+
+        // TODO: Add a proper grid like structure, for now the outputs just extend to the right
+        let pos =
+            self.outputs
+                .iter()
+                .take_while(|o| o != &output)
+                .fold((0, 0), |(x, y), output| {
+                    let size = self.output_size(output);
+                    (x + size.w, y)
+                });
+
+        Rectangle::from_loc_and_size(pos, self.output_size(output))
     }
 
     pub fn activate(&mut self, output: &Output, idx: usize) {

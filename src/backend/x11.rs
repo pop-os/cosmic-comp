@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
+    input::{set_active_output, Devices},
     state::{BackendData, State},
     utils::GlobalDrop,
 };
@@ -10,10 +11,11 @@ use smithay::{
         allocator::dmabuf::Dmabuf,
         drm::DrmNode,
         egl::{EGLContext, EGLDisplay},
+        input::{Event, InputEvent},
         renderer::{gles2::Gles2Renderer, Bind, ImportDma, ImportEgl, Unbind},
-        x11::{Window, WindowBuilder, X11Backend, X11Event, X11Handle, X11Surface},
+        x11::{Window, WindowBuilder, X11Backend, X11Event, X11Handle, X11Input, X11Surface},
     },
-    desktop::Space,
+    desktop::{layer_map_for_output, Space},
     reexports::{
         calloop::{ping, EventLoop, LoopHandle},
         gbm::Device as GbmDevice,
@@ -146,6 +148,7 @@ impl Surface {
             &self.output,
             age as usize,
             [0.153, 0.161, 0.165, 1.0],
+            &[],
         ) {
             Ok(true) => {
                 slog_scope::trace!("Finished rendering");
@@ -156,6 +159,7 @@ impl Surface {
             }
             Ok(false) => {
                 let _ = renderer.unbind();
+                self.render.ping();
             }
             Err(err) => {
                 self.surface.reset_buffers();
@@ -207,56 +211,64 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
 
     event_loop
         .handle()
-        .insert_source(backend, |event, window, state| match event {
-            X11Event::CloseRequested => {
-                window.unmap();
+        .insert_source(backend, |event, _, state| match event {
+            X11Event::CloseRequested { window_id } => {
                 // TODO: drain_filter
-                for output in state
+                for surface in state
                     .backend
                     .x11()
                     .surfaces
                     .iter()
-                    .filter(|s| &s.window == window)
-                    .map(|s| &s.output)
+                    .filter(|s| s.window.id() == window_id)
                 {
-                    state.spaces.unmap_output(output);
+                    surface.window.unmap();
+                    state.spaces.unmap_output(&surface.output);
                 }
-                state.backend.x11().surfaces.retain(|s| &s.window != window);
-            }
-            X11Event::Resized(size) => {
-                let size = { (size.w as i32, size.h as i32).into() };
-                let mode = Mode {
-                    size,
-                    refresh: 60_000,
-                };
-                let surface = state
-                    .backend
-                    .x11()
-                    .surfaces
-                    .iter_mut()
-                    .find(|s| &s.window == window)
-                    .expect("Unmanaged X11 surface?");
-                surface.render.ping();
-
-                let output = &surface.output;
-                output.delete_mode(output.current_mode().unwrap());
-                output.change_current_state(Some(mode), None, None, None);
-                output.set_preferred(mode);
-            }
-
-            X11Event::PresentCompleted | X11Event::Refresh => {
                 state
                     .backend
                     .x11()
                     .surfaces
+                    .retain(|s| s.window.id() != window_id);
+            }
+            X11Event::Resized {
+                new_size,
+                window_id,
+            } => {
+                let size = { (new_size.w as i32, new_size.h as i32).into() };
+                let mode = Mode {
+                    size,
+                    refresh: 60_000,
+                };
+                if let Some(surface) = state
+                    .backend
+                    .x11()
+                    .surfaces
                     .iter_mut()
-                    .find(|s| &s.window == window)
-                    .expect("Unmanaged X11 surface?")
-                    .render
-                    .ping();
+                    .find(|s| s.window.id() == window_id)
+                {
+                    surface.render.ping();
+
+                    let output = &surface.output;
+                    output.delete_mode(output.current_mode().unwrap());
+                    output.change_current_state(Some(mode), None, None, None);
+                    output.set_preferred(mode);
+                    layer_map_for_output(output).arrange();
+                }
             }
 
-            X11Event::Input(event) => { /*TODO*/ }
+            X11Event::PresentCompleted { window_id } | X11Event::Refresh { window_id } => {
+                if let Some(surface) = state
+                    .backend
+                    .x11()
+                    .surfaces
+                    .iter_mut()
+                    .find(|s| s.window.id() == window_id)
+                {
+                    surface.render.ping();
+                }
+            }
+
+            X11Event::Input(event) => state.process_x11_event(event),
         })
         .map_err(|_| anyhow::anyhow!("Failed to insert X11 Backend into event loop"))?;
 
@@ -284,4 +296,36 @@ fn init_egl_client_side(display: &mut Display, renderer: Rc<RefCell<Gles2Rendere
     };
 
     Ok(())
+}
+
+impl State {
+    pub fn process_x11_event(&mut self, event: InputEvent<X11Input>) {
+        // here we can handle special cases for x11 inputs, like mapping them to windows
+        match &event {
+            InputEvent::PointerMotionAbsolute { event } => {
+                if let Some(window) = event.window() {
+                    let output = self
+                        .backend
+                        .x11()
+                        .surfaces
+                        .iter()
+                        .find(|surface| &surface.window == window.as_ref())
+                        .map(|surface| surface.output.clone())
+                        .unwrap();
+
+                    let device = event.device();
+                    for seat in self.seats.clone().iter() {
+                        let devices = seat.user_data().get::<Devices>().unwrap();
+                        if devices.has_device(&device) {
+                            set_active_output(seat, &output);
+                            break;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        };
+
+        self.process_input_event(event);
+    }
 }
