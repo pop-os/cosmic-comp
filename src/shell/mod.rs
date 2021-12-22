@@ -12,10 +12,12 @@ use smithay::{
         compositor::{compositor_init, with_states},
         output::Output,
         shell::{
-            wlr_layer::{wlr_layer_shell_init, LayerShellRequest, LayerShellState},
+            wlr_layer::{
+                wlr_layer_shell_init, LayerShellRequest, LayerShellState, LayerSurfaceAttributes,
+            },
             xdg::{
-                xdg_shell_init, Configure, ShellState as XdgShellState, XdgRequest,
-                XdgToplevelSurfaceRoleAttributes,
+                xdg_shell_init, Configure, ShellState as XdgShellState,
+                XdgPopupSurfaceRoleAttributes, XdgRequest, XdgToplevelSurfaceRoleAttributes,
             },
         },
     },
@@ -210,5 +212,55 @@ fn commit(surface: &WlSurface, state: &mut State) {
                 }
             }
         }
+
+        return;
     }
+
+    if let Some(popup) = state.shell.popups.find_popup(surface) {
+        let PopupKind::Xdg(ref popup) = popup;
+        let initial_configure_sent = with_states(surface, |states| {
+            states
+                .data_map
+                .get::<Mutex<XdgPopupSurfaceRoleAttributes>>()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .initial_configure_sent
+        })
+        .unwrap();
+        if !initial_configure_sent {
+            // NOTE: This should never fail as the initial configure is always
+            // allowed.
+            popup.send_configure().expect("initial configure failed");
+        }
+
+        return;
+    }
+
+    if let Some(output) = state.spaces.outputs().find(|o| {
+        let map = layer_map_for_output(o);
+        map.layer_for_surface(surface).is_some()
+    }) {
+        let mut map = layer_map_for_output(output);
+        let layer = map.layer_for_surface(surface).unwrap();
+
+        // send the initial configure if relevant
+        let initial_configure_sent = with_states(surface, |states| {
+            states
+                .data_map
+                .get::<Mutex<LayerSurfaceAttributes>>()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .initial_configure_sent
+        })
+        .unwrap();
+        if !initial_configure_sent {
+            layer.layer_surface().send_configure();
+        }
+
+        map.arrange();
+
+        return;
+    };
 }
