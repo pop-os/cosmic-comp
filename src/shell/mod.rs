@@ -11,6 +11,7 @@ use smithay::{
     wayland::{
         compositor::{compositor_init, with_states},
         output::Output,
+        seat::{GrabStartData, PointerHandle, Seat},
         shell::{
             wlr_layer::{
                 wlr_layer_shell_init, LayerShellRequest, LayerShellState, LayerSurfaceAttributes,
@@ -20,10 +21,12 @@ use smithay::{
                 XdgPopupSurfaceRoleAttributes, XdgRequest, XdgToplevelSurfaceRoleAttributes,
             },
         },
+        Serial,
     },
 };
 use std::sync::{Arc, Mutex};
 
+pub mod grabs;
 pub mod workspaces;
 
 pub struct ShellStates {
@@ -87,11 +90,105 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
                         surface.send_repositioned(token);
                     }
                 }
-                /*
-                XdgRequest::AckConfigure { surface, configure: Configure::Toplevel(configure) } => {
+                XdgRequest::Move {
+                    surface,
+                    seat,
+                    serial,
+                } => {
+                    let seat = Seat::from_resource(&seat).unwrap();
+                    if let Some((pointer, start_data)) =
+                        check_grab_preconditions(&seat, surface.get_surface(), serial)
+                    {
+                        let space = state
+                            .spaces
+                            .space_for_surface(surface.get_surface().unwrap())
+                            .unwrap();
+                        let window = space
+                            .window_for_surface(surface.get_surface().unwrap())
+                            .unwrap()
+                            .clone();
+                        let mut initial_window_location =
+                            space.window_geometry(&window).unwrap().loc;
 
-                },
-                */
+                        // If surface is maximized then unmaximize it
+                        if let Some(current_state) = surface.current_state() {
+                            if current_state
+                                .states
+                                .contains(xdg_toplevel::State::Maximized)
+                            {
+                                let fs_changed = surface.with_pending_state(|state| {
+                                    state.states.unset(xdg_toplevel::State::Maximized);
+                                    state.size = None;
+                                });
+
+                                if fs_changed.is_ok() {
+                                    surface.send_configure();
+
+                                    // NOTE: In real compositor mouse location should be mapped to a new window size
+                                    // For example, you could:
+                                    // 1) transform mouse pointer position from compositor space to window space (location relative)
+                                    // 2) divide the x coordinate by width of the window to get the percentage
+                                    //   - 0.0 would be on the far left of the window
+                                    //   - 0.5 would be in middle of the window
+                                    //   - 1.0 would be on the far right of the window
+                                    // 3) multiply the percentage by new window width
+                                    // 4) by doing that, drag will look a lot more natural
+                                    //
+                                    // but for anvil needs setting location to pointer location is fine
+                                    let pos = pointer.current_location();
+                                    initial_window_location = (pos.x as i32, pos.y as i32).into();
+                                }
+                            }
+                        }
+
+                        let grab = grabs::MoveSurfaceGrab::new(
+                            start_data,
+                            window,
+                            initial_window_location,
+                        );
+
+                        pointer.set_grab(grab, serial);
+                    }
+                }
+
+                XdgRequest::Resize {
+                    surface,
+                    seat,
+                    serial,
+                    edges,
+                } => {
+                    let seat = Seat::from_resource(&seat).unwrap();
+                    if let Some((pointer, start_data)) =
+                        check_grab_preconditions(&seat, surface.get_surface(), serial)
+                    {
+                        let space = state
+                            .spaces
+                            .space_for_surface(surface.get_surface().unwrap())
+                            .unwrap();
+                        let window = space
+                            .window_for_surface(surface.get_surface().unwrap())
+                            .unwrap()
+                            .clone();
+                        let geometry = space.window_geometry(&window).unwrap();
+
+                        let grab =
+                            grabs::ResizeSurfaceGrab::new(start_data, window, edges, geometry);
+
+                        pointer.set_grab(grab, serial);
+                    }
+                }
+                XdgRequest::AckConfigure {
+                    surface,
+                    configure: Configure::Toplevel(configure),
+                } => {
+                    let window = state
+                        .spaces
+                        .space_for_surface(&surface)
+                        .unwrap()
+                        .window_for_surface(&surface)
+                        .unwrap();
+                    grabs::ResizeSurfaceGrab::ack_configure(window, configure)
+                }
                 XdgRequest::Maximize { surface } => {
                     let seat = &state.last_active_seat;
                     let output = active_output(seat, &state);
@@ -161,6 +258,43 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
     }
 }
 
+fn check_grab_preconditions(
+    seat: &Seat,
+    surface: Option<&WlSurface>,
+    serial: Serial,
+) -> Option<(PointerHandle, GrabStartData)> {
+    let surface = if let Some(surface) = surface {
+        surface
+    } else {
+        return None;
+    };
+
+    // TODO: touch resize.
+    let pointer = seat.get_pointer().unwrap();
+
+    // Check that this surface has a click grab.
+    if !pointer.has_grab(serial) {
+        return None;
+    }
+
+    let start_data = pointer.grab_start_data().unwrap();
+
+    // If the focus was for a different surface, ignore the request.
+    if start_data.focus.is_none()
+        || !start_data
+            .focus
+            .as_ref()
+            .unwrap()
+            .0
+            .as_ref()
+            .same_client_as(surface.as_ref())
+    {
+        return None;
+    }
+
+    Some((pointer, start_data))
+}
+
 fn commit(surface: &WlSurface, state: &mut State) {
     if let Some(toplevel) = state.pending_toplevels.iter().find(|toplevel| {
         toplevel
@@ -211,6 +345,27 @@ fn commit(surface: &WlSurface, state: &mut State) {
                     });
                 }
             }
+        }
+
+        return;
+    }
+
+    if let Some((space, window)) = state
+        .spaces
+        .space_for_surface_mut(surface)
+        .and_then(|space| {
+            space
+                .window_for_surface(surface)
+                .cloned()
+                .map(|window| (space, window))
+        })
+    {
+        let new_location = grabs::ResizeSurfaceGrab::apply_resize_state(
+            &window,
+            space.window_geometry(&window).unwrap(),
+        );
+        if let Some(location) = new_location {
+            space.map_window(&window, location);
         }
 
         return;

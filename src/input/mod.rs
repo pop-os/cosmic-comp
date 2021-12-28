@@ -207,11 +207,12 @@ impl State {
                                     .to_f64()
                                     .contains(position)
                             })
-                            .unwrap_or(&current_output);
-                        if output != &current_output {
-                            set_active_output(seat, output);
+                            .cloned()
+                            .unwrap_or(current_output.clone());
+                        if output != current_output {
+                            set_active_output(seat, &output);
                         }
-                        let output_geometry = self.spaces.output_geometry(output);
+                        let output_geometry = self.spaces.output_geometry(&output);
 
                         position.x = 0.0f64
                             .max(position.x)
@@ -221,11 +222,13 @@ impl State {
                             .min((output_geometry.loc.y + output_geometry.size.h) as f64);
 
                         let serial = SERIAL_COUNTER.next_serial();
-                        let space = self.spaces.active_space(&output);
-                        let under = State::surface_under(position, output, space);
+                        let space = self.spaces.active_space_mut(&output);
+                        let under = State::surface_under(position, &output, space);
+                        handle_window_movement(under.as_ref().map(|(s, _)| s), space);
                         seat.get_pointer()
                             .unwrap()
                             .motion(position, under, serial, event.time());
+
                         break;
                     }
                 }
@@ -239,12 +242,13 @@ impl State {
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
                         let output = active_output(seat, &self);
-                        let space = self.spaces.active_space(&output);
                         let geometry = self.spaces.output_geometry(&output);
+                        let space = self.spaces.active_space_mut(&output);
                         let position =
                             geometry.loc.to_f64() + event.position_transformed(geometry.size);
                         let serial = SERIAL_COUNTER.next_serial();
                         let under = State::surface_under(position, &output, space);
+                        handle_window_movement(under.as_ref().map(|(s, _)| s), space);
                         seat.get_pointer()
                             .unwrap()
                             .motion(position, under, serial, event.time());
@@ -417,6 +421,18 @@ impl State {
                 .map(|(s, loc)| (s, loc + layer_loc))
         } else {
             None
+        }
+    }
+}
+
+pub fn handle_window_movement(surface: Option<&WlSurface>, space: &mut Space) {
+    if let Some(surface) = surface {
+        if let Some(window) = space.window_for_surface(&surface).cloned() {
+            if let Some(new_position) =
+                crate::shell::grabs::MoveSurfaceGrab::apply_move_state(&window)
+            {
+                space.map_window(&window, new_position);
+            }
         }
     }
 }
