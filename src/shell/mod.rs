@@ -155,7 +155,7 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
     );
 
     ShellStates {
-        popups: PopupManager::new(),
+        popups: PopupManager::new(None),
         xdg: xdg_shell_state,
         layer: layer_shell_state,
     }
