@@ -150,14 +150,14 @@ impl Surface {
             [0.153, 0.161, 0.165, 1.0],
             &[],
         ) {
-            Ok(true) => {
+            Ok(Some(_)) => {
                 slog_scope::trace!("Finished rendering");
                 space.send_frames(false, start_time.elapsed().as_millis() as u32);
                 self.surface
                     .submit()
                     .with_context(|| "Failed to submit buffer for display")?;
             }
-            Ok(false) => {
+            Ok(None) => {
                 let _ = renderer.unbind();
                 self.render.ping();
             }

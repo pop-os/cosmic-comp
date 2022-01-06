@@ -17,6 +17,6 @@ slog-stdlog = "4.1"
 [dependencies.smithay]
 version = "0.3"
 git = "https://github.com/Smithay/smithay.git"
-rev = "a16c307"
+rev = "820e67f"
 default-features = false
 features = ["backend_x11", "backend_egl", "desktop", "use_system_lib", "renderer_gl", "wayland_frontend"]

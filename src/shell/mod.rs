@@ -61,7 +61,7 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
                     let output = active_output(seat, &state);
                     let space = state.spaces.active_space_mut(&output);
                     let window = Window::new(Kind::Xdg(surface));
-                    space.map_window(&window, (0, 0));
+                    space.map_window(&window, (0, 0), true);
                     // We will position the window after the first commit, when we know its size
                 }
                 XdgRequest::NewPopup { surface, .. } => {
@@ -200,7 +200,7 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
                     let layers = layer_map_for_output(&output);
                     let geometry = layers.non_exclusive_zone();
 
-                    space.map_window(&window, geometry.loc);
+                    space.map_window(&window, geometry.loc, true);
                     let ret = surface.with_pending_state(|state| {
                         state.states.set(xdg_toplevel::State::Maximized);
                         state.size = Some(geometry.size);
@@ -336,7 +336,7 @@ fn commit(surface: &WlSurface, state: &mut State) {
                         geometry.loc.x + (geometry.size.w / 2) - (win_geo.size.w / 2),
                         geometry.loc.y + (geometry.size.h / 2) - (win_geo.size.h / 2),
                     );
-                    space.map_window(&window, position);
+                    space.map_window(&window, position, true);
                     state.pending_toplevels.retain(|toplevel| {
                         toplevel
                             .get_surface()
@@ -365,7 +365,7 @@ fn commit(surface: &WlSurface, state: &mut State) {
             space.window_geometry(&window).unwrap(),
         );
         if let Some(location) = new_location {
-            space.map_window(&window, location);
+            space.map_window(&window, location, true);
         }
 
         return;

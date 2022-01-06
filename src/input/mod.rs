@@ -286,7 +286,8 @@ impl State {
                                         .or_else(|| layers.layer_under(WlrLayer::Top, pos))
                                     {
                                         if layer.can_receive_keyboard_focus() {
-                                            let layer_loc = layers.layer_geometry(layer).loc;
+                                            let layer_loc =
+                                                layers.layer_geometry(layer).unwrap().loc;
                                             under = layer
                                                 .surface_under(pos - layer_loc.to_f64())
                                                 .map(|(s, _)| s);
@@ -297,13 +298,14 @@ impl State {
                                         under = window
                                             .surface_under(pos - window_loc.to_f64())
                                             .map(|(s, _)| s);
-                                        space.raise_window(&window);
+                                        space.raise_window(&window, true);
                                     } else if let Some(layer) = layers
                                         .layer_under(WlrLayer::Bottom, pos)
                                         .or_else(|| layers.layer_under(WlrLayer::Background, pos))
                                     {
                                         if layer.can_receive_keyboard_focus() {
-                                            let layer_loc = layers.layer_geometry(layer).loc;
+                                            let layer_loc =
+                                                layers.layer_geometry(layer).unwrap().loc;
                                             under = layer
                                                 .surface_under(pos - layer_loc.to_f64())
                                                 .map(|(s, _)| s);
@@ -402,7 +404,7 @@ impl State {
             .layer_under(WlrLayer::Overlay, pos)
             .or_else(|| layers.layer_under(WlrLayer::Top, pos))
         {
-            let layer_loc = layers.layer_geometry(layer).loc;
+            let layer_loc = layers.layer_geometry(layer).unwrap().loc;
             layer
                 .surface_under(pos - output_geo.loc.to_f64() - layer_loc.to_f64())
                 .map(|(s, loc)| (s, loc + layer_loc))
@@ -415,7 +417,7 @@ impl State {
             .layer_under(WlrLayer::Bottom, pos)
             .or_else(|| layers.layer_under(WlrLayer::Background, pos))
         {
-            let layer_loc = layers.layer_geometry(layer).loc;
+            let layer_loc = layers.layer_geometry(layer).unwrap().loc;
             layer
                 .surface_under(pos - output_geo.loc.to_f64() - layer_loc.to_f64())
                 .map(|(s, loc)| (s, loc + layer_loc))
@@ -431,7 +433,7 @@ pub fn handle_window_movement(surface: Option<&WlSurface>, space: &mut Space) {
             if let Some(new_position) =
                 crate::shell::grabs::MoveSurfaceGrab::apply_move_state(&window)
             {
-                space.map_window(&window, new_position);
+                space.map_window(&window, new_position, true);
             }
         }
     }
