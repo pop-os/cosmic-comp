@@ -67,7 +67,7 @@ fn init_logger() -> Result<slog_scope::GlobalLoggerGuard> {
     slog_stdlog::init().unwrap();
 
     slog_scope::info!("Version: {}", std::env!("CARGO_PKG_VERSION"));
-    if cfg!(debug_assertions) {
+    if cfg!(feature = "debug") {
         slog_scope::debug!(
             "Debug build ({})",
             std::option_env!("GIT_HASH").unwrap_or("Unknown")

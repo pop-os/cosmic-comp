@@ -2,14 +2,14 @@
 
 use crate::state::State;
 use smithay::{
-    backend::input::{Device, DeviceCapability, InputBackend, InputEvent},
+    backend::input::{Device, DeviceCapability, InputBackend, InputEvent, KeyState},
     desktop::{layer_map_for_output, Space},
     reexports::wayland_server::{protocol::wl_surface::WlSurface, Display},
     utils::{Logical, Point},
     wayland::{
         data_device::set_data_device_focus,
         output::Output,
-        seat::{CursorImageStatus, FilterResult, Keysym, Seat, XkbConfig},
+        seat::{keysyms, CursorImageStatus, FilterResult, KeysymHandle, Seat, XkbConfig},
         shell::wlr_layer::Layer as WlrLayer,
         SERIAL_COUNTER,
     },
@@ -17,8 +17,28 @@ use smithay::{
 use std::{cell::RefCell, collections::HashMap};
 
 pub struct ActiveOutput(pub RefCell<Output>);
-
+pub struct SupressedKeys(RefCell<Vec<u32>>);
 pub struct Devices(RefCell<HashMap<String, Vec<DeviceCapability>>>);
+
+impl SupressedKeys {
+    fn new() -> SupressedKeys {
+        SupressedKeys(RefCell::new(Vec::new()))
+    }
+
+    fn add(&self, keysym: &KeysymHandle) {
+        self.0.borrow_mut().push(keysym.raw_code());
+    }
+
+    fn filter(&self, keysym: &KeysymHandle) -> bool {
+        let mut keys = self.0.borrow_mut();
+        if let Some(i) = keys.iter().position(|x| *x == keysym.raw_code()) {
+            keys.remove(i);
+            true
+        } else {
+            false
+        }
+    }
+}
 
 impl Devices {
     fn new() -> Devices {
@@ -61,8 +81,8 @@ pub fn add_seat(display: &mut Display, name: String) -> Seat {
     let (seat, _) = Seat::new(display, name, None);
     let userdata = seat.user_data();
     userdata.insert_if_missing(|| Devices::new());
+    userdata.insert_if_missing(|| SupressedKeys::new());
     userdata.insert_if_missing(|| RefCell::new(CursorImageStatus::Hidden));
-    userdata.insert_if_missing(|| Vec::<Keysym>::new());
     seat
 }
 
@@ -137,6 +157,10 @@ impl State {
                         _ => {}
                     }
                 }
+                #[cfg(feature = "debug")]
+                {
+                    self.common.egui.state.handle_device_added(&device);
+                }
             }
             InputEvent::DeviceRemoved { device } => {
                 for seat in &mut self.common.seats {
@@ -156,6 +180,10 @@ impl State {
                         }
                         break;
                     }
+                }
+                #[cfg(feature = "debug")]
+                {
+                    self.common.egui.state.handle_device_added(&device);
                 }
             }
             InputEvent::Keyboard { event, .. } => {
@@ -179,6 +207,37 @@ impl State {
                             time,
                             |modifiers, handle| {
                                 // here we can handle global shortcuts and the like
+                                if userdata.get::<SupressedKeys>().unwrap().filter(&handle) {
+                                    return FilterResult::Intercept(());
+                                }
+
+                                #[cfg(feature = "debug")]
+                                {
+                                    self.common.egui.modifiers = modifiers.clone();
+                                    if self.common.seats.iter().position(|x| x == seat).unwrap()
+                                        == 0
+                                        && modifiers.logo
+                                        && handle.raw_syms().contains(&keysyms::KEY_Escape)
+                                        && state == KeyState::Pressed
+                                    {
+                                        self.common.egui.active = !self.common.egui.active;
+                                        userdata.get::<SupressedKeys>().unwrap().add(&handle);
+                                        return FilterResult::Intercept(());
+                                    }
+                                    if self.common.seats.iter().position(|x| x == seat).unwrap()
+                                        == 0
+                                        && self.common.egui.active
+                                        && self.common.egui.state.wants_keyboard()
+                                    {
+                                        self.common.egui.state.handle_keyboard(
+                                            handle.raw_syms(),
+                                            state == KeyState::Pressed,
+                                            modifiers.clone(),
+                                        );
+                                        return FilterResult::Intercept(());
+                                    }
+                                }
+
                                 let _ = (modifiers, handle);
                                 FilterResult::Forward
                             },
@@ -233,6 +292,13 @@ impl State {
                             .unwrap()
                             .motion(position, under, serial, event.time());
 
+                        #[cfg(feature = "debug")]
+                        if self.common.seats.iter().position(|x| x == seat).unwrap() == 0 {
+                            self.common
+                                .egui
+                                .state
+                                .handle_pointer_motion(position.to_i32_round());
+                        }
                         break;
                     }
                 }
@@ -256,6 +322,14 @@ impl State {
                         seat.get_pointer()
                             .unwrap()
                             .motion(position, under, serial, event.time());
+
+                        #[cfg(feature = "debug")]
+                        if self.common.seats.iter().position(|x| x == seat).unwrap() == 0 {
+                            self.common
+                                .egui
+                                .state
+                                .handle_pointer_motion(position.to_i32_round());
+                        }
                         break;
                     }
                 }
@@ -271,6 +345,21 @@ impl State {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
+                        #[cfg(feature = "debug")]
+                        if self.common.seats.iter().position(|x| x == seat).unwrap() == 0
+                            && self.common.egui.active
+                            && self.common.egui.state.wants_pointer()
+                        {
+                            if let Some(button) = event.button() {
+                                self.common.egui.state.handle_pointer_button(
+                                    button,
+                                    event.state() == ButtonState::Pressed,
+                                    self.common.egui.modifiers.clone(),
+                                );
+                            }
+                            break;
+                        }
+
                         let serial = SERIAL_COUNTER.next_serial();
                         let button = event.button_code();
                         let state = match event.state() {
@@ -340,6 +429,24 @@ impl State {
 
                 let device = event.device();
                 for seat in self.common.seats.clone().iter() {
+                    #[cfg(feature = "debug")]
+                    if self.common.seats.iter().position(|x| x == seat).unwrap() == 0
+                        && self.common.egui.active
+                        && self.common.egui.state.wants_pointer()
+                    {
+                        self.common.egui.state.handle_pointer_axis(
+                            event
+                                .amount_discrete(Axis::Horizontal)
+                                .or_else(|| event.amount(Axis::Horizontal).map(|x| x * 3.0))
+                                .unwrap_or(0.0),
+                            event
+                                .amount_discrete(Axis::Vertical)
+                                .or_else(|| event.amount(Axis::Vertical).map(|x| x * 3.0))
+                                .unwrap_or(0.0),
+                        );
+                        break;
+                    }
+
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {

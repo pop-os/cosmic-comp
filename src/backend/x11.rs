@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use crate::state::Common;
 use crate::{
     input::{set_active_output, Devices},
     state::{BackendData, State},
@@ -15,7 +16,7 @@ use smithay::{
         renderer::{gles2::Gles2Renderer, Bind, ImportDma, ImportEgl, Unbind},
         x11::{Window, WindowBuilder, X11Backend, X11Event, X11Handle, X11Input, X11Surface},
     },
-    desktop::{layer_map_for_output, Space},
+    desktop::layer_map_for_output,
     reexports::{
         calloop::{ping, EventLoop, LoopHandle},
         gbm::Device as GbmDevice,
@@ -33,7 +34,6 @@ use std::{
     cell::RefCell,
     rc::Rc,
     sync::{Arc, Mutex},
-    time::Instant,
 };
 
 pub struct X11State {
@@ -96,10 +96,10 @@ impl X11State {
                     .iter_mut()
                     .find(|s| s.output == output_ref)
                 {
-                    if let Err(err) = surface.render_from_space(
+                    if let Err(err) = surface.render_output(
                         &mut *x11_state.renderer.borrow_mut(),
-                        state.common.spaces.active_space_mut(&output_ref),
-                        &state.common.start_time,
+                        &output_ref,
+                        &mut state.common,
                     ) {
                         slog_scope::error!("Error rendering: {}", err);
                     }
@@ -130,12 +130,41 @@ pub struct Surface {
 }
 
 impl Surface {
-    pub fn render_from_space(
+    pub fn render_output(
         &mut self,
         renderer: &mut Gles2Renderer,
-        space: &mut Space,
-        start_time: &Instant,
+        output: &Output,
+        state: &mut Common,
     ) -> Result<()> {
+        #[allow(unused_mut)]
+        let mut custom_elements = Vec::new();
+        let space = state.spaces.active_space_mut(output);
+
+        #[cfg(feature = "debug")]
+        if state.egui.active {
+            let size = space.output_geometry(&self.output).unwrap();
+            let scale = space.output_scale(&self.output).unwrap();
+            let frame = state.egui.state.run(
+                |ctx| {
+                    egui::SidePanel::left("my_left_panel").show(ctx, |ui| {
+                        ui.label(format!(
+                            "cosmic-comp version {}",
+                            std::env!("CARGO_PKG_VERSION")
+                        ));
+                    });
+                },
+                size,
+                size.to_f64().to_physical(scale).to_i32_round().size,
+                scale,
+                state.egui.alpha,
+                &state.start_time,
+                state.egui.modifiers.clone(),
+            );
+            custom_elements.push(
+                Box::new(frame) as smithay::desktop::space::DynamicRenderElements<Gles2Renderer>
+            );
+        }
+
         let (buffer, age) = self
             .surface
             .buffer()
@@ -148,11 +177,11 @@ impl Surface {
             &self.output,
             age as usize,
             [0.153, 0.161, 0.165, 1.0],
-            &[],
+            &*custom_elements,
         ) {
             Ok(Some(_)) => {
                 slog_scope::trace!("Finished rendering");
-                space.send_frames(false, start_time.elapsed().as_millis() as u32);
+                space.send_frames(false, state.start_time.elapsed().as_millis() as u32);
                 self.surface
                     .submit()
                     .with_context(|| "Failed to submit buffer for display")?;

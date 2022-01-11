@@ -13,10 +13,20 @@ slog-term = "2.8"
 slog-async = "2.7"
 slog-scope = "4.4"
 slog-stdlog = "4.1"
+egui = { version = "0.16", optional = true }
 
 [dependencies.smithay]
 version = "0.3"
 git = "https://github.com/Smithay/smithay.git"
-rev = "820e67f"
+branch = "feature/egl_userdata"
 default-features = false
 features = ["backend_x11", "backend_egl", "desktop", "use_system_lib", "renderer_gl", "wayland_frontend"]
+
+[dependencies.smithay-egui]
+git = "https://github.com/Smithay/smithay-egui.git"
+rev = "ad146d59"
+optional = true
+
+[features]
+default = ["debug"]
+debug = ["egui", "smithay-egui"]

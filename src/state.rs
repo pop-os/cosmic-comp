@@ -33,6 +33,17 @@ pub struct Common {
 
     pub start_time: Instant,
     pub should_stop: bool,
+
+    #[cfg(feature = "debug")]
+    pub egui: Egui,
+}
+
+#[cfg(feature = "debug")]
+pub struct Egui {
+    pub state: smithay_egui::EguiState,
+    pub modifiers: smithay::wayland::seat::ModifiersState,
+    pub active: bool,
+    pub alpha: f32,
 }
 
 pub enum BackendData {
@@ -78,6 +89,14 @@ impl State {
 
                 start_time: Instant::now(),
                 should_stop: false,
+
+                #[cfg(feature = "debug")]
+                egui: Egui {
+                    state: smithay_egui::EguiState::new(),
+                    modifiers: Default::default(),
+                    active: false,
+                    alpha: 1.0,
+                },
             },
             backend: BackendData::Unset,
         }
