@@ -32,7 +32,7 @@ fn main() -> Result<()> {
     let signal = event_loop.get_signal();
     event_loop.run(None, &mut state, |state| {
         // shall we shut down?
-        if state.spaces.outputs().next().is_none() || state.should_stop {
+        if state.common.spaces.outputs().next().is_none() || state.common.should_stop {
             slog_scope::info!("Shutting down");
             signal.stop();
             signal.wakeup();
@@ -40,10 +40,10 @@ fn main() -> Result<()> {
         }
 
         // trigger routines
-        state.spaces.refresh();
+        state.common.spaces.refresh();
 
         // send out events
-        let display = state.display.clone();
+        let display = state.common.display.clone();
         display.borrow_mut().flush_clients(state);
     })?;
 
@@ -87,13 +87,13 @@ fn init_wayland_display(event_loop: &mut EventLoop<state::State>) -> Result<Disp
         .insert_source(
             Generic::from_fd(display.get_poll_fd(), Interest::READ, Mode::Level),
             move |_, _, state: &mut state::State| {
-                let display = state.display.clone();
+                let display = state.common.display.clone();
                 let mut display = display.borrow_mut();
                 match display.dispatch(std::time::Duration::from_millis(0), state) {
                     Ok(_) => Ok(PostAction::Continue),
                     Err(e) => {
                         slog_scope::error!("I/O error on the Wayland display: {}", e);
-                        state.should_stop = true;
+                        state.common.should_stop = true;
                         Err(e)
                     }
                 }

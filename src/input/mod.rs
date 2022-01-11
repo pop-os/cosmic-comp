@@ -72,6 +72,7 @@ pub fn active_output(seat: &Seat, state: &State) -> Output {
         .map(|x| x.0.borrow().clone())
         .unwrap_or_else(|| {
             state
+                .common
                 .spaces
                 .outputs()
                 .next()
@@ -100,7 +101,7 @@ impl State {
 
         match event {
             InputEvent::DeviceAdded { device } => {
-                let seat = &mut self.last_active_seat;
+                let seat = &mut self.common.last_active_seat;
                 let userdata = seat.user_data();
                 let devices = userdata.get::<Devices>().unwrap();
                 for cap in devices.add_device(&device) {
@@ -116,6 +117,7 @@ impl State {
                         }
                         DeviceCapability::Pointer => {
                             let output = self
+                                .common
                                 .spaces
                                 .outputs()
                                 .next()
@@ -137,7 +139,7 @@ impl State {
                 }
             }
             InputEvent::DeviceRemoved { device } => {
-                for seat in &mut self.seats {
+                for seat in &mut self.common.seats {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
@@ -160,7 +162,7 @@ impl State {
                 use smithay::backend::input::KeyboardKeyEvent;
 
                 let device = event.device();
-                for seat in self.seats.clone().iter() {
+                for seat in self.common.seats.clone().iter() {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
@@ -189,7 +191,7 @@ impl State {
                 use smithay::backend::input::PointerMotionEvent;
 
                 let device = event.device();
-                for seat in self.seats.clone().iter() {
+                for seat in self.common.seats.clone().iter() {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
@@ -199,10 +201,12 @@ impl State {
                         position += event.delta();
 
                         let output = self
+                            .common
                             .spaces
                             .outputs()
                             .find(|output| {
-                                self.spaces
+                                self.common
+                                    .spaces
                                     .output_geometry(output)
                                     .to_f64()
                                     .contains(position)
@@ -212,7 +216,7 @@ impl State {
                         if output != current_output {
                             set_active_output(seat, &output);
                         }
-                        let output_geometry = self.spaces.output_geometry(&output);
+                        let output_geometry = self.common.spaces.output_geometry(&output);
 
                         position.x = 0.0f64
                             .max(position.x)
@@ -222,7 +226,7 @@ impl State {
                             .min((output_geometry.loc.y + output_geometry.size.h) as f64);
 
                         let serial = SERIAL_COUNTER.next_serial();
-                        let space = self.spaces.active_space_mut(&output);
+                        let space = self.common.spaces.active_space_mut(&output);
                         let under = State::surface_under(position, &output, space);
                         handle_window_movement(under.as_ref().map(|(s, _)| s), space);
                         seat.get_pointer()
@@ -237,13 +241,13 @@ impl State {
                 use smithay::backend::input::PointerMotionAbsoluteEvent;
 
                 let device = event.device();
-                for seat in self.seats.clone().iter() {
+                for seat in self.common.seats.clone().iter() {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
                         let output = active_output(seat, &self);
-                        let geometry = self.spaces.output_geometry(&output);
-                        let space = self.spaces.active_space_mut(&output);
+                        let geometry = self.common.spaces.output_geometry(&output);
+                        let space = self.common.spaces.active_space_mut(&output);
                         let position =
                             geometry.loc.to_f64() + event.position_transformed(geometry.size);
                         let serial = SERIAL_COUNTER.next_serial();
@@ -263,7 +267,7 @@ impl State {
                 };
 
                 let device = event.device();
-                for seat in self.seats.clone().iter() {
+                for seat in self.common.seats.clone().iter() {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
@@ -275,8 +279,8 @@ impl State {
                                 if !seat.get_pointer().unwrap().is_grabbed() {
                                     let output = active_output(seat, &self);
                                     let mut pos = seat.get_pointer().unwrap().current_location();
-                                    let output_geo = self.spaces.output_geometry(&output);
-                                    let space = self.spaces.active_space_mut(&output);
+                                    let output_geo = self.common.spaces.output_geometry(&output);
+                                    let space = self.common.spaces.active_space_mut(&output);
                                     let layers = layer_map_for_output(&output);
                                     pos -= output_geo.loc.to_f64();
                                     let mut under = None;
@@ -335,7 +339,7 @@ impl State {
                 };
 
                 let device = event.device();
-                for seat in self.seats.clone().iter() {
+                for seat in self.common.seats.clone().iter() {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {

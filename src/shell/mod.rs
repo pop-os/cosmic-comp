@@ -41,8 +41,8 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
         move |surface, mut ddata| {
             on_commit_buffer_handler(&surface);
             let state = ddata.get::<State>().unwrap();
-            state.spaces.commit(&surface);
-            state.shell.popups.commit(&surface);
+            state.common.spaces.commit(&surface);
+            state.common.shell.popups.commit(&surface);
             commit(&surface, state)
         },
         None,
@@ -55,17 +55,18 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
 
             match event {
                 XdgRequest::NewToplevel { surface } => {
-                    state.pending_toplevels.push(surface.clone());
+                    state.common.pending_toplevels.push(surface.clone());
 
-                    let seat = &state.last_active_seat;
+                    let seat = &state.common.last_active_seat;
                     let output = active_output(seat, &state);
-                    let space = state.spaces.active_space_mut(&output);
+                    let space = state.common.spaces.active_space_mut(&output);
                     let window = Window::new(Kind::Xdg(surface));
                     space.map_window(&window, (0, 0), true);
                     // We will position the window after the first commit, when we know its size
                 }
                 XdgRequest::NewPopup { surface, .. } => {
                     state
+                        .common
                         .shell
                         .popups
                         .track_popup(PopupKind::from(surface))
@@ -100,6 +101,7 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
                         check_grab_preconditions(&seat, surface.get_surface(), serial)
                     {
                         let space = state
+                            .common
                             .spaces
                             .space_for_surface(surface.get_surface().unwrap())
                             .unwrap();
@@ -162,6 +164,7 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
                         check_grab_preconditions(&seat, surface.get_surface(), serial)
                     {
                         let space = state
+                            .common
                             .spaces
                             .space_for_surface(surface.get_surface().unwrap())
                             .unwrap();
@@ -182,6 +185,7 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
                     configure: Configure::Toplevel(configure),
                 } => {
                     let window = state
+                        .common
                         .spaces
                         .space_for_surface(&surface)
                         .unwrap()
@@ -190,9 +194,9 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
                     grabs::ResizeSurfaceGrab::ack_configure(window, configure)
                 }
                 XdgRequest::Maximize { surface } => {
-                    let seat = &state.last_active_seat;
+                    let seat = &state.common.last_active_seat;
                     let output = active_output(seat, &state);
-                    let space = state.spaces.active_space_mut(&output);
+                    let space = state.common.spaces.active_space_mut(&output);
                     let window = space
                         .window_for_surface(surface.get_surface().unwrap())
                         .unwrap()
@@ -236,7 +240,7 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
                 ..
             } => {
                 let state = ddata.get::<State>().unwrap();
-                let seat = &state.last_active_seat;
+                let seat = &state.common.last_active_seat;
                 let output = wl_output
                     .as_ref()
                     .and_then(Output::from_resource)
@@ -296,6 +300,8 @@ fn check_grab_preconditions(
 }
 
 fn commit(surface: &WlSurface, state: &mut State) {
+    let state = &mut state.common;
+
     if let Some(toplevel) = state.pending_toplevels.iter().find(|toplevel| {
         toplevel
             .get_surface()

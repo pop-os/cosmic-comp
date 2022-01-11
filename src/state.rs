@@ -17,6 +17,11 @@ use smithay::{
 use std::{cell::RefCell, rc::Rc, time::Instant};
 
 pub struct State {
+    pub common: Common,
+    pub backend: BackendData,
+}
+
+pub struct Common {
     pub display: Rc<RefCell<Display>>,
 
     pub spaces: Workspaces,
@@ -28,7 +33,6 @@ pub struct State {
 
     pub start_time: Instant,
     pub should_stop: bool,
-    pub backend: BackendData,
 }
 
 pub enum BackendData {
@@ -62,17 +66,19 @@ impl State {
         );
 
         State {
-            display: Rc::new(RefCell::new(display)),
+            common: Common {
+                display: Rc::new(RefCell::new(display)),
 
-            spaces: Workspaces::new(),
-            shell: shell_handles,
-            pending_toplevels: Vec::new(),
+                spaces: Workspaces::new(),
+                shell: shell_handles,
+                pending_toplevels: Vec::new(),
 
-            seats: vec![initial_seat.clone()],
-            last_active_seat: initial_seat,
+                seats: vec![initial_seat.clone()],
+                last_active_seat: initial_seat,
 
-            start_time: Instant::now(),
-            should_stop: false,
+                start_time: Instant::now(),
+                should_stop: false,
+            },
             backend: BackendData::Unset,
         }
     }

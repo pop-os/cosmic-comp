@@ -98,8 +98,8 @@ impl X11State {
                 {
                     if let Err(err) = surface.render_from_space(
                         &mut *x11_state.renderer.borrow_mut(),
-                        state.spaces.active_space_mut(&output_ref),
-                        &state.start_time,
+                        state.common.spaces.active_space_mut(&output_ref),
+                        &state.common.start_time,
                     ) {
                         slog_scope::error!("Error rendering: {}", err);
                     }
@@ -192,7 +192,7 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
             .with_context(|| "Failed to initialize renderer")?,
     ));
 
-    init_egl_client_side(&mut *state.display.borrow_mut(), renderer.clone())?;
+    init_egl_client_side(&mut *state.common.display.borrow_mut(), renderer.clone())?;
 
     state.backend = BackendData::X11(X11State {
         handle,
@@ -205,9 +205,9 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
     let output = state
         .backend
         .x11()
-        .add_window(&mut *state.display.borrow_mut(), event_loop.handle())
+        .add_window(&mut *state.common.display.borrow_mut(), event_loop.handle())
         .with_context(|| "Failed to create wl_output")?;
-    state.spaces.map_output(&output);
+    state.common.spaces.map_output(&output);
 
     event_loop
         .handle()
@@ -222,7 +222,7 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
                     .filter(|s| s.window.id() == window_id)
                 {
                     surface.window.unmap();
-                    state.spaces.unmap_output(&surface.output);
+                    state.common.spaces.unmap_output(&surface.output);
                 }
                 state
                     .backend
@@ -314,7 +314,7 @@ impl State {
                         .unwrap();
 
                     let device = event.device();
-                    for seat in self.seats.clone().iter() {
+                    for seat in self.common.seats.clone().iter() {
                         let devices = seat.user_data().get::<Devices>().unwrap();
                         if devices.has_device(&device) {
                             set_active_output(seat, &output);
