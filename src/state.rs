@@ -14,7 +14,10 @@ use smithay::{
         shm::init_shm_global,
     },
 };
+
 use std::{cell::RefCell, rc::Rc, time::Instant};
+#[cfg(feature = "debug")]
+use std::{collections::VecDeque, time::Duration};
 
 pub struct State {
     pub common: Common,
@@ -34,7 +37,6 @@ pub struct Common {
     pub start_time: Instant,
     pub should_stop: bool,
 
-    #[cfg(feature = "debug")]
     pub egui: Egui,
 }
 
@@ -44,6 +46,21 @@ pub struct Egui {
     pub modifiers: smithay::wayland::seat::ModifiersState,
     pub active: bool,
     pub alpha: f32,
+}
+
+#[cfg(feature = "debug")]
+pub struct Fps {
+    pub frames: VecDeque<Duration>,
+    pub last: Instant,
+}
+
+impl Default for Fps {
+    fn default() -> Fps {
+        Fps {
+            frames: VecDeque::with_capacity(101),
+            last: Instant::now(),
+        }
+    }
 }
 
 pub enum BackendData {
@@ -100,5 +117,36 @@ impl State {
             },
             backend: BackendData::Unset,
         }
+    }
+}
+
+#[cfg(feature = "debug")]
+impl Fps {
+    pub fn tick(&mut self) {
+        let next = Instant::now();
+        let frame = next.duration_since(self.last);
+
+        self.frames.push_back(frame);
+        if self.frames.len() > 100 {
+            self.frames.pop_front();
+        }
+        self.last = next;
+    }
+
+    pub fn max(&self) -> &Duration {
+        self.frames.iter().max().unwrap_or(&Duration::ZERO)
+    }
+
+    pub fn min(&self) -> &Duration {
+        self.frames.iter().min().unwrap_or(&Duration::ZERO)
+    }
+
+    pub fn avg(&self) -> Duration {
+        self.frames.iter().cloned().sum::<Duration>() / (self.frames.len() as u32)
+    }
+
+    pub fn avg_fps(&self) -> f64 {
+        let sum_secs = self.frames.iter().map(|d| d.as_secs_f64()).sum::<f64>();
+        1.0 / (sum_secs / self.frames.len() as f64)
     }
 }

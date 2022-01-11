@@ -10,6 +10,7 @@ use slog::Drain;
 
 pub mod backend;
 pub mod input;
+pub mod rendering;
 pub mod shell;
 pub mod state;
 pub mod utils;

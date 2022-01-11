@@ -36,6 +36,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+#[cfg(feature = "debug")]
+use crate::{rendering::debug_ui, state::Fps};
+
 pub struct X11State {
     allocator: Arc<Mutex<GbmDevice<DrmNode>>>,
     _egl: EGLDisplay,
@@ -112,6 +115,8 @@ impl X11State {
             surface,
             output: output.clone(),
             render: ping.clone(),
+            #[cfg(feature = "debug")]
+            fps: Fps::default(),
             _global,
         });
 
@@ -126,6 +131,8 @@ pub struct Surface {
     surface: X11Surface,
     output: Output,
     render: ping::Ping,
+    #[cfg(feature = "debug")]
+    fps: Fps,
     _global: GlobalDrop<WlOutput>,
 }
 
@@ -145,14 +152,7 @@ impl Surface {
             let size = space.output_geometry(&self.output).unwrap();
             let scale = space.output_scale(&self.output).unwrap();
             let frame = state.egui.state.run(
-                |ctx| {
-                    egui::SidePanel::left("my_left_panel").show(ctx, |ui| {
-                        ui.label(format!(
-                            "cosmic-comp version {}",
-                            std::env!("CARGO_PKG_VERSION")
-                        ));
-                    });
-                },
+                |ctx| debug_ui(ctx, &self.fps, true),
                 size,
                 size.to_f64().to_physical(scale).to_i32_round().size,
                 scale,
@@ -185,6 +185,10 @@ impl Surface {
                 self.surface
                     .submit()
                     .with_context(|| "Failed to submit buffer for display")?;
+                #[cfg(feature = "debug")]
+                {
+                    self.fps.tick();
+                }
             }
             Ok(None) => {
                 let _ = renderer.unbind();
