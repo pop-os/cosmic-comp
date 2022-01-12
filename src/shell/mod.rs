@@ -184,14 +184,14 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
                     surface,
                     configure: Configure::Toplevel(configure),
                 } => {
-                    let window = state
+                    if let Some(window) = state
                         .common
                         .spaces
                         .space_for_surface(&surface)
-                        .unwrap()
-                        .window_for_surface(&surface)
-                        .unwrap();
-                    grabs::ResizeSurfaceGrab::ack_configure(window, configure)
+                        .and_then(|space| space.window_for_surface(&surface))
+                    {
+                        grabs::ResizeSurfaceGrab::ack_configure(window, configure)
+                    }
                 }
                 XdgRequest::Maximize { surface } => {
                     let seat = &state.common.last_active_seat;
