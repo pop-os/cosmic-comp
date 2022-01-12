@@ -752,7 +752,7 @@ checksum = "1ecab6c735a6bb4139c0caafd0cc3635748bbb3acf4550e8138122099251f309"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/Smithay/smithay.git?branch=feature/egl_userdata#1edff977226474e25e0fe90cbfb91860978b80cc"
+source = "git+https://github.com/Smithay/smithay.git?branch=feature/egl_userdata#5cbd4352b9043cf634fb0b950ef244d9aaa9e151"
 dependencies = [
  "appendlist",
  "bitflags",
@@ -773,6 +773,7 @@ dependencies = [
  "rand",
  "scan_fmt",
  "slog",
+ "slog-stdlog",
  "tempfile",
  "thiserror",
  "wayland-commons",
@@ -786,7 +787,7 @@ dependencies = [
 [[package]]
 name = "smithay-egui"
 version = "0.1.0"
-source = "git+https://github.com/Smithay/smithay-egui.git?rev=ad146d59#ad146d59cc35199ef68024cc04c0a6e0c40b0d91"
+source = "git+https://github.com/Smithay/smithay-egui.git#baa131d77b2fc2e3c2e87e881bba3ee18b315d14"
 dependencies = [
  "egui",
  "lazy_static",

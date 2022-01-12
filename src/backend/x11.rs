@@ -13,7 +13,7 @@ use smithay::{
         drm::DrmNode,
         egl::{EGLContext, EGLDisplay},
         input::{Event, InputEvent},
-        renderer::{gles2::Gles2Renderer, Bind, ImportDma, ImportEgl, Unbind},
+        renderer::{gles2::Gles2Renderer, Bind, ImportDma, ImportEgl},
         x11::{Window, WindowBuilder, X11Backend, X11Event, X11Handle, X11Input, X11Surface},
     },
     desktop::layer_map_for_output,
@@ -37,7 +37,7 @@ use std::{
 };
 
 #[cfg(feature = "debug")]
-use crate::{rendering::debug_ui, state::Fps};
+use crate::{debug::debug_ui, state::Fps};
 
 pub struct X11State {
     allocator: Arc<Mutex<GbmDevice<DrmNode>>>,
@@ -145,26 +145,19 @@ impl Surface {
     ) -> Result<()> {
         #[allow(unused_mut)]
         let mut custom_elements = Vec::new();
-        let space = state.spaces.active_space_mut(output);
 
         #[cfg(feature = "debug")]
-        if state.egui.active {
+        {
+            let space = state.spaces.active_space(output);
             let size = space.output_geometry(&self.output).unwrap();
             let scale = space.output_scale(&self.output).unwrap();
-            let frame = state.egui.state.run(
-                |ctx| debug_ui(ctx, &self.fps, true),
-                size,
-                size.to_f64().to_physical(scale).to_i32_round().size,
-                scale,
-                state.egui.alpha,
-                &state.start_time,
-                state.egui.modifiers.clone(),
-            );
+            let frame = debug_ui(state, &self.fps, size, scale, true);
             custom_elements.push(
                 Box::new(frame) as smithay::desktop::space::DynamicRenderElements<Gles2Renderer>
             );
         }
 
+        let space = state.spaces.active_space_mut(output);
         let (buffer, age) = self
             .surface
             .buffer()
@@ -179,8 +172,7 @@ impl Surface {
             [0.153, 0.161, 0.165, 1.0],
             &*custom_elements,
         ) {
-            Ok(Some(_)) => {
-                slog_scope::trace!("Finished rendering");
+            Ok(_) => {
                 space.send_frames(false, state.start_time.elapsed().as_millis() as u32);
                 self.surface
                     .submit()
@@ -189,10 +181,6 @@ impl Surface {
                 {
                     self.fps.tick();
                 }
-            }
-            Ok(None) => {
-                let _ = renderer.unbind();
-                self.render.ping();
             }
             Err(err) => {
                 self.surface.reset_buffers();

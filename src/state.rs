@@ -37,6 +37,7 @@ pub struct Common {
     pub start_time: Instant,
     pub should_stop: bool,
 
+    #[cfg(feature = "debug")]
     pub egui: Egui,
 }
 
@@ -46,21 +47,14 @@ pub struct Egui {
     pub modifiers: smithay::wayland::seat::ModifiersState,
     pub active: bool,
     pub alpha: f32,
+    pub spaces: bool,
+    pub outputs: bool,
 }
 
 #[cfg(feature = "debug")]
 pub struct Fps {
     pub frames: VecDeque<Duration>,
     pub last: Instant,
-}
-
-impl Default for Fps {
-    fn default() -> Fps {
-        Fps {
-            frames: VecDeque::with_capacity(101),
-            last: Instant::now(),
-        }
-    }
 }
 
 pub enum BackendData {
@@ -113,6 +107,8 @@ impl State {
                     modifiers: Default::default(),
                     active: false,
                     alpha: 1.0,
+                    outputs: false,
+                    spaces: false,
                 },
             },
             backend: BackendData::Unset,
@@ -122,31 +118,55 @@ impl State {
 
 #[cfg(feature = "debug")]
 impl Fps {
+    const WINDOW_SIZE: usize = 100;
+
     pub fn tick(&mut self) {
         let next = Instant::now();
-        let frame = next.duration_since(self.last);
+        let frame_time = next.duration_since(self.last);
 
-        self.frames.push_back(frame);
-        if self.frames.len() > 100 {
+        self.frames.push_back(frame_time);
+        if self.frames.len() > Fps::WINDOW_SIZE {
             self.frames.pop_front();
         }
         self.last = next;
     }
 
-    pub fn max(&self) -> &Duration {
+    pub fn max_frametime(&self) -> &Duration {
         self.frames.iter().max().unwrap_or(&Duration::ZERO)
     }
 
-    pub fn min(&self) -> &Duration {
+    pub fn min_frametime(&self) -> &Duration {
         self.frames.iter().min().unwrap_or(&Duration::ZERO)
     }
 
-    pub fn avg(&self) -> Duration {
+    pub fn avg_frametime(&self) -> Duration {
+        if self.frames.is_empty() {
+            return Duration::ZERO;
+        }
         self.frames.iter().cloned().sum::<Duration>() / (self.frames.len() as u32)
     }
 
     pub fn avg_fps(&self) -> f64 {
+        if self.frames.is_empty() {
+            return 0.0;
+        }
         let sum_secs = self.frames.iter().map(|d| d.as_secs_f64()).sum::<f64>();
         1.0 / (sum_secs / self.frames.len() as f64)
     }
+}
+
+#[cfg(feature = "debug")]
+impl Default for Fps {
+    fn default() -> Fps {
+        Fps {
+            frames: VecDeque::with_capacity(Fps::WINDOW_SIZE + 1),
+            last: Instant::now(),
+        }
+    }
+}
+
+#[cfg(feature = "debug")]
+pub fn avg_fps<'a>(iter: impl Iterator<Item=&'a Duration>) -> f64 {
+    let sum_secs = iter.map(|d| d.as_secs_f64()).sum::<f64>();
+    1.0 / (sum_secs / Fps::WINDOW_SIZE as f64)
 }

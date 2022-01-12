@@ -8,14 +8,14 @@ pub use smithay::{
 };
 use std::{cell::Cell, mem::MaybeUninit};
 
-const MAX_WORKSPACES: usize = 10; // TODO?
+pub const MAX_WORKSPACES: usize = 10; // TODO?
 
 pub struct ActiveWorkspace(Cell<Option<usize>>);
 impl ActiveWorkspace {
     fn new() -> Self {
         ActiveWorkspace(Cell::new(None))
     }
-    fn get(&self) -> Option<usize> {
+    pub fn get(&self) -> Option<usize> {
         self.0.get()
     }
     fn set(&self, active: usize) -> Option<usize> {
@@ -26,6 +26,7 @@ impl ActiveWorkspace {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Mode {
     OutputBound,
     Global { active: usize },
@@ -44,7 +45,7 @@ impl Mode {
 pub struct Workspaces {
     mode: Mode,
     outputs: Vec<Output>,
-    spaces: [Space; MAX_WORKSPACES],
+    pub spaces: [Space; MAX_WORKSPACES],
 }
 
 const UNINIT_SPACE: MaybeUninit<Space> = MaybeUninit::uninit();
@@ -164,6 +165,11 @@ impl Workspaces {
                 }
             }
         };
+    }
+
+    #[cfg(feature = "debug")]
+    pub fn mode(&self) -> &Mode {
+        &self.mode
     }
 
     pub fn set_mode(&mut self, mode: Mode) {
