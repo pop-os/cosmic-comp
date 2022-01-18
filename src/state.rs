@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::x11::X11State,
+    backend::{
+        x11::X11State,
+        winit::WinitState,
+    },
     shell::{init_shell, workspaces::Workspaces, ShellStates},
 };
 use smithay::{
@@ -59,6 +62,7 @@ pub struct Fps {
 
 pub enum BackendData {
     X11(X11State),
+    Winit(WinitState),
     // TODO
     // Wayland(WaylandState),
     // Udev(UdevState),
@@ -70,6 +74,13 @@ impl BackendData {
         match self {
             BackendData::X11(ref mut x11_state) => x11_state,
             _ => unreachable!("Called x11 in non x11 backend"),
+        }
+    }
+
+    pub fn winit(&mut self) -> &mut WinitState {
+        match self {
+            BackendData::Winit(ref mut winit_state) => winit_state,
+            _ => unreachable!("Called winit in non winit backend"),
         }
     }
 }

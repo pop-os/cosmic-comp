@@ -1,0 +1,224 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
+use crate::state::Common;
+use crate::{
+    input::{set_active_output, Devices},
+    state::{BackendData, State},
+};
+use anyhow::{Context, Result};
+use smithay::{
+    backend::{
+        renderer::{ImportDma, ImportEgl},
+        winit::{self, WinitGraphicsBackend, WinitEvent, WinitVirtualDevice},
+    },
+    desktop::layer_map_for_output,
+    reexports::{
+        calloop::{ping, EventLoop},
+        wayland_server::{
+            protocol::wl_output::{Subpixel, Transform},
+            Display,
+        },
+    },
+    wayland::{
+        dmabuf::init_dmabuf_global,
+        output::{Mode, Output, PhysicalProperties},
+    },
+};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+};
+
+#[cfg(feature = "debug")]
+use smithay::backend::renderer::gles2::Gles2Renderer;
+#[cfg(feature = "debug")]
+use crate::{debug::debug_ui, state::Fps};
+
+pub struct WinitState {
+    // The winit backend currently has no notion of multiple windows
+    backend: Rc<RefCell<WinitGraphicsBackend>>,
+    //_global: GlobalDrop<WlOutput>,
+    output: Output,
+    #[cfg(feature = "debug")]
+    fps: Fps,
+}
+
+impl WinitState {
+    pub fn render_output(
+        &mut self,
+        state: &mut Common,
+    ) -> Result<()> {
+        #[allow(unused_mut)]
+        let mut custom_elements = Vec::new();
+
+        #[cfg(feature = "debug")]
+        {
+            let space = state.spaces.active_space(&self.output);
+            let size = space.output_geometry(&self.output).unwrap();
+            let scale = space.output_scale(&self.output).unwrap();
+            let frame = debug_ui(state, &self.fps, size, scale, true);
+            custom_elements.push(
+                Box::new(frame) as smithay::desktop::space::DynamicRenderElements<Gles2Renderer>
+            );
+        }
+
+        let space = state.spaces.active_space_mut(&self.output);
+        let mut backend = self.backend.borrow_mut();
+
+        let age = backend.buffer_age();
+        backend.bind().with_context(|| "Failed to bind buffer")?;
+        match space.render_output(
+            backend.renderer(),
+            &self.output,
+            age as usize,
+            [0.153, 0.161, 0.165, 1.0],
+            &*custom_elements,
+        ) {
+            Ok(damage) => {
+                space.send_frames(false, state.start_time.elapsed().as_millis() as u32);
+                backend
+                    .submit(damage.as_ref().map(|x| &**x), 1.0)
+                    .with_context(|| "Failed to submit buffer for display")?;
+                #[cfg(feature = "debug")]
+                {
+                    self.fps.tick();
+                }
+            }
+            Err(err) => {
+                anyhow::bail!("Rendering failed: {}", err);
+            }
+        };
+
+        Ok(())
+    }
+}
+
+pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Result<()> {
+    let (backend, mut input) = winit::init(None).with_context(|| "Failed to initilize winit backend")?;
+    let backend = Rc::new(RefCell::new(backend));
+
+    init_egl_client_side(&mut *state.common.display.borrow_mut(), backend.clone())?;
+    
+    let name = format!("WINIT-0");
+    let size = backend.borrow().window_size();
+    let props = PhysicalProperties {
+        size: (0, 0).into(),
+        subpixel: Subpixel::Unknown,
+        make: "COSMIC".to_string(),
+        model: name.clone(),
+    };
+    let mode = Mode {
+        size: (size.physical_size.w as i32, size.physical_size.h as i32).into(),
+        refresh: 60_000,
+    };
+    let (output, _global) = Output::new(&mut *state.common.display.borrow_mut(), name, props, None);
+    //let _global = global.into();
+    output.change_current_state(Some(mode), Some(Transform::Flipped180), None, Some((0, 0).into()));
+    output.set_preferred(mode);
+
+    state.common.spaces.map_output(&output);
+
+    let (event_ping, event_source) = ping::make_ping().with_context(|| "Failed to init eventloop timer for winit")?;
+    let (render_ping, render_source) = ping::make_ping().with_context(|| "Failed to init eventloop timer for winit")?;
+    let event_ping_handle = event_ping.clone();
+    let render_ping_handle = render_ping.clone();
+    let mut token = Some(event_loop
+        .handle()
+        .insert_source(
+            render_source,
+            move |_, _, state| {
+                if let Err(err) = state.backend.winit().render_output(&mut state.common) {
+                    slog_scope::error!("Failed to render frame: {}", err);
+                    render_ping.ping();
+                }
+            }
+        ).map_err(|_| anyhow::anyhow!("Failed to init eventloop timer for winit"))?);
+    let event_loop_handle = event_loop.handle();
+    event_loop
+        .handle()
+        .insert_source(
+            event_source,
+            move |_, _, state| {
+                match input.dispatch_new_events(|event| state.process_winit_event(event, &render_ping_handle)) {
+                    Ok(_) => {
+                        event_ping_handle.ping();
+                        render_ping_handle.ping();
+                    },
+                    Err(winit::WinitError::WindowClosed) => {
+                        let winit_state = state.backend.winit();
+                        state.common.spaces.unmap_output(&winit_state.output);
+                        if let Some(token) = token.take() {
+                            event_loop_handle.remove(token);
+                        }
+                    }
+                };
+            }
+        ).map_err(|_| anyhow::anyhow!("Failed to init eventloop timer for winit"))?;
+    event_ping.ping();
+
+    state.backend = BackendData::Winit(WinitState {
+        backend,
+        output,
+        #[cfg(feature = "debug")]
+        fps: Fps::default(),
+    });
+    
+    Ok(())
+}
+
+fn init_egl_client_side(display: &mut Display, renderer: Rc<RefCell<WinitGraphicsBackend>>) -> Result<()> {
+    let bind_result = renderer.borrow_mut().renderer().bind_wl_display(display);
+    match bind_result {
+        Ok(_) => {
+            slog_scope::info!("EGL hardware-acceleration enabled");
+            let dmabuf_formats = renderer
+                .borrow_mut()
+                .renderer()
+                .dmabuf_formats()
+                .cloned()
+                .collect::<Vec<_>>();
+            init_dmabuf_global(
+                display,
+                dmabuf_formats,
+                move |buffer, _| renderer.borrow_mut().renderer().import_dmabuf(buffer).is_ok(),
+                None,
+            );
+        }
+        Err(err) => slog_scope::warn!("Unable to initialize bind display to EGL: {}", err),
+    };
+
+    Ok(())
+}
+
+impl State {
+    pub fn process_winit_event(&mut self, event: WinitEvent, render_ping: &ping::Ping) {
+        // here we can handle special cases for winit inputs
+        match event {
+            WinitEvent::Focus(true) => {
+                for seat in self.common.seats.clone().iter() {
+                    let devices = seat.user_data().get::<Devices>().unwrap();
+                    if devices.has_device(&WinitVirtualDevice) {
+                        set_active_output(seat, &self.backend.winit().output);
+                        break;
+                    }
+                }
+            }
+            WinitEvent::Resized { size, .. } => {
+                let winit_state = self.backend.winit();
+                let output = &winit_state.output;
+                let mode = Mode {
+                    size,
+                    refresh: 60_000,
+                };
+                output.delete_mode(output.current_mode().unwrap());
+                output.change_current_state(Some(mode), None, None, None);
+                output.set_preferred(mode);
+                layer_map_for_output(output).arrange();
+                render_ping.ping();
+            },
+            WinitEvent::Refresh => render_ping.ping(),
+            WinitEvent::Input(event) => self.common.process_input_event(event),
+            _ => {},
+        };
+    }
+}

@@ -20,7 +20,7 @@ version = "0.3"
 git = "https://github.com/Smithay/smithay.git"
 rev = "92d04ba8"
 default-features = false
-features = ["backend_x11", "backend_egl", "desktop", "use_system_lib", "renderer_gl", "wayland_frontend", "slog-stdlog"]
+features = ["backend_x11", "backend_egl", "backend_winit", "desktop", "use_system_lib", "renderer_gl", "wayland_frontend", "slog-stdlog"]
 
 [dependencies.smithay-egui]
 git = "https://github.com/Smithay/smithay-egui.git"
