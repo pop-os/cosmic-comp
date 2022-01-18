@@ -51,22 +51,21 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
     let (xdg_shell_state, _xdg_global) = xdg_shell_init(
         display,
         |event, mut ddata| {
-            let state = ddata.get::<State>().unwrap();
+            let state = &mut ddata.get::<State>().unwrap().common;
 
             match event {
                 XdgRequest::NewToplevel { surface } => {
-                    state.common.pending_toplevels.push(surface.clone());
+                    state.pending_toplevels.push(surface.clone());
 
-                    let seat = &state.common.last_active_seat;
-                    let output = active_output(seat, &state);
-                    let space = state.common.spaces.active_space_mut(&output);
+                    let seat = &state.last_active_seat;
+                    let output = active_output(seat, &*state);
+                    let space = state.spaces.active_space_mut(&output);
                     let window = Window::new(Kind::Xdg(surface));
                     space.map_window(&window, (0, 0), true);
                     // We will position the window after the first commit, when we know its size
                 }
                 XdgRequest::NewPopup { surface, .. } => {
                     state
-                        .common
                         .shell
                         .popups
                         .track_popup(PopupKind::from(surface))
@@ -101,7 +100,6 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
                         check_grab_preconditions(&seat, surface.get_surface(), serial)
                     {
                         let space = state
-                            .common
                             .spaces
                             .space_for_surface(surface.get_surface().unwrap())
                             .unwrap();
@@ -164,7 +162,6 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
                         check_grab_preconditions(&seat, surface.get_surface(), serial)
                     {
                         let space = state
-                            .common
                             .spaces
                             .space_for_surface(surface.get_surface().unwrap())
                             .unwrap();
@@ -185,7 +182,6 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
                     configure: Configure::Toplevel(configure),
                 } => {
                     if let Some(window) = state
-                        .common
                         .spaces
                         .space_for_surface(&surface)
                         .and_then(|space| space.window_for_surface(&surface))
@@ -194,9 +190,9 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
                     }
                 }
                 XdgRequest::Maximize { surface } => {
-                    let seat = &state.common.last_active_seat;
-                    let output = active_output(seat, &state);
-                    let space = state.common.spaces.active_space_mut(&output);
+                    let seat = &state.last_active_seat;
+                    let output = active_output(seat, &*state);
+                    let space = state.spaces.active_space_mut(&output);
                     let window = space
                         .window_for_surface(surface.get_surface().unwrap())
                         .unwrap()
@@ -239,12 +235,12 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
                 namespace,
                 ..
             } => {
-                let state = ddata.get::<State>().unwrap();
-                let seat = &state.common.last_active_seat;
+                let state = &mut ddata.get::<State>().unwrap().common;
+                let seat = &state.last_active_seat;
                 let output = wl_output
                     .as_ref()
                     .and_then(Output::from_resource)
-                    .unwrap_or_else(|| active_output(seat, &state));
+                    .unwrap_or_else(|| active_output(seat, &*state));
 
                 let mut map = layer_map_for_output(&output);
                 map.map_layer(&LayerSurface::new(surface, namespace))

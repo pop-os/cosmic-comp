@@ -101,7 +101,6 @@ impl X11State {
                 {
                     if let Err(err) = surface.render_output(
                         &mut *x11_state.renderer.borrow_mut(),
-                        &output_ref,
                         &mut state.common,
                     ) {
                         slog_scope::error!("Error rendering: {}", err);
@@ -140,7 +139,6 @@ impl Surface {
     pub fn render_output(
         &mut self,
         renderer: &mut Gles2Renderer,
-        output: &Output,
         state: &mut Common,
     ) -> Result<()> {
         #[allow(unused_mut)]
@@ -148,7 +146,7 @@ impl Surface {
 
         #[cfg(feature = "debug")]
         {
-            let space = state.spaces.active_space(output);
+            let space = state.spaces.active_space(&self.output);
             let size = space.output_geometry(&self.output).unwrap();
             let scale = space.output_scale(&self.output).unwrap();
             let frame = debug_ui(state, &self.fps, size, scale, true);
@@ -157,7 +155,7 @@ impl Surface {
             );
         }
 
-        let space = state.spaces.active_space_mut(output);
+        let space = state.spaces.active_space_mut(&self.output);
         let (buffer, age) = self
             .surface
             .buffer()
@@ -347,6 +345,6 @@ impl State {
             _ => {}
         };
 
-        self.process_input_event(event);
+        self.common.process_input_event(event);
     }
 }

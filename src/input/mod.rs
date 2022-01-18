@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::state::State;
+use crate::state::Common;
 use smithay::{
     backend::input::{Device, DeviceCapability, InputBackend, InputEvent},
     desktop::{layer_map_for_output, Space},
@@ -91,13 +91,12 @@ pub fn add_seat(display: &mut Display, name: String) -> Seat {
     seat
 }
 
-pub fn active_output(seat: &Seat, state: &State) -> Output {
+pub fn active_output(seat: &Seat, state: &Common) -> Output {
     seat.user_data()
         .get::<ActiveOutput>()
         .map(|x| x.0.borrow().clone())
         .unwrap_or_else(|| {
             state
-                .common
                 .spaces
                 .outputs()
                 .next()
@@ -120,13 +119,13 @@ pub fn set_active_output(seat: &Seat, output: &Output) {
     }
 }
 
-impl State {
+impl Common {
     pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>) {
         use smithay::backend::input::Event;
 
         match event {
             InputEvent::DeviceAdded { device } => {
-                let seat = &mut self.common.last_active_seat;
+                let seat = &mut self.last_active_seat;
                 let userdata = seat.user_data();
                 let devices = userdata.get::<Devices>().unwrap();
                 for cap in devices.add_device(&device) {
@@ -142,7 +141,6 @@ impl State {
                         }
                         DeviceCapability::Pointer => {
                             let output = self
-                                .common
                                 .spaces
                                 .outputs()
                                 .next()
@@ -168,7 +166,7 @@ impl State {
                 }
             }
             InputEvent::DeviceRemoved { device } => {
-                for seat in &mut self.common.seats {
+                for seat in &mut self.seats {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
@@ -195,7 +193,7 @@ impl State {
                 use smithay::backend::input::KeyboardKeyEvent;
 
                 let device = event.device();
-                for seat in self.common.seats.clone().iter() {
+                for seat in self.seats.clone().iter() {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
@@ -218,23 +216,23 @@ impl State {
 
                                 #[cfg(feature = "debug")]
                                 {
-                                    self.common.egui.modifiers = modifiers.clone();
-                                    if self.common.seats.iter().position(|x| x == seat).unwrap()
+                                    self.egui.modifiers = modifiers.clone();
+                                    if self.seats.iter().position(|x| x == seat).unwrap()
                                         == 0
                                         && modifiers.logo
                                         && handle.raw_syms().contains(&keysyms::KEY_Escape)
                                         && state == KeyState::Pressed
                                     {
-                                        self.common.egui.active = !self.common.egui.active;
+                                        self.egui.active = !self.egui.active;
                                         userdata.get::<SupressedKeys>().unwrap().add(&handle);
                                         return FilterResult::Intercept(());
                                     }
-                                    if self.common.seats.iter().position(|x| x == seat).unwrap()
+                                    if self.seats.iter().position(|x| x == seat).unwrap()
                                         == 0
-                                        && self.common.egui.active
-                                        && self.common.egui.state.wants_keyboard()
+                                        && self.egui.active
+                                        && self.egui.state.wants_keyboard()
                                     {
-                                        self.common.egui.state.handle_keyboard(
+                                        self.egui.state.handle_keyboard(
                                             &handle,
                                             state == KeyState::Pressed,
                                             modifiers.clone(),
@@ -255,7 +253,7 @@ impl State {
                 use smithay::backend::input::PointerMotionEvent;
 
                 let device = event.device();
-                for seat in self.common.seats.clone().iter() {
+                for seat in self.seats.clone().iter() {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
@@ -265,12 +263,10 @@ impl State {
                         position += event.delta();
 
                         let output = self
-                            .common
                             .spaces
                             .outputs()
                             .find(|output| {
-                                self.common
-                                    .spaces
+                                self.spaces
                                     .output_geometry(output)
                                     .to_f64()
                                     .contains(position)
@@ -280,7 +276,7 @@ impl State {
                         if output != current_output {
                             set_active_output(seat, &output);
                         }
-                        let output_geometry = self.common.spaces.output_geometry(&output);
+                        let output_geometry = self.spaces.output_geometry(&output);
 
                         position.x = 0.0f64
                             .max(position.x)
@@ -290,17 +286,16 @@ impl State {
                             .min((output_geometry.loc.y + output_geometry.size.h) as f64);
 
                         let serial = SERIAL_COUNTER.next_serial();
-                        let space = self.common.spaces.active_space_mut(&output);
-                        let under = State::surface_under(position, &output, space);
+                        let space = self.spaces.active_space_mut(&output);
+                        let under = Common::surface_under(position, &output, space);
                         handle_window_movement(under.as_ref().map(|(s, _)| s), space);
                         seat.get_pointer()
                             .unwrap()
                             .motion(position, under, serial, event.time());
 
                         #[cfg(feature = "debug")]
-                        if self.common.seats.iter().position(|x| x == seat).unwrap() == 0 {
-                            self.common
-                                .egui
+                        if self.seats.iter().position(|x| x == seat).unwrap() == 0 {
+                            self.egui
                                 .state
                                 .handle_pointer_motion(position.to_i32_round());
                         }
@@ -312,26 +307,25 @@ impl State {
                 use smithay::backend::input::PointerMotionAbsoluteEvent;
 
                 let device = event.device();
-                for seat in self.common.seats.clone().iter() {
+                for seat in self.seats.clone().iter() {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
                         let output = active_output(seat, &self);
-                        let geometry = self.common.spaces.output_geometry(&output);
-                        let space = self.common.spaces.active_space_mut(&output);
+                        let geometry = self.spaces.output_geometry(&output);
+                        let space = self.spaces.active_space_mut(&output);
                         let position =
                             geometry.loc.to_f64() + event.position_transformed(geometry.size);
                         let serial = SERIAL_COUNTER.next_serial();
-                        let under = State::surface_under(position, &output, space);
+                        let under = Common::surface_under(position, &output, space);
                         handle_window_movement(under.as_ref().map(|(s, _)| s), space);
                         seat.get_pointer()
                             .unwrap()
                             .motion(position, under, serial, event.time());
 
                         #[cfg(feature = "debug")]
-                        if self.common.seats.iter().position(|x| x == seat).unwrap() == 0 {
-                            self.common
-                                .egui
+                        if self.seats.iter().position(|x| x == seat).unwrap() == 0 {
+                            self.egui
                                 .state
                                 .handle_pointer_motion(position.to_i32_round());
                         }
@@ -346,20 +340,20 @@ impl State {
                 };
 
                 let device = event.device();
-                for seat in self.common.seats.clone().iter() {
+                for seat in self.seats.clone().iter() {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
                         #[cfg(feature = "debug")]
-                        if self.common.seats.iter().position(|x| x == seat).unwrap() == 0
-                            && self.common.egui.active
-                            && self.common.egui.state.wants_pointer()
+                        if self.seats.iter().position(|x| x == seat).unwrap() == 0
+                            && self.egui.active
+                            && self.egui.state.wants_pointer()
                         {
                             if let Some(button) = event.button() {
-                                self.common.egui.state.handle_pointer_button(
+                                self.egui.state.handle_pointer_button(
                                     button,
                                     event.state() == ButtonState::Pressed,
-                                    self.common.egui.modifiers.clone(),
+                                    self.egui.modifiers.clone(),
                                 );
                             }
                             break;
@@ -373,8 +367,8 @@ impl State {
                                 if !seat.get_pointer().unwrap().is_grabbed() {
                                     let output = active_output(seat, &self);
                                     let mut pos = seat.get_pointer().unwrap().current_location();
-                                    let output_geo = self.common.spaces.output_geometry(&output);
-                                    let space = self.common.spaces.active_space_mut(&output);
+                                    let output_geo = self.spaces.output_geometry(&output);
+                                    let space = self.spaces.active_space_mut(&output);
                                     let layers = layer_map_for_output(&output);
                                     pos -= output_geo.loc.to_f64();
                                     let mut under = None;
@@ -433,13 +427,13 @@ impl State {
                 };
 
                 let device = event.device();
-                for seat in self.common.seats.clone().iter() {
+                for seat in self.seats.clone().iter() {
                     #[cfg(feature = "debug")]
-                    if self.common.seats.iter().position(|x| x == seat).unwrap() == 0
-                        && self.common.egui.active
-                        && self.common.egui.state.wants_pointer()
+                    if self.seats.iter().position(|x| x == seat).unwrap() == 0
+                        && self.egui.active
+                        && self.egui.state.wants_pointer()
                     {
-                        self.common.egui.state.handle_pointer_axis(
+                        self.egui.state.handle_pointer_axis(
                             event
                                 .amount_discrete(Axis::Horizontal)
                                 .or_else(|| event.amount(Axis::Horizontal).map(|x| x * 3.0))
