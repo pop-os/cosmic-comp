@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use smithay::{
     backend::{
         renderer::{ImportDma, ImportEgl},
-        winit::{self, WinitGraphicsBackend, WinitEvent, WinitVirtualDevice},
+        winit::{self, WinitEvent, WinitGraphicsBackend, WinitVirtualDevice},
     },
     desktop::layer_map_for_output,
     reexports::{
@@ -24,15 +24,12 @@ use smithay::{
         output::{Mode, Output, PhysicalProperties},
     },
 };
-use std::{
-    cell::RefCell,
-    rc::Rc,
-};
+use std::{cell::RefCell, rc::Rc};
 
 #[cfg(feature = "debug")]
-use smithay::backend::renderer::gles2::Gles2Renderer;
-#[cfg(feature = "debug")]
 use crate::{debug::debug_ui, state::Fps};
+#[cfg(feature = "debug")]
+use smithay::backend::renderer::gles2::Gles2Renderer;
 
 pub struct WinitState {
     // The winit backend currently has no notion of multiple windows
@@ -44,10 +41,7 @@ pub struct WinitState {
 }
 
 impl WinitState {
-    pub fn render_output(
-        &mut self,
-        state: &mut Common,
-    ) -> Result<()> {
+    pub fn render_output(&mut self, state: &mut Common) -> Result<()> {
         #[allow(unused_mut)]
         let mut custom_elements = Vec::new();
 
@@ -94,11 +88,12 @@ impl WinitState {
 }
 
 pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Result<()> {
-    let (backend, mut input) = winit::init(None).with_context(|| "Failed to initilize winit backend")?;
+    let (backend, mut input) =
+        winit::init(None).with_context(|| "Failed to initilize winit backend")?;
     let backend = Rc::new(RefCell::new(backend));
 
     init_egl_client_side(&mut *state.common.display.borrow_mut(), backend.clone())?;
-    
+
     let name = format!("WINIT-0");
     let size = backend.borrow().window_size();
     let props = PhysicalProperties {
@@ -113,47 +108,54 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
     };
     let (output, _global) = Output::new(&mut *state.common.display.borrow_mut(), name, props, None);
     //let _global = global.into();
-    output.change_current_state(Some(mode), Some(Transform::Flipped180), None, Some((0, 0).into()));
+    output.change_current_state(
+        Some(mode),
+        Some(Transform::Flipped180),
+        None,
+        Some((0, 0).into()),
+    );
     output.set_preferred(mode);
 
     state.common.spaces.map_output(&output);
 
-    let (event_ping, event_source) = ping::make_ping().with_context(|| "Failed to init eventloop timer for winit")?;
-    let (render_ping, render_source) = ping::make_ping().with_context(|| "Failed to init eventloop timer for winit")?;
+    let (event_ping, event_source) =
+        ping::make_ping().with_context(|| "Failed to init eventloop timer for winit")?;
+    let (render_ping, render_source) =
+        ping::make_ping().with_context(|| "Failed to init eventloop timer for winit")?;
     let event_ping_handle = event_ping.clone();
     let render_ping_handle = render_ping.clone();
-    let mut token = Some(event_loop
-        .handle()
-        .insert_source(
-            render_source,
-            move |_, _, state| {
+    let mut token = Some(
+        event_loop
+            .handle()
+            .insert_source(render_source, move |_, _, state| {
                 if let Err(err) = state.backend.winit().render_output(&mut state.common) {
                     slog_scope::error!("Failed to render frame: {}", err);
                     render_ping.ping();
                 }
-            }
-        ).map_err(|_| anyhow::anyhow!("Failed to init eventloop timer for winit"))?);
+            })
+            .map_err(|_| anyhow::anyhow!("Failed to init eventloop timer for winit"))?,
+    );
     let event_loop_handle = event_loop.handle();
     event_loop
         .handle()
-        .insert_source(
-            event_source,
-            move |_, _, state| {
-                match input.dispatch_new_events(|event| state.process_winit_event(event, &render_ping_handle)) {
-                    Ok(_) => {
-                        event_ping_handle.ping();
-                        render_ping_handle.ping();
-                    },
-                    Err(winit::WinitError::WindowClosed) => {
-                        let winit_state = state.backend.winit();
-                        state.common.spaces.unmap_output(&winit_state.output);
-                        if let Some(token) = token.take() {
-                            event_loop_handle.remove(token);
-                        }
+        .insert_source(event_source, move |_, _, state| {
+            match input
+                .dispatch_new_events(|event| state.process_winit_event(event, &render_ping_handle))
+            {
+                Ok(_) => {
+                    event_ping_handle.ping();
+                    render_ping_handle.ping();
+                }
+                Err(winit::WinitError::WindowClosed) => {
+                    let winit_state = state.backend.winit();
+                    state.common.spaces.unmap_output(&winit_state.output);
+                    if let Some(token) = token.take() {
+                        event_loop_handle.remove(token);
                     }
-                };
-            }
-        ).map_err(|_| anyhow::anyhow!("Failed to init eventloop timer for winit"))?;
+                }
+            };
+        })
+        .map_err(|_| anyhow::anyhow!("Failed to init eventloop timer for winit"))?;
     event_ping.ping();
 
     state.backend = BackendData::Winit(WinitState {
@@ -162,11 +164,14 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
         #[cfg(feature = "debug")]
         fps: Fps::default(),
     });
-    
+
     Ok(())
 }
 
-fn init_egl_client_side(display: &mut Display, renderer: Rc<RefCell<WinitGraphicsBackend>>) -> Result<()> {
+fn init_egl_client_side(
+    display: &mut Display,
+    renderer: Rc<RefCell<WinitGraphicsBackend>>,
+) -> Result<()> {
     let bind_result = renderer.borrow_mut().renderer().bind_wl_display(display);
     match bind_result {
         Ok(_) => {
@@ -180,7 +185,13 @@ fn init_egl_client_side(display: &mut Display, renderer: Rc<RefCell<WinitGraphic
             init_dmabuf_global(
                 display,
                 dmabuf_formats,
-                move |buffer, _| renderer.borrow_mut().renderer().import_dmabuf(buffer).is_ok(),
+                move |buffer, _| {
+                    renderer
+                        .borrow_mut()
+                        .renderer()
+                        .import_dmabuf(buffer)
+                        .is_ok()
+                },
                 None,
             );
         }
@@ -215,10 +226,10 @@ impl State {
                 output.set_preferred(mode);
                 layer_map_for_output(output).arrange();
                 render_ping.ping();
-            },
+            }
             WinitEvent::Refresh => render_ping.ping(),
             WinitEvent::Input(event) => self.common.process_input_event(event),
-            _ => {},
+            _ => {}
         };
     }
 }

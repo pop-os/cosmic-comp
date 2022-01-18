@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::{
-        x11::X11State,
-        winit::WinitState,
-    },
+    backend::{winit::WinitState, x11::X11State},
     shell::{init_shell, workspaces::Workspaces, ShellStates},
 };
 use smithay::{
@@ -177,7 +174,7 @@ impl Default for Fps {
 }
 
 #[cfg(feature = "debug")]
-pub fn avg_fps<'a>(iter: impl Iterator<Item=&'a Duration>) -> f64 {
+pub fn avg_fps<'a>(iter: impl Iterator<Item = &'a Duration>) -> f64 {
     let sum_secs = iter.map(|d| d.as_secs_f64()).sum::<f64>();
     1.0 / (sum_secs / Fps::WINDOW_SIZE as f64)
 }

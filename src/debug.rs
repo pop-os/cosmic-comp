@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::state::{Common, Fps};
+use smithay::utils::{Logical, Rectangle};
 use smithay_egui::EguiFrame;
-use smithay::utils::{Rectangle, Logical};
 
-pub fn debug_ui(state: &mut Common, fps: &Fps, area: Rectangle<i32, Logical>, scale: f64, primary: bool) -> EguiFrame {
+pub fn debug_ui(
+    state: &mut Common,
+    fps: &Fps,
+    area: Rectangle<i32, Logical>,
+    scale: f64,
+    primary: bool,
+) -> EguiFrame {
     let size = area.size;
     let alpha = state.egui.alpha;
 
@@ -32,7 +38,7 @@ pub fn debug_ui(state: &mut Common, fps: &Fps, area: Rectangle<i32, Logical>, sc
                         ui.separator();
 
                         // FPS
-                        
+
                         let (max, min, avg, avg_fps) = (
                             fps.max_frametime().as_secs_f64(),
                             fps.min_frametime().as_secs_f64(),
@@ -48,11 +54,14 @@ pub fn debug_ui(state: &mut Common, fps: &Fps, area: Rectangle<i32, Logical>, sc
                         let fps_chart = BarChart::new(
                             fps.frames
                                 .iter()
-                                .rev().take(30).rev()
+                                .rev()
+                                .take(30)
+                                .rev()
                                 .enumerate()
                                 .map(|(i, d)| {
                                     let value = d.as_secs_f64();
-                                    let transformed = ((value - min) / (max - min) * 255.0).round() as u8;
+                                    let transformed =
+                                        ((value - min) / (max - min) * 255.0).round() as u8;
                                     Bar::new(i as f64, value).fill(egui::Color32::from_rgb(
                                         transformed,
                                         255 - transformed,
@@ -74,21 +83,23 @@ pub fn debug_ui(state: &mut Common, fps: &Fps, area: Rectangle<i32, Logical>, sc
                             .show(ui, |plot_ui| {
                                 plot_ui.bar_chart(fps_chart);
                                 plot_ui.hline(
-                                    HLine::new(avg)
-                                        .highlight()
-                                        .color(egui::Color32::LIGHT_BLUE),
+                                    HLine::new(avg).highlight().color(egui::Color32::LIGHT_BLUE),
                                 );
                             });
-                        
+
                         ui.separator();
 
                         // Toggles and stuff
-                        ui.add(egui::Slider::new(&mut state.egui.alpha, 0.1..=1.0).clamp_to_range(true).text("Opacity"));
+                        ui.add(
+                            egui::Slider::new(&mut state.egui.alpha, 0.1..=1.0)
+                                .clamp_to_range(true)
+                                .text("Opacity"),
+                        );
                         ui.checkbox(&mut state.egui.spaces, "Workspace UI");
                         //TODO: ui.checkbox(&mut state.egui.outputs, "Outputs UI");
                     }
                 });
-                        
+
             // don't show these one others then the primary monitor
             if primary {
                 egui::Window::new("Workspaces")
@@ -99,11 +110,15 @@ pub fn debug_ui(state: &mut Common, fps: &Fps, area: Rectangle<i32, Logical>, sc
 
                         ui.set_min_width(250.0);
 
-                        // Mode 
+                        // Mode
 
                         ui.label(egui::RichText::new("Mode").heading());
                         let mut mode = *state.spaces.mode();
-                        let active = if let Mode::Global { active } = mode { active } else { 0 };
+                        let active = if let Mode::Global { active } = mode {
+                            active
+                        } else {
+                            0
+                        };
                         ui.radio_value(&mut mode, Mode::OutputBound, "Output bound");
                         ui.radio_value(&mut mode, Mode::Global { active }, "Global");
                         state.spaces.set_mode(mode);
@@ -121,20 +136,29 @@ pub fn debug_ui(state: &mut Common, fps: &Fps, area: Rectangle<i32, Logical>, sc
                                             .unwrap();
                                         let mut active_val = active as f64;
                                         ui.label(output.name());
-                                        ui.add(egui::DragValue::new(&mut active_val).clamp_range(0..=(MAX_WORKSPACES-1)).speed(1.0));
+                                        ui.add(
+                                            egui::DragValue::new(&mut active_val)
+                                                .clamp_range(0..=(MAX_WORKSPACES - 1))
+                                                .speed(1.0),
+                                        );
                                         if active != active_val as usize {
                                             state.spaces.activate(&output, active_val as usize);
                                         }
                                     });
                                 }
-                            },
+                            }
                             Mode::Global { active } => {
                                 ui.horizontal(|ui| {
                                     let mut active_val = active as f64;
                                     ui.label("Workspace:");
-                                    ui.add(egui::DragValue::new(&mut active_val).clamp_range(0..=(MAX_WORKSPACES-1)).speed(1.0));
+                                    ui.add(
+                                        egui::DragValue::new(&mut active_val)
+                                            .clamp_range(0..=(MAX_WORKSPACES - 1))
+                                            .speed(1.0),
+                                    );
                                     if active != active_val as usize {
-                                        let output = state.spaces.outputs().next().cloned().unwrap();
+                                        let output =
+                                            state.spaces.outputs().next().cloned().unwrap();
                                         state.spaces.activate(&output, active_val as usize);
                                     }
                                 });
@@ -147,21 +171,25 @@ pub fn debug_ui(state: &mut Common, fps: &Fps, area: Rectangle<i32, Logical>, sc
                                 ui.collapsing(format!("Windows"), |ui| {
                                     for window in space.windows() {
                                         ui.collapsing(format!("{:?}", window.toplevel()), |ui| {
-                                            ui.label(format!("Rect:         {:?}", space.window_geometry(window)));
-                                            ui.label(format!("Bounding box: {:?}", space.window_bbox(window)));
+                                            ui.label(format!(
+                                                "Rect:         {:?}",
+                                                space.window_geometry(window)
+                                            ));
+                                            ui.label(format!(
+                                                "Bounding box: {:?}",
+                                                space.window_bbox(window)
+                                            ));
                                         });
                                     }
                                 })
                             });
                         }
                     });
-                
+
                 egui::Window::new("Outputs")
                     .open(&mut state.egui.outputs)
                     .hscroll(true)
-                    .show(ctx, |ui| {
-
-                    });
+                    .show(ctx, |ui| {});
             }
         },
         area,

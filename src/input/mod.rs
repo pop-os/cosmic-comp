@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::state::Common;
+#[cfg(feature = "debug")]
+use smithay::{backend::input::KeyState, wayland::seat::keysyms};
 use smithay::{
     backend::input::{Device, DeviceCapability, InputBackend, InputEvent},
     desktop::{layer_map_for_output, Space},
@@ -13,11 +15,6 @@ use smithay::{
         shell::wlr_layer::Layer as WlrLayer,
         SERIAL_COUNTER,
     },
-};
-#[cfg(feature = "debug")]
-use smithay::{
-    backend::input::KeyState,
-    wayland::seat::keysyms,
 };
 use std::{cell::RefCell, collections::HashMap};
 
@@ -217,8 +214,7 @@ impl Common {
                                 #[cfg(feature = "debug")]
                                 {
                                     self.egui.modifiers = modifiers.clone();
-                                    if self.seats.iter().position(|x| x == seat).unwrap()
-                                        == 0
+                                    if self.seats.iter().position(|x| x == seat).unwrap() == 0
                                         && modifiers.logo
                                         && handle.raw_syms().contains(&keysyms::KEY_Escape)
                                         && state == KeyState::Pressed
@@ -227,8 +223,7 @@ impl Common {
                                         userdata.get::<SupressedKeys>().unwrap().add(&handle);
                                         return FilterResult::Intercept(());
                                     }
-                                    if self.seats.iter().position(|x| x == seat).unwrap()
-                                        == 0
+                                    if self.seats.iter().position(|x| x == seat).unwrap() == 0
                                         && self.egui.active
                                         && self.egui.state.wants_keyboard()
                                     {

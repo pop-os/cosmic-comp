@@ -99,10 +99,9 @@ impl X11State {
                     .iter_mut()
                     .find(|s| s.output == output_ref)
                 {
-                    if let Err(err) = surface.render_output(
-                        &mut *x11_state.renderer.borrow_mut(),
-                        &mut state.common,
-                    ) {
+                    if let Err(err) = surface
+                        .render_output(&mut *x11_state.renderer.borrow_mut(), &mut state.common)
+                    {
                         slog_scope::error!("Error rendering: {}", err);
                     }
                 }
