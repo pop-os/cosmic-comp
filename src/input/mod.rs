@@ -162,7 +162,7 @@ impl Common {
                 }
                 #[cfg(feature = "debug")]
                 {
-                    self.common.egui.state.handle_device_added(&device);
+                    self.egui.state.handle_device_added(&device);
                 }
             }
             InputEvent::DeviceRemoved { device } => {
@@ -186,7 +186,7 @@ impl Common {
                 }
                 #[cfg(feature = "debug")]
                 {
-                    self.common.egui.state.handle_device_added(&device);
+                    self.egui.state.handle_device_added(&device);
                 }
             }
             InputEvent::Keyboard { event, .. } => {
