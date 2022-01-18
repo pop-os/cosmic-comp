@@ -2,17 +2,22 @@
 
 use crate::state::State;
 use smithay::{
-    backend::input::{Device, DeviceCapability, InputBackend, InputEvent, KeyState},
+    backend::input::{Device, DeviceCapability, InputBackend, InputEvent},
     desktop::{layer_map_for_output, Space},
     reexports::wayland_server::{protocol::wl_surface::WlSurface, Display},
     utils::{Logical, Point},
     wayland::{
         data_device::set_data_device_focus,
         output::Output,
-        seat::{keysyms, CursorImageStatus, FilterResult, KeysymHandle, Seat, XkbConfig},
+        seat::{CursorImageStatus, FilterResult, KeysymHandle, Seat, XkbConfig},
         shell::wlr_layer::Layer as WlrLayer,
         SERIAL_COUNTER,
     },
+};
+#[cfg(feature = "debug")]
+use smithay::{
+    backend::input::KeyState,
+    wayland::seat::keysyms,
 };
 use std::{cell::RefCell, collections::HashMap};
 
@@ -230,7 +235,7 @@ impl State {
                                         && self.common.egui.state.wants_keyboard()
                                     {
                                         self.common.egui.state.handle_keyboard(
-                                            handle.raw_syms(),
+                                            &handle,
                                             state == KeyState::Pressed,
                                             modifiers.clone(),
                                         );
