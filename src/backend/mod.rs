@@ -4,16 +4,17 @@ use crate::state::State;
 use anyhow::Result;
 use smithay::reexports::calloop::EventLoop;
 
+pub mod kms;
 pub mod winit;
 pub mod x11;
 // TODO
 // pub mod wayland; // tbd in smithay
-// pub mod udev;
 
 pub fn init_backend_auto(event_loop: &mut EventLoop<State>, state: &mut State) -> Result<()> {
     match std::env::var("COSMIC_BACKEND") {
         Ok(x) if x == "x11" => x11::init_backend(event_loop, state),
         Ok(x) if x == "winit" => winit::init_backend(event_loop, state),
+        Ok(x) if x == "kms" => kms::init_backend(event_loop, state),
         Ok(_) => unimplemented!("There is no backend with this identifier"),
         Err(_) => {
             if std::env::var_os("DISPLAY").is_some()
@@ -28,7 +29,7 @@ pub fn init_backend_auto(event_loop: &mut EventLoop<State>, state: &mut State) -
                     }
                 }
             } else {
-                unimplemented!("Currently this runs only nested")
+                kms::init_backend(event_loop, state)
             }
         }
     }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::{winit::WinitState, x11::X11State},
+    backend::{kms::KmsState, winit::WinitState, x11::X11State},
     shell::{init_shell, workspaces::Workspaces, ShellStates},
 };
 use smithay::{
@@ -60,13 +60,20 @@ pub struct Fps {
 pub enum BackendData {
     X11(X11State),
     Winit(WinitState),
+    Kms(KmsState),
     // TODO
     // Wayland(WaylandState),
-    // Udev(UdevState),
     Unset,
 }
 
 impl BackendData {
+    pub fn kms(&mut self) -> &mut KmsState {
+        match self {
+            BackendData::Kms(ref mut kms_state) => kms_state,
+            _ => unreachable!("Called kms in non kms backend"),
+        }
+    }
+
     pub fn x11(&mut self) -> &mut X11State {
         match self {
             BackendData::X11(ref mut x11_state) => x11_state,

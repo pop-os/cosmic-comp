@@ -14,13 +14,14 @@ slog-async = "2.7"
 slog-scope = "4.4"
 slog-stdlog = "4.1"
 egui = { version = "0.16", optional = true }
+edid-rs = { version = "0.1" }
 
 [dependencies.smithay]
 version = "0.3"
 git = "https://github.com/Smithay/smithay.git"
 rev = "ab89bda5"
 default-features = false
-features = ["backend_x11", "backend_egl", "backend_winit", "desktop", "use_system_lib", "renderer_gl", "wayland_frontend", "slog-stdlog"]
+features = ["backend_drm", "backend_gbm", "backend_egl", "backend_libinput", "backend_session_logind", "backend_udev", "backend_winit", "backend_x11", "desktop", "use_system_lib", "renderer_gl", "wayland_frontend", "slog-stdlog"]
 
 [dependencies.smithay-egui]
 git = "https://github.com/Smithay/smithay-egui.git"
@@ -30,3 +31,6 @@ optional = true
 [features]
 default = []
 debug = ["egui", "smithay-egui"]
+
+[patch."https://github.com/Smithay/smithay"]
+smithay = { path = "../../tavern/smithay" }
