@@ -3,7 +3,10 @@
 use crate::{input::active_output, state::State};
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
-    desktop::{layer_map_for_output, Kind, LayerSurface, PopupKind, PopupManager, Window},
+    desktop::{
+        layer_map_for_output, Kind, LayerSurface, PopupKeyboardGrab, PopupKind, PopupManager,
+        PopupPointerGrab, PopupUngrabStrategy, Window,
+    },
     reexports::{
         wayland_protocols::xdg_shell::server::xdg_toplevel,
         wayland_server::{protocol::wl_surface::WlSurface, Display},
@@ -218,6 +221,41 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
 
                     if ret.is_ok() {
                         surface.send_configure();
+                    }
+                }
+                XdgRequest::Grab {
+                    serial,
+                    surface,
+                    seat,
+                } => {
+                    let seat = Seat::from_resource(&seat).unwrap();
+                    let ret = state.shell.popups.grab_popup(surface.into(), &seat, serial);
+
+                    if let Ok(mut grab) = ret {
+                        if let Some(keyboard) = seat.get_keyboard() {
+                            if keyboard.is_grabbed()
+                                && !(keyboard.has_grab(serial)
+                                    || keyboard.has_grab(grab.previous_serial().unwrap_or(serial)))
+                            {
+                                grab.ungrab(PopupUngrabStrategy::All);
+                                return;
+                            }
+                            keyboard.set_focus(grab.current_grab().as_ref(), serial);
+                            keyboard.set_grab(PopupKeyboardGrab::new(&grab), serial);
+                        }
+
+                        if let Some(pointer) = seat.get_pointer() {
+                            if pointer.is_grabbed()
+                                && !(pointer.has_grab(serial)
+                                    || pointer.has_grab(
+                                        grab.previous_serial().unwrap_or_else(|| grab.serial()),
+                                    ))
+                            {
+                                grab.ungrab(PopupUngrabStrategy::All);
+                                return;
+                            }
+                            pointer.set_grab(PopupPointerGrab::new(&grab), serial);
+                        }
                     }
                 }
                 _ => { /*TODO*/ }
