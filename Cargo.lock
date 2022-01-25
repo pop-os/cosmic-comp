@@ -1148,7 +1148,7 @@ checksum = "f2dd574626839106c320a323308629dcb1acfc96e32a8cba364ddc61ac23ee83"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/Smithay/smithay.git?rev=e019b4fa#e019b4fa9edfd86f6ca559e644185feb1dbc8565"
+source = "git+https://github.com/Smithay/smithay.git?rev=8558253b#8558253b1395ccee04941778badf1b2869f1597b"
 dependencies = [
  "appendlist",
  "bitflags",
@@ -1204,8 +1204,9 @@ dependencies = [
 [[package]]
 name = "smithay-egui"
 version = "0.1.0"
-source = "git+https://github.com/Smithay/smithay-egui.git?rev=ee254ea5#ee254ea5ef0202bb22228b56c8b1980d3cd4cb5d"
+source = "git+https://github.com/Smithay/smithay-egui.git?rev=3af730c7#3af730c7e923ce3a3d552205ed491a65447968a1"
 dependencies = [
+ "cgmath",
  "egui",
  "lazy_static",
  "memoffset",

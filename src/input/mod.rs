@@ -5,7 +5,7 @@ use crate::state::Common;
 use smithay::{backend::input::KeyState, wayland::seat::keysyms};
 use smithay::{
     backend::input::{Device, DeviceCapability, InputBackend, InputEvent},
-    desktop::{layer_map_for_output, Space},
+    desktop::{layer_map_for_output, Space, WindowSurfaceType},
     reexports::wayland_server::{protocol::wl_surface::WlSurface, Display},
     utils::{Logical, Point},
     wayland::{
@@ -376,14 +376,21 @@ impl Common {
                                             let layer_loc =
                                                 layers.layer_geometry(layer).unwrap().loc;
                                             under = layer
-                                                .surface_under(pos - layer_loc.to_f64())
+                                                .surface_under(
+                                                    pos - layer_loc.to_f64(),
+                                                    WindowSurfaceType::ALL,
+                                                )
                                                 .map(|(s, _)| s);
                                         }
                                     } else if let Some(window) = space.window_under(pos).cloned() {
                                         let window_loc =
                                             space.window_geometry(&window).unwrap().loc;
                                         under = window
-                                            .surface_under(pos - window_loc.to_f64())
+                                            .surface_under(
+                                                pos - window_loc.to_f64(),
+                                                WindowSurfaceType::TOPLEVEL
+                                                    | WindowSurfaceType::SUBSURFACE,
+                                            )
                                             .map(|(s, _)| s);
                                         space.raise_window(&window, true);
                                     } else if let Some(layer) = layers
@@ -394,7 +401,10 @@ impl Common {
                                             let layer_loc =
                                                 layers.layer_geometry(layer).unwrap().loc;
                                             under = layer
-                                                .surface_under(pos - layer_loc.to_f64())
+                                                .surface_under(
+                                                    pos - layer_loc.to_f64(),
+                                                    WindowSurfaceType::ALL,
+                                                )
                                                 .map(|(s, _)| s);
                                         }
                                     };
@@ -511,12 +521,15 @@ impl Common {
         {
             let layer_loc = layers.layer_geometry(layer).unwrap().loc;
             layer
-                .surface_under(pos - output_geo.loc.to_f64() - layer_loc.to_f64())
+                .surface_under(
+                    pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
+                    WindowSurfaceType::ALL,
+                )
                 .map(|(s, loc)| (s, loc + layer_loc))
         } else if let Some(window) = space.window_under(pos) {
             let window_loc = space.window_geometry(window).unwrap().loc;
             window
-                .surface_under(pos - window_loc.to_f64())
+                .surface_under(pos - window_loc.to_f64(), WindowSurfaceType::ALL)
                 .map(|(s, loc)| (s, loc + window_loc))
         } else if let Some(layer) = layers
             .layer_under(WlrLayer::Bottom, pos)
@@ -524,7 +537,10 @@ impl Common {
         {
             let layer_loc = layers.layer_geometry(layer).unwrap().loc;
             layer
-                .surface_under(pos - output_geo.loc.to_f64() - layer_loc.to_f64())
+                .surface_under(
+                    pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
+                    WindowSurfaceType::ALL,
+                )
                 .map(|(s, loc)| (s, loc + layer_loc))
         } else {
             None

@@ -11,7 +11,7 @@ use smithay::{
     wayland::{
         compositor::{compositor_init, with_states},
         output::Output,
-        seat::{GrabStartData, PointerHandle, Seat},
+        seat::{PointerGrabStartData, PointerHandle, Seat},
         shell::{
             wlr_layer::{
                 wlr_layer_shell_init, LayerShellRequest, LayerShellState, LayerSurfaceAttributes,
@@ -262,7 +262,7 @@ fn check_grab_preconditions(
     seat: &Seat,
     surface: Option<&WlSurface>,
     serial: Serial,
-) -> Option<(PointerHandle, GrabStartData)> {
+) -> Option<(PointerHandle, PointerGrabStartData)> {
     let surface = if let Some(surface) = surface {
         surface
     } else {

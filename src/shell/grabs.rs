@@ -9,7 +9,7 @@ use smithay::{
     utils::{Logical, Point, Rectangle, Size},
     wayland::{
         compositor::with_states,
-        seat::{AxisFrame, GrabStartData, PointerGrab, PointerInnerHandle},
+        seat::{AxisFrame, PointerGrab, PointerGrabStartData, PointerInnerHandle},
         shell::xdg::{SurfaceCachedState, ToplevelConfigure, XdgToplevelSurfaceRoleAttributes},
         Serial,
     },
@@ -22,7 +22,7 @@ struct MoveData {
 }
 
 pub struct MoveSurfaceGrab {
-    start_data: GrabStartData,
+    start_data: PointerGrabStartData,
     window: Window,
     initial_window_location: Point<i32, Logical>,
 }
@@ -70,14 +70,14 @@ impl PointerGrab for MoveSurfaceGrab {
         handle.axis(details)
     }
 
-    fn start_data(&self) -> &GrabStartData {
+    fn start_data(&self) -> &PointerGrabStartData {
         &self.start_data
     }
 }
 
 impl MoveSurfaceGrab {
     pub fn new(
-        start_data: GrabStartData,
+        start_data: PointerGrabStartData,
         window: Window,
         initial_window_location: Point<i32, Logical>,
     ) -> MoveSurfaceGrab {
@@ -159,7 +159,7 @@ impl Default for ResizeState {
 }
 
 pub struct ResizeSurfaceGrab {
-    start_data: GrabStartData,
+    start_data: PointerGrabStartData,
     window: Window,
     edges: ResizeEdge,
     initial_window_size: Size<i32, Logical>,
@@ -290,14 +290,14 @@ impl PointerGrab for ResizeSurfaceGrab {
         handle.axis(details)
     }
 
-    fn start_data(&self) -> &GrabStartData {
+    fn start_data(&self) -> &PointerGrabStartData {
         &self.start_data
     }
 }
 
 impl ResizeSurfaceGrab {
     pub fn new(
-        start_data: GrabStartData,
+        start_data: PointerGrabStartData,
         window: Window,
         edges: xdg_toplevel::ResizeEdge,
         initial_window_geometry: Rectangle<i32, Logical>,
