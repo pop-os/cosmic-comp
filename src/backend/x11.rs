@@ -104,6 +104,7 @@ impl X11State {
                     {
                         slog_scope::error!("Error rendering: {}", err);
                     }
+                    surface.pending = false;
                 }
             })
             .with_context(|| "Failed to add output to event loop")?;
@@ -113,6 +114,7 @@ impl X11State {
             surface,
             output: output.clone(),
             render: ping.clone(),
+            pending: true,
             #[cfg(feature = "debug")]
             fps: Fps::default(),
             _global,
@@ -122,6 +124,15 @@ impl X11State {
         ping.ping();
         Ok(output)
     }
+
+    pub fn schedule_render(&mut self, output: &Output) {
+        if let Some(surface) = self.surfaces.iter_mut().find(|s| s.output == *output) {
+            if !surface.pending {
+                surface.pending = true;
+                surface.render.ping();
+            }
+        }
+    }
 }
 
 pub struct Surface {
@@ -129,6 +140,7 @@ pub struct Surface {
     surface: X11Surface,
     output: Output,
     render: ping::Ping,
+    pending: bool,
     #[cfg(feature = "debug")]
     fps: Fps,
     _global: GlobalDrop<WlOutput>,
@@ -274,19 +286,8 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
                 }
             }
 
-            X11Event::PresentCompleted { window_id } | X11Event::Refresh { window_id } => {
-                if let Some(surface) = state
-                    .backend
-                    .x11()
-                    .surfaces
-                    .iter_mut()
-                    .find(|s| s.window.id() == window_id)
-                {
-                    surface.render.ping();
-                }
-            }
-
             X11Event::Input(event) => state.process_x11_event(event),
+            _ => {},
         })
         .map_err(|_| anyhow::anyhow!("Failed to insert X11 Backend into event loop"))?;
 
@@ -345,5 +346,9 @@ impl State {
         };
 
         self.common.process_input_event(event);
+        // TODO actually figure out the output
+        for output in self.common.spaces.outputs() {
+            self.backend.schedule_render(output);
+        }
     }
 }

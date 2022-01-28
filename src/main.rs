@@ -27,7 +27,7 @@ fn main() -> Result<()> {
     // init wayland
     let display = init_wayland_display(&mut event_loop)?;
     // init state
-    let mut state = state::State::new(display);
+    let mut state = state::State::new(display, event_loop.handle());
     // init backend
     backend::init_backend_auto(&mut event_loop, &mut state)?;
 

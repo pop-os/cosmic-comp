@@ -5,10 +5,13 @@ use crate::{
     shell::{init_shell, workspaces::Workspaces, ShellStates},
 };
 use smithay::{
-    reexports::wayland_server::Display,
+    reexports::{
+        calloop::LoopHandle,
+        wayland_server::Display,
+    },
     wayland::{
         data_device::{default_action_chooser, init_data_device},
-        output::xdg::init_xdg_output_manager,
+        output::{xdg::init_xdg_output_manager, Output},
         seat::Seat,
         shell::xdg::ToplevelSurface,
         shm::init_shm_global,
@@ -26,6 +29,7 @@ pub struct State {
 
 pub struct Common {
     pub display: Rc<RefCell<Display>>,
+    pub event_loop_handle: LoopHandle<'static, State>,
 
     pub spaces: Workspaces,
     pub shell: ShellStates,
@@ -87,10 +91,21 @@ impl BackendData {
             _ => unreachable!("Called winit in non winit backend"),
         }
     }
+
+    pub fn schedule_render(&mut self, output: &Output) {
+        match self {
+            BackendData::Winit(_) => {}, // We cannot do this on the winit backend.
+            // Winit has a very strict render-loop and skipping frames breaks atleast the wayland winit-backend.
+            // Swapping with damage (which should be empty on these frames) is likely good enough anyway.
+            BackendData::X11(ref mut state) => state.schedule_render(output),
+            BackendData::Kms(ref mut state) => state.schedule_render(output),
+            _ => unreachable!("No backend was initialized"),
+        }
+    }
 }
 
 impl State {
-    pub fn new(mut display: Display) -> State {
+    pub fn new(mut display: Display, handle: LoopHandle<'static, State>) -> State {
         init_shm_global(&mut display, vec![], None);
         init_xdg_output_manager(&mut display, None);
         let shell_handles = init_shell(&mut display);
@@ -105,6 +120,7 @@ impl State {
         State {
             common: Common {
                 display: Rc::new(RefCell::new(display)),
+                event_loop_handle: handle,
 
                 spaces: Workspaces::new(),
                 shell: shell_handles,
