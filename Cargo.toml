@@ -18,13 +18,13 @@ egui = { version = "0.16", optional = true }
 [dependencies.smithay]
 version = "0.3"
 git = "https://github.com/Smithay/smithay.git"
-rev = "8558253b"
+rev = "ab89bda5"
 default-features = false
 features = ["backend_x11", "backend_egl", "backend_winit", "desktop", "use_system_lib", "renderer_gl", "wayland_frontend", "slog-stdlog"]
 
 [dependencies.smithay-egui]
 git = "https://github.com/Smithay/smithay-egui.git"
-rev = "3af730c7"
+rev = "cdff1795"
 optional = true
 
 [features]

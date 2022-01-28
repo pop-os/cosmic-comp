@@ -59,8 +59,8 @@ impl WinitState {
         let space = state.spaces.active_space_mut(&self.output);
         let mut backend = self.backend.borrow_mut();
 
-        let age = backend.buffer_age();
         backend.bind().with_context(|| "Failed to bind buffer")?;
+        let age = backend.buffer_age().unwrap_or(0);
         match space.render_output(
             backend.renderer(),
             &self.output,
