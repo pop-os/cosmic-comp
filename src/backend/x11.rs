@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::state::Common;
 use crate::{
+    backend::cursor,
     input::{set_active_output, Devices},
-    state::{BackendData, State},
+    state::{BackendData, State, Common},
     utils::GlobalDrop,
 };
 use anyhow::{Context, Result};
@@ -164,6 +164,17 @@ impl Surface {
             custom_elements.push(
                 Box::new(frame) as smithay::desktop::space::DynamicRenderElements<Gles2Renderer>
             );
+        }
+
+        for seat in &state.seats {
+            if let Some(cursor) = cursor::draw_cursor(
+                renderer,
+                seat,
+                &state.start_time,
+                false,
+            ) {
+                custom_elements.push(cursor)
+            }
         }
 
         let space = state.spaces.active_space_mut(&self.output);

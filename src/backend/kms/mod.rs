@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
+    backend::cursor,
     state::{BackendData, Common, State},
     utils::GlobalDrop,
 };
@@ -45,7 +46,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-mod crtc_mapping;
+mod drm_helpers;
 mod session_fd;
 use session_fd::*;
 
@@ -260,7 +261,7 @@ impl Device {
         let drm = &mut *self.drm.as_source_mut();
 
         // enumerate our outputs
-        let config = crtc_mapping::display_configuration(drm, self.supports_atomic)?;
+        let config = drm_helpers::display_configuration(drm, self.supports_atomic)?;
 
         let surfaces = self.surfaces.iter()
             .map(|(c, s)| (*c, s.surface.current_connectors().into_iter().next().unwrap()))
@@ -293,9 +294,9 @@ impl Device {
         let drm = &mut *self.drm.as_source_mut();
         let crtc_info = drm.get_crtc(crtc)?;
         let conn_info = drm.get_connector(conn)?;
-        let vrr = crtc_mapping::set_vrr(drm, crtc, conn, true)?;
-        let interface = crtc_mapping::interface_name(drm, conn)?;
-        let edid_info = crtc_mapping::edid_info(drm, conn)?;
+        let vrr = drm_helpers::set_vrr(drm, crtc, conn, true)?;
+        let interface = drm_helpers::interface_name(drm, conn)?;
+        let edid_info = drm_helpers::edid_info(drm, conn)?;
         let mode = crtc_info.mode().unwrap_or(conn_info.modes()[0]);
         let mut surface = drm.create_surface(crtc, mode, &[conn])?;
         surface.link(signaler);
@@ -351,7 +352,7 @@ impl Device {
             _global: output_global.into(),
             surface: target,
             vrr,
-            refresh_rate: crtc_mapping::calculate_refresh_rate(mode),
+            refresh_rate: drm_helpers::calculate_refresh_rate(mode),
             last_submit: None,
             pending: true,
             render_timer: timer_handle,
@@ -369,7 +370,30 @@ impl Surface {
         renderer: &mut Gles2Renderer,
         state: &mut Common,
     ) -> Result<()> {
-        let custom_elements = Vec::new();
+        #[allow(unused_mut)]
+        let mut custom_elements = Vec::new();
+
+        #[cfg(feature = "debug")]
+        {
+            let space = state.spaces.active_space(&self.output);
+            let size = space.output_geometry(&self.output).unwrap();
+            let scale = space.output_scale(&self.output).unwrap();
+            let frame = debug_ui(state, &self.fps, size, scale, true);
+            custom_elements.push(
+                Box::new(frame) as smithay::desktop::space::DynamicRenderElements<Gles2Renderer>
+            );
+        }
+
+        for seat in &state.seats {
+            if let Some(cursor) = cursor::draw_cursor(
+                renderer,
+                seat,
+                &state.start_time,
+                true,
+            ) {
+                custom_elements.push(cursor)
+            }
+        }
 
         let space = state.spaces.active_space_mut(&self.output);
         let (buffer, age) = self
@@ -390,6 +414,10 @@ impl Surface {
                 self.surface
                     .queue_buffer()
                     .with_context(|| "Failed to submit buffer for display")?;
+                #[cfg(feature = "debug")]
+                {
+                    self.fps.tick();
+                }
             }
             Err(err) => {
                 self.surface.reset_buffers();

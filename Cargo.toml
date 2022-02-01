@@ -15,6 +15,8 @@ slog-scope = "4.4"
 slog-stdlog = "4.1"
 egui = { version = "0.16", optional = true }
 edid-rs = { version = "0.1" }
+thiserror = "1.0.26"
+xcursor = "0.3.3"
 
 [dependencies.smithay]
 version = "0.3"

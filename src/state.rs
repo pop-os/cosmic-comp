@@ -7,10 +7,13 @@ use crate::{
 use smithay::{
     reexports::{
         calloop::LoopHandle,
-        wayland_server::Display,
+        wayland_server::{
+            Display,
+            protocol::wl_surface::WlSurface,
+        },
     },
     wayland::{
-        data_device::{default_action_chooser, init_data_device},
+        data_device::{default_action_chooser, init_data_device, DataDeviceEvent},
         output::{xdg::init_xdg_output_manager, Output},
         seat::Seat,
         shell::xdg::ToplevelSurface,
@@ -110,6 +113,15 @@ impl BackendData {
     }
 }
 
+struct DnDIcon {
+    surface: RefCell<Option<WlSurface>>,
+}
+
+pub fn get_dnd_icon(seat: &Seat) -> Option<WlSurface> {
+    let userdata = seat.user_data();
+    userdata.get::<DnDIcon>().and_then(|x| x.surface.borrow().clone())
+}
+
 impl State {
     pub fn new(mut display: Display, handle: LoopHandle<'static, State>) -> State {
         init_shm_global(&mut display, vec![], None);
@@ -118,7 +130,17 @@ impl State {
         let initial_seat = crate::input::add_seat(&mut display, "seat-0".into());
         init_data_device(
             &mut display,
-            |_dnd_event| { /* TODO */ },
+            |dnd_event| match dnd_event {
+                DataDeviceEvent::DnDStarted { icon, seat, .. } => {
+                    let user_data = seat.user_data();
+                    user_data.insert_if_missing(|| DnDIcon { surface: RefCell::new(None) });
+                    *user_data.get::<DnDIcon>().unwrap().surface.borrow_mut() = icon;
+                },
+                DataDeviceEvent::DnDDropped { seat } => {
+                    seat.user_data().get::<DnDIcon>().unwrap().surface.borrow_mut().take();
+                },
+                _ => {},
+            },
             default_action_chooser,
             None,
         );
