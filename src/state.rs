@@ -3,6 +3,7 @@
 use crate::{
     backend::{kms::KmsState, winit::WinitState, x11::X11State},
     shell::{init_shell, workspaces::Workspaces, ShellStates},
+    logger::LogState,
 };
 use smithay::{
     reexports::{
@@ -47,13 +48,15 @@ pub struct Common {
     pub start_time: Instant,
     pub should_stop: bool,
 
+    pub log: LogState,
     #[cfg(feature = "debug")]
     pub egui: Egui,
 }
 
 #[cfg(feature = "debug")]
 pub struct Egui {
-    pub state: smithay_egui::EguiState,
+    pub debug_state: smithay_egui::EguiState,
+    pub log_state: smithay_egui::EguiState,
     pub modifiers: smithay::wayland::seat::ModifiersState,
     pub active: bool,
     pub alpha: f32,
@@ -122,7 +125,7 @@ pub fn get_dnd_icon(seat: &Seat) -> Option<WlSurface> {
 }
 
 impl State {
-    pub fn new(mut display: Display, handle: LoopHandle<'static, State>) -> State {
+    pub fn new(mut display: Display, handle: LoopHandle<'static, State>, log: LogState) -> State {
         init_shm_global(&mut display, vec![], None);
         init_xdg_output_manager(&mut display, None);
         let shell_handles = init_shell(&mut display);
@@ -151,6 +154,11 @@ impl State {
             None,
         );
 
+        #[cfg(not(feature = "debug"))]
+        let dirty_flag = Arc::new(AtomicBool::new(false));
+        #[cfg(feature = "debug")]
+        let dirty_flag = log.dirty_flag.clone();
+
         State {
             common: Common {
                 display: Rc::new(RefCell::new(display)),
@@ -159,7 +167,7 @@ impl State {
                 spaces: Workspaces::new(),
                 shell: shell_handles,
                 pending_toplevels: Vec::new(),
-                dirty_flag: Arc::new(AtomicBool::new(false)),
+                dirty_flag,
 
                 seats: vec![initial_seat.clone()],
                 last_active_seat: initial_seat,
@@ -167,9 +175,15 @@ impl State {
                 start_time: Instant::now(),
                 should_stop: false,
 
+                log,
                 #[cfg(feature = "debug")]
                 egui: Egui {
-                    state: smithay_egui::EguiState::new(smithay_egui::EguiMode::Continuous),
+                    debug_state: smithay_egui::EguiState::new(smithay_egui::EguiMode::Continuous),
+                    log_state: {
+                        let mut state = smithay_egui::EguiState::new(smithay_egui::EguiMode::Continuous);
+                        state.set_zindex(0);
+                        state
+                    },
                     modifiers: Default::default(),
                     active: false,
                     alpha: 1.0,

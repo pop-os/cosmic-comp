@@ -159,7 +159,8 @@ impl Common {
                 }
                 #[cfg(feature = "debug")]
                 {
-                    self.egui.state.handle_device_added(&device);
+                    self.egui.debug_state.handle_device_added(&device);
+                    self.egui.log_state.handle_device_added(&device);
                 }
             }
             InputEvent::DeviceRemoved { device } => {
@@ -183,7 +184,8 @@ impl Common {
                 }
                 #[cfg(feature = "debug")]
                 {
-                    self.egui.state.handle_device_added(&device);
+                    self.egui.debug_state.handle_device_added(&device);
+                    self.egui.log_state.handle_device_added(&device);
                 }
             }
             InputEvent::Keyboard { event, .. } => {
@@ -225,14 +227,23 @@ impl Common {
                                     }
                                     if self.seats.iter().position(|x| x == seat).unwrap() == 0
                                         && self.egui.active
-                                        && self.egui.state.wants_keyboard()
                                     {
-                                        self.egui.state.handle_keyboard(
-                                            &handle,
-                                            state == KeyState::Pressed,
-                                            modifiers.clone(),
-                                        );
-                                        return FilterResult::Intercept(());
+                                        if self.egui.debug_state.wants_keyboard() {
+                                            self.egui.debug_state.handle_keyboard(
+                                                &handle,
+                                                state == KeyState::Pressed,
+                                                modifiers.clone(),
+                                            );
+                                            return FilterResult::Intercept(());
+                                        }
+                                        if self.egui.log_state.wants_keyboard() {
+                                            self.egui.log_state.handle_keyboard(
+                                                &handle,
+                                                state == KeyState::Pressed,
+                                                modifiers.clone(),
+                                            );
+                                            return FilterResult::Intercept(());
+                                        }
                                     }
                                 }
 
@@ -291,7 +302,10 @@ impl Common {
                         #[cfg(feature = "debug")]
                         if self.seats.iter().position(|x| x == seat).unwrap() == 0 {
                             self.egui
-                                .state
+                                .debug_state
+                                .handle_pointer_motion(position.to_i32_round());
+                            self.egui
+                                .log_state
                                 .handle_pointer_motion(position.to_i32_round());
                         }
                         break;
@@ -321,7 +335,10 @@ impl Common {
                         #[cfg(feature = "debug")]
                         if self.seats.iter().position(|x| x == seat).unwrap() == 0 {
                             self.egui
-                                .state
+                                .debug_state
+                                .handle_pointer_motion(position.to_i32_round());
+                            self.egui
+                                .log_state
                                 .handle_pointer_motion(position.to_i32_round());
                         }
                         break;
@@ -342,16 +359,27 @@ impl Common {
                         #[cfg(feature = "debug")]
                         if self.seats.iter().position(|x| x == seat).unwrap() == 0
                             && self.egui.active
-                            && self.egui.state.wants_pointer()
                         {
-                            if let Some(button) = event.button() {
-                                self.egui.state.handle_pointer_button(
-                                    button,
-                                    event.state() == ButtonState::Pressed,
-                                    self.egui.modifiers.clone(),
-                                );
+                            if self.egui.debug_state.wants_pointer() {
+                                if let Some(button) = event.button() {
+                                    self.egui.debug_state.handle_pointer_button(
+                                        button,
+                                        event.state() == ButtonState::Pressed,
+                                        self.egui.modifiers.clone(),
+                                    );
+                                }
+                                break;
                             }
-                            break;
+                            if self.egui.log_state.wants_pointer() {
+                                if let Some(button) = event.button() {
+                                    self.egui.log_state.handle_pointer_button(
+                                        button,
+                                        event.state() == ButtonState::Pressed,
+                                        self.egui.modifiers.clone(),
+                                    );
+                                }
+                                break;
+                            }
                         }
 
                         let serial = SERIAL_COUNTER.next_serial();
@@ -436,19 +464,33 @@ impl Common {
                     #[cfg(feature = "debug")]
                     if self.seats.iter().position(|x| x == seat).unwrap() == 0
                         && self.egui.active
-                        && self.egui.state.wants_pointer()
                     {
-                        self.egui.state.handle_pointer_axis(
-                            event
-                                .amount_discrete(Axis::Horizontal)
-                                .or_else(|| event.amount(Axis::Horizontal).map(|x| x * 3.0))
-                                .unwrap_or(0.0),
-                            event
-                                .amount_discrete(Axis::Vertical)
-                                .or_else(|| event.amount(Axis::Vertical).map(|x| x * 3.0))
-                                .unwrap_or(0.0),
-                        );
-                        break;
+                        if self.egui.debug_state.wants_pointer() {
+                            self.egui.debug_state.handle_pointer_axis(
+                                event
+                                    .amount_discrete(Axis::Horizontal)
+                                    .or_else(|| event.amount(Axis::Horizontal).map(|x| x * 3.0))
+                                    .unwrap_or(0.0),
+                                event
+                                    .amount_discrete(Axis::Vertical)
+                                    .or_else(|| event.amount(Axis::Vertical).map(|x| x * 3.0))
+                                    .unwrap_or(0.0),
+                            );
+                            break;
+                        }
+                        if self.egui.log_state.wants_pointer() {
+                            self.egui.log_state.handle_pointer_axis(
+                                event
+                                    .amount_discrete(Axis::Horizontal)
+                                    .or_else(|| event.amount(Axis::Horizontal).map(|x| x * 3.0))
+                                    .unwrap_or(0.0),
+                                event
+                                    .amount_discrete(Axis::Vertical)
+                                    .or_else(|| event.amount(Axis::Vertical).map(|x| x * 3.0))
+                                    .unwrap_or(0.0),
+                            );
+                            break;
+                        }
                     }
 
                     let userdata = seat.user_data();

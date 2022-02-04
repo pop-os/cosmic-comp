@@ -6,13 +6,13 @@ use smithay::reexports::{
 };
 
 use anyhow::{Context, Result};
-use slog::Drain;
 use std::sync::atomic::Ordering;
 
 pub mod backend;
 pub mod input;
 pub mod shell;
 pub mod state;
+mod logger;
 pub mod utils;
 
 #[cfg(feature = "debug")]
@@ -20,7 +20,7 @@ pub mod debug;
 
 fn main() -> Result<()> {
     // setup logger
-    let _guard = init_logger();
+    let log = logger::init_logger()?;
     slog_scope::info!("Cosmic starting up!");
 
     // init event loop
@@ -28,7 +28,7 @@ fn main() -> Result<()> {
     // init wayland
     let display = init_wayland_display(&mut event_loop)?;
     // init state
-    let mut state = state::State::new(display, event_loop.handle());
+    let mut state = state::State::new(display, event_loop.handle(), log);
     // init backend
     backend::init_backend_auto(&mut event_loop, &mut state)?;
 
@@ -58,33 +58,6 @@ fn main() -> Result<()> {
     })?;
 
     Ok(())
-}
-
-fn init_logger() -> Result<slog_scope::GlobalLoggerGuard> {
-    let decorator = slog_term::TermDecorator::new().stderr().build();
-    // usually we would not want to use a Mutex here, but this is usefull for a prototype,
-    // to make sure we do not miss any in-flight messages, when we crash.
-    let logger = slog::Logger::root(
-        std::sync::Mutex::new(
-            slog_term::CompactFormat::new(decorator)
-                .build()
-                .ignore_res(),
-        )
-        .fuse(),
-        slog::o!(),
-    );
-    let guard = slog_scope::set_global_logger(logger);
-    slog_stdlog::init().unwrap();
-
-    slog_scope::info!("Version: {}", std::env!("CARGO_PKG_VERSION"));
-    if cfg!(feature = "debug") {
-        slog_scope::debug!(
-            "Debug build ({})",
-            std::option_env!("GIT_HASH").unwrap_or("Unknown")
-        );
-    }
-
-    Ok(guard)
 }
 
 fn init_wayland_display(event_loop: &mut EventLoop<state::State>) -> Result<Display> {

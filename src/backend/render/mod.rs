@@ -3,7 +3,7 @@
 use crate::state::Common;
 #[cfg(feature = "debug")]
 use crate::{
-    debug::{debug_ui, fps_ui},
+    debug::{debug_ui, fps_ui, log_ui},
     state::Fps,
 };
 
@@ -44,7 +44,9 @@ pub fn render_output(
 
         let mut area = state.spaces.global_space();
         area.loc = state.spaces.space_relative_output_geometry((0, 0), output);
-        //let output_geo = state.spaces.output_geometry(output);
+        if let Some(log_ui) = log_ui(state, area, scale, output_geo.size.w as f32 * 0.6) {
+            custom_elements.push(Box::new(log_ui));
+        }
         if let Some(debug_overlay) = debug_ui(state, area, scale) {
             custom_elements.push(Box::new(debug_overlay));
         }

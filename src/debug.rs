@@ -96,7 +96,7 @@ pub fn debug_ui(
         return None;
     }
 
-    Some(state.egui.state.run(
+    Some(state.egui.debug_state.run(
         |ctx| {
             egui::Window::new("Workspaces")
                 .default_pos([0.0, 300.0])
@@ -206,3 +206,94 @@ pub fn debug_ui(
         state.egui.modifiers.clone(),
     ))
 }
+
+pub fn log_ui(
+    state: &mut Common,
+    area: Rectangle<i32, Logical>,
+    scale: f64,
+    default_width: f32,
+) -> Option<EguiFrame> {
+    if !state.egui.active {
+        return None;
+    }
+
+    Some(state.egui.log_state.run(
+        |ctx| {
+            egui::SidePanel::right("Log")
+            .default_width(default_width)    
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for (i, record) in state.log.debug_buffer.lock().unwrap().iter().enumerate() {
+                        let mut message = egui::text::LayoutJob::single_section(
+                            record.level.as_short_str().to_string(),
+                            egui::TextFormat::simple(egui::TextStyle::Monospace, match record.level {
+                                slog::Level::Critical => egui::Color32::RED,
+                                slog::Level::Error => egui::Color32::LIGHT_RED,
+                                slog::Level::Warning => egui::Color32::LIGHT_YELLOW,
+                                slog::Level::Info => egui::Color32::LIGHT_BLUE,
+                                slog::Level::Debug => egui::Color32::LIGHT_GREEN,
+                                slog::Level::Trace => egui::Color32::GRAY,
+                            })
+                        );
+                        message.append(&record.message, 1.0, egui::TextFormat::simple(
+                            egui::TextStyle::Body, egui::Color32::WHITE,
+                        ));
+                        egui::containers::CollapsingHeader::new(message)
+                        .id_source(i)
+                        .show(ui, |ui| {
+                            for (k, v) in &record.kv {
+                                ui.horizontal(|ui| {
+                                    ui.add(egui::Label::new(egui::RichText::new(k).code())
+                                        .sense(egui::Sense::click()))
+                                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+                                    render_value(ui, v);
+                                });
+                            }
+                        });
+                    }
+                })
+            });
+        },
+        area,
+        scale,
+        state.egui.alpha,
+        &state.start_time,
+        state.egui.modifiers.clone(),
+    ))
+}
+
+fn render_value(ui: &mut egui::Ui, value: &serde_json::Value) {
+    use serde_json::Value::*;
+
+    match value {
+        Null => { ui.label(egui::RichText::new("null").code()); },
+        Bool(val) => { ui.label(egui::RichText::new(format!("{}", val)).code()); },
+        Number(val) => { ui.label(egui::RichText::new(format!("{}", val)).code()); },
+        String(val) => { ui.label(val); },
+        Array(list) => {
+            ui.vertical(|ui| {
+                ui.label("[");
+                for val in list {
+                    ui.horizontal(|ui| {
+                        ui.add_space(4.0);
+                        render_value(ui, val);
+                    });
+                }
+                ui.label("]");
+            });
+        },
+        Object(map) => {
+            ui.vertical(|ui| {
+                for (k, val) in map {
+                    ui.horizontal(|ui| {
+                        ui.add_space(4.0);
+                        ui.add(egui::Label::new(egui::RichText::new(k).code()));
+                        render_value(ui, val);
+                    });
+                }
+            });
+        },
+    };
+}
+
+     
