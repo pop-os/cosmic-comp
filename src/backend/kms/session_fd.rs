@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 use smithay::reexports::nix::unistd::close;
 use std::{
     fmt,
