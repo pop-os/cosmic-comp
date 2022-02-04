@@ -60,14 +60,14 @@ pub struct Egui {
     pub modifiers: smithay::wayland::seat::ModifiersState,
     pub active: bool,
     pub alpha: f32,
-    pub spaces: bool,
-    pub outputs: bool,
 }
 
 #[cfg(feature = "debug")]
 pub struct Fps {
-    pub frames: VecDeque<Duration>,
-    pub last: Instant,
+    pub state: smithay_egui::EguiState,
+    pub modifiers: smithay::wayland::seat::ModifiersState,
+    pub frames: VecDeque<(Instant, Duration)>,
+    pub start: Instant,
 }
 
 pub enum BackendData {
@@ -163,12 +163,10 @@ impl State {
 
                 #[cfg(feature = "debug")]
                 egui: Egui {
-                    state: smithay_egui::EguiState::new(),
+                    state: smithay_egui::EguiState::new(smithay_egui::EguiMode::Continuous),
                     modifiers: Default::default(),
                     active: false,
                     alpha: 1.0,
-                    outputs: false,
-                    spaces: false,
                 },
             },
             backend: BackendData::Unset,
@@ -180,38 +178,59 @@ impl State {
 impl Fps {
     const WINDOW_SIZE: usize = 100;
 
-    pub fn tick(&mut self) {
-        let next = Instant::now();
-        let frame_time = next.duration_since(self.last);
+    pub fn start(&mut self) {
+        self.start = Instant::now();
+    }
 
-        self.frames.push_back(frame_time);
+    pub fn end(&mut self) {
+        let frame_time = Instant::now().duration_since(self.start);
+
+        self.frames.push_back((self.start, frame_time));
         if self.frames.len() > Fps::WINDOW_SIZE {
             self.frames.pop_front();
         }
-        self.last = next;
     }
 
     pub fn max_frametime(&self) -> &Duration {
-        self.frames.iter().max().unwrap_or(&Duration::ZERO)
+        self.frames
+            .iter()
+            .map(|(_, f)| f)
+            .max()
+            .unwrap_or(&Duration::ZERO)
     }
 
     pub fn min_frametime(&self) -> &Duration {
-        self.frames.iter().min().unwrap_or(&Duration::ZERO)
+        self.frames
+            .iter()
+            .map(|(_, f)| f)
+            .min()
+            .unwrap_or(&Duration::ZERO)
     }
 
     pub fn avg_frametime(&self) -> Duration {
         if self.frames.is_empty() {
             return Duration::ZERO;
         }
-        self.frames.iter().cloned().sum::<Duration>() / (self.frames.len() as u32)
+        self.frames
+            .iter()
+            .map(|(_, f)| f)
+            .cloned()
+            .sum::<Duration>()
+            / (self.frames.len() as u32)
     }
 
     pub fn avg_fps(&self) -> f64 {
         if self.frames.is_empty() {
             return 0.0;
         }
-        let sum_secs = self.frames.iter().map(|d| d.as_secs_f64()).sum::<f64>();
-        1.0 / (sum_secs / self.frames.len() as f64)
+        let secs = match (self.frames.front(), self.frames.back()) {
+            (Some((start, _)), Some((end, dur))) => {
+                end.duration_since(*start) + *dur
+            }
+            _ => Duration::ZERO,
+        }
+        .as_secs_f64();
+        1.0 / (secs / self.frames.len() as f64)
     }
 }
 
@@ -219,8 +238,16 @@ impl Fps {
 impl Default for Fps {
     fn default() -> Fps {
         Fps {
+            state: {
+                let state = smithay_egui::EguiState::new(smithay_egui::EguiMode::Continuous);
+                let mut visuals: egui::style::Visuals = Default::default();
+                visuals.window_shadow.extrusion = 0.0;
+                state.context().set_visuals(visuals);
+                state
+            },
+            modifiers: Default::default(),
             frames: VecDeque::with_capacity(Fps::WINDOW_SIZE + 1),
-            last: Instant::now(),
+            start: Instant::now(),
         }
     }
 }
