@@ -7,39 +7,32 @@ use crate::{
     state::{BackendData, Common, State},
     utils::GlobalDrop,
 };
+
 use anyhow::{Context, Result};
 use smithay::{
     backend::{
         allocator::{gbm::GbmDevice, Format},
-        drm::{DrmDevice, DrmEvent, GbmBufferedSurface, DrmEventTime},
-        egl::{EGLDevice, EGLDisplay, EGLContext},
+        drm::{DrmDevice, DrmEvent, DrmEventTime, GbmBufferedSurface},
+        egl::{EGLContext, EGLDevice, EGLDisplay},
         libinput::{LibinputInputBackend, LibinputSessionInterface},
-        session::{Session, Signal, auto::AutoSession, AsErrno},
-        udev::{UdevBackend, UdevEvent, primary_gpu},
-        renderer::{Bind, gles2::Gles2Renderer},
+        renderer::{gles2::Gles2Renderer, Bind},
+        session::{auto::AutoSession, AsErrno, Session, Signal},
+        udev::{driver, primary_gpu, UdevBackend, UdevEvent},
     },
     reexports::{
-        drm::{
-            control::{
-                Device as ControlDevice,
-                connector,
-                crtc,
-            },
+        calloop::{
+            timer::{Timer, TimerHandle},
+            Dispatcher, EventLoop, LoopHandle, RegistrationToken,
         },
-        calloop::{EventLoop, Dispatcher, RegistrationToken, LoopHandle, timer::{Timer, TimerHandle}},
+        drm::control::{connector, crtc, Device as ControlDevice},
         input::Libinput,
-        nix::{
-            fcntl::OFlag,
-            sys::stat::dev_t,
-        },
-        wayland_server::{
-            Display,
-            protocol::wl_output,
-        }
+        nix::{fcntl::OFlag, sys::stat::dev_t},
+        wayland_server::{protocol::wl_output, Display},
     },
-    wayland::output::{Output, Mode as OutputMode, PhysicalProperties},
-    utils::signaling::{Signaler, Linkable},
+    utils::signaling::{Linkable, Signaler},
+    wayland::output::{Mode as OutputMode, Output, PhysicalProperties},
 };
+
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
@@ -91,8 +84,11 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
     let signaler = notifier.signaler();
 
     let udev_backend = UdevBackend::new(session.seat(), None)?;
-    let mut libinput_context = Libinput::new_with_udev::<LibinputSessionInterface<AutoSession>>(session.clone().into());
-    libinput_context.udev_assign_seat(&session.seat()).map_err(|_| anyhow::anyhow!("Failed to assign seat to libinput"))?;
+    let mut libinput_context =
+        Libinput::new_with_udev::<LibinputSessionInterface<AutoSession>>(session.clone().into());
+    libinput_context
+        .udev_assign_seat(&session.seat())
+        .map_err(|_| anyhow::anyhow!("Failed to assign seat to libinput"))?;
     let mut libinput_backend = LibinputInputBackend::new(libinput_context, None);
     libinput_backend.link(signaler.clone());
 
@@ -113,33 +109,41 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
         .context("Failed to initialize session event source")?;
 
     state.backend = BackendData::Kms(KmsState {
-        tokens: vec![
-            libinput_event_source,
-            session_event_source,
-        ],
+        tokens: vec![libinput_event_source, session_event_source],
         session,
         signaler,
         devices: HashMap::new(),
     });
 
     for (dev, path) in udev_backend.device_list() {
-        state.device_added(dev, path.into())
+        state
+            .device_added(dev, path.into())
             .with_context(|| format!("Failed to add drm device: {}", path.display()))?;
     }
 
     let udev_event_source = event_loop
         .handle()
-        .insert_source(udev_backend, move |event, _, state| match match event {
-            UdevEvent::Added { device_id, path } => state.device_added(device_id, path)
+        .insert_source(udev_backend, move |event, _, state| {
+            match match event {
+                UdevEvent::Added { device_id, path } => state
+                    .device_added(device_id, path)
                     .with_context(|| format!("Failed to add drm device: {}", device_id)),
-            UdevEvent::Changed { device_id } => state.device_changed(device_id)
+                UdevEvent::Changed { device_id } => state
+                    .device_changed(device_id)
                     .with_context(|| format!("Failed to update drm device: {}", device_id)),
-            UdevEvent::Removed { device_id } => state.device_removed(device_id)
+                UdevEvent::Removed { device_id } => state
+                    .device_removed(device_id)
                     .with_context(|| format!("Failed to remove drm device: {}", device_id)),
-        } {
-            Ok(()) => { slog_scope::debug!("Successfully handled udev event") },
-            Err(err) => { slog_scope::error!("Error while handling udev event: {}", err) },
-        }).unwrap();
+            } {
+                Ok(()) => {
+                    slog_scope::debug!("Successfully handled udev event")
+                }
+                Err(err) => {
+                    slog_scope::error!("Error while handling udev event: {}", err)
+                }
+            }
+        })
+        .unwrap();
     state.backend.kms().tokens.push(udev_event_source);
 
     Ok(())
@@ -147,31 +151,64 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
 
 impl State {
     fn device_added(&mut self, dev: dev_t, path: PathBuf) -> Result<()> {
-        let fd = SessionFd::new(self.backend.kms().session.open(&path, OFlag::O_RDWR | OFlag::O_CLOEXEC | OFlag::O_NOCTTY | OFlag::O_NONBLOCK)
-            .with_context(|| format!("Failed to optain file descriptor for drm device: {}", path.display()))?);
+        let fd = SessionFd::new(
+            self.backend
+                .kms()
+                .session
+                .open(
+                    &path,
+                    OFlag::O_RDWR | OFlag::O_CLOEXEC | OFlag::O_NOCTTY | OFlag::O_NONBLOCK,
+                )
+                .with_context(|| {
+                    format!(
+                        "Failed to optain file descriptor for drm device: {}",
+                        path.display()
+                    )
+                })?,
+        );
         let mut drm = DrmDevice::new(fd.clone(), false, None)
             .with_context(|| format!("Failed to initialize drm device for: {}", path.display()))?;
         let supports_atomic = drm.is_atomic();
 
-        let egl_device = EGLDevice::enumerate().context("Failed to enumerate EGLDevices")?
+        let egl_device = EGLDevice::enumerate()
+            .context("Failed to enumerate EGLDevices")?
             // TODO: this check compares the primary node path.
             // On split display controller setups however this *may* return the render node
             // *or* if `EGL_EXT_device_drm_render_node` is supported nothing and we need to
             // query `EGL_DRM_RENDER_NODE_FILE_EXT` instead for comparision.
             .find(|dev| dev.drm_device_path().map(|p| p == path).unwrap_or(false))
-            .with_context(|| format!("Unable to find matching egl device for {}", path.display()))?;
-        let egl_display = EGLDisplay::new(&egl_device, None)
-            .with_context(|| format!("Failed to open EGLDisplay for device {:?}:{}", egl_device, path.display()))?;
-        let egl_context = EGLContext::new(&egl_display, None)
-            .with_context(|| format!("Failed to create EGLContext for device {:?}:{}", egl_device, path.display()))?;
+            .with_context(|| {
+                format!("Unable to find matching egl device for {}", path.display())
+            })?;
+        let egl_display = EGLDisplay::new(&egl_device, None).with_context(|| {
+            format!(
+                "Failed to open EGLDisplay for device {:?}:{}",
+                egl_device,
+                path.display()
+            )
+        })?;
+        let egl_context = EGLContext::new(&egl_display, None).with_context(|| {
+            format!(
+                "Failed to create EGLContext for device {:?}:{}",
+                egl_device,
+                path.display()
+            )
+        })?;
         let formats = egl_context.dmabuf_render_formats().clone();
-        let renderer = unsafe { Gles2Renderer::new(egl_context, None) }
-            .with_context(|| format!("Failed to create OpenGLES renderer for device {:?}:{}", egl_device, path.display()))?;
+        let renderer = unsafe { Gles2Renderer::new(egl_context, None) }.with_context(|| {
+            format!(
+                "Failed to create OpenGLES renderer for device {:?}:{}",
+                egl_device,
+                path.display()
+            )
+        })?;
 
-        let gbm = GbmDevice::new(fd).with_context(|| format!("Failed to initialize GBM device for {}", path.display()))?;
+
+        let gbm = GbmDevice::new(fd)
+            .with_context(|| format!("Failed to initialize GBM device for {}", path.display()))?;
         drm.link(self.backend.kms().signaler.clone());
-        let dispatcher = Dispatcher::new(drm, move |event, metadata, state: &mut State| {
-            match event {
+        let dispatcher =
+            Dispatcher::new(drm, move |event, metadata, state: &mut State| match event {
                 DrmEvent::VBlank(crtc) => {
                     if let Some(device) = state.backend.kms().devices.get_mut(&dev) {
                         if let Some(surface) = device.surfaces.get_mut(&crtc) {
@@ -179,20 +216,28 @@ impl State {
                                 Ok(_) => {
                                     surface.last_submit = metadata.take().map(|data| data.time);
                                     surface.pending = false;
-                                    state.common.spaces.active_space_mut(&surface.output)
-                                        .send_frames(true, state.common.start_time.elapsed().as_millis() as u32);
-                                },
+                                    state
+                                        .common
+                                        .spaces
+                                        .active_space_mut(&surface.output)
+                                        .send_frames(
+                                            true,
+                                            state.common.start_time.elapsed().as_millis() as u32,
+                                        );
+                                }
                                 Err(err) => slog_scope::warn!("Failed to submit frame: {}", err),
                             };
                         }
                     }
-                },
+                }
                 DrmEvent::Error(err) => {
                     slog_scope::warn!("Failed to read events of device {:?}: {}", dev, err);
                 }
-            }
-        });
-        let token = self.common.event_loop_handle.register_dispatcher(dispatcher.clone())
+            });
+        let token = self
+            .common
+            .event_loop_handle
+            .register_dispatcher(dispatcher.clone())
             .with_context(|| format!("Failed to add drm device to event loop: {}", dev))?;
 
         let mut device = Device {
@@ -207,7 +252,13 @@ impl State {
 
         let outputs = device.enumerate_surfaces()?.added; // There are no removed outputs on newly added devices
         for (crtc, conn) in outputs {
-            match device.setup_surface(crtc, conn, self.backend.kms().signaler.clone(), &mut self.common.display.borrow_mut(), &mut self.common.event_loop_handle) {
+            match device.setup_surface(
+                crtc,
+                conn,
+                self.backend.kms().signaler.clone(),
+                &mut self.common.display.borrow_mut(),
+                &mut self.common.event_loop_handle,
+            ) {
                 Ok(output) => self.common.spaces.map_output(&output),
                 Err(err) => slog_scope::warn!("Failed to initialize output: {}", err),
             };
@@ -221,7 +272,7 @@ impl State {
         let signaler = self.backend.kms().signaler.clone();
         if let Some(device) = self.backend.kms().devices.get_mut(&dev) {
             let changes = device.enumerate_surfaces()?;
-            for (crtc, _) in changes.removed {
+            for crtc in changes.removed {
                 if let Some(surface) = device.surfaces.get_mut(&crtc) {
                     if let Some(token) = surface.render_timer_token.take() {
                         self.common.event_loop_handle.remove(token);
@@ -230,7 +281,13 @@ impl State {
                 }
             }
             for (crtc, conn) in changes.added {
-                match device.setup_surface(crtc, conn, signaler.clone(), &mut self.common.display.borrow_mut(), &mut self.common.event_loop_handle) {
+                match device.setup_surface(
+                    crtc,
+                    conn,
+                    signaler.clone(),
+                    &mut self.common.display.borrow_mut(),
+                    &mut self.common.event_loop_handle,
+                ) {
                     Ok(output) => self.common.spaces.map_output(&output),
                     Err(err) => slog_scope::warn!("Failed to initialize output: {}", err),
                 };
@@ -257,7 +314,7 @@ impl State {
 
 pub struct OutputChanges {
     pub added: Vec<(crtc::Handle, connector::Handle)>,
-    pub removed: Vec<(crtc::Handle, connector::Handle)>,
+    pub removed: Vec<crtc::Handle>,
 }
 
 impl Device {
@@ -267,24 +324,29 @@ impl Device {
         // enumerate our outputs
         let config = drm_helpers::display_configuration(drm, self.supports_atomic)?;
 
-        let surfaces = self.surfaces.iter()
-            .map(|(c, s)| (*c, s.surface.current_connectors().into_iter().next().unwrap()))
-            .collect::<HashMap<crtc::Handle, connector::Handle>>();
-        
-        let added = config.iter()
-            .filter(|(conn, crtc)| surfaces.get(&crtc).map(|c| c != *conn).unwrap_or(true))
+        let surfaces = self
+            .surfaces
+            .iter()
+            .map(|(c, s)| (*c, s.surface.current_connectors().into_iter().next()))
+            .collect::<HashMap<crtc::Handle, Option<connector::Handle>>>();
+
+        let added = config
+            .iter()
+            .filter(|(conn, crtc)| surfaces.get(&crtc).map(|c| c.as_ref() != Some(*conn)).unwrap_or(true))
             .map(|(conn, crtc)| (crtc, conn))
             .map(|(crtc, conn)| (*crtc, *conn))
             .collect::<Vec<_>>();
-        let removed = surfaces.iter()
-            .filter(|(crtc, conn)| config.get(&conn).map(|c| c != *crtc).unwrap_or(true))
-            .map(|(crtc, conn)| (*crtc, *conn))
+        let removed = surfaces
+            .iter()
+            .filter(|(crtc, conn)| if let Some(conn) = conn {
+                config.get(conn).map(|c| c != *crtc).unwrap_or(true)
+            } else {
+                true
+            })
+            .map(|(crtc, _)| *crtc)
             .collect::<Vec<_>>();
 
-        Ok(OutputChanges {
-            added,
-            removed,
-        })
+        Ok(OutputChanges { added, removed })
     }
 
     fn setup_surface(
@@ -298,16 +360,18 @@ impl Device {
         let drm = &mut *self.drm.as_source_mut();
         let crtc_info = drm.get_crtc(crtc)?;
         let conn_info = drm.get_connector(conn)?;
-        let vrr = drm_helpers::set_vrr(drm, crtc, conn, true)?;
+        let vrr = drm_helpers::set_vrr(drm, crtc, conn, true).unwrap_or(false);
         let interface = drm_helpers::interface_name(drm, conn)?;
         let edid_info = drm_helpers::edid_info(drm, conn)?;
         let mode = crtc_info.mode().unwrap_or(conn_info.modes()[0]);
         let mut surface = drm.create_surface(crtc, mode, &[conn])?;
         surface.link(signaler);
 
-        let target = GbmBufferedSurface::new(surface, self.allocator.clone(), self.formats.clone(), None)
-            .with_context(|| format!("Failed to initialize Gbm surface for {}", interface))?;
+        let target =
+            GbmBufferedSurface::new(surface, self.allocator.clone(), self.formats.clone(), None)
+                .with_context(|| format!("Failed to initialize Gbm surface for {}", interface))?;
 
+        //let is_nvidia = driver(drm.device_id()).ok().flatten().map(|x| x == "nvidia").unwrap_or(false);
         let output_mode = OutputMode {
             size: (mode.size().0 as i32, mode.size().1 as i32).into(),
             refresh: (mode.vrefresh() * 1000) as i32,
@@ -323,12 +387,13 @@ impl Device {
                 make: edid_info.manufacturer,
                 model: edid_info.model,
             },
-            None
+            None,
         );
         output.set_preferred(output_mode.clone());
         output.change_current_state(
             Some(output_mode),
-            None, // TODO: Readout property for monitor rotation
+            // TODO: Readout property for monitor rotation
+            Some(wl_output::Transform::Normal),
             None,
             None,
         );
@@ -410,7 +475,9 @@ impl Surface {
 
 impl KmsState {
     pub fn schedule_render(&mut self, output: &Output) {
-        if let Some((device, surface)) = self.devices.values_mut()
+        if let Some((device, surface)) = self
+            .devices
+            .values_mut()
             .flat_map(|d| {
                 let dev_id = d.drm.as_source_ref().device_id();
                 d.surfaces.values_mut().map(move |s| (dev_id, s))
@@ -419,16 +486,19 @@ impl KmsState {
         {
             if !surface.pending {
                 surface.pending = true;
-                let duration = match surface.last_submit {
-                    Some(DrmEventTime::Monotonic(instant)) => Instant::now().duration_since(instant),
-                    Some(DrmEventTime::Realtime(time)) => SystemTime::now().duration_since(time).unwrap_or(Duration::new(100, 0)),
-                    None => Duration::new(100, 0), // Just do an insane amount
-                };
+                let duration = surface.last_submit.as_ref().and_then(|x| match x {
+                    DrmEventTime::Monotonic(instant) => {
+                        instant.checked_duration_since(Instant::now())
+                    }
+                    DrmEventTime::Realtime(time) => {
+                        time.duration_since(SystemTime::now()).ok()
+                    }
+                }).unwrap_or(Duration::ZERO); // + Duration::from_secs_f64((1.0 / surface.refresh_rate as f64) - 20.0);
                 let data = (device, surface.surface.crtc());
-                if surface.vrr || 1.0 / (surface.refresh_rate as f64) < duration.as_secs_f64() / 1000.0 {
+                if surface.vrr {
                     surface.render_timer.add_timeout(Duration::ZERO, data);
                 } else {
-                    surface.render_timer.add_timeout(duration.saturating_sub(Duration::from_millis(5)), data);
+                    surface.render_timer.add_timeout(duration, data);
                 }
             }
         }
