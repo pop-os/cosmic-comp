@@ -7,10 +7,7 @@ use crate::{
 use smithay::{
     reexports::{
         calloop::LoopHandle,
-        wayland_server::{
-            Display,
-            protocol::wl_surface::WlSurface,
-        },
+        wayland_server::{protocol::wl_surface::WlSurface, Display},
     },
     wayland::{
         data_device::{default_action_chooser, init_data_device, DataDeviceEvent},
@@ -103,7 +100,7 @@ impl BackendData {
 
     pub fn schedule_render(&mut self, output: &Output) {
         match self {
-            BackendData::Winit(_) => {}, // We cannot do this on the winit backend.
+            BackendData::Winit(_) => {} // We cannot do this on the winit backend.
             // Winit has a very strict render-loop and skipping frames breaks atleast the wayland winit-backend.
             // Swapping with damage (which should be empty on these frames) is likely good enough anyway.
             BackendData::X11(ref mut state) => state.schedule_render(output),
@@ -119,7 +116,9 @@ struct DnDIcon {
 
 pub fn get_dnd_icon(seat: &Seat) -> Option<WlSurface> {
     let userdata = seat.user_data();
-    userdata.get::<DnDIcon>().and_then(|x| x.surface.borrow().clone())
+    userdata
+        .get::<DnDIcon>()
+        .and_then(|x| x.surface.borrow().clone())
 }
 
 impl State {
@@ -133,13 +132,20 @@ impl State {
             |dnd_event| match dnd_event {
                 DataDeviceEvent::DnDStarted { icon, seat, .. } => {
                     let user_data = seat.user_data();
-                    user_data.insert_if_missing(|| DnDIcon { surface: RefCell::new(None) });
+                    user_data.insert_if_missing(|| DnDIcon {
+                        surface: RefCell::new(None),
+                    });
                     *user_data.get::<DnDIcon>().unwrap().surface.borrow_mut() = icon;
-                },
+                }
                 DataDeviceEvent::DnDDropped { seat } => {
-                    seat.user_data().get::<DnDIcon>().unwrap().surface.borrow_mut().take();
-                },
-                _ => {},
+                    seat.user_data()
+                        .get::<DnDIcon>()
+                        .unwrap()
+                        .surface
+                        .borrow_mut()
+                        .take();
+                }
+                _ => {}
             },
             default_action_chooser,
             None,

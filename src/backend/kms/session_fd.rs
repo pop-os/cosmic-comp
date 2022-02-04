@@ -1,9 +1,9 @@
+use smithay::reexports::nix::unistd::close;
 use std::{
     fmt,
+    os::unix::io::{AsRawFd, RawFd},
     rc::Rc,
-    os::unix::io::{RawFd, AsRawFd},
 };
-use smithay::reexports::nix::unistd::close;
 
 #[derive(Clone)]
 pub struct SessionFd(Rc<DropFd>);
@@ -31,7 +31,7 @@ impl AsRawFd for SessionFd {
 impl Drop for DropFd {
     fn drop(&mut self) {
         if let Err(err) = close(self.0) {
-            slog_scope::warn!("Failed to close file descriptor {}", self.0);
+            slog_scope::warn!("Failed to close file descriptor {}: {}", self.0, err);
         }
     }
 }

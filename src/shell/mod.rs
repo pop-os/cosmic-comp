@@ -335,7 +335,8 @@ fn check_grab_preconditions(
 
 fn commit(surface: &WlSurface, state: &mut State) {
     // TODO figure out which output the surface is on.
-    for output in state.common.spaces.outputs() {//.cloned().collect::<Vec<_>>().into_iter() {
+    for output in state.common.spaces.outputs() {
+        //.cloned().collect::<Vec<_>>().into_iter() {
         state.backend.schedule_render(output);
         // let space = state.common.spaces.active_space(output);
         // get output for surface

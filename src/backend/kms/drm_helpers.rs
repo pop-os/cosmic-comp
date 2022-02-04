@@ -1,26 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use anyhow::Result;
-use smithay::{
-    reexports::drm::control::{
-        AtomicCommitFlags,
-        Device as ControlDevice,
-        ResourceHandle,
-        atomic::AtomicModeReq,
-        crtc,
-        connector::{
-            self,
-            State as ConnectorState,
-        },
-        dumbbuffer::DumbBuffer,
-        property,
-        Mode,
-        ModeFlags,
-    },
+use smithay::reexports::drm::control::{
+    atomic::AtomicModeReq,
+    connector::{self, State as ConnectorState},
+    crtc,
+    dumbbuffer::DumbBuffer,
+    property, AtomicCommitFlags, Device as ControlDevice, Mode, ModeFlags, ResourceHandle,
 };
 use std::collections::HashMap;
 
-pub fn display_configuration(device: &mut impl ControlDevice, supports_atomic: bool) -> Result<HashMap<connector::Handle, crtc::Handle>> {
+pub fn display_configuration(
+    device: &mut impl ControlDevice,
+    supports_atomic: bool,
+) -> Result<HashMap<connector::Handle, crtc::Handle>> {
     let res_handles = device.resource_handles()?;
     let connectors = res_handles.connectors();
 
@@ -53,7 +46,8 @@ pub fn display_configuration(device: &mut impl ControlDevice, supports_atomic: b
         .flat_map(|conn| device.get_connector(*conn).ok())
         .filter(|conn| conn.state() == ConnectorState::Connected)
         .filter(|conn| !map.contains_key(&conn.handle()))
-        .collect::<Vec<_>>().iter()
+        .collect::<Vec<_>>()
+        .iter()
     {
         'outer: for encoder_info in conn
             .encoders()
@@ -123,7 +117,7 @@ pub fn display_configuration(device: &mut impl ControlDevice, supports_atomic: b
 
 pub fn interface_name(device: &impl ControlDevice, connector: connector::Handle) -> Result<String> {
     let conn_info = device.get_connector(connector)?;
-    
+
     let other_short_name;
     let interface_short_name = match conn_info.interface() {
         connector::Interface::DVII => "DVI-I",
@@ -139,8 +133,12 @@ pub fn interface_name(device: &impl ControlDevice, connector: connector::Handle)
             &other_short_name
         }
     };
-    
-    Ok(format!("{}-{}", interface_short_name, conn_info.interface_id()))   
+
+    Ok(format!(
+        "{}-{}",
+        interface_short_name,
+        conn_info.interface_id()
+    ))
 }
 
 pub struct EdidInfo {
@@ -159,9 +157,7 @@ pub fn edid_info(device: &impl ControlDevice, connector: connector::Handle) -> R
     let (ids, vals) = props.as_props_and_values();
     for (&id, &val) in ids.iter().zip(vals.iter()) {
         if id == edid_prop {
-            if let property::Value::Blob(edid_blob) =
-                edid_info.value_type().convert_value(val)
-            {
+            if let property::Value::Blob(edid_blob) = edid_info.value_type().convert_value(val) {
                 let blob = device.get_property_blob(edid_blob)?;
                 let mut reader = std::io::Cursor::new(blob);
                 if let Some(edid) = edid_parse(&mut reader).ok() {
@@ -170,7 +166,9 @@ pub fn edid_info(device: &impl ControlDevice, connector: connector::Handle) -> R
                         let code = [id.0, id.1, id.2];
                         get_manufacturer(&code).into()
                     };
-                    model = if let Some(MonitorDescriptor::MonitorName(name)) = edid.descriptors.0
+                    model = if let Some(MonitorDescriptor::MonitorName(name)) = edid
+                        .descriptors
+                        .0
                         .iter()
                         .find(|x| matches!(x, MonitorDescriptor::MonitorName(_)))
                     {
@@ -190,7 +188,11 @@ pub fn edid_info(device: &impl ControlDevice, connector: connector::Handle) -> R
     })
 }
 
-pub fn get_prop(device: &impl ControlDevice, handle: impl ResourceHandle, name: &str) -> Result<property::Handle> {
+pub fn get_prop(
+    device: &impl ControlDevice,
+    handle: impl ResourceHandle,
+    name: &str,
+) -> Result<property::Handle> {
     let props = device.get_properties(handle)?;
     let (prop_handles, _) = props.as_props_and_values();
     for prop in prop_handles {
@@ -202,7 +204,11 @@ pub fn get_prop(device: &impl ControlDevice, handle: impl ResourceHandle, name: 
     anyhow::bail!("No prop found")
 }
 
-pub fn get_property_val(device: &impl ControlDevice, handle: impl ResourceHandle, name: &str) -> Result<(property::ValueType, property::RawValue)> {
+pub fn get_property_val(
+    device: &impl ControlDevice,
+    handle: impl ResourceHandle,
+    name: &str,
+) -> Result<(property::ValueType, property::RawValue)> {
     let props = device.get_properties(handle)?;
     let (prop_handles, values) = props.as_props_and_values();
     for (&prop, &val) in prop_handles.iter().zip(values.iter()) {
@@ -216,113 +222,123 @@ pub fn get_property_val(device: &impl ControlDevice, handle: impl ResourceHandle
 }
 
 fn get_manufacturer(vendor: &[char; 3]) -> &'static str {
-	match vendor {
-	    ['A', 'A', 'A'] => "Avolites Ltd",
-	    ['A', 'C', 'I'] => "Ancor Communications Inc",
-	    ['A', 'C', 'R'] => "Acer Technologies",
-	    ['A', 'D', 'A'] => "Addi-Data GmbH",
-	    ['A', 'P', 'P'] => "Apple Computer Inc",
-	    ['A', 'S', 'K'] => "Ask A/S",
-	    ['A', 'V', 'T'] => "Avtek (Electronics) Pty Ltd",
-	    ['B', 'N', 'O'] => "Bang & Olufsen",
-	    ['B', 'N', 'Q'] => "BenQ Corporation",
-	    ['C', 'M', 'N'] => "Chimei Innolux Corporation",
-	    ['C', 'M', 'O'] => "Chi Mei Optoelectronics corp.",
-	    ['C', 'R', 'O'] => "Extraordinary Technologies PTY Limited",
-	    ['D', 'E', 'L'] => "Dell Inc.",
-	    ['D', 'G', 'C'] => "Data General Corporation",
-	    ['D', 'O', 'N'] => "DENON, Ltd.",
-	    ['E', 'N', 'C'] => "Eizo Nanao Corporation",
-	    ['E', 'P', 'H'] => "Epiphan Systems Inc.",
-	    ['E', 'X', 'P'] => "Data Export Corporation",
-	    ['F', 'N', 'I'] => "Funai Electric Co., Ltd.",
-	    ['F', 'U', 'S'] => "Fujitsu Siemens Computers GmbH",
-	    ['G', 'S', 'M'] => "Goldstar Company Ltd",
-	    ['H', 'I', 'Q'] => "Kaohsiung Opto Electronics Americas, Inc.",
-	    ['H', 'S', 'D'] => "HannStar Display Corp",
-	    ['H', 'T', 'C'] => "Hitachi Ltd",
-	    ['H', 'W', 'P'] => "Hewlett Packard",
-	    ['I', 'N', 'T'] => "Interphase Corporation",
-	    ['I', 'N', 'X'] => "Communications Supply Corporation (A division of WESCO)",
-	    ['I', 'T', 'E'] => "Integrated Tech Express Inc",
-	    ['I', 'V', 'M'] => "Iiyama North America",
-	    ['L', 'E', 'N'] => "Lenovo Group Limited",
-	    ['M', 'A', 'X'] => "Rogen Tech Distribution Inc",
-	    ['M', 'E', 'G'] => "Abeam Tech Ltd",
-	    ['M', 'E', 'I'] => "Panasonic Industry Company",
-	    ['M', 'T', 'C'] => "Mars-Tech Corporation",
-	    ['M', 'T', 'X'] => "Matrox",
-	    ['N', 'E', 'C'] => "NEC Corporation",
-	    ['N', 'E', 'X'] => "Nexgen Mediatech Inc.",
-	    ['O', 'N', 'K'] => "ONKYO Corporation",
-	    ['O', 'R', 'N'] => "ORION ELECTRIC CO., LTD.",
-	    ['O', 'T', 'M'] => "Optoma Corporation",
-	    ['O', 'V', 'R'] => "Oculus VR, Inc.",
-	    ['P', 'H', 'L'] => "Philips Consumer Electronics Company",
-	    ['P', 'I', 'O'] => "Pioneer Electronic Corporation",
-	    ['P', 'N', 'R'] => "Planar Systems, Inc.",
-	    ['Q', 'D', 'S'] => "Quanta Display Inc.",
-	    ['R', 'A', 'T'] => "Rent-A-Tech",
-	    ['R', 'E', 'N'] => "Renesas Technology Corp.",
-	    ['S', 'A', 'M'] => "Samsung Electric Company",
-	    ['S', 'A', 'N'] => "Sanyo Electric Co., Ltd.",
-	    ['S', 'E', 'C'] => "Seiko Epson Corporation",
-	    ['S', 'H', 'P'] => "Sharp Corporation",
-	    ['S', 'I', 'I'] => "Silicon Image, Inc.",
-	    ['S', 'N', 'Y'] => "Sony",
-	    ['S', 'T', 'D'] => "STD Computer Inc",
-	    ['S', 'V', 'S'] => "SVSI",
-	    ['S', 'Y', 'N'] => "Synaptics Inc",
-	    ['T', 'C', 'L'] => "Technical Concepts Ltd",
-	    ['T', 'O', 'P'] => "Orion Communications Co., Ltd.",
-	    ['T', 'S', 'B'] => "Toshiba America Info Systems Inc",
-	    ['T', 'S', 'T'] => "Transtream Inc",
-	    ['U', 'N', 'K'] => "Unknown",
-	    ['V', 'E', 'S'] => "Vestel Elektronik Sanayi ve Ticaret A. S.",
-	    ['V', 'I', 'T'] => "Visitech AS",
-	    ['V', 'I', 'Z'] => "VIZIO, Inc",
-	    ['V', 'S', 'C'] => "ViewSonic Corporation",
-	    ['Y', 'M', 'H'] => "Yamaha Corporation",
-	    _ => "Unknown",
+    match vendor {
+        ['A', 'A', 'A'] => "Avolites Ltd",
+        ['A', 'C', 'I'] => "Ancor Communications Inc",
+        ['A', 'C', 'R'] => "Acer Technologies",
+        ['A', 'D', 'A'] => "Addi-Data GmbH",
+        ['A', 'P', 'P'] => "Apple Computer Inc",
+        ['A', 'S', 'K'] => "Ask A/S",
+        ['A', 'V', 'T'] => "Avtek (Electronics) Pty Ltd",
+        ['B', 'N', 'O'] => "Bang & Olufsen",
+        ['B', 'N', 'Q'] => "BenQ Corporation",
+        ['C', 'M', 'N'] => "Chimei Innolux Corporation",
+        ['C', 'M', 'O'] => "Chi Mei Optoelectronics corp.",
+        ['C', 'R', 'O'] => "Extraordinary Technologies PTY Limited",
+        ['D', 'E', 'L'] => "Dell Inc.",
+        ['D', 'G', 'C'] => "Data General Corporation",
+        ['D', 'O', 'N'] => "DENON, Ltd.",
+        ['E', 'N', 'C'] => "Eizo Nanao Corporation",
+        ['E', 'P', 'H'] => "Epiphan Systems Inc.",
+        ['E', 'X', 'P'] => "Data Export Corporation",
+        ['F', 'N', 'I'] => "Funai Electric Co., Ltd.",
+        ['F', 'U', 'S'] => "Fujitsu Siemens Computers GmbH",
+        ['G', 'S', 'M'] => "Goldstar Company Ltd",
+        ['H', 'I', 'Q'] => "Kaohsiung Opto Electronics Americas, Inc.",
+        ['H', 'S', 'D'] => "HannStar Display Corp",
+        ['H', 'T', 'C'] => "Hitachi Ltd",
+        ['H', 'W', 'P'] => "Hewlett Packard",
+        ['I', 'N', 'T'] => "Interphase Corporation",
+        ['I', 'N', 'X'] => "Communications Supply Corporation (A division of WESCO)",
+        ['I', 'T', 'E'] => "Integrated Tech Express Inc",
+        ['I', 'V', 'M'] => "Iiyama North America",
+        ['L', 'E', 'N'] => "Lenovo Group Limited",
+        ['M', 'A', 'X'] => "Rogen Tech Distribution Inc",
+        ['M', 'E', 'G'] => "Abeam Tech Ltd",
+        ['M', 'E', 'I'] => "Panasonic Industry Company",
+        ['M', 'T', 'C'] => "Mars-Tech Corporation",
+        ['M', 'T', 'X'] => "Matrox",
+        ['N', 'E', 'C'] => "NEC Corporation",
+        ['N', 'E', 'X'] => "Nexgen Mediatech Inc.",
+        ['O', 'N', 'K'] => "ONKYO Corporation",
+        ['O', 'R', 'N'] => "ORION ELECTRIC CO., LTD.",
+        ['O', 'T', 'M'] => "Optoma Corporation",
+        ['O', 'V', 'R'] => "Oculus VR, Inc.",
+        ['P', 'H', 'L'] => "Philips Consumer Electronics Company",
+        ['P', 'I', 'O'] => "Pioneer Electronic Corporation",
+        ['P', 'N', 'R'] => "Planar Systems, Inc.",
+        ['Q', 'D', 'S'] => "Quanta Display Inc.",
+        ['R', 'A', 'T'] => "Rent-A-Tech",
+        ['R', 'E', 'N'] => "Renesas Technology Corp.",
+        ['S', 'A', 'M'] => "Samsung Electric Company",
+        ['S', 'A', 'N'] => "Sanyo Electric Co., Ltd.",
+        ['S', 'E', 'C'] => "Seiko Epson Corporation",
+        ['S', 'H', 'P'] => "Sharp Corporation",
+        ['S', 'I', 'I'] => "Silicon Image, Inc.",
+        ['S', 'N', 'Y'] => "Sony",
+        ['S', 'T', 'D'] => "STD Computer Inc",
+        ['S', 'V', 'S'] => "SVSI",
+        ['S', 'Y', 'N'] => "Synaptics Inc",
+        ['T', 'C', 'L'] => "Technical Concepts Ltd",
+        ['T', 'O', 'P'] => "Orion Communications Co., Ltd.",
+        ['T', 'S', 'B'] => "Toshiba America Info Systems Inc",
+        ['T', 'S', 'T'] => "Transtream Inc",
+        ['U', 'N', 'K'] => "Unknown",
+        ['V', 'E', 'S'] => "Vestel Elektronik Sanayi ve Ticaret A. S.",
+        ['V', 'I', 'T'] => "Visitech AS",
+        ['V', 'I', 'Z'] => "VIZIO, Inc",
+        ['V', 'S', 'C'] => "ViewSonic Corporation",
+        ['Y', 'M', 'H'] => "Yamaha Corporation",
+        _ => "Unknown",
     }
 }
 
 pub fn calculate_refresh_rate(mode: Mode) -> u32 {
     let htotal = mode.hsync().2 as u32;
     let vtotal = mode.vsync().2 as u32;
-	let mut refresh = (mode.clock() as u64 * 1000000_u64 / htotal as u64 +
-        vtotal as u64 / 2) / vtotal as u64;
+    let mut refresh =
+        (mode.clock() as u64 * 1000000_u64 / htotal as u64 + vtotal as u64 / 2) / vtotal as u64;
 
-	if mode.flags().contains(ModeFlags::INTERLACE) {
-		refresh *= 2;
-	}
-	if mode.flags().contains(ModeFlags::DBLSCAN) {
-		refresh /= 2;
-	}
-	if mode.vscan() > 1 {
-		refresh /= mode.vscan() as u64;
-	}
+    if mode.flags().contains(ModeFlags::INTERLACE) {
+        refresh *= 2;
+    }
+    if mode.flags().contains(ModeFlags::DBLSCAN) {
+        refresh /= 2;
+    }
+    if mode.vscan() > 1 {
+        refresh /= mode.vscan() as u64;
+    }
 
-	refresh as u32
+    refresh as u32
 }
 
 pub fn supports_vrr(dev: &impl ControlDevice, conn: connector::Handle) -> Result<bool> {
-    get_property_val(dev, conn, "vrr_capable")
-        .map(|(val_type, val)| match val_type.convert_value(val) {
+    get_property_val(dev, conn, "vrr_capable").map(|(val_type, val)| {
+        match val_type.convert_value(val) {
             property::Value::UnsignedRange(res) => res == 1,
             _ => false,
-        })
+        }
+    })
 }
 
-pub fn set_vrr(dev: &impl ControlDevice, crtc: crtc::Handle, conn: connector::Handle, vrr: bool) -> Result<bool> {
+pub fn set_vrr(
+    dev: &impl ControlDevice,
+    crtc: crtc::Handle,
+    conn: connector::Handle,
+    vrr: bool,
+) -> Result<bool> {
     if supports_vrr(dev, conn)? {
-        dev.set_property(conn, get_prop(dev, crtc, "VRR_ENABLED")?, property::Value::UnsignedRange(if vrr { 1 } else { 0 }).into())
-            .map_err(Into::<anyhow::Error>::into)
-            .and_then(|_| get_property_val(dev, crtc, "VRR_ENABLED"))
-            .map(|(val_type, val)| match val_type.convert_value(val) {
-                property::Value::UnsignedRange(vrr) => vrr == 1,
-                _ => false,
-            })
+        dev.set_property(
+            conn,
+            get_prop(dev, crtc, "VRR_ENABLED")?,
+            property::Value::UnsignedRange(if vrr { 1 } else { 0 }).into(),
+        )
+        .map_err(Into::<anyhow::Error>::into)
+        .and_then(|_| get_property_val(dev, crtc, "VRR_ENABLED"))
+        .map(|(val_type, val)| match val_type.convert_value(val) {
+            property::Value::UnsignedRange(vrr) => vrr == 1,
+            _ => false,
+        })
     } else {
         Ok(false)
     }
