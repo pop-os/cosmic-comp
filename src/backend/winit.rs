@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::cursor,
+    backend::render,
     input::{set_active_output, Devices},
-    state::{BackendData, State, Common},
+    state::{BackendData, Common, State},
 };
 use anyhow::{Context, Result};
 use smithay::{
@@ -27,9 +27,7 @@ use smithay::{
 use std::{cell::RefCell, rc::Rc};
 
 #[cfg(feature = "debug")]
-use crate::{debug::debug_ui, state::Fps};
-#[cfg(feature = "debug")]
-use smithay::backend::renderer::gles2::Gles2Renderer;
+use crate::state::Fps;
 
 pub struct WinitState {
     // The winit backend currently has no notion of multiple windows
@@ -42,52 +40,27 @@ pub struct WinitState {
 
 impl WinitState {
     pub fn render_output(&mut self, state: &mut Common) -> Result<()> {
-        #[allow(unused_mut)]
-        let mut custom_elements = Vec::new();
-
-        #[cfg(feature = "debug")]
-        {
-            let space = state.spaces.active_space(&self.output);
-            let size = space.output_geometry(&self.output).unwrap();
-            let scale = space.output_scale(&self.output).unwrap();
-            let frame = debug_ui(state, &self.fps, size, scale, true);
-            custom_elements.push(
-                Box::new(frame) as smithay::desktop::space::DynamicRenderElements<Gles2Renderer>
-            );
-        }
-
-        let space = state.spaces.active_space_mut(&self.output);
-        let mut backend = self.backend.borrow_mut();
-        
-        for seat in &state.seats {
-            if let Some(cursor) = cursor::draw_cursor(
-                backend.renderer(),
-                seat,
-                &state.start_time,
-                false,
-            ) {
-                custom_elements.push(cursor)
-            }
-        }
-
+        let backend = &mut *self.backend.borrow_mut();
         backend.bind().with_context(|| "Failed to bind buffer")?;
         let age = backend.buffer_age().unwrap_or(0);
-        match space.render_output(
+
+        match render::render_output(
             backend.renderer(),
+            age as u8,
+            state,
             &self.output,
-            age as usize,
-            [0.153, 0.161, 0.165, 1.0],
-            &*custom_elements,
+            true,
+            #[cfg(feature = "debug")]
+            &mut self.fps,
         ) {
             Ok(damage) => {
-                space.send_frames(false, state.start_time.elapsed().as_millis() as u32);
+                state
+                    .spaces
+                    .active_space_mut(&self.output)
+                    .send_frames(true, state.start_time.elapsed().as_millis() as u32);
                 backend
                     .submit(damage.as_ref().map(|x| &**x), 1.0)
                     .with_context(|| "Failed to submit buffer for display")?;
-                #[cfg(feature = "debug")]
-                {
-                    self.fps.tick();
-                }
             }
             Err(err) => {
                 anyhow::bail!("Rendering failed: {}", err);

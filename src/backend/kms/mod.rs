@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+#[cfg(feature = "debug")]
+use crate::state::Fps;
 use crate::{
-    backend::cursor,
+    backend::render,
     state::{BackendData, Common, State},
     utils::GlobalDrop,
 };
@@ -77,6 +79,8 @@ pub struct Surface {
     pending: bool,
     render_timer: TimerHandle<(dev_t, crtc::Handle)>,
     render_timer_token: Option<RegistrationToken>,
+    #[cfg(feature = "debug")]
+    fps: Fps,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -357,6 +361,8 @@ impl Device {
             pending: true,
             render_timer: timer_handle,
             render_timer_token: Some(timer_token),
+            #[cfg(feature = "debug")]
+            fps: Fps::default(),
         };
         self.surfaces.insert(crtc, data);
 
@@ -370,54 +376,28 @@ impl Surface {
         renderer: &mut Gles2Renderer,
         state: &mut Common,
     ) -> Result<()> {
-        #[allow(unused_mut)]
-        let mut custom_elements = Vec::new();
-
-        #[cfg(feature = "debug")]
-        {
-            let space = state.spaces.active_space(&self.output);
-            let size = space.output_geometry(&self.output).unwrap();
-            let scale = space.output_scale(&self.output).unwrap();
-            let frame = debug_ui(state, &self.fps, size, scale, true);
-            custom_elements.push(
-                Box::new(frame) as smithay::desktop::space::DynamicRenderElements<Gles2Renderer>
-            );
-        }
-
-        for seat in &state.seats {
-            if let Some(cursor) = cursor::draw_cursor(
-                renderer,
-                seat,
-                &state.start_time,
-                true,
-            ) {
-                custom_elements.push(cursor)
-            }
-        }
-
-        let space = state.spaces.active_space_mut(&self.output);
         let (buffer, age) = self
             .surface
             .next_buffer()
             .with_context(|| "Failed to allocate buffer")?;
+
         renderer
             .bind(buffer)
             .with_context(|| "Failed to bind buffer")?;
-        match space.render_output(
+
+        match render::render_output(
             renderer,
+            age,
+            state,
             &self.output,
-            age as usize,
-            [0.153, 0.161, 0.165, 1.0],
-            &*custom_elements,
+            false,
+            #[cfg(feature = "debug")]
+            &mut self.fps
         ) {
             Ok(_) => {
                 self.surface
                     .queue_buffer()
                     .with_context(|| "Failed to submit buffer for display")?;
-                #[cfg(feature = "debug")]
-                {
-                    self.fps.tick();
-                }
             }
             Err(err) => {
                 self.surface.reset_buffers();

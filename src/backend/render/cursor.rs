@@ -1,31 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{
-    cell::RefCell,
-    io::Read,
-    rc::Rc,
-    sync::Mutex,
-};
+use crate::state::get_dnd_icon;
 use smithay::{
     backend::{
-        renderer::{Frame, ImportAll, Renderer, Texture, gles2},
+        renderer::{gles2, Frame, ImportAll, Renderer, Texture},
         SwapBuffersError,
     },
-    desktop::space::{RenderElement, SpaceOutputTuple, SurfaceTree, DynamicRenderElements},
+    desktop::space::{DynamicRenderElements, RenderElement, SpaceOutputTuple, SurfaceTree},
     reexports::wayland_server::protocol::wl_surface,
-    utils::{Logical, Buffer, Point, Rectangle, Size, Transform},
+    utils::{Buffer, Logical, Point, Rectangle, Size, Transform},
     wayland::{
         compositor::{get_role, with_states},
-        seat::{Seat, CursorImageAttributes, CursorImageStatus},
+        seat::{CursorImageAttributes, CursorImageStatus, Seat},
     },
 };
+use std::{cell::RefCell, io::Read, rc::Rc, sync::Mutex};
 use xcursor::{
     parser::{parse_xcursor, Image},
     CursorTheme,
 };
-use crate::state::get_dnd_icon;
 
-static FALLBACK_CURSOR_DATA: &[u8] = include_bytes!("../../resources/cursor.rgba");
+static FALLBACK_CURSOR_DATA: &[u8] = include_bytes!("../../../resources/cursor.rgba");
 
 #[derive(Debug, Clone)]
 pub struct Cursor {
@@ -45,7 +40,9 @@ impl Cursor {
 
         let theme = CursorTheme::load(&name);
         let icons = load_icon(&theme)
-            .map_err(|err| slog_scope::warn!("Unable to load xcursor: {}, using fallback cursor", err))
+            .map_err(|err| {
+                slog_scope::warn!("Unable to load xcursor: {}, using fallback cursor", err)
+            })
             .unwrap_or_else(|_| {
                 vec![Image {
                     size: 32,
@@ -69,7 +66,9 @@ impl Cursor {
 }
 
 impl Default for Cursor {
-    fn default() -> Cursor { Cursor::load() }
+    fn default() -> Cursor {
+        Cursor::load()
+    }
 }
 
 fn nearest_images(size: u32, images: &[Image]) -> impl Iterator<Item = &Image> {
@@ -79,9 +78,9 @@ fn nearest_images(size: u32, images: &[Image]) -> impl Iterator<Item = &Image> {
         .min_by_key(|image| (size as i32 - image.size as i32).abs())
         .unwrap();
 
-    images
-        .iter()
-        .filter(move |image| image.width == nearest_image.width && image.height == nearest_image.height)
+    images.iter().filter(move |image| {
+        image.width == nearest_image.width && image.height == nearest_image.height
+    })
 }
 
 fn frame(mut millis: u32, size: u32, images: &[Image]) -> Image {
@@ -142,7 +141,9 @@ where
     position -= match ret {
         Some(h) => h,
         None => {
-            slog_scope::warn!("Trying to display as a cursor a surface that does not have the CursorImage role.");
+            slog_scope::warn!(
+                "Trying to display as a cursor a surface that does not have the CursorImage role."
+            );
             (0, 0).into()
         }
     };
@@ -160,7 +161,9 @@ where
     T: Texture + 'static,
 {
     if get_role(&surface) != Some("dnd_icon") {
-        slog_scope::warn!("Trying to display as a dnd icon a surface that does not have the DndIcon role.");
+        slog_scope::warn!(
+            "Trying to display as a dnd icon a surface that does not have the DndIcon role."
+        );
     }
     SurfaceTree {
         surface,
@@ -176,7 +179,11 @@ pub struct PointerElement<T: Texture> {
 }
 
 impl<T: Texture> PointerElement<T> {
-    pub fn new(texture: T, relative_pointer_pos: Point<i32, Logical>, new_frame: bool) -> PointerElement<T> {
+    pub fn new(
+        texture: T,
+        relative_pointer_pos: Point<i32, Logical>,
+        new_frame: bool,
+    ) -> PointerElement<T> {
         let size = texture.size().to_logical(1, Transform::Normal);
         PointerElement {
             texture,
@@ -202,8 +209,15 @@ where
         Rectangle::from_loc_and_size(self.position, self.size)
     }
 
-    fn accumulated_damage(&self, _: Option<SpaceOutputTuple<'_, '_>>) -> Vec<Rectangle<i32, Logical>> {
-        if self.new_frame { vec![Rectangle::from_loc_and_size((0, 0), self.size)] } else { vec![] }
+    fn accumulated_damage(
+        &self,
+        _: Option<SpaceOutputTuple<'_, '_>>,
+    ) -> Vec<Rectangle<i32, Logical>> {
+        if self.new_frame {
+            vec![Rectangle::from_loc_and_size((0, 0), self.size)]
+        } else {
+            vec![]
+        }
     }
 
     fn draw(
@@ -242,24 +256,15 @@ pub type Textures = Vec<(Image, gles2::Gles2Texture)>;
 pub fn draw_cursor(
     renderer: &mut gles2::Gles2Renderer,
     seat: &Seat,
+    location: Point<i32, Logical>,
     start_time: &std::time::Instant,
     draw_default: bool,
-) -> Option<DynamicRenderElements<gles2::Gles2Renderer>>
-{
-    let pointer = match seat.get_pointer() {
-        Some(ptr) => ptr,
-        None => return None,
-    };
-    let location = pointer.current_location();
-
+) -> Option<DynamicRenderElements<gles2::Gles2Renderer>> {
     // draw the dnd icon if applicable
     {
         if let Some(wl_surface) = get_dnd_icon(seat) {
             if wl_surface.as_ref().is_alive() {
-                return Some(Box::new(draw_dnd_icon(
-                    wl_surface,
-                    location.to_i32_round(),
-                )));
+                return Some(Box::new(draw_dnd_icon(wl_surface, location)));
             }
         }
     }
@@ -284,13 +289,15 @@ pub fn draw_cursor(
         if let CursorImageStatus::Image(wl_surface) = cursor_status {
             Some(Box::new(draw_surface_cursor(
                 wl_surface.clone(),
-                location.to_i32_round(),
+                location,
             )))
         } else if draw_default {
             let seat_userdata = seat.user_data();
             seat_userdata.insert_if_missing(CursorState::default);
             let state = seat_userdata.get::<CursorState>().unwrap();
-            let frame = state.cursor.get_image(1, start_time.elapsed().as_millis() as u32);
+            let frame = state
+                .cursor
+                .get_image(1, start_time.elapsed().as_millis() as u32);
             let new_frame = state.current_image.borrow().as_ref() != Some(&frame);
 
             let egl_userdata = renderer.egl_context().user_data();
@@ -302,8 +309,13 @@ pub fn draw_cursor(
                 .find_map(|(image, texture)| if image == &frame { Some(texture) } else { None })
                 .cloned()
                 .unwrap_or_else(|| {
-                    let texture = import_bitmap(renderer, &frame.pixels_rgba, gles2::ffi::RGBA, (frame.width as i32, frame.height as i32))
-                        .expect("Failed to import cursor bitmap");
+                    let texture = import_bitmap(
+                        renderer,
+                        &frame.pixels_rgba,
+                        gles2::ffi::RGBA,
+                        (frame.width as i32, frame.height as i32),
+                    )
+                    .expect("Failed to import cursor bitmap");
                     pointer_images_ref.push((frame.clone(), texture.clone()));
                     texture
                 });
@@ -312,7 +324,7 @@ pub fn draw_cursor(
 
             Some(Box::new(PointerElement::new(
                 pointer_image.clone(),
-                location.to_i32_round() - hotspot,
+                location - hotspot,
                 new_frame,
             )))
         } else {
@@ -334,8 +346,16 @@ pub fn import_bitmap(
         let mut tex = 0;
         gl.GenTextures(1, &mut tex);
         gl.BindTexture(ffi::TEXTURE_2D, tex);
-        gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_WRAP_S, ffi::CLAMP_TO_EDGE as i32);
-        gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_WRAP_T, ffi::CLAMP_TO_EDGE as i32);
+        gl.TexParameteri(
+            ffi::TEXTURE_2D,
+            ffi::TEXTURE_WRAP_S,
+            ffi::CLAMP_TO_EDGE as i32,
+        );
+        gl.TexParameteri(
+            ffi::TEXTURE_2D,
+            ffi::TEXTURE_WRAP_T,
+            ffi::CLAMP_TO_EDGE as i32,
+        );
         gl.TexImage2D(
             ffi::TEXTURE_2D,
             0,
@@ -349,10 +369,6 @@ pub fn import_bitmap(
         );
         gl.BindTexture(ffi::TEXTURE_2D, 0);
 
-        gles2::Gles2Texture::from_raw(
-            renderer,
-            tex,
-            size,
-        )
+        gles2::Gles2Texture::from_raw(renderer, tex, size)
     })
 }

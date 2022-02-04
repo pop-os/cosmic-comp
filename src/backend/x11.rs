@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::cursor,
+    backend::render,
     input::{set_active_output, Devices},
-    state::{BackendData, State, Common},
+    state::{BackendData, Common, State},
     utils::GlobalDrop,
 };
 use anyhow::{Context, Result};
@@ -37,7 +37,7 @@ use std::{
 };
 
 #[cfg(feature = "debug")]
-use crate::{debug::debug_ui, state::Fps};
+use crate::state::Fps;
 
 pub struct X11State {
     allocator: Arc<Mutex<GbmDevice<DrmNode>>>,
@@ -104,7 +104,8 @@ impl X11State {
                     {
                         slog_scope::error!("Error rendering: {}", err);
                     }
-                    surface.pending = false;
+                    surface.dirty = false;
+                    surface.pending = true;
                 }
             })
             .with_context(|| "Failed to add output to event loop")?;
@@ -114,6 +115,7 @@ impl X11State {
             surface,
             output: output.clone(),
             render: ping.clone(),
+            dirty: false,
             pending: true,
             #[cfg(feature = "debug")]
             fps: Fps::default(),
@@ -127,8 +129,8 @@ impl X11State {
 
     pub fn schedule_render(&mut self, output: &Output) {
         if let Some(surface) = self.surfaces.iter_mut().find(|s| s.output == *output) {
+            surface.dirty = true;
             if !surface.pending {
-                surface.pending = true;
                 surface.render.ping();
             }
         }
@@ -140,6 +142,7 @@ pub struct Surface {
     surface: X11Surface,
     output: Output,
     render: ping::Ping,
+    dirty: bool,
     pending: bool,
     #[cfg(feature = "debug")]
     fps: Fps,
@@ -152,32 +155,6 @@ impl Surface {
         renderer: &mut Gles2Renderer,
         state: &mut Common,
     ) -> Result<()> {
-        #[allow(unused_mut)]
-        let mut custom_elements = Vec::new();
-
-        #[cfg(feature = "debug")]
-        {
-            let space = state.spaces.active_space(&self.output);
-            let size = space.output_geometry(&self.output).unwrap();
-            let scale = space.output_scale(&self.output).unwrap();
-            let frame = debug_ui(state, &self.fps, size, scale, true);
-            custom_elements.push(
-                Box::new(frame) as smithay::desktop::space::DynamicRenderElements<Gles2Renderer>
-            );
-        }
-
-        for seat in &state.seats {
-            if let Some(cursor) = cursor::draw_cursor(
-                renderer,
-                seat,
-                &state.start_time,
-                false,
-            ) {
-                custom_elements.push(cursor)
-            }
-        }
-
-        let space = state.spaces.active_space_mut(&self.output);
         let (buffer, age) = self
             .surface
             .buffer()
@@ -185,22 +162,24 @@ impl Surface {
         renderer
             .bind(buffer)
             .with_context(|| "Failed to bind buffer")?;
-        match space.render_output(
+
+        match render::render_output(
             renderer,
+            age as u8,
+            state,
             &self.output,
-            age as usize,
-            [0.153, 0.161, 0.165, 1.0],
-            &*custom_elements,
+            true,
+            #[cfg(feature = "debug")]
+            &mut self.fps,
         ) {
             Ok(_) => {
-                space.send_frames(false, state.start_time.elapsed().as_millis() as u32);
+                state
+                    .spaces
+                    .active_space_mut(&self.output)
+                    .send_frames(true, state.start_time.elapsed().as_millis() as u32);
                 self.surface
                     .submit()
                     .with_context(|| "Failed to submit buffer for display")?;
-                #[cfg(feature = "debug")]
-                {
-                    self.fps.tick();
-                }
             }
             Err(err) => {
                 self.surface.reset_buffers();
@@ -287,18 +266,33 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
                     .iter_mut()
                     .find(|s| s.window.id() == window_id)
                 {
-                    surface.render.ping();
-
                     let output = &surface.output;
                     output.delete_mode(output.current_mode().unwrap());
                     output.change_current_state(Some(mode), None, None, None);
                     output.set_preferred(mode);
                     layer_map_for_output(output).arrange();
+                    surface.dirty = true;
+                    if !surface.pending {
+                        surface.render.ping();
+                    }
                 }
-            }
-
+            },
+            X11Event::Refresh { window_id } | X11Event::PresentCompleted { window_id } => {
+                if let Some(surface) = state
+                    .backend
+                    .x11()
+                    .surfaces
+                    .iter_mut()
+                    .find(|s| s.window.id() == window_id)
+                {
+                    if surface.dirty {
+                        surface.render.ping();
+                    } else {
+                        surface.pending = false;
+                    }
+                }
+            },
             X11Event::Input(event) => state.process_x11_event(event),
-            _ => {},
         })
         .map_err(|_| anyhow::anyhow!("Failed to insert X11 Backend into event loop"))?;
 

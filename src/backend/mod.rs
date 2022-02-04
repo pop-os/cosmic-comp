@@ -4,7 +4,8 @@ use crate::state::State;
 use anyhow::Result;
 use smithay::reexports::calloop::EventLoop;
 
-pub mod cursor;
+pub mod render;
+
 pub mod kms;
 pub mod winit;
 pub mod x11;

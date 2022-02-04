@@ -3,7 +3,7 @@
 pub use smithay::{
     desktop::Space,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::{Logical, Rectangle, Size},
+    utils::{Logical, Point, Rectangle, Size},
     wayland::output::Output,
 };
 use std::{cell::Cell, mem::MaybeUninit};
@@ -124,6 +124,26 @@ impl Workspaces {
             .output_geometry(&output)
             .unwrap_or(Rectangle::from_loc_and_size((0, 0), (0, 0)))
             .size
+    }
+
+    pub fn global_space(&self) -> Rectangle<i32, Logical> {
+        let size = self.outputs.iter().fold((0, 0), |(w, h), output| {
+            let size = self.output_size(output);
+            (w + size.w, std::cmp::max(h, size.h))
+        });
+
+        Rectangle::from_loc_and_size((0, 0), size)
+    }
+
+    pub fn space_relative_output_geometry(
+        &self,
+        global_loc: impl Into<Point<i32, Logical>>,
+        output: &Output,
+    ) -> Point<i32, Logical> {
+        match self.mode {
+            Mode::Global { .. } => global_loc.into(),
+            Mode::OutputBound => global_loc.into() - self.output_geometry(output).loc,
+        }
     }
 
     pub fn output_geometry(&self, output: &Output) -> Rectangle<i32, Logical> {
