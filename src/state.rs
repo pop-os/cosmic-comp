@@ -245,10 +245,11 @@ impl Default for Fps {
     fn default() -> Fps {
         Fps {
             state: {
-                let state = smithay_egui::EguiState::new(smithay_egui::EguiMode::Continuous);
+                let mut state = smithay_egui::EguiState::new(smithay_egui::EguiMode::Continuous);
                 let mut visuals: egui::style::Visuals = Default::default();
                 visuals.window_shadow.extrusion = 0.0;
                 state.context().set_visuals(visuals);
+                state.set_zindex(110); // always render on top
                 state
             },
             modifiers: Default::default(),
