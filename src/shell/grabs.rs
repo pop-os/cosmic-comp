@@ -30,12 +30,15 @@ pub struct MoveSurfaceGrab {
 impl PointerGrab for MoveSurfaceGrab {
     fn motion(
         &mut self,
-        _handle: &mut PointerInnerHandle<'_>,
+        handle: &mut PointerInnerHandle<'_>,
         location: Point<f64, Logical>,
         _focus: Option<(wl_surface::WlSurface, Point<i32, Logical>)>,
-        _serial: Serial,
-        _time: u32,
+        serial: Serial,
+        time: u32,
     ) {
+        // While the grab is active, no client has pointer focus
+        handle.motion(location, None, serial, time);
+
         let delta = location - self.start_data.location;
         let new_location = self.initial_window_location.to_f64() + delta;
         self.window
@@ -175,6 +178,9 @@ impl PointerGrab for ResizeSurfaceGrab {
         serial: Serial,
         time: u32,
     ) {
+        // While the grab is active, no client has pointer focus
+        handle.motion(location, None, serial, time);
+
         // It is impossible to get `min_size` and `max_size` of dead toplevel, so we return early.
         if !self.window.toplevel().alive() | self.window.toplevel().get_surface().is_none() {
             handle.unset_grab(serial, time);

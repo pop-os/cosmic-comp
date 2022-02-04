@@ -683,9 +683,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.116"
+version = "0.2.117"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "565dbd88872dbe4cc8a46e527f26483c1d1f7afa6b884a3bd6cd893d4f98da74"
+checksum = "e74d72e0f9b65b5b4ca49a346af3976df0f9c61d550727f349ecd559f251a26c"
 
 [[package]]
 name = "libdbus-sys"
@@ -1209,6 +1209,7 @@ checksum = "f2dd574626839106c320a323308629dcb1acfc96e32a8cba364ddc61ac23ee83"
 [[package]]
 name = "smithay"
 version = "0.3.0"
+source = "git+https://github.com/Smithay/smithay.git?rev=5da3a629#5da3a629290fef745abca58272cf27044acc03e6"
 dependencies = [
  "appendlist",
  "bitflags",
@@ -1268,7 +1269,7 @@ dependencies = [
 [[package]]
 name = "smithay-egui"
 version = "0.1.0"
-source = "git+https://github.com/Smithay/smithay-egui.git?rev=cdff1795#cdff17953e837fb090445db0ca8a85f6d932b79b"
+source = "git+https://github.com/Smithay/smithay-egui.git?rev=cdca17da#cdca17da3278751fa1fae9d3805c47012d7ca418"
 dependencies = [
  "cgmath",
  "egui",
@@ -1383,9 +1384,9 @@ checksum = "4ccbe8381883510b6a2d8f1e32905bddd178c11caef8083086d0c0c9ab0ac281"
 
 [[package]]
 name = "udev"
-version = "0.6.2"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3193363f52bb34c6708ac2ffedcb5f7e5874f0329ef68e1315f27d8d768eb568"
+checksum = "1c960764f7e816eed851a96c364745d37f9fe71a2e7dba79fbd40104530b5dd0"
 dependencies = [
  "libc",
  "libudev-sys",

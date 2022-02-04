@@ -150,7 +150,7 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
                             initial_window_location,
                         );
 
-                        pointer.set_grab(grab, serial);
+                        pointer.set_grab(grab, serial, 0);
                     }
                 }
 
@@ -177,7 +177,7 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
                         let grab =
                             grabs::ResizeSurfaceGrab::new(start_data, window, edges, geometry);
 
-                        pointer.set_grab(grab, serial);
+                        pointer.set_grab(grab, serial, 0);
                     }
                 }
                 XdgRequest::AckConfigure {
@@ -254,7 +254,7 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
                                 grab.ungrab(PopupUngrabStrategy::All);
                                 return;
                             }
-                            pointer.set_grab(PopupPointerGrab::new(&grab), serial);
+                            pointer.set_grab(PopupPointerGrab::new(&grab), serial, 0);
                         }
                     }
                 }
