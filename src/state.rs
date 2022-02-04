@@ -18,7 +18,12 @@ use smithay::{
     },
 };
 
-use std::{cell::RefCell, rc::Rc, time::Instant};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    sync::{atomic::AtomicBool, Arc},
+    time::Instant,
+};
 #[cfg(feature = "debug")]
 use std::{collections::VecDeque, time::Duration};
 
@@ -34,6 +39,7 @@ pub struct Common {
     pub spaces: Workspaces,
     pub shell: ShellStates,
     pub pending_toplevels: Vec<ToplevelSurface>,
+    pub dirty_flag: Arc<AtomicBool>,
 
     pub seats: Vec<Seat>,
     pub last_active_seat: Seat,
@@ -125,6 +131,7 @@ impl State {
                 spaces: Workspaces::new(),
                 shell: shell_handles,
                 pending_toplevels: Vec::new(),
+                dirty_flag: Arc::new(AtomicBool::new(false)),
 
                 seats: vec![initial_seat.clone()],
                 last_active_seat: initial_seat,

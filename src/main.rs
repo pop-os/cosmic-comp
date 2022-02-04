@@ -7,6 +7,7 @@ use smithay::reexports::{
 
 use anyhow::{Context, Result};
 use slog::Drain;
+use std::sync::atomic::Ordering;
 
 pub mod backend;
 pub mod input;
@@ -42,12 +43,18 @@ fn main() -> Result<()> {
             return;
         }
 
-        // trigger routines
-        state.common.spaces.refresh();
+        // do we need to trigger another render
+        if state.common.dirty_flag.swap(false, Ordering::SeqCst) {
+            for output in state.common.spaces.outputs() {
+                state.backend.schedule_render(output)
+            }
+        }
 
         // send out events
         let display = state.common.display.clone();
         display.borrow_mut().flush_clients(state);
+        // trigger routines
+        state.common.spaces.refresh();
     })?;
 
     Ok(())

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{input::active_output, state::State};
+use crate::{input::active_output, state::State, utils::SurfaceDropNotifier};
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
     desktop::{
@@ -342,6 +342,11 @@ fn commit(surface: &WlSurface, state: &mut State) {
     }
 
     let state = &mut state.common;
+    let _ = with_states(surface, |states| {
+        states
+            .data_map
+            .insert_if_missing(|| SurfaceDropNotifier::from(&*state));
+    });
 
     if let Some(toplevel) = state.pending_toplevels.iter().find(|toplevel| {
         toplevel
