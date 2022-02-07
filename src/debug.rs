@@ -220,10 +220,23 @@ pub fn log_ui(
     Some(state.egui.log_state.run(
         |ctx| {
             egui::SidePanel::right("Log")
+            .frame(egui::Frame {
+                margin: egui::Vec2::new(10.0, 10.0),
+                corner_radius: 5.0,
+                shadow: egui::epaint::Shadow {
+                    extrusion: 0.0,
+                    color: egui::Color32::TRANSPARENT,
+                },
+                fill: egui::Color32::from_black_alpha(100),
+                stroke: egui::Stroke::none(),
+            })
             .default_width(default_width)    
             .show(ctx, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for (i, record) in state.log.debug_buffer.lock().unwrap().iter().enumerate() {
+                egui::ScrollArea::vertical()
+                .always_show_scroll(true)
+                .stick_to_bottom()
+                .show(ui, |ui| {
+                    for (i, record) in state.log.debug_buffer.lock().unwrap().iter().rev().enumerate() {
                         let mut message = egui::text::LayoutJob::single_section(
                             record.level.as_short_str().to_string(),
                             egui::TextFormat::simple(egui::TextStyle::Monospace, match record.level {
@@ -235,12 +248,12 @@ pub fn log_ui(
                                 slog::Level::Trace => egui::Color32::GRAY,
                             })
                         );
-                        message.append(&record.message, 1.0, egui::TextFormat::simple(
+                        message.append(&record.message, 6.0, egui::TextFormat::simple(
                             egui::TextStyle::Body, egui::Color32::WHITE,
                         ));
-                        egui::containers::CollapsingHeader::new(message)
-                        .id_source(i)
-                        .show(ui, |ui| {
+                        ui.vertical(|ui| {
+                            ui.add(egui::Label::new(message));
+                            ui.add_space(4.0);
                             for (k, v) in &record.kv {
                                 ui.horizontal(|ui| {
                                     ui.add(egui::Label::new(egui::RichText::new(k).code())
