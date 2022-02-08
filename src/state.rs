@@ -21,6 +21,7 @@ use smithay::{
 
 use std::{
     cell::RefCell,
+    ffi::OsString,
     rc::Rc,
     sync::{atomic::AtomicBool, Arc},
     time::Instant,
@@ -35,6 +36,7 @@ pub struct State {
 
 pub struct Common {
     pub display: Rc<RefCell<Display>>,
+    pub socket: OsString,
     pub event_loop_handle: LoopHandle<'static, State>,
 
     pub spaces: Workspaces,
@@ -125,7 +127,7 @@ pub fn get_dnd_icon(seat: &Seat) -> Option<WlSurface> {
 }
 
 impl State {
-    pub fn new(mut display: Display, handle: LoopHandle<'static, State>, log: LogState) -> State {
+    pub fn new(mut display: Display, socket: OsString, handle: LoopHandle<'static, State>, log: LogState) -> State {
         init_shm_global(&mut display, vec![], None);
         init_xdg_output_manager(&mut display, None);
         let shell_handles = init_shell(&mut display);
@@ -162,6 +164,7 @@ impl State {
         State {
             common: Common {
                 display: Rc::new(RefCell::new(display)),
+                socket,
                 event_loop_handle: handle,
 
                 spaces: Workspaces::new(),

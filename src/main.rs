@@ -6,7 +6,10 @@ use smithay::reexports::{
 };
 
 use anyhow::{Context, Result};
-use std::sync::atomic::Ordering;
+use std::{
+    ffi::OsString,
+    sync::atomic::Ordering,
+};
 
 pub mod backend;
 pub mod input;
@@ -26,9 +29,9 @@ fn main() -> Result<()> {
     // init event loop
     let mut event_loop = EventLoop::try_new().with_context(|| "Failed to initialize event loop")?;
     // init wayland
-    let display = init_wayland_display(&mut event_loop)?;
+    let (display, socket) = init_wayland_display(&mut event_loop)?;
     // init state
-    let mut state = state::State::new(display, event_loop.handle(), log);
+    let mut state = state::State::new(display, socket, event_loop.handle(), log);
     // init backend
     backend::init_backend_auto(&mut event_loop, &mut state)?;
 
@@ -60,7 +63,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn init_wayland_display(event_loop: &mut EventLoop<state::State>) -> Result<Display> {
+fn init_wayland_display(event_loop: &mut EventLoop<state::State>) -> Result<(Display, OsString)> {
     let mut display = Display::new();
     let socket_name = display.add_socket_auto()?;
 
@@ -84,5 +87,5 @@ fn init_wayland_display(event_loop: &mut EventLoop<state::State>) -> Result<Disp
         )
         .with_context(|| "Failed to init the wayland event source.")?;
 
-    Ok(display)
+    Ok((display, socket_name))
 }
