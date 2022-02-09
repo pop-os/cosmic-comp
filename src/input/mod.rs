@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::state::Common;
-#[cfg(feature = "debug")]
 use smithay::{backend::input::KeyState, wayland::seat::keysyms};
 use smithay::{
     backend::input::{Device, DeviceCapability, InputBackend, InputEvent},
@@ -208,9 +207,48 @@ impl Common {
                             serial,
                             time,
                             |modifiers, handle| {
-                                // here we can handle global shortcuts and the like
-                                if userdata.get::<SupressedKeys>().unwrap().filter(&handle) {
+                                if state == KeyState::Released && userdata.get::<SupressedKeys>().unwrap().filter(&handle) {
                                     return FilterResult::Intercept(());
+                                }
+
+                                // here we can handle global shortcuts and the like
+                                if modifiers.logo
+                                    && handle.raw_syms().contains(&keysyms::KEY_Return)
+                                    && state == KeyState::Pressed
+                                {
+                                    if let Err(err) = std::process::Command::new("gnome-terminal")
+                                        .env("WAYLAND_DISPLAY", &self.socket)
+                                        .spawn()
+                                    {
+                                        slog_scope::warn!("Failed to spawn terminal: {}", err);
+                                    }
+                                    userdata.get::<SupressedKeys>().unwrap().add(&handle);
+                                    return FilterResult::Intercept(());
+                                }
+
+                                if modifiers.logo
+                                    && handle.raw_syms().iter().any(|sym| *sym >= keysyms::KEY_0 && *sym <= keysyms::KEY_9)
+                                    && state == KeyState::Pressed
+                                {
+                                    let current_output = active_output(seat, &self);
+                                    let key_num = handle.raw_syms()
+                                        .iter()
+                                        .find(|sym| **sym >= keysyms::KEY_0 && **sym <= keysyms::KEY_9)
+                                        .unwrap() - keysyms::KEY_0;
+                                    let workspace = match key_num {
+                                        0 => 9,
+                                        x => x - 1,
+                                    };
+                                    self.spaces.activate(&current_output, workspace as usize);
+                                    userdata.get::<SupressedKeys>().unwrap().add(&handle);
+                                    return FilterResult::Intercept(());
+                                }
+                                
+                                if modifiers.logo && modifiers.shift
+                                    && handle.raw_syms().contains(&keysyms::KEY_Escape)
+                                    && state == KeyState::Pressed
+                                {
+                                    self.should_stop = true;
                                 }
 
                                 #[cfg(feature = "debug")]
@@ -247,7 +285,6 @@ impl Common {
                                     }
                                 }
 
-                                let _ = (modifiers, handle);
                                 FilterResult::Forward
                             },
                         );
