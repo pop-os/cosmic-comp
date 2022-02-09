@@ -1,0 +1,25 @@
+#!/usr/bin/make -f
+
+export sysconfdir = "/usr/share"
+export VENDOR ?= 1
+CLEAN ?= 1
+
+%:
+	dh $@ --with=systemd
+
+override_dh_auto_clean:
+ifeq ($(CLEAN),1)
+	ischroot && make clean || make distclean
+endif
+ifeq ($(VENDOR),1)
+	ischroot || make vendor
+endif
+
+override_dh_auto_build:
+	CARGO_HOME="$$(pwd)/target/cargo" make
+
+override_dh_installinit:
+	dh_installinit -r
+
+override_dh_systemd_start:
+	dh_systemd_start -r

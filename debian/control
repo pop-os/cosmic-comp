@@ -1,0 +1,26 @@
+Source: cosmic-comp
+Section: x11
+Priority: optional
+Maintainer: Victoria Brekenfeld <github@drakulix.de>
+Build-Depends:
+    cargo,
+    debhelper-compat (=10),
+    rustc (>=1.57),
+    libudev-dev,
+    libegl1-mesa-dev,
+    libgl1-mesa-dri,
+    libgbm-dev,
+    libinput-dev,
+    libdbus-1-dev,
+    libwayland-dev,
+    libxcb1-dev,
+    libxkbcommon-dev,
+    libsystemd-dev,
+    libseat-dev
+Standards-Version: 4.1.1
+Homepage: https://github.com/pop-os/cosmic-comp
+
+Package: cosmic-comp
+Architecture: amd64 arm64
+Depends: ${misc:Depends}, ${shlibs:Depends}
+Description: Wayland compositor of pop-os cosmic shell

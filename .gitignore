@@ -1,1 +1,14 @@
-/target
+debian/*
+!debian/cfs-tweak.service
+!debian/changelog
+!debian/control
+!debian/copyright
+!debian/postinst
+!debian/rules
+!debian/source
+.cargo
+target
+vendor
+vendor.tar
+.vscode
+*.log

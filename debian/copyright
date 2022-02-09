@@ -1,0 +1,7 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: cosmic-comp
+Upstream-Contact: Victoria Brekenfeld <github@drakulix.de>
+Source: https://github.com/pop-os/cosmic-comp
+Files: *
+Copyright: System76 <info@system76.com>
+License: GPL-3.0-only
