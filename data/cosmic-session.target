@@ -1,0 +1,7 @@
+[Unit]
+Description=Cosmic session
+Documentation=man:systemd.special(7)
+RefuseManualStart=yes
+StopWhenUnneeded=yes
+BindsTo=graphical-session.target
+Before=graphical-session.target

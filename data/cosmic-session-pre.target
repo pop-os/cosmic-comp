@@ -1,0 +1,8 @@
+[Unit]
+Description=Cosmic session early services
+Documentation=man:systemd.special(7)
+RefuseManualStart=yes
+StopWhenUnneeded=yes
+BindsTo=graphical-session-pre.target
+Before=graphical-session-pre.target
+Before=cosmic-session.target
