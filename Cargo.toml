@@ -25,7 +25,7 @@ version = "0.3"
 git = "https://github.com/Smithay/smithay.git"
 rev = "5da3a629"
 default-features = false
-features = ["backend_drm", "backend_gbm", "backend_egl", "backend_libinput", "backend_session_logind", "backend_udev", "backend_winit", "backend_x11", "desktop", "use_system_lib", "renderer_gl", "wayland_frontend", "slog-stdlog"]
+features = ["backend_drm", "backend_gbm", "backend_egl", "backend_libinput", "backend_session_libseat", "backend_udev", "backend_winit", "backend_x11", "desktop", "use_system_lib", "renderer_gl", "wayland_frontend", "slog-stdlog"]
 
 [dependencies.smithay-egui]
 git = "https://github.com/Smithay/smithay-egui.git"
