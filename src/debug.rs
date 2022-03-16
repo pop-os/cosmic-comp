@@ -188,13 +188,28 @@ pub fn debug_ui(
                 .default_pos([300.0, 300.0])
                 .show(ctx, |ui| {
                     ui.label(format!("Global Space: {:?}", state.spaces.global_space()));
-                    for output in state.spaces.outputs().cloned().collect::<Vec<_>>().into_iter() {
+                    for output in state
+                        .spaces
+                        .outputs()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                    {
                         ui.separator();
                         ui.collapsing(output.name(), |ui| {
                             ui.label(format!("Output: {:#?}", output));
-                            ui.label(format!("Geometry: {:?}", state.spaces.output_geometry(&output)));
-                            ui.label(format!("Local Geometry: {:?}", state.spaces.active_space(&output).output_geometry(&output)));
-                            ui.label(format!("Relative Geometry: {:?}", state.spaces.space_relative_output_geometry((0, 0), &output)));
+                            ui.label(format!(
+                                "Geometry: {:?}",
+                                state.spaces.output_geometry(&output)
+                            ));
+                            ui.label(format!(
+                                "Local Geometry: {:?}",
+                                state.spaces.active_space(&output).output_geometry(&output)
+                            ));
+                            ui.label(format!(
+                                "Relative Geometry: {:?}",
+                                state.spaces.space_relative_output_geometry((0, 0), &output)
+                            ));
                         });
                     }
                 });
@@ -220,52 +235,72 @@ pub fn log_ui(
     Some(state.egui.log_state.run(
         |ctx| {
             egui::SidePanel::right("Log")
-            .frame(egui::Frame {
-                margin: egui::Vec2::new(10.0, 10.0),
-                corner_radius: 5.0,
-                shadow: egui::epaint::Shadow {
-                    extrusion: 0.0,
-                    color: egui::Color32::TRANSPARENT,
-                },
-                fill: egui::Color32::from_black_alpha(100),
-                stroke: egui::Stroke::none(),
-            })
+                .frame(egui::Frame {
+                    margin: egui::Vec2::new(10.0, 10.0),
+                    corner_radius: 5.0,
+                    shadow: egui::epaint::Shadow {
+                        extrusion: 0.0,
+                        color: egui::Color32::TRANSPARENT,
+                    },
+                    fill: egui::Color32::from_black_alpha(100),
+                    stroke: egui::Stroke::none(),
+                })
+                .default_width(default_width)
             .default_width(default_width)    
-            .show(ctx, |ui| {
-                egui::ScrollArea::vertical()
-                .always_show_scroll(true)
-                .stick_to_bottom()
-                .show(ui, |ui| {
-                    for (i, record) in state.log.debug_buffer.lock().unwrap().iter().rev().enumerate() {
-                        let mut message = egui::text::LayoutJob::single_section(
-                            record.level.as_short_str().to_string(),
-                            egui::TextFormat::simple(egui::TextStyle::Monospace, match record.level {
-                                slog::Level::Critical => egui::Color32::RED,
-                                slog::Level::Error => egui::Color32::LIGHT_RED,
-                                slog::Level::Warning => egui::Color32::LIGHT_YELLOW,
-                                slog::Level::Info => egui::Color32::LIGHT_BLUE,
-                                slog::Level::Debug => egui::Color32::LIGHT_GREEN,
-                                slog::Level::Trace => egui::Color32::GRAY,
-                            })
-                        );
-                        message.append(&record.message, 6.0, egui::TextFormat::simple(
-                            egui::TextStyle::Body, egui::Color32::WHITE,
-                        ));
-                        ui.vertical(|ui| {
-                            ui.add(egui::Label::new(message));
-                            ui.add_space(4.0);
-                            for (k, v) in &record.kv {
-                                ui.horizontal(|ui| {
-                                    ui.add(egui::Label::new(egui::RichText::new(k).code())
-                                        .sense(egui::Sense::click()))
-                                        .on_hover_cursor(egui::CursorIcon::PointingHand);
-                                    render_value(ui, v);
+                .default_width(default_width)
+                .show(ctx, |ui| {
+                    egui::ScrollArea::vertical()
+                        .always_show_scroll(true)
+                        .stick_to_bottom()
+                        .show(ui, |ui| {
+                            for (_i, record) in state
+                                .log
+                                .debug_buffer
+                                .lock()
+                                .unwrap()
+                                .iter()
+                                .rev()
+                                .enumerate()
+                            {
+                                let mut message = egui::text::LayoutJob::single_section(
+                                    record.level.as_short_str().to_string(),
+                                    egui::TextFormat::simple(
+                                        egui::TextStyle::Monospace,
+                                        match record.level {
+                                            slog::Level::Critical => egui::Color32::RED,
+                                            slog::Level::Error => egui::Color32::LIGHT_RED,
+                                            slog::Level::Warning => egui::Color32::LIGHT_YELLOW,
+                                            slog::Level::Info => egui::Color32::LIGHT_BLUE,
+                                            slog::Level::Debug => egui::Color32::LIGHT_GREEN,
+                                            slog::Level::Trace => egui::Color32::GRAY,
+                                        },
+                                    ),
+                                );
+                                message.append(
+                                    &record.message,
+                                    6.0,
+                                    egui::TextFormat::simple(
+                                        egui::TextStyle::Body,
+                                        egui::Color32::WHITE,
+                                    ),
+                                );
+                                ui.vertical(|ui| {
+                                    ui.add(egui::Label::new(message));
+                                    ui.add_space(4.0);
+                                    for (k, v) in &record.kv {
+                                        ui.horizontal(|ui| {
+                                            ui.add(
+                                                egui::Label::new(egui::RichText::new(k).code())
+                                                    .sense(egui::Sense::click()),
+                                            )
+                                            .on_hover_cursor(egui::CursorIcon::PointingHand);
+                                            render_value(ui, v);
+                                        });
+                                    }
                                 });
                             }
-                        });
-                    }
-                })
-            });
+                        })
+                });
         },
         area,
         scale,
@@ -279,10 +314,18 @@ fn render_value(ui: &mut egui::Ui, value: &serde_json::Value) {
     use serde_json::Value::*;
 
     match value {
-        Null => { ui.label(egui::RichText::new("null").code()); },
-        Bool(val) => { ui.label(egui::RichText::new(format!("{}", val)).code()); },
-        Number(val) => { ui.label(egui::RichText::new(format!("{}", val)).code()); },
-        String(val) => { ui.label(val); },
+        Null => {
+            ui.label(egui::RichText::new("null").code());
+        }
+        Bool(val) => {
+            ui.label(egui::RichText::new(format!("{}", val)).code());
+        }
+        Number(val) => {
+            ui.label(egui::RichText::new(format!("{}", val)).code());
+        }
+        String(val) => {
+            ui.label(val);
+        }
         Array(list) => {
             ui.vertical(|ui| {
                 ui.label("[");
@@ -294,7 +337,7 @@ fn render_value(ui: &mut egui::Ui, value: &serde_json::Value) {
                 }
                 ui.label("]");
             });
-        },
+        }
         Object(map) => {
             ui.vertical(|ui| {
                 for (k, val) in map {
@@ -305,8 +348,6 @@ fn render_value(ui: &mut egui::Ui, value: &serde_json::Value) {
                     });
                 }
             });
-        },
+        }
     };
 }
-
-     

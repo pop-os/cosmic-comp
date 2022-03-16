@@ -2,8 +2,8 @@
 
 use crate::{
     backend::{kms::KmsState, winit::WinitState, x11::X11State},
-    shell::{init_shell, workspaces::Workspaces, ShellStates},
     logger::LogState,
+    shell::{init_shell, workspaces::Workspaces, ShellStates},
 };
 use smithay::{
     reexports::{
@@ -127,7 +127,12 @@ pub fn get_dnd_icon(seat: &Seat) -> Option<WlSurface> {
 }
 
 impl State {
-    pub fn new(mut display: Display, socket: OsString, handle: LoopHandle<'static, State>, log: LogState) -> State {
+    pub fn new(
+        mut display: Display,
+        socket: OsString,
+        handle: LoopHandle<'static, State>,
+        log: LogState,
+    ) -> State {
         init_shm_global(&mut display, vec![], None);
         init_xdg_output_manager(&mut display, None);
         let shell_handles = init_shell(&mut display);
@@ -183,7 +188,8 @@ impl State {
                 egui: Egui {
                     debug_state: smithay_egui::EguiState::new(smithay_egui::EguiMode::Continuous),
                     log_state: {
-                        let mut state = smithay_egui::EguiState::new(smithay_egui::EguiMode::Continuous);
+                        let mut state =
+                            smithay_egui::EguiState::new(smithay_egui::EguiMode::Continuous);
                         state.set_zindex(0);
                         state
                     },
@@ -251,9 +257,7 @@ impl Fps {
             return 0.0;
         }
         let secs = match (self.frames.front(), self.frames.back()) {
-            (Some((start, _)), Some((end, dur))) => {
-                end.duration_since(*start) + *dur
-            }
+            (Some((start, _)), Some((end, dur))) => end.duration_since(*start) + *dur,
             _ => Duration::ZERO,
         }
         .as_secs_f64();

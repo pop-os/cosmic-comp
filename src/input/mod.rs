@@ -207,7 +207,9 @@ impl Common {
                             serial,
                             time,
                             |modifiers, handle| {
-                                if state == KeyState::Released && userdata.get::<SupressedKeys>().unwrap().filter(&handle) {
+                                if state == KeyState::Released
+                                    && userdata.get::<SupressedKeys>().unwrap().filter(&handle)
+                                {
                                     return FilterResult::Intercept(());
                                 }
 
@@ -227,14 +229,21 @@ impl Common {
                                 }
 
                                 if modifiers.logo
-                                    && handle.raw_syms().iter().any(|sym| *sym >= keysyms::KEY_0 && *sym <= keysyms::KEY_9)
+                                    && handle
+                                        .raw_syms()
+                                        .iter()
+                                        .any(|sym| *sym >= keysyms::KEY_0 && *sym <= keysyms::KEY_9)
                                     && state == KeyState::Pressed
                                 {
                                     let current_output = active_output(seat, &self);
-                                    let key_num = handle.raw_syms()
+                                    let key_num = handle
+                                        .raw_syms()
                                         .iter()
-                                        .find(|sym| **sym >= keysyms::KEY_0 && **sym <= keysyms::KEY_9)
-                                        .unwrap() - keysyms::KEY_0;
+                                        .find(|sym| {
+                                            **sym >= keysyms::KEY_0 && **sym <= keysyms::KEY_9
+                                        })
+                                        .unwrap()
+                                        - keysyms::KEY_0;
                                     let workspace = match key_num {
                                         0 => 9,
                                         x => x - 1,
@@ -243,8 +252,9 @@ impl Common {
                                     userdata.get::<SupressedKeys>().unwrap().add(&handle);
                                     return FilterResult::Intercept(());
                                 }
-                                
-                                if modifiers.logo && modifiers.shift
+
+                                if modifiers.logo
+                                    && modifiers.shift
                                     && handle.raw_syms().contains(&keysyms::KEY_Escape)
                                     && state == KeyState::Pressed
                                 {
@@ -499,9 +509,7 @@ impl Common {
                 let device = event.device();
                 for seat in self.seats.clone().iter() {
                     #[cfg(feature = "debug")]
-                    if self.seats.iter().position(|x| x == seat).unwrap() == 0
-                        && self.egui.active
-                    {
+                    if self.seats.iter().position(|x| x == seat).unwrap() == 0 && self.egui.active {
                         if self.egui.debug_state.wants_pointer() {
                             self.egui.debug_state.handle_pointer_axis(
                                 event

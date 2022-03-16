@@ -3,7 +3,10 @@
 #[cfg(feature = "debug")]
 use std::{
     collections::VecDeque,
-    sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use anyhow::Result;
@@ -22,13 +25,13 @@ pub type LogBuffer = Arc<Mutex<VecDeque<OwnedRecord>>>;
 #[derive(Clone)]
 struct DebugDrain {
     buffer: LogBuffer,
-    dirty_flag:Arc<AtomicBool>,
+    dirty_flag: Arc<AtomicBool>,
 }
 
 pub struct LogState {
     _guard: slog_scope::GlobalLoggerGuard,
     #[cfg(feature = "debug")]
-    pub dirty_flag:Arc<AtomicBool>,
+    pub dirty_flag: Arc<AtomicBool>,
     #[cfg(feature = "debug")]
     pub debug_buffer: LogBuffer,
 }
@@ -48,7 +51,7 @@ impl DebugDrain {
         (
             DebugDrain {
                 buffer: buffer.clone(),
-                dirty_flag: dirty_flag.clone()
+                dirty_flag: dirty_flag.clone(),
             },
             buffer,
             dirty_flag,
@@ -64,14 +67,11 @@ impl Drain for DebugDrain {
     fn log(
         &self,
         record: &slog::Record<'_>,
-        values: &slog::OwnedKVList
+        values: &slog::OwnedKVList,
     ) -> Result<Self::Ok, Self::Err> {
-        use slog::KV;
+        use serde_json::value::{Serializer as ValueSerializer, Value};
         use serializer::SerdeSerializer;
-        use serde_json::value::{
-            Serializer as ValueSerializer,
-            Value,
-        };
+        use slog::KV;
 
         let mut serializer = SerdeSerializer::start(ValueSerializer, None)?;
         values.serialize(record, &mut serializer)?;
@@ -116,7 +116,7 @@ pub fn init_logger() -> Result<LogState> {
             std::sync::Mutex::new(
                 slog_term::CompactFormat::new(decorator)
                     .build()
-                    .ignore_res()
+                    .ignore_res(),
             ),
             debug_drain,
         )

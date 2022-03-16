@@ -117,11 +117,7 @@ where
     fn emit_str(&mut self, key: Key, val: &str) -> slog::Result {
         impl_m!(self, key, &val)
     }
-    fn emit_arguments(
-        &mut self,
-        key: Key,
-        val: &fmt::Arguments,
-    ) -> slog::Result {
+    fn emit_arguments(&mut self, key: Key, val: &fmt::Arguments) -> slog::Result {
         TL_BUF.with(|buf| {
             let mut buf = buf.borrow_mut();
 
