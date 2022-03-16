@@ -32,6 +32,9 @@ git = "https://github.com/Smithay/smithay-egui.git"
 rev = "5cc416ce"
 optional = true
 
+[build-dependencies]
+wayland-scanner = "0.29"
+
 [features]
 default = []
 debug = ["egui", "smithay-egui", "serde", "serde_json"]

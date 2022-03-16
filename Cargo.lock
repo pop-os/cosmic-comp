@@ -299,6 +299,7 @@ dependencies = [
  "smithay",
  "smithay-egui",
  "thiserror",
+ "wayland-scanner",
  "xcursor",
 ]
 

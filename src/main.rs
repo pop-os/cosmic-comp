@@ -14,6 +14,7 @@ mod logger;
 pub mod shell;
 pub mod state;
 pub mod utils;
+pub mod wayland;
 
 #[cfg(feature = "debug")]
 pub mod debug;
