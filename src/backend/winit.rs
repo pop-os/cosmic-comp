@@ -173,7 +173,7 @@ fn init_egl_client_side(
                     renderer
                         .borrow_mut()
                         .renderer()
-                        .import_dmabuf(buffer)
+                        .import_dmabuf(buffer, None)
                         .is_ok()
                 },
                 None,

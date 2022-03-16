@@ -2,7 +2,7 @@
 
 use crate::state::{Common, Fps};
 use smithay::utils::{Logical, Rectangle};
-use smithay_egui::EguiFrame;
+pub use smithay_egui::EguiFrame;
 
 pub fn fps_ui(
     state: &Common,
@@ -167,10 +167,13 @@ pub fn debug_ui(
                             ui.collapsing(format!("Windows"), |ui| {
                                 for window in space.windows() {
                                     ui.collapsing(format!("{:?}", window.toplevel()), |ui| {
-                                        ui.label(format!(
-                                            "Rect:         {:?}",
-                                            space.window_geometry(window)
-                                        ));
+                                        ui.label(format!("Rect:         {:?}", {
+                                            let mut geo = window.geometry();
+                                            geo.loc += space
+                                                .window_location(window)
+                                                .unwrap_or((0, 0).into());
+                                            geo
+                                        }));
                                         ui.label(format!(
                                             "Bounding box: {:?}",
                                             space.window_bbox(window)
@@ -245,8 +248,6 @@ pub fn log_ui(
                     fill: egui::Color32::from_black_alpha(100),
                     stroke: egui::Stroke::none(),
                 })
-                .default_width(default_width)
-            .default_width(default_width)    
                 .default_width(default_width)
                 .show(ctx, |ui| {
                     egui::ScrollArea::vertical()

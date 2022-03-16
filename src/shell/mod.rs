@@ -110,8 +110,7 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
                             .window_for_surface(surface.get_surface().unwrap())
                             .unwrap()
                             .clone();
-                        let mut initial_window_location =
-                            space.window_geometry(&window).unwrap().loc;
+                        let mut initial_window_location = space.window_location(&window).unwrap();
 
                         // If surface is maximized then unmaximize it
                         if let Some(current_state) = surface.current_state() {
@@ -172,10 +171,12 @@ pub fn init_shell(display: &mut Display) -> ShellStates {
                             .window_for_surface(surface.get_surface().unwrap())
                             .unwrap()
                             .clone();
-                        let geometry = space.window_geometry(&window).unwrap();
+                        let location = space.window_location(&window).unwrap();
+                        let size = window.geometry().size;
 
-                        let grab =
-                            grabs::ResizeSurfaceGrab::new(start_data, window, edges, geometry);
+                        let grab = grabs::ResizeSurfaceGrab::new(
+                            start_data, window, edges, location, size,
+                        );
 
                         pointer.set_grab(grab, serial, 0);
                     }
@@ -415,7 +416,8 @@ fn commit(surface: &WlSurface, state: &mut State) {
     {
         let new_location = grabs::ResizeSurfaceGrab::apply_resize_state(
             &window,
-            space.window_geometry(&window).unwrap(),
+            space.window_location(&window).unwrap(),
+            window.geometry().size,
         );
         if let Some(location) = new_location {
             space.map_window(&window, location, true);

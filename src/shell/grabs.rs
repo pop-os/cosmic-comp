@@ -6,7 +6,7 @@ use smithay::{
         wayland_protocols::xdg_shell::server::xdg_toplevel,
         wayland_server::protocol::{wl_pointer::ButtonState, wl_surface},
     },
-    utils::{Logical, Point, Rectangle, Size},
+    utils::{Logical, Point, Size},
     wayland::{
         compositor::with_states,
         seat::{AxisFrame, PointerGrab, PointerGrabStartData, PointerInnerHandle},
@@ -306,10 +306,9 @@ impl ResizeSurfaceGrab {
         start_data: PointerGrabStartData,
         window: Window,
         edges: xdg_toplevel::ResizeEdge,
-        initial_window_geometry: Rectangle<i32, Logical>,
+        initial_window_location: Point<i32, Logical>,
+        initial_window_size: Size<i32, Logical>,
     ) -> ResizeSurfaceGrab {
-        let (initial_window_location, initial_window_size) =
-            (initial_window_geometry.loc, initial_window_geometry.size);
         let resize_state = ResizeState::Resizing(ResizeData {
             edges: edges.into(),
             initial_window_location,
@@ -393,7 +392,8 @@ impl ResizeSurfaceGrab {
 
     pub fn apply_resize_state(
         window: &Window,
-        geometry: Rectangle<i32, Logical>,
+        mut location: Point<i32, Logical>,
+        size: Size<i32, Logical>,
     ) -> Option<Point<i32, Logical>> {
         let mut new_location = None;
 
@@ -413,15 +413,13 @@ impl ResizeSurfaceGrab {
                     } = resize_data;
 
                     if edges.intersects(ResizeEdge::TOP_LEFT) {
-                        let mut location = geometry.loc;
-
                         if edges.intersects(ResizeEdge::LEFT) {
-                            location.x = initial_window_location.x
-                                + (initial_window_size.w - geometry.size.w);
+                            location.x =
+                                initial_window_location.x + (initial_window_size.w - size.w);
                         }
                         if edges.intersects(ResizeEdge::TOP) {
-                            location.y = initial_window_location.y
-                                + (initial_window_size.h - geometry.size.h);
+                            location.y =
+                                initial_window_location.y + (initial_window_size.h - size.h);
                         }
 
                         new_location = Some(location);

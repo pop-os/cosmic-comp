@@ -10,7 +10,6 @@ use anyhow::{Context, Result};
 use smithay::{
     backend::{
         allocator::dmabuf::Dmabuf,
-        drm::DrmNode,
         egl::{EGLContext, EGLDisplay},
         input::{Event, InputEvent},
         renderer::{gles2::Gles2Renderer, Bind, ImportDma, ImportEgl},
@@ -19,7 +18,7 @@ use smithay::{
     desktop::layer_map_for_output,
     reexports::{
         calloop::{ping, EventLoop, LoopHandle},
-        gbm::Device as GbmDevice,
+        gbm::{Device as GbmDevice, FdWrapper},
         wayland_server::{
             protocol::wl_output::{Subpixel, WlOutput},
             Display,
@@ -40,7 +39,7 @@ use std::{
 use crate::state::Fps;
 
 pub struct X11State {
-    allocator: Arc<Mutex<GbmDevice<DrmNode>>>,
+    allocator: Arc<Mutex<GbmDevice<FdWrapper>>>,
     _egl: EGLDisplay,
     renderer: Rc<RefCell<Gles2Renderer>>,
     surfaces: Vec<Surface>,
@@ -196,12 +195,13 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
     let handle = backend.handle();
 
     // Obtain the DRM node the X server uses for direct rendering.
-    let drm_node = handle
+    let (_drm_node, fd) = handle
         .drm_node()
         .with_context(|| "Could not get DRM node used by X server")?;
 
     // Create the gbm device for buffer allocation.
-    let device = GbmDevice::new(drm_node).with_context(|| "Failed to create GBM device")?;
+    let device =
+        unsafe { GbmDevice::new_from_fd(fd) }.with_context(|| "Failed to create GBM device")?;
     // Initialize EGL using the GBM device.
     let egl = EGLDisplay::new(&device, None).with_context(|| "Failed to create EGL display")?;
     // Create the OpenGL context
@@ -276,7 +276,7 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
                         surface.render.ping();
                     }
                 }
-            },
+            }
             X11Event::Refresh { window_id } | X11Event::PresentCompleted { window_id } => {
                 if let Some(surface) = state
                     .backend
@@ -291,7 +291,7 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
                         surface.pending = false;
                     }
                 }
-            },
+            }
             X11Event::Input(event) => state.process_x11_event(event),
         })
         .map_err(|_| anyhow::anyhow!("Failed to insert X11 Backend into event loop"))?;
@@ -312,7 +312,7 @@ fn init_egl_client_side(display: &mut Display, renderer: Rc<RefCell<Gles2Rendere
             init_dmabuf_global(
                 display,
                 dmabuf_formats,
-                move |buffer, _| renderer.borrow_mut().import_dmabuf(buffer).is_ok(),
+                move |buffer, _| renderer.borrow_mut().import_dmabuf(buffer, None).is_ok(),
                 None,
             );
         }
