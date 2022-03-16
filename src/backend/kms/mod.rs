@@ -2,6 +2,7 @@
 
 #[cfg(feature = "debug")]
 use crate::state::Fps;
+
 use crate::{
     backend::render,
     state::{BackendData, Common, State},
@@ -12,12 +13,15 @@ use anyhow::{Context, Result};
 use smithay::{
     backend::{
         allocator::{gbm::GbmDevice, Format},
-        drm::{DrmDevice, DrmEvent, DrmEventTime, GbmBufferedSurface},
+        drm::{DrmDevice, DrmEvent, DrmEventTime, DrmNode, GbmBufferedSurface, NodeType},
         egl::{EGLContext, EGLDevice, EGLDisplay},
         libinput::{LibinputInputBackend, LibinputSessionInterface},
-        renderer::{gles2::Gles2Renderer, Bind},
-        session::{auto::AutoSession, AsErrno, Session, Signal},
-        udev::{driver, primary_gpu, UdevBackend, UdevEvent},
+        renderer::{
+            multigpu::{egl::EglGlesBackend, GpuManager},
+            Bind,
+        },
+        session::{auto::AutoSession, Session, Signal},
+        udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
     },
     reexports::{
         calloop::{
@@ -46,14 +50,16 @@ mod session_fd;
 use session_fd::*;
 
 pub struct KmsState {
-    devices: HashMap<dev_t, Device>,
+    devices: HashMap<DrmNode, Device>,
+    api: GpuManager<EglGlesBackend>,
+    primary: DrmNode,
     session: AutoSession,
     signaler: Signaler<Signal>,
     tokens: Vec<RegistrationToken>,
 }
 
 pub struct Device {
-    renderer: Gles2Renderer,
+    render_node: DrmNode,
     surfaces: HashMap<crtc::Handle, Surface>,
     allocator: Rc<RefCell<GbmDevice<SessionFd>>>,
     drm: Dispatcher<'static, DrmDevice<SessionFd>, State>,
@@ -70,14 +76,11 @@ pub struct Surface {
     refresh_rate: u32,
     vrr: bool,
     pending: bool,
-    render_timer: TimerHandle<(dev_t, crtc::Handle)>,
+    render_timer: TimerHandle<(DrmNode, crtc::Handle)>,
     render_timer_token: Option<RegistrationToken>,
     #[cfg(feature = "debug")]
     fps: Fps,
 }
-
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
-pub struct DevId(pub dev_t);
 
 pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Result<()> {
     let (session, notifier) = AutoSession::new(None).context("Failed to acquire session")?;
@@ -108,8 +111,38 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
         .map_err(|err| err.error)
         .context("Failed to initialize session event source")?;
 
+    let api = GpuManager::new(EglGlesBackend, None).context("Failed to initialize renderers")?;
+
+    // TODO get this info from system76-power, if available and setup a watcher
+    let primary = if let Some(path) = std::env::var("COSMIC_RENDER_DEVICE")
+        .ok()
+        .and_then(|x| DrmNode::from_path(x).ok())
+    {
+        path
+    } else {
+        primary_gpu(session.seat())
+            .ok()
+            .flatten()
+            .and_then(|x| DrmNode::from_path(x).ok())
+            .and_then(|x| x.node_with_type(NodeType::Render).and_then(Result::ok))
+            .unwrap_or_else(|| {
+                for dev in all_gpus(session.seat()).expect("No GPU found") {
+                    if let Some(node) = DrmNode::from_path(dev)
+                        .ok()
+                        .and_then(|x| x.node_with_type(NodeType::Render).and_then(Result::ok))
+                    {
+                        return node;
+                    }
+                }
+                panic!("Failed to initialize any GPU");
+            })
+    };
+    slog_scope::info!("Using {} as primary gpu for rendering", primary);
+
     state.backend = BackendData::Kms(KmsState {
+        api,
         tokens: vec![libinput_event_source, session_event_source],
+        primary,
         session,
         signaler,
         devices: HashMap::new(),
@@ -168,25 +201,27 @@ impl State {
         );
         let mut drm = DrmDevice::new(fd.clone(), false, None)
             .with_context(|| format!("Failed to initialize drm device for: {}", path.display()))?;
+        let drm_node = DrmNode::from_dev_id(dev)?;
         let supports_atomic = drm.is_atomic();
 
-        let egl_device = EGLDevice::enumerate()
-            .context("Failed to enumerate EGLDevices")?
-            // TODO: this check compares the primary node path.
-            // On split display controller setups however this *may* return the render node
-            // *or* if `EGL_EXT_device_drm_render_node` is supported nothing and we need to
-            // query `EGL_DRM_RENDER_NODE_FILE_EXT` instead for comparision.
-            .find(|dev| dev.drm_device_path().map(|p| p == path).unwrap_or(false))
-            .with_context(|| {
-                format!("Unable to find matching egl device for {}", path.display())
-            })?;
-        let egl_display = EGLDisplay::new(&egl_device, None).with_context(|| {
-            format!(
-                "Failed to open EGLDisplay for device {:?}:{}",
-                egl_device,
-                path.display()
-            )
+        let gbm = GbmDevice::new(fd)
+            .with_context(|| format!("Failed to initialize GBM device for {}", path.display()))?;
+        let egl_display = EGLDisplay::new(&gbm, None).with_context(|| {
+            format!("Failed to create EGLDisplay for device: {}", path.display())
         })?;
+        let egl_device = EGLDevice::device_for_display(&egl_display).with_context(|| {
+            format!("Unable to find matching egl device for {}", path.display())
+        })?;
+        let render_node = egl_device
+            .try_get_render_node()
+            .ok()
+            .and_then(std::convert::identity)
+            .with_context(|| {
+                format!(
+                    "Failed to determine path of egl device for {}",
+                    path.display()
+                )
+            })?;
         let egl_context = EGLContext::new(&egl_display, None).with_context(|| {
             format!(
                 "Failed to create EGLContext for device {:?}:{}",
@@ -195,22 +230,12 @@ impl State {
             )
         })?;
         let formats = egl_context.dmabuf_render_formats().clone();
-        let renderer = unsafe { Gles2Renderer::new(egl_context, None) }.with_context(|| {
-            format!(
-                "Failed to create OpenGLES renderer for device {:?}:{}",
-                egl_device,
-                path.display()
-            )
-        })?;
 
-
-        let gbm = GbmDevice::new(fd)
-            .with_context(|| format!("Failed to initialize GBM device for {}", path.display()))?;
         drm.link(self.backend.kms().signaler.clone());
         let dispatcher =
             Dispatcher::new(drm, move |event, metadata, state: &mut State| match event {
                 DrmEvent::VBlank(crtc) => {
-                    if let Some(device) = state.backend.kms().devices.get_mut(&dev) {
+                    if let Some(device) = state.backend.kms().devices.get_mut(&drm_node) {
                         if let Some(surface) = device.surfaces.get_mut(&crtc) {
                             match surface.surface.frame_submitted() {
                                 Ok(_) => {
@@ -241,7 +266,7 @@ impl State {
             .with_context(|| format!("Failed to add drm device to event loop: {}", dev))?;
 
         let mut device = Device {
-            renderer,
+            render_node,
             surfaces: HashMap::new(),
             allocator: Rc::new(RefCell::new(gbm)),
             drm: dispatcher,
@@ -253,6 +278,7 @@ impl State {
         let outputs = device.enumerate_surfaces()?.added; // There are no removed outputs on newly added devices
         for (crtc, conn) in outputs {
             match device.setup_surface(
+                &drm_node,
                 crtc,
                 conn,
                 self.backend.kms().signaler.clone(),
@@ -264,13 +290,14 @@ impl State {
             };
         }
 
-        self.backend.kms().devices.insert(dev, device);
+        self.backend.kms().devices.insert(drm_node, device);
         Ok(())
     }
 
     fn device_changed(&mut self, dev: dev_t) -> Result<()> {
+        let drm_node = DrmNode::from_dev_id(dev)?;
         let signaler = self.backend.kms().signaler.clone();
-        if let Some(device) = self.backend.kms().devices.get_mut(&dev) {
+        if let Some(device) = self.backend.kms().devices.get_mut(&drm_node) {
             let changes = device.enumerate_surfaces()?;
             for crtc in changes.removed {
                 if let Some(surface) = device.surfaces.get_mut(&crtc) {
@@ -282,6 +309,7 @@ impl State {
             }
             for (crtc, conn) in changes.added {
                 match device.setup_surface(
+                    &drm_node,
                     crtc,
                     conn,
                     signaler.clone(),
@@ -297,7 +325,8 @@ impl State {
     }
 
     fn device_removed(&mut self, dev: dev_t) -> Result<()> {
-        if let Some(device) = self.backend.kms().devices.get_mut(&dev) {
+        let drm_node = DrmNode::from_dev_id(dev)?;
+        if let Some(device) = self.backend.kms().devices.get_mut(&drm_node) {
             for surface in device.surfaces.values_mut() {
                 if let Some(token) = surface.render_timer_token.take() {
                     self.common.event_loop_handle.remove(token);
@@ -332,16 +361,23 @@ impl Device {
 
         let added = config
             .iter()
-            .filter(|(conn, crtc)| surfaces.get(&crtc).map(|c| c.as_ref() != Some(*conn)).unwrap_or(true))
+            .filter(|(conn, crtc)| {
+                surfaces
+                    .get(&crtc)
+                    .map(|c| c.as_ref() != Some(*conn))
+                    .unwrap_or(true)
+            })
             .map(|(conn, crtc)| (crtc, conn))
             .map(|(crtc, conn)| (*crtc, *conn))
             .collect::<Vec<_>>();
         let removed = surfaces
             .iter()
-            .filter(|(crtc, conn)| if let Some(conn) = conn {
-                config.get(conn).map(|c| c != *crtc).unwrap_or(true)
-            } else {
-                true
+            .filter(|(crtc, conn)| {
+                if let Some(conn) = conn {
+                    config.get(conn).map(|c| c != *crtc).unwrap_or(true)
+                } else {
+                    true
+                }
             })
             .map(|(crtc, _)| *crtc)
             .collect::<Vec<_>>();
@@ -351,6 +387,7 @@ impl Device {
 
     fn setup_surface(
         &mut self,
+        drm_node: &DrmNode,
         crtc: crtc::Handle,
         conn: connector::Handle,
         signaler: Signaler<Signal>,
@@ -403,10 +440,14 @@ impl Device {
         // render timer
         let timer_token = loop_handle
             .insert_source(timer, |(dev_id, crtc), _, state| {
-                if let Some(device) = state.backend.kms().devices.get_mut(&dev_id) {
-                    let renderer = &mut device.renderer;
+                let backend = state.backend.kms();
+                if let Some(device) = backend.devices.get_mut(&dev_id) {
+                    let mut renderer = backend
+                        .api
+                        .renderer(&backend.primary, &device.render_node)
+                        .unwrap();
                     if let Some(surface) = device.surfaces.get_mut(&crtc) {
-                        if let Err(err) = surface.render_output(renderer, &mut state.common) {
+                        if let Err(err) = surface.render_output(&mut renderer, &mut state.common) {
                             slog_scope::error!("Error rendering: {}", err);
                             // TODO re-schedule?
                         }
@@ -414,7 +455,7 @@ impl Device {
                 }
             })
             .unwrap();
-        timer_handle.add_timeout(Duration::ZERO, (drm.device_id(), crtc));
+        timer_handle.add_timeout(Duration::ZERO, (*drm_node, crtc));
 
         let data = Surface {
             output: output.clone(),
@@ -438,7 +479,7 @@ impl Device {
 impl Surface {
     pub fn render_output(
         &mut self,
-        renderer: &mut Gles2Renderer,
+        renderer: &mut render::GlMultiRenderer<'_>,
         state: &mut Common,
     ) -> Result<()> {
         let (buffer, age) = self
@@ -457,7 +498,7 @@ impl Surface {
             &self.output,
             false,
             #[cfg(feature = "debug")]
-            &mut self.fps
+            &mut self.fps,
         ) {
             Ok(_) => {
                 self.surface
@@ -477,24 +518,23 @@ impl KmsState {
     pub fn schedule_render(&mut self, output: &Output) {
         if let Some((device, surface)) = self
             .devices
-            .values_mut()
-            .flat_map(|d| {
-                let dev_id = d.drm.as_source_ref().device_id();
-                d.surfaces.values_mut().map(move |s| (dev_id, s))
-            })
+            .iter_mut()
+            .flat_map(|(node, d)| d.surfaces.values_mut().map(move |s| (node, s)))
             .find(|(_, s)| s.output == *output)
         {
             if !surface.pending {
                 surface.pending = true;
-                let duration = surface.last_submit.as_ref().and_then(|x| match x {
-                    DrmEventTime::Monotonic(instant) => {
-                        instant.checked_duration_since(Instant::now())
-                    }
-                    DrmEventTime::Realtime(time) => {
-                        time.duration_since(SystemTime::now()).ok()
-                    }
-                }).unwrap_or(Duration::ZERO); // + Duration::from_secs_f64((1.0 / surface.refresh_rate as f64) - 20.0);
-                let data = (device, surface.surface.crtc());
+                let duration = surface
+                    .last_submit
+                    .as_ref()
+                    .and_then(|x| match x {
+                        DrmEventTime::Monotonic(instant) => {
+                            instant.checked_duration_since(Instant::now())
+                        }
+                        DrmEventTime::Realtime(time) => time.duration_since(SystemTime::now()).ok(),
+                    })
+                    .unwrap_or(Duration::ZERO); // + Duration::from_secs_f64((1.0 / surface.refresh_rate as f64) - 20.0);
+                let data = (*device, surface.surface.crtc());
                 if surface.vrr {
                     surface.render_timer.add_timeout(Duration::ZERO, data);
                 } else {

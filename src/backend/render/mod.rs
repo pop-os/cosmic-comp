@@ -11,6 +11,7 @@ use slog::Logger;
 use smithay::{
     backend::renderer::{
         gles2::{Gles2Renderbuffer, Gles2Renderer, Gles2Texture},
+        multigpu::{egl::EglGlesBackend, Error as MultiError, MultiFrame, MultiRenderer},
         ImportAll, Renderer,
     },
     desktop::space::{RenderElement, RenderError, SpaceOutputTuple, SurfaceTree},
@@ -21,6 +22,10 @@ use smithay::{
 mod cursor;
 use self::cursor::PointerElement;
 
+pub type GlMultiRenderer<'a> =
+    MultiRenderer<'a, 'a, EglGlesBackend, EglGlesBackend, Gles2Renderbuffer>;
+pub type GlMultiFrame = MultiFrame<EglGlesBackend, EglGlesBackend>;
+
 smithay::custom_elements! {
     pub CustomElem<=Gles2Renderer>;
     SurfaceTree=SurfaceTree,
@@ -29,12 +34,62 @@ smithay::custom_elements! {
     EguiFrame=EguiFrame,
 }
 
+// TODO: due to the lifetime, we cannot be generic over CustomElem's renderer
+// util after GATs land. So we generate with the macro for Gles2 and then
+// do a manual impl for MultiRenderer.
+impl RenderElement<GlMultiRenderer<'_>> for CustomElem {
+    fn id(&self) -> usize {
+        RenderElement::<Gles2Renderer>::id(self)
+    }
+
+    fn geometry(&self) -> Rectangle<i32, Logical> {
+        RenderElement::<Gles2Renderer>::geometry(self)
+    }
+
+    fn accumulated_damage(
+        &self,
+        for_values: Option<SpaceOutputTuple<'_, '_>>,
+    ) -> Vec<Rectangle<i32, Logical>> {
+        RenderElement::<Gles2Renderer>::accumulated_damage(self, for_values)
+    }
+
+    fn draw(
+        &self,
+        renderer: &mut GlMultiRenderer<'_>,
+        frame: &mut GlMultiFrame,
+        scale: f64,
+        location: Point<i32, Logical>,
+        damage: &[Rectangle<i32, Logical>],
+        log: &Logger,
+    ) -> Result<(), MultiError<EglGlesBackend, EglGlesBackend>> {
+        RenderElement::<Gles2Renderer>::draw(
+            self,
+            renderer.as_mut(),
+            frame.as_mut(),
+            scale,
+            location,
+            damage,
+            log,
+        )
+        .map_err(MultiError::Render)
+    }
+
+    fn z_index(&self) -> u8 {
+        RenderElement::<Gles2Renderer>::z_index(self)
+    }
+}
+
 pub trait AsGles2Renderer {
     fn as_gles2(&mut self) -> &mut Gles2Renderer;
 }
 impl AsGles2Renderer for Gles2Renderer {
     fn as_gles2(&mut self) -> &mut Gles2Renderer {
         self
+    }
+}
+impl AsGles2Renderer for GlMultiRenderer<'_> {
+    fn as_gles2(&mut self) -> &mut Gles2Renderer {
+        self.as_mut()
     }
 }
 
