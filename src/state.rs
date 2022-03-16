@@ -30,8 +30,8 @@ use std::{
 use std::{collections::VecDeque, time::Duration};
 
 pub struct State {
-    pub common: Common,
     pub backend: BackendData,
+    pub common: Common,
 }
 
 pub struct Common {
@@ -194,6 +194,10 @@ impl State {
             },
             backend: BackendData::Unset,
         }
+    }
+
+    pub fn destroy(self) -> LogState {
+        self.common.log
     }
 }
 

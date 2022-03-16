@@ -60,6 +60,10 @@ fn main() -> Result<()> {
         state.common.spaces.refresh();
     })?;
 
+    let _log = state.destroy();
+    // drop eventloop before logger
+    std::mem::drop(event_loop);
+
     Ok(())
 }
 
