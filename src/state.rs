@@ -6,7 +6,6 @@ use crate::{
     shell::{init_shell, workspaces::Workspaces, ShellStates},
 };
 use smithay::{
-    backend::drm::DrmNode,
     reexports::{
         calloop::LoopHandle,
         wayland_server::{protocol::wl_surface::WlSurface, Display},
@@ -39,7 +38,6 @@ pub struct Common {
     pub display: Rc<RefCell<Display>>,
     pub socket: OsString,
     pub event_loop_handle: LoopHandle<'static, State>,
-    pub primary_gpu: Option<DrmNode>,
 
     pub spaces: Workspaces,
     pub shell: ShellStates,
@@ -168,16 +166,11 @@ impl State {
         #[cfg(feature = "debug")]
         let dirty_flag = log.dirty_flag.clone();
 
-        let primary_gpu = std::env::var("COSMIC_RENDER_DEVICE")
-            .ok()
-            .and_then(|device| DrmNode::from_path(device).ok());
-
         State {
             common: Common {
                 display: Rc::new(RefCell::new(display)),
                 socket,
                 event_loop_handle: handle,
-                primary_gpu,
 
                 spaces: Workspaces::new(),
                 shell: shell_handles,
