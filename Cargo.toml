@@ -38,3 +38,16 @@ wayland-scanner = "0.29"
 [features]
 default = []
 debug = ["egui", "smithay-egui", "serde", "serde_json"]
+
+[profile.dev]
+lto = "thin"
+
+[profile.fastdebug]
+inherits = "release"
+debug = true
+
+[profile.release]
+lto = "fat"
+
+[patch."https://github.com/Smithay/smithay.git"]
+smithay = { git = "https://github.com/pop-os/smithay", branch = "main" }
