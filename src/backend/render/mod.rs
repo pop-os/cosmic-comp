@@ -9,10 +9,13 @@ use crate::{
 
 use slog::Logger;
 use smithay::{
-    backend::renderer::{
-        gles2::{Gles2Renderbuffer, Gles2Renderer, Gles2Texture},
-        multigpu::{egl::EglGlesBackend, Error as MultiError, MultiFrame, MultiRenderer},
-        ImportAll, Renderer,
+    backend::{
+        drm::DrmNode,
+        renderer::{
+            gles2::{Gles2Renderbuffer, Gles2Renderer, Gles2Texture},
+            multigpu::{egl::EglGlesBackend, Error as MultiError, MultiFrame, MultiRenderer},
+            ImportAll, Renderer,
+        },
     },
     desktop::space::{RenderElement, RenderError, SpaceOutputTuple, SurfaceTree},
     utils::{Logical, Point, Rectangle},
@@ -94,6 +97,7 @@ impl AsGles2Renderer for GlMultiRenderer<'_> {
 }
 
 pub fn render_output<R>(
+    _gpu: Option<&DrmNode>,
     renderer: &mut R,
     age: u8,
     state: &mut Common,
@@ -122,7 +126,7 @@ where
             .unwrap_or(Rectangle::from_loc_and_size((0, 0), (0, 0)));
         let scale = space.output_scale(output).unwrap();
 
-        let fps_overlay = fps_ui(state, fps, output_geo, scale);
+        let fps_overlay = fps_ui(_gpu, state, fps, output_geo, scale);
         custom_elements.push(fps_overlay.into());
 
         let mut area = state.spaces.global_space();

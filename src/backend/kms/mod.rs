@@ -441,12 +441,8 @@ impl Device {
             .insert_source(timer, |(dev_id, crtc), _, state| {
                 let backend = state.backend.kms();
                 if let Some(device) = backend.devices.get_mut(&dev_id) {
-                    let mut renderer = backend
-                        .api
-                        .renderer(&backend.primary, &device.render_node)
-                        .unwrap();
                     if let Some(surface) = device.surfaces.get_mut(&crtc) {
-                        if let Err(err) = surface.render_output(&mut renderer, &mut state.common) {
+                        if let Err(err) = surface.render_output(&mut backend.api, &backend.primary, &device.render_node, &mut state.common) {
                             slog_scope::error!("Error rendering: {}", err);
                             // TODO re-schedule?
                         }
@@ -478,9 +474,15 @@ impl Device {
 impl Surface {
     pub fn render_output(
         &mut self,
-        renderer: &mut render::GlMultiRenderer<'_>,
+        api: &mut GpuManager<EglGlesBackend>,
+        render_node: &DrmNode,
+        target_node: &DrmNode,
         state: &mut Common,
     ) -> Result<()> {
+        let mut renderer = api
+            .renderer(render_node, target_node)
+            .unwrap();
+        
         let (buffer, age) = self
             .surface
             .next_buffer()
@@ -491,7 +493,8 @@ impl Surface {
             .with_context(|| "Failed to bind buffer")?;
 
         match render::render_output(
-            renderer,
+            Some(&render_node),
+            &mut renderer,
             age,
             state,
             &self.output,

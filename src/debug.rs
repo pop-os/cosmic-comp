@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::state::{Common, Fps};
-use smithay::utils::{Logical, Rectangle};
+use smithay::{
+    backend::drm::DrmNode,
+    utils::{Logical, Rectangle},
+};
 pub use smithay_egui::EguiFrame;
 
 pub fn fps_ui(
+    gpu: Option<&DrmNode>,
     state: &Common,
     fps: &mut Fps,
     area: Rectangle<i32, Logical>,
@@ -55,6 +59,9 @@ pub fn fps_ui(
                         ui.set_max_width(label_res.rect.min.x + label_res.rect.width());
                         ui.separator();
 
+                        if let Some(gpu) = gpu {
+                            ui.label(egui::RichText::new(format!("renderD{}", gpu.minor())).code());
+                        }
                         ui.label(egui::RichText::new(format!("FPS: {:>7.3}", avg_fps)).heading());
                         ui.label("Frame Times:");
                         ui.label(egui::RichText::new(format!("avg: {:>7.6}", avg)).code());

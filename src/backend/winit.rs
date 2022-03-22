@@ -45,6 +45,7 @@ impl WinitState {
         let age = backend.buffer_age().unwrap_or(0);
 
         match render::render_output(
+            None,
             backend.renderer(),
             age as u8,
             state,

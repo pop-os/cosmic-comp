@@ -163,6 +163,7 @@ impl Surface {
             .with_context(|| "Failed to bind buffer")?;
 
         match render::render_output(
+            None,
             renderer,
             age as u8,
             state,
