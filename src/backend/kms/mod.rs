@@ -246,7 +246,6 @@ impl State {
                                         .spaces
                                         .active_space_mut(&surface.output)
                                         .send_frames(
-                                            true,
                                             state.common.start_time.elapsed().as_millis() as u32,
                                         );
                                 }

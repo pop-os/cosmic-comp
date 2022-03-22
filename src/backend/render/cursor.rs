@@ -228,7 +228,7 @@ where
             Transform::Normal,
             &*damage
                 .iter()
-                .map(|rect| rect.to_buffer(1, Transform::Normal, &self.size))
+                .map(|rect| rect.to_physical(1).to_f64())
                 .collect::<Vec<_>>(),
             1.0,
         )?;

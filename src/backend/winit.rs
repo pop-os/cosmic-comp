@@ -57,7 +57,7 @@ impl WinitState {
                 state
                     .spaces
                     .active_space_mut(&self.output)
-                    .send_frames(true, state.start_time.elapsed().as_millis() as u32);
+                    .send_frames(state.start_time.elapsed().as_millis() as u32);
                 backend
                     .submit(damage.as_ref().map(|x| &**x), 1.0)
                     .with_context(|| "Failed to submit buffer for display")?;

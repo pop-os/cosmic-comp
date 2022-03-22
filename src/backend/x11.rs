@@ -175,7 +175,7 @@ impl Surface {
                 state
                     .spaces
                     .active_space_mut(&self.output)
-                    .send_frames(true, state.start_time.elapsed().as_millis() as u32);
+                    .send_frames(state.start_time.elapsed().as_millis() as u32);
                 self.surface
                     .submit()
                     .with_context(|| "Failed to submit buffer for display")?;
