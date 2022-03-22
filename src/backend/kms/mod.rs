@@ -47,7 +47,9 @@ use std::{
 
 mod drm_helpers;
 mod session_fd;
+mod socket;
 use session_fd::*;
+use socket::*;
 
 pub struct KmsState {
     devices: HashMap<DrmNode, Device>,
@@ -66,6 +68,7 @@ pub struct Device {
     formats: HashSet<Format>,
     supports_atomic: bool,
     event_token: Option<RegistrationToken>,
+    socket: Option<Socket>,
 }
 
 pub struct Surface {
@@ -246,7 +249,7 @@ impl State {
                                         .spaces
                                         .active_space_mut(&surface.output)
                                         .send_frames(
-                                            state.common.start_time.elapsed().as_millis() as u32,
+                                            state.common.start_time.elapsed().as_millis() as u32
                                         );
                                 }
                                 Err(err) => slog_scope::warn!("Failed to submit frame: {}", err),
@@ -264,6 +267,18 @@ impl State {
             .register_dispatcher(dispatcher.clone())
             .with_context(|| format!("Failed to add drm device to event loop: {}", dev))?;
 
+        let socket = match self.create_socket(render_node, formats.clone().into_iter()) {
+            Ok(socket) => Some(socket),
+            Err(err) => {
+                slog_scope::warn!(
+                    "Failed to initialize hardware-acceleration for clients on {}: {}",
+                    render_node,
+                    err
+                );
+                None
+            }
+        };
+
         let mut device = Device {
             render_node,
             surfaces: HashMap::new(),
@@ -272,6 +287,7 @@ impl State {
             formats,
             supports_atomic,
             event_token: Some(token),
+            socket,
         };
 
         let outputs = device.enumerate_surfaces()?.added; // There are no removed outputs on newly added devices
@@ -334,6 +350,9 @@ impl State {
             }
             if let Some(token) = device.event_token.take() {
                 self.common.event_loop_handle.remove(token);
+            }
+            if let Some(socket) = device.socket.take() {
+                self.common.event_loop_handle.remove(socket.token);
             }
         }
         Ok(())
@@ -442,7 +461,11 @@ impl Device {
                 let backend = state.backend.kms();
                 if let Some(device) = backend.devices.get_mut(&dev_id) {
                     if let Some(surface) = device.surfaces.get_mut(&crtc) {
-                        if let Err(err) = surface.render_output(&mut backend.api, &backend.primary, &device.render_node, &mut state.common) {
+                        if let Err(err) = surface.render_output(
+                            &mut backend.api,
+                            &device.render_node,
+                            &mut state.common,
+                        ) {
                             slog_scope::error!("Error rendering: {}", err);
                             // TODO re-schedule?
                         }
@@ -471,18 +494,47 @@ impl Device {
     }
 }
 
+const MAX_CPU_COPIES: usize = 3;
+
 impl Surface {
     pub fn render_output(
         &mut self,
         api: &mut GpuManager<EglGlesBackend>,
-        render_node: &DrmNode,
         target_node: &DrmNode,
         state: &mut Common,
     ) -> Result<()> {
-        let mut renderer = api
-            .renderer(render_node, target_node)
-            .unwrap();
-        
+        let nodes = state
+            .spaces
+            .active_space(&self.output)
+            .windows()
+            .flat_map(|w| {
+                w.toplevel()
+                    .get_surface()?
+                    .as_ref()
+                    .client()?
+                    .data_map()
+                    .get::<DrmNode>()
+                    .cloned()
+            })
+            .collect::<Vec<_>>();
+        let render_node = if nodes.contains(&target_node) || nodes.len() < MAX_CPU_COPIES {
+            &target_node
+        } else {
+            nodes
+                .iter()
+                .fold(HashMap::new(), |mut count_map, node| {
+                    let count = count_map.entry(node).or_insert(0);
+                    *count += 1;
+                    count_map
+                })
+                .into_iter()
+                .reduce(|a, b| if a.1 > b.1 { a } else { b })
+                .map(|(node, _)| node)
+                .unwrap_or(&target_node)
+        };
+
+        let mut renderer = api.renderer(render_node, &target_node).unwrap();
+
         let (buffer, age) = self
             .surface
             .next_buffer()
