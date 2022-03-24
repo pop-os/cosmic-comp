@@ -37,7 +37,7 @@ fn main() -> Result<()> {
     let signal = event_loop.get_signal();
     event_loop.run(None, &mut state, |state| {
         // shall we shut down?
-        if state.common.spaces.outputs().next().is_none() || state.common.should_stop {
+        if state.common.shell.outputs().next().is_none() || state.common.should_stop {
             slog_scope::info!("Shutting down");
             signal.stop();
             signal.wakeup();
@@ -46,7 +46,7 @@ fn main() -> Result<()> {
 
         // do we need to trigger another render
         if state.common.dirty_flag.swap(false, Ordering::SeqCst) {
-            for output in state.common.spaces.outputs() {
+            for output in state.common.shell.outputs() {
                 state.backend.schedule_render(output)
             }
         }
@@ -55,7 +55,7 @@ fn main() -> Result<()> {
         let display = state.common.display.clone();
         display.borrow_mut().flush_clients(state);
         // trigger routines
-        state.common.spaces.refresh();
+        state.common.shell.refresh();
     })?;
 
     let _log = state.destroy();

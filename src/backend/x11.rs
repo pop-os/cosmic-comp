@@ -174,8 +174,9 @@ impl Surface {
         ) {
             Ok(_) => {
                 state
-                    .spaces
+                    .shell
                     .active_space_mut(&self.output)
+                    .space
                     .send_frames(state.start_time.elapsed().as_millis() as u32);
                 self.surface
                     .submit()
@@ -228,7 +229,7 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
         .x11()
         .add_window(&mut *state.common.display.borrow_mut(), event_loop.handle())
         .with_context(|| "Failed to create wl_output")?;
-    state.common.spaces.map_output(&output);
+    state.common.shell.map_output(&output);
 
     event_loop
         .handle()
@@ -243,7 +244,7 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
                     .filter(|s| s.window.id() == window_id)
                 {
                     surface.window.unmap();
-                    state.common.spaces.unmap_output(&surface.output);
+                    state.common.shell.unmap_output(&surface.output);
                 }
                 state
                     .backend
@@ -353,7 +354,7 @@ impl State {
 
         self.common.process_input_event(event);
         // TODO actually figure out the output
-        for output in self.common.spaces.outputs() {
+        for output in self.common.shell.outputs() {
             self.backend.schedule_render(output);
         }
     }

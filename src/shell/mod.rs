@@ -1,476 +1,392 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{input::active_output, state::State, utils::SurfaceDropNotifier};
-use smithay::{
-    backend::renderer::utils::on_commit_buffer_handler,
-    desktop::{
-        layer_map_for_output, Kind, LayerSurface, PopupKeyboardGrab, PopupKind, PopupManager,
-        PopupPointerGrab, PopupUngrabStrategy, Window,
-    },
-    reexports::{
-        wayland_protocols::xdg_shell::server::xdg_toplevel,
-        wayland_server::{protocol::wl_surface::WlSurface, Display},
-    },
-    wayland::{
-        compositor::{compositor_init, with_states},
-        output::Output,
-        seat::{PointerGrabStartData, PointerHandle, Seat},
-        shell::{
-            wlr_layer::{
-                wlr_layer_shell_init, LayerShellRequest, LayerShellState, LayerSurfaceAttributes,
-            },
-            xdg::{
-                xdg_shell_init, Configure, ShellState as XdgShellState,
-                XdgPopupSurfaceRoleAttributes, XdgRequest, XdgToplevelSurfaceRoleAttributes,
-            },
-        },
-        Serial,
-    },
+pub use smithay::{
+    desktop::{PopupGrab, PopupManager, PopupUngrabStrategy, Space, Window},
+    reexports::wayland_server::protocol::wl_surface::WlSurface,
+    utils::{Logical, Point, Rectangle, Size},
+    wayland::{output::Output, seat::Seat, SERIAL_COUNTER},
 };
-use std::sync::{Arc, Mutex};
+use std::{cell::Cell, mem::MaybeUninit, rc::Rc};
 
-pub mod grabs;
-pub mod workspaces;
+pub const MAX_WORKSPACES: usize = 10; // TODO?
 
-pub struct ShellStates {
-    popups: PopupManager,
-    xdg: Arc<Mutex<XdgShellState>>,
-    layer: Arc<Mutex<LayerShellState>>,
+mod handler;
+pub mod layout;
+mod workspace;
+pub use self::handler::init_shell;
+pub use self::layout::Layout;
+pub use self::workspace::*;
+
+pub struct ActiveWorkspace(Cell<Option<usize>>);
+impl ActiveWorkspace {
+    fn new() -> Self {
+        ActiveWorkspace(Cell::new(None))
+    }
+    pub fn get(&self) -> Option<usize> {
+        self.0.get()
+    }
+    fn set(&self, active: usize) -> Option<usize> {
+        self.0.replace(Some(active))
+    }
+    fn clear(&self) -> Option<usize> {
+        self.0.replace(None)
+    }
 }
 
-pub fn init_shell(display: &mut Display) -> ShellStates {
-    compositor_init(
-        display,
-        move |surface, mut ddata| {
-            on_commit_buffer_handler(&surface);
-            let state = ddata.get::<State>().unwrap();
-            state.common.spaces.commit(&surface);
-            state.common.shell.popups.commit(&surface);
-            commit(&surface, state)
-        },
-        None,
-    );
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum Mode {
+    OutputBound,
+    Global { active: usize },
+}
 
-    let (xdg_shell_state, _xdg_global) = xdg_shell_init(
-        display,
-        |event, mut ddata| {
-            let state = &mut ddata.get::<State>().unwrap().common;
+impl Mode {
+    pub fn output_bound() -> Mode {
+        Mode::OutputBound
+    }
 
-            match event {
-                XdgRequest::NewToplevel { surface } => {
-                    state.pending_toplevels.push(surface.clone());
+    pub fn global() -> Mode {
+        Mode::Global { active: 0 }
+    }
+}
 
-                    let seat = &state.last_active_seat;
-                    let output = active_output(seat, &*state);
-                    let space = state.spaces.active_space_mut(&output);
-                    let window = Window::new(Kind::Xdg(surface));
-                    space.map_window(&window, (0, 0), true);
-                    // We will position the window after the first commit, when we know its size
+pub struct Shell {
+    popups: PopupManager,
+    popup_grab: Rc<Cell<Option<PopupGrab>>>,
+    mode: Mode,
+    outputs: Vec<Output>,
+    pub spaces: [Workspace; MAX_WORKSPACES],
+}
+
+const UNINIT_SPACE: MaybeUninit<Workspace> = MaybeUninit::uninit();
+
+impl Shell {
+    fn new(popup_grab: Rc<Cell<Option<PopupGrab>>>) -> Self {
+        Shell {
+            popups: PopupManager::new(None),
+            popup_grab,
+            mode: Mode::global(),
+            outputs: Vec::new(),
+            spaces: unsafe {
+                let mut spaces = [UNINIT_SPACE; MAX_WORKSPACES];
+                for space in &mut spaces {
+                    *space = MaybeUninit::new(Workspace::new());
                 }
-                XdgRequest::NewPopup { surface, .. } => {
-                    state
-                        .shell
-                        .popups
-                        .track_popup(PopupKind::from(surface))
-                        .unwrap();
-                }
-                XdgRequest::RePosition {
-                    surface,
-                    positioner,
-                    token,
-                } => {
-                    let result = surface.with_pending_state(|state| {
-                        // TODO: This is a simplification, a proper compositor would
-                        // calculate the geometry of the popup here.
-                        // For now we just use the default implementation here that does not take the
-                        // window position and output constraints into account.
-                        let geometry = positioner.get_geometry();
-                        state.geometry = geometry;
-                        state.positioner = positioner;
-                    });
+                std::mem::transmute(spaces)
+            },
+        }
+    }
 
-                    if result.is_ok() {
-                        surface.send_repositioned(token);
-                    }
-                }
-                XdgRequest::Move {
-                    surface,
-                    seat,
-                    serial,
-                } => {
-                    let seat = Seat::from_resource(&seat).unwrap();
-                    if let Some((pointer, start_data)) =
-                        check_grab_preconditions(&seat, surface.get_surface(), serial)
-                    {
-                        let space = state
-                            .spaces
-                            .space_for_surface(surface.get_surface().unwrap())
-                            .unwrap();
-                        let window = space
-                            .window_for_surface(surface.get_surface().unwrap())
-                            .unwrap()
-                            .clone();
-                        let mut initial_window_location = space.window_location(&window).unwrap();
+    pub fn map_output(&mut self, output: &Output) {
+        match self.mode {
+            Mode::OutputBound => {
+                output
+                    .user_data()
+                    .insert_if_missing(|| ActiveWorkspace::new());
 
-                        // If surface is maximized then unmaximize it
-                        if let Some(current_state) = surface.current_state() {
-                            if current_state
-                                .states
-                                .contains(xdg_toplevel::State::Maximized)
-                            {
-                                let fs_changed = surface.with_pending_state(|state| {
-                                    state.states.unset(xdg_toplevel::State::Maximized);
-                                    state.size = None;
-                                });
-
-                                if fs_changed.is_ok() {
-                                    surface.send_configure();
-
-                                    // NOTE: In real compositor mouse location should be mapped to a new window size
-                                    // For example, you could:
-                                    // 1) transform mouse pointer position from compositor space to window space (location relative)
-                                    // 2) divide the x coordinate by width of the window to get the percentage
-                                    //   - 0.0 would be on the far left of the window
-                                    //   - 0.5 would be in middle of the window
-                                    //   - 1.0 would be on the far right of the window
-                                    // 3) multiply the percentage by new window width
-                                    // 4) by doing that, drag will look a lot more natural
-                                    //
-                                    // but for anvil needs setting location to pointer location is fine
-                                    let pos = pointer.current_location();
-                                    initial_window_location = (pos.x as i32, pos.y as i32).into();
-                                }
-                            }
-                        }
-
-                        let grab = grabs::MoveSurfaceGrab::new(
-                            start_data,
-                            window,
-                            initial_window_location,
-                        );
-
-                        pointer.set_grab(grab, serial, 0);
-                    }
-                }
-
-                XdgRequest::Resize {
-                    surface,
-                    seat,
-                    serial,
-                    edges,
-                } => {
-                    let seat = Seat::from_resource(&seat).unwrap();
-                    if let Some((pointer, start_data)) =
-                        check_grab_preconditions(&seat, surface.get_surface(), serial)
-                    {
-                        let space = state
-                            .spaces
-                            .space_for_surface(surface.get_surface().unwrap())
-                            .unwrap();
-                        let window = space
-                            .window_for_surface(surface.get_surface().unwrap())
-                            .unwrap()
-                            .clone();
-                        let location = space.window_location(&window).unwrap();
-                        let size = window.geometry().size;
-
-                        let grab = grabs::ResizeSurfaceGrab::new(
-                            start_data, window, edges, location, size,
-                        );
-
-                        pointer.set_grab(grab, serial, 0);
-                    }
-                }
-                XdgRequest::AckConfigure {
-                    surface,
-                    configure: Configure::Toplevel(configure),
-                } => {
-                    if let Some(window) = state
-                        .spaces
-                        .space_for_surface(&surface)
-                        .and_then(|space| space.window_for_surface(&surface))
-                    {
-                        grabs::ResizeSurfaceGrab::ack_configure(window, configure)
-                    }
-                }
-                XdgRequest::Maximize { surface } => {
-                    let seat = &state.last_active_seat;
-                    let output = active_output(seat, &*state);
-                    let space = state.spaces.active_space_mut(&output);
-                    let window = space
-                        .window_for_surface(surface.get_surface().unwrap())
-                        .unwrap()
-                        .clone();
-                    let layers = layer_map_for_output(&output);
-                    let geometry = layers.non_exclusive_zone();
-
-                    space.map_window(&window, geometry.loc, true);
-                    let ret = surface.with_pending_state(|state| {
-                        state.states.set(xdg_toplevel::State::Maximized);
-                        state.size = Some(geometry.size);
-                    });
-
-                    if ret.is_ok() {
-                        window.configure();
-                    }
-                }
-                XdgRequest::UnMaximize { surface } => {
-                    let ret = surface.with_pending_state(|state| {
-                        state.states.unset(xdg_toplevel::State::Maximized);
-                        state.size = None;
-                    });
-
-                    if ret.is_ok() {
-                        surface.send_configure();
-                    }
-                }
-                XdgRequest::Grab {
-                    serial,
-                    surface,
-                    seat,
-                } => {
-                    let seat = Seat::from_resource(&seat).unwrap();
-                    let ret = state.shell.popups.grab_popup(surface.into(), &seat, serial);
-
-                    if let Ok(mut grab) = ret {
-                        if let Some(keyboard) = seat.get_keyboard() {
-                            if keyboard.is_grabbed()
-                                && !(keyboard.has_grab(serial)
-                                    || keyboard.has_grab(grab.previous_serial().unwrap_or(serial)))
-                            {
-                                grab.ungrab(PopupUngrabStrategy::All);
-                                return;
-                            }
-                            keyboard.set_focus(grab.current_grab().as_ref(), serial);
-                            keyboard.set_grab(PopupKeyboardGrab::new(&grab), serial);
-                        }
-
-                        if let Some(pointer) = seat.get_pointer() {
-                            if pointer.is_grabbed()
-                                && !(pointer.has_grab(serial)
-                                    || pointer.has_grab(
-                                        grab.previous_serial().unwrap_or_else(|| grab.serial()),
-                                    ))
-                            {
-                                grab.ungrab(PopupUngrabStrategy::All);
-                                return;
-                            }
-                            pointer.set_grab(PopupPointerGrab::new(&grab), serial, 0);
-                        }
-                    }
-                }
-                _ => { /*TODO*/ }
+                let (idx, workspace) = self
+                    .spaces
+                    .iter_mut()
+                    .enumerate()
+                    .find(|(_, x)| x.space.outputs().next().is_none())
+                    .expect("More then 10 outputs?");
+                output
+                    .user_data()
+                    .get::<ActiveWorkspace>()
+                    .unwrap()
+                    .set(idx);
+                workspace.space.map_output(output, 1.0, (0, 0));
+                self.outputs.push(output.clone());
             }
-        },
-        None,
-    );
+            Mode::Global { active } => {
+                // just put new outputs on the right of the previous ones.
+                // in the future we will only need that as a fallback and need to read saved configurations here
+                let workspace = &mut self.spaces[active];
+                let x = workspace
+                    .space
+                    .outputs()
+                    .map(|output| workspace.space.output_geometry(&output).unwrap())
+                    .fold(0, |acc, geo| std::cmp::max(acc, geo.loc.x + geo.size.w));
+                workspace.space.map_output(output, 1.0, (x, 0));
+                self.outputs.push(output.clone());
+            }
+        }
+    }
 
-    let (layer_shell_state, _layer_global) = wlr_layer_shell_init(
-        display,
-        |event, mut ddata| match event {
-            LayerShellRequest::NewLayerSurface {
-                surface,
-                output: wl_output,
-                namespace,
-                ..
-            } => {
-                let state = &mut ddata.get::<State>().unwrap().common;
-                let seat = &state.last_active_seat;
-                let output = wl_output
-                    .as_ref()
-                    .and_then(Output::from_resource)
-                    .unwrap_or_else(|| active_output(seat, &*state));
+    pub fn unmap_output(&mut self, output: &Output) {
+        match self.mode {
+            Mode::OutputBound => {
+                if let Some(idx) = output
+                    .user_data()
+                    .get::<ActiveWorkspace>()
+                    .and_then(|a| a.get())
+                {
+                    self.spaces[idx].space.unmap_output(output);
+                    self.outputs.retain(|o| o != output);
+                }
+            }
+            Mode::Global { active } => {
+                self.spaces[active].space.unmap_output(output);
+                self.outputs.retain(|o| o != output);
+                // TODO move windows and outputs farther on the right / or load save config for remaining monitors
+            }
+        }
+    }
 
-                let mut map = layer_map_for_output(&output);
-                map.map_layer(&LayerSurface::new(surface, namespace))
-                    .unwrap();
+    pub fn output_size(&self, output: &Output) -> Size<i32, Logical> {
+        let workspace = self.active_space(output);
+        workspace
+            .space
+            .output_geometry(&output)
+            .unwrap_or(Rectangle::from_loc_and_size((0, 0), (0, 0)))
+            .size
+    }
+
+    pub fn global_space(&self) -> Rectangle<i32, Logical> {
+        let size = self.outputs.iter().fold((0, 0), |(w, h), output| {
+            let size = self.output_size(output);
+            (w + size.w, std::cmp::max(h, size.h))
+        });
+
+        Rectangle::from_loc_and_size((0, 0), size)
+    }
+
+    pub fn space_relative_output_geometry(
+        &self,
+        global_loc: impl Into<Point<i32, Logical>>,
+        output: &Output,
+    ) -> Point<i32, Logical> {
+        match self.mode {
+            Mode::Global { .. } => global_loc.into(),
+            Mode::OutputBound => global_loc.into() - self.output_geometry(output).loc,
+        }
+    }
+
+    pub fn output_geometry(&self, output: &Output) -> Rectangle<i32, Logical> {
+        // due to our different modes, we cannot just ask the space for the global output coordinates,
+        // because for `Mode::OutputBound` the origin will always be (0, 0)
+
+        // TODO: Add a proper grid like structure, for now the outputs just extend to the right
+        let pos =
+            self.outputs
+                .iter()
+                .take_while(|o| o != &output)
+                .fold((0, 0), |(x, y), output| {
+                    let size = self.output_size(output);
+                    (x + size.w, y)
+                });
+
+        Rectangle::from_loc_and_size(pos, self.output_size(output))
+    }
+
+    pub fn activate(&mut self, output: &Output, idx: usize) {
+        match self.mode {
+            Mode::OutputBound => {
+                // TODO check for other outputs already occupying that space
+                if let Some(active) = output.user_data().get::<ActiveWorkspace>() {
+                    if let Some(old_idx) = active.set(idx) {
+                        self.spaces[old_idx].space.unmap_output(output);
+                    }
+                    self.spaces[idx].space.map_output(output, 1.0, (0, 0));
+                }
+                // TODO translate windows from previous space size into new size
+            }
+            Mode::Global { ref mut active } => {
+                let old = *active;
+                *active = idx;
+                for output in &self.outputs {
+                    let loc = self.spaces[old].space.output_geometry(output).unwrap().loc;
+                    self.spaces[old].space.unmap_output(output);
+                    self.spaces[*active].space.map_output(output, 1.0, loc);
+                }
+            }
+        };
+    }
+
+    #[cfg(feature = "debug")]
+    pub fn mode(&self) -> &Mode {
+        &self.mode
+    }
+
+    pub fn set_mode(&mut self, mode: Mode) {
+        match (&mut self.mode, mode) {
+            (Mode::OutputBound, Mode::Global { .. }) => {
+                let active = self
+                    .outputs
+                    .iter()
+                    .next()
+                    .map(|o| {
+                        o.user_data()
+                            .get::<ActiveWorkspace>()
+                            .unwrap()
+                            .get()
+                            .unwrap()
+                    })
+                    .unwrap_or(0);
+                let mut x = 0;
+
+                for output in &self.outputs {
+                    let old_active = output
+                        .user_data()
+                        .get::<ActiveWorkspace>()
+                        .unwrap()
+                        .clear()
+                        .unwrap();
+                    let width = self.spaces[old_active]
+                        .space
+                        .output_geometry(output)
+                        .unwrap()
+                        .size
+                        .w;
+                    self.spaces[old_active].space.unmap_output(output);
+                    self.spaces[active].space.map_output(output, 1.0, (x, 0));
+                    x += width;
+                }
+
+                self.mode = Mode::Global { active };
+                // TODO move windows into new bounds
+            }
+            (Mode::Global { active }, new @ Mode::OutputBound) => {
+                for output in &self.outputs {
+                    self.spaces[*active].space.unmap_output(output);
+                }
+
+                self.mode = new;
+                let outputs = self.outputs.drain(..).collect::<Vec<_>>();
+                for output in &outputs {
+                    self.map_output(output);
+                }
+                // TODO move windows into new bounds
+                // TODO active should probably be mapped somewhere
             }
             _ => {}
-        },
-        None,
-    );
-
-    ShellStates {
-        popups: PopupManager::new(None),
-        xdg: xdg_shell_state,
-        layer: layer_shell_state,
-    }
-}
-
-fn check_grab_preconditions(
-    seat: &Seat,
-    surface: Option<&WlSurface>,
-    serial: Serial,
-) -> Option<(PointerHandle, PointerGrabStartData)> {
-    let surface = if let Some(surface) = surface {
-        surface
-    } else {
-        return None;
-    };
-
-    // TODO: touch resize.
-    let pointer = seat.get_pointer().unwrap();
-
-    // Check that this surface has a click grab.
-    if !pointer.has_grab(serial) {
-        return None;
+        };
     }
 
-    let start_data = pointer.grab_start_data().unwrap();
-
-    // If the focus was for a different surface, ignore the request.
-    if start_data.focus.is_none()
-        || !start_data
-            .focus
-            .as_ref()
-            .unwrap()
-            .0
-            .as_ref()
-            .same_client_as(surface.as_ref())
-    {
-        return None;
+    pub fn outputs(&self) -> impl Iterator<Item = &Output> {
+        self.outputs.iter()
     }
 
-    Some((pointer, start_data))
-}
-
-fn commit(surface: &WlSurface, state: &mut State) {
-    // TODO figure out which output the surface is on.
-    for output in state.common.spaces.outputs() {
-        //.cloned().collect::<Vec<_>>().into_iter() {
-        state.backend.schedule_render(output);
-        // let space = state.common.spaces.active_space(output);
-        // get output for surface
-    }
-
-    let state = &mut state.common;
-    let _ = with_states(surface, |states| {
-        states
-            .data_map
-            .insert_if_missing(|| SurfaceDropNotifier::from(&*state));
-    });
-
-    if let Some(toplevel) = state.pending_toplevels.iter().find(|toplevel| {
-        toplevel
-            .get_surface()
-            .map(|s| s == surface)
-            .unwrap_or(false)
-    }) {
-        // send the initial configure if relevant
-        let initial_configure_sent = with_states(surface, |states| {
-            states
-                .data_map
-                .get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .initial_configure_sent
-        })
-        .unwrap();
-        if !initial_configure_sent {
-            toplevel.send_configure();
+    pub fn active_space(&self, output: &Output) -> &Workspace {
+        match &self.mode {
+            Mode::OutputBound => {
+                let active = output
+                    .user_data()
+                    .get::<ActiveWorkspace>()
+                    .unwrap()
+                    .get()
+                    .unwrap();
+                &self.spaces[active]
+            }
+            Mode::Global { active } => &self.spaces[*active],
         }
+    }
 
-        // position our new window
-        if let Some(space) = toplevel
-            .get_surface()
-            .and_then(|surface| state.spaces.space_for_surface_mut(surface))
-        {
-            let window = space
-                .window_for_surface(toplevel.get_surface().unwrap())
-                .unwrap()
-                .clone();
-            if let Some(output) = space.outputs_for_window(&window).iter().next() {
-                let win_geo = window.bbox();
-                if win_geo.size.w > 0 && win_geo.size.h > 0 {
-                    let layers = layer_map_for_output(&output);
-                    let geometry = layers.non_exclusive_zone();
+    pub fn active_space_mut(&mut self, output: &Output) -> &mut Workspace {
+        match &self.mode {
+            Mode::OutputBound => {
+                let active = output
+                    .user_data()
+                    .get::<ActiveWorkspace>()
+                    .unwrap()
+                    .get()
+                    .unwrap();
+                &mut self.spaces[active]
+            }
+            Mode::Global { active } => &mut self.spaces[*active],
+        }
+    }
 
-                    let position = (
-                        geometry.loc.x + (geometry.size.w / 2) - (win_geo.size.w / 2),
-                        geometry.loc.y + (geometry.size.h / 2) - (win_geo.size.h / 2),
-                    );
-                    space.map_window(&window, position, true);
-                    state.pending_toplevels.retain(|toplevel| {
-                        toplevel
-                            .get_surface()
-                            .map(|s| s != surface)
-                            .unwrap_or(false)
-                    });
+    pub fn space_for_surface(&self, surface: &WlSurface) -> Option<&Workspace> {
+        self.spaces.iter().find(|workspace| {
+            workspace
+                .pending_windows
+                .iter()
+                .any(|(w, _)| w.toplevel().get_surface() == Some(surface))
+                || workspace.space.window_for_surface(surface).is_some()
+        })
+    }
+
+    pub fn space_for_surface_mut(&mut self, surface: &WlSurface) -> Option<&mut Workspace> {
+        self.spaces
+            .iter_mut()
+            .find(|workspace| workspace.space.window_for_surface(surface).is_some())
+    }
+
+    pub fn refresh(&mut self) {
+        for workspace in &mut self.spaces {
+            workspace.refresh();
+        }
+    }
+
+    pub fn commit(&mut self, surface: &WlSurface) {
+        let mut new_focus = None;
+        for (idx, workspace) in self.spaces.iter_mut().enumerate() {
+            if let Some((window, seat)) = workspace
+                .pending_windows
+                .iter()
+                .find(|(w, _)| w.toplevel().get_surface() == Some(surface))
+                .cloned()
+            {
+                workspace.map_window(&window, &seat);
+                if match self.mode {
+                    Mode::OutputBound => self.outputs.iter().any(|o| {
+                        o.user_data()
+                            .get::<ActiveWorkspace>()
+                            .unwrap()
+                            .get()
+                            .unwrap()
+                            == idx
+                    }),
+                    Mode::Global { active } => active == idx,
+                } {
+                    new_focus = Some(seat);
+                }
+                workspace.pending_windows.retain(|(w, _)| w != &window);
+            }
+            workspace.space.commit(surface)
+        }
+        if let Some(seat) = new_focus {
+            self.set_focus(Some(surface), &seat)
+        }
+        self.popups.commit(&surface);
+    }
+
+    pub fn set_focus(&mut self, surface: Option<&WlSurface>, active_seat: &Seat) {
+        // update FocusStack and notify layouts about new focus (if any window)
+        if let Some(surface) = surface {
+            if let Some(workspace) = self.space_for_surface_mut(surface) {
+                if let Some(window) = workspace.space.window_for_surface(surface) {
+                    if Some(window) != workspace.focus_stack.last().as_ref() {
+                        slog_scope::debug!("Focusing window: {:?}", window);
+                        workspace.focus_stack.append(window);
+                        // also remove popup grabs, if we are switching focus
+                        if let Some(mut popup_grab) = self.popup_grab.take() {
+                            if !popup_grab.has_ended() {
+                                popup_grab.ungrab(PopupUngrabStrategy::All);
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        return;
-    }
-
-    if let Some((space, window)) = state
-        .spaces
-        .space_for_surface_mut(surface)
-        .and_then(|space| {
-            space
-                .window_for_surface(surface)
-                .cloned()
-                .map(|window| (space, window))
-        })
-    {
-        let new_location = grabs::ResizeSurfaceGrab::apply_resize_state(
-            &window,
-            space.window_location(&window).unwrap(),
-            window.geometry().size,
-        );
-        if let Some(location) = new_location {
-            space.map_window(&window, location, true);
+        // update keyboard focus
+        if let Some(keyboard) = active_seat.get_keyboard() {
+            keyboard.set_focus(surface, SERIAL_COUNTER.next_serial());
         }
 
-        return;
-    }
+        // update activate status
+        let focused_windows = self
+            .outputs
+            .iter()
+            .flat_map(|o| self.active_space(o).focus_stack.last())
+            .collect::<Vec<_>>();
 
-    if let Some(popup) = state.shell.popups.find_popup(surface) {
-        let PopupKind::Xdg(ref popup) = popup;
-        let initial_configure_sent = with_states(surface, |states| {
-            states
-                .data_map
-                .get::<Mutex<XdgPopupSurfaceRoleAttributes>>()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .initial_configure_sent
-        })
-        .unwrap();
-        if !initial_configure_sent {
-            // NOTE: This should never fail as the initial configure is always
-            // allowed.
-            popup.send_configure().expect("initial configure failed");
+        for workspace in &self.spaces {
+            for window in workspace.space.windows() {
+                window.set_activated(focused_windows.contains(window));
+                window.configure();
+            }
         }
-
-        return;
     }
-
-    if let Some(output) = state.spaces.outputs().find(|o| {
-        let map = layer_map_for_output(o);
-        map.layer_for_surface(surface).is_some()
-    }) {
-        let mut map = layer_map_for_output(output);
-        let layer = map.layer_for_surface(surface).unwrap();
-
-        // send the initial configure if relevant
-        let initial_configure_sent = with_states(surface, |states| {
-            states
-                .data_map
-                .get::<Mutex<LayerSurfaceAttributes>>()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .initial_configure_sent
-        })
-        .unwrap();
-        if !initial_configure_sent {
-            layer.layer_surface().send_configure();
-        }
-
-        map.arrange();
-
-        return;
-    };
 }

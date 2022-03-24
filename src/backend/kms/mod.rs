@@ -102,7 +102,7 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
         .handle()
         .insert_source(libinput_backend, move |event, _, state| {
             state.common.process_input_event(event);
-            for output in state.common.spaces.outputs() {
+            for output in state.common.shell.outputs() {
                 state.backend.kms().schedule_render(output);
             }
         })
@@ -246,8 +246,9 @@ impl State {
                                     surface.pending = false;
                                     state
                                         .common
-                                        .spaces
+                                        .shell
                                         .active_space_mut(&surface.output)
+                                        .space
                                         .send_frames(
                                             state.common.start_time.elapsed().as_millis() as u32
                                         );
@@ -300,7 +301,7 @@ impl State {
                 &mut self.common.display.borrow_mut(),
                 &mut self.common.event_loop_handle,
             ) {
-                Ok(output) => self.common.spaces.map_output(&output),
+                Ok(output) => self.common.shell.map_output(&output),
                 Err(err) => slog_scope::warn!("Failed to initialize output: {}", err),
             };
         }
@@ -319,7 +320,7 @@ impl State {
                     if let Some(token) = surface.render_timer_token.take() {
                         self.common.event_loop_handle.remove(token);
                     }
-                    self.common.spaces.unmap_output(&surface.output);
+                    self.common.shell.unmap_output(&surface.output);
                 }
             }
             for (crtc, conn) in changes.added {
@@ -331,7 +332,7 @@ impl State {
                     &mut self.common.display.borrow_mut(),
                     &mut self.common.event_loop_handle,
                 ) {
-                    Ok(output) => self.common.spaces.map_output(&output),
+                    Ok(output) => self.common.shell.map_output(&output),
                     Err(err) => slog_scope::warn!("Failed to initialize output: {}", err),
                 };
             }
@@ -346,7 +347,7 @@ impl State {
                 if let Some(token) = surface.render_timer_token.take() {
                     self.common.event_loop_handle.remove(token);
                 }
-                self.common.spaces.unmap_output(&surface.output);
+                self.common.shell.unmap_output(&surface.output);
             }
             if let Some(token) = device.event_token.take() {
                 self.common.event_loop_handle.remove(token);
@@ -504,8 +505,9 @@ impl Surface {
         state: &mut Common,
     ) -> Result<()> {
         let nodes = state
-            .spaces
+            .shell
             .active_space(&self.output)
+            .space
             .windows()
             .flat_map(|w| {
                 w.toplevel()

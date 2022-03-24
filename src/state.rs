@@ -3,7 +3,7 @@
 use crate::{
     backend::{kms::KmsState, winit::WinitState, x11::X11State},
     logger::LogState,
-    shell::{init_shell, workspaces::Workspaces, ShellStates},
+    shell::{init_shell, Shell},
 };
 use smithay::{
     reexports::{
@@ -39,8 +39,7 @@ pub struct Common {
     pub socket: OsString,
     pub event_loop_handle: LoopHandle<'static, State>,
 
-    pub spaces: Workspaces,
-    pub shell: ShellStates,
+    pub shell: Shell,
     pub pending_toplevels: Vec<ToplevelSurface>,
     pub dirty_flag: Arc<AtomicBool>,
 
@@ -135,7 +134,7 @@ impl State {
     ) -> State {
         init_shm_global(&mut display, vec![], None);
         init_xdg_output_manager(&mut display, None);
-        let shell_handles = init_shell(&mut display);
+        let shell = init_shell(&mut display);
         let initial_seat = crate::input::add_seat(&mut display, "seat-0".into());
         init_data_device(
             &mut display,
@@ -172,8 +171,7 @@ impl State {
                 socket,
                 event_loop_handle: handle,
 
-                spaces: Workspaces::new(),
-                shell: shell_handles,
+                shell,
                 pending_toplevels: Vec::new(),
                 dirty_flag,
 

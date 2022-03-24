@@ -56,8 +56,9 @@ impl WinitState {
         ) {
             Ok(damage) => {
                 state
-                    .spaces
+                    .shell
                     .active_space_mut(&self.output)
+                    .space
                     .send_frames(state.start_time.elapsed().as_millis() as u32);
                 backend
                     .submit(damage.as_ref().map(|x| &**x), 1.0)
@@ -101,7 +102,7 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
     );
     output.set_preferred(mode);
 
-    state.common.spaces.map_output(&output);
+    state.common.shell.map_output(&output);
 
     let (event_ping, event_source) =
         ping::make_ping().with_context(|| "Failed to init eventloop timer for winit")?;
@@ -133,7 +134,7 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
                 }
                 Err(winit::WinitError::WindowClosed) => {
                     let winit_state = state.backend.winit();
-                    state.common.spaces.unmap_output(&winit_state.output);
+                    state.common.shell.unmap_output(&winit_state.output);
                     if let Some(token) = token.take() {
                         event_loop_handle.remove(token);
                     }

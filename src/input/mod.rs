@@ -83,7 +83,7 @@ pub fn add_seat(display: &mut Display, name: String) -> Seat {
     let userdata = seat.user_data();
     userdata.insert_if_missing(|| Devices::new());
     userdata.insert_if_missing(|| SupressedKeys::new());
-    userdata.insert_if_missing(|| RefCell::new(CursorImageStatus::Hidden));
+    userdata.insert_if_missing(|| RefCell::new(CursorImageStatus::Default));
     seat
 }
 
@@ -93,7 +93,7 @@ pub fn active_output(seat: &Seat, state: &Common) -> Output {
         .map(|x| x.0.borrow().clone())
         .unwrap_or_else(|| {
             state
-                .spaces
+                .shell
                 .outputs()
                 .next()
                 .cloned()
@@ -137,7 +137,7 @@ impl Common {
                         }
                         DeviceCapability::Pointer => {
                             let output = self
-                                .spaces
+                                .shell
                                 .outputs()
                                 .next()
                                 .expect("Backend initialized without output")
@@ -248,7 +248,7 @@ impl Common {
                                         0 => 9,
                                         x => x - 1,
                                     };
-                                    self.spaces.activate(&current_output, workspace as usize);
+                                    self.shell.activate(&current_output, workspace as usize);
                                     userdata.get::<SupressedKeys>().unwrap().add(&handle);
                                     return FilterResult::Intercept(());
                                 }
@@ -316,10 +316,10 @@ impl Common {
                         position += event.delta();
 
                         let output = self
-                            .spaces
+                            .shell
                             .outputs()
                             .find(|output| {
-                                self.spaces
+                                self.shell
                                     .output_geometry(output)
                                     .to_f64()
                                     .contains(position)
@@ -329,7 +329,7 @@ impl Common {
                         if output != current_output {
                             set_active_output(seat, &output);
                         }
-                        let output_geometry = self.spaces.output_geometry(&output);
+                        let output_geometry = self.shell.output_geometry(&output);
 
                         position.x = 0.0f64
                             .max(position.x)
@@ -339,9 +339,12 @@ impl Common {
                             .min((output_geometry.loc.y + output_geometry.size.h) as f64);
 
                         let serial = SERIAL_COUNTER.next_serial();
-                        let space = self.spaces.active_space_mut(&output);
-                        let under = Common::surface_under(position, &output, space);
-                        handle_window_movement(under.as_ref().map(|(s, _)| s), space);
+                        let workspace = self.shell.active_space_mut(&output);
+                        let under = Common::surface_under(position, &output, &workspace.space);
+                        handle_window_movement(
+                            under.as_ref().map(|(s, _)| s),
+                            &mut workspace.space,
+                        );
                         seat.get_pointer()
                             .unwrap()
                             .motion(position, under, serial, event.time());
@@ -368,13 +371,16 @@ impl Common {
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
                         let output = active_output(seat, &self);
-                        let geometry = self.spaces.output_geometry(&output);
-                        let space = self.spaces.active_space_mut(&output);
+                        let geometry = self.shell.output_geometry(&output);
+                        let workspace = self.shell.active_space_mut(&output);
                         let position =
                             geometry.loc.to_f64() + event.position_transformed(geometry.size);
                         let serial = SERIAL_COUNTER.next_serial();
-                        let under = Common::surface_under(position, &output, space);
-                        handle_window_movement(under.as_ref().map(|(s, _)| s), space);
+                        let under = Common::surface_under(position, &output, &workspace.space);
+                        handle_window_movement(
+                            under.as_ref().map(|(s, _)| s),
+                            &mut workspace.space,
+                        );
                         seat.get_pointer()
                             .unwrap()
                             .motion(position, under, serial, event.time());
@@ -437,8 +443,8 @@ impl Common {
                                 if !seat.get_pointer().unwrap().is_grabbed() {
                                     let output = active_output(seat, &self);
                                     let mut pos = seat.get_pointer().unwrap().current_location();
-                                    let output_geo = self.spaces.output_geometry(&output);
-                                    let space = self.spaces.active_space_mut(&output);
+                                    let output_geo = self.shell.output_geometry(&output);
+                                    let workspace = self.shell.active_space_mut(&output);
                                     let layers = layer_map_for_output(&output);
                                     pos -= output_geo.loc.to_f64();
                                     let mut under = None;
@@ -457,8 +463,11 @@ impl Common {
                                                 )
                                                 .map(|(s, _)| s);
                                         }
-                                    } else if let Some(window) = space.window_under(pos).cloned() {
-                                        let window_loc = space.window_location(&window).unwrap();
+                                    } else if let Some(window) =
+                                        workspace.space.window_under(pos).cloned()
+                                    {
+                                        let window_loc =
+                                            workspace.space.window_location(&window).unwrap();
                                         under = window
                                             .surface_under(
                                                 pos - window_loc.to_f64(),
@@ -466,7 +475,7 @@ impl Common {
                                                     | WindowSurfaceType::SUBSURFACE,
                                             )
                                             .map(|(s, _)| s);
-                                        space.raise_window(&window, true);
+                                        // space.raise_window(&window, true);
                                     } else if let Some(layer) = layers
                                         .layer_under(WlrLayer::Bottom, pos)
                                         .or_else(|| layers.layer_under(WlrLayer::Background, pos))
@@ -483,9 +492,7 @@ impl Common {
                                         }
                                     };
 
-                                    if let Some(keyboard) = seat.get_keyboard() {
-                                        keyboard.set_focus(under.as_ref(), serial);
-                                    }
+                                    self.shell.set_focus(under.as_ref(), seat);
                                 }
                                 wl_pointer::ButtonState::Pressed
                             }
@@ -635,10 +642,11 @@ impl Common {
 }
 
 pub fn handle_window_movement(surface: Option<&WlSurface>, space: &mut Space) {
+    // TODO: this is why to hardcoded and hacky, but wayland-rs 0.30 will make this unnecessary anyway.
     if let Some(surface) = surface {
         if let Some(window) = space.window_for_surface(&surface).cloned() {
             if let Some(new_position) =
-                crate::shell::grabs::MoveSurfaceGrab::apply_move_state(&window)
+                crate::shell::layout::floating::MoveSurfaceGrab::apply_move_state(&window)
             {
                 space.map_window(&window, new_position, true);
             }

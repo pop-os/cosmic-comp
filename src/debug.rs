@@ -110,14 +110,14 @@ pub fn debug_ui(
                 .vscroll(true)
                 .collapsible(true)
                 .show(ctx, |ui| {
-                    use crate::shell::workspaces::{ActiveWorkspace, Mode, MAX_WORKSPACES};
+                    use crate::shell::{ActiveWorkspace, Mode, MAX_WORKSPACES};
 
                     ui.set_min_width(250.0);
 
                     // Mode
 
                     ui.label(egui::RichText::new("Mode").heading());
-                    let mut mode = *state.spaces.mode();
+                    let mut mode = *state.shell.mode();
                     let active = if let Mode::Global { active } = mode {
                         active
                     } else {
@@ -125,12 +125,12 @@ pub fn debug_ui(
                     };
                     ui.radio_value(&mut mode, Mode::OutputBound, "Output bound");
                     ui.radio_value(&mut mode, Mode::Global { active }, "Global");
-                    state.spaces.set_mode(mode);
+                    state.shell.set_mode(mode);
 
-                    match *state.spaces.mode() {
+                    match *state.shell.mode() {
                         Mode::OutputBound => {
                             ui.label("Workspaces:");
-                            for output in state.spaces.outputs().cloned().collect::<Vec<_>>() {
+                            for output in state.shell.outputs().cloned().collect::<Vec<_>>() {
                                 ui.horizontal(|ui| {
                                     let active = output
                                         .user_data()
@@ -146,7 +146,7 @@ pub fn debug_ui(
                                             .speed(1.0),
                                     );
                                     if active != active_val as usize {
-                                        state.spaces.activate(&output, active_val as usize);
+                                        state.shell.activate(&output, active_val as usize);
                                     }
                                 });
                             }
@@ -161,29 +161,30 @@ pub fn debug_ui(
                                         .speed(1.0),
                                 );
                                 if active != active_val as usize {
-                                    let output = state.spaces.outputs().next().cloned().unwrap();
-                                    state.spaces.activate(&output, active_val as usize);
+                                    let output = state.shell.outputs().next().cloned().unwrap();
+                                    state.shell.activate(&output, active_val as usize);
                                 }
                             });
                         }
                     }
 
                     // Spaces
-                    for (i, space) in state.spaces.spaces.iter().enumerate() {
+                    for (i, workspace) in state.shell.spaces.iter().enumerate() {
                         ui.collapsing(format!("Space: {}", i), |ui| {
                             ui.collapsing(format!("Windows"), |ui| {
-                                for window in space.windows() {
+                                for window in workspace.space.windows() {
                                     ui.collapsing(format!("{:?}", window.toplevel()), |ui| {
                                         ui.label(format!("Rect:         {:?}", {
                                             let mut geo = window.geometry();
-                                            geo.loc += space
+                                            geo.loc += workspace
+                                                .space
                                                 .window_location(window)
                                                 .unwrap_or((0, 0).into());
                                             geo
                                         }));
                                         ui.label(format!(
                                             "Bounding box: {:?}",
-                                            space.window_bbox(window)
+                                            workspace.space.window_bbox(window)
                                         ));
                                     });
                                 }
@@ -197,9 +198,9 @@ pub fn debug_ui(
                 .hscroll(true)
                 .default_pos([300.0, 300.0])
                 .show(ctx, |ui| {
-                    ui.label(format!("Global Space: {:?}", state.spaces.global_space()));
+                    ui.label(format!("Global Space: {:?}", state.shell.global_space()));
                     for output in state
-                        .spaces
+                        .shell
                         .outputs()
                         .cloned()
                         .collect::<Vec<_>>()
@@ -210,15 +211,19 @@ pub fn debug_ui(
                             ui.label(format!("Output: {:#?}", output));
                             ui.label(format!(
                                 "Geometry: {:?}",
-                                state.spaces.output_geometry(&output)
+                                state.shell.output_geometry(&output)
                             ));
                             ui.label(format!(
                                 "Local Geometry: {:?}",
-                                state.spaces.active_space(&output).output_geometry(&output)
+                                state
+                                    .shell
+                                    .active_space(&output)
+                                    .space
+                                    .output_geometry(&output)
                             ));
                             ui.label(format!(
                                 "Relative Geometry: {:?}",
-                                state.spaces.space_relative_output_geometry((0, 0), &output)
+                                state.shell.space_relative_output_geometry((0, 0), &output)
                             ));
                         });
                     }

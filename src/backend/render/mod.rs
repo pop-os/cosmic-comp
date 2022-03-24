@@ -120,17 +120,18 @@ where
 
     #[cfg(feature = "debug")]
     {
-        let space = state.spaces.active_space(output);
-        let output_geo = space
+        let workspace = state.shell.active_space(output);
+        let output_geo = workspace
+            .space
             .output_geometry(output)
             .unwrap_or(Rectangle::from_loc_and_size((0, 0), (0, 0)));
-        let scale = space.output_scale(output).unwrap();
+        let scale = workspace.space.output_scale(output).unwrap();
 
         let fps_overlay = fps_ui(_gpu, state, fps, output_geo, scale);
         custom_elements.push(fps_overlay.into());
 
-        let mut area = state.spaces.global_space();
-        area.loc = state.spaces.space_relative_output_geometry((0, 0), output);
+        let mut area = state.shell.global_space();
+        area.loc = state.shell.space_relative_output_geometry((0, 0), output);
         if let Some(log_ui) = log_ui(state, area, scale, output_geo.size.w as f32 * 0.6) {
             custom_elements.push(log_ui.into());
         }
@@ -145,7 +146,7 @@ where
             None => continue,
         };
         let location = state
-            .spaces
+            .shell
             .space_relative_output_geometry(pointer.current_location().to_i32_round(), output);
 
         if let Some(cursor) = cursor::draw_cursor(
@@ -159,7 +160,7 @@ where
         }
     }
 
-    let res = state.spaces.active_space_mut(output).render_output(
+    let res = state.shell.active_space_mut(output).space.render_output(
         renderer,
         &output,
         age as usize,
