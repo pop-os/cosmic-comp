@@ -2,6 +2,7 @@
 
 use crate::{
     backend::{kms::KmsState, winit::WinitState, x11::X11State},
+    config::Config,
     logger::LogState,
     shell::{init_shell, Shell},
 };
@@ -35,6 +36,8 @@ pub struct State {
 }
 
 pub struct Common {
+    pub config: Config,
+
     pub display: Rc<RefCell<Display>>,
     pub socket: OsString,
     pub event_loop_handle: LoopHandle<'static, State>,
@@ -167,6 +170,8 @@ impl State {
 
         State {
             common: Common {
+                config: Config::load(),
+
                 display: Rc::new(RefCell::new(display)),
                 socket,
                 event_loop_handle: handle,

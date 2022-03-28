@@ -9,6 +9,7 @@ use anyhow::{Context, Result};
 use std::{ffi::OsString, sync::atomic::Ordering};
 
 pub mod backend;
+pub mod config;
 pub mod input;
 mod logger;
 pub mod shell;

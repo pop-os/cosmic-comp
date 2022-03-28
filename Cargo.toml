@@ -13,14 +13,17 @@ slog-term = "2.8"
 slog-async = "2.7"
 slog-scope = "4.4"
 slog-stdlog = "4.1"
-serde = { version = "1", optional = true }
+serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", optional = true }
 egui = { version = "0.16", optional = true }
 edid-rs = { version = "0.1" }
 thiserror = "1.0.26"
 xcursor = "0.3.3"
 id_tree = "1.8.0"
+xkbcommon = "0.4"
 indexmap = "1.8.0"
+xdg = "^2.1"
+ron = "0.7"
 
 [dependencies.smithay]
 version = "0.3"
@@ -39,7 +42,7 @@ wayland-scanner = "0.29"
 
 [features]
 default = []
-debug = ["egui", "smithay-egui", "serde", "serde_json"]
+debug = ["egui", "smithay-egui", "serde_json"]
 
 [profile.dev]
 lto = "thin"
