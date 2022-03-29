@@ -51,9 +51,9 @@ pub trait Layout {
     }
 }
 
-pub fn new_default_layout() -> Box<dyn Layout> {
+pub fn new_default_layout(idx: u8) -> Box<dyn Layout> {
     Box::new(combined::Combined::new(
-        tiling::TilingLayout::new(),
+        tiling::TilingLayout::new(idx),
         floating::FloatingLayout,
         |app_id, title| {
             slog_scope::debug!(

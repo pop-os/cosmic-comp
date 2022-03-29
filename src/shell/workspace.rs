@@ -40,10 +40,10 @@ pub struct Workspace {
 }
 
 impl Workspace {
-    pub fn new() -> Workspace {
+    pub fn new(idx: u8) -> Workspace {
         Workspace {
             space: Space::new(None),
-            layout: layout::new_default_layout(),
+            layout: layout::new_default_layout(idx),
             focus_stack: FocusStack::new(),
             pending_windows: Vec::new(),
         }

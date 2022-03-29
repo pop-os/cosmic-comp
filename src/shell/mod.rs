@@ -68,8 +68,8 @@ impl Shell {
             outputs: Vec::new(),
             spaces: unsafe {
                 let mut spaces = [UNINIT_SPACE; MAX_WORKSPACES];
-                for space in &mut spaces {
-                    *space = MaybeUninit::new(Workspace::new());
+                for (idx, space) in spaces.iter_mut().enumerate() {
+                    *space = MaybeUninit::new(Workspace::new(idx as u8));
                 }
                 std::mem::transmute(spaces)
             },

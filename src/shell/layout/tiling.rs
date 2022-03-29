@@ -8,10 +8,11 @@ use smithay::{
     utils::Rectangle,
     wayland::{output::Output, seat::Seat},
 };
-use std::cell::RefCell;
+use std::{cell::RefCell, collections::HashMap};
 
 #[derive(Debug)]
 pub struct TilingLayout {
+    idx: u8,
     gaps: (i32, i32),
 }
 
@@ -41,18 +42,14 @@ pub struct WindowInfo {
 }
 
 pub struct OutputInfo {
-    tree: Tree<Data>,
-}
-
-impl std::fmt::Debug for OutputInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.tree.write_formatted(f)
-    }
+    trees: HashMap<u8, Tree<Data>>,
 }
 
 impl Default for OutputInfo {
     fn default() -> OutputInfo {
-        OutputInfo { tree: Tree::new() }
+        OutputInfo {
+            trees: HashMap::new(),
+        }
     }
 }
 
@@ -66,8 +63,8 @@ impl Data {
 }
 
 impl TilingLayout {
-    pub fn new() -> TilingLayout {
-        TilingLayout { gaps: (0, 4) }
+    pub fn new(idx: u8) -> TilingLayout {
+        TilingLayout { idx, gaps: (0, 4) }
     }
 }
 
@@ -84,8 +81,12 @@ impl Layout for TilingLayout {
             output
                 .user_data()
                 .insert_if_missing(|| RefCell::new(OutputInfo::default()));
-            let output_info = output.user_data().get::<RefCell<OutputInfo>>().unwrap();
-            let tree = &mut output_info.borrow_mut().tree;
+            let mut output_info = output
+                .user_data()
+                .get::<RefCell<OutputInfo>>()
+                .unwrap()
+                .borrow_mut();
+            let tree = &mut output_info.trees.entry(self.idx).or_insert_with(Tree::new);
 
             let new_window = Node::new(Data::Window(window.clone()));
 
@@ -144,7 +145,7 @@ impl Layout for TilingLayout {
 
     fn refresh(&mut self, space: &mut Space) {
         while let Some(dead_windows) =
-            Some(update_space_positions(space, self.gaps)).filter(|v| !v.is_empty())
+            Some(update_space_positions(self.idx, space, self.gaps)).filter(|v| !v.is_empty())
         {
             for window in dead_windows {
                 self.unmap_window(&window);
@@ -157,8 +158,12 @@ impl TilingLayout {
     fn unmap_window(&mut self, window: &Window) {
         if let Some(info) = window.user_data().get::<RefCell<WindowInfo>>() {
             let output = &info.borrow().output;
-            let output_info = output.user_data().get::<RefCell<OutputInfo>>().unwrap();
-            let tree = &mut output_info.borrow_mut().tree;
+            let mut output_info = output
+                .user_data()
+                .get::<RefCell<OutputInfo>>()
+                .unwrap()
+                .borrow_mut();
+            let tree = &mut output_info.trees.entry(self.idx).or_insert_with(Tree::new);
 
             let node_id = info.borrow().node.clone();
             let parent_id = tree
@@ -259,7 +264,7 @@ fn new_fork(
     tree.insert(new, InsertBehavior::UnderNode(&fork_id))
 }
 
-fn update_space_positions(space: &mut Space, gaps: (i32, i32)) -> Vec<Window> {
+fn update_space_positions(idx: u8, space: &mut Space, gaps: (i32, i32)) -> Vec<Window> {
     let mut dead_windows = Vec::new();
     let (outer, inner) = gaps;
     for output in space.outputs().cloned().collect::<Vec<_>>().into_iter() {
@@ -268,8 +273,7 @@ fn update_space_positions(space: &mut Space, gaps: (i32, i32)) -> Vec<Window> {
             .get::<RefCell<OutputInfo>>()
             .map(|x| x.borrow_mut())
         {
-            slog_scope::trace!("Tree:\n{:?}", info);
-            let tree = &mut info.tree;
+            let tree = &mut info.trees.entry(idx).or_insert_with(Tree::new);
             if let Some(root) = tree.root_node_id() {
                 let mut stack = Vec::new();
 
