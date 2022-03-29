@@ -150,14 +150,17 @@ impl Shell {
         Rectangle::from_loc_and_size((0, 0), size)
     }
 
-    pub fn space_relative_output_geometry(
+    pub fn space_relative_output_geometry<C: smithay::utils::Coordinate>(
         &self,
-        global_loc: impl Into<Point<i32, Logical>>,
+        global_loc: impl Into<Point<C, Logical>>,
         output: &Output,
-    ) -> Point<i32, Logical> {
+    ) -> Point<C, Logical> {
         match self.mode {
             Mode::Global { .. } => global_loc.into(),
-            Mode::OutputBound => global_loc.into() - self.output_geometry(output).loc,
+            Mode::OutputBound => {
+                let p = global_loc.into().to_f64() - self.output_geometry(output).loc.to_f64();
+                (C::from_f64(p.x), C::from_f64(p.y)).into()
+            }
         }
     }
 

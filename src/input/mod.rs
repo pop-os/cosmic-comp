@@ -347,8 +347,15 @@ impl Common {
                             .min((output_geometry.loc.y + output_geometry.size.h) as f64);
 
                         let serial = SERIAL_COUNTER.next_serial();
+                        let relative_pos =
+                            self.shell.space_relative_output_geometry(position, &output);
                         let workspace = self.shell.active_space_mut(&output);
-                        let under = Common::surface_under(position, &output, &workspace.space);
+                        let under = Common::surface_under(
+                            position,
+                            relative_pos,
+                            &output,
+                            &workspace.space,
+                        );
                         handle_window_movement(
                             under.as_ref().map(|(s, _)| s),
                             &mut workspace.space,
@@ -380,11 +387,18 @@ impl Common {
                     if devices.has_device(&device) {
                         let output = active_output(seat, &self);
                         let geometry = self.shell.output_geometry(&output);
-                        let workspace = self.shell.active_space_mut(&output);
                         let position =
                             geometry.loc.to_f64() + event.position_transformed(geometry.size);
+                        let relative_pos =
+                            self.shell.space_relative_output_geometry(position, &output);
+                        let workspace = self.shell.active_space_mut(&output);
                         let serial = SERIAL_COUNTER.next_serial();
-                        let under = Common::surface_under(position, &output, &workspace.space);
+                        let under = Common::surface_under(
+                            position,
+                            relative_pos,
+                            &output,
+                            &workspace.space,
+                        );
                         handle_window_movement(
                             under.as_ref().map(|(s, _)| s),
                             &mut workspace.space,
@@ -609,7 +623,8 @@ impl Common {
     }
 
     pub fn surface_under(
-        pos: Point<f64, Logical>,
+        global_pos: Point<f64, Logical>,
+        relative_pos: Point<f64, Logical>,
         output: &Output,
         space: &Space,
     ) -> Option<(WlSurface, Point<i32, Logical>)> {
@@ -617,32 +632,47 @@ impl Common {
         let output_geo = space.output_geometry(output).unwrap();
 
         if let Some(layer) = layers
-            .layer_under(WlrLayer::Overlay, pos)
-            .or_else(|| layers.layer_under(WlrLayer::Top, pos))
+            .layer_under(WlrLayer::Overlay, relative_pos)
+            .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos))
         {
             let layer_loc = layers.layer_geometry(layer).unwrap().loc;
             layer
                 .surface_under(
-                    pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
+                    relative_pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
                     WindowSurfaceType::ALL,
                 )
-                .map(|(s, loc)| (s, loc + layer_loc))
-        } else if let Some(window) = space.window_under(pos) {
+                .map(|(s, loc)| {
+                    (
+                        s,
+                        loc + layer_loc - (relative_pos - global_pos).to_i32_round(),
+                    )
+                })
+        } else if let Some(window) = space.window_under(relative_pos) {
             let window_loc = space.window_location(window).unwrap();
             window
-                .surface_under(pos - window_loc.to_f64(), WindowSurfaceType::ALL)
-                .map(|(s, loc)| (s, loc + window_loc))
+                .surface_under(relative_pos - window_loc.to_f64(), WindowSurfaceType::ALL)
+                .map(|(s, loc)| {
+                    (
+                        s,
+                        loc + window_loc - (relative_pos - global_pos).to_i32_round(),
+                    )
+                })
         } else if let Some(layer) = layers
-            .layer_under(WlrLayer::Bottom, pos)
-            .or_else(|| layers.layer_under(WlrLayer::Background, pos))
+            .layer_under(WlrLayer::Bottom, relative_pos)
+            .or_else(|| layers.layer_under(WlrLayer::Background, relative_pos))
         {
             let layer_loc = layers.layer_geometry(layer).unwrap().loc;
             layer
                 .surface_under(
-                    pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
+                    relative_pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
                     WindowSurfaceType::ALL,
                 )
-                .map(|(s, loc)| (s, loc + layer_loc))
+                .map(|(s, loc)| {
+                    (
+                        s,
+                        loc + layer_loc - (relative_pos - global_pos).to_i32_round(),
+                    )
+                })
         } else {
             None
         }
