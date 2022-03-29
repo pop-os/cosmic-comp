@@ -27,6 +27,9 @@
         (modifiers: [Logo], key: "Right"): Focus(Right),
         (modifiers: [Logo], key: "Up"): Focus(Up),
         (modifiers: [Logo], key: "Down"): Focus(Down),
+        (modifiers: [Logo], key: "v"): Orientation(Vertical),
+        (modifiers: [Logo], key: "h"): Orientation(Horizontal),
         (modifiers: [Ctrl], key: "Return"): Spawn("gnome-terminal"),
-    }
+    },
+    workspace_mode: OutputBound,
 )

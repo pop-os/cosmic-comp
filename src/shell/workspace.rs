@@ -63,6 +63,11 @@ impl Workspace {
         self.space.refresh();
     }
 
+    pub fn update_orientation(&mut self, seat: &Seat, orientation: layout::Orientation) {
+        self.layout
+            .update_orientation(orientation, seat, &mut self.space, self.focus_stack.iter())
+    }
+
     pub fn maximize_request(&mut self, window: &Window, output: &Output) {
         self.layout
             .maximize_request(&mut self.space, window, output)

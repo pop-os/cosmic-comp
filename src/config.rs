@@ -12,6 +12,7 @@ use xkbcommon::xkb;
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub key_bindings: HashMap<KeyPattern, Action>,
+    pub workspace_mode: crate::shell::Mode,
 }
 
 impl Config {
@@ -39,6 +40,7 @@ impl Config {
 
         Config {
             key_bindings: HashMap::new(),
+            workspace_mode: crate::shell::Mode::global(),
         }
     }
 }
@@ -180,6 +182,7 @@ pub enum Action {
     Workspace(u8),
     MoveToWorkspace(u8),
     Focus(FocusAction),
+    Orientation(crate::shell::layout::Orientation),
     Spawn(String),
 }
 

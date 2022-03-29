@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use crate::config::Config;
 pub use smithay::{
     desktop::{PopupGrab, PopupManager, PopupUngrabStrategy, Space, Window},
     reexports::wayland_server::protocol::wl_surface::WlSurface,
@@ -33,10 +34,13 @@ impl ActiveWorkspace {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, serde::Deserialize, PartialEq, Eq, Clone, Copy)]
 pub enum Mode {
     OutputBound,
-    Global { active: usize },
+    Global {
+        #[serde(default)]
+        active: usize,
+    },
 }
 
 impl Mode {
@@ -60,11 +64,11 @@ pub struct Shell {
 const UNINIT_SPACE: MaybeUninit<Workspace> = MaybeUninit::uninit();
 
 impl Shell {
-    fn new(popup_grab: Rc<Cell<Option<PopupGrab>>>) -> Self {
+    fn new(config: &Config, popup_grab: Rc<Cell<Option<PopupGrab>>>) -> Self {
         Shell {
             popups: PopupManager::new(None),
             popup_grab,
-            mode: Mode::global(),
+            mode: config.workspace_mode,
             outputs: Vec::new(),
             spaces: unsafe {
                 let mut spaces = [UNINIT_SPACE; MAX_WORKSPACES];
@@ -391,5 +395,15 @@ impl Shell {
                 window.configure();
             }
         }
+    }
+
+    pub fn set_orientation(
+        &mut self,
+        seat: &Seat,
+        output: &Output,
+        orientation: layout::Orientation,
+    ) {
+        self.active_space_mut(output)
+            .update_orientation(seat, orientation)
     }
 }

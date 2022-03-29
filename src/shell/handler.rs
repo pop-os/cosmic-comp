@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{input::active_output, state::State, utils::SurfaceDropNotifier};
+use crate::{config::Config, input::active_output, state::State, utils::SurfaceDropNotifier};
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
     desktop::{
@@ -27,7 +27,7 @@ use smithay::{
 };
 use std::{cell::Cell, rc::Rc, sync::Mutex};
 
-pub fn init_shell(display: &mut Display) -> super::Shell {
+pub fn init_shell(config: &Config, display: &mut Display) -> super::Shell {
     compositor_init(
         display,
         move |surface, mut ddata| {
@@ -234,7 +234,7 @@ pub fn init_shell(display: &mut Display) -> super::Shell {
         None,
     );
 
-    super::Shell::new(popup_grab)
+    super::Shell::new(config, popup_grab)
 }
 
 fn check_grab_preconditions(

@@ -135,9 +135,10 @@ impl State {
         handle: LoopHandle<'static, State>,
         log: LogState,
     ) -> State {
+        let config = Config::load();
         init_shm_global(&mut display, vec![], None);
         init_xdg_output_manager(&mut display, None);
-        let shell = init_shell(&mut display);
+        let shell = init_shell(&config, &mut display);
         let initial_seat = crate::input::add_seat(&mut display, "seat-0".into());
         init_data_device(
             &mut display,
@@ -170,8 +171,7 @@ impl State {
 
         State {
             common: Common {
-                config: Config::load(),
-
+                config,
                 display: Rc::new(RefCell::new(display)),
                 socket,
                 event_loop_handle: handle,

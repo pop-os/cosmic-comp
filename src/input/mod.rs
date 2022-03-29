@@ -283,6 +283,15 @@ impl Common {
                                             Action::Focus(focus) => match focus {
                                                 _ => { /* TODO */ }
                                             },
+                                            Action::Orientation(orientation) => {
+                                                let output = active_output(seat, &self);
+                                                self.shell.set_orientation(
+                                                    &seat,
+                                                    &output,
+                                                    *orientation,
+                                                );
+                                                return FilterResult::Intercept(());
+                                            }
                                             Action::Spawn(command) => {
                                                 if let Err(err) =
                                                     std::process::Command::new("/bin/sh")

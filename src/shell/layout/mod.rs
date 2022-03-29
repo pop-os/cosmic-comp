@@ -14,6 +14,12 @@ pub mod combined;
 pub mod floating;
 pub mod tiling;
 
+#[derive(Debug, serde::Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Orientation {
+    Horizontal,
+    Vertical,
+}
+
 pub trait Layout {
     fn map_window<'a>(
         &mut self,
@@ -25,6 +31,15 @@ pub trait Layout {
     fn refresh(&mut self, space: &mut Space);
     //fn unmap_window(&mut self, space: &mut Space, window: &Window);
 
+    fn update_orientation<'a>(
+        &mut self,
+        orientation: Orientation,
+        seat: &Seat,
+        space: &mut Space,
+        focus_stack: Box<dyn Iterator<Item = &'a Window> + 'a>,
+    ) {
+        let _ = (orientation, seat, space, focus_stack);
+    }
     fn maximize_request(&mut self, space: &mut Space, window: &Window, output: &Output) {
         let _ = (space, window, output);
     }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::shell::layout::Layout;
+use crate::shell::layout::{Layout, Orientation};
 use id_tree::{InsertBehavior, MoveBehavior, Node, NodeId, NodeIdError, RemoveBehavior, Tree};
 use smithay::{
     desktop::{layer_map_for_output, Kind, Space, Window},
@@ -14,12 +14,6 @@ use std::{cell::RefCell, collections::HashMap};
 pub struct TilingLayout {
     idx: u8,
     gaps: (i32, i32),
-}
-
-#[derive(Debug)]
-pub enum Orientation {
-    Horizontal,
-    Vertical,
 }
 
 #[derive(Debug)]
@@ -137,6 +131,50 @@ impl Layout for TilingLayout {
                 // insert or update
                 if !user_data.insert_if_missing(|| RefCell::new(window_info.clone())) {
                     *user_data.get::<RefCell<WindowInfo>>().unwrap().borrow_mut() = window_info;
+                }
+            }
+        }
+        self.refresh(space);
+    }
+
+    fn update_orientation<'a>(
+        &mut self,
+        new_orientation: Orientation,
+        seat: &Seat,
+        space: &mut Space,
+        mut focus_stack: Box<dyn Iterator<Item = &'a Window> + 'a>,
+    ) {
+        {
+            let output = super::output_from_seat(seat, space);
+            output
+                .user_data()
+                .insert_if_missing(|| RefCell::new(OutputInfo::default()));
+            let mut output_info = output
+                .user_data()
+                .get::<RefCell<OutputInfo>>()
+                .unwrap()
+                .borrow_mut();
+            let tree = &mut output_info.trees.entry(self.idx).or_insert_with(Tree::new);
+
+            let last_active = focus_stack
+                .find_map(|window| tree.root_node_id()
+                    .and_then(|root| tree.traverse_pre_order_ids(root).unwrap()
+                        .find(|id| matches!(tree.get(id).map(|n| n.data()), Ok(Data::Window(w)) if w == window))
+                    )
+                );
+
+            if let Some(ref node_id) = last_active {
+                let mut node_id = node_id.clone();
+                while let Some(parent_id) = tree.get(&node_id).unwrap().parent().cloned() {
+                    if let &mut Data::Fork {
+                        ref mut orientation,
+                        ..
+                    } = tree.get_mut(&parent_id).unwrap().data_mut()
+                    {
+                        *orientation = new_orientation;
+                        break;
+                    }
+                    node_id = parent_id;
                 }
             }
         }
