@@ -4,11 +4,20 @@ use crate::shell::layout::{Layout, Orientation};
 use id_tree::{InsertBehavior, MoveBehavior, Node, NodeId, NodeIdError, RemoveBehavior, Tree};
 use smithay::{
     desktop::{layer_map_for_output, Kind, Space, Window},
-    reexports::wayland_protocols::xdg_shell::server::xdg_toplevel::State as XdgState,
+    reexports::wayland_protocols::xdg_shell::server::xdg_toplevel::{
+        ResizeEdge, State as XdgState,
+    },
     utils::Rectangle,
-    wayland::{output::Output, seat::Seat},
+    wayland::{
+        output::Output,
+        seat::{PointerGrabStartData, Seat},
+        Serial,
+    },
 };
 use std::{cell::RefCell, collections::HashMap};
+
+mod grabs;
+pub use self::grabs::*;
 
 #[derive(Debug)]
 pub struct TilingLayout {
@@ -187,6 +196,63 @@ impl Layout for TilingLayout {
         {
             for window in dead_windows {
                 self.unmap_window(&window);
+            }
+        }
+    }
+
+    fn resize_request(
+        &mut self,
+        _space: &mut Space,
+        window: &Window,
+        seat: &Seat,
+        serial: Serial,
+        start_data: PointerGrabStartData,
+        edges: ResizeEdge,
+    ) {
+        if let Some(pointer) = seat.get_pointer() {
+            if let Some(info) = window.user_data().get::<RefCell<WindowInfo>>() {
+                let output = &info.borrow().output;
+                let mut output_info = output
+                    .user_data()
+                    .get::<RefCell<OutputInfo>>()
+                    .unwrap()
+                    .borrow_mut();
+                let tree = &mut output_info.trees.entry(self.idx).or_insert_with(Tree::new);
+
+                let mut node_id = info.borrow().node.clone();
+                while let Some(parent_id) = tree.get(&node_id).unwrap().parent().cloned() {
+                    if let &Data::Fork {
+                        ref orientation,
+                        ref ratio,
+                    } = tree.get(&parent_id).unwrap().data()
+                    {
+                        // found a fork
+                        // which child are we?
+                        let first = tree.children_ids(&parent_id).unwrap().next() == Some(&node_id);
+                        match (first, orientation, edges) {
+                            (true, Orientation::Horizontal, ResizeEdge::Bottom)
+                            | (false, Orientation::Horizontal, ResizeEdge::Top)
+                            | (true, Orientation::Vertical, ResizeEdge::Right)
+                            | (false, Orientation::Vertical, ResizeEdge::Left) => {
+                                let grab = ResizeForkGrab {
+                                    start_data,
+                                    node_id: parent_id,
+                                    initial_ratio: *ratio,
+                                    idx: self.idx,
+                                    output: output.clone(),
+                                };
+
+                                slog_scope::debug!("Tiling resize grabs");
+                                pointer.set_grab(grab, serial, 0);
+                                return;
+                            }
+                            (x, y, z) => {
+                                slog_scope::debug!("Nope: {:?}, {:?}, {:?}", x, y, z);
+                            }
+                        }
+                    }
+                    node_id = parent_id;
+                }
             }
         }
     }
