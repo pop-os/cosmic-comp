@@ -16,7 +16,10 @@ use smithay::{
         output::Output,
         seat::{PointerGrabStartData, Seat},
         shell::{
-            wlr_layer::{wlr_layer_shell_init, LayerShellRequest, LayerSurfaceAttributes},
+            wlr_layer::{
+                wlr_layer_shell_init, KeyboardInteractivity, Layer, LayerShellRequest,
+                LayerSurfaceAttributes, LayerSurfaceCachedState,
+            },
             xdg::{
                 xdg_shell_init, Configure, XdgPopupSurfaceRoleAttributes, XdgRequest,
                 XdgToplevelSurfaceRoleAttributes,
@@ -225,9 +228,25 @@ pub fn init_shell(config: &Config, display: &mut Display) -> super::Shell {
                     .and_then(Output::from_resource)
                     .unwrap_or_else(|| active_output(seat, &*state));
 
+                let focus = surface
+                    .get_surface()
+                    .map(|surface| {
+                        with_states(surface, |states| {
+                            let state = states.cached_state.current::<LayerSurfaceCachedState>();
+                            matches!(state.layer, Layer::Top | Layer::Overlay)
+                                && state.keyboard_interactivity == KeyboardInteractivity::Exclusive
+                        })
+                        .unwrap()
+                    })
+                    .unwrap_or(false);
+
                 let mut map = layer_map_for_output(&output);
-                map.map_layer(&LayerSurface::new(surface, namespace))
+                map.map_layer(&LayerSurface::new(surface.clone(), namespace))
                     .unwrap();
+
+                if focus {
+                    state.shell.set_focus(surface.get_surface(), seat);
+                }
             }
             _ => {}
         },
