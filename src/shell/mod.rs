@@ -191,6 +191,10 @@ impl Shell {
     }
 
     pub fn activate(&mut self, seat: &Seat, output: &Output, idx: usize) {
+        if idx > MAX_WORKSPACES {
+            return;
+        }
+
         match self.mode {
             Mode::OutputBound => {
                 for output in &self.outputs {
@@ -237,16 +241,20 @@ impl Shell {
         };
     }
 
-    pub fn move_current_window(&mut self, seat: &Seat, output: &Output, idx: u8) {
+    pub fn move_current_window(&mut self, seat: &Seat, output: &Output, idx: usize) {
+        if idx > MAX_WORKSPACES {
+            return;
+        }
+
         let workspace = self.active_space_mut(output);
-        if idx == workspace.idx {
+        if idx == workspace.idx as usize {
             return;
         }
 
         let maybe_window = workspace.focus_stack(seat).last();
         if let Some(window) = maybe_window {
             workspace.unmap_window(&window);
-            self.spaces[idx as usize].map_window(&window, seat);
+            self.spaces[idx].map_window(&window, seat);
         }
     }
 
