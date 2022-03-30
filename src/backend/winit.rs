@@ -102,8 +102,6 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
     );
     output.set_preferred(mode);
 
-    state.common.shell.map_output(&output);
-
     let (event_ping, event_source) =
         ping::make_ping().with_context(|| "Failed to init eventloop timer for winit")?;
     let (render_ping, render_source) =
@@ -150,6 +148,7 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
         #[cfg(feature = "debug")]
         fps: Fps::default(),
     });
+    state.common.shell.map_output(&output, &mut state.backend, &state.common.config);
 
     Ok(())
 }

@@ -229,7 +229,7 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
         .x11()
         .add_window(&mut *state.common.display.borrow_mut(), event_loop.handle())
         .with_context(|| "Failed to create wl_output")?;
-    state.common.shell.map_output(&output);
+    state.common.shell.map_output(&output, &mut state.backend, &state.common.config);
 
     event_loop
         .handle()

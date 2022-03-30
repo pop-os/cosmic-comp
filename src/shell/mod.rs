@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{config::Config, input::active_output, state::Common};
+use crate::{
+    config::{Config, OutputInfo, OutputConfig},
+    input::active_output,
+    state::{BackendData, Common},
+};
 pub use smithay::{
     desktop::{PopupGrab, PopupManager, PopupUngrabStrategy, Space, Window},
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Logical, Point, Rectangle, Size},
     wayland::{
-        compositor::with_states, output::Output, seat::Seat,
+        compositor::with_states, output::{Mode as OutputMode, Output}, seat::Seat,
         shell::xdg::XdgToplevelSurfaceRoleAttributes, Serial, SERIAL_COUNTER,
     },
 };
@@ -73,7 +77,7 @@ impl Shell {
     fn new(config: &Config) -> Self {
         Shell {
             popups: PopupManager::new(None),
-            mode: config.workspace_mode,
+            mode: config.static_conf.workspace_mode,
             outputs: Vec::new(),
             spaces: unsafe {
                 let mut spaces = [UNINIT_SPACE; MAX_WORKSPACES];
@@ -85,38 +89,103 @@ impl Shell {
         }
     }
 
-    pub fn map_output(&mut self, output: &Output) {
-        match self.mode {
-            Mode::OutputBound => {
-                output
-                    .user_data()
-                    .insert_if_missing(|| ActiveWorkspace::new());
+    fn apply_config(output: &Output, backend: &mut BackendData) -> Result<(), impl std::error::Error> {
+        backend.apply_config_for_output(output)?;
 
-                let (idx, workspace) = self
-                    .spaces
-                    .iter_mut()
-                    .enumerate()
-                    .find(|(_, x)| x.space.outputs().next().is_none())
-                    .expect("More then 10 outputs?");
-                output
-                    .user_data()
-                    .get::<ActiveWorkspace>()
-                    .unwrap()
-                    .set(idx);
-                workspace.space.map_output(output, 1.0, (0, 0));
-                self.outputs.push(output.clone());
+        let final_config = output.user_data().get::<RefCell<OutputConfig>>().unwrap().borrow();
+        let mode = Some(OutputMode {
+            size: final_config.mode_size(),
+            refresh: final_config.mode_refresh(),
+        }).filter(|m| match output.current_mode() {
+            None => true,
+            Some(c_m) => m.size != c_m.size || m.refresh != c_m.refresh,
+        });
+        let transform = Some(final_config.transform.into()).filter(|x| *x != output.current_transform());
+        let scale = Some(final_config.scale.ceil() as i32).filter(|x| *x != output.current_scale());
+        let location = Some(final_config.position.into()).filter(|x| *x != output.current_location());
+        output.change_current_state(
+            mode,
+            transform,
+            scale,
+            location,
+        );
+
+        Ok(())
+    }
+
+    pub fn map_output(&mut self, output: &Output, backend: &mut BackendData, config: &Config) {
+        self.outputs.push(output.clone());
+
+        let mut infos = self.outputs().cloned().map(Into::<crate::config::OutputInfo>::into).collect::<Vec<_>>();
+        infos.sort();
+        if let Some(configs) = config.dynamic_conf.outputs().config.get(&infos) {
+            let mut reset = false;
+            let known_good_configs = self.outputs.iter().map(|output| {
+                output.user_data().get::<RefCell<OutputConfig>>().unwrap().borrow().clone()
+            }).collect::<Vec<_>>();
+
+            for (name, config) in infos.iter().map(|o| &o.connector).zip(configs.into_iter().cloned()) {
+                let output = self.outputs.iter().find(|o| &o.name() == name).unwrap();
+                *output.user_data().get::<RefCell<OutputConfig>>().unwrap().borrow_mut() = config;
+                if let Err(err) = Self::apply_config(output, backend) {
+                    slog_scope::warn!("Failed to set new config for output {}: {}", output.name(), err);
+                    reset = true;
+                    break;
+                }
             }
-            Mode::Global { active } => {
-                // just put new outputs on the right of the previous ones.
-                // in the future we will only need that as a fallback and need to read saved configurations here
+
+            if reset {
+                for (output, config) in self.outputs.iter().zip(known_good_configs.into_iter()) {
+                    *output.user_data().get::<RefCell<OutputConfig>>().unwrap().borrow_mut() = config;
+                    if let Err(err) = Self::apply_config(output, backend) {
+                        slog_scope::error!("Failed to reset config for output {}: {}", output.name(), err);
+                        self.unmap_output(output);
+                    }
+                }
+            }
+
+            if let Mode::Global { active } = self.mode {
                 let workspace = &mut self.spaces[active];
-                let x = workspace
-                    .space
-                    .outputs()
-                    .map(|output| workspace.space.output_geometry(&output).unwrap())
-                    .fold(0, |acc, geo| std::cmp::max(acc, geo.loc.x + geo.size.w));
-                workspace.space.map_output(output, 1.0, (x, 0));
-                self.outputs.push(output.clone());
+                for output in self.outputs.iter() {
+                    let config = output.user_data().get::<RefCell<OutputConfig>>().unwrap().borrow();
+                    workspace.space.map_output(output, config.scale, config.position);
+                }
+            }
+        } else {
+            let new_pos_x = self.outputs().map(|o| {
+                let logical_size = self.active_space(o).space.output_geometry(o).map(|x| x.size).unwrap_or((0, 0).into());
+                o.user_data().get::<RefCell<OutputConfig>>().unwrap().borrow().position.0 + logical_size.w
+            }).max().unwrap_or(0);
+
+            let new_pos = (new_pos_x, 0);
+            output.user_data().get::<RefCell<OutputConfig>>().unwrap().borrow_mut().position = new_pos;
+            output.change_current_state(None, None, None, Some(new_pos.into()));
+
+            match self.mode {
+                Mode::OutputBound => {
+                    output
+                        .user_data()
+                        .insert_if_missing(|| ActiveWorkspace::new());
+
+                    let (idx, workspace) = self
+                        .spaces
+                        .iter_mut()
+                        .enumerate()
+                        .find(|(_, x)| x.space.outputs().next().is_none())
+                        .expect("More then 10 outputs?");
+                    output
+                        .user_data()
+                        .get::<ActiveWorkspace>()
+                        .unwrap()
+                        .set(idx);
+                    workspace.space.map_output(output, 1.0, (0, 0));
+                }
+                Mode::Global { active } => {
+                    // just put new outputs on the right of the previous ones.
+                    // in the future we will only need that as a fallback and need to read saved configurations here
+                    let workspace = &mut self.spaces[active];
+                    workspace.space.map_output(output, 1.0, new_pos);
+                }
             }
         }
     }

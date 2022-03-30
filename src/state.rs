@@ -2,7 +2,7 @@
 
 use crate::{
     backend::{kms::KmsState, winit::WinitState, x11::X11State},
-    config::Config,
+    config::{Config, OutputConfig},
     logger::LogState,
     shell::{init_shell, Shell},
 };
@@ -102,6 +102,16 @@ impl BackendData {
         match self {
             BackendData::Winit(ref mut winit_state) => winit_state,
             _ => unreachable!("Called winit in non winit backend"),
+        }
+    }
+
+    pub fn apply_config_for_output(&mut self, output: &Output) -> Result<(), impl std::error::Error> {
+        match self {
+            BackendData::Kms(ref mut state) => state.apply_config_for_output(output),
+            _ => {
+                // TODO: reset the mode for nested backends, because we have no control over it
+                Ok(())
+            },
         }
     }
 

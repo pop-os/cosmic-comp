@@ -1,25 +1,105 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::shell::layout::FocusDirection;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use smithay::wayland::seat::Keysym;
 pub use smithay::{
     backend::input::KeyState,
-    wayland::seat::{keysyms as KeySyms, ModifiersState as KeyModifiers},
+    wayland::{
+        output::Output,
+        seat::{keysyms as KeySyms, ModifiersState as KeyModifiers},
+    },
+    utils::{Point, Size, Logical, Physical, Transform},
 };
 use std::{collections::HashMap, fs::OpenOptions, path::PathBuf};
 use xkbcommon::xkb;
 
-#[derive(Debug, Deserialize)]
 pub struct Config {
+    pub static_conf: StaticConfig,
+    pub dynamic_conf: DynamicConfig,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StaticConfig {
     pub key_bindings: HashMap<KeyPattern, Action>,
     pub workspace_mode: crate::shell::Mode,
 }
 
+pub struct DynamicConfig {
+    outputs: (Option<PathBuf>, OutputsConfig),
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct OutputsConfig {
+    pub config: HashMap<Vec<OutputInfo>, Vec<OutputConfig>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct OutputInfo {
+    pub connector: String,
+    pub make: String,
+    pub model: String,
+}
+
+impl From<Output> for OutputInfo {
+    fn from(o: Output) -> OutputInfo {
+        let physical = o.physical_properties();
+        OutputInfo {
+            connector: o.name(),
+            make: physical.make,
+            model: physical.model,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+pub struct OutputConfig {
+    pub mode: ((i32, i32), Option<String>),
+    pub vrr: bool,
+    pub scale: f64,
+    #[serde(with="TransformDef")]
+    pub transform: Transform,
+    pub position: (i32, i32),
+}
+
+impl OutputConfig {
+    fn mode_size(&self) -> Size<i32, Physical> {
+        self.mode.0.into()
+    }
+
+    fn mode_refresh(&self) -> i32 {
+        self.mode.1.as_deref().map(|x| str::parse::<f64>(x).unwrap().round() as i32).unwrap_or(60)
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "Transform")]
+enum TransformDef {
+    Normal,
+    _90,
+    _180,
+    _270,
+    Flipped,
+    Flipped90,
+    Flipped180,
+    Flipped270,
+}
+
 impl Config {
     pub fn load() -> Config {
-        let mut locations = if let Ok(base) = xdg::BaseDirectories::new() {
-            base.list_config_files_once("cosmic-comp.ron")
+        let xdg = xdg::BaseDirectories::new().ok();
+        Config {
+            static_conf: Self::load_static(xdg.as_ref()),
+            dynamic_conf: Self::load_dynamic(xdg.as_ref()),
+        }
+    }
+
+    fn load_static(xdg: Option<&xdg::BaseDirectories>) -> StaticConfig {
+        let mut locations = if let Some(base) = xdg {
+            vec![
+                base.get_config_file("cosmic-comp.ron"),
+                base.get_config_file("cosmic-comp/config.ron"),
+            ]
         } else {
             Vec::with_capacity(3)
         };
@@ -33,16 +113,84 @@ impl Config {
         locations.push(PathBuf::from("/etc/cosmic-comp.ron"));
 
         for path in locations {
+            slog_scope::debug!("Trying config location: {}", path.display());
             if path.exists() {
+                slog_scope::info!("Using config at {}", path.display());
                 return ron::de::from_reader(OpenOptions::new().read(true).open(path).unwrap())
                     .expect("Malformed config file");
             }
         }
 
-        Config {
+        StaticConfig {
             key_bindings: HashMap::new(),
             workspace_mode: crate::shell::Mode::global(),
         }
+    }
+
+    fn load_dynamic(xdg: Option<&xdg::BaseDirectories>) -> DynamicConfig {
+        let output_path = xdg.and_then(|base| base.place_state_file("cosmic-comp/outputs.ron").ok());
+        let outputs = Self::load_outputs(&output_path);
+
+        DynamicConfig {
+            outputs: (output_path, outputs),
+        }
+    }
+
+    fn load_outputs(path: &Option<PathBuf>) -> OutputsConfig {
+        if let Some(path) = path.as_ref() {
+            if path.exists() {
+                match ron::de::from_reader(OpenOptions::new().read(true).open(path).unwrap()) {
+                    Ok(config) => return config,
+                    Err(err) => {
+                        slog_scope::warn!("Failed to read output_config ({}), resetting..", err);
+                        std::fs::remove_file(path);
+                    }
+                };
+            }
+        }
+
+        OutputsConfig {
+            config: HashMap::new(),
+        }
+    }
+}
+
+pub struct PersistenceGuard<'a, T: Serialize>(Option<PathBuf>, &'a mut T);
+
+impl<'a, T: Serialize> std::ops::Deref for PersistenceGuard<'a, T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.1
+    }
+}
+
+impl<'a, T: Serialize> std::ops::DerefMut for PersistenceGuard<'a, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.1
+    }
+}
+
+impl<'a, T: Serialize> Drop for PersistenceGuard<'a, T> {
+    fn drop(&mut self) {
+        if let Some(path) = self.0.as_ref() {
+            let writer = match OpenOptions::new().write(true).open(path) {
+                Ok(writer) => writer,
+                Err(err) => {
+                    slog_scope::warn!("Failed to persist {}: {}", path.display(), err);
+                }
+            };
+            ron::ser::to_writer(writer, &self.1);
+        }
+    }
+}
+
+impl DynamicConfig {
+    pub fn outputs(&self) -> &OutputsConfig {
+        &self.outputs.1
+    }
+
+    pub fn outputs_mut<'a>(&'a mut self) -> PersistenceGuard<'a, OutputsConfig> {
+        PersistenceGuard(self.outputs.0.clone(), &mut self.outputs.1)
     }
 }
 

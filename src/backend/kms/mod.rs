@@ -301,7 +301,7 @@ impl State {
                 &mut self.common.display.borrow_mut(),
                 &mut self.common.event_loop_handle,
             ) {
-                Ok(output) => self.common.shell.map_output(&output),
+                Ok(output) => self.common.shell.map_output(&output, &mut self.backend, &self.common.config),
                 Err(err) => slog_scope::warn!("Failed to initialize output: {}", err),
             };
         }
@@ -332,7 +332,7 @@ impl State {
                     &mut self.common.display.borrow_mut(),
                     &mut self.common.event_loop_handle,
                 ) {
-                    Ok(output) => self.common.shell.map_output(&output),
+                    Ok(output) => self.common.shell.map_output(&output, &mut self.backend, &self.common.config),
                     Err(err) => slog_scope::warn!("Failed to initialize output: {}", err),
                 };
             }
@@ -571,6 +571,10 @@ impl Surface {
 }
 
 impl KmsState {
+    pub fn apply_config_for_output(&mut self, output: &Output) -> Result<(), impl std::error::Error> {
+        
+    }
+    
     pub fn schedule_render(&mut self, output: &Output) {
         if let Some((device, surface)) = self
             .devices
