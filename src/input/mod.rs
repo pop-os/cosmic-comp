@@ -3,7 +3,7 @@
 use crate::{config::Action, state::Common};
 use smithay::{
     backend::input::{Device, DeviceCapability, InputBackend, InputEvent, KeyState},
-    desktop::{layer_map_for_output, Space, WindowSurfaceType},
+    desktop::{layer_map_for_output, Kind, Space, WindowSurfaceType},
     reexports::wayland_server::{protocol::wl_surface::WlSurface, Display},
     utils::{Logical, Point},
     wayland::{
@@ -264,7 +264,17 @@ impl Common {
                                             Action::Debug => slog_scope::info!(
                                                 "Debug overlay not included in this version"
                                             ),
-                                            Action::Close => { /* TODO */ }
+                                            Action::Close => {
+                                                let current_output = active_output(seat, &self);
+                                                let workspace =
+                                                    self.shell.active_space_mut(&current_output);
+                                                if let Some(window) = workspace.focus_stack.last() {
+                                                    #[allow(irrefutable_let_patterns)]
+                                                    if let Kind::Xdg(xdg) = &window.toplevel() {
+                                                        xdg.send_close();
+                                                    }
+                                                }
+                                            }
                                             Action::Workspace(key_num) => {
                                                 let current_output = active_output(seat, &self);
                                                 let workspace = match key_num {
