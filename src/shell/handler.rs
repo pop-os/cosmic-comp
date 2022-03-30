@@ -4,8 +4,8 @@ use crate::{config::Config, input::active_output, state::State, utils::SurfaceDr
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
     desktop::{
-        layer_map_for_output, Kind, LayerSurface, PopupKeyboardGrab, PopupKind, PopupPointerGrab,
-        PopupUngrabStrategy, Window,
+        layer_map_for_output, Kind, LayerSurface, PopupGrab, PopupKeyboardGrab, PopupKind,
+        PopupPointerGrab, PopupUngrabStrategy, Window,
     },
     reexports::{
         wayland_protocols::xdg_shell::server::xdg_toplevel,
@@ -28,7 +28,9 @@ use smithay::{
         Serial,
     },
 };
-use std::{cell::Cell, rc::Rc, sync::Mutex};
+use std::{cell::Cell, sync::Mutex};
+
+pub type PopupGrabData = Cell<Option<PopupGrab>>;
 
 pub fn init_shell(config: &Config, display: &mut Display) -> super::Shell {
     compositor_init(
@@ -36,14 +38,15 @@ pub fn init_shell(config: &Config, display: &mut Display) -> super::Shell {
         move |surface, mut ddata| {
             on_commit_buffer_handler(&surface);
             let state = ddata.get::<State>().unwrap();
-            state.common.shell.commit(&surface);
+            state
+                .common
+                .shell
+                .commit(&surface, state.common.seats.iter());
             commit(&surface, state)
         },
         None,
     );
 
-    let popup_grab = Rc::new(Cell::new(None));
-    let popup_grab_clone = popup_grab.clone();
     let (_xdg_shell_state, _xdg_global) = xdg_shell_init(
         display,
         move |event, mut ddata| {
@@ -186,7 +189,7 @@ pub fn init_shell(config: &Config, display: &mut Display) -> super::Shell {
                                 grab.ungrab(PopupUngrabStrategy::All);
                                 return;
                             }
-                            keyboard.set_focus(grab.current_grab().as_ref(), serial);
+                            state.set_focus(grab.current_grab().as_ref(), &seat, Some(serial));
                             keyboard.set_grab(PopupKeyboardGrab::new(&grab), serial);
                         }
 
@@ -203,7 +206,12 @@ pub fn init_shell(config: &Config, display: &mut Display) -> super::Shell {
                             pointer.set_grab(PopupPointerGrab::new(&grab), serial, 0);
                         }
 
-                        popup_grab_clone.set(Some(grab));
+                        seat.user_data()
+                            .insert_if_missing(|| PopupGrabData::new(None));
+                        seat.user_data()
+                            .get::<PopupGrabData>()
+                            .unwrap()
+                            .set(Some(grab));
                     }
                 }
                 _ => { /*TODO*/ }
@@ -222,11 +230,11 @@ pub fn init_shell(config: &Config, display: &mut Display) -> super::Shell {
                 ..
             } => {
                 let state = &mut ddata.get::<State>().unwrap().common;
-                let seat = &state.last_active_seat;
+                let seat = state.last_active_seat.clone();
                 let output = wl_output
                     .as_ref()
                     .and_then(Output::from_resource)
-                    .unwrap_or_else(|| active_output(seat, &*state));
+                    .unwrap_or_else(|| active_output(&seat, &*state));
 
                 let focus = surface
                     .get_surface()
@@ -245,7 +253,7 @@ pub fn init_shell(config: &Config, display: &mut Display) -> super::Shell {
                     .unwrap();
 
                 if focus {
-                    state.shell.set_focus(surface.get_surface(), seat);
+                    state.set_focus(surface.get_surface(), &seat, None);
                 }
             }
             _ => {}
@@ -253,7 +261,7 @@ pub fn init_shell(config: &Config, display: &mut Display) -> super::Shell {
         None,
     );
 
-    super::Shell::new(config, popup_grab)
+    super::Shell::new(config)
 }
 
 fn check_grab_preconditions(

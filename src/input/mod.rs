@@ -268,7 +268,9 @@ impl Common {
                                                 let current_output = active_output(seat, &self);
                                                 let workspace =
                                                     self.shell.active_space_mut(&current_output);
-                                                if let Some(window) = workspace.focus_stack.last() {
+                                                if let Some(window) =
+                                                    workspace.focus_stack(seat).last()
+                                                {
                                                     #[allow(irrefutable_let_patterns)]
                                                     if let Kind::Xdg(xdg) = &window.toplevel() {
                                                         xdg.send_close();
@@ -536,7 +538,7 @@ impl Common {
                                         }
                                     };
 
-                                    self.shell.set_focus(under.as_ref(), seat);
+                                    self.set_focus(under.as_ref(), seat, None);
                                 }
                                 wl_pointer::ButtonState::Pressed
                             }

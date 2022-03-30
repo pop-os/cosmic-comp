@@ -57,6 +57,7 @@ fn main() -> Result<()> {
         display.borrow_mut().flush_clients(state);
         // trigger routines
         state.common.shell.refresh();
+        state.common.refresh_focus();
     })?;
 
     let _log = state.destroy();

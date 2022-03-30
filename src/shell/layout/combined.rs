@@ -63,7 +63,16 @@ impl<A: Layout, B: Layout> Layout for Combined<A, B> {
         self.windows_a.retain(|w| w.toplevel().alive());
         self.windows_b.retain(|w| w.toplevel().alive());
     }
-    //fn unmap_window(&mut self, space: &mut Space, window: &Window);
+
+    fn unmap_window(&mut self, space: &mut Space, window: &Window) {
+        if self.windows_a.contains(window) {
+            self.windows_a.retain(|w| w != window);
+            self.first.unmap_window(space, window)
+        } else if self.windows_b.contains(window) {
+            self.windows_b.retain(|w| w != window);
+            self.second.unmap_window(space, window)
+        }
+    }
 
     fn move_request(
         &mut self,

@@ -9,13 +9,26 @@ use smithay::{
         Serial,
     },
 };
-pub struct FocusStack(IndexSet<Window>);
+use std::{
+    cell::{Ref, RefCell, RefMut},
+    collections::HashMap,
+};
 
-impl FocusStack {
-    pub fn new() -> FocusStack {
-        FocusStack(IndexSet::new())
+pub struct FocusStack<'a>(Ref<'a, IndexSet<Window>>);
+pub struct FocusStackMut<'a>(RefMut<'a, IndexSet<Window>>);
+
+impl<'a> FocusStack<'a> {
+    pub fn last(&self) -> Option<Window> {
+        self.0.iter().rev().find(|w| w.toplevel().alive()).cloned()
     }
 
+    pub fn iter<'b>(&'b self) -> Box<dyn Iterator<Item = &'b Window> + 'b> {
+        //working around object-safety constraints for trait Layout
+        Box::new(self.0.iter().rev().filter(|w| w.toplevel().alive()))
+    }
+}
+
+impl<'a> FocusStackMut<'a> {
     pub fn append(&mut self, window: &Window) {
         self.0.retain(|w| w.toplevel().alive());
         self.0.shift_remove(window);
@@ -26,27 +39,50 @@ impl FocusStack {
         self.0.iter().rev().find(|w| w.toplevel().alive()).cloned()
     }
 
-    pub fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Window> + 'a> {
+    pub fn iter<'b>(&'b self) -> Box<dyn Iterator<Item = &'b Window> + 'b> {
         //working around object-safety constraints for trait Layout
         Box::new(self.0.iter().rev().filter(|w| w.toplevel().alive()))
     }
 }
 
+type FocusStackData = RefCell<(HashMap<u8, IndexSet<Window>>, IndexSet<Window>)>;
+
 pub struct Workspace {
+    idx: u8,
     pub space: Space,
     pub(super) layout: Box<dyn Layout>,
-    pub focus_stack: FocusStack,
     pub(super) pending_windows: Vec<(Window, Seat)>,
 }
 
 impl Workspace {
     pub fn new(idx: u8) -> Workspace {
         Workspace {
+            idx,
             space: Space::new(None),
             layout: layout::new_default_layout(idx),
-            focus_stack: FocusStack::new(),
             pending_windows: Vec::new(),
         }
+    }
+
+    pub fn focus_stack<'a>(&'a self, seat: &'a Seat) -> FocusStack<'a> {
+        seat.user_data()
+            .insert_if_missing(|| FocusStackData::new((HashMap::new(), IndexSet::new())));
+        FocusStack(Ref::map(
+            seat.user_data().get::<FocusStackData>().unwrap().borrow(),
+            |map| map.0.get(&self.idx).unwrap_or(&map.1), //TODO: workaround until Ref::filter_map goes stable
+        ))
+    }
+
+    pub fn focus_stack_mut<'a>(&'a self, seat: &'a Seat) -> FocusStackMut<'a> {
+        seat.user_data()
+            .insert_if_missing(|| FocusStackData::new((HashMap::new(), IndexSet::new())));
+        FocusStackMut(RefMut::map(
+            seat.user_data()
+                .get::<FocusStackData>()
+                .unwrap()
+                .borrow_mut(),
+            |map| map.0.entry(self.idx).or_insert_with(|| IndexSet::new()),
+        ))
     }
 
     pub fn pending_window(&mut self, window: Window, seat: &Seat) {
@@ -54,8 +90,17 @@ impl Workspace {
     }
 
     pub(super) fn map_window<'a>(&mut self, window: &Window, seat: &Seat) {
+        seat.user_data()
+            .insert_if_missing(|| FocusStackData::new((HashMap::new(), IndexSet::new())));
+        let focus_stack = FocusStackMut(RefMut::map(
+            seat.user_data()
+                .get::<FocusStackData>()
+                .unwrap()
+                .borrow_mut(),
+            |map| map.0.entry(self.idx).or_insert_with(|| IndexSet::new()),
+        ));
         self.layout
-            .map_window(&mut self.space, window, seat, self.focus_stack.iter())
+            .map_window(&mut self.space, window, seat, focus_stack.iter())
     }
 
     pub fn refresh(&mut self) {
@@ -64,8 +109,17 @@ impl Workspace {
     }
 
     pub fn update_orientation(&mut self, seat: &Seat, orientation: layout::Orientation) {
+        seat.user_data()
+            .insert_if_missing(|| FocusStackData::new((HashMap::new(), IndexSet::new())));
+        let focus_stack = FocusStackMut(RefMut::map(
+            seat.user_data()
+                .get::<FocusStackData>()
+                .unwrap()
+                .borrow_mut(),
+            |map| map.0.entry(self.idx).or_insert_with(|| IndexSet::new()),
+        ));
         self.layout
-            .update_orientation(orientation, seat, &mut self.space, self.focus_stack.iter())
+            .update_orientation(orientation, seat, &mut self.space, focus_stack.iter())
     }
 
     pub fn maximize_request(&mut self, window: &Window, output: &Output) {

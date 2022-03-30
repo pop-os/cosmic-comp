@@ -1,20 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::config::Config;
+use crate::{config::Config, input::active_output, state::Common};
 pub use smithay::{
     desktop::{PopupGrab, PopupManager, PopupUngrabStrategy, Space, Window},
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Logical, Point, Rectangle, Size},
-    wayland::{output::Output, seat::Seat, SERIAL_COUNTER},
+    wayland::{
+        compositor::with_states, output::Output, seat::Seat,
+        shell::xdg::XdgToplevelSurfaceRoleAttributes, Serial, SERIAL_COUNTER,
+    },
 };
-use std::{cell::Cell, mem::MaybeUninit, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    mem::MaybeUninit,
+    sync::Mutex,
+};
 
 pub const MAX_WORKSPACES: usize = 10; // TODO?
 
 mod handler;
 pub mod layout;
 mod workspace;
-pub use self::handler::init_shell;
+pub use self::handler::{init_shell, PopupGrabData};
 pub use self::layout::Layout;
 pub use self::workspace::*;
 
@@ -55,7 +62,6 @@ impl Mode {
 
 pub struct Shell {
     popups: PopupManager,
-    popup_grab: Rc<Cell<Option<PopupGrab>>>,
     mode: Mode,
     outputs: Vec<Output>,
     pub spaces: [Workspace; MAX_WORKSPACES],
@@ -64,10 +70,9 @@ pub struct Shell {
 const UNINIT_SPACE: MaybeUninit<Workspace> = MaybeUninit::uninit();
 
 impl Shell {
-    fn new(config: &Config, popup_grab: Rc<Cell<Option<PopupGrab>>>) -> Self {
+    fn new(config: &Config) -> Self {
         Shell {
             popups: PopupManager::new(None),
-            popup_grab,
             mode: config.workspace_mode,
             outputs: Vec::new(),
             spaces: unsafe {
@@ -348,7 +353,7 @@ impl Shell {
         }
     }
 
-    pub fn commit(&mut self, surface: &WlSurface) {
+    pub fn commit<'a>(&mut self, surface: &WlSurface, seats: impl Iterator<Item = &'a Seat>) {
         let mut new_focus = None;
         for (idx, workspace) in self.spaces.iter_mut().enumerate() {
             if let Some((window, seat)) = workspace
@@ -376,21 +381,42 @@ impl Shell {
             workspace.space.commit(surface)
         }
         if let Some(seat) = new_focus {
-            self.set_focus(Some(surface), &seat)
+            self.set_focus(Some(surface), &seat, seats, None)
         }
         self.popups.commit(&surface);
     }
 
-    pub fn set_focus(&mut self, surface: Option<&WlSurface>, active_seat: &Seat) {
+    pub fn set_orientation(
+        &mut self,
+        seat: &Seat,
+        output: &Output,
+        orientation: layout::Orientation,
+    ) {
+        self.active_space_mut(output)
+            .update_orientation(seat, orientation)
+    }
+
+    fn set_focus<'a>(
+        &mut self,
+        surface: Option<&WlSurface>,
+        active_seat: &Seat,
+        seats: impl Iterator<Item = &'a Seat>,
+        serial: Option<Serial>,
+    ) {
         // update FocusStack and notify layouts about new focus (if any window)
         if let Some(surface) = surface {
             if let Some(workspace) = self.space_for_surface_mut(surface) {
                 if let Some(window) = workspace.space.window_for_surface(surface) {
-                    if Some(window) != workspace.focus_stack.last().as_ref() {
+                    let mut focus_stack = workspace.focus_stack_mut(active_seat);
+                    if Some(window) != focus_stack.last().as_ref() {
                         slog_scope::debug!("Focusing window: {:?}", window);
-                        workspace.focus_stack.append(window);
+                        focus_stack.append(window);
                         // also remove popup grabs, if we are switching focus
-                        if let Some(mut popup_grab) = self.popup_grab.take() {
+                        if let Some(mut popup_grab) = active_seat
+                            .user_data()
+                            .get::<PopupGrabData>()
+                            .and_then(|x| x.take())
+                        {
                             if !popup_grab.has_ended() {
                                 popup_grab.ungrab(PopupUngrabStrategy::All);
                             }
@@ -402,14 +428,24 @@ impl Shell {
 
         // update keyboard focus
         if let Some(keyboard) = active_seat.get_keyboard() {
-            keyboard.set_focus(surface, SERIAL_COUNTER.next_serial());
+            ActiveFocus::set(active_seat, surface.cloned());
+            keyboard.set_focus(
+                surface,
+                serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
+            );
         }
 
+        self.update_active(seats)
+    }
+
+    fn update_active<'a>(&self, seats: impl Iterator<Item = &'a Seat>) {
         // update activate status
-        let focused_windows = self
-            .outputs
-            .iter()
-            .flat_map(|o| self.active_space(o).focus_stack.last())
+        let focused_windows = seats
+            .flat_map(|seat| {
+                self.outputs
+                    .iter()
+                    .flat_map(|o| self.active_space(o).focus_stack(seat).last().clone())
+            })
             .collect::<Vec<_>>();
 
         for workspace in &self.spaces {
@@ -419,14 +455,102 @@ impl Shell {
             }
         }
     }
+}
 
-    pub fn set_orientation(
+pub struct ActiveFocus(RefCell<Option<WlSurface>>);
+
+impl ActiveFocus {
+    fn set(seat: &Seat, surface: Option<WlSurface>) {
+        if !seat
+            .user_data()
+            .insert_if_missing(|| ActiveFocus(RefCell::new(surface.clone())))
+        {
+            *seat
+                .user_data()
+                .get::<ActiveFocus>()
+                .unwrap()
+                .0
+                .borrow_mut() = surface;
+        }
+    }
+
+    fn get(seat: &Seat) -> Option<WlSurface> {
+        seat.user_data()
+            .get::<ActiveFocus>()
+            .and_then(|a| a.0.borrow().clone())
+    }
+}
+
+impl Common {
+    pub fn set_focus(
         &mut self,
-        seat: &Seat,
-        output: &Output,
-        orientation: layout::Orientation,
+        surface: Option<&WlSurface>,
+        active_seat: &Seat,
+        serial: Option<Serial>,
     ) {
-        self.active_space_mut(output)
-            .update_orientation(seat, orientation)
+        self.shell
+            .set_focus(surface, active_seat, self.seats.iter(), serial)
+    }
+
+    pub fn refresh_focus(&mut self) {
+        for seat in &self.seats {
+            let mut fixup = false;
+            let output = active_output(seat, &self);
+            let last_known_focus = ActiveFocus::get(seat);
+
+            if let Some(surface) = last_known_focus {
+                if surface.as_ref().is_alive() {
+                    let is_toplevel = with_states(&surface, |states| {
+                        states
+                            .data_map
+                            .get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
+                            .is_some()
+                    })
+                    .unwrap_or(false);
+                    if !is_toplevel {
+                        continue;
+                    }
+
+                    let workspace = self.shell.active_space(&output);
+                    if let Some(window) = workspace.space.window_for_surface(&surface) {
+                        let focus_stack = workspace.focus_stack(&seat);
+                        if focus_stack.last().map(|w| &w == window).unwrap_or(false) {
+                            continue;
+                        } else {
+                            fixup = true;
+                        }
+                    }
+                } else {
+                    fixup = true;
+                }
+            }
+
+            if fixup {
+                // also remove popup grabs, if we are switching focus
+                if let Some(mut popup_grab) = seat
+                    .user_data()
+                    .get::<PopupGrabData>()
+                    .and_then(|x| x.take())
+                {
+                    if !popup_grab.has_ended() {
+                        popup_grab.ungrab(PopupUngrabStrategy::All);
+                    }
+                }
+
+                // update keyboard focus
+                let surface = self
+                    .shell
+                    .active_space(&output)
+                    .focus_stack(seat)
+                    .last()
+                    .and_then(|w| w.toplevel().get_surface().cloned());
+                if let Some(keyboard) = seat.get_keyboard() {
+                    keyboard.set_focus(surface.as_ref(), SERIAL_COUNTER.next_serial());
+                    ActiveFocus::set(seat, surface);
+                }
+            }
+        }
+
+        self.shell.update_active(self.seats.iter())
     }
 }
