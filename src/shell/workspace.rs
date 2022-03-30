@@ -48,7 +48,7 @@ impl<'a> FocusStackMut<'a> {
 type FocusStackData = RefCell<(HashMap<u8, IndexSet<Window>>, IndexSet<Window>)>;
 
 pub struct Workspace {
-    idx: u8,
+    pub(super) idx: u8,
     pub space: Space,
     pub(super) layout: Box<dyn Layout>,
     pub(super) pending_windows: Vec<(Window, Seat)>,
@@ -89,7 +89,7 @@ impl Workspace {
         self.pending_windows.push((window, seat.clone()));
     }
 
-    pub(super) fn map_window<'a>(&mut self, window: &Window, seat: &Seat) {
+    pub(super) fn map_window(&mut self, window: &Window, seat: &Seat) {
         seat.user_data()
             .insert_if_missing(|| FocusStackData::new((HashMap::new(), IndexSet::new())));
         let focus_stack = FocusStackMut(RefMut::map(
@@ -101,6 +101,10 @@ impl Workspace {
         ));
         self.layout
             .map_window(&mut self.space, window, seat, focus_stack.iter())
+    }
+
+    pub(super) fn unmap_window(&mut self, window: &Window) {
+        self.layout.unmap_window(&mut self.space, window)
     }
 
     pub fn refresh(&mut self) {

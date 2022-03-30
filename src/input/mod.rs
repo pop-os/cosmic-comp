@@ -294,7 +294,14 @@ impl Common {
                                                     .add(&handle);
                                                 return FilterResult::Intercept(());
                                             }
-                                            Action::MoveToWorkspace(num) => { /* TODO */ }
+                                            Action::MoveToWorkspace(num) => {
+                                                let current_output = active_output(seat, &self);
+                                                self.shell.move_current_window(
+                                                    seat,
+                                                    &current_output,
+                                                    *num,
+                                                );
+                                            }
                                             Action::Focus(focus) => match focus {
                                                 _ => { /* TODO */ }
                                             },

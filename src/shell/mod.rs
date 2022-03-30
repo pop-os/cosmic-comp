@@ -237,6 +237,19 @@ impl Shell {
         };
     }
 
+    pub fn move_current_window(&mut self, seat: &Seat, output: &Output, idx: u8) {
+        let workspace = self.active_space_mut(output);
+        if idx == workspace.idx {
+            return;
+        }
+
+        let maybe_window = workspace.focus_stack(seat).last();
+        if let Some(window) = maybe_window {
+            workspace.unmap_window(&window);
+            self.spaces[idx as usize].map_window(&window, seat);
+        }
+    }
+
     #[cfg(feature = "debug")]
     pub fn mode(&self) -> &Mode {
         &self.mode

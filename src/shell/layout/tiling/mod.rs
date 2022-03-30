@@ -200,6 +200,12 @@ impl Layout for TilingLayout {
         }
     }
 
+    fn unmap_window(&mut self, space: &mut Space, window: &Window) {
+        self.unmap_window(&window);
+        space.unmap_window(&window);
+        self.refresh(space);
+    }
+
     fn resize_request(
         &mut self,
         _space: &mut Space,

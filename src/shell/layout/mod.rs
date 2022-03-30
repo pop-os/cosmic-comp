@@ -32,7 +32,7 @@ pub trait Layout {
         focus_stack: Box<dyn Iterator<Item = &'a Window> + 'a>,
     ); //working around object safety..
     fn refresh(&mut self, space: &mut Space);
-    //fn unmap_window(&mut self, space: &mut Space, window: &Window);
+    fn unmap_window(&mut self, space: &mut Space, window: &Window);
 
     fn update_orientation<'a>(
         &mut self,

@@ -54,6 +54,10 @@ impl Layout for FloatingLayout {
         // TODO make sure all windows are still visible on any output or move them
     }
 
+    fn unmap_window(&mut self, space: &mut Space, window: &Window) {
+        space.unmap_window(window)
+    }
+
     fn maximize_request(&mut self, space: &mut Space, window: &Window, output: &Output) {
         let layers = layer_map_for_output(&output);
         let geometry = layers.non_exclusive_zone();
