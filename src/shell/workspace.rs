@@ -126,6 +126,20 @@ impl Workspace {
             .update_orientation(orientation, seat, &mut self.space, focus_stack.iter())
     }
 
+    pub fn move_focus(&mut self, seat: &Seat, focus: layout::FocusDirection) -> Option<Window> {
+        seat.user_data()
+            .insert_if_missing(|| FocusStackData::new((HashMap::new(), IndexSet::new())));
+        let focus_stack = FocusStackMut(RefMut::map(
+            seat.user_data()
+                .get::<FocusStackData>()
+                .unwrap()
+                .borrow_mut(),
+            |map| map.0.entry(self.idx).or_insert_with(|| IndexSet::new()),
+        ));
+        self.layout
+            .move_focus(focus, seat, &mut self.space, focus_stack.iter())
+    }
+
     pub fn maximize_request(&mut self, window: &Window, output: &Output) {
         self.layout
             .maximize_request(&mut self.space, window, output)

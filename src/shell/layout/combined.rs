@@ -1,4 +1,4 @@
-use super::Layout;
+use super::{FocusDirection, Layout, Orientation};
 use smithay::{
     desktop::{Space, Window},
     reexports::wayland_protocols::xdg_shell::server::xdg_toplevel::ResizeEdge,
@@ -107,5 +107,45 @@ impl<A: Layout, B: Layout> Layout for Combined<A, B> {
             self.second
                 .resize_request(space, window, seat, serial, start_data, edges)
         }
+    }
+
+    fn move_focus<'a>(
+        &mut self,
+        direction: FocusDirection,
+        seat: &Seat,
+        space: &mut Space,
+        focus_stack: Box<dyn Iterator<Item = &'a Window> + 'a>,
+    ) -> Option<Window> {
+        let focus_stack = focus_stack.collect::<Vec<_>>();
+        match self.first.move_focus(
+            direction,
+            seat,
+            space,
+            Box::new(focus_stack.clone().into_iter()),
+        ) {
+            Some(window) => Some(window),
+            None => {
+                self.second
+                    .move_focus(direction, seat, space, Box::new(focus_stack.into_iter()))
+            }
+        }
+    }
+
+    fn update_orientation<'a>(
+        &mut self,
+        orientation: Orientation,
+        seat: &Seat,
+        space: &mut Space,
+        focus_stack: Box<dyn Iterator<Item = &'a Window> + 'a>,
+    ) {
+        let focus_stack = focus_stack.collect::<Vec<_>>();
+        self.first.update_orientation(
+            orientation,
+            seat,
+            space,
+            Box::new(focus_stack.clone().into_iter()),
+        );
+        self.second
+            .update_orientation(orientation, seat, space, Box::new(focus_stack.into_iter()));
     }
 }

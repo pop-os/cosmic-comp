@@ -409,6 +409,22 @@ impl Shell {
             .update_orientation(seat, orientation)
     }
 
+    pub fn move_focus<'a>(
+        &mut self,
+        seat: &Seat,
+        output: &Output,
+        focus: layout::FocusDirection,
+        seats: impl Iterator<Item = &'a Seat>,
+    ) {
+        if let Some(surface) = self
+            .active_space_mut(output)
+            .move_focus(seat, focus)
+            .and_then(|window| window.toplevel().get_surface().cloned())
+        {
+            self.set_focus(Some(&surface), seat, seats, None)
+        }
+    }
+
     fn set_focus<'a>(
         &mut self,
         surface: Option<&WlSurface>,

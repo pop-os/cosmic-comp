@@ -302,9 +302,15 @@ impl Common {
                                                     *num,
                                                 );
                                             }
-                                            Action::Focus(focus) => match focus {
-                                                _ => { /* TODO */ }
-                                            },
+                                            Action::Focus(focus) => {
+                                                let current_output = active_output(seat, &self);
+                                                self.shell.move_focus(
+                                                    seat,
+                                                    &current_output,
+                                                    *focus,
+                                                    self.seats.iter(),
+                                                );
+                                            }
                                             Action::Orientation(orientation) => {
                                                 let output = active_output(seat, &self);
                                                 self.shell.set_orientation(

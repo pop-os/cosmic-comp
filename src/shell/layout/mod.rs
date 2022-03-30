@@ -23,6 +23,14 @@ pub enum Orientation {
     Vertical,
 }
 
+#[derive(Debug, serde::Deserialize, Clone, Copy, PartialEq, Eq)]
+pub enum FocusDirection {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
 pub trait Layout {
     fn map_window<'a>(
         &mut self,
@@ -34,6 +42,16 @@ pub trait Layout {
     fn refresh(&mut self, space: &mut Space);
     fn unmap_window(&mut self, space: &mut Space, window: &Window);
 
+    fn move_focus<'a>(
+        &mut self,
+        direction: FocusDirection,
+        seat: &Seat,
+        space: &mut Space,
+        focus_stack: Box<dyn Iterator<Item = &'a Window> + 'a>,
+    ) -> Option<Window> {
+        let _ = (direction, seat, space, focus_stack);
+        None
+    }
     fn update_orientation<'a>(
         &mut self,
         orientation: Orientation,

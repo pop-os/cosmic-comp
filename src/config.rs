@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use crate::shell::layout::FocusDirection;
 use serde::Deserialize;
 use smithay::wayland::seat::Keysym;
 pub use smithay::{
@@ -181,15 +182,7 @@ pub enum Action {
     Close,
     Workspace(u8),
     MoveToWorkspace(u8),
-    Focus(FocusAction),
+    Focus(FocusDirection),
     Orientation(crate::shell::layout::Orientation),
     Spawn(String),
-}
-
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
-pub enum FocusAction {
-    Left,
-    Right,
-    Up,
-    Down,
 }
