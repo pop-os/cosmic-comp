@@ -146,7 +146,11 @@ where
             (0, 0).into()
         }
     };
-    SurfaceTree { surface, position }
+    SurfaceTree {
+        surface,
+        position,
+        z_index: 100,
+    }
 }
 
 pub fn draw_dnd_icon(
@@ -161,6 +165,7 @@ pub fn draw_dnd_icon(
     SurfaceTree {
         surface,
         position: location.into(),
+        z_index: 100,
     }
 }
 
