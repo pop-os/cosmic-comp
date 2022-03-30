@@ -200,16 +200,14 @@ impl Common {
 
                         let serial = SERIAL_COUNTER.next_serial();
                         let time = Event::time(&event);
-                        seat.get_keyboard().unwrap().input::<(), _>(
-                            keycode,
-                            state,
-                            serial,
-                            time,
-                            |modifiers, handle| {
+                        if let Some(action) = seat
+                            .get_keyboard()
+                            .unwrap()
+                            .input(keycode, state, serial, time, |modifiers, handle| {
                                 if state == KeyState::Released
                                     && userdata.get::<SupressedKeys>().unwrap().filter(&handle)
                                 {
-                                    return FilterResult::Intercept(());
+                                    return FilterResult::Intercept(None);
                                 }
 
                                 #[cfg(feature = "debug")]
@@ -223,7 +221,8 @@ impl Common {
                                                 state == KeyState::Pressed,
                                                 modifiers.clone(),
                                             );
-                                            return FilterResult::Intercept(());
+                                            userdata.get::<SupressedKeys>().unwrap().add(&handle);
+                                            return FilterResult::Intercept(None);
                                         }
                                         if self.egui.log_state.wants_keyboard() {
                                             self.egui.log_state.handle_keyboard(
@@ -231,7 +230,8 @@ impl Common {
                                                 state == KeyState::Pressed,
                                                 modifiers.clone(),
                                             );
-                                            return FilterResult::Intercept(());
+                                            userdata.get::<SupressedKeys>().unwrap().add(&handle);
+                                            return FilterResult::Intercept(None);
                                         }
                                     }
                                 }
@@ -242,107 +242,83 @@ impl Common {
                                         && binding.modifiers == *modifiers
                                         && handle.raw_syms().contains(&binding.key)
                                     {
-                                        match action {
-                                            Action::Terminate => {
-                                                userdata
-                                                    .get::<SupressedKeys>()
-                                                    .unwrap()
-                                                    .add(&handle);
-                                                self.should_stop = true;
-                                                return FilterResult::Intercept(());
-                                            }
-                                            #[cfg(feature = "debug")]
-                                            Action::Debug => {
-                                                self.egui.active = !self.egui.active;
-                                                userdata
-                                                    .get::<SupressedKeys>()
-                                                    .unwrap()
-                                                    .add(&handle);
-                                                return FilterResult::Intercept(());
-                                            }
-                                            #[cfg(not(feature = "debug"))]
-                                            Action::Debug => slog_scope::info!(
-                                                "Debug overlay not included in this version"
-                                            ),
-                                            Action::Close => {
-                                                let current_output = active_output(seat, &self);
-                                                let workspace =
-                                                    self.shell.active_space_mut(&current_output);
-                                                if let Some(window) =
-                                                    workspace.focus_stack(seat).last()
-                                                {
-                                                    #[allow(irrefutable_let_patterns)]
-                                                    if let Kind::Xdg(xdg) = &window.toplevel() {
-                                                        xdg.send_close();
-                                                    }
-                                                }
-                                            }
-                                            Action::Workspace(key_num) => {
-                                                let current_output = active_output(seat, &self);
-                                                let workspace = match key_num {
-                                                    0 => 9,
-                                                    x => x - 1,
-                                                };
-                                                self.shell.activate(
-                                                    seat,
-                                                    &current_output,
-                                                    workspace as usize,
-                                                );
-                                                userdata
-                                                    .get::<SupressedKeys>()
-                                                    .unwrap()
-                                                    .add(&handle);
-                                                return FilterResult::Intercept(());
-                                            }
-                                            Action::MoveToWorkspace(num) => {
-                                                let current_output = active_output(seat, &self);
-                                                self.shell.move_current_window(
-                                                    seat,
-                                                    &current_output,
-                                                    *num,
-                                                );
-                                            }
-                                            Action::Focus(focus) => {
-                                                let current_output = active_output(seat, &self);
-                                                self.shell.move_focus(
-                                                    seat,
-                                                    &current_output,
-                                                    *focus,
-                                                    self.seats.iter(),
-                                                );
-                                            }
-                                            Action::Orientation(orientation) => {
-                                                let output = active_output(seat, &self);
-                                                self.shell.set_orientation(
-                                                    &seat,
-                                                    &output,
-                                                    *orientation,
-                                                );
-                                                return FilterResult::Intercept(());
-                                            }
-                                            Action::Spawn(command) => {
-                                                if let Err(err) =
-                                                    std::process::Command::new("/bin/sh")
-                                                        .arg("-c")
-                                                        .arg(command)
-                                                        .env("WAYLAND_DISPLAY", &self.socket)
-                                                        .spawn()
-                                                {
-                                                    slog_scope::warn!("Failed to spawn: {}", err);
-                                                }
-                                                userdata
-                                                    .get::<SupressedKeys>()
-                                                    .unwrap()
-                                                    .add(&handle);
-                                                return FilterResult::Intercept(());
-                                            }
-                                        }
+                                        userdata.get::<SupressedKeys>().unwrap().add(&handle);
+                                        return FilterResult::Intercept(Some(action));
                                     }
                                 }
 
                                 FilterResult::Forward
-                            },
-                        );
+                            })
+                            .flatten()
+                        {
+                            match action {
+                                Action::Terminate => {
+                                    self.should_stop = true;
+                                }
+                                #[cfg(feature = "debug")]
+                                Action::Debug => {
+                                    self.egui.active = !self.egui.active;
+                                }
+                                #[cfg(not(feature = "debug"))]
+                                Action::Debug => {
+                                    slog_scope::info!("Debug overlay not included in this version")
+                                }
+                                Action::Close => {
+                                    let current_output = active_output(seat, &self);
+                                    let workspace = self.shell.active_space_mut(&current_output);
+                                    if let Some(window) = workspace.focus_stack(seat).last() {
+                                        #[allow(irrefutable_let_patterns)]
+                                        if let Kind::Xdg(xdg) = &window.toplevel() {
+                                            xdg.send_close();
+                                        }
+                                    }
+                                }
+                                Action::Workspace(key_num) => {
+                                    let current_output = active_output(seat, &self);
+                                    let workspace = match key_num {
+                                        0 => 9,
+                                        x => x - 1,
+                                    };
+                                    self.shell
+                                        .activate(seat, &current_output, workspace as usize);
+                                }
+                                Action::MoveToWorkspace(key_num) => {
+                                    let current_output = active_output(seat, &self);
+                                    let workspace = match key_num {
+                                        0 => 9,
+                                        x => x - 1,
+                                    };
+                                    self.shell.move_current_window(
+                                        seat,
+                                        &current_output,
+                                        workspace as usize,
+                                    );
+                                }
+                                Action::Focus(focus) => {
+                                    let current_output = active_output(seat, &self);
+                                    self.shell.move_focus(
+                                        seat,
+                                        &current_output,
+                                        *focus,
+                                        self.seats.iter(),
+                                    );
+                                }
+                                Action::Orientation(orientation) => {
+                                    let output = active_output(seat, &self);
+                                    self.shell.set_orientation(&seat, &output, *orientation);
+                                }
+                                Action::Spawn(command) => {
+                                    if let Err(err) = std::process::Command::new("/bin/sh")
+                                        .arg("-c")
+                                        .arg(command)
+                                        .env("WAYLAND_DISPLAY", &self.socket)
+                                        .spawn()
+                                    {
+                                        slog_scope::warn!("Failed to spawn: {}", err);
+                                    }
+                                }
+                            }
+                        }
                         break;
                     }
                 }
