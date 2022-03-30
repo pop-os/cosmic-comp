@@ -146,7 +146,11 @@ pub fn debug_ui(
                                             .speed(1.0),
                                     );
                                     if active != active_val as usize {
-                                        state.shell.activate(&output, active_val as usize);
+                                        state.shell.activate(
+                                            &state.seats[0],
+                                            &output,
+                                            active_val as usize,
+                                        );
                                     }
                                 });
                             }
@@ -162,7 +166,11 @@ pub fn debug_ui(
                                 );
                                 if active != active_val as usize {
                                     let output = state.shell.outputs().next().cloned().unwrap();
-                                    state.shell.activate(&output, active_val as usize);
+                                    state.shell.activate(
+                                        &state.seats[0],
+                                        &output,
+                                        active_val as usize,
+                                    );
                                 }
                             });
                         }

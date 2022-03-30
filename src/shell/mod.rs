@@ -185,17 +185,40 @@ impl Shell {
         Rectangle::from_loc_and_size(pos, self.output_size(output))
     }
 
-    pub fn activate(&mut self, output: &Output, idx: usize) {
+    pub fn activate(&mut self, seat: &Seat, output: &Output, idx: usize) {
         match self.mode {
             Mode::OutputBound => {
-                // TODO check for other outputs already occupying that space
+                for output in &self.outputs {
+                    if output
+                        .user_data()
+                        .get::<ActiveWorkspace>()
+                        .and_then(|i| i.get().map(|i| i == idx))
+                        .unwrap_or(false)
+                    {
+                        let geometry = self.output_geometry(output);
+                        if let Some(ptr) = seat.get_pointer() {
+                            ptr.motion(
+                                Point::<i32, Logical>::from((
+                                    geometry.loc.x + (geometry.size.w / 2),
+                                    geometry.loc.y + (geometry.size.h / 2),
+                                ))
+                                .to_f64(),
+                                None,
+                                SERIAL_COUNTER.next_serial(),
+                                0,
+                            );
+                            return;
+                        }
+                    }
+                }
+
                 if let Some(active) = output.user_data().get::<ActiveWorkspace>() {
                     if let Some(old_idx) = active.set(idx) {
                         self.spaces[old_idx].space.unmap_output(output);
                     }
                     self.spaces[idx].space.map_output(output, 1.0, (0, 0));
+                    self.spaces[idx].refresh();
                 }
-                // TODO translate windows from previous space size into new size
             }
             Mode::Global { ref mut active } => {
                 let old = *active;

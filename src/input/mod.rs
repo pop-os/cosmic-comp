@@ -271,8 +271,11 @@ impl Common {
                                                     0 => 9,
                                                     x => x - 1,
                                                 };
-                                                self.shell
-                                                    .activate(&current_output, workspace as usize);
+                                                self.shell.activate(
+                                                    seat,
+                                                    &current_output,
+                                                    workspace as usize,
+                                                );
                                                 userdata
                                                     .get::<SupressedKeys>()
                                                     .unwrap()
