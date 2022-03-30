@@ -4,11 +4,14 @@ use smithay::{
     desktop::{Space, Window},
     reexports::wayland_protocols::xdg_shell::server::xdg_toplevel::ResizeEdge,
     wayland::{
+        compositor::with_states,
         output::Output,
         seat::{PointerGrabStartData, Seat},
+        shell::xdg::XdgToplevelSurfaceRoleAttributes,
         Serial,
     },
 };
+use std::sync::Mutex;
 
 pub mod combined;
 pub mod floating;
@@ -70,15 +73,38 @@ pub fn new_default_layout(idx: u8) -> Box<dyn Layout> {
     Box::new(combined::Combined::new(
         tiling::TilingLayout::new(idx),
         floating::FloatingLayout,
-        |app_id, title| {
-            slog_scope::debug!(
-                "New filter input: ({}:{})",
-                app_id.unwrap_or("<unknown>"),
-                title.unwrap_or("<no title>")
-            );
-            match (app_id.unwrap_or(""), title.unwrap_or("")) {
-                ("gcr-prompter", _) => true,
-                _ => false,
+        |window| {
+            if let Some(surface) = window.toplevel().get_surface() {
+                with_states(surface, |states| {
+                    let attrs = states
+                        .data_map
+                        .get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
+                        .unwrap()
+                        .lock()
+                        .unwrap();
+
+                    // simple heuristic taken from
+                    // sway/desktop/xdg_shell.c:188 @ 0ee54a52
+                    if attrs.parent.is_some()
+                        || (attrs.min_size.w != 0
+                            && attrs.min_size.h != 0
+                            && attrs.min_size == attrs.max_size)
+                    {
+                        return true;
+                    }
+
+                    // else take a look at our exceptions
+                    match (
+                        attrs.app_id.as_deref().unwrap_or(""),
+                        attrs.title.as_deref().unwrap_or(""),
+                    ) {
+                        ("gcr-prompter", _) => true,
+                        _ => false,
+                    }
+                })
+                .unwrap_or(false)
+            } else {
+                false
             }
         },
     ))
