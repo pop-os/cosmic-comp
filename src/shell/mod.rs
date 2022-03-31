@@ -369,7 +369,19 @@ impl Shell {
     }
 
     pub fn refresh(&mut self) {
-        for workspace in &mut self.spaces {
+        for output in self.outputs.iter() {
+            let workspace = match &self.mode {
+                Mode::OutputBound => {
+                    let active = output
+                        .user_data()
+                        .get::<ActiveWorkspace>()
+                        .unwrap()
+                        .get()
+                        .unwrap();
+                    &mut self.spaces[active]
+                }
+                Mode::Global { active } => &mut self.spaces[*active],
+            };
             workspace.refresh();
         }
     }
@@ -485,7 +497,8 @@ impl Shell {
             })
             .collect::<Vec<_>>();
 
-        for workspace in &self.spaces {
+        for output in self.outputs() {
+            let workspace = self.active_space(output);
             for window in workspace.space.windows() {
                 window.set_activated(focused_windows.contains(window));
                 window.configure();
@@ -551,11 +564,11 @@ impl Common {
                     let workspace = self.shell.active_space(&output);
                     if let Some(window) = workspace.space.window_for_surface(&surface) {
                         let focus_stack = workspace.focus_stack(&seat);
-                        if focus_stack.last().map(|w| &w == window).unwrap_or(false) {
-                            continue;
-                        } else {
+                        if focus_stack.last().map(|w| &w != window).unwrap_or(true) {
                             fixup = true;
                         }
+                    } else {
+                        fixup = true;
                     }
                 } else {
                     fixup = true;
