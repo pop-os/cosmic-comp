@@ -59,7 +59,7 @@ impl Workspace {
         Workspace {
             idx,
             space: Space::new(None),
-            layout: layout::new_default_layout(idx),
+            layout: layout::new_default_layout(),
             pending_windows: Vec::new(),
         }
     }

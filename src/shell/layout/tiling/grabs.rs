@@ -1,24 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use super::{Data, Orientation, OutputInfo};
-use id_tree::{NodeId, Tree};
+use super::Orientation;
+use atomic_float::AtomicF64;
 use smithay::{
-    desktop::layer_map_for_output,
     reexports::wayland_server::protocol::{wl_pointer::ButtonState, wl_surface},
-    utils::{Logical, Point},
+    utils::{Logical, Point, Size},
     wayland::{
-        output::Output,
         seat::{AxisFrame, PointerGrab, PointerGrabStartData, PointerInnerHandle},
         Serial,
     },
 };
-use std::cell::RefCell;
+use std::sync::{atomic::Ordering, Arc};
 
 pub struct ResizeForkGrab {
     pub start_data: PointerGrabStartData,
-    pub node_id: NodeId,
+    pub orientation: Orientation,
+    pub initial_size: Size<i32, Logical>,
     pub initial_ratio: f64,
-    pub idx: u8,
-    pub output: Output,
+    pub ratio: Arc<AtomicF64>,
 }
 
 impl PointerGrab for ResizeForkGrab {
@@ -34,28 +32,14 @@ impl PointerGrab for ResizeForkGrab {
         handle.motion(location, None, serial, time);
 
         let delta = location - self.start_data.location;
-
-        let mut output_info = self
-            .output
-            .user_data()
-            .get::<RefCell<OutputInfo>>()
-            .unwrap()
-            .borrow_mut();
-        let tree = &mut output_info.trees.entry(self.idx).or_insert_with(Tree::new);
-        if let Some(&mut Data::Fork {
-            ref mut ratio,
-            ref orientation,
-        }) = tree.get_mut(&self.node_id).map(|x| x.data_mut()).ok()
-        {
-            let size = layer_map_for_output(&self.output).non_exclusive_zone().size;
-            let delta = match orientation {
-                Orientation::Vertical => delta.x / size.w as f64,
-                Orientation::Horizontal => delta.y / size.h as f64,
-            };
-            *ratio = 0.9f64.min(0.1f64.max(self.initial_ratio + delta));
-        } else {
-            handle.unset_grab(serial, time);
-        }
+        let delta = match self.orientation {
+            Orientation::Vertical => delta.x / self.initial_size.w as f64,
+            Orientation::Horizontal => delta.y / self.initial_size.h as f64,
+        };
+        self.ratio.store(
+            0.9f64.min(0.1f64.max(self.initial_ratio + delta)),
+            Ordering::SeqCst,
+        );
     }
 
     fn button(

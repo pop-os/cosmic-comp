@@ -24,6 +24,7 @@ xkbcommon = "0.4"
 indexmap = "1.8.0"
 xdg = "^2.1"
 ron = "0.7"
+atomic_float = "0.1"
 
 [dependencies.smithay]
 version = "0.3"

@@ -26,7 +26,7 @@ impl Layout for FloatingLayout {
         seat: &Seat,
         _focus_stack: Box<dyn Iterator<Item = &'a Window> + 'a>,
     ) {
-        let output = super::output_from_seat(seat, space);
+        let output = super::output_from_seat(Some(seat), space);
         let win_geo = window.bbox();
         let layers = layer_map_for_output(&output);
         let geometry = layers.non_exclusive_zone();

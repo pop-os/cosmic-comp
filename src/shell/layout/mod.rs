@@ -87,9 +87,9 @@ pub trait Layout {
     }
 }
 
-pub fn new_default_layout(idx: u8) -> Box<dyn Layout> {
+pub fn new_default_layout() -> Box<dyn Layout> {
     Box::new(combined::Combined::new(
-        tiling::TilingLayout::new(idx),
+        tiling::TilingLayout::new(),
         floating::FloatingLayout,
         |window| {
             if let Some(surface) = window.toplevel().get_surface() {
@@ -128,14 +128,16 @@ pub fn new_default_layout(idx: u8) -> Box<dyn Layout> {
     ))
 }
 
-fn output_from_seat(seat: &Seat, space: &Space) -> Output {
-    seat.user_data()
-        .get::<ActiveOutput>()
-        .map(|active| active.0.borrow().clone())
-        .or_else(|| {
-            seat.get_pointer()
-                .map(|ptr| space.output_under(ptr.current_location()).next().unwrap())
-                .cloned()
-        })
-        .unwrap_or_else(|| space.outputs().next().cloned().unwrap())
+fn output_from_seat(seat: Option<&Seat>, space: &Space) -> Output {
+    seat.and_then(|seat| {
+        seat.user_data()
+            .get::<ActiveOutput>()
+            .map(|active| active.0.borrow().clone())
+            .or_else(|| {
+                seat.get_pointer()
+                    .map(|ptr| space.output_under(ptr.current_location()).next().unwrap())
+                    .cloned()
+            })
+    })
+    .unwrap_or_else(|| space.outputs().next().cloned().unwrap())
 }
