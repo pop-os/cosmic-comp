@@ -237,7 +237,8 @@ impl Common {
                                 }
 
                                 // here we can handle global shortcuts and the like
-                                for (binding, action) in self.config.static_conf.key_bindings.iter() {
+                                for (binding, action) in self.config.static_conf.key_bindings.iter()
+                                {
                                     if state == KeyState::Pressed
                                         && binding.modifiers == *modifiers
                                         && handle.raw_syms().contains(&binding.key)

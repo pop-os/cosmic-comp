@@ -2,6 +2,7 @@
 
 use crate::{
     backend::render,
+    config::OutputConfig,
     input::{set_active_output, Devices},
     state::{BackendData, Common, State},
     utils::GlobalDrop,
@@ -86,6 +87,12 @@ impl X11State {
         let _global = global.into();
         output.change_current_state(Some(mode), None, None, Some((0, 0).into()));
         output.set_preferred(mode);
+        output.user_data().insert_if_missing(|| {
+            RefCell::new(OutputConfig {
+                mode: ((size.w as i32, size.h as i32), None),
+                ..Default::default()
+            })
+        });
 
         let output_ref = output.clone();
         let (ping, source) =
@@ -229,13 +236,17 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
         .x11()
         .add_window(&mut *state.common.display.borrow_mut(), event_loop.handle())
         .with_context(|| "Failed to create wl_output")?;
-    state.common.shell.map_output(&output, &mut state.backend, &state.common.config);
+    state
+        .common
+        .shell
+        .map_output(&output, &mut state.backend, &mut state.common.config);
 
     event_loop
         .handle()
         .insert_source(backend, |event, _, state| match event {
             X11Event::CloseRequested { window_id } => {
                 // TODO: drain_filter
+                let mut outputs_removed = Vec::new();
                 for surface in state
                     .backend
                     .x11()
@@ -244,13 +255,20 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
                     .filter(|s| s.window.id() == window_id)
                 {
                     surface.window.unmap();
-                    state.common.shell.unmap_output(&surface.output);
+                    outputs_removed.push(surface.output.clone());
                 }
                 state
                     .backend
                     .x11()
                     .surfaces
                     .retain(|s| s.window.id() != window_id);
+                for output in outputs_removed.into_iter() {
+                    state.common.shell.unmap_output(
+                        &output,
+                        &mut state.backend,
+                        &state.common.config,
+                    );
+                }
             }
             X11Event::Resized {
                 new_size,

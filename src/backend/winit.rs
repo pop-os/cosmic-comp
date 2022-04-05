@@ -2,6 +2,7 @@
 
 use crate::{
     backend::render,
+    config::OutputConfig,
     input::{set_active_output, Devices},
     state::{BackendData, Common, State},
 };
@@ -101,6 +102,16 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
         Some((0, 0).into()),
     );
     output.set_preferred(mode);
+    output.user_data().insert_if_missing(|| {
+        RefCell::new(OutputConfig {
+            mode: (
+                (size.physical_size.w as i32, size.physical_size.h as i32),
+                None,
+            ),
+            transform: Transform::Flipped180.into(),
+            ..Default::default()
+        })
+    });
 
     let (event_ping, event_source) =
         ping::make_ping().with_context(|| "Failed to init eventloop timer for winit")?;
@@ -131,8 +142,12 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
                     render_ping_handle.ping();
                 }
                 Err(winit::WinitError::WindowClosed) => {
-                    let winit_state = state.backend.winit();
-                    state.common.shell.unmap_output(&winit_state.output);
+                    let output = state.backend.winit().output.clone();
+                    state.common.shell.unmap_output(
+                        &output,
+                        &mut state.backend,
+                        &state.common.config,
+                    );
                     if let Some(token) = token.take() {
                         event_loop_handle.remove(token);
                     }
@@ -144,11 +159,14 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
 
     state.backend = BackendData::Winit(WinitState {
         backend,
-        output,
+        output: output.clone(),
         #[cfg(feature = "debug")]
         fps: Fps::default(),
     });
-    state.common.shell.map_output(&output, &mut state.backend, &state.common.config);
+    state
+        .common
+        .shell
+        .map_output(&output, &mut state.backend, &mut state.common.config);
 
     Ok(())
 }

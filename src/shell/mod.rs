@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    config::{Config, OutputInfo, OutputConfig},
+    config::{Config, OutputConfig, OutputInfo},
     input::active_output,
     state::{BackendData, Common},
 };
@@ -10,8 +10,11 @@ pub use smithay::{
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Logical, Point, Rectangle, Size},
     wayland::{
-        compositor::with_states, output::{Mode as OutputMode, Output}, seat::Seat,
-        shell::xdg::XdgToplevelSurfaceRoleAttributes, Serial, SERIAL_COUNTER,
+        compositor::with_states,
+        output::{Mode as OutputMode, Output},
+        seat::Seat,
+        shell::xdg::XdgToplevelSurfaceRoleAttributes,
+        Serial, SERIAL_COUNTER,
     },
 };
 use std::{
@@ -89,46 +92,74 @@ impl Shell {
         }
     }
 
-    fn apply_config(output: &Output, backend: &mut BackendData) -> Result<(), impl std::error::Error> {
+    fn apply_config(
+        output: &Output,
+        backend: &mut BackendData,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         backend.apply_config_for_output(output)?;
 
-        let final_config = output.user_data().get::<RefCell<OutputConfig>>().unwrap().borrow();
+        let final_config = output
+            .user_data()
+            .get::<RefCell<OutputConfig>>()
+            .unwrap()
+            .borrow();
         let mode = Some(OutputMode {
             size: final_config.mode_size(),
             refresh: final_config.mode_refresh(),
-        }).filter(|m| match output.current_mode() {
+        })
+        .filter(|m| match output.current_mode() {
             None => true,
             Some(c_m) => m.size != c_m.size || m.refresh != c_m.refresh,
         });
-        let transform = Some(final_config.transform.into()).filter(|x| *x != output.current_transform());
+        let transform =
+            Some(final_config.transform.into()).filter(|x| *x != output.current_transform());
         let scale = Some(final_config.scale.ceil() as i32).filter(|x| *x != output.current_scale());
-        let location = Some(final_config.position.into()).filter(|x| *x != output.current_location());
-        output.change_current_state(
-            mode,
-            transform,
-            scale,
-            location,
-        );
+        let location =
+            Some(final_config.position.into()).filter(|x| *x != output.current_location());
+        output.change_current_state(mode, transform, scale, location);
 
         Ok(())
     }
 
-    pub fn map_output(&mut self, output: &Output, backend: &mut BackendData, config: &Config) {
-        self.outputs.push(output.clone());
-
-        let mut infos = self.outputs().cloned().map(Into::<crate::config::OutputInfo>::into).collect::<Vec<_>>();
+    fn refresh_config(&mut self, backend: &mut BackendData, config: &Config) -> bool {
+        let mut infos = self
+            .outputs()
+            .cloned()
+            .map(Into::<crate::config::OutputInfo>::into)
+            .collect::<Vec<_>>();
         infos.sort();
         if let Some(configs) = config.dynamic_conf.outputs().config.get(&infos) {
             let mut reset = false;
-            let known_good_configs = self.outputs.iter().map(|output| {
-                output.user_data().get::<RefCell<OutputConfig>>().unwrap().borrow().clone()
-            }).collect::<Vec<_>>();
+            let known_good_configs = self
+                .outputs
+                .iter()
+                .map(|output| {
+                    output
+                        .user_data()
+                        .get::<RefCell<OutputConfig>>()
+                        .unwrap()
+                        .borrow()
+                        .clone()
+                })
+                .collect::<Vec<_>>();
 
-            for (name, config) in infos.iter().map(|o| &o.connector).zip(configs.into_iter().cloned()) {
+            for (name, config) in infos
+                .iter()
+                .map(|o| &o.connector)
+                .zip(configs.into_iter().cloned())
+            {
                 let output = self.outputs.iter().find(|o| &o.name() == name).unwrap();
-                *output.user_data().get::<RefCell<OutputConfig>>().unwrap().borrow_mut() = config;
+                *output
+                    .user_data()
+                    .get::<RefCell<OutputConfig>>()
+                    .unwrap()
+                    .borrow_mut() = config;
                 if let Err(err) = Self::apply_config(output, backend) {
-                    slog_scope::warn!("Failed to set new config for output {}: {}", output.name(), err);
+                    slog_scope::warn!(
+                        "Failed to set new config for output {}: {}",
+                        output.name(),
+                        err
+                    );
                     reset = true;
                     break;
                 }
@@ -136,10 +167,17 @@ impl Shell {
 
             if reset {
                 for (output, config) in self.outputs.iter().zip(known_good_configs.into_iter()) {
-                    *output.user_data().get::<RefCell<OutputConfig>>().unwrap().borrow_mut() = config;
+                    *output
+                        .user_data()
+                        .get::<RefCell<OutputConfig>>()
+                        .unwrap()
+                        .borrow_mut() = config;
                     if let Err(err) = Self::apply_config(output, backend) {
-                        slog_scope::error!("Failed to reset config for output {}: {}", output.name(), err);
-                        self.unmap_output(output);
+                        slog_scope::error!(
+                            "Failed to reset config for output {}: {}",
+                            output.name(),
+                            err
+                        );
                     }
                 }
             }
@@ -147,37 +185,91 @@ impl Shell {
             if let Mode::Global { active } = self.mode {
                 let workspace = &mut self.spaces[active];
                 for output in self.outputs.iter() {
-                    let config = output.user_data().get::<RefCell<OutputConfig>>().unwrap().borrow();
-                    workspace.space.map_output(output, config.scale, config.position);
+                    let config = output
+                        .user_data()
+                        .get::<RefCell<OutputConfig>>()
+                        .unwrap()
+                        .borrow();
+                    workspace
+                        .space
+                        .map_output(output, config.scale, config.position);
+                }
+            } else {
+                for output in self.outputs.iter() {
+                    let config = output
+                        .user_data()
+                        .get::<RefCell<OutputConfig>>()
+                        .unwrap()
+                        .borrow();
+                    let workspace = Self::assign_next_free_output(&mut self.spaces, output);
+                    workspace.space.map_output(output, config.scale, (0, 0));
                 }
             }
+
+            true
         } else {
-            let new_pos_x = self.outputs().map(|o| {
-                let logical_size = self.active_space(o).space.output_geometry(o).map(|x| x.size).unwrap_or((0, 0).into());
-                o.user_data().get::<RefCell<OutputConfig>>().unwrap().borrow().position.0 + logical_size.w
-            }).max().unwrap_or(0);
+            false
+        }
+    }
+
+    fn assign_next_free_output<'a>(
+        spaces: &'a mut [Workspace],
+        output: &Output,
+    ) -> &'a mut Workspace {
+        output
+            .user_data()
+            .insert_if_missing(|| ActiveWorkspace::new());
+        let (idx, workspace) = spaces
+            .iter_mut()
+            .enumerate()
+            .find(|(_, x)| x.space.outputs().next().is_none())
+            .expect("More then 10 outputs?");
+        output
+            .user_data()
+            .get::<ActiveWorkspace>()
+            .unwrap()
+            .set(idx);
+
+        workspace
+    }
+
+    pub fn map_output(&mut self, output: &Output, backend: &mut BackendData, config: &mut Config) {
+        self.outputs.push(output.clone());
+
+        if !self.refresh_config(backend, config) {
+            let new_pos_x = self
+                .outputs()
+                .take(self.outputs.len() - 1)
+                .map(|o| {
+                    let logical_size = self
+                        .active_space(o)
+                        .space
+                        .output_geometry(o)
+                        .map(|x| x.size)
+                        .unwrap_or((0, 0).into());
+                    o.user_data()
+                        .get::<RefCell<OutputConfig>>()
+                        .unwrap()
+                        .borrow()
+                        .position
+                        .0
+                        + logical_size.w
+                })
+                .max()
+                .unwrap_or(0);
 
             let new_pos = (new_pos_x, 0);
-            output.user_data().get::<RefCell<OutputConfig>>().unwrap().borrow_mut().position = new_pos;
+            output
+                .user_data()
+                .get::<RefCell<OutputConfig>>()
+                .unwrap()
+                .borrow_mut()
+                .position = new_pos;
             output.change_current_state(None, None, None, Some(new_pos.into()));
 
             match self.mode {
                 Mode::OutputBound => {
-                    output
-                        .user_data()
-                        .insert_if_missing(|| ActiveWorkspace::new());
-
-                    let (idx, workspace) = self
-                        .spaces
-                        .iter_mut()
-                        .enumerate()
-                        .find(|(_, x)| x.space.outputs().next().is_none())
-                        .expect("More then 10 outputs?");
-                    output
-                        .user_data()
-                        .get::<ActiveWorkspace>()
-                        .unwrap()
-                        .set(idx);
+                    let workspace = Self::assign_next_free_output(&mut self.spaces, output);
                     workspace.space.map_output(output, 1.0, (0, 0));
                 }
                 Mode::Global { active } => {
@@ -187,10 +279,32 @@ impl Shell {
                     workspace.space.map_output(output, 1.0, new_pos);
                 }
             }
+
+            let mut infos = self
+                .outputs()
+                .cloned()
+                .map(|o| {
+                    (
+                        Into::<crate::config::OutputInfo>::into(o.clone()),
+                        o.user_data()
+                            .get::<RefCell<OutputConfig>>()
+                            .unwrap()
+                            .borrow()
+                            .clone(),
+                    )
+                })
+                .collect::<Vec<(OutputInfo, OutputConfig)>>();
+            infos.sort_by(|&(ref a, _), &(ref b, _)| a.cmp(b));
+            let (infos, configs) = infos.into_iter().unzip();
+            config
+                .dynamic_conf
+                .outputs_mut()
+                .config
+                .insert(infos, configs);
         }
     }
 
-    pub fn unmap_output(&mut self, output: &Output) {
+    pub fn unmap_output(&mut self, output: &Output, backend: &mut BackendData, config: &Config) {
         match self.mode {
             Mode::OutputBound => {
                 if let Some(idx) = output
@@ -208,6 +322,7 @@ impl Shell {
                 // TODO move windows and outputs farther on the right / or load save config for remaining monitors
             }
         }
+        self.refresh_config(backend, config);
     }
 
     pub fn output_size(&self, output: &Output) -> Size<i32, Logical> {
@@ -220,12 +335,16 @@ impl Shell {
     }
 
     pub fn global_space(&self) -> Rectangle<i32, Logical> {
-        let size = self.outputs.iter().fold((0, 0), |(w, h), output| {
-            let size = self.output_size(output);
-            (w + size.w, std::cmp::max(h, size.h))
-        });
-
-        Rectangle::from_loc_and_size((0, 0), size)
+        self.outputs
+            .iter()
+            .fold(
+                Option::<Rectangle<i32, Logical>>::None,
+                |maybe_geo, output| match maybe_geo {
+                    Some(rect) => Some(rect.merge(self.output_geometry(output))),
+                    None => Some(self.output_geometry(output)),
+                },
+            )
+            .unwrap_or_else(|| Rectangle::from_loc_and_size((0, 0), (0, 0)))
     }
 
     pub fn space_relative_output_geometry<C: smithay::utils::Coordinate>(
@@ -246,17 +365,12 @@ impl Shell {
         // due to our different modes, we cannot just ask the space for the global output coordinates,
         // because for `Mode::OutputBound` the origin will always be (0, 0)
 
-        // TODO: Add a proper grid like structure, for now the outputs just extend to the right
-        let pos =
-            self.outputs
-                .iter()
-                .take_while(|o| o != &output)
-                .fold((0, 0), |(x, y), output| {
-                    let size = self.output_size(output);
-                    (x + size.w, y)
-                });
-
-        Rectangle::from_loc_and_size(pos, self.output_size(output))
+        let config = output
+            .user_data()
+            .get::<RefCell<OutputConfig>>()
+            .unwrap()
+            .borrow();
+        Rectangle::from_loc_and_size(config.position, self.output_size(output))
     }
 
     pub fn activate(&mut self, seat: &Seat, output: &Output, idx: usize) {
@@ -294,7 +408,14 @@ impl Shell {
                     if let Some(old_idx) = active.set(idx) {
                         self.spaces[old_idx].space.unmap_output(output);
                     }
-                    self.spaces[idx].space.map_output(output, 1.0, (0, 0));
+                    let config = output
+                        .user_data()
+                        .get::<RefCell<OutputConfig>>()
+                        .unwrap()
+                        .borrow();
+                    self.spaces[idx]
+                        .space
+                        .map_output(output, config.scale, (0, 0));
                     self.spaces[idx].refresh();
                 }
             }
@@ -302,9 +423,15 @@ impl Shell {
                 let old = *active;
                 *active = idx;
                 for output in &self.outputs {
-                    let loc = self.spaces[old].space.output_geometry(output).unwrap().loc;
                     self.spaces[old].space.unmap_output(output);
-                    self.spaces[*active].space.map_output(output, 1.0, loc);
+                    let config = output
+                        .user_data()
+                        .get::<RefCell<OutputConfig>>()
+                        .unwrap()
+                        .borrow();
+                    self.spaces[*active]
+                        .space
+                        .map_output(output, config.scale, config.position);
                 }
             }
         };
@@ -347,7 +474,6 @@ impl Shell {
                             .unwrap()
                     })
                     .unwrap_or(0);
-                let mut x = 0;
 
                 for output in &self.outputs {
                     let old_active = output
@@ -356,32 +482,45 @@ impl Shell {
                         .unwrap()
                         .clear()
                         .unwrap();
-                    let width = self.spaces[old_active]
-                        .space
-                        .output_geometry(output)
+                    let config = output
+                        .user_data()
+                        .get::<RefCell<OutputConfig>>()
                         .unwrap()
-                        .size
-                        .w;
+                        .borrow();
                     self.spaces[old_active].space.unmap_output(output);
-                    self.spaces[active].space.map_output(output, 1.0, (x, 0));
-                    x += width;
+                    self.spaces[active]
+                        .space
+                        .map_output(output, config.scale, config.position);
+                    self.spaces[active].refresh();
                 }
 
                 self.mode = Mode::Global { active };
-                // TODO move windows into new bounds
             }
             (Mode::Global { active }, new @ Mode::OutputBound) => {
                 for output in &self.outputs {
                     self.spaces[*active].space.unmap_output(output);
                 }
 
+                let mut active = Some(active.clone());
                 self.mode = new;
-                let outputs = self.outputs.drain(..).collect::<Vec<_>>();
-                for output in &outputs {
-                    self.map_output(output);
+                for output in &self.outputs {
+                    let config = output
+                        .user_data()
+                        .get::<RefCell<OutputConfig>>()
+                        .unwrap()
+                        .borrow();
+                    let workspace = if let Some(a) = active.take() {
+                        output
+                            .user_data()
+                            .insert_if_missing(|| ActiveWorkspace::new());
+                        output.user_data().get::<ActiveWorkspace>().unwrap().set(a);
+                        &mut self.spaces[a]
+                    } else {
+                        Self::assign_next_free_output(&mut self.spaces, output)
+                    };
+                    workspace.space.map_output(output, config.scale, (0, 0));
+                    workspace.refresh();
                 }
-                // TODO move windows into new bounds
-                // TODO active should probably be mapped somewhere
             }
             _ => {}
         };

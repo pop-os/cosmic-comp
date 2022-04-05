@@ -90,7 +90,7 @@ pub trait Layout {
 pub fn new_default_layout() -> Box<dyn Layout> {
     Box::new(combined::Combined::new(
         tiling::TilingLayout::new(),
-        floating::FloatingLayout,
+        floating::FloatingLayout::new(),
         |window| {
             if let Some(surface) = window.toplevel().get_surface() {
                 with_states(surface, |states| {
@@ -128,7 +128,7 @@ pub fn new_default_layout() -> Box<dyn Layout> {
     ))
 }
 
-fn output_from_seat(seat: Option<&Seat>, space: &Space) -> Output {
+fn output_from_seat(seat: Option<&Seat>, space: &Space) -> Option<Output> {
     seat.and_then(|seat| {
         seat.user_data()
             .get::<ActiveOutput>()
@@ -139,5 +139,5 @@ fn output_from_seat(seat: Option<&Seat>, space: &Space) -> Output {
                     .cloned()
             })
     })
-    .unwrap_or_else(|| space.outputs().next().cloned().unwrap())
+    .or_else(|| space.outputs().next().cloned())
 }

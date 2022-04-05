@@ -2,7 +2,7 @@
 
 use crate::{
     backend::{kms::KmsState, winit::WinitState, x11::X11State},
-    config::{Config, OutputConfig},
+    config::Config,
     logger::LogState,
     shell::{init_shell, Shell},
 };
@@ -105,13 +105,16 @@ impl BackendData {
         }
     }
 
-    pub fn apply_config_for_output(&mut self, output: &Output) -> Result<(), impl std::error::Error> {
+    pub fn apply_config_for_output(
+        &mut self,
+        output: &Output,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         match self {
             BackendData::Kms(ref mut state) => state.apply_config_for_output(output),
             _ => {
                 // TODO: reset the mode for nested backends, because we have no control over it
                 Ok(())
-            },
+            }
         }
     }
 

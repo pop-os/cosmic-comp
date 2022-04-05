@@ -5,11 +5,11 @@ use serde::{Deserialize, Serialize};
 use smithay::wayland::seat::Keysym;
 pub use smithay::{
     backend::input::KeyState,
+    utils::{Logical, Physical, Point, Size, Transform},
     wayland::{
         output::Output,
         seat::{keysyms as KeySyms, ModifiersState as KeyModifiers},
     },
-    utils::{Point, Size, Logical, Physical, Transform},
 };
 use std::{collections::HashMap, fs::OpenOptions, path::PathBuf};
 use xkbcommon::xkb;
@@ -57,18 +57,36 @@ pub struct OutputConfig {
     pub mode: ((i32, i32), Option<String>),
     pub vrr: bool,
     pub scale: f64,
-    #[serde(with="TransformDef")]
+    #[serde(with = "TransformDef")]
     pub transform: Transform,
     pub position: (i32, i32),
 }
 
+impl Default for OutputConfig {
+    fn default() -> OutputConfig {
+        OutputConfig {
+            mode: ((0, 0), None),
+            vrr: false,
+            scale: 1.0,
+            transform: Transform::Normal,
+            position: (0, 0),
+        }
+    }
+}
+
 impl OutputConfig {
-    fn mode_size(&self) -> Size<i32, Physical> {
+    pub fn mode_size(&self) -> Size<i32, Physical> {
         self.mode.0.into()
     }
 
-    fn mode_refresh(&self) -> i32 {
-        self.mode.1.as_deref().map(|x| str::parse::<f64>(x).unwrap().round() as i32).unwrap_or(60)
+    pub fn mode_refresh(&self) -> i32 {
+        self.mode
+            .1
+            .as_deref()
+            .and_then(|x| x.split("@").nth(1))
+            .and_then(|x| str::parse::<f64>(x).ok())
+            .map(|x| x.round() as i32)
+            .unwrap_or(60)
     }
 }
 
@@ -128,7 +146,8 @@ impl Config {
     }
 
     fn load_dynamic(xdg: Option<&xdg::BaseDirectories>) -> DynamicConfig {
-        let output_path = xdg.and_then(|base| base.place_state_file("cosmic-comp/outputs.ron").ok());
+        let output_path =
+            xdg.and_then(|base| base.place_state_file("cosmic-comp/outputs.ron").ok());
         let outputs = Self::load_outputs(&output_path);
 
         DynamicConfig {
@@ -143,7 +162,9 @@ impl Config {
                     Ok(config) => return config,
                     Err(err) => {
                         slog_scope::warn!("Failed to read output_config ({}), resetting..", err);
-                        std::fs::remove_file(path);
+                        if let Err(err) = std::fs::remove_file(path) {
+                            slog_scope::error!("Failed to remove output_config {}", err);
+                        }
                     }
                 };
             }
@@ -173,13 +194,21 @@ impl<'a, T: Serialize> std::ops::DerefMut for PersistenceGuard<'a, T> {
 impl<'a, T: Serialize> Drop for PersistenceGuard<'a, T> {
     fn drop(&mut self) {
         if let Some(path) = self.0.as_ref() {
-            let writer = match OpenOptions::new().write(true).open(path) {
+            let writer = match OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(path)
+            {
                 Ok(writer) => writer,
                 Err(err) => {
                     slog_scope::warn!("Failed to persist {}: {}", path.display(), err);
+                    return;
                 }
             };
-            ron::ser::to_writer(writer, &self.1);
+            if let Err(err) = ron::ser::to_writer_pretty(writer, &self.1, Default::default()) {
+                slog_scope::warn!("Failed to persist {}: {}", path.display(), err);
+            }
         }
     }
 }

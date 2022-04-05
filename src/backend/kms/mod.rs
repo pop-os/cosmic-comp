@@ -5,6 +5,7 @@ use crate::state::Fps;
 
 use crate::{
     backend::render,
+    config::OutputConfig,
     state::{BackendData, Common, State},
     utils::GlobalDrop,
 };
@@ -28,7 +29,7 @@ use smithay::{
             timer::{Timer, TimerHandle},
             Dispatcher, EventLoop, LoopHandle, RegistrationToken,
         },
-        drm::control::{connector, crtc, Device as ControlDevice},
+        drm::control::{connector, crtc, Device as ControlDevice, ModeTypeFlags},
         input::Libinput,
         nix::{fcntl::OFlag, sys::stat::dev_t},
         wayland_server::{protocol::wl_output, Display},
@@ -301,7 +302,11 @@ impl State {
                 &mut self.common.display.borrow_mut(),
                 &mut self.common.event_loop_handle,
             ) {
-                Ok(output) => self.common.shell.map_output(&output, &mut self.backend, &self.common.config),
+                Ok(output) => self.common.shell.map_output(
+                    &output,
+                    &mut self.backend,
+                    &mut self.common.config,
+                ),
                 Err(err) => slog_scope::warn!("Failed to initialize output: {}", err),
             };
         }
@@ -313,6 +318,8 @@ impl State {
     fn device_changed(&mut self, dev: dev_t) -> Result<()> {
         let drm_node = DrmNode::from_dev_id(dev)?;
         let signaler = self.backend.kms().signaler.clone();
+        let mut outputs_removed = Vec::new();
+        let mut outputs_added = Vec::new();
         if let Some(device) = self.backend.kms().devices.get_mut(&drm_node) {
             let changes = device.enumerate_surfaces()?;
             for crtc in changes.removed {
@@ -320,7 +327,7 @@ impl State {
                     if let Some(token) = surface.render_timer_token.take() {
                         self.common.event_loop_handle.remove(token);
                     }
-                    self.common.shell.unmap_output(&surface.output);
+                    outputs_removed.push(surface.output.clone());
                 }
             }
             for (crtc, conn) in changes.added {
@@ -332,22 +339,36 @@ impl State {
                     &mut self.common.display.borrow_mut(),
                     &mut self.common.event_loop_handle,
                 ) {
-                    Ok(output) => self.common.shell.map_output(&output, &mut self.backend, &self.common.config),
+                    Ok(output) => {
+                        outputs_added.push(output);
+                    }
                     Err(err) => slog_scope::warn!("Failed to initialize output: {}", err),
                 };
             }
+        }
+
+        for output in outputs_removed.into_iter() {
+            self.common
+                .shell
+                .unmap_output(&output, &mut self.backend, &self.common.config);
+        }
+        for output in outputs_added.into_iter() {
+            self.common
+                .shell
+                .map_output(&output, &mut self.backend, &mut self.common.config)
         }
         Ok(())
     }
 
     fn device_removed(&mut self, dev: dev_t) -> Result<()> {
         let drm_node = DrmNode::from_dev_id(dev)?;
-        if let Some(device) = self.backend.kms().devices.get_mut(&drm_node) {
+        let mut outputs_removed = Vec::new();
+        if let Some(mut device) = self.backend.kms().devices.remove(&drm_node) {
             for surface in device.surfaces.values_mut() {
                 if let Some(token) = surface.render_timer_token.take() {
                     self.common.event_loop_handle.remove(token);
                 }
-                self.common.shell.unmap_output(&surface.output);
+                outputs_removed.push(surface.output.clone());
             }
             if let Some(token) = device.event_token.take() {
                 self.common.event_loop_handle.remove(token);
@@ -356,6 +377,12 @@ impl State {
                 self.common.event_loop_handle.remove(socket.token);
             }
         }
+        for output in outputs_removed.into_iter() {
+            self.common
+                .shell
+                .unmap_output(&output, &mut self.backend, &self.common.config);
+        }
+
         Ok(())
     }
 }
@@ -419,7 +446,11 @@ impl Device {
         let vrr = drm_helpers::set_vrr(drm, crtc, conn, true).unwrap_or(false);
         let interface = drm_helpers::interface_name(drm, conn)?;
         let edid_info = drm_helpers::edid_info(drm, conn)?;
-        let mode = crtc_info.mode().unwrap_or(conn_info.modes()[0]);
+        let mode = crtc_info.mode().unwrap_or_else(||
+            conn_info.modes().iter().find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
+                .copied().unwrap_or(conn_info.modes()[0])
+        );
+        let refresh_rate = drm_helpers::calculate_refresh_rate(mode);
         let mut surface = drm.create_surface(crtc, mode, &[conn])?;
         surface.link(signaler);
 
@@ -430,7 +461,7 @@ impl Device {
         //let is_nvidia = driver(drm.device_id()).ok().flatten().map(|x| x == "nvidia").unwrap_or(false);
         let output_mode = OutputMode {
             size: (mode.size().0 as i32, mode.size().1 as i32).into(),
-            refresh: (mode.vrefresh() * 1000) as i32,
+            refresh: refresh_rate as i32,
         };
         let (phys_w, phys_h) = conn_info.size().unwrap_or((0, 0));
         let (output, output_global) = Output::new(
@@ -453,6 +484,16 @@ impl Device {
             None,
             None,
         );
+        output.user_data().insert_if_missing(|| {
+            RefCell::new(OutputConfig {
+                mode: (
+                    (output_mode.size.w, output_mode.size.h),
+                    Some(format!("{}x{}@{}", mode.size().0, mode.size().1, refresh_rate)),
+                ),
+                vrr,
+                ..Default::default()
+            })
+        });
 
         let timer = Timer::new()?;
         let timer_handle = timer.handle();
@@ -481,7 +522,7 @@ impl Device {
             _global: output_global.into(),
             surface: target,
             vrr,
-            refresh_rate: drm_helpers::calculate_refresh_rate(mode),
+            refresh_rate,
             last_submit: None,
             pending: true,
             render_timer: timer_handle,
@@ -571,10 +612,63 @@ impl Surface {
 }
 
 impl KmsState {
-    pub fn apply_config_for_output(&mut self, output: &Output) -> Result<(), impl std::error::Error> {
-        
+    pub fn apply_config_for_output(
+        &mut self,
+        output: &Output,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(device) = self
+            .devices
+            .values_mut()
+            .find(|dev| dev.surfaces.values().any(|s| s.output == *output))
+        {
+            let mut surface = device
+                .surfaces
+                .values_mut()
+                .find(|s| s.output == *output)
+                .unwrap();
+            let config = output
+                .user_data()
+                .get::<RefCell<OutputConfig>>()
+                .unwrap()
+                .borrow();
+
+            let conn_info = device.drm.as_source_ref().get_connector(
+                surface
+                    .surface
+                    .current_connectors()
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(
+                        || surface.surface
+                        .pending_connectors()
+                        .into_iter()
+                        .next()
+                        .unwrap()
+                    ),
+            )?;
+            let mode = conn_info
+                .modes()
+                .iter()
+                .find(|mode| {            
+                    let refresh_rate = drm_helpers::calculate_refresh_rate(**mode);
+                    format!("{}x{}@{}", mode.size().0, mode.size().1, refresh_rate)
+                        == *config.mode.1.as_ref().unwrap()
+                })
+                .ok_or(anyhow::anyhow!("Unknown mode"))?;
+            surface.surface.use_mode(*mode).unwrap();
+
+            if config.vrr != surface.vrr {
+                surface.vrr = drm_helpers::set_vrr(
+                    &*device.drm.as_source_ref(),
+                    surface.surface.crtc(),
+                    conn_info.handle(),
+                    config.vrr,
+                )?;
+            }
+        }
+        Ok(())
     }
-    
+
     pub fn schedule_render(&mut self, output: &Output) {
         if let Some((device, surface)) = self
             .devices

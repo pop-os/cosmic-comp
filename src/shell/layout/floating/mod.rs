@@ -16,7 +16,10 @@ use smithay::{
 mod grabs;
 pub use self::grabs::*;
 
-pub struct FloatingLayout;
+#[derive(Debug, Default)]
+pub struct FloatingLayout {
+    pending_windows: Vec<Window>,
+}
 
 impl Layout for FloatingLayout {
     fn map_window<'a>(
@@ -26,36 +29,26 @@ impl Layout for FloatingLayout {
         seat: &Seat,
         _focus_stack: Box<dyn Iterator<Item = &'a Window> + 'a>,
     ) {
-        let output = super::output_from_seat(Some(seat), space);
-        let win_geo = window.bbox();
-        let layers = layer_map_for_output(&output);
-        let geometry = layers.non_exclusive_zone();
-
-        let position = (
-            -geometry.loc.x + (geometry.size.w / 2) - (win_geo.size.w / 2),
-            -geometry.loc.y + (geometry.size.h / 2) - (win_geo.size.h / 2),
-        );
-        #[allow(irrefutable_let_patterns)]
-        if let Kind::Xdg(xdg) = &window.toplevel() {
-            let ret = xdg.with_pending_state(|state| {
-                state.states.unset(XdgState::TiledLeft);
-                state.states.unset(XdgState::TiledRight);
-                state.states.unset(XdgState::TiledTop);
-                state.states.unset(XdgState::TiledBottom);
-            });
-            if ret.is_ok() {
-                xdg.send_configure();
-            }
+        if let Some(output) = super::output_from_seat(Some(seat), space) {
+            Self::map_window(space, window, &output)
+        } else {
+            self.pending_windows.push(window.clone());
         }
-        space.map_window(&window, position, false);
     }
 
-    fn refresh(&mut self, _space: &mut Space) {
+    fn refresh(&mut self, space: &mut Space) {
+        self.pending_windows.retain(|w| w.toplevel().alive());
+        if let Some(output) = super::output_from_seat(None, space) {
+            for window in self.pending_windows.drain(..) {
+                Self::map_window(space, &window, &output);
+            }
+        }
         // TODO make sure all windows are still visible on any output or move them
     }
 
     fn unmap_window(&mut self, space: &mut Space, window: &Window) {
-        space.unmap_window(window)
+        space.unmap_window(window);
+        self.pending_windows.retain(|w| w != window);
     }
 
     fn maximize_request(&mut self, space: &mut Space, window: &Window, output: &Output) {
@@ -142,5 +135,39 @@ impl Layout for FloatingLayout {
 
             pointer.set_grab(grab, serial, 0);
         }
+    }
+}
+
+impl FloatingLayout {
+    pub fn new() -> FloatingLayout {
+        Default::default()
+    }
+
+    fn map_window(
+        space: &mut Space,
+        window: &Window,
+        output: &Output,
+    ) {
+        let win_geo = window.bbox();
+        let layers = layer_map_for_output(&output);
+        let geometry = layers.non_exclusive_zone();
+
+        let position = (
+            -geometry.loc.x + (geometry.size.w / 2) - (win_geo.size.w / 2),
+            -geometry.loc.y + (geometry.size.h / 2) - (win_geo.size.h / 2),
+        );
+        #[allow(irrefutable_let_patterns)]
+        if let Kind::Xdg(xdg) = &window.toplevel() {
+            let ret = xdg.with_pending_state(|state| {
+                state.states.unset(XdgState::TiledLeft);
+                state.states.unset(XdgState::TiledRight);
+                state.states.unset(XdgState::TiledTop);
+                state.states.unset(XdgState::TiledBottom);
+            });
+            if ret.is_ok() {
+                xdg.send_configure();
+            }
+        }
+        space.map_window(&window, position, false);
     }
 }

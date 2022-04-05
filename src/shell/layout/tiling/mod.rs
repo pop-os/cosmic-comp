@@ -85,7 +85,7 @@ impl Layout for TilingLayout {
         focus_stack: Box<dyn Iterator<Item = &'a Window> + 'a>,
     ) -> Option<Window> {
         let output = super::output_from_seat(Some(seat), space);
-        let idx = space.outputs().position(|o| *o == output).unwrap_or(0);
+        let idx = space.outputs().position(|o| Some(o) == output.as_ref()).unwrap_or(0);
         let tree = TilingLayout::active_tree(&mut self.trees, idx);
         if let Some(last_active) = TilingLayout::last_active_window(tree, focus_stack) {
             let mut node_id = last_active;
@@ -141,7 +141,7 @@ impl Layout for TilingLayout {
         focus_stack: Box<dyn Iterator<Item = &'a Window> + 'a>,
     ) {
         let output = super::output_from_seat(Some(seat), space);
-        let idx = space.outputs().position(|o| *o == output).unwrap_or(0);
+        let idx = space.outputs().position(|o| Some(o) == output.as_ref()).unwrap_or(0);
         let tree = TilingLayout::active_tree(&mut self.trees, idx);
         if let Some(last_active) = TilingLayout::last_active_window(tree, focus_stack) {
             if let Some((fork, _child)) = TilingLayout::find_fork(tree, last_active) {
@@ -288,7 +288,7 @@ impl TilingLayout {
         focus_stack: Option<Box<dyn Iterator<Item = &'a Window> + 'a>>,
     ) {
         let output = super::output_from_seat(seat, space);
-        let idx = space.outputs().position(|o| *o == output).unwrap_or(0);
+        let idx = space.outputs().position(|o| Some(o) == output.as_ref()).unwrap_or(0);
         let tree = TilingLayout::active_tree(&mut self.trees, idx);
         let new_window = Node::new(Data::Window(window.clone()));
 
