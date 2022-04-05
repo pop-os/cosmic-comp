@@ -478,40 +478,40 @@ impl Common {
                                 // change the keyboard focus unless the pointer is grabbed
                                 if !seat.get_pointer().unwrap().is_grabbed() {
                                     let output = active_output(seat, &self);
-                                    let mut pos = seat.get_pointer().unwrap().current_location();
+                                    let pos = seat.get_pointer().unwrap().current_location();
                                     let output_geo = self.shell.output_geometry(&output);
+                                    let relative_pos =
+                                        self.shell.space_relative_output_geometry(pos, &output);
                                     let workspace = self.shell.active_space_mut(&output);
                                     let layers = layer_map_for_output(&output);
-                                    pos -= output_geo.loc.to_f64();
                                     let mut under = None;
 
                                     if let Some(layer) = layers
-                                        .layer_under(WlrLayer::Overlay, pos)
-                                        .or_else(|| layers.layer_under(WlrLayer::Top, pos))
+                                        .layer_under(WlrLayer::Overlay, relative_pos)
+                                        .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos))
                                     {
                                         if layer.can_receive_keyboard_focus() {
                                             let layer_loc =
                                                 layers.layer_geometry(layer).unwrap().loc;
                                             under = layer
                                                 .surface_under(
-                                                    pos - layer_loc.to_f64(),
+                                                    pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
                                                     WindowSurfaceType::ALL,
                                                 )
                                                 .map(|(s, _)| s);
                                         }
                                     } else if let Some(window) =
-                                        workspace.space.window_under(pos).cloned()
+                                        workspace.space.window_under(relative_pos).cloned()
                                     {
                                         let window_loc =
                                             workspace.space.window_location(&window).unwrap();
                                         under = window
                                             .surface_under(
-                                                pos - window_loc.to_f64(),
+                                                relative_pos - window_loc.to_f64(),
                                                 WindowSurfaceType::TOPLEVEL
                                                     | WindowSurfaceType::SUBSURFACE,
                                             )
                                             .map(|(s, _)| s);
-                                        // space.raise_window(&window, true);
                                     } else if let Some(layer) = layers
                                         .layer_under(WlrLayer::Bottom, pos)
                                         .or_else(|| layers.layer_under(WlrLayer::Background, pos))
@@ -521,14 +521,14 @@ impl Common {
                                                 layers.layer_geometry(layer).unwrap().loc;
                                             under = layer
                                                 .surface_under(
-                                                    pos - layer_loc.to_f64(),
+                                                    pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
                                                     WindowSurfaceType::ALL,
                                                 )
                                                 .map(|(s, _)| s);
                                         }
                                     };
 
-                                    self.set_focus(under.as_ref(), seat, None);
+                                    self.set_focus(under.as_ref(), seat, Some(serial));
                                 }
                                 wl_pointer::ButtonState::Pressed
                             }
@@ -652,13 +652,13 @@ impl Common {
             let layer_loc = layers.layer_geometry(layer).unwrap().loc;
             layer
                 .surface_under(
-                    relative_pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
+                    global_pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
                     WindowSurfaceType::ALL,
                 )
                 .map(|(s, loc)| {
                     (
                         s,
-                        loc + layer_loc - (relative_pos - global_pos).to_i32_round(),
+                        loc + layer_loc + output_geo.loc,
                     )
                 })
         } else if let Some(window) = space.window_under(relative_pos) {
@@ -678,13 +678,13 @@ impl Common {
             let layer_loc = layers.layer_geometry(layer).unwrap().loc;
             layer
                 .surface_under(
-                    relative_pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
+                    global_pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
                     WindowSurfaceType::ALL,
                 )
                 .map(|(s, loc)| {
                     (
                         s,
-                        loc + layer_loc - (relative_pos - global_pos).to_i32_round(),
+                        loc + layer_loc + output_geo.loc,
                     )
                 })
         } else {

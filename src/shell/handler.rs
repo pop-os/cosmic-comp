@@ -26,6 +26,7 @@ use smithay::{
             },
         },
         Serial,
+        SERIAL_COUNTER,
     },
 };
 use std::{cell::Cell, sync::Mutex};
@@ -242,7 +243,7 @@ pub fn init_shell(config: &Config, display: &mut Display) -> super::Shell {
                         with_states(surface, |states| {
                             let state = states.cached_state.current::<LayerSurfaceCachedState>();
                             matches!(state.layer, Layer::Top | Layer::Overlay)
-                                && state.keyboard_interactivity == KeyboardInteractivity::Exclusive
+                                && state.keyboard_interactivity != KeyboardInteractivity::None
                         })
                         .unwrap()
                     })
@@ -253,7 +254,7 @@ pub fn init_shell(config: &Config, display: &mut Display) -> super::Shell {
                     .unwrap();
 
                 if focus {
-                    state.set_focus(surface.get_surface(), &seat, None);
+                    state.set_focus(surface.get_surface(), &seat, Some(SERIAL_COUNTER.next_serial()));
                 }
             }
             _ => {}
