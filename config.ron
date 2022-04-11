@@ -2,7 +2,7 @@
     key_bindings: {
         (modifiers: [Logo, Shift], key: "Escape"): Terminate,
         (modifiers: [Logo], key: "Escape"): Debug,
-        (modifiers: [Logo, Shift], key: "Q"): Close,
+        (modifiers: [Logo], key: "Q"): Close,
         (modifiers: [Logo], key: "1"): Workspace(1),
         (modifiers: [Logo], key: "2"): Workspace(2),
         (modifiers: [Logo], key: "3"): Workspace(3),
@@ -27,9 +27,19 @@
         (modifiers: [Logo], key: "Right"): Focus(Right),
         (modifiers: [Logo], key: "Up"): Focus(Up),
         (modifiers: [Logo], key: "Down"): Focus(Down),
+        (modifiers: [Logo], key: "h"): Focus(Left),
+        (modifiers: [Logo], key: "j"): Focus(Down),
+        (modifiers: [Logo], key: "k"): Focus(Up),
+        (modifiers: [Logo], key: "l"): Focus(Right),
+		//TODO: automatic orientation with Logo+o toggling
         (modifiers: [Logo], key: "v"): Orientation(Vertical),
-        (modifiers: [Logo], key: "h"): Orientation(Horizontal),
-        (modifiers: [Ctrl], key: "Return"): Spawn("gnome-terminal"),
+        (modifiers: [Logo], key: "o"): Orientation(Horizontal),
+        //TODO: ability to select default web browser
+        (modifiers: [Logo], key: "b"): Spawn("firefox"),
+        //TODO: ability to select default file browser
+        (modifiers: [Logo], key: "f"): Spawn("nautilus"),
+        //TODO: ability to select default terminal
+        (modifiers: [Logo], key: "t"): Spawn("gnome-terminal"),
     },
     workspace_mode: OutputBound,
 )
