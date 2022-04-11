@@ -3,6 +3,7 @@ debian/*
 !debian/changelog
 !debian/control
 !debian/copyright
+!debian/cosmic-comp.install
 !debian/postinst
 !debian/rules
 !debian/source
