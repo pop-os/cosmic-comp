@@ -5,7 +5,6 @@ use crate::{
     config::OutputConfig,
     input::{set_active_output, Devices},
     state::{BackendData, Common, State},
-    utils::GlobalDrop,
 };
 use anyhow::{Context, Result};
 use smithay::{
@@ -20,10 +19,7 @@ use smithay::{
     reexports::{
         calloop::{ping, EventLoop, LoopHandle},
         gbm::{Device as GbmDevice, FdWrapper},
-        wayland_server::{
-            protocol::wl_output::{Subpixel, WlOutput},
-            Display,
-        },
+        wayland_server::{protocol::wl_output::Subpixel, Display},
     },
     wayland::{
         dmabuf::init_dmabuf_global,
@@ -48,11 +44,7 @@ pub struct X11State {
 }
 
 impl X11State {
-    pub fn add_window(
-        &mut self,
-        display: &mut Display,
-        handle: LoopHandle<'_, State>,
-    ) -> Result<Output> {
+    pub fn add_window(&mut self, handle: LoopHandle<'_, State>) -> Result<Output> {
         let window = WindowBuilder::new()
             .title("COSMIC")
             .build(&self.handle)
@@ -83,8 +75,7 @@ impl X11State {
             size: (size.w as i32, size.h as i32).into(),
             refresh: 60_000,
         };
-        let (output, global) = Output::new(display, name, props, None);
-        let _global = global.into();
+        let output = Output::new(name, props, None);
         output.change_current_state(Some(mode), None, None, Some((0, 0).into()));
         output.set_preferred(mode);
         output.user_data().insert_if_missing(|| {
@@ -125,7 +116,6 @@ impl X11State {
             pending: true,
             #[cfg(feature = "debug")]
             fps: Fps::default(),
-            _global,
         });
 
         // schedule first render
@@ -141,6 +131,35 @@ impl X11State {
             }
         }
     }
+
+    pub fn apply_config_for_output(
+        &mut self,
+        output: &Output,
+        test_only: bool,
+    ) -> Result<(), anyhow::Error> {
+        // TODO: if we ever have multiple winit outputs, don't ignore config.enabled
+        // reset size
+        let size = self
+            .surfaces
+            .iter()
+            .find(|s| s.output == *output)
+            .unwrap()
+            .window
+            .size();
+        let mut config = output
+            .user_data()
+            .get::<RefCell<OutputConfig>>()
+            .unwrap()
+            .borrow_mut();
+        if config.mode.0 != (size.w as i32, size.h as i32) {
+            if !test_only {
+                config.mode = ((size.w as i32, size.h as i32), None);
+            }
+            Err(anyhow::anyhow!("Cannot set window size"))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 pub struct Surface {
@@ -152,7 +171,6 @@ pub struct Surface {
     pending: bool,
     #[cfg(feature = "debug")]
     fps: Fps,
-    _global: GlobalDrop<WlOutput>,
 }
 
 impl Surface {
@@ -234,8 +252,13 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
     let output = state
         .backend
         .x11()
-        .add_window(&mut *state.common.display.borrow_mut(), event_loop.handle())
+        .add_window(event_loop.handle())
         .with_context(|| "Failed to create wl_output")?;
+    state.common.output_conf.add_heads(std::iter::once(&output));
+    state
+        .common
+        .output_conf
+        .update(&mut *state.common.display.borrow_mut());
     state
         .common
         .shell
@@ -266,7 +289,7 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
                     state.common.shell.unmap_output(
                         &output,
                         &mut state.backend,
-                        &state.common.config,
+                        &mut state.common.config,
                     );
                 }
             }
@@ -287,10 +310,23 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
                     .find(|s| s.window.id() == window_id)
                 {
                     let output = &surface.output;
+                    {
+                        let mut config = output
+                            .user_data()
+                            .get::<RefCell<OutputConfig>>()
+                            .unwrap()
+                            .borrow_mut();
+                        config.mode.0 = size.into();
+                    }
+
                     output.delete_mode(output.current_mode().unwrap());
                     output.change_current_state(Some(mode), None, None, None);
                     output.set_preferred(mode);
                     layer_map_for_output(output).arrange();
+                    state
+                        .common
+                        .output_conf
+                        .update(&mut *state.common.display.borrow_mut());
                     surface.dirty = true;
                     if !surface.pending {
                         surface.render.ping();

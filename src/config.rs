@@ -52,14 +52,20 @@ impl From<Output> for OutputInfo {
     }
 }
 
+fn default_enabled() -> bool {
+    true
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct OutputConfig {
-    pub mode: ((i32, i32), Option<String>),
+    pub mode: ((i32, i32), Option<u32>),
     pub vrr: bool,
     pub scale: f64,
     #[serde(with = "TransformDef")]
     pub transform: Transform,
     pub position: (i32, i32),
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
 }
 
 impl Default for OutputConfig {
@@ -70,6 +76,7 @@ impl Default for OutputConfig {
             scale: 1.0,
             transform: Transform::Normal,
             position: (0, 0),
+            enabled: true,
         }
     }
 }
@@ -79,14 +86,8 @@ impl OutputConfig {
         self.mode.0.into()
     }
 
-    pub fn mode_refresh(&self) -> i32 {
-        self.mode
-            .1
-            .as_deref()
-            .and_then(|x| x.split("@").nth(1))
-            .and_then(|x| str::parse::<f64>(x).ok())
-            .map(|x| x.round() as i32)
-            .unwrap_or(60)
+    pub fn mode_refresh(&self) -> u32 {
+        self.mode.1.unwrap_or(60_000)
     }
 }
 
