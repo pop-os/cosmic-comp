@@ -2,7 +2,7 @@
 
 use crate::{
     backend::{kms::KmsState, winit::WinitState, x11::X11State},
-    config::Config,
+    config::{Config, OutputConfig},
     logger::LogState,
     shell::{init_shell, Shell},
 };
@@ -13,7 +13,13 @@ use smithay::{
     },
     wayland::{
         data_device::{default_action_chooser, init_data_device, DataDeviceEvent},
-        output::{xdg::init_xdg_output_manager, Output},
+        output::{
+            wlr_configuration::{
+                self, init_wlr_output_configuration, ConfigurationManager, ModeConfiguration,
+            },
+            xdg::init_xdg_output_manager,
+            Mode as OutputMode, Output,
+        },
         seat::Seat,
         shell::xdg::ToplevelSurface,
         shm::init_shm_global,
@@ -42,6 +48,7 @@ pub struct Common {
     pub socket: OsString,
     pub event_loop_handle: LoopHandle<'static, State>,
 
+    pub output_conf: ConfigurationManager,
     pub shell: Shell,
     pub pending_toplevels: Vec<ToplevelSurface>,
     pub dirty_flag: Arc<AtomicBool>,
@@ -108,14 +115,45 @@ impl BackendData {
     pub fn apply_config_for_output(
         &mut self,
         output: &Output,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        match self {
-            BackendData::Kms(ref mut state) => state.apply_config_for_output(output),
-            _ => {
-                // TODO: reset the mode for nested backends, because we have no control over it
-                Ok(())
+        test_only: bool,
+        config: &mut Config,
+        shell: &mut Shell,
+    ) -> Result<(), anyhow::Error> {
+        let result = match self {
+            BackendData::Kms(ref mut state) => {
+                state.apply_config_for_output(output, config, shell, test_only)
             }
+            BackendData::Winit(ref mut state) => state.apply_config_for_output(output, test_only),
+            BackendData::X11(ref mut state) => state.apply_config_for_output(output, test_only),
+            _ => unreachable!("No backend set when applying output config"),
+        };
+
+        if result.is_ok() {
+            // apply to Output
+            let final_config = output
+                .user_data()
+                .get::<RefCell<OutputConfig>>()
+                .unwrap()
+                .borrow();
+            let mode = Some(OutputMode {
+                size: final_config.mode_size(),
+                refresh: final_config.mode_refresh() as i32,
+            })
+            .filter(|m| match output.current_mode() {
+                None => true,
+                Some(c_m) => m.size != c_m.size || m.refresh != c_m.refresh,
+            });
+            let transform =
+                Some(final_config.transform.into()).filter(|x| *x != output.current_transform());
+            let scale =
+                Some(final_config.scale.ceil() as i32).filter(|x| *x != output.current_scale());
+            let location =
+                Some(final_config.position.into()).filter(|x| *x != output.current_location());
+            output.change_current_state(mode, transform, scale, location);
+            shell.save_config(config);
         }
+
+        result
     }
 
     pub fn schedule_render(&mut self, output: &Output) {
@@ -176,6 +214,108 @@ impl State {
             default_action_chooser,
             None,
         );
+        let (output_conf, _) = init_wlr_output_configuration(
+            &mut display,
+            |_| true,
+            |conf, test_only, mut ddata| {
+                let state = ddata.get::<State>().unwrap();
+                if conf.iter().all(|(_, conf)| conf.is_none()) {
+                    return false; // we don't allow the user to accidentally disable all their outputs
+                }
+
+                let mut backups = Vec::new();
+                for (output, conf) in &conf {
+                    {
+                        let mut current_config = output
+                            .user_data()
+                            .get::<RefCell<OutputConfig>>()
+                            .unwrap()
+                            .borrow_mut();
+                        backups.push((output, current_config.clone()));
+
+                        if let Some(conf) = conf {
+                            match conf.mode {
+                                Some(ModeConfiguration::Mode(mode)) => {
+                                    current_config.mode =
+                                        ((mode.size.w, mode.size.h), Some(mode.refresh as u32));
+                                }
+                                Some(ModeConfiguration::Custom { size, refresh }) => {
+                                    current_config.mode =
+                                        ((size.w, size.h), refresh.map(|x| x as u32));
+                                }
+                                _ => {}
+                            }
+                            if let Some(scale) = conf.scale {
+                                current_config.scale = scale;
+                            }
+                            if let Some(transform) = conf.transform {
+                                current_config.transform = transform;
+                            }
+                            if let Some(position) = conf.position {
+                                current_config.position = position.into();
+                            }
+                            current_config.enabled = true;
+                        } else {
+                            current_config.enabled = false;
+                        }
+                    }
+
+                    if let Err(err) = state.backend.apply_config_for_output(
+                        output,
+                        test_only,
+                        &mut state.common.config,
+                        &mut state.common.shell,
+                    ) {
+                        slog_scope::warn!(
+                            "Failed to apply config to {}: {}. Resetting",
+                            output.name(),
+                            err
+                        );
+                        for (output, backup) in backups {
+                            {
+                                let mut current_config = output
+                                    .user_data()
+                                    .get::<RefCell<OutputConfig>>()
+                                    .unwrap()
+                                    .borrow_mut();
+                                *current_config = backup;
+                            }
+                            if !test_only {
+                                if let Err(err) = state.backend.apply_config_for_output(
+                                    output,
+                                    false,
+                                    &mut state.common.config,
+                                    &mut state.common.shell,
+                                ) {
+                                    slog_scope::error!(
+                                        "Failed to reset output config for {}: {}",
+                                        output.name(),
+                                        err
+                                    );
+                                }
+                            }
+                        }
+                        return false;
+                    }
+                }
+
+                for output in conf.iter().filter(|(_, c)| c.is_some()).map(|(o, _)| o) {
+                    wlr_configuration::enable_head(output);
+                }
+                for output in conf.iter().filter(|(_, c)| c.is_none()).map(|(o, _)| o) {
+                    wlr_configuration::disable_head(output);
+                }
+                state.common.event_loop_handle.insert_idle(move |state| {
+                    state
+                        .common
+                        .output_conf
+                        .update(&mut *state.common.display.borrow_mut());
+                });
+
+                true
+            },
+            None,
+        );
 
         #[cfg(not(feature = "debug"))]
         let dirty_flag = Arc::new(AtomicBool::new(false));
@@ -189,6 +329,7 @@ impl State {
                 socket,
                 event_loop_handle: handle,
 
+                output_conf,
                 shell,
                 pending_toplevels: Vec::new(),
                 dirty_flag,

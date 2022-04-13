@@ -143,11 +143,7 @@ impl FloatingLayout {
         Default::default()
     }
 
-    fn map_window(
-        space: &mut Space,
-        window: &Window,
-        output: &Output,
-    ) {
+    fn map_window(space: &mut Space, window: &Window, output: &Output) {
         let win_geo = window.bbox();
         let layers = layer_map_for_output(&output);
         let geometry = layers.non_exclusive_zone();

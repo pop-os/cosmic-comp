@@ -72,6 +72,32 @@ impl WinitState {
 
         Ok(())
     }
+
+    pub fn apply_config_for_output(
+        &mut self,
+        output: &Output,
+        test_only: bool,
+    ) -> Result<(), anyhow::Error> {
+        // TODO: if we ever have multiple winit outputs, don't ignore config.enabled
+        // reset size
+        let size = self.backend.borrow().window_size();
+        let mut config = output
+            .user_data()
+            .get::<RefCell<OutputConfig>>()
+            .unwrap()
+            .borrow_mut();
+        if dbg!(config.mode.0) != dbg!((size.physical_size.w as i32, size.physical_size.h as i32)) {
+            if !test_only {
+                config.mode = (
+                    (size.physical_size.w as i32, size.physical_size.h as i32),
+                    None,
+                );
+            }
+            Err(anyhow::anyhow!("Cannot set window size"))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Result<()> {
@@ -93,7 +119,7 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
         size: (size.physical_size.w as i32, size.physical_size.h as i32).into(),
         refresh: 60_000,
     };
-    let (output, _global) = Output::new(&mut *state.common.display.borrow_mut(), name, props, None);
+    let output = Output::new(name, props, None);
     //let _global = global.into();
     output.change_current_state(
         Some(mode),
@@ -146,7 +172,7 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
                     state.common.shell.unmap_output(
                         &output,
                         &mut state.backend,
-                        &state.common.config,
+                        &mut state.common.config,
                     );
                     if let Some(token) = token.take() {
                         event_loop_handle.remove(token);
@@ -163,6 +189,11 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
         #[cfg(feature = "debug")]
         fps: Fps::default(),
     });
+    state.common.output_conf.add_heads(std::iter::once(&output));
+    state
+        .common
+        .output_conf
+        .update(&mut *state.common.display.borrow_mut());
     state
         .common
         .shell
@@ -224,10 +255,22 @@ impl State {
                     size,
                     refresh: 60_000,
                 };
+
+                {
+                    let mut config = output
+                        .user_data()
+                        .get::<RefCell<OutputConfig>>()
+                        .unwrap()
+                        .borrow_mut();
+                    config.mode.0 = size.into();
+                }
                 output.delete_mode(output.current_mode().unwrap());
-                output.change_current_state(Some(mode), None, None, None);
                 output.set_preferred(mode);
+                output.change_current_state(Some(mode), None, None, None);
                 layer_map_for_output(output).arrange();
+                self.common
+                    .output_conf
+                    .update(&mut *self.common.display.borrow_mut());
                 render_ping.ping();
             }
             WinitEvent::Refresh => render_ping.ping(),
