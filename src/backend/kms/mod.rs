@@ -5,7 +5,7 @@ use crate::state::Fps;
 
 use crate::{
     backend::render,
-    config::{Config, OutputConfig},
+    config::OutputConfig,
     shell::Shell,
     state::{BackendData, Common, State},
 };
@@ -297,58 +297,64 @@ impl State {
 
         let outputs = device.enumerate_surfaces()?.added; // There are no removed outputs on newly added devices
         let mut wl_outputs = Vec::new();
+        let mut w = self.common.shell.global_space().size.w;
         for (crtc, conn) in outputs {
             match device.setup_surface(
-                &drm_node,
                 crtc,
                 conn,
-                self.backend.kms().signaler.clone(),
                 &mut self.common.event_loop_handle,
+                (0, w),
             ) {
                 Ok(output) => {
-                    self.common.shell.map_output(
-                        &output,
-                        &mut self.backend,
-                        &mut self.common.config,
-                    );
+                    w += output.user_data().get::<RefCell<OutputConfig>>().unwrap().borrow().mode_size().w;
                     wl_outputs.push(output);
                 }
                 Err(err) => slog_scope::warn!("Failed to initialize output: {}", err),
             };
         }
+        self.backend.kms().devices.insert(drm_node, device);
+        
         self.common.output_conf.add_heads(wl_outputs.iter());
         self.common
             .output_conf
             .update(&mut *self.common.display.borrow_mut());
+        for output in wl_outputs {
+            if let Err(err) = self.backend.kms().apply_config_for_output(&output, &mut self.common.shell, false) {
+                slog_scope::warn!("Failed to initialize output: {}", err);
+            }
+        }
+        self.common.config.read_outputs(self.common.output_conf.outputs(), &mut self.backend, &mut self.common.shell);
+        self.common.shell.refresh_outputs();
+        self.common.config.write_outputs(self.common.output_conf.outputs());
 
-        self.backend.kms().devices.insert(drm_node, device);
         Ok(())
     }
 
     fn device_changed(&mut self, dev: dev_t) -> Result<()> {
         let drm_node = DrmNode::from_dev_id(dev)?;
-        let signaler = self.backend.kms().signaler.clone();
         let mut outputs_removed = Vec::new();
         let mut outputs_added = Vec::new();
         if let Some(device) = self.backend.kms().devices.get_mut(&drm_node) {
             let changes = device.enumerate_surfaces()?;
+            let mut w = self.common.shell.global_space().size.w;
             for crtc in changes.removed {
                 if let Some(surface) = device.surfaces.get_mut(&crtc) {
                     if let Some(token) = surface.render_timer_token.take() {
                         self.common.event_loop_handle.remove(token);
                     }
+                    w -= surface.output.current_mode().map(|m| m.size.w).unwrap_or(0);
                     outputs_removed.push(surface.output.clone());
                 }
             }
             for (crtc, conn) in changes.added {
                 match device.setup_surface(
-                    &drm_node,
                     crtc,
                     conn,
-                    signaler.clone(),
                     &mut self.common.event_loop_handle,
+                    (0, w),
                 ) {
                     Ok(output) => {
+                        w += output.user_data().get::<RefCell<OutputConfig>>().unwrap().borrow().mode_size().w;
                         outputs_added.push(output);
                     }
                     Err(err) => slog_scope::warn!("Failed to initialize output: {}", err),
@@ -357,20 +363,19 @@ impl State {
         }
 
         self.common.output_conf.remove_heads(outputs_removed.iter());
-        for output in outputs_removed.into_iter() {
-            self.common
-                .shell
-                .unmap_output(&output, &mut self.backend, &mut self.common.config);
-        }
         self.common.output_conf.add_heads(outputs_added.iter());
-        for output in outputs_added.into_iter() {
-            self.common
-                .shell
-                .map_output(&output, &mut self.backend, &mut self.common.config)
+        for output in outputs_added {
+            if let Err(err) = self.backend.kms().apply_config_for_output(&output, &mut self.common.shell, false) {
+                slog_scope::warn!("Failed to initialize output: {}", err);
+            }
         }
         self.common
             .output_conf
             .update(&mut self.common.display.borrow_mut());
+        self.common.config.read_outputs(self.common.output_conf.outputs(), &mut self.backend, &mut self.common.shell);
+        self.common.shell.refresh_outputs();
+        self.common.config.write_outputs(self.common.output_conf.outputs());
+
         Ok(())
     }
 
@@ -392,14 +397,12 @@ impl State {
             }
         }
         self.common.output_conf.remove_heads(outputs_removed.iter());
-        for output in outputs_removed.into_iter() {
-            self.common
-                .shell
-                .unmap_output(&output, &mut self.backend, &mut self.common.config);
-        }
         self.common
             .output_conf
             .update(&mut *self.common.display.borrow_mut());
+        self.common.config.read_outputs(self.common.output_conf.outputs(), &mut self.backend, &mut self.common.shell);
+        self.common.shell.refresh_outputs();
+        self.common.config.write_outputs(self.common.output_conf.outputs());
 
         Ok(())
     }
@@ -440,11 +443,10 @@ impl Device {
 
     fn setup_surface(
         &mut self,
-        drm_node: &DrmNode,
         crtc: crtc::Handle,
         conn: connector::Handle,
-        signaler: Signaler<Signal>,
         loop_handle: &mut LoopHandle<'static, State>,
+        position: (i32, i32),
     ) -> Result<Output> {
         let drm = &mut *self.drm.as_source_mut();
         let crtc_info = drm.get_crtc(crtc)?;
@@ -461,14 +463,6 @@ impl Device {
                 .unwrap_or(conn_info.modes()[0])
         });
         let refresh_rate = drm_helpers::calculate_refresh_rate(mode);
-        let mut surface = drm.create_surface(crtc, mode, &[conn])?;
-        surface.link(signaler);
-
-        let target =
-            GbmBufferedSurface::new(surface, self.allocator.clone(), self.formats.clone(), None)
-                .with_context(|| format!("Failed to initialize Gbm surface for {}", interface))?;
-
-        //let is_nvidia = driver(drm.device_id()).ok().flatten().map(|x| x == "nvidia").unwrap_or(false);
         let output_mode = OutputMode {
             size: (mode.size().0 as i32, mode.size().1 as i32).into(),
             refresh: refresh_rate as i32,
@@ -499,12 +493,13 @@ impl Device {
             // TODO: Readout property for monitor rotation
             Some(wl_output::Transform::Normal),
             None,
-            None,
+            Some(position.into()),
         );
         output.user_data().insert_if_missing(|| {
             RefCell::new(OutputConfig {
                 mode: ((output_mode.size.w, output_mode.size.h), Some(refresh_rate)),
                 vrr,
+                position,
                 ..Default::default()
             })
         });
@@ -529,16 +524,15 @@ impl Device {
                 }
             })
             .unwrap();
-        timer_handle.add_timeout(Duration::ZERO, (*drm_node, crtc));
 
         let data = Surface {
             output: output.clone(),
-            surface: Some(target),
+            surface: None,
             connector: conn,
             vrr,
             refresh_rate,
             last_submit: None,
-            pending: true,
+            pending: false,
             render_timer: timer_handle,
             render_timer_token: Some(timer_token),
             #[cfg(feature = "debug")]
@@ -633,7 +627,6 @@ impl KmsState {
     pub fn apply_config_for_output(
         &mut self,
         output: &Output,
-        config: &mut Config,
         shell: &mut Shell,
         test_only: bool,
     ) -> Result<(), anyhow::Error> {
@@ -657,7 +650,7 @@ impl KmsState {
                 if !test_only {
                     if surface.surface.take().is_some() {
                         // just drop it
-                        shell.disable_output(output, config);
+                        shell.remove_output(output);
                     }
                 }
                 false
@@ -707,7 +700,7 @@ impl KmsState {
                             )
                         })?;
                         surface.surface = Some(target);
-                        shell.enable_output(output, config);
+                        shell.add_output(output);
                         true
                     }
                 } else {

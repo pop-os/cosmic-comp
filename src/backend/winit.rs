@@ -169,10 +169,8 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
                 }
                 Err(winit::WinitError::WindowClosed) => {
                     let output = state.backend.winit().output.clone();
-                    state.common.shell.unmap_output(
+                    state.common.shell.remove_output(
                         &output,
-                        &mut state.backend,
-                        &mut state.common.config,
                     );
                     if let Some(token) = token.take() {
                         event_loop_handle.remove(token);
@@ -197,7 +195,10 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
     state
         .common
         .shell
-        .map_output(&output, &mut state.backend, &mut state.common.config);
+        .add_output(&output);
+    state.common.config.read_outputs(std::iter::once(&output), &mut state.backend, &mut state.common.shell);
+    state.common.shell.refresh_outputs();
+    state.common.config.write_outputs(std::iter::once(&output));
 
     Ok(())
 }
@@ -271,6 +272,7 @@ impl State {
                 self.common
                     .output_conf
                     .update(&mut *self.common.display.borrow_mut());
+                self.common.shell.refresh_outputs();
                 render_ping.ping();
             }
             WinitEvent::Refresh => render_ping.ping(),

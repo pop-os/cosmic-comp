@@ -116,12 +116,11 @@ impl BackendData {
         &mut self,
         output: &Output,
         test_only: bool,
-        config: &mut Config,
         shell: &mut Shell,
     ) -> Result<(), anyhow::Error> {
         let result = match self {
             BackendData::Kms(ref mut state) => {
-                state.apply_config_for_output(output, config, shell, test_only)
+                state.apply_config_for_output(output, shell, test_only)
             }
             BackendData::Winit(ref mut state) => state.apply_config_for_output(output, test_only),
             BackendData::X11(ref mut state) => state.apply_config_for_output(output, test_only),
@@ -150,7 +149,6 @@ impl BackendData {
             let location =
                 Some(final_config.position.into()).filter(|x| *x != output.current_location());
             output.change_current_state(mode, transform, scale, location);
-            shell.save_config(config);
         }
 
         result
@@ -263,7 +261,6 @@ impl State {
                     if let Err(err) = state.backend.apply_config_for_output(
                         output,
                         test_only,
-                        &mut state.common.config,
                         &mut state.common.shell,
                     ) {
                         slog_scope::warn!(
@@ -284,7 +281,6 @@ impl State {
                                 if let Err(err) = state.backend.apply_config_for_output(
                                     output,
                                     false,
-                                    &mut state.common.config,
                                     &mut state.common.shell,
                                 ) {
                                     slog_scope::error!(
@@ -297,6 +293,7 @@ impl State {
                         }
                         return false;
                     }
+
                 }
 
                 for output in conf.iter().filter(|(_, c)| c.is_some()).map(|(o, _)| o) {
@@ -305,6 +302,7 @@ impl State {
                 for output in conf.iter().filter(|(_, c)| c.is_none()).map(|(o, _)| o) {
                     wlr_configuration::disable_head(output);
                 }
+                state.common.config.write_outputs(state.common.output_conf.outputs());
                 state.common.event_loop_handle.insert_idle(move |state| {
                     state
                         .common

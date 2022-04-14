@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    config::{Config, OutputConfig, OutputInfo},
+    config::{Config, OutputConfig},
     input::active_output,
-    state::{BackendData, Common},
+    state::Common,
 };
 pub use smithay::{
     desktop::{PopupGrab, PopupManager, PopupUngrabStrategy, Space, Window},
@@ -92,127 +92,36 @@ impl Shell {
         }
     }
 
-    fn refresh_config(&mut self, backend: &mut BackendData, config: &mut Config) -> bool {
-        let mut infos = self
-            .outputs()
-            .cloned()
-            .map(Into::<crate::config::OutputInfo>::into)
-            .collect::<Vec<_>>();
-        infos.sort();
-        if let Some(configs) = config.dynamic_conf.outputs().config.get(&infos).cloned() {
-            let mut reset = false;
-            let known_good_configs = self
-                .outputs
-                .iter()
-                .map(|output| {
-                    output
-                        .user_data()
-                        .get::<RefCell<OutputConfig>>()
-                        .unwrap()
-                        .borrow()
-                        .clone()
-                })
-                .collect::<Vec<_>>();
-
-            for (name, output_config) in infos.iter().map(|o| &o.connector).zip(configs.into_iter())
-            {
-                let output = self
-                    .outputs
-                    .iter()
-                    .find(|o| &o.name() == name)
-                    .unwrap()
-                    .clone();
-                *output
+    pub fn refresh_outputs(&mut self) {
+        if let Mode::Global { active } = self.mode {
+            let workspace = &mut self.spaces[active];
+            for output in self.outputs.iter() {
+                let config = output
                     .user_data()
                     .get::<RefCell<OutputConfig>>()
                     .unwrap()
-                    .borrow_mut() = output_config;
-                if let Err(err) = backend.apply_config_for_output(&output, false, config, self) {
-                    slog_scope::warn!(
-                        "Failed to set new config for output {}: {}",
-                        output.name(),
-                        err
-                    );
-                    reset = true;
-                    break;
-                }
+                    .borrow();
+                workspace
+                    .space
+                    .map_output(output, config.scale, config.position);
             }
-
-            if reset {
-                for (output, output_config) in self
-                    .outputs
-                    .clone()
-                    .into_iter()
-                    .zip(known_good_configs.into_iter())
-                {
-                    *output
-                        .user_data()
-                        .get::<RefCell<OutputConfig>>()
-                        .unwrap()
-                        .borrow_mut() = output_config;
-                    if let Err(err) = backend.apply_config_for_output(&output, false, config, self)
-                    {
-                        slog_scope::error!(
-                            "Failed to reset config for output {}: {}",
-                            output.name(),
-                            err
-                        );
-                    }
-                }
-            }
-
-            if let Mode::Global { active } = self.mode {
-                let workspace = &mut self.spaces[active];
-                for output in self.outputs.iter() {
-                    let config = output
-                        .user_data()
-                        .get::<RefCell<OutputConfig>>()
-                        .unwrap()
-                        .borrow();
-                    workspace
-                        .space
-                        .map_output(output, config.scale, config.position);
-                }
-            } else {
-                for output in self.outputs.iter() {
-                    let config = output
-                        .user_data()
-                        .get::<RefCell<OutputConfig>>()
-                        .unwrap()
-                        .borrow();
-                    let workspace = Self::assign_next_free_output(&mut self.spaces, output);
-                    workspace.space.map_output(output, config.scale, (0, 0));
-                }
-            }
-
-            true
         } else {
-            false
+            for output in self.outputs.iter() {
+                let config = output
+                    .user_data()
+                    .get::<RefCell<OutputConfig>>()
+                    .unwrap()
+                    .borrow();
+                let active = output
+                    .user_data()
+                    .get::<ActiveWorkspace>()
+                    .unwrap()
+                    .get()
+                    .unwrap();
+                let workspace = &mut self.spaces[active];
+                workspace.space.map_output(output, config.scale, (0, 0));
+            }
         }
-    }
-
-    pub fn save_config(&self, config: &mut Config) {
-        let mut infos = self
-            .outputs()
-            .cloned()
-            .map(|o| {
-                (
-                    Into::<crate::config::OutputInfo>::into(o.clone()),
-                    o.user_data()
-                        .get::<RefCell<OutputConfig>>()
-                        .unwrap()
-                        .borrow()
-                        .clone(),
-                )
-            })
-            .collect::<Vec<(OutputInfo, OutputConfig)>>();
-        infos.sort_by(|&(ref a, _), &(ref b, _)| a.cmp(b));
-        let (infos, configs) = infos.into_iter().unzip();
-        config
-            .dynamic_conf
-            .outputs_mut()
-            .config
-            .insert(infos, configs);
     }
 
     fn assign_next_free_output<'a>(
@@ -236,7 +145,8 @@ impl Shell {
         workspace
     }
 
-    fn add_output(&mut self, output: &Output) {
+    pub fn add_output(&mut self, output: &Output) {
+        self.outputs.push(output.clone());
         let config = output
             .user_data()
             .get::<RefCell<OutputConfig>>()
@@ -255,9 +165,10 @@ impl Shell {
                     .map_output(output, config.scale, config.position);
             }
         }
+        output.change_current_state(None, None, Some(config.scale.ceil() as i32), None);
     }
 
-    fn remove_output(&mut self, output: &Output) {
+    pub fn remove_output(&mut self, output: &Output) {
         match self.mode {
             Mode::OutputBound => {
                 if let Some(idx) = output
@@ -275,65 +186,6 @@ impl Shell {
                 // TODO move windows and outputs farther on the right / or load save config for remaining monitors
             }
         }
-    }
-
-    pub fn map_output(&mut self, output: &Output, backend: &mut BackendData, config: &mut Config) {
-        self.outputs.push(output.clone());
-        if !self.refresh_config(backend, config) {
-            let new_pos_x = self
-                .outputs()
-                .take(self.outputs.len() - 1)
-                .map(|o| {
-                    let logical_size = self
-                        .active_space(o)
-                        .space
-                        .output_geometry(o)
-                        .map(|x| x.size)
-                        .unwrap_or((0, 0).into());
-                    o.user_data()
-                        .get::<RefCell<OutputConfig>>()
-                        .unwrap()
-                        .borrow()
-                        .position
-                        .0
-                        + logical_size.w
-                })
-                .max()
-                .unwrap_or(0);
-
-            let new_pos = (new_pos_x, 0);
-            output
-                .user_data()
-                .get::<RefCell<OutputConfig>>()
-                .unwrap()
-                .borrow_mut()
-                .position = new_pos;
-            output.change_current_state(None, None, None, Some(new_pos.into()));
-
-            self.add_output(output);
-            self.save_config(config);
-        }
-    }
-
-    pub fn unmap_output(
-        &mut self,
-        output: &Output,
-        backend: &mut BackendData,
-        config: &mut Config,
-    ) {
-        self.remove_output(output);
-        self.refresh_config(backend, config);
-    }
-
-    pub fn enable_output(&mut self, output: &Output, config: &mut Config) {
-        self.outputs.push(output.clone());
-        self.add_output(output);
-        self.save_config(config);
-    }
-
-    pub fn disable_output(&mut self, output: &Output, config: &mut Config) {
-        self.remove_output(output);
-        self.save_config(config);
     }
 
     pub fn output_size(&self, output: &Output) -> Size<i32, Logical> {

@@ -1,17 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::shell::layout::FocusDirection;
+use crate::{
+    shell::{
+        Shell,
+        layout::FocusDirection,
+    },
+    state::BackendData,
+};
 use serde::{Deserialize, Serialize};
-use smithay::wayland::seat::Keysym;
 pub use smithay::{
     backend::input::KeyState,
     utils::{Logical, Physical, Point, Size, Transform},
     wayland::{
-        output::Output,
-        seat::{keysyms as KeySyms, ModifiersState as KeyModifiers},
+        output::{Mode, Output},
+        seat::{keysyms as KeySyms, Keysym, ModifiersState as KeyModifiers},
     },
 };
-use std::{collections::HashMap, fs::OpenOptions, path::PathBuf};
+use std::{cell::RefCell, collections::HashMap, fs::OpenOptions, path::PathBuf};
 use xkbcommon::xkb;
 
 pub struct Config {
@@ -88,6 +93,13 @@ impl OutputConfig {
 
     pub fn mode_refresh(&self) -> u32 {
         self.mode.1.unwrap_or(60_000)
+    }
+
+    pub fn output_mode(&self) -> Mode {
+        Mode {
+            size: self.mode_size(),
+            refresh: self.mode_refresh() as i32,
+        }
     }
 }
 
@@ -174,6 +186,103 @@ impl Config {
         OutputsConfig {
             config: HashMap::new(),
         }
+    }
+    
+    pub fn read_outputs<'a>(
+        &mut self,
+        outputs: impl Iterator<Item=impl std::borrow::Borrow<Output>>,
+        backend: &mut BackendData,
+        shell: &mut Shell,
+    ) {
+        let outputs = outputs.map(|x| x.borrow().clone()).collect::<Vec<_>>();
+        let mut infos = outputs
+            .iter()
+            .cloned()
+            .map(Into::<crate::config::OutputInfo>::into)
+            .collect::<Vec<_>>();
+        infos.sort();
+        if let Some(configs) = self.dynamic_conf.outputs().config.get(&infos).cloned() {
+            let mut reset = false;
+            let known_good_configs = outputs
+                .iter()
+                .map(|output| {
+                    output
+                        .user_data()
+                        .get::<RefCell<OutputConfig>>()
+                        .unwrap()
+                        .borrow()
+                        .clone()
+                })
+                .collect::<Vec<_>>();
+
+            for (name, output_config) in infos.iter().map(|o| &o.connector).zip(configs.into_iter())
+            {
+                let output = outputs
+                    .iter()
+                    .find(|o| &o.name() == name)
+                    .unwrap()
+                    .clone();
+                *output
+                    .user_data()
+                    .get::<RefCell<OutputConfig>>()
+                    .unwrap()
+                    .borrow_mut() = output_config;
+                if let Err(err) = backend.apply_config_for_output(&output, false, shell) {
+                    slog_scope::warn!(
+                        "Failed to set new config for output {}: {}",
+                        output.name(),
+                        err
+                    );
+                    reset = true;
+                    break;
+                }
+            }
+
+            if reset {
+                for (output, output_config) in outputs
+                    .clone()
+                    .into_iter()
+                    .zip(known_good_configs.into_iter())
+                {
+                    *output
+                        .user_data()
+                        .get::<RefCell<OutputConfig>>()
+                        .unwrap()
+                        .borrow_mut() = output_config;
+                    if let Err(err) = backend.apply_config_for_output(&output, false, shell)
+                    {
+                        slog_scope::error!(
+                            "Failed to reset config for output {}: {}",
+                            output.name(),
+                            err
+                        );
+                    }
+                }
+            }
+        }
+    }
+    
+    pub fn write_outputs<'a>(&mut self, outputs: impl Iterator<Item=impl std::borrow::Borrow<Output>>) {
+        let mut infos = outputs
+            .map(|o| {
+                let o = o.borrow();
+                (
+                    Into::<crate::config::OutputInfo>::into(o.clone()),
+                    o.user_data()
+                        .get::<RefCell<OutputConfig>>()
+                        .unwrap()
+                        .borrow()
+                        .clone(),
+                )
+            })
+            .collect::<Vec<(OutputInfo, OutputConfig)>>();
+        infos.sort_by(|&(ref a, _), &(ref b, _)| a.cmp(b));
+        let (infos, configs) = infos.into_iter().unzip();
+        self
+            .dynamic_conf
+            .outputs_mut()
+            .config
+            .insert(infos, configs);
     }
 }
 
