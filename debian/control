@@ -23,4 +23,8 @@ Homepage: https://github.com/pop-os/cosmic-comp
 Package: cosmic-comp
 Architecture: amd64 arm64
 Depends: ${misc:Depends}, ${shlibs:Depends}
+Recommends:
+    cosmic-app-library,
+    cosmic-launcher,
+    xdg-shell-wrapper
 Description: Wayland compositor of pop-os cosmic shell

@@ -40,6 +40,8 @@
         (modifiers: [Logo], key: "f"): Spawn("nautilus"),
         //TODO: ability to select default terminal
         (modifiers: [Logo], key: "t"): Spawn("gnome-terminal"),
+        (modifiers: [Logo], key: "a"): Spawn("xdg-shell-wrapper cosmic-app-library"),
+        (modifiers: [Logo], key: "Slash"): Spawn("xdg-shell-wrapper cosmic-launcher"),
     },
     workspace_mode: OutputBound,
 )
