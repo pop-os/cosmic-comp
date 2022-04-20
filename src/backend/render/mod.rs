@@ -125,7 +125,7 @@ where
             .space
             .output_geometry(output)
             .unwrap_or(Rectangle::from_loc_and_size((0, 0), (0, 0)));
-        let scale = workspace.space.output_scale(output).unwrap();
+        let scale = output.current_scale().fractional_scale();
 
         let fps_overlay = fps_ui(_gpu, state, fps, output_geo, scale);
         custom_elements.push(fps_overlay.into());

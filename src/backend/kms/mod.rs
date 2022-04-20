@@ -711,6 +711,7 @@ impl KmsState {
             false
         };
 
+        shell.refresh_outputs();
         if recreated {
             self.schedule_render(output);
         }

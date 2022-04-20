@@ -18,7 +18,7 @@ use smithay::{
                 self, init_wlr_output_configuration, ConfigurationManager, ModeConfiguration,
             },
             xdg::init_xdg_output_manager,
-            Mode as OutputMode, Output,
+            Mode as OutputMode, Output, Scale,
         },
         seat::Seat,
         shell::xdg::ToplevelSurface,
@@ -145,10 +145,10 @@ impl BackendData {
             let transform =
                 Some(final_config.transform.into()).filter(|x| *x != output.current_transform());
             let scale =
-                Some(final_config.scale.ceil() as i32).filter(|x| *x != output.current_scale());
+                Some(final_config.scale).filter(|x| *x != output.current_scale().fractional_scale());
             let location =
                 Some(final_config.position.into()).filter(|x| *x != output.current_location());
-            output.change_current_state(mode, transform, scale, location);
+            output.change_current_state(mode, transform, scale.map(Scale::Fractional), location);
         }
 
         result

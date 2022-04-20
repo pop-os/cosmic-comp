@@ -11,7 +11,7 @@ pub use smithay::{
     utils::{Logical, Point, Rectangle, Size},
     wayland::{
         compositor::with_states,
-        output::{Mode as OutputMode, Output},
+        output::{Mode as OutputMode, Output, Scale},
         seat::Seat,
         shell::xdg::XdgToplevelSurfaceRoleAttributes,
         Serial, SERIAL_COUNTER,
@@ -103,15 +103,10 @@ impl Shell {
                     .borrow();
                 workspace
                     .space
-                    .map_output(output, config.scale, config.position);
+                    .map_output(output, config.position);
             }
         } else {
             for output in self.outputs.iter() {
-                let config = output
-                    .user_data()
-                    .get::<RefCell<OutputConfig>>()
-                    .unwrap()
-                    .borrow();
                 let active = output
                     .user_data()
                     .get::<ActiveWorkspace>()
@@ -119,7 +114,7 @@ impl Shell {
                     .get()
                     .unwrap();
                 let workspace = &mut self.spaces[active];
-                workspace.space.map_output(output, config.scale, (0, 0));
+                workspace.space.map_output(output, (0, 0));
             }
         }
     }
@@ -156,16 +151,16 @@ impl Shell {
         match self.mode {
             Mode::OutputBound => {
                 let workspace = Self::assign_next_free_output(&mut self.spaces, output);
-                workspace.space.map_output(output, config.scale, (0, 0));
+                workspace.space.map_output(output, (0, 0));
             }
             Mode::Global { active } => {
                 let workspace = &mut self.spaces[active];
                 workspace
                     .space
-                    .map_output(output, config.scale, config.position);
+                    .map_output(output, config.position);
             }
         }
-        output.change_current_state(None, None, Some(config.scale.ceil() as i32), None);
+        output.change_current_state(None, None, Some(Scale::Fractional(config.scale)), None);
     }
 
     pub fn remove_output(&mut self, output: &Output) {
@@ -271,14 +266,9 @@ impl Shell {
                     if let Some(old_idx) = active.set(idx) {
                         self.spaces[old_idx].space.unmap_output(output);
                     }
-                    let config = output
-                        .user_data()
-                        .get::<RefCell<OutputConfig>>()
-                        .unwrap()
-                        .borrow();
                     self.spaces[idx]
                         .space
-                        .map_output(output, config.scale, (0, 0));
+                        .map_output(output, (0, 0));
                     self.spaces[idx].refresh();
                 }
             }
@@ -294,7 +284,7 @@ impl Shell {
                         .borrow();
                     self.spaces[*active]
                         .space
-                        .map_output(output, config.scale, config.position);
+                        .map_output(output, config.position);
                 }
             }
         };
@@ -353,7 +343,7 @@ impl Shell {
                     self.spaces[old_active].space.unmap_output(output);
                     self.spaces[active]
                         .space
-                        .map_output(output, config.scale, config.position);
+                        .map_output(output, config.position);
                     self.spaces[active].refresh();
                 }
 
@@ -367,11 +357,6 @@ impl Shell {
                 let mut active = Some(active.clone());
                 self.mode = new;
                 for output in &self.outputs {
-                    let config = output
-                        .user_data()
-                        .get::<RefCell<OutputConfig>>()
-                        .unwrap()
-                        .borrow();
                     let workspace = if let Some(a) = active.take() {
                         output
                             .user_data()
@@ -381,7 +366,7 @@ impl Shell {
                     } else {
                         Self::assign_next_free_output(&mut self.spaces, output)
                     };
-                    workspace.space.map_output(output, config.scale, (0, 0));
+                    workspace.space.map_output(output, (0, 0));
                     workspace.refresh();
                 }
             }
