@@ -730,6 +730,7 @@ impl KmsState {
             }
             if !surface.pending {
                 surface.pending = true;
+                /*
                 let duration = surface
                     .last_submit
                     .as_ref()
@@ -740,12 +741,13 @@ impl KmsState {
                         DrmEventTime::Realtime(time) => time.duration_since(SystemTime::now()).ok(),
                     })
                     .unwrap_or(Duration::ZERO); // + Duration::from_secs_f64((1.0 / surface.refresh_rate as f64) - 20.0);
+                */
                 let data = (*device, *crtc);
-                if surface.vrr {
+                //if surface.vrr {
                     surface.render_timer.add_timeout(Duration::ZERO, data);
-                } else {
-                    surface.render_timer.add_timeout(duration, data);
-                }
+                //} else {
+                //    surface.render_timer.add_timeout(duration, data);
+                //}
             }
         }
     }
