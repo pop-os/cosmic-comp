@@ -1,7 +1,7 @@
 use super::{layout, Layout};
 use indexmap::IndexSet;
 use smithay::{
-    desktop::{Space, Window},
+    desktop::{LayerSurface, Space, Window},
     reexports::wayland_protocols::xdg_shell::server::xdg_toplevel::ResizeEdge,
     wayland::{
         output::Output,
@@ -52,6 +52,7 @@ pub struct Workspace {
     pub space: Space,
     pub(super) layout: Box<dyn Layout>,
     pub(super) pending_windows: Vec<(Window, Seat)>,
+    pub(super) pending_layers: Vec<(LayerSurface, Output, Seat)>,
 }
 
 impl Workspace {
@@ -61,6 +62,7 @@ impl Workspace {
             space: Space::new(None),
             layout: layout::new_default_layout(),
             pending_windows: Vec::new(),
+            pending_layers: Vec::new(),
         }
     }
 
@@ -87,6 +89,10 @@ impl Workspace {
 
     pub fn pending_window(&mut self, window: Window, seat: &Seat) {
         self.pending_windows.push((window, seat.clone()));
+    }
+    
+    pub fn pending_layer(&mut self, layer: LayerSurface, output: &Output, seat: &Seat) {
+        self.pending_layers.push((layer, output.clone(), seat.clone()));
     }
 
     pub(super) fn map_window(&mut self, window: &Window, seat: &Seat) {

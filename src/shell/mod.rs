@@ -6,14 +6,17 @@ use crate::{
     state::Common,
 };
 pub use smithay::{
-    desktop::{PopupGrab, PopupManager, PopupUngrabStrategy, Space, Window},
+    desktop::{PopupGrab, PopupManager, PopupUngrabStrategy, Space, Window, layer_map_for_output},
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Logical, Point, Rectangle, Size},
     wayland::{
         compositor::with_states,
         output::{Mode as OutputMode, Output, Scale},
         seat::Seat,
-        shell::xdg::XdgToplevelSurfaceRoleAttributes,
+        shell::{
+            xdg::XdgToplevelSurfaceRoleAttributes,
+            wlr_layer::{Layer, KeyboardInteractivity, LayerSurfaceCachedState},
+        },
         Serial, SERIAL_COUNTER,
     },
 };
@@ -465,9 +468,35 @@ impl Shell {
                 } {
                     new_focus = Some(seat);
                 }
-                workspace.pending_windows.retain(|(w, _)| w != &window);
+                workspace.pending_windows.retain(|(w, _)| w != &window); 
             }
-            workspace.space.commit(surface)
+            if let Some((layer, output, seat)) = workspace
+                .pending_layers
+                .iter()
+                .find(|(l, _, _)| l.get_surface() == Some(surface))
+                .cloned()
+            {
+                let focus = layer
+                    .get_surface()
+                    .map(|surface| {
+                        with_states(surface, |states| {
+                            let state = states.cached_state.current::<LayerSurfaceCachedState>();
+                            matches!(state.layer, Layer::Top | Layer::Overlay)
+                                && dbg!(state.keyboard_interactivity) != KeyboardInteractivity::None
+                        })
+                        .unwrap()
+                    })
+                    .unwrap_or(false);
+
+                let mut map = layer_map_for_output(&output);
+                map.map_layer(&layer).unwrap();
+
+                if focus {
+                    new_focus = Some(seat);
+                }
+                workspace.pending_layers.retain(|(l, _, _)| l != &layer);
+            }
+            workspace.space.commit(surface);
         }
         if let Some(seat) = new_focus {
             self.set_focus(Some(surface), &seat, seats, None)
