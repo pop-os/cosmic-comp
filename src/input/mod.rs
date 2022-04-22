@@ -5,7 +5,7 @@ use smithay::{
     backend::input::{Device, DeviceCapability, InputBackend, InputEvent, KeyState},
     desktop::{layer_map_for_output, Kind, Space, WindowSurfaceType},
     reexports::wayland_server::{protocol::wl_surface::WlSurface, Display},
-    utils::{Logical, Point},
+    utils::{Logical, Point, Rectangle},
     wayland::{
         data_device::set_data_device_focus,
         output::Output,
@@ -368,6 +368,7 @@ impl Common {
                             position,
                             relative_pos,
                             &output,
+                            output_geometry,
                             &workspace.space,
                         );
                         handle_window_movement(
@@ -411,6 +412,7 @@ impl Common {
                             position,
                             relative_pos,
                             &output,
+                            geometry,
                             &workspace.space,
                         );
                         handle_window_movement(
@@ -495,7 +497,8 @@ impl Common {
                                                 layers.layer_geometry(layer).unwrap().loc;
                                             under = layer
                                                 .surface_under(
-                                                    pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
+                                                    pos - output_geo.loc.to_f64()
+                                                        - layer_loc.to_f64(),
                                                     WindowSurfaceType::ALL,
                                                 )
                                                 .map(|(s, _)| s);
@@ -521,7 +524,8 @@ impl Common {
                                                 layers.layer_geometry(layer).unwrap().loc;
                                             under = layer
                                                 .surface_under(
-                                                    pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
+                                                    pos - output_geo.loc.to_f64()
+                                                        - layer_loc.to_f64(),
                                                     WindowSurfaceType::ALL,
                                                 )
                                                 .map(|(s, _)| s);
@@ -640,10 +644,10 @@ impl Common {
         global_pos: Point<f64, Logical>,
         relative_pos: Point<f64, Logical>,
         output: &Output,
+        output_geo: Rectangle<i32, Logical>,
         space: &Space,
     ) -> Option<(WlSurface, Point<i32, Logical>)> {
         let layers = layer_map_for_output(output);
-        let output_geo = space.output_geometry(output).unwrap();
 
         if let Some(layer) = layers
             .layer_under(WlrLayer::Overlay, relative_pos)
@@ -655,12 +659,7 @@ impl Common {
                     global_pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
                     WindowSurfaceType::ALL,
                 )
-                .map(|(s, loc)| {
-                    (
-                        s,
-                        loc + layer_loc + output_geo.loc,
-                    )
-                })
+                .map(|(s, loc)| (s, loc + layer_loc + output_geo.loc))
         } else if let Some(window) = space.window_under(relative_pos) {
             let window_loc = space.window_location(window).unwrap();
             window
@@ -681,12 +680,7 @@ impl Common {
                     global_pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
                     WindowSurfaceType::ALL,
                 )
-                .map(|(s, loc)| {
-                    (
-                        s,
-                        loc + layer_loc + output_geo.loc,
-                    )
-                })
+                .map(|(s, loc)| (s, loc + layer_loc + output_geo.loc))
         } else {
             None
         }
