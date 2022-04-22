@@ -34,12 +34,14 @@
 		//TODO: automatic orientation with Logo+o toggling
         (modifiers: [Logo], key: "v"): Orientation(Vertical),
         (modifiers: [Logo], key: "o"): Orientation(Horizontal),
+        (modifiers: [Logo, Shift], key: "f"): Fullscreen,
         //TODO: ability to select default web browser
         (modifiers: [Logo], key: "b"): Spawn("firefox"),
         //TODO: ability to select default file browser
         (modifiers: [Logo], key: "f"): Spawn("nautilus"),
         //TODO: ability to select default terminal
         (modifiers: [Logo], key: "t"): Spawn("gnome-terminal"),
+        (modifiers: [Ctrl], key: "t"): Spawn("wofi --show drun"),
     },
     workspace_mode: OutputBound,
 )

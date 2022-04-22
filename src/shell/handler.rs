@@ -213,6 +213,31 @@ pub fn init_shell(config: &Config, display: &mut Display) -> super::Shell {
                             .set(Some(grab));
                     }
                 }
+                XdgRequest::Fullscreen { surface, output } => {
+                    let output = output
+                        .as_ref()
+                        .and_then(Output::from_resource)
+                        .unwrap_or_else(|| {
+                            let seat = &state.last_active_seat;
+                            active_output(seat, &*state)
+                        });
+                    if let Some(surface) = surface.get_surface() {
+                        if let Some(workspace) = state.shell.space_for_surface_mut(surface) {
+                            let window =
+                                workspace.space.window_for_surface(surface).unwrap().clone();
+                            workspace.fullscreen_request(&window, &output)
+                        }
+                    }
+                }
+                XdgRequest::UnFullscreen { surface } => {
+                    if let Some(surface) = surface.get_surface() {
+                        if let Some(workspace) = state.shell.space_for_surface_mut(surface) {
+                            let window =
+                                workspace.space.window_for_surface(surface).unwrap().clone();
+                            workspace.unfullscreen_request(&window)
+                        }
+                    }
+                }
                 _ => { /*TODO*/ }
             }
         },

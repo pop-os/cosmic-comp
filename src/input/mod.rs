@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{config::Action, state::Common};
+use crate::{config::Action, state::Common, shell::Workspace};
 use smithay::{
     backend::input::{Device, DeviceCapability, InputBackend, InputEvent, KeyState},
     desktop::{layer_map_for_output, Kind, Space, WindowSurfaceType},
@@ -304,6 +304,14 @@ impl Common {
                                         self.seats.iter(),
                                     );
                                 }
+                                Action::Fullscreen => {
+                                    let current_output = active_output(seat, &self);
+                                    let workspace = self.shell.active_space_mut(&current_output);
+                                    let focused_window = workspace.focus_stack(seat).last();
+                                    if let Some(window) = focused_window {
+                                        workspace.fullscreen_toggle(&window, &current_output);
+                                    }
+                                }
                                 Action::Orientation(orientation) => {
                                     let output = active_output(seat, &self);
                                     self.shell.set_orientation(&seat, &output, *orientation);
@@ -369,7 +377,7 @@ impl Common {
                             relative_pos,
                             &output,
                             output_geometry,
-                            &workspace.space,
+                            &workspace,
                         );
                         handle_window_movement(
                             under.as_ref().map(|(s, _)| s),
@@ -413,7 +421,7 @@ impl Common {
                             relative_pos,
                             &output,
                             geometry,
-                            &workspace.space,
+                            &workspace,
                         );
                         handle_window_movement(
                             under.as_ref().map(|(s, _)| s),
@@ -488,49 +496,73 @@ impl Common {
                                     let layers = layer_map_for_output(&output);
                                     let mut under = None;
 
-                                    if let Some(layer) = layers
-                                        .layer_under(WlrLayer::Overlay, relative_pos)
-                                        .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos))
-                                    {
-                                        if layer.can_receive_keyboard_focus() {
-                                            let layer_loc =
-                                                layers.layer_geometry(layer).unwrap().loc;
-                                            under = layer
-                                                .surface_under(
-                                                    pos - output_geo.loc.to_f64()
-                                                        - layer_loc.to_f64(),
-                                                    WindowSurfaceType::ALL,
-                                                )
-                                                .map(|(s, _)| s);
-                                        }
-                                    } else if let Some(window) =
-                                        workspace.space.window_under(relative_pos).cloned()
-                                    {
-                                        let window_loc =
-                                            workspace.space.window_location(&window).unwrap();
-                                        under = window
-                                            .surface_under(
-                                                relative_pos - window_loc.to_f64(),
+                                    if let Some(window) = workspace.get_fullscreen(&output) {
+                                        if let Some(layer) = layers
+                                            .layer_under(WlrLayer::Overlay, relative_pos)
+                                        {
+                                            if layer.can_receive_keyboard_focus() {
+                                                let layer_loc =
+                                                    layers.layer_geometry(layer).unwrap().loc;
+                                                under = layer
+                                                    .surface_under(
+                                                        pos - output_geo.loc.to_f64()
+                                                            - layer_loc.to_f64(),
+                                                        WindowSurfaceType::ALL,
+                                                    )
+                                                    .map(|(s, _)| s);
+                                            }
+                                        } else { 
+                                            under = window.surface_under(
+                                                pos - output_geo.loc.to_f64(), 
                                                 WindowSurfaceType::TOPLEVEL
-                                                    | WindowSurfaceType::SUBSURFACE,
-                                            )
-                                            .map(|(s, _)| s);
-                                    } else if let Some(layer) = layers
-                                        .layer_under(WlrLayer::Bottom, pos)
-                                        .or_else(|| layers.layer_under(WlrLayer::Background, pos))
-                                    {
-                                        if layer.can_receive_keyboard_focus() {
-                                            let layer_loc =
-                                                layers.layer_geometry(layer).unwrap().loc;
-                                            under = layer
+                                                    | WindowSurfaceType::SUBSURFACE
+                                            ).map(|(s, _)| s);
+                                        }
+                                    } else {
+                                        if let Some(layer) = layers
+                                            .layer_under(WlrLayer::Overlay, relative_pos)
+                                            .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos))
+                                        {
+                                            if layer.can_receive_keyboard_focus() {
+                                                let layer_loc =
+                                                    layers.layer_geometry(layer).unwrap().loc;
+                                                under = layer
+                                                    .surface_under(
+                                                        pos - output_geo.loc.to_f64()
+                                                            - layer_loc.to_f64(),
+                                                        WindowSurfaceType::ALL,
+                                                    )
+                                                    .map(|(s, _)| s);
+                                            }
+                                        } else if let Some(window) =
+                                            workspace.space.window_under(relative_pos).cloned()
+                                        {
+                                            let window_loc =
+                                                workspace.space.window_location(&window).unwrap();
+                                            under = window
                                                 .surface_under(
-                                                    pos - output_geo.loc.to_f64()
-                                                        - layer_loc.to_f64(),
-                                                    WindowSurfaceType::ALL,
+                                                    relative_pos - window_loc.to_f64(),
+                                                    WindowSurfaceType::TOPLEVEL
+                                                        | WindowSurfaceType::SUBSURFACE,
                                                 )
                                                 .map(|(s, _)| s);
-                                        }
-                                    };
+                                        } else if let Some(layer) = layers
+                                            .layer_under(WlrLayer::Bottom, pos)
+                                            .or_else(|| layers.layer_under(WlrLayer::Background, pos))
+                                        {
+                                            if layer.can_receive_keyboard_focus() {
+                                                let layer_loc =
+                                                    layers.layer_geometry(layer).unwrap().loc;
+                                                under = layer
+                                                    .surface_under(
+                                                        pos - output_geo.loc.to_f64()
+                                                            - layer_loc.to_f64(),
+                                                        WindowSurfaceType::ALL,
+                                                    )
+                                                    .map(|(s, _)| s);
+                                            }
+                                        };
+                                    }
 
                                     self.set_focus(under.as_ref(), seat, Some(serial));
                                 }
@@ -645,44 +677,67 @@ impl Common {
         relative_pos: Point<f64, Logical>,
         output: &Output,
         output_geo: Rectangle<i32, Logical>,
-        space: &Space,
+        workspace: &Workspace,
     ) -> Option<(WlSurface, Point<i32, Logical>)> {
         let layers = layer_map_for_output(output);
-
-        if let Some(layer) = layers
-            .layer_under(WlrLayer::Overlay, relative_pos)
-            .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos))
-        {
-            let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-            layer
-                .surface_under(
-                    global_pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
-                    WindowSurfaceType::ALL,
-                )
-                .map(|(s, loc)| (s, loc + layer_loc + output_geo.loc))
-        } else if let Some(window) = space.window_under(relative_pos) {
-            let window_loc = space.window_location(window).unwrap();
-            window
-                .surface_under(relative_pos - window_loc.to_f64(), WindowSurfaceType::ALL)
-                .map(|(s, loc)| {
-                    (
-                        s,
-                        loc + window_loc - (relative_pos - global_pos).to_i32_round(),
+        if let Some(window) = workspace.get_fullscreen(output) {
+            if let Some(layer) = layers
+                .layer_under(WlrLayer::Overlay, relative_pos)
+                .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos))
+            {
+                let layer_loc = layers.layer_geometry(layer).unwrap().loc;
+                layer
+                    .surface_under(
+                        global_pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
+                        WindowSurfaceType::ALL,
                     )
-                })
-        } else if let Some(layer) = layers
-            .layer_under(WlrLayer::Bottom, relative_pos)
-            .or_else(|| layers.layer_under(WlrLayer::Background, relative_pos))
-        {
-            let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-            layer
-                .surface_under(
-                    global_pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
-                    WindowSurfaceType::ALL,
-                )
-                .map(|(s, loc)| (s, loc + layer_loc + output_geo.loc))
+                    .map(|(s, loc)| (s, loc + layer_loc + output_geo.loc))
+            } else { 
+                window
+                    .surface_under(global_pos - output_geo.loc.to_f64(), WindowSurfaceType::ALL)
+                    .map(|(s, loc)| {
+                        (
+                            s,
+                            loc + output_geo.loc,
+                        )
+                    })
+            }
         } else {
-            None
+            if let Some(layer) = layers
+                .layer_under(WlrLayer::Overlay, relative_pos)
+                .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos))
+            {
+                let layer_loc = layers.layer_geometry(layer).unwrap().loc;
+                layer
+                    .surface_under(
+                        global_pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
+                        WindowSurfaceType::ALL,
+                    )
+                    .map(|(s, loc)| (s, loc + layer_loc + output_geo.loc))
+            } else if let Some(window) = workspace.space.window_under(relative_pos) {
+                let window_loc = workspace.space.window_location(window).unwrap();
+                window
+                    .surface_under(relative_pos - window_loc.to_f64(), WindowSurfaceType::ALL)
+                    .map(|(s, loc)| {
+                        (
+                            s,
+                            loc + window_loc - (relative_pos - global_pos).to_i32_round(),
+                        )
+                    })
+            } else if let Some(layer) = layers
+                .layer_under(WlrLayer::Bottom, relative_pos)
+                .or_else(|| layers.layer_under(WlrLayer::Background, relative_pos))
+            {
+                let layer_loc = layers.layer_geometry(layer).unwrap().loc;
+                layer
+                    .surface_under(
+                        global_pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
+                        WindowSurfaceType::ALL,
+                    )
+                    .map(|(s, loc)| (s, loc + layer_loc + output_geo.loc))
+            } else {
+                None
+            }
         }
     }
 }

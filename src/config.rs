@@ -471,5 +471,6 @@ pub enum Action {
     MoveToWorkspace(u8),
     Focus(FocusDirection),
     Orientation(crate::shell::layout::Orientation),
+    Fullscreen,
     Spawn(String),
 }

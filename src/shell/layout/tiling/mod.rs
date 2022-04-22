@@ -529,6 +529,9 @@ impl TilingLayout {
                                 if let Some(geo) = geo {
                                     #[allow(irrefutable_let_patterns)]
                                     if let Kind::Xdg(xdg) = &window.toplevel() {
+                                        if xdg.current_state().map(|state| state.states.contains(XdgState::Fullscreen)).unwrap_or(false) {
+                                            continue;
+                                        }
                                         let ret = xdg.with_pending_state(|state| {
                                             state.size = Some(
                                                 (geo.size.w - inner * 2, geo.size.h - inner * 2)
