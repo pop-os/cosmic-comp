@@ -16,6 +16,7 @@ use smithay::{
         allocator::{gbm::GbmDevice, Format},
         drm::{DrmDevice, DrmEvent, DrmEventTime, DrmNode, GbmBufferedSurface, NodeType},
         egl::{EGLContext, EGLDevice, EGLDisplay},
+        input::InputEvent,
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
             multigpu::{egl::EglGlesBackend, GpuManager},
@@ -101,7 +102,10 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
 
     let libinput_event_source = event_loop
         .handle()
-        .insert_source(libinput_backend, move |event, _, state| {
+        .insert_source(libinput_backend, move |mut event, _, state| {
+            if let &mut InputEvent::DeviceAdded { ref mut device } = &mut event {
+                state.common.config.read_device(device);
+            }
             state.process_input_event(event);
             for output in state.common.shell.outputs() {
                 state.backend.kms().schedule_render(output);
