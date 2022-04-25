@@ -102,7 +102,7 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
     let libinput_event_source = event_loop
         .handle()
         .insert_source(libinput_backend, move |event, _, state| {
-            state.common.process_input_event(event);
+            state.process_input_event(event);
             for output in state.common.shell.outputs() {
                 state.backend.kms().schedule_render(output);
             }
@@ -624,6 +624,13 @@ impl Surface {
 }
 
 impl KmsState {
+    pub fn switch_vt(
+        &mut self,
+        num: i32,
+    ) -> Result<(), anyhow::Error> {
+        self.session.change_vt(num).map_err(Into::into)
+    }
+
     pub fn apply_config_for_output(
         &mut self,
         output: &Output,

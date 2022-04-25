@@ -276,7 +276,7 @@ impl State {
                 render_ping.ping();
             }
             WinitEvent::Refresh => render_ping.ping(),
-            WinitEvent::Input(event) => self.common.process_input_event(event),
+            WinitEvent::Input(event) => self.process_input_event(event),
             _ => {}
         };
     }

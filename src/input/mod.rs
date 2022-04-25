@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{config::Action, state::Common, shell::Workspace};
+use crate::{config::Action, state::{Common, State}, shell::Workspace};
 use smithay::{
     backend::input::{Device, DeviceCapability, InputBackend, InputEvent, KeyState},
     desktop::{layer_map_for_output, Kind, Space, WindowSurfaceType},
@@ -9,11 +9,12 @@ use smithay::{
     wayland::{
         data_device::set_data_device_focus,
         output::Output,
-        seat::{CursorImageStatus, FilterResult, KeysymHandle, Seat, XkbConfig},
+        seat::{CursorImageStatus, FilterResult, KeysymHandle, Seat, XkbConfig, keysyms},
         shell::wlr_layer::Layer as WlrLayer,
         SERIAL_COUNTER,
     },
 };
+use xkbcommon::xkb::KEY_XF86Switch_VT_12;
 use std::{cell::RefCell, collections::HashMap};
 
 pub struct ActiveOutput(pub RefCell<Output>);
@@ -114,13 +115,13 @@ pub fn set_active_output(seat: &Seat, output: &Output) {
     }
 }
 
-impl Common {
+impl State {
     pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>) {
         use smithay::backend::input::Event;
 
         match event {
             InputEvent::DeviceAdded { device } => {
-                let seat = &mut self.last_active_seat;
+                let seat = &mut self.common.last_active_seat;
                 let userdata = seat.user_data();
                 let devices = userdata.get::<Devices>().unwrap();
                 for cap in devices.add_device(&device) {
@@ -136,6 +137,7 @@ impl Common {
                         }
                         DeviceCapability::Pointer => {
                             let output = self
+                                .common
                                 .shell
                                 .outputs()
                                 .next()
@@ -157,12 +159,12 @@ impl Common {
                 }
                 #[cfg(feature = "debug")]
                 {
-                    self.egui.debug_state.handle_device_added(&device);
-                    self.egui.log_state.handle_device_added(&device);
+                    self.common.egui.debug_state.handle_device_added(&device);
+                    self.common.egui.log_state.handle_device_added(&device);
                 }
             }
             InputEvent::DeviceRemoved { device } => {
-                for seat in &mut self.seats {
+                for seat in &mut self.common.seats {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
@@ -182,15 +184,15 @@ impl Common {
                 }
                 #[cfg(feature = "debug")]
                 {
-                    self.egui.debug_state.handle_device_added(&device);
-                    self.egui.log_state.handle_device_added(&device);
+                    self.common.egui.debug_state.handle_device_added(&device);
+                    self.common.egui.log_state.handle_device_added(&device);
                 }
             }
             InputEvent::Keyboard { event, .. } => {
                 use smithay::backend::input::KeyboardKeyEvent;
 
                 let device = event.device();
-                for seat in self.seats.clone().iter() {
+                for seat in self.common.seats.clone().iter() {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
@@ -212,11 +214,11 @@ impl Common {
 
                                 #[cfg(feature = "debug")]
                                 {
-                                    if self.seats.iter().position(|x| x == seat).unwrap() == 0
-                                        && self.egui.active
+                                    if self.common.seats.iter().position(|x| x == seat).unwrap() == 0
+                                        && self.common.egui.active
                                     {
-                                        if self.egui.debug_state.wants_keyboard() {
-                                            self.egui.debug_state.handle_keyboard(
+                                        if self.common.egui.debug_state.wants_keyboard() {
+                                            self.common.egui.debug_state.handle_keyboard(
                                                 &handle,
                                                 state == KeyState::Pressed,
                                                 modifiers.clone(),
@@ -224,8 +226,8 @@ impl Common {
                                             userdata.get::<SupressedKeys>().unwrap().add(&handle);
                                             return FilterResult::Intercept(None);
                                         }
-                                        if self.egui.log_state.wants_keyboard() {
-                                            self.egui.log_state.handle_keyboard(
+                                        if self.common.egui.log_state.wants_keyboard() {
+                                            self.common.egui.log_state.handle_keyboard(
                                                 &handle,
                                                 state == KeyState::Pressed,
                                                 modifiers.clone(),
@@ -236,8 +238,16 @@ impl Common {
                                     }
                                 }
 
+                                if state == KeyState::Pressed && (keysyms::KEY_XF86Switch_VT_1..=KEY_XF86Switch_VT_12).contains(&handle.modified_sym()) {
+                                    if let Err(err) = self.backend.kms().switch_vt((handle.modified_sym() - keysyms::KEY_XF86Switch_VT_1 + 1) as i32) {
+                                        slog_scope::error!("Failed switching virtual terminal: {}", err);
+                                    }
+                                    userdata.get::<SupressedKeys>().unwrap().add(&handle);
+                                    return FilterResult::Intercept(None);
+                                }
+
                                 // here we can handle global shortcuts and the like
-                                for (binding, action) in self.config.static_conf.key_bindings.iter()
+                                for (binding, action) in self.common.config.static_conf.key_bindings.iter()
                                 {
                                     if state == KeyState::Pressed
                                         && binding.modifiers == *modifiers
@@ -254,19 +264,19 @@ impl Common {
                         {
                             match action {
                                 Action::Terminate => {
-                                    self.should_stop = true;
+                                    self.common.should_stop = true;
                                 }
                                 #[cfg(feature = "debug")]
                                 Action::Debug => {
-                                    self.egui.active = !self.egui.active;
+                                    self.common.egui.active = !self.common.egui.active;
                                 }
                                 #[cfg(not(feature = "debug"))]
                                 Action::Debug => {
                                     slog_scope::info!("Debug overlay not included in this version")
                                 }
                                 Action::Close => {
-                                    let current_output = active_output(seat, &self);
-                                    let workspace = self.shell.active_space_mut(&current_output);
+                                    let current_output = active_output(seat, &self.common);
+                                    let workspace = self.common.shell.active_space_mut(&current_output);
                                     if let Some(window) = workspace.focus_stack(seat).last() {
                                         #[allow(irrefutable_let_patterns)]
                                         if let Kind::Xdg(xdg) = &window.toplevel() {
@@ -275,52 +285,52 @@ impl Common {
                                     }
                                 }
                                 Action::Workspace(key_num) => {
-                                    let current_output = active_output(seat, &self);
+                                    let current_output = active_output(seat, &self.common);
                                     let workspace = match key_num {
                                         0 => 9,
                                         x => x - 1,
                                     };
-                                    self.shell
+                                    self.common.shell
                                         .activate(seat, &current_output, workspace as usize);
                                 }
                                 Action::MoveToWorkspace(key_num) => {
-                                    let current_output = active_output(seat, &self);
+                                    let current_output = active_output(seat, &self.common);
                                     let workspace = match key_num {
                                         0 => 9,
                                         x => x - 1,
                                     };
-                                    self.shell.move_current_window(
+                                    self.common.shell.move_current_window(
                                         seat,
                                         &current_output,
                                         workspace as usize,
                                     );
                                 }
                                 Action::Focus(focus) => {
-                                    let current_output = active_output(seat, &self);
-                                    self.shell.move_focus(
+                                    let current_output = active_output(seat, &self.common);
+                                    self.common.shell.move_focus(
                                         seat,
                                         &current_output,
                                         *focus,
-                                        self.seats.iter(),
+                                        self.common.seats.iter(),
                                     );
                                 }
                                 Action::Fullscreen => {
-                                    let current_output = active_output(seat, &self);
-                                    let workspace = self.shell.active_space_mut(&current_output);
+                                    let current_output = active_output(seat, &self.common);
+                                    let workspace = self.common.shell.active_space_mut(&current_output);
                                     let focused_window = workspace.focus_stack(seat).last();
                                     if let Some(window) = focused_window {
                                         workspace.fullscreen_toggle(&window, &current_output);
                                     }
                                 }
                                 Action::Orientation(orientation) => {
-                                    let output = active_output(seat, &self);
-                                    self.shell.set_orientation(&seat, &output, *orientation);
+                                    let output = active_output(seat, &self.common);
+                                    self.common.shell.set_orientation(&seat, &output, *orientation);
                                 }
                                 Action::Spawn(command) => {
                                     if let Err(err) = std::process::Command::new("/bin/sh")
                                         .arg("-c")
                                         .arg(command)
-                                        .env("WAYLAND_DISPLAY", &self.socket)
+                                        .env("WAYLAND_DISPLAY", &self.common.socket)
                                         .spawn()
                                     {
                                         slog_scope::warn!("Failed to spawn: {}", err);
@@ -336,20 +346,22 @@ impl Common {
                 use smithay::backend::input::PointerMotionEvent;
 
                 let device = event.device();
-                for seat in self.seats.clone().iter() {
+                for seat in self.common.seats.clone().iter() {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
-                        let current_output = active_output(seat, &self);
+                        let current_output = active_output(seat, &self.common);
 
                         let mut position = seat.get_pointer().unwrap().current_location();
                         position += event.delta();
 
                         let output = self
+                            .common
                             .shell
                             .outputs()
                             .find(|output| {
-                                self.shell
+                                self.common
+                                    .shell
                                     .output_geometry(output)
                                     .to_f64()
                                     .contains(position)
@@ -359,7 +371,7 @@ impl Common {
                         if output != current_output {
                             set_active_output(seat, &output);
                         }
-                        let output_geometry = self.shell.output_geometry(&output);
+                        let output_geometry = self.common.shell.output_geometry(&output);
 
                         position.x = 0.0f64
                             .max(position.x)
@@ -370,9 +382,9 @@ impl Common {
 
                         let serial = SERIAL_COUNTER.next_serial();
                         let relative_pos =
-                            self.shell.space_relative_output_geometry(position, &output);
-                        let workspace = self.shell.active_space_mut(&output);
-                        let under = Common::surface_under(
+                            self.common.shell.space_relative_output_geometry(position, &output);
+                        let workspace = self.common.shell.active_space_mut(&output);
+                        let under = State::surface_under(
                             position,
                             relative_pos,
                             &output,
@@ -388,11 +400,11 @@ impl Common {
                             .motion(position, under, serial, event.time());
 
                         #[cfg(feature = "debug")]
-                        if self.seats.iter().position(|x| x == seat).unwrap() == 0 {
-                            self.egui
+                        if self.common.seats.iter().position(|x| x == seat).unwrap() == 0 {
+                            self.common.egui
                                 .debug_state
                                 .handle_pointer_motion(position.to_i32_round());
-                            self.egui
+                            self.common.egui
                                 .log_state
                                 .handle_pointer_motion(position.to_i32_round());
                         }
@@ -404,19 +416,19 @@ impl Common {
                 use smithay::backend::input::PointerMotionAbsoluteEvent;
 
                 let device = event.device();
-                for seat in self.seats.clone().iter() {
+                for seat in self.common.seats.clone().iter() {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
-                        let output = active_output(seat, &self);
-                        let geometry = self.shell.output_geometry(&output);
+                        let output = active_output(seat, &self.common);
+                        let geometry = self.common.shell.output_geometry(&output);
                         let position =
                             geometry.loc.to_f64() + event.position_transformed(geometry.size);
                         let relative_pos =
-                            self.shell.space_relative_output_geometry(position, &output);
-                        let workspace = self.shell.active_space_mut(&output);
+                            self.common.shell.space_relative_output_geometry(position, &output);
+                        let workspace = self.common.shell.active_space_mut(&output);
                         let serial = SERIAL_COUNTER.next_serial();
-                        let under = Common::surface_under(
+                        let under = State::surface_under(
                             position,
                             relative_pos,
                             &output,
@@ -432,11 +444,11 @@ impl Common {
                             .motion(position, under, serial, event.time());
 
                         #[cfg(feature = "debug")]
-                        if self.seats.iter().position(|x| x == seat).unwrap() == 0 {
-                            self.egui
+                        if self.common.seats.iter().position(|x| x == seat).unwrap() == 0 {
+                            self.common.egui
                                 .debug_state
                                 .handle_pointer_motion(position.to_i32_round());
-                            self.egui
+                            self.common.egui
                                 .log_state
                                 .handle_pointer_motion(position.to_i32_round());
                         }
@@ -451,30 +463,30 @@ impl Common {
                 };
 
                 let device = event.device();
-                for seat in self.seats.clone().iter() {
+                for seat in self.common.seats.clone().iter() {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
                         #[cfg(feature = "debug")]
-                        if self.seats.iter().position(|x| x == seat).unwrap() == 0
-                            && self.egui.active
+                        if self.common.seats.iter().position(|x| x == seat).unwrap() == 0
+                            && self.common.egui.active
                         {
-                            if self.egui.debug_state.wants_pointer() {
+                            if self.common.egui.debug_state.wants_pointer() {
                                 if let Some(button) = event.button() {
-                                    self.egui.debug_state.handle_pointer_button(
+                                    self.common.egui.debug_state.handle_pointer_button(
                                         button,
                                         event.state() == ButtonState::Pressed,
-                                        self.egui.modifiers.clone(),
+                                        self.common.egui.modifiers.clone(),
                                     );
                                 }
                                 break;
                             }
-                            if self.egui.log_state.wants_pointer() {
+                            if self.common.egui.log_state.wants_pointer() {
                                 if let Some(button) = event.button() {
-                                    self.egui.log_state.handle_pointer_button(
+                                    self.common.egui.log_state.handle_pointer_button(
                                         button,
                                         event.state() == ButtonState::Pressed,
-                                        self.egui.modifiers.clone(),
+                                        self.common.egui.modifiers.clone(),
                                     );
                                 }
                                 break;
@@ -487,12 +499,12 @@ impl Common {
                             ButtonState::Pressed => {
                                 // change the keyboard focus unless the pointer is grabbed
                                 if !seat.get_pointer().unwrap().is_grabbed() {
-                                    let output = active_output(seat, &self);
+                                    let output = active_output(seat, &self.common);
                                     let pos = seat.get_pointer().unwrap().current_location();
-                                    let output_geo = self.shell.output_geometry(&output);
+                                    let output_geo = self.common.shell.output_geometry(&output);
                                     let relative_pos =
-                                        self.shell.space_relative_output_geometry(pos, &output);
-                                    let workspace = self.shell.active_space_mut(&output);
+                                        self.common.shell.space_relative_output_geometry(pos, &output);
+                                    let workspace = self.common.shell.active_space_mut(&output);
                                     let layers = layer_map_for_output(&output);
                                     let mut under = None;
 
@@ -564,7 +576,7 @@ impl Common {
                                         };
                                     }
 
-                                    self.set_focus(under.as_ref(), seat, Some(serial));
+                                    self.common.set_focus(under.as_ref(), seat, Some(serial));
                                 }
                                 wl_pointer::ButtonState::Pressed
                             }
@@ -585,11 +597,11 @@ impl Common {
                 };
 
                 let device = event.device();
-                for seat in self.seats.clone().iter() {
+                for seat in self.common.seats.clone().iter() {
                     #[cfg(feature = "debug")]
-                    if self.seats.iter().position(|x| x == seat).unwrap() == 0 && self.egui.active {
-                        if self.egui.debug_state.wants_pointer() {
-                            self.egui.debug_state.handle_pointer_axis(
+                    if self.common.seats.iter().position(|x| x == seat).unwrap() == 0 && self.common.egui.active {
+                        if self.common.egui.debug_state.wants_pointer() {
+                            self.common.egui.debug_state.handle_pointer_axis(
                                 event
                                     .amount_discrete(Axis::Horizontal)
                                     .or_else(|| event.amount(Axis::Horizontal).map(|x| x * 3.0))
@@ -601,8 +613,8 @@ impl Common {
                             );
                             break;
                         }
-                        if self.egui.log_state.wants_pointer() {
-                            self.egui.log_state.handle_pointer_axis(
+                        if self.common.egui.log_state.wants_pointer() {
+                            self.common.egui.log_state.handle_pointer_axis(
                                 event
                                     .amount_discrete(Axis::Horizontal)
                                     .or_else(|| event.amount(Axis::Horizontal).map(|x| x * 3.0))
