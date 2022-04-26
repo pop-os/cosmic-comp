@@ -547,12 +547,11 @@ impl TilingLayout {
                                             xdg.send_configure();
                                         }
                                     }
-                                    let window_geo = window.geometry();
                                     space.map_window(
                                         &window,
                                         (
-                                            geo.loc.x + inner - window_geo.loc.x,
-                                            geo.loc.y + inner - window_geo.loc.y,
+                                            geo.loc.x + inner,
+                                            geo.loc.y + inner,
                                         ),
                                         false,
                                     );

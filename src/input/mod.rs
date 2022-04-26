@@ -546,18 +546,10 @@ impl State {
                                                     )
                                                     .map(|(s, _)| s);
                                             }
-                                        } else if let Some(window) =
-                                            workspace.space.window_under(relative_pos).cloned()
+                                        } else if let Some((_, surface, _)) =
+                                            workspace.space.surface_under(relative_pos, WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE)
                                         {
-                                            let window_loc =
-                                                workspace.space.window_location(&window).unwrap();
-                                            under = window
-                                                .surface_under(
-                                                    relative_pos - window_loc.to_f64(),
-                                                    WindowSurfaceType::TOPLEVEL
-                                                        | WindowSurfaceType::SUBSURFACE,
-                                                )
-                                                .map(|(s, _)| s);
+                                            under = Some(surface);
                                         } else if let Some(layer) = layers
                                             .layer_under(WlrLayer::Bottom, pos)
                                             .or_else(|| layers.layer_under(WlrLayer::Background, pos))
@@ -726,16 +718,11 @@ impl State {
                         WindowSurfaceType::ALL,
                     )
                     .map(|(s, loc)| (s, loc + layer_loc + output_geo.loc))
-            } else if let Some(window) = workspace.space.window_under(relative_pos) {
-                let window_loc = workspace.space.window_location(window).unwrap();
-                window
-                    .surface_under(relative_pos - window_loc.to_f64(), WindowSurfaceType::ALL)
-                    .map(|(s, loc)| {
-                        (
-                            s,
-                            loc + window_loc - (relative_pos - global_pos).to_i32_round(),
-                        )
-                    })
+            } else if let Some((_, surface, loc)) = workspace.space.surface_under(relative_pos, WindowSurfaceType::ALL) {
+                Some((
+                    surface,
+                    loc + (global_pos - relative_pos).to_i32_round(),
+                ))
             } else if let Some(layer) = layers
                 .layer_under(WlrLayer::Bottom, relative_pos)
                 .or_else(|| layers.layer_under(WlrLayer::Background, relative_pos))
