@@ -116,24 +116,24 @@ pub struct InputsConfig {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct InputConfig {
     state: DeviceState,
-    #[serde(skip_serializing_if="Option::is_none")]
+    #[serde(skip_serializing_if="Option::is_none", default)]
     acceleration: Option<AccelConfig>,
-    #[serde(skip_serializing_if="Option::is_none")]
+    #[serde(skip_serializing_if="Option::is_none", default)]
     calibration: Option<[f32; 6]>,
     #[serde(with = "ClickMethodDef")]
-    #[serde(skip_serializing_if="Option::is_none")]
+    #[serde(skip_serializing_if="Option::is_none", default)]
     click_method: Option<ClickMethod>,
-    #[serde(skip_serializing_if="Option::is_none")]
+    #[serde(skip_serializing_if="Option::is_none", default)]
     disable_while_typing: Option<bool>,
-    #[serde(skip_serializing_if="Option::is_none")]
+    #[serde(skip_serializing_if="Option::is_none", default)]
     left_handed: Option<bool>,
-    #[serde(skip_serializing_if="Option::is_none")]
+    #[serde(skip_serializing_if="Option::is_none", default)]
     middle_button_emulation: Option<bool>,
-    #[serde(skip_serializing_if="Option::is_none")]
+    #[serde(skip_serializing_if="Option::is_none", default)]
     rotation_angle: Option<u32>,
-    #[serde(skip_serializing_if="Option::is_none")]
+    #[serde(skip_serializing_if="Option::is_none", default)]
     scroll_config: Option<ScrollConfig>,
-    #[serde(skip_serializing_if="Option::is_none")]
+    #[serde(skip_serializing_if="Option::is_none", default)]
     tap_config: Option<TapConfig>,
 }
 
