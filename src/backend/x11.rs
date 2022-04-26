@@ -179,6 +179,10 @@ impl Surface {
         renderer: &mut Gles2Renderer,
         state: &mut Common,
     ) -> Result<()> {
+        if render::needs_buffer_reset(&self.output, state) {
+            self.surface.reset_buffers();
+        }
+
         let (buffer, age) = self
             .surface
             .buffer()

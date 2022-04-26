@@ -612,11 +612,23 @@ impl Surface {
             return Ok(());
         }
 
-        let nodes = state
+        if render::needs_buffer_reset(&self.output, state) {
+            self.surface.as_mut().unwrap().reset_buffers();
+        }
+
+        let workspace = state
             .shell
-            .active_space(&self.output)
-            .space
-            .windows()
+            .active_space(&self.output);
+        let nodes = workspace
+            .get_fullscreen(&self.output)
+            .map(|w| vec![w])
+            .unwrap_or_else(||
+                workspace
+                    .space
+                    .windows()
+                    .collect::<Vec<_>>()
+            )
+            .into_iter()
             .flat_map(|w| {
                 w.toplevel()
                     .get_surface()?

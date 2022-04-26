@@ -104,6 +104,20 @@ impl AsGles2Renderer for GlMultiRenderer<'_> {
     }
 }
 
+pub fn needs_buffer_reset(output: &Output, state: &Common) -> bool {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct DidCustomRendering(AtomicBool);
+
+    let will_render_custom = {
+        let workspace = state.shell.active_space(output);
+        workspace.get_fullscreen(output).is_some()
+    };
+
+    let userdata = output.user_data();
+    userdata.insert_if_missing(|| DidCustomRendering(AtomicBool::new(false)));
+    userdata.get::<DidCustomRendering>().unwrap().0.swap(will_render_custom, Ordering::AcqRel) != will_render_custom
+}
+
 pub fn render_output<R>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,
@@ -128,7 +142,7 @@ where
     let workspace = state.shell.active_space(output);
     let maybe_fullscreen_window = workspace.get_fullscreen(output).cloned();
     let res = if let Some(window) = maybe_fullscreen_window {
-    #[cfg(not(feature = "debug"))]
+        #[cfg(not(feature = "debug"))]
         {
             render_fullscreen(gpu, renderer, window, state, output, hardware_cursor)
         }
