@@ -35,7 +35,7 @@ use smithay::{
         nix::{fcntl::OFlag, sys::stat::dev_t},
         wayland_server::protocol::wl_output,
     },
-    utils::signaling::{Linkable, Signaler},
+    utils::signaling::{Linkable, Signaler, SignalToken},
     wayland::output::{Mode as OutputMode, Output, PhysicalProperties},
 };
 
@@ -59,7 +59,8 @@ pub struct KmsState {
     primary: DrmNode,
     session: AutoSession,
     signaler: Signaler<Signal>,
-    tokens: Vec<RegistrationToken>,
+    _restart_token: SignalToken,
+    _tokens: Vec<RegistrationToken>,
 }
 
 pub struct Device {
@@ -87,7 +88,7 @@ pub struct Surface {
     fps: Fps,
 }
 
-pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Result<()> {
+pub fn init_backend(event_loop: &mut EventLoop<'static, State>, state: &mut State) -> Result<()> {
     let (session, notifier) = AutoSession::new(None).context("Failed to acquire session")?;
     let signaler = notifier.signaler();
 
@@ -147,51 +148,94 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
     };
     slog_scope::info!("Using {} as primary gpu for rendering", primary);
 
+    let udev_dispatcher = Dispatcher::new(udev_backend, move |event, _, state: &mut State| {
+        match match event {
+            UdevEvent::Added { device_id, path } => state
+                .device_added(device_id, path)
+                .with_context(|| format!("Failed to add drm device: {}", device_id)),
+            UdevEvent::Changed { device_id } => state
+                .device_changed(device_id)
+                .with_context(|| format!("Failed to update drm device: {}", device_id)),
+            UdevEvent::Removed { device_id } => state
+                .device_removed(device_id)
+                .with_context(|| format!("Failed to remove drm device: {}", device_id)),
+        } {
+            Ok(()) => {
+                slog_scope::debug!("Successfully handled udev event")
+            }
+            Err(err) => {
+                slog_scope::error!("Error while handling udev event: {}", err)
+            }
+        }
+    });
+    let udev_event_source = event_loop
+        .handle()
+        .register_dispatcher(udev_dispatcher.clone())
+        .unwrap();
+ 
+    let handle = event_loop.handle();
+    let dispatcher = udev_dispatcher.clone();
+    let _restart_token = signaler.register(move |signal| {
+        if let Signal::ActivateSession = signal {
+            let dispatcher = dispatcher.clone();
+            handle.insert_idle(move |state| {
+                for (dev, path) in dispatcher.as_source_ref().device_list() {
+                    let drm_node = match DrmNode::from_dev_id(dev) {
+                        Ok(node) => node,
+                        Err(err) => {
+                            slog_scope::error!("Failed to read drm device {}: {}", path.display(), err);
+                            continue
+                        },
+                    };
+                    if state.backend.kms().devices.contains_key(&drm_node) {
+                        if let Err(err) = state.device_changed(dev) {
+                            slog_scope::error!("Failed to update drm device {}: {}", path.display(), err);
+                        }
+                    } else {
+                        if let Err(err) = state.device_added(dev, path.into()) {
+                            slog_scope::error!("Failed to add drm device {}: {}", path.display(), err);
+                        }
+                    }
+                }
+                state.common
+                    .output_conf
+                    .update(&mut *state.common.display.borrow_mut());
+
+                state.common.config.read_outputs(state.common.output_conf.outputs(), &mut state.backend, &mut state.common.shell);
+                state.common.shell.refresh_outputs();
+                state.common.config.write_outputs(state.common.output_conf.outputs());
+
+                for output in state.common.shell.outputs() {
+                    state.backend.kms().schedule_render(output);
+                }
+            });
+        }
+    });
+        
     state.backend = BackendData::Kms(KmsState {
         api,
-        tokens: vec![libinput_event_source, session_event_source],
+        _tokens: vec![libinput_event_source, session_event_source, udev_event_source],
         primary,
         session,
         signaler,
+        _restart_token,
         devices: HashMap::new(),
     });
 
-    for (dev, path) in udev_backend.device_list() {
+    for (dev, path) in udev_dispatcher.as_source_ref().device_list() {
         state
             .device_added(dev, path.into())
             .with_context(|| format!("Failed to add drm device: {}", path.display()))?;
     }
-
-    let udev_event_source = event_loop
-        .handle()
-        .insert_source(udev_backend, move |event, _, state| {
-            match match event {
-                UdevEvent::Added { device_id, path } => state
-                    .device_added(device_id, path)
-                    .with_context(|| format!("Failed to add drm device: {}", device_id)),
-                UdevEvent::Changed { device_id } => state
-                    .device_changed(device_id)
-                    .with_context(|| format!("Failed to update drm device: {}", device_id)),
-                UdevEvent::Removed { device_id } => state
-                    .device_removed(device_id)
-                    .with_context(|| format!("Failed to remove drm device: {}", device_id)),
-            } {
-                Ok(()) => {
-                    slog_scope::debug!("Successfully handled udev event")
-                }
-                Err(err) => {
-                    slog_scope::error!("Error while handling udev event: {}", err)
-                }
-            }
-        })
-        .unwrap();
-    state.backend.kms().tokens.push(udev_event_source);
-
     Ok(())
 }
 
 impl State {
     fn device_added(&mut self, dev: dev_t, path: PathBuf) -> Result<()> {
+        if !self.backend.kms().session.is_active() {
+            return Ok(());
+        }
+        
         let fd = SessionFd::new(
             self.backend
                 .kms()
@@ -335,6 +379,10 @@ impl State {
     }
 
     fn device_changed(&mut self, dev: dev_t) -> Result<()> {
+        if !self.backend.kms().session.is_active() {
+            return Ok(());
+        }
+        
         let drm_node = DrmNode::from_dev_id(dev)?;
         let mut outputs_removed = Vec::new();
         let mut outputs_added = Vec::new();
@@ -404,9 +452,12 @@ impl State {
         self.common
             .output_conf
             .update(&mut *self.common.display.borrow_mut());
-        self.common.config.read_outputs(self.common.output_conf.outputs(), &mut self.backend, &mut self.common.shell);
-        self.common.shell.refresh_outputs();
-        self.common.config.write_outputs(self.common.output_conf.outputs());
+
+        if self.backend.kms().session.is_active() {
+            self.common.config.read_outputs(self.common.output_conf.outputs(), &mut self.backend, &mut self.common.shell);
+            self.common.shell.refresh_outputs();
+            self.common.config.write_outputs(self.common.output_conf.outputs());
+        }
 
         Ok(())
     }
