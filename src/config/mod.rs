@@ -367,7 +367,7 @@ impl Config {
         use std::collections::hash_map::Entry;
 
         let mut inputs = self.dynamic_conf.inputs_mut();
-        match inputs.devices.entry(device.sysname().into()) {
+        match inputs.devices.entry(device.name().into()) {
             Entry::Occupied(entry) => {
                 let config = entry.get();
                 if let Err(err) = match config.state {
