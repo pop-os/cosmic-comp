@@ -428,6 +428,7 @@ impl Shell {
     }
 
     pub fn refresh(&mut self) {
+        self.popups.cleanup();
         for output in self.outputs.iter() {
             let workspace = match &self.mode {
                 Mode::OutputBound => {
@@ -442,6 +443,9 @@ impl Shell {
                 Mode::Global { active } => &mut self.spaces[*active],
             };
             workspace.refresh();
+            let mut map = layer_map_for_output(output);
+            map.cleanup();
+            map.arrange();
         }
     }
 
