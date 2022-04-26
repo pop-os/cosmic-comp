@@ -129,6 +129,7 @@ impl Workspace {
         for window in dead_output_windows {
             self.unfullscreen_request(&window);
         }
+        self.fullscreen.retain(|_, w| w.toplevel().alive());
         self.layout.refresh(&mut self.space);
         self.space.refresh();
     }
