@@ -25,6 +25,7 @@ indexmap = "1.8.0"
 xdg = "^2.1"
 ron = "0.7"
 atomic_float = "0.1"
+libsystemd = "0.5"
 
 [dependencies.smithay]
 version = "0.3"
@@ -57,3 +58,4 @@ lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
 smithay = { git = "https://github.com/pop-os/smithay", branch = "main" }
+#smithay = { path = "../smithay" }

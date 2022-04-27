@@ -14,6 +14,7 @@ pub mod input;
 mod logger;
 pub mod shell;
 pub mod state;
+pub mod systemd;
 pub mod utils;
 pub mod wayland;
 
@@ -33,6 +34,8 @@ fn main() -> Result<()> {
     let mut state = state::State::new(display, socket, event_loop.handle(), event_loop.get_signal(), log);
     // init backend
     backend::init_backend_auto(&mut event_loop, &mut state)?;
+    // potentially tell systemd we are setup now
+    systemd::ready(&state);
 
     // run the event loop
     event_loop.run(None, &mut state, |state| {
