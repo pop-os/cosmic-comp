@@ -320,13 +320,12 @@ where
             }
             for elem in custom_elements {
                 let geo = elem.geometry();
-                let location = geo.loc - output_geo.loc;
                 let elem_damage = elem.accumulated_damage(None);
                 elem.draw(
                     renderer,
                     frame,
                     scale,
-                    location,
+                    geo.loc,
                     &[Rectangle::from_loc_and_size((0, 0), geo.size)],
                     &slog_scope::logger(),
                 )?;
