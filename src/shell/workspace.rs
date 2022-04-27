@@ -214,7 +214,9 @@ impl Workspace {
                             .current_mode()
                             .map(|m| m.size)
                             .unwrap_or((0, 0).into())
-                            .to_logical(output.current_scale().integer_scale()),
+                            .to_f64()
+                            .to_logical(output.current_scale().fractional_scale())
+                            .to_i32_round(),
                     );
                 });
 
