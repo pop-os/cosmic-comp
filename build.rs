@@ -17,6 +17,8 @@ fn main() {
     let dest = PathBuf::from(&env::var("OUT_DIR").unwrap());
     // Location of the xml file, relative to the `Cargo.toml`
     let drm_protocol_file = "resources/wayland-drm.xml";
+    let ext_workspace_protocol_file = "resources/ext-workspace-unstable-v1.xml";
     // Target directory for the generate files
     generate_code(drm_protocol_file, &dest.join("wl_drm.rs"), Side::Server);
+    generate_code(ext_workspace_protocol_file, &dest.join("ext_workspace.rs"), Side::Server);
 }
