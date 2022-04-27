@@ -8,7 +8,7 @@ use crate::{
 };
 use smithay::{
     reexports::{
-        calloop::LoopHandle,
+        calloop::{LoopHandle, LoopSignal},
         wayland_server::{protocol::wl_surface::WlSurface, Display},
     },
     wayland::{
@@ -47,6 +47,7 @@ pub struct Common {
     pub display: Rc<RefCell<Display>>,
     pub socket: OsString,
     pub event_loop_handle: LoopHandle<'static, State>,
+    pub event_loop_signal: LoopSignal,
 
     pub output_conf: ConfigurationManager,
     pub shell: Shell,
@@ -182,6 +183,7 @@ impl State {
         mut display: Display,
         socket: OsString,
         handle: LoopHandle<'static, State>,
+        signal: LoopSignal,
         log: LogState,
     ) -> State {
         let config = Config::load();
@@ -326,6 +328,7 @@ impl State {
                 display: Rc::new(RefCell::new(display)),
                 socket,
                 event_loop_handle: handle,
+                event_loop_signal: signal,
 
                 output_conf,
                 shell,

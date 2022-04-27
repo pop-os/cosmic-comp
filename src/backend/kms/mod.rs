@@ -174,6 +174,7 @@ pub fn init_backend(event_loop: &mut EventLoop<'static, State>, state: &mut Stat
         .unwrap();
  
     let handle = event_loop.handle();
+    let loop_signal = state.common.event_loop_signal.clone();
     let dispatcher = udev_dispatcher.clone();
     let _restart_token = signaler.register(move |signal| {
         if let Signal::ActivateSession = signal {
@@ -205,10 +206,14 @@ pub fn init_backend(event_loop: &mut EventLoop<'static, State>, state: &mut Stat
                 state.common.shell.refresh_outputs();
                 state.common.config.write_outputs(state.common.output_conf.outputs());
 
+                for surface in state.backend.kms().devices.values_mut().flat_map(|d| d.surfaces.values_mut()) {
+                    surface.pending = false;
+                }
                 for output in state.common.shell.outputs() {
                     state.backend.kms().schedule_render(output);
                 }
             });
+            loop_signal.wakeup();
         }
     });
         

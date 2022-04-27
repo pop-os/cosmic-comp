@@ -30,18 +30,17 @@ fn main() -> Result<()> {
     // init wayland
     let (display, socket) = init_wayland_display(&mut event_loop)?;
     // init state
-    let mut state = state::State::new(display, socket, event_loop.handle(), log);
+    let mut state = state::State::new(display, socket, event_loop.handle(), event_loop.get_signal(), log);
     // init backend
     backend::init_backend_auto(&mut event_loop, &mut state)?;
 
     // run the event loop
-    let signal = event_loop.get_signal();
     event_loop.run(None, &mut state, |state| {
         // shall we shut down?
         if state.common.shell.outputs().next().is_none() || state.common.should_stop {
             slog_scope::info!("Shutting down");
-            signal.stop();
-            signal.wakeup();
+            state.common.event_loop_signal.stop();
+            state.common.event_loop_signal.wakeup();
             return;
         }
 
