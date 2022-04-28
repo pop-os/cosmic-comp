@@ -31,7 +31,7 @@
         (modifiers: [Logo], key: "j"): Focus(Down),
         (modifiers: [Logo], key: "k"): Focus(Up),
         (modifiers: [Logo], key: "l"): Focus(Right),
-		//TODO: automatic orientation with Logo+o toggling
+		    //TODO: automatic orientation with Logo+o toggling
         (modifiers: [Logo], key: "v"): Orientation(Vertical),
         (modifiers: [Logo], key: "o"): Orientation(Horizontal),
         (modifiers: [Logo, Shift], key: "f"): Fullscreen,
@@ -41,7 +41,8 @@
         (modifiers: [Logo], key: "f"): Spawn("nautilus"),
         //TODO: ability to select default terminal
         (modifiers: [Logo], key: "t"): Spawn("gnome-terminal"),
-        (modifiers: [Ctrl], key: "t"): Spawn("wofi --show drun"),
+        (modifiers: [Logo], key: "a"): Spawn("xdg-shell-wrapper cosmic-app-library"),
+        (modifiers: [Logo], key: "Slash"): Spawn("xdg-shell-wrapper cosmic-launcher"),
     },
     workspace_mode: OutputBound,
 )
