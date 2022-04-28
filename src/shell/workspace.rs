@@ -1,8 +1,8 @@
 use super::{layout, Layout};
 use indexmap::IndexSet;
 use smithay::{
-    desktop::{Space, Window},
-    reexports::wayland_protocols::xdg_shell::server::xdg_toplevel::ResizeEdge,
+    desktop::{LayerSurface, Space, Window, Kind},
+    reexports::wayland_protocols::xdg_shell::server::xdg_toplevel::{self, ResizeEdge},
     wayland::{
         output::Output,
         seat::{PointerGrabStartData, Seat},
@@ -52,6 +52,8 @@ pub struct Workspace {
     pub space: Space,
     pub(super) layout: Box<dyn Layout>,
     pub(super) pending_windows: Vec<(Window, Seat)>,
+    pub(super) pending_layers: Vec<(LayerSurface, Output, Seat)>,
+    pub fullscreen: HashMap<String, Window>,
 }
 
 impl Workspace {
@@ -61,6 +63,8 @@ impl Workspace {
             space: Space::new(None),
             layout: layout::new_default_layout(),
             pending_windows: Vec::new(),
+            pending_layers: Vec::new(),
+            fullscreen: HashMap::new(),
         }
     }
 
@@ -89,6 +93,11 @@ impl Workspace {
         self.pending_windows.push((window, seat.clone()));
     }
 
+    pub fn pending_layer(&mut self, layer: LayerSurface, output: &Output, seat: &Seat) {
+        self.pending_layers
+            .push((layer, output.clone(), seat.clone()));
+    }
+
     pub(super) fn map_window(&mut self, window: &Window, seat: &Seat) {
         seat.user_data()
             .insert_if_missing(|| FocusStackData::new((HashMap::new(), IndexSet::new())));
@@ -108,6 +117,19 @@ impl Workspace {
     }
 
     pub fn refresh(&mut self) {
+        let outputs = self.space.outputs().collect::<Vec<_>>();
+        let dead_output_windows = self.fullscreen
+            .iter()
+            .filter(|(name, _)|
+                !outputs.iter().any(|o| o.name() == **name)
+            )
+            .map(|(_, w)| w)
+            .cloned()
+            .collect::<Vec<_>>();
+        for window in dead_output_windows {
+            self.unfullscreen_request(&window);
+        }
+        self.fullscreen.retain(|_, w| w.toplevel().alive());
         self.layout.refresh(&mut self.space);
         self.space.refresh();
     }
@@ -141,6 +163,9 @@ impl Workspace {
     }
 
     pub fn maximize_request(&mut self, window: &Window, output: &Output) {
+        if self.fullscreen.values().any(|w| w == window) {
+            return;
+        }
         self.layout
             .maximize_request(&mut self.space, window, output)
     }
@@ -152,6 +177,9 @@ impl Workspace {
         serial: Serial,
         start_data: PointerGrabStartData,
     ) {
+        if self.fullscreen.values().any(|w| w == window) {
+            return;
+        }
         self.layout
             .move_request(&mut self.space, window, seat, serial, start_data)
     }
@@ -164,7 +192,73 @@ impl Workspace {
         start_data: PointerGrabStartData,
         edges: ResizeEdge,
     ) {
+        if self.fullscreen.values().any(|w| w == window) {
+            return;
+        }
         self.layout
             .resize_request(&mut self.space, window, seat, serial, start_data, edges)
+    }
+
+    pub fn fullscreen_request(&mut self, window: &Window, output: &Output) {
+        if self.fullscreen.contains_key(&output.name()) {
+            return;
+        }
+
+        #[allow(irrefutable_let_patterns)]
+        if let Kind::Xdg(xdg) = &window.toplevel() {
+            if xdg.get_surface().is_some() {
+                let ret = xdg.with_pending_state(|state| {
+                    state.states.set(xdg_toplevel::State::Fullscreen);
+                    state.size = Some(
+                        output
+                            .current_mode()
+                            .map(|m| m.size)
+                            .unwrap_or((0, 0).into())
+                            .to_f64()
+                            .to_logical(output.current_scale().fractional_scale())
+                            .to_i32_round(),
+                    );
+                });
+
+                if ret.is_ok() {
+                    xdg.send_configure();
+                    self.fullscreen.insert(output.name(), window.clone());
+                }
+            }
+        }
+    }
+    
+    pub fn unfullscreen_request(&mut self, window: &Window) {
+        if self.fullscreen.values().any(|w| w == window) {
+            #[allow(irrefutable_let_patterns)]
+            if let Kind::Xdg(xdg) = &window.toplevel() {
+                if xdg.get_surface().is_some() {
+                    let ret = xdg.with_pending_state(|state| {
+                        state.states.unset(xdg_toplevel::State::Fullscreen);
+                        state.size = None;
+                    });
+                    if ret.is_ok() {
+                        self.layout.refresh(&mut self.space);
+                        xdg.send_configure();
+                    } 
+                }
+            }
+            self.fullscreen.retain(|_, w| w != window);
+        }
+    }
+
+    pub fn fullscreen_toggle(&mut self, window: &Window, output: &Output) {
+        if self.fullscreen.contains_key(&output.name()) {
+            self.unfullscreen_request(window)
+        } else {
+            self.fullscreen_request(window, output)
+        }
+    }
+
+    pub fn get_fullscreen(&self, output: &Output) -> Option<&Window> {
+        if !self.space.outputs().any(|o| o == output) {
+            return None;
+        }
+        self.fullscreen.get(&output.name()).filter(|w| w.toplevel().get_surface().is_some())
     }
 }

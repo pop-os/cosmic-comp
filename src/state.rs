@@ -8,7 +8,7 @@ use crate::{
 };
 use smithay::{
     reexports::{
-        calloop::LoopHandle,
+        calloop::{LoopHandle, LoopSignal},
         wayland_server::{protocol::wl_surface::WlSurface, Display},
     },
     wayland::{
@@ -18,7 +18,7 @@ use smithay::{
                 self, init_wlr_output_configuration, ConfigurationManager, ModeConfiguration,
             },
             xdg::init_xdg_output_manager,
-            Mode as OutputMode, Output,
+            Mode as OutputMode, Output, Scale,
         },
         seat::Seat,
         shell::xdg::ToplevelSurface,
@@ -47,6 +47,7 @@ pub struct Common {
     pub display: Rc<RefCell<Display>>,
     pub socket: OsString,
     pub event_loop_handle: LoopHandle<'static, State>,
+    pub event_loop_signal: LoopSignal,
 
     pub output_conf: ConfigurationManager,
     pub shell: Shell,
@@ -145,10 +146,10 @@ impl BackendData {
             let transform =
                 Some(final_config.transform.into()).filter(|x| *x != output.current_transform());
             let scale =
-                Some(final_config.scale.ceil() as i32).filter(|x| *x != output.current_scale());
+                Some(final_config.scale).filter(|x| *x != output.current_scale().fractional_scale());
             let location =
                 Some(final_config.position.into()).filter(|x| *x != output.current_location());
-            output.change_current_state(mode, transform, scale, location);
+            output.change_current_state(mode, transform, scale.map(Scale::Fractional), location);
         }
 
         result
@@ -182,6 +183,7 @@ impl State {
         mut display: Display,
         socket: OsString,
         handle: LoopHandle<'static, State>,
+        signal: LoopSignal,
         log: LogState,
     ) -> State {
         let config = Config::load();
@@ -326,6 +328,7 @@ impl State {
                 display: Rc::new(RefCell::new(display)),
                 socket,
                 event_loop_handle: handle,
+                event_loop_signal: signal,
 
                 output_conf,
                 shell,

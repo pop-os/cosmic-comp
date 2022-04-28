@@ -35,15 +35,25 @@ pub struct WinitState {
     backend: Rc<RefCell<WinitGraphicsBackend>>,
     //_global: GlobalDrop<WlOutput>,
     output: Output,
+    age_reset: u8,
     #[cfg(feature = "debug")]
     fps: Fps,
 }
 
 impl WinitState {
     pub fn render_output(&mut self, state: &mut Common) -> Result<()> {
+        if render::needs_buffer_reset(&self.output, state) {
+            self.reset_buffers();
+        }
+
         let backend = &mut *self.backend.borrow_mut();
         backend.bind().with_context(|| "Failed to bind buffer")?;
-        let age = backend.buffer_age().unwrap_or(0);
+        let age = if self.age_reset > 0 {
+            self.age_reset -= 1;
+            0
+        } else {
+            backend.buffer_age().unwrap_or(0)
+        };
 
         match render::render_output(
             None,
@@ -97,6 +107,10 @@ impl WinitState {
         } else {
             Ok(())
         }
+    }
+
+    pub fn reset_buffers(&mut self) {
+        self.age_reset = 3;
     }
 }
 
@@ -186,6 +200,7 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
         output: output.clone(),
         #[cfg(feature = "debug")]
         fps: Fps::default(),
+        age_reset: 0,
     });
     state.common.output_conf.add_heads(std::iter::once(&output));
     state
@@ -276,7 +291,7 @@ impl State {
                 render_ping.ping();
             }
             WinitEvent::Refresh => render_ping.ping(),
-            WinitEvent::Input(event) => self.common.process_input_event(event),
+            WinitEvent::Input(event) => self.process_input_event(event),
             _ => {}
         };
     }

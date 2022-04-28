@@ -6,14 +6,17 @@ use crate::{
     state::Common,
 };
 pub use smithay::{
-    desktop::{PopupGrab, PopupManager, PopupUngrabStrategy, Space, Window},
+    desktop::{PopupGrab, PopupManager, PopupUngrabStrategy, Space, Window, layer_map_for_output},
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Logical, Point, Rectangle, Size},
     wayland::{
         compositor::with_states,
-        output::{Mode as OutputMode, Output},
+        output::{Mode as OutputMode, Output, Scale},
         seat::Seat,
-        shell::xdg::XdgToplevelSurfaceRoleAttributes,
+        shell::{
+            xdg::XdgToplevelSurfaceRoleAttributes,
+            wlr_layer::{Layer, KeyboardInteractivity, LayerSurfaceCachedState},
+        },
         Serial, SERIAL_COUNTER,
     },
 };
@@ -103,15 +106,10 @@ impl Shell {
                     .borrow();
                 workspace
                     .space
-                    .map_output(output, config.scale, config.position);
+                    .map_output(output, config.position);
             }
         } else {
             for output in self.outputs.iter() {
-                let config = output
-                    .user_data()
-                    .get::<RefCell<OutputConfig>>()
-                    .unwrap()
-                    .borrow();
                 let active = output
                     .user_data()
                     .get::<ActiveWorkspace>()
@@ -119,7 +117,7 @@ impl Shell {
                     .get()
                     .unwrap();
                 let workspace = &mut self.spaces[active];
-                workspace.space.map_output(output, config.scale, (0, 0));
+                workspace.space.map_output(output, (0, 0));
             }
         }
     }
@@ -156,16 +154,16 @@ impl Shell {
         match self.mode {
             Mode::OutputBound => {
                 let workspace = Self::assign_next_free_output(&mut self.spaces, output);
-                workspace.space.map_output(output, config.scale, (0, 0));
+                workspace.space.map_output(output, (0, 0));
             }
             Mode::Global { active } => {
                 let workspace = &mut self.spaces[active];
                 workspace
                     .space
-                    .map_output(output, config.scale, config.position);
+                    .map_output(output, config.position);
             }
         }
-        output.change_current_state(None, None, Some(config.scale.ceil() as i32), None);
+        output.change_current_state(None, None, Some(Scale::Fractional(config.scale)), None);
     }
 
     pub fn remove_output(&mut self, output: &Output) {
@@ -271,14 +269,9 @@ impl Shell {
                     if let Some(old_idx) = active.set(idx) {
                         self.spaces[old_idx].space.unmap_output(output);
                     }
-                    let config = output
-                        .user_data()
-                        .get::<RefCell<OutputConfig>>()
-                        .unwrap()
-                        .borrow();
                     self.spaces[idx]
                         .space
-                        .map_output(output, config.scale, (0, 0));
+                        .map_output(output, (0, 0));
                     self.spaces[idx].refresh();
                 }
             }
@@ -294,7 +287,7 @@ impl Shell {
                         .borrow();
                     self.spaces[*active]
                         .space
-                        .map_output(output, config.scale, config.position);
+                        .map_output(output, config.position);
                 }
             }
         };
@@ -353,7 +346,7 @@ impl Shell {
                     self.spaces[old_active].space.unmap_output(output);
                     self.spaces[active]
                         .space
-                        .map_output(output, config.scale, config.position);
+                        .map_output(output, config.position);
                     self.spaces[active].refresh();
                 }
 
@@ -367,11 +360,6 @@ impl Shell {
                 let mut active = Some(active.clone());
                 self.mode = new;
                 for output in &self.outputs {
-                    let config = output
-                        .user_data()
-                        .get::<RefCell<OutputConfig>>()
-                        .unwrap()
-                        .borrow();
                     let workspace = if let Some(a) = active.take() {
                         output
                             .user_data()
@@ -381,7 +369,7 @@ impl Shell {
                     } else {
                         Self::assign_next_free_output(&mut self.spaces, output)
                     };
-                    workspace.space.map_output(output, config.scale, (0, 0));
+                    workspace.space.map_output(output, (0, 0));
                     workspace.refresh();
                 }
             }
@@ -440,6 +428,7 @@ impl Shell {
     }
 
     pub fn refresh(&mut self) {
+        self.popups.cleanup();
         for output in self.outputs.iter() {
             let workspace = match &self.mode {
                 Mode::OutputBound => {
@@ -454,6 +443,9 @@ impl Shell {
                 Mode::Global { active } => &mut self.spaces[*active],
             };
             workspace.refresh();
+            let mut map = layer_map_for_output(output);
+            map.cleanup();
+            map.arrange();
         }
     }
 
@@ -480,9 +472,35 @@ impl Shell {
                 } {
                     new_focus = Some(seat);
                 }
-                workspace.pending_windows.retain(|(w, _)| w != &window);
+                workspace.pending_windows.retain(|(w, _)| w != &window); 
             }
-            workspace.space.commit(surface)
+            if let Some((layer, output, seat)) = workspace
+                .pending_layers
+                .iter()
+                .find(|(l, _, _)| l.get_surface() == Some(surface))
+                .cloned()
+            {
+                let focus = layer
+                    .get_surface()
+                    .map(|surface| {
+                        with_states(surface, |states| {
+                            let state = states.cached_state.current::<LayerSurfaceCachedState>();
+                            matches!(state.layer, Layer::Top | Layer::Overlay)
+                                && dbg!(state.keyboard_interactivity) != KeyboardInteractivity::None
+                        })
+                        .unwrap()
+                    })
+                    .unwrap_or(false);
+
+                let mut map = layer_map_for_output(&output);
+                map.map_layer(&layer).unwrap();
+
+                if focus {
+                    new_focus = Some(seat);
+                }
+                workspace.pending_layers.retain(|(l, _, _)| l != &layer);
+            }
+            workspace.space.commit(surface);
         }
         if let Some(seat) = new_focus {
             self.set_focus(Some(surface), &seat, seats, None)

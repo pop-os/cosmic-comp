@@ -529,6 +529,10 @@ impl TilingLayout {
                                 if let Some(geo) = geo {
                                     #[allow(irrefutable_let_patterns)]
                                     if let Kind::Xdg(xdg) = &window.toplevel() {
+                                        if xdg.current_state().map(|state| state.states.contains(XdgState::Fullscreen)).unwrap_or(false) ||
+                                            xdg.with_pending_state(|pending| pending.states.contains(XdgState::Fullscreen)).unwrap_or(false) {
+                                            continue;
+                                        }
                                         let ret = xdg.with_pending_state(|state| {
                                             state.size = Some(
                                                 (geo.size.w - inner * 2, geo.size.h - inner * 2)
@@ -543,12 +547,11 @@ impl TilingLayout {
                                             xdg.send_configure();
                                         }
                                     }
-                                    let window_geo = window.geometry();
                                     space.map_window(
                                         &window,
                                         (
-                                            geo.loc.x + inner - window_geo.loc.x,
-                                            geo.loc.y + inner - window_geo.loc.y,
+                                            geo.loc.x + inner,
+                                            geo.loc.y + inner,
                                         ),
                                         false,
                                     );
