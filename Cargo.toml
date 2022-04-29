@@ -45,6 +45,7 @@ wayland-scanner = "0.29"
 [features]
 default = []
 debug = ["egui", "smithay-egui", "serde_json"]
+experimental = []
 
 [profile.dev]
 lto = "thin"
