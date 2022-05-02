@@ -266,7 +266,7 @@ pub fn init_shell(config: &Config, display: &mut Display) -> super::Shell {
         None,
     );
 
-    super::Shell::new(config)
+    super::Shell::new(config, display)
 }
 
 fn check_grab_preconditions(

@@ -1,25 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+#[cfg(feature = "experimental")]
+use crate::wayland::workspace as ext_work;
 use crate::{
     config::{Config, OutputConfig},
     input::active_output,
     state::Common,
 };
 pub use smithay::{
-    desktop::{PopupGrab, PopupManager, PopupUngrabStrategy, Space, Window, layer_map_for_output},
-    reexports::wayland_server::protocol::wl_surface::WlSurface,
+    desktop::{layer_map_for_output, PopupGrab, PopupManager, PopupUngrabStrategy, Space, Window},
+    reexports::wayland_server::{protocol::wl_surface::WlSurface, Display},
     utils::{Logical, Point, Rectangle, Size},
     wayland::{
         compositor::with_states,
         output::{Mode as OutputMode, Output, Scale},
         seat::Seat,
         shell::{
+            wlr_layer::{KeyboardInteractivity, Layer, LayerSurfaceCachedState},
             xdg::XdgToplevelSurfaceRoleAttributes,
-            wlr_layer::{Layer, KeyboardInteractivity, LayerSurfaceCachedState},
         },
         Serial, SERIAL_COUNTER,
     },
 };
+
 use std::{
     cell::{Cell, RefCell},
     mem::MaybeUninit,
@@ -75,12 +78,16 @@ pub struct Shell {
     mode: Mode,
     outputs: Vec<Output>,
     pub spaces: [Workspace; MAX_WORKSPACES],
+    #[cfg(feature = "experimental")]
+    manager: ext_work::WorkspaceManager,
+    #[cfg(feature = "experimental")]
+    global_group: Option<ext_work::WorkspaceGroup>,
 }
 
 const UNINIT_SPACE: MaybeUninit<Workspace> = MaybeUninit::uninit();
 
 impl Shell {
-    fn new(config: &Config) -> Self {
+    fn new(config: &Config, _display: &mut Display) -> Self {
         Shell {
             popups: PopupManager::new(None),
             mode: config.static_conf.workspace_mode,
@@ -92,6 +99,37 @@ impl Shell {
                 }
                 std::mem::transmute(spaces)
             },
+            #[cfg(feature = "experimental")]
+            manager: ext_work::init_ext_workspace(
+                _display,
+                |_, changes, mut ddata| {
+                    let state = ddata.get::<crate::state::State>().unwrap();
+                    if let Some((w, _)) = changes.into_iter().rev().find(|(_, p)| {
+                        p.into_iter()
+                            .rev()
+                            .find(|o| {
+                                **o == ext_work::PendingOperation::Activate
+                                    || **o == ext_work::PendingOperation::Deactivate
+                            })
+                            .map(|o| *o == ext_work::PendingOperation::Activate)
+                            .unwrap_or(false)
+                    }) {
+                        if let Some(idx) = state.common.shell.spaces.iter().position(|work| {
+                            work.ext_workspace.as_ref().map(|e| e == w).unwrap_or(false)
+                        }) {
+                            state.common.event_loop_handle.insert_idle(move |state| {
+                                let seat = &state.common.last_active_seat;
+                                let output = active_output(&seat, &state.common);
+                                state.common.shell.activate(seat, &output, idx);
+                            });
+                        }
+                    }
+                },
+                |_| true,
+            )
+            .0,
+            #[cfg(feature = "experimental")]
+            global_group: None,
         }
     }
 
@@ -104,9 +142,7 @@ impl Shell {
                     .get::<RefCell<OutputConfig>>()
                     .unwrap()
                     .borrow();
-                workspace
-                    .space
-                    .map_output(output, config.position);
+                workspace.space.map_output(output, config.position);
             }
         } else {
             for output in self.outputs.iter() {
@@ -125,7 +161,7 @@ impl Shell {
     fn assign_next_free_output<'a>(
         spaces: &'a mut [Workspace],
         output: &Output,
-    ) -> &'a mut Workspace {
+    ) -> (usize, &'a mut Workspace) {
         output
             .user_data()
             .insert_if_missing(|| ActiveWorkspace::new());
@@ -140,7 +176,7 @@ impl Shell {
             .unwrap()
             .set(idx);
 
-        workspace
+        (idx, workspace)
     }
 
     pub fn add_output(&mut self, output: &Output) {
@@ -153,14 +189,76 @@ impl Shell {
 
         match self.mode {
             Mode::OutputBound => {
-                let workspace = Self::assign_next_free_output(&mut self.spaces, output);
-                workspace.space.map_output(output, (0, 0));
+                let _idx = {
+                    let (idx, workspace) = Self::assign_next_free_output(&mut self.spaces, output);
+                    workspace.space.map_output(output, (0, 0));
+                    idx
+                };
+                #[cfg(feature = "experimental")]
+                {
+                    let group = self
+                        .manager
+                        .new_group(|_, _, _| {}, std::iter::once(output.clone()));
+                    if self.spaces.iter().all(|w| w.ext_workspace.is_none()) {
+                        for (idx, workspace) in self.spaces.iter_mut().enumerate() {
+                            let ext_workspace = group.create_workspace(format!("{}", idx + 1));
+                            ext_workspace.set_coordinates(std::iter::once(idx as u32 + 1));
+                            workspace.ext_workspace = Some(ext_workspace);
+                        }
+                        self.spaces[_idx]
+                            .ext_workspace
+                            .as_mut()
+                            .unwrap()
+                            .add_state(ext_work::State::Active);
+                    } else {
+                        let ext_workspace = group.create_workspace(format!("{}", _idx + 1));
+                        ext_workspace.set_coordinates(std::iter::once(_idx as u32 + 1));
+                        ext_workspace.add_state(ext_work::State::Active);
+                        if let Some(old) = self.spaces[_idx].ext_workspace.replace(ext_workspace) {
+                            old.remove();
+                        }
+                    }
+                    output.user_data().insert_if_missing(|| {
+                        RefCell::new(Option::<ext_work::WorkspaceGroup>::None)
+                    });
+                    *output
+                        .user_data()
+                        .get::<RefCell<Option<ext_work::WorkspaceGroup>>>()
+                        .unwrap()
+                        .borrow_mut() = Some(group);
+                    self.manager.done();
+                }
             }
             Mode::Global { active } => {
+                #[cfg(feature = "experimental")]
+                {
+                    if self.global_group.is_none() {
+                        self.global_group = Some(
+                            self.manager
+                                .new_group(|_, _, _| {}, std::iter::once(output.clone())),
+                        );
+                        for (idx, workspace) in self.spaces.iter_mut().enumerate() {
+                            let ext_workspace = self
+                                .global_group
+                                .as_mut()
+                                .unwrap()
+                                .create_workspace(format!("{}", idx + 1));
+                            ext_workspace.set_coordinates(std::iter::once(idx as u32 + 1));
+                            if idx == active {
+                                ext_workspace.add_state(ext_work::State::Active);
+                            }
+                            workspace.ext_workspace = Some(ext_workspace);
+                        }
+                    } else {
+                        self.manager.update_outputs(|_, outputs| {
+                            outputs.insert(output.clone());
+                        });
+                    }
+                    self.manager.done();
+                }
+
                 let workspace = &mut self.spaces[active];
-                workspace
-                    .space
-                    .map_output(output, config.position);
+                workspace.space.map_output(output, config.position);
             }
         }
         output.change_current_state(None, None, Some(Scale::Fractional(config.scale)), None);
@@ -177,8 +275,47 @@ impl Shell {
                     self.spaces[idx].space.unmap_output(output);
                     self.outputs.retain(|o| o != output);
                 }
+                #[cfg(feature = "experimental")]
+                {
+                    let group = output
+                        .user_data()
+                        .get::<RefCell<Option<ext_work::WorkspaceGroup>>>()
+                        .unwrap()
+                        .borrow_mut()
+                        .take()
+                        .unwrap();
+                    let mut alternative_group = self.outputs.last_mut().map(|o| {
+                        o.user_data()
+                            .get::<RefCell<Option<ext_work::WorkspaceGroup>>>()
+                            .unwrap()
+                    });
+                    for (idx, workspace) in self.spaces.iter_mut().enumerate() {
+                        if workspace
+                            .ext_workspace
+                            .as_ref()
+                            .map(|w| group.belongs(w))
+                            .unwrap_or(false)
+                        {
+                            workspace.ext_workspace.take().unwrap().remove();
+                            if let Some(alternative) = alternative_group.as_mut() {
+                                let ext_workspace = alternative
+                                    .borrow_mut()
+                                    .as_mut()
+                                    .unwrap()
+                                    .create_workspace(format!("{}", idx + 1));
+                                ext_workspace.set_coordinates(std::iter::once(idx as u32 + 1));
+                                workspace.ext_workspace = Some(ext_workspace);
+                            }
+                        }
+                    }
+                    self.manager.remove_group(&group);
+                }
             }
             Mode::Global { active } => {
+                #[cfg(feature = "experimental")]
+                self.manager.update_outputs(|_, outputs| {
+                    outputs.remove(output);
+                });
                 self.spaces[active].space.unmap_output(output);
                 self.outputs.retain(|o| o != output);
                 // TODO move windows and outputs farther on the right / or load save config for remaining monitors
@@ -267,11 +404,41 @@ impl Shell {
 
                 if let Some(active) = output.user_data().get::<ActiveWorkspace>() {
                     if let Some(old_idx) = active.set(idx) {
+                        #[cfg(feature = "experimental")]
+                        if let Some(ext_workspace) = self.spaces[old_idx].ext_workspace.as_mut() {
+                            ext_workspace.remove_state(ext_work::State::Active);
+                        }
                         self.spaces[old_idx].space.unmap_output(output);
                     }
-                    self.spaces[idx]
-                        .space
-                        .map_output(output, (0, 0));
+                    self.spaces[idx].space.map_output(output, (0, 0));
+                    #[cfg(feature = "experimental")]
+                    {
+                        let mut group_borrow = output
+                            .user_data()
+                            .get::<RefCell<Option<ext_work::WorkspaceGroup>>>()
+                            .unwrap()
+                            .borrow_mut();
+                        let group = group_borrow.as_mut().unwrap();
+                        if self.spaces[idx]
+                            .ext_workspace
+                            .as_ref()
+                            .map(|x| !group.belongs(x))
+                            .unwrap_or(true)
+                        {
+                            let ext_workspace = group.create_workspace(format!("{}", idx + 1));
+                            ext_workspace.set_coordinates(std::iter::once(idx as u32 + 1));
+                            if let Some(old) = self.spaces[idx].ext_workspace.replace(ext_workspace)
+                            {
+                                old.remove();
+                            }
+                        }
+                        self.spaces[idx]
+                            .ext_workspace
+                            .as_mut()
+                            .unwrap()
+                            .add_state(ext_work::State::Active);
+                        self.manager.done();
+                    }
                     self.spaces[idx].refresh();
                 }
             }
@@ -288,6 +455,25 @@ impl Shell {
                     self.spaces[*active]
                         .space
                         .map_output(output, config.position);
+                }
+                #[cfg(feature = "experimental")]
+                {
+                    for (idx, workspace) in self.spaces.iter_mut().enumerate() {
+                        if idx == *active {
+                            workspace
+                                .ext_workspace
+                                .as_mut()
+                                .unwrap()
+                                .add_state(ext_work::State::Active);
+                        } else {
+                            workspace
+                                .ext_workspace
+                                .as_mut()
+                                .unwrap()
+                                .remove_state(ext_work::State::Active);
+                        }
+                    }
+                    self.manager.done();
                 }
             }
         };
@@ -367,7 +553,7 @@ impl Shell {
                         output.user_data().get::<ActiveWorkspace>().unwrap().set(a);
                         &mut self.spaces[a]
                     } else {
-                        Self::assign_next_free_output(&mut self.spaces, output)
+                        Self::assign_next_free_output(&mut self.spaces, output).1
                     };
                     workspace.space.map_output(output, (0, 0));
                     workspace.refresh();
@@ -472,7 +658,7 @@ impl Shell {
                 } {
                     new_focus = Some(seat);
                 }
-                workspace.pending_windows.retain(|(w, _)| w != &window); 
+                workspace.pending_windows.retain(|(w, _)| w != &window);
             }
             if let Some((layer, output, seat)) = workspace
                 .pending_layers

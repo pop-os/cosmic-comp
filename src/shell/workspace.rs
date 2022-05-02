@@ -1,4 +1,6 @@
 use super::{layout, Layout};
+#[cfg(feature = "experimental")]
+use crate::wayland::workspace as ext_work;
 use indexmap::IndexSet;
 use smithay::{
     desktop::{LayerSurface, Space, Window, Kind},
@@ -54,10 +56,14 @@ pub struct Workspace {
     pub(super) pending_windows: Vec<(Window, Seat)>,
     pub(super) pending_layers: Vec<(LayerSurface, Output, Seat)>,
     pub fullscreen: HashMap<String, Window>,
+    #[cfg(feature = "experimental")]
+    pub(super) ext_workspace: Option<ext_work::Workspace>,
 }
 
 impl Workspace {
-    pub fn new(idx: u8) -> Workspace {
+    pub fn new(
+        idx: u8,
+    ) -> Workspace {
         Workspace {
             idx,
             space: Space::new(None),
@@ -65,6 +71,8 @@ impl Workspace {
             pending_windows: Vec::new(),
             pending_layers: Vec::new(),
             fullscreen: HashMap::new(),
+            #[cfg(feature = "experimental")]
+            ext_workspace: None,
         }
     }
 
