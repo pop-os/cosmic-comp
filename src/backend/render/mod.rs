@@ -14,7 +14,7 @@ use smithay::{
         renderer::{
             gles2::{Gles2Renderbuffer, Gles2Renderer, Gles2Texture},
             multigpu::{egl::EglGlesBackend, Error as MultiError, MultiFrame, MultiRenderer},
-            Frame, ImportAll, Renderer, TextureFilter,
+            Frame, ImportAll, Renderer,
         },
     },
     desktop::{
@@ -136,10 +136,6 @@ where
     <R as Renderer>::TextureId: Clone + 'static,
     CustomElem: RenderElement<R>,
 {
-    renderer
-        .downscale_filter(TextureFilter::Linear)
-        .map_err(RenderError::Rendering)?;
-
     #[cfg(feature = "debug")]
     {
         fps.start();
