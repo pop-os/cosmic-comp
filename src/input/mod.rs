@@ -551,7 +551,7 @@ impl State {
                                                     .surface_under(
                                                         pos - output_geo.loc.to_f64()
                                                             - layer_loc.to_f64(),
-                                                        WindowSurfaceType::ALL,
+                                                        WindowSurfaceType::TOPLEVEL,
                                                     )
                                                     .map(|(s, _)| s);
                                             }
@@ -559,8 +559,7 @@ impl State {
                                             under = window
                                                 .surface_under(
                                                     pos - output_geo.loc.to_f64(),
-                                                    WindowSurfaceType::TOPLEVEL
-                                                        | WindowSurfaceType::SUBSURFACE,
+                                                    WindowSurfaceType::TOPLEVEL,
                                                 )
                                                 .map(|(s, _)| s);
                                         }
@@ -578,15 +577,14 @@ impl State {
                                                     .surface_under(
                                                         pos - output_geo.loc.to_f64()
                                                             - layer_loc.to_f64(),
-                                                        WindowSurfaceType::ALL,
+                                                        WindowSurfaceType::TOPLEVEL,
                                                     )
                                                     .map(|(s, _)| s);
                                             }
                                         } else if let Some((_, surface, _)) =
                                             workspace.space.surface_under(
                                                 relative_pos,
-                                                WindowSurfaceType::TOPLEVEL
-                                                    | WindowSurfaceType::SUBSURFACE,
+                                                WindowSurfaceType::TOPLEVEL,
                                             )
                                         {
                                             under = Some(surface);
@@ -602,7 +600,7 @@ impl State {
                                                     .surface_under(
                                                         pos - output_geo.loc.to_f64()
                                                             - layer_loc.to_f64(),
-                                                        WindowSurfaceType::ALL,
+                                                        WindowSurfaceType::TOPLEVEL,
                                                     )
                                                     .map(|(s, _)| s);
                                             }
