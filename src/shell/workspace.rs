@@ -3,7 +3,7 @@ use super::{layout, Layout};
 use crate::wayland::workspace as ext_work;
 use indexmap::IndexSet;
 use smithay::{
-    desktop::{LayerSurface, Space, Window, Kind},
+    desktop::{Kind, LayerSurface, Space, Window},
     reexports::wayland_protocols::xdg_shell::server::xdg_toplevel::{self, ResizeEdge},
     wayland::{
         output::Output,
@@ -61,9 +61,7 @@ pub struct Workspace {
 }
 
 impl Workspace {
-    pub fn new(
-        idx: u8,
-    ) -> Workspace {
+    pub fn new(idx: u8) -> Workspace {
         Workspace {
             idx,
             space: Space::new(None),
@@ -126,11 +124,10 @@ impl Workspace {
 
     pub fn refresh(&mut self) {
         let outputs = self.space.outputs().collect::<Vec<_>>();
-        let dead_output_windows = self.fullscreen
+        let dead_output_windows = self
+            .fullscreen
             .iter()
-            .filter(|(name, _)|
-                !outputs.iter().any(|o| o.name() == **name)
-            )
+            .filter(|(name, _)| !outputs.iter().any(|o| o.name() == **name))
             .map(|(_, w)| w)
             .cloned()
             .collect::<Vec<_>>();
@@ -235,7 +232,7 @@ impl Workspace {
             }
         }
     }
-    
+
     pub fn unfullscreen_request(&mut self, window: &Window) {
         if self.fullscreen.values().any(|w| w == window) {
             #[allow(irrefutable_let_patterns)]
@@ -248,7 +245,7 @@ impl Workspace {
                     if ret.is_ok() {
                         self.layout.refresh(&mut self.space);
                         xdg.send_configure();
-                    } 
+                    }
                 }
             }
             self.fullscreen.retain(|_, w| w != window);
@@ -267,6 +264,8 @@ impl Workspace {
         if !self.space.outputs().any(|o| o == output) {
             return None;
         }
-        self.fullscreen.get(&output.name()).filter(|w| w.toplevel().get_surface().is_some())
+        self.fullscreen
+            .get(&output.name())
+            .filter(|w| w.toplevel().get_surface().is_some())
     }
 }

@@ -36,8 +36,8 @@ impl Default for XkbConfig {
 }
 
 pub mod ClickMethodDef {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use smithay::reexports::input::ClickMethod as ClickMethodOrig;
-    use serde::{Deserialize, Serialize, Deserializer, Serializer};
 
     #[derive(Debug, Serialize, Deserialize)]
     pub enum ClickMethod {
@@ -53,12 +53,12 @@ pub mod ClickMethodDef {
         Ok(o.map(|x| match x {
             ClickMethod::ButtonAreas => ClickMethodOrig::ButtonAreas,
             ClickMethod::Clickfinger => ClickMethodOrig::Clickfinger,
-        })) 
+        }))
     }
-    
+
     pub fn serialize<S>(arg: &Option<ClickMethodOrig>, ser: S) -> Result<S::Ok, S::Error>
     where
-        S: Serializer
+        S: Serializer,
     {
         let arg = match arg {
             Some(ClickMethodOrig::ButtonAreas) => Some(ClickMethod::ButtonAreas),
@@ -70,8 +70,8 @@ pub mod ClickMethodDef {
 }
 
 pub mod AccelProfileDef {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use smithay::reexports::input::AccelProfile as AccelProfileOrig;
-    use serde::{Deserialize, Serialize, Deserializer, Serializer};
 
     #[derive(Debug, Serialize, Deserialize)]
     enum AccelProfile {
@@ -87,12 +87,12 @@ pub mod AccelProfileDef {
         Ok(o.map(|x| match x {
             AccelProfile::Flat => AccelProfileOrig::Flat,
             AccelProfile::Adaptive => AccelProfileOrig::Adaptive,
-        })) 
+        }))
     }
-    
+
     pub fn serialize<S>(arg: &Option<AccelProfileOrig>, ser: S) -> Result<S::Ok, S::Error>
     where
-        S: Serializer
+        S: Serializer,
     {
         let arg = match arg {
             Some(AccelProfileOrig::Flat) => Some(AccelProfile::Flat),
@@ -104,8 +104,8 @@ pub mod AccelProfileDef {
 }
 
 pub mod ScrollMethodDef {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use smithay::reexports::input::ScrollMethod as ScrollMethodOrig;
-    use serde::{Deserialize, Serialize, Deserializer, Serializer};
 
     #[derive(Debug, Serialize, Deserialize)]
     pub enum ScrollMethod {
@@ -125,12 +125,12 @@ pub mod ScrollMethodDef {
             ScrollMethod::TwoFinger => ScrollMethodOrig::TwoFinger,
             ScrollMethod::Edge => ScrollMethodOrig::Edge,
             ScrollMethod::OnButtonDown => ScrollMethodOrig::OnButtonDown,
-        })) 
+        }))
     }
-    
+
     pub fn serialize<S>(arg: &Option<ScrollMethodOrig>, ser: S) -> Result<S::Ok, S::Error>
     where
-        S: Serializer
+        S: Serializer,
     {
         let arg = match arg {
             Some(ScrollMethodOrig::NoScroll) => Some(ScrollMethod::NoScroll),
@@ -157,8 +157,8 @@ pub enum TransformDef {
 }
 
 pub mod TapButtonMapDef {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use smithay::reexports::input::TapButtonMap as TapButtonMapOrig;
-    use serde::{Deserialize, Serialize, Deserializer, Serializer};
 
     #[derive(Debug, Serialize, Deserialize)]
     pub enum TapButtonMap {
@@ -174,12 +174,12 @@ pub mod TapButtonMapDef {
         Ok(o.map(|x| match x {
             TapButtonMap::LeftRightMiddle => TapButtonMapOrig::LeftRightMiddle,
             TapButtonMap::LeftMiddleRight => TapButtonMapOrig::LeftMiddleRight,
-        })) 
+        }))
     }
-    
+
     pub fn serialize<S>(arg: &Option<TapButtonMapOrig>, ser: S) -> Result<S::Ok, S::Error>
     where
-        S: Serializer
+        S: Serializer,
     {
         let arg = match arg {
             Some(TapButtonMapOrig::LeftRightMiddle) => Some(TapButtonMap::LeftRightMiddle),
@@ -248,4 +248,3 @@ where
         x => Ok(x),
     }
 }
-

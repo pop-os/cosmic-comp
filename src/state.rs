@@ -145,8 +145,8 @@ impl BackendData {
             });
             let transform =
                 Some(final_config.transform.into()).filter(|x| *x != output.current_transform());
-            let scale =
-                Some(final_config.scale).filter(|x| *x != output.current_scale().fractional_scale());
+            let scale = Some(final_config.scale)
+                .filter(|x| *x != output.current_scale().fractional_scale());
             let location =
                 Some(final_config.position.into()).filter(|x| *x != output.current_location());
             output.change_current_state(mode, transform, scale.map(Scale::Fractional), location);
@@ -295,7 +295,6 @@ impl State {
                         }
                         return false;
                     }
-
                 }
 
                 for output in conf.iter().filter(|(_, c)| c.is_some()).map(|(o, _)| o) {
@@ -304,7 +303,10 @@ impl State {
                 for output in conf.iter().filter(|(_, c)| c.is_none()).map(|(o, _)| o) {
                     wlr_configuration::disable_head(output);
                 }
-                state.common.config.write_outputs(state.common.output_conf.outputs());
+                state
+                    .common
+                    .config
+                    .write_outputs(state.common.output_conf.outputs());
                 state.common.event_loop_handle.insert_idle(move |state| {
                     state
                         .common

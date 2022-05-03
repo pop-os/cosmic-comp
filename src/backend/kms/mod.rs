@@ -35,7 +35,7 @@ use smithay::{
         nix::{fcntl::OFlag, sys::stat::dev_t},
         wayland_server::protocol::wl_output,
     },
-    utils::signaling::{Linkable, Signaler, SignalToken},
+    utils::signaling::{Linkable, SignalToken, Signaler},
     wayland::output::{Mode as OutputMode, Output, PhysicalProperties},
 };
 
@@ -172,7 +172,7 @@ pub fn init_backend(event_loop: &mut EventLoop<'static, State>, state: &mut Stat
         .handle()
         .register_dispatcher(udev_dispatcher.clone())
         .unwrap();
- 
+
     let handle = event_loop.handle();
     let loop_signal = state.common.event_loop_signal.clone();
     let dispatcher = udev_dispatcher.clone();
@@ -184,29 +184,55 @@ pub fn init_backend(event_loop: &mut EventLoop<'static, State>, state: &mut Stat
                     let drm_node = match DrmNode::from_dev_id(dev) {
                         Ok(node) => node,
                         Err(err) => {
-                            slog_scope::error!("Failed to read drm device {}: {}", path.display(), err);
-                            continue
-                        },
+                            slog_scope::error!(
+                                "Failed to read drm device {}: {}",
+                                path.display(),
+                                err
+                            );
+                            continue;
+                        }
                     };
                     if state.backend.kms().devices.contains_key(&drm_node) {
                         if let Err(err) = state.device_changed(dev) {
-                            slog_scope::error!("Failed to update drm device {}: {}", path.display(), err);
+                            slog_scope::error!(
+                                "Failed to update drm device {}: {}",
+                                path.display(),
+                                err
+                            );
                         }
                     } else {
                         if let Err(err) = state.device_added(dev, path.into()) {
-                            slog_scope::error!("Failed to add drm device {}: {}", path.display(), err);
+                            slog_scope::error!(
+                                "Failed to add drm device {}: {}",
+                                path.display(),
+                                err
+                            );
                         }
                     }
                 }
-                state.common
+                state
+                    .common
                     .output_conf
                     .update(&mut *state.common.display.borrow_mut());
 
-                state.common.config.read_outputs(state.common.output_conf.outputs(), &mut state.backend, &mut state.common.shell);
+                state.common.config.read_outputs(
+                    state.common.output_conf.outputs(),
+                    &mut state.backend,
+                    &mut state.common.shell,
+                );
                 state.common.shell.refresh_outputs();
-                state.common.config.write_outputs(state.common.output_conf.outputs());
+                state
+                    .common
+                    .config
+                    .write_outputs(state.common.output_conf.outputs());
 
-                for surface in state.backend.kms().devices.values_mut().flat_map(|d| d.surfaces.values_mut()) {
+                for surface in state
+                    .backend
+                    .kms()
+                    .devices
+                    .values_mut()
+                    .flat_map(|d| d.surfaces.values_mut())
+                {
                     surface.pending = false;
                 }
                 for output in state.common.shell.outputs() {
@@ -216,10 +242,14 @@ pub fn init_backend(event_loop: &mut EventLoop<'static, State>, state: &mut Stat
             loop_signal.wakeup();
         }
     });
-        
+
     state.backend = BackendData::Kms(KmsState {
         api,
-        _tokens: vec![libinput_event_source, session_event_source, udev_event_source],
+        _tokens: vec![
+            libinput_event_source,
+            session_event_source,
+            udev_event_source,
+        ],
         primary,
         session,
         signaler,
@@ -240,7 +270,7 @@ impl State {
         if !self.backend.kms().session.is_active() {
             return Ok(());
         }
-        
+
         let fd = SessionFd::new(
             self.backend
                 .kms()
@@ -352,33 +382,44 @@ impl State {
         let mut wl_outputs = Vec::new();
         let mut w = self.common.shell.global_space().size.w;
         for (crtc, conn) in outputs {
-            match device.setup_surface(
-                crtc,
-                conn,
-                &mut self.common.event_loop_handle,
-                (0, w),
-            ) {
+            match device.setup_surface(crtc, conn, &mut self.common.event_loop_handle, (0, w)) {
                 Ok(output) => {
-                    w += output.user_data().get::<RefCell<OutputConfig>>().unwrap().borrow().mode_size().w;
+                    w += output
+                        .user_data()
+                        .get::<RefCell<OutputConfig>>()
+                        .unwrap()
+                        .borrow()
+                        .mode_size()
+                        .w;
                     wl_outputs.push(output);
                 }
                 Err(err) => slog_scope::warn!("Failed to initialize output: {}", err),
             };
         }
         self.backend.kms().devices.insert(drm_node, device);
-        
+
         self.common.output_conf.add_heads(wl_outputs.iter());
         self.common
             .output_conf
             .update(&mut *self.common.display.borrow_mut());
         for output in wl_outputs {
-            if let Err(err) = self.backend.kms().apply_config_for_output(&output, &mut self.common.shell, false) {
+            if let Err(err) =
+                self.backend
+                    .kms()
+                    .apply_config_for_output(&output, &mut self.common.shell, false)
+            {
                 slog_scope::warn!("Failed to initialize output: {}", err);
             }
         }
-        self.common.config.read_outputs(self.common.output_conf.outputs(), &mut self.backend, &mut self.common.shell);
+        self.common.config.read_outputs(
+            self.common.output_conf.outputs(),
+            &mut self.backend,
+            &mut self.common.shell,
+        );
         self.common.shell.refresh_outputs();
-        self.common.config.write_outputs(self.common.output_conf.outputs());
+        self.common
+            .config
+            .write_outputs(self.common.output_conf.outputs());
 
         Ok(())
     }
@@ -387,7 +428,7 @@ impl State {
         if !self.backend.kms().session.is_active() {
             return Ok(());
         }
-        
+
         let drm_node = DrmNode::from_dev_id(dev)?;
         let mut outputs_removed = Vec::new();
         let mut outputs_added = Vec::new();
@@ -404,14 +445,15 @@ impl State {
                 }
             }
             for (crtc, conn) in changes.added {
-                match device.setup_surface(
-                    crtc,
-                    conn,
-                    &mut self.common.event_loop_handle,
-                    (0, w),
-                ) {
+                match device.setup_surface(crtc, conn, &mut self.common.event_loop_handle, (0, w)) {
                     Ok(output) => {
-                        w += output.user_data().get::<RefCell<OutputConfig>>().unwrap().borrow().mode_size().w;
+                        w += output
+                            .user_data()
+                            .get::<RefCell<OutputConfig>>()
+                            .unwrap()
+                            .borrow()
+                            .mode_size()
+                            .w;
                         outputs_added.push(output);
                     }
                     Err(err) => slog_scope::warn!("Failed to initialize output: {}", err),
@@ -422,16 +464,26 @@ impl State {
         self.common.output_conf.remove_heads(outputs_removed.iter());
         self.common.output_conf.add_heads(outputs_added.iter());
         for output in outputs_added {
-            if let Err(err) = self.backend.kms().apply_config_for_output(&output, &mut self.common.shell, false) {
+            if let Err(err) =
+                self.backend
+                    .kms()
+                    .apply_config_for_output(&output, &mut self.common.shell, false)
+            {
                 slog_scope::warn!("Failed to initialize output: {}", err);
             }
         }
         self.common
             .output_conf
             .update(&mut self.common.display.borrow_mut());
-        self.common.config.read_outputs(self.common.output_conf.outputs(), &mut self.backend, &mut self.common.shell);
+        self.common.config.read_outputs(
+            self.common.output_conf.outputs(),
+            &mut self.backend,
+            &mut self.common.shell,
+        );
         self.common.shell.refresh_outputs();
-        self.common.config.write_outputs(self.common.output_conf.outputs());
+        self.common
+            .config
+            .write_outputs(self.common.output_conf.outputs());
 
         Ok(())
     }
@@ -459,9 +511,15 @@ impl State {
             .update(&mut *self.common.display.borrow_mut());
 
         if self.backend.kms().session.is_active() {
-            self.common.config.read_outputs(self.common.output_conf.outputs(), &mut self.backend, &mut self.common.shell);
+            self.common.config.read_outputs(
+                self.common.output_conf.outputs(),
+                &mut self.backend,
+                &mut self.common.shell,
+            );
             self.common.shell.refresh_outputs();
-            self.common.config.write_outputs(self.common.output_conf.outputs());
+            self.common
+                .config
+                .write_outputs(self.common.output_conf.outputs());
         }
 
         Ok(())
@@ -621,18 +679,11 @@ impl Surface {
             self.surface.as_mut().unwrap().reset_buffers();
         }
 
-        let workspace = state
-            .shell
-            .active_space(&self.output);
+        let workspace = state.shell.active_space(&self.output);
         let nodes = workspace
             .get_fullscreen(&self.output)
             .map(|w| vec![w])
-            .unwrap_or_else(||
-                workspace
-                    .space
-                    .windows()
-                    .collect::<Vec<_>>()
-            )
+            .unwrap_or_else(|| workspace.space.windows().collect::<Vec<_>>())
             .into_iter()
             .flat_map(|w| {
                 w.toplevel()
@@ -696,10 +747,7 @@ impl Surface {
 }
 
 impl KmsState {
-    pub fn switch_vt(
-        &mut self,
-        num: i32,
-    ) -> Result<(), anyhow::Error> {
+    pub fn switch_vt(&mut self, num: i32) -> Result<(), anyhow::Error> {
         self.session.change_vt(num).map_err(Into::into)
     }
 
@@ -823,7 +871,7 @@ impl KmsState {
                 */
                 let data = (*device, *crtc);
                 //if surface.vrr {
-                    surface.render_timer.add_timeout(Duration::ZERO, data);
+                surface.render_timer.add_timeout(Duration::ZERO, data);
                 //} else {
                 //    surface.render_timer.add_timeout(duration, data);
                 //}

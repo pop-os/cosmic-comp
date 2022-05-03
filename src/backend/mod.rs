@@ -12,7 +12,10 @@ pub mod x11;
 // TODO
 // pub mod wayland; // tbd in smithay
 
-pub fn init_backend_auto(event_loop: &mut EventLoop<'static, State>, state: &mut State) -> Result<()> {
+pub fn init_backend_auto(
+    event_loop: &mut EventLoop<'static, State>,
+    state: &mut State,
+) -> Result<()> {
     match std::env::var("COSMIC_BACKEND") {
         Ok(x) if x == "x11" => x11::init_backend(event_loop, state),
         Ok(x) if x == "winit" => winit::init_backend(event_loop, state),

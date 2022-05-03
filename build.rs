@@ -20,5 +20,9 @@ fn main() {
     let ext_workspace_protocol_file = "resources/ext-workspace-unstable-v1.xml";
     // Target directory for the generate files
     generate_code(drm_protocol_file, &dest.join("wl_drm.rs"), Side::Server);
-    generate_code(ext_workspace_protocol_file, &dest.join("ext_workspace.rs"), Side::Server);
+    generate_code(
+        ext_workspace_protocol_file,
+        &dest.join("ext_workspace.rs"),
+        Side::Server,
+    );
 }

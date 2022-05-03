@@ -85,7 +85,10 @@ impl Layout for TilingLayout {
         focus_stack: Box<dyn Iterator<Item = &'a Window> + 'a>,
     ) -> Option<Window> {
         let output = super::output_from_seat(Some(seat), space);
-        let idx = space.outputs().position(|o| Some(o) == output.as_ref()).unwrap_or(0);
+        let idx = space
+            .outputs()
+            .position(|o| Some(o) == output.as_ref())
+            .unwrap_or(0);
         let tree = TilingLayout::active_tree(&mut self.trees, idx);
         if let Some(last_active) = TilingLayout::last_active_window(tree, focus_stack) {
             let mut node_id = last_active;
@@ -141,7 +144,10 @@ impl Layout for TilingLayout {
         focus_stack: Box<dyn Iterator<Item = &'a Window> + 'a>,
     ) {
         let output = super::output_from_seat(Some(seat), space);
-        let idx = space.outputs().position(|o| Some(o) == output.as_ref()).unwrap_or(0);
+        let idx = space
+            .outputs()
+            .position(|o| Some(o) == output.as_ref())
+            .unwrap_or(0);
         let tree = TilingLayout::active_tree(&mut self.trees, idx);
         if let Some(last_active) = TilingLayout::last_active_window(tree, focus_stack) {
             if let Some((fork, _child)) = TilingLayout::find_fork(tree, last_active) {
@@ -288,7 +294,10 @@ impl TilingLayout {
         focus_stack: Option<Box<dyn Iterator<Item = &'a Window> + 'a>>,
     ) {
         let output = super::output_from_seat(seat, space);
-        let idx = space.outputs().position(|o| Some(o) == output.as_ref()).unwrap_or(0);
+        let idx = space
+            .outputs()
+            .position(|o| Some(o) == output.as_ref())
+            .unwrap_or(0);
         let tree = TilingLayout::active_tree(&mut self.trees, idx);
         let new_window = Node::new(Data::Window(window.clone()));
 
@@ -529,8 +538,18 @@ impl TilingLayout {
                                 if let Some(geo) = geo {
                                     #[allow(irrefutable_let_patterns)]
                                     if let Kind::Xdg(xdg) = &window.toplevel() {
-                                        if xdg.current_state().map(|state| state.states.contains(XdgState::Fullscreen)).unwrap_or(false) ||
-                                            xdg.with_pending_state(|pending| pending.states.contains(XdgState::Fullscreen)).unwrap_or(false) {
+                                        if xdg
+                                            .current_state()
+                                            .map(|state| {
+                                                state.states.contains(XdgState::Fullscreen)
+                                            })
+                                            .unwrap_or(false)
+                                            || xdg
+                                                .with_pending_state(|pending| {
+                                                    pending.states.contains(XdgState::Fullscreen)
+                                                })
+                                                .unwrap_or(false)
+                                        {
                                             continue;
                                         }
                                         let ret = xdg.with_pending_state(|state| {
@@ -549,10 +568,7 @@ impl TilingLayout {
                                     }
                                     space.map_window(
                                         &window,
-                                        (
-                                            geo.loc.x + inner,
-                                            geo.loc.y + inner,
-                                        ),
+                                        (geo.loc.x + inner, geo.loc.y + inner),
                                         false,
                                     );
                                 }

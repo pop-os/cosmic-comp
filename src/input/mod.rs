@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{config::Action, state::{Common, State}, shell::Workspace};
+use crate::{
+    config::Action,
+    shell::Workspace,
+    state::{Common, State},
+};
 use smithay::{
     backend::input::{Device, DeviceCapability, InputBackend, InputEvent, KeyState},
     desktop::{layer_map_for_output, Kind, Space, WindowSurfaceType},
@@ -9,13 +13,13 @@ use smithay::{
     wayland::{
         data_device::set_data_device_focus,
         output::Output,
-        seat::{CursorImageStatus, FilterResult, KeysymHandle, Seat, XkbConfig, keysyms},
+        seat::{keysyms, CursorImageStatus, FilterResult, KeysymHandle, Seat, XkbConfig},
         shell::wlr_layer::Layer as WlrLayer,
         SERIAL_COUNTER,
     },
 };
-use xkbcommon::xkb::KEY_XF86Switch_VT_12;
 use std::{cell::RefCell, collections::HashMap};
+use xkbcommon::xkb::KEY_XF86Switch_VT_12;
 
 pub struct ActiveOutput(pub RefCell<Output>);
 pub struct SupressedKeys(RefCell<Vec<u32>>);
@@ -214,7 +218,8 @@ impl State {
 
                                 #[cfg(feature = "debug")]
                                 {
-                                    if self.common.seats.iter().position(|x| x == seat).unwrap() == 0
+                                    if self.common.seats.iter().position(|x| x == seat).unwrap()
+                                        == 0
                                         && self.common.egui.active
                                     {
                                         if self.common.egui.debug_state.wants_keyboard() {
@@ -238,16 +243,26 @@ impl State {
                                     }
                                 }
 
-                                if state == KeyState::Pressed && (keysyms::KEY_XF86Switch_VT_1..=KEY_XF86Switch_VT_12).contains(&handle.modified_sym()) {
-                                    if let Err(err) = self.backend.kms().switch_vt((handle.modified_sym() - keysyms::KEY_XF86Switch_VT_1 + 1) as i32) {
-                                        slog_scope::error!("Failed switching virtual terminal: {}", err);
+                                if state == KeyState::Pressed
+                                    && (keysyms::KEY_XF86Switch_VT_1..=KEY_XF86Switch_VT_12)
+                                        .contains(&handle.modified_sym())
+                                {
+                                    if let Err(err) = self.backend.kms().switch_vt(
+                                        (handle.modified_sym() - keysyms::KEY_XF86Switch_VT_1 + 1)
+                                            as i32,
+                                    ) {
+                                        slog_scope::error!(
+                                            "Failed switching virtual terminal: {}",
+                                            err
+                                        );
                                     }
                                     userdata.get::<SupressedKeys>().unwrap().add(&handle);
                                     return FilterResult::Intercept(None);
                                 }
 
                                 // here we can handle global shortcuts and the like
-                                for (binding, action) in self.common.config.static_conf.key_bindings.iter()
+                                for (binding, action) in
+                                    self.common.config.static_conf.key_bindings.iter()
                                 {
                                     if state == KeyState::Pressed
                                         && binding.modifiers == *modifiers
@@ -276,7 +291,8 @@ impl State {
                                 }
                                 Action::Close => {
                                     let current_output = active_output(seat, &self.common);
-                                    let workspace = self.common.shell.active_space_mut(&current_output);
+                                    let workspace =
+                                        self.common.shell.active_space_mut(&current_output);
                                     if let Some(window) = workspace.focus_stack(seat).last() {
                                         #[allow(irrefutable_let_patterns)]
                                         if let Kind::Xdg(xdg) = &window.toplevel() {
@@ -290,8 +306,11 @@ impl State {
                                         0 => 9,
                                         x => x - 1,
                                     };
-                                    self.common.shell
-                                        .activate(seat, &current_output, workspace as usize);
+                                    self.common.shell.activate(
+                                        seat,
+                                        &current_output,
+                                        workspace as usize,
+                                    );
                                 }
                                 Action::MoveToWorkspace(key_num) => {
                                     let current_output = active_output(seat, &self.common);
@@ -316,7 +335,8 @@ impl State {
                                 }
                                 Action::Fullscreen => {
                                     let current_output = active_output(seat, &self.common);
-                                    let workspace = self.common.shell.active_space_mut(&current_output);
+                                    let workspace =
+                                        self.common.shell.active_space_mut(&current_output);
                                     let focused_window = workspace.focus_stack(seat).last();
                                     if let Some(window) = focused_window {
                                         workspace.fullscreen_toggle(&window, &current_output);
@@ -324,7 +344,9 @@ impl State {
                                 }
                                 Action::Orientation(orientation) => {
                                     let output = active_output(seat, &self.common);
-                                    self.common.shell.set_orientation(&seat, &output, *orientation);
+                                    self.common
+                                        .shell
+                                        .set_orientation(&seat, &output, *orientation);
                                 }
                                 Action::Spawn(command) => {
                                     if let Err(err) = std::process::Command::new("/bin/sh")
@@ -381,8 +403,10 @@ impl State {
                             .min((output_geometry.loc.y + output_geometry.size.h) as f64);
 
                         let serial = SERIAL_COUNTER.next_serial();
-                        let relative_pos =
-                            self.common.shell.space_relative_output_geometry(position, &output);
+                        let relative_pos = self
+                            .common
+                            .shell
+                            .space_relative_output_geometry(position, &output);
                         let workspace = self.common.shell.active_space_mut(&output);
                         let under = State::surface_under(
                             position,
@@ -401,10 +425,12 @@ impl State {
 
                         #[cfg(feature = "debug")]
                         if self.common.seats.iter().position(|x| x == seat).unwrap() == 0 {
-                            self.common.egui
+                            self.common
+                                .egui
                                 .debug_state
                                 .handle_pointer_motion(position.to_i32_round());
-                            self.common.egui
+                            self.common
+                                .egui
                                 .log_state
                                 .handle_pointer_motion(position.to_i32_round());
                         }
@@ -424,8 +450,10 @@ impl State {
                         let geometry = self.common.shell.output_geometry(&output);
                         let position =
                             geometry.loc.to_f64() + event.position_transformed(geometry.size);
-                        let relative_pos =
-                            self.common.shell.space_relative_output_geometry(position, &output);
+                        let relative_pos = self
+                            .common
+                            .shell
+                            .space_relative_output_geometry(position, &output);
                         let workspace = self.common.shell.active_space_mut(&output);
                         let serial = SERIAL_COUNTER.next_serial();
                         let under = State::surface_under(
@@ -445,10 +473,12 @@ impl State {
 
                         #[cfg(feature = "debug")]
                         if self.common.seats.iter().position(|x| x == seat).unwrap() == 0 {
-                            self.common.egui
+                            self.common
+                                .egui
                                 .debug_state
                                 .handle_pointer_motion(position.to_i32_round());
-                            self.common.egui
+                            self.common
+                                .egui
                                 .log_state
                                 .handle_pointer_motion(position.to_i32_round());
                         }
@@ -502,15 +532,17 @@ impl State {
                                     let output = active_output(seat, &self.common);
                                     let pos = seat.get_pointer().unwrap().current_location();
                                     let output_geo = self.common.shell.output_geometry(&output);
-                                    let relative_pos =
-                                        self.common.shell.space_relative_output_geometry(pos, &output);
+                                    let relative_pos = self
+                                        .common
+                                        .shell
+                                        .space_relative_output_geometry(pos, &output);
                                     let workspace = self.common.shell.active_space_mut(&output);
                                     let layers = layer_map_for_output(&output);
                                     let mut under = None;
 
                                     if let Some(window) = workspace.get_fullscreen(&output) {
-                                        if let Some(layer) = layers
-                                            .layer_under(WlrLayer::Overlay, relative_pos)
+                                        if let Some(layer) =
+                                            layers.layer_under(WlrLayer::Overlay, relative_pos)
                                         {
                                             if layer.can_receive_keyboard_focus() {
                                                 let layer_loc =
@@ -523,17 +555,21 @@ impl State {
                                                     )
                                                     .map(|(s, _)| s);
                                             }
-                                        } else { 
-                                            under = window.surface_under(
-                                                pos - output_geo.loc.to_f64(), 
-                                                WindowSurfaceType::TOPLEVEL
-                                                    | WindowSurfaceType::SUBSURFACE
-                                            ).map(|(s, _)| s);
+                                        } else {
+                                            under = window
+                                                .surface_under(
+                                                    pos - output_geo.loc.to_f64(),
+                                                    WindowSurfaceType::TOPLEVEL
+                                                        | WindowSurfaceType::SUBSURFACE,
+                                                )
+                                                .map(|(s, _)| s);
                                         }
                                     } else {
                                         if let Some(layer) = layers
                                             .layer_under(WlrLayer::Overlay, relative_pos)
-                                            .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos))
+                                            .or_else(|| {
+                                                layers.layer_under(WlrLayer::Top, relative_pos)
+                                            })
                                         {
                                             if layer.can_receive_keyboard_focus() {
                                                 let layer_loc =
@@ -547,12 +583,17 @@ impl State {
                                                     .map(|(s, _)| s);
                                             }
                                         } else if let Some((_, surface, _)) =
-                                            workspace.space.surface_under(relative_pos, WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE)
+                                            workspace.space.surface_under(
+                                                relative_pos,
+                                                WindowSurfaceType::TOPLEVEL
+                                                    | WindowSurfaceType::SUBSURFACE,
+                                            )
                                         {
                                             under = Some(surface);
-                                        } else if let Some(layer) = layers
-                                            .layer_under(WlrLayer::Bottom, pos)
-                                            .or_else(|| layers.layer_under(WlrLayer::Background, pos))
+                                        } else if let Some(layer) =
+                                            layers.layer_under(WlrLayer::Bottom, pos).or_else(
+                                                || layers.layer_under(WlrLayer::Background, pos),
+                                            )
                                         {
                                             if layer.can_receive_keyboard_focus() {
                                                 let layer_loc =
@@ -591,7 +632,9 @@ impl State {
                 let device = event.device();
                 for seat in self.common.seats.clone().iter() {
                     #[cfg(feature = "debug")]
-                    if self.common.seats.iter().position(|x| x == seat).unwrap() == 0 && self.common.egui.active {
+                    if self.common.seats.iter().position(|x| x == seat).unwrap() == 0
+                        && self.common.egui.active
+                    {
                         if self.common.egui.debug_state.wants_pointer() {
                             self.common.egui.debug_state.handle_pointer_axis(
                                 event
@@ -696,15 +739,10 @@ impl State {
                         WindowSurfaceType::ALL,
                     )
                     .map(|(s, loc)| (s, loc + layer_loc + output_geo.loc))
-            } else { 
+            } else {
                 window
                     .surface_under(global_pos - output_geo.loc.to_f64(), WindowSurfaceType::ALL)
-                    .map(|(s, loc)| {
-                        (
-                            s,
-                            loc + output_geo.loc,
-                        )
-                    })
+                    .map(|(s, loc)| (s, loc + output_geo.loc))
             }
         } else {
             if let Some(layer) = layers
@@ -718,11 +756,11 @@ impl State {
                         WindowSurfaceType::ALL,
                     )
                     .map(|(s, loc)| (s, loc + layer_loc + output_geo.loc))
-            } else if let Some((_, surface, loc)) = workspace.space.surface_under(relative_pos, WindowSurfaceType::ALL) {
-                Some((
-                    surface,
-                    loc + (global_pos - relative_pos).to_i32_round(),
-                ))
+            } else if let Some((_, surface, loc)) = workspace
+                .space
+                .surface_under(relative_pos, WindowSurfaceType::ALL)
+            {
+                Some((surface, loc + (global_pos - relative_pos).to_i32_round()))
             } else if let Some(layer) = layers
                 .layer_under(WlrLayer::Bottom, relative_pos)
                 .or_else(|| layers.layer_under(WlrLayer::Background, relative_pos))

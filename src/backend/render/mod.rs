@@ -14,18 +14,17 @@ use smithay::{
         renderer::{
             gles2::{Gles2Renderbuffer, Gles2Renderer, Gles2Texture},
             multigpu::{egl::EglGlesBackend, Error as MultiError, MultiFrame, MultiRenderer},
-            ImportAll, Renderer, Frame, TextureFilter,
+            Frame, ImportAll, Renderer, TextureFilter,
         },
     },
     desktop::{
+        draw_layer_surface, draw_window, layer_map_for_output,
         space::{RenderElement, RenderError, SpaceOutputTuple, SurfaceTree},
-        draw_window, draw_layer_surface, Window, layer_map_for_output, utils::damage_from_surface_tree,
+        utils::damage_from_surface_tree,
+        Window,
     },
     utils::{Logical, Point, Rectangle, Transform},
-    wayland::{
-        shell::wlr_layer::Layer as WlrLayer,
-        output::Output,
-    },
+    wayland::{output::Output, shell::wlr_layer::Layer as WlrLayer},
 };
 
 mod cursor;
@@ -115,7 +114,12 @@ pub fn needs_buffer_reset(output: &Output, state: &Common) -> bool {
 
     let userdata = output.user_data();
     userdata.insert_if_missing(|| DidCustomRendering(AtomicBool::new(false)));
-    userdata.get::<DidCustomRendering>().unwrap().0.swap(will_render_custom, Ordering::AcqRel) != will_render_custom
+    userdata
+        .get::<DidCustomRendering>()
+        .unwrap()
+        .0
+        .swap(will_render_custom, Ordering::AcqRel)
+        != will_render_custom
 }
 
 pub fn render_output<R>(
@@ -132,7 +136,9 @@ where
     <R as Renderer>::TextureId: Clone + 'static,
     CustomElem: RenderElement<R>,
 {
-    renderer.downscale_filter(TextureFilter::Linear).map_err(RenderError::Rendering)?;
+    renderer
+        .downscale_filter(TextureFilter::Linear)
+        .map_err(RenderError::Rendering)?;
 
     #[cfg(feature = "debug")]
     {
@@ -259,10 +265,16 @@ where
 
     #[cfg(feature = "debug")]
     {
-        let fps_overlay = fps_ui(_gpu, state, fps, Rectangle::from_loc_and_size((0, 0), output_geo.size), scale);
+        let fps_overlay = fps_ui(
+            _gpu,
+            state,
+            fps,
+            Rectangle::from_loc_and_size((0, 0), output_geo.size),
+            scale,
+        );
         custom_elements.push(fps_overlay.into());
     }
-    
+
     for seat in &state.seats {
         let pointer = match seat.get_pointer() {
             Some(ptr) => ptr,

@@ -31,7 +31,13 @@ fn main() -> Result<()> {
     // init wayland
     let (display, socket) = init_wayland_display(&mut event_loop)?;
     // init state
-    let mut state = state::State::new(display, socket, event_loop.handle(), event_loop.get_signal(), log);
+    let mut state = state::State::new(
+        display,
+        socket,
+        event_loop.handle(),
+        event_loop.get_signal(),
+        log,
+    );
     // init backend
     backend::init_backend_auto(&mut event_loop, &mut state)?;
     // potentially tell systemd we are setup now

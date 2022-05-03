@@ -16,9 +16,7 @@ use smithay::{
         output::Output,
         seat::{PointerGrabStartData, Seat},
         shell::{
-            wlr_layer::{
-                wlr_layer_shell_init, LayerShellRequest, LayerSurfaceAttributes,
-            },
+            wlr_layer::{wlr_layer_shell_init, LayerShellRequest, LayerSurfaceAttributes},
             xdg::{
                 xdg_shell_init, Configure, XdgPopupSurfaceRoleAttributes, XdgRequest,
                 XdgToplevelSurfaceRoleAttributes,
@@ -259,7 +257,11 @@ pub fn init_shell(config: &Config, display: &mut Display) -> super::Shell {
                     .as_ref()
                     .and_then(Output::from_resource)
                     .unwrap_or_else(|| active_output(&seat, &*state));
-                state.shell.active_space_mut(&output).pending_layer(LayerSurface::new(surface, namespace), &output, &seat); 
+                state.shell.active_space_mut(&output).pending_layer(
+                    LayerSurface::new(surface, namespace),
+                    &output,
+                    &seat,
+                );
             }
             _ => {}
         },

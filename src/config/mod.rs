@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    shell::{
-        Shell,
-        layout::FocusDirection,
-    },
+    shell::{layout::FocusDirection, Shell},
     state::BackendData,
 };
 use serde::{Deserialize, Serialize};
 pub use smithay::{
     backend::input::KeyState,
-    reexports::input::{AccelProfile, ClickMethod, ScrollMethod, SendEventsMode, TapButtonMap, Device as InputDevice},
+    reexports::input::{
+        AccelProfile, ClickMethod, Device as InputDevice, ScrollMethod, SendEventsMode,
+        TapButtonMap,
+    },
     utils::{Logical, Physical, Point, Size, Transform},
     wayland::{
         output::{Mode, Output},
@@ -116,24 +116,24 @@ pub struct InputsConfig {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct InputConfig {
     state: DeviceState,
-    #[serde(skip_serializing_if="Option::is_none", default)]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     acceleration: Option<AccelConfig>,
-    #[serde(skip_serializing_if="Option::is_none", default)]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     calibration: Option<[f32; 6]>,
     #[serde(with = "ClickMethodDef")]
-    #[serde(skip_serializing_if="Option::is_none", default)]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     click_method: Option<ClickMethod>,
-    #[serde(skip_serializing_if="Option::is_none", default)]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     disable_while_typing: Option<bool>,
-    #[serde(skip_serializing_if="Option::is_none", default)]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     left_handed: Option<bool>,
-    #[serde(skip_serializing_if="Option::is_none", default)]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     middle_button_emulation: Option<bool>,
-    #[serde(skip_serializing_if="Option::is_none", default)]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     rotation_angle: Option<u32>,
-    #[serde(skip_serializing_if="Option::is_none", default)]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     scroll_config: Option<ScrollConfig>,
-    #[serde(skip_serializing_if="Option::is_none", default)]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     tap_config: Option<TapConfig>,
 }
 
@@ -215,8 +215,7 @@ impl Config {
             xdg.and_then(|base| base.place_state_file("cosmic-comp/outputs.ron").ok());
         let outputs = Self::load_outputs(&output_path);
 
-        let input_path =
-            xdg.and_then(|base| base.place_state_file("cosmic-comp/inputs.ron").ok());
+        let input_path = xdg.and_then(|base| base.place_state_file("cosmic-comp/inputs.ron").ok());
         let inputs = Self::load_inputs(&input_path);
 
         DynamicConfig {
@@ -244,7 +243,7 @@ impl Config {
             config: HashMap::new(),
         }
     }
-    
+
     fn load_inputs(path: &Option<PathBuf>) -> InputsConfig {
         if let Some(path) = path.as_ref() {
             if path.exists() {
@@ -265,10 +264,10 @@ impl Config {
             devices: HashMap::new(),
         }
     }
-    
+
     pub fn read_outputs(
         &mut self,
-        outputs: impl Iterator<Item=impl std::borrow::Borrow<Output>>,
+        outputs: impl Iterator<Item = impl std::borrow::Borrow<Output>>,
         backend: &mut BackendData,
         shell: &mut Shell,
     ) {
@@ -295,11 +294,7 @@ impl Config {
 
             for (name, output_config) in infos.iter().map(|o| &o.connector).zip(configs.into_iter())
             {
-                let output = outputs
-                    .iter()
-                    .find(|o| &o.name() == name)
-                    .unwrap()
-                    .clone();
+                let output = outputs.iter().find(|o| &o.name() == name).unwrap().clone();
                 *output
                     .user_data()
                     .get::<RefCell<OutputConfig>>()
@@ -327,8 +322,7 @@ impl Config {
                         .get::<RefCell<OutputConfig>>()
                         .unwrap()
                         .borrow_mut() = output_config;
-                    if let Err(err) = backend.apply_config_for_output(&output, false, shell)
-                    {
+                    if let Err(err) = backend.apply_config_for_output(&output, false, shell) {
                         slog_scope::error!(
                             "Failed to reset config for output {}: {}",
                             output.name(),
@@ -339,8 +333,11 @@ impl Config {
             }
         }
     }
-    
-    pub fn write_outputs(&mut self, outputs: impl Iterator<Item=impl std::borrow::Borrow<Output>>) {
+
+    pub fn write_outputs(
+        &mut self,
+        outputs: impl Iterator<Item = impl std::borrow::Borrow<Output>>,
+    ) {
         let mut infos = outputs
             .map(|o| {
                 let o = o.borrow();
@@ -356,8 +353,7 @@ impl Config {
             .collect::<Vec<(OutputInfo, OutputConfig)>>();
         infos.sort_by(|&(ref a, _), &(ref b, _)| a.cmp(b));
         let (infos, configs) = infos.into_iter().unzip();
-        self
-            .dynamic_conf
+        self.dynamic_conf
             .outputs_mut()
             .config
             .insert(infos, configs);
@@ -371,86 +367,168 @@ impl Config {
             Entry::Occupied(entry) => {
                 let config = entry.get();
                 if let Err(err) = match config.state {
-                    DeviceState::Enabled => device.config_send_events_set_mode(SendEventsMode::ENABLED),
-                    DeviceState::Disabled => device.config_send_events_set_mode(SendEventsMode::DISABLED),
-                    DeviceState::DisabledOnExternalMouse => device.config_send_events_set_mode(SendEventsMode::DISABLED_ON_EXTERNAL_MOUSE),
+                    DeviceState::Enabled => {
+                        device.config_send_events_set_mode(SendEventsMode::ENABLED)
+                    }
+                    DeviceState::Disabled => {
+                        device.config_send_events_set_mode(SendEventsMode::DISABLED)
+                    }
+                    DeviceState::DisabledOnExternalMouse => device
+                        .config_send_events_set_mode(SendEventsMode::DISABLED_ON_EXTERNAL_MOUSE),
                 } {
-                    slog_scope::warn!("Failed to apply mode {:?} for device {:?}: {:?}", config.state, device.name(), err);
+                    slog_scope::warn!(
+                        "Failed to apply mode {:?} for device {:?}: {:?}",
+                        config.state,
+                        device.name(),
+                        err
+                    );
                 }
                 if let Some(accel) = config.acceleration.as_ref() {
                     if let Some(profile) = accel.profile {
                         if let Err(err) = device.config_accel_set_profile(profile) {
-                            slog_scope::warn!("Failed to apply acceleration profile {:?} for device {:?}: {:?}", profile, device.name(), err);
+                            slog_scope::warn!(
+                                "Failed to apply acceleration profile {:?} for device {:?}: {:?}",
+                                profile,
+                                device.name(),
+                                err
+                            );
                         }
                     }
                     if let Err(err) = device.config_accel_set_speed(accel.speed) {
-                        slog_scope::warn!("Failed to apply acceleration speed {:?} for device {:?}: {:?}", accel.speed, device.name(), err);
+                        slog_scope::warn!(
+                            "Failed to apply acceleration speed {:?} for device {:?}: {:?}",
+                            accel.speed,
+                            device.name(),
+                            err
+                        );
                     }
                 }
                 if let Some(matrix) = config.calibration {
                     if let Err(err) = device.config_calibration_set_matrix(matrix) {
-                        slog_scope::warn!("Failed to apply calibration matrix {:?} for device {:?}: {:?}", matrix, device.name(), err);
+                        slog_scope::warn!(
+                            "Failed to apply calibration matrix {:?} for device {:?}: {:?}",
+                            matrix,
+                            device.name(),
+                            err
+                        );
                     }
                 }
                 if let Some(dwt) = config.disable_while_typing {
                     if let Err(err) = device.config_dwt_set_enabled(dwt) {
-                        slog_scope::warn!("Failed to apply disable-while-typing {:?} for device {:?}: {:?}", dwt, device.name(), err);
+                        slog_scope::warn!(
+                            "Failed to apply disable-while-typing {:?} for device {:?}: {:?}",
+                            dwt,
+                            device.name(),
+                            err
+                        );
                     }
                 }
                 if let Some(left) = config.left_handed {
                     if let Err(err) = device.config_left_handed_set(left) {
-                        slog_scope::warn!("Failed to apply left-handed {:?} for device {:?}: {:?}", left, device.name(), err);
+                        slog_scope::warn!(
+                            "Failed to apply left-handed {:?} for device {:?}: {:?}",
+                            left,
+                            device.name(),
+                            err
+                        );
                     }
                 }
                 if let Some(middle) = config.middle_button_emulation {
                     if let Err(err) = device.config_middle_emulation_set_enabled(middle) {
-                        slog_scope::warn!("Failed to apply middle-button-emulation {:?} for device {:?}: {:?}", middle, device.name(), err);
+                        slog_scope::warn!(
+                            "Failed to apply middle-button-emulation {:?} for device {:?}: {:?}",
+                            middle,
+                            device.name(),
+                            err
+                        );
                     }
                 }
                 if let Some(angle) = config.rotation_angle {
                     if let Err(err) = device.config_rotation_set_angle(angle) {
-                        slog_scope::warn!("Failed to apply rotation-angle {:?} for device {:?}: {:?}", angle, device.name(), err);
+                        slog_scope::warn!(
+                            "Failed to apply rotation-angle {:?} for device {:?}: {:?}",
+                            angle,
+                            device.name(),
+                            err
+                        );
                     }
                 }
                 if let Some(scroll) = config.scroll_config.as_ref() {
                     if let Some(method) = scroll.method {
                         if let Err(err) = device.config_scroll_set_method(method) {
-                            slog_scope::warn!("Failed to apply scroll method {:?} for device {:?}: {:?}", method, device.name(), err);
+                            slog_scope::warn!(
+                                "Failed to apply scroll method {:?} for device {:?}: {:?}",
+                                method,
+                                device.name(),
+                                err
+                            );
                         }
                     }
                     if let Some(natural) = scroll.natural_scroll {
                         if let Err(err) = device.config_scroll_set_natural_scroll_enabled(natural) {
-                            slog_scope::warn!("Failed to apply natural scrolling {:?} for device {:?}: {:?}", natural, device.name(), err);
+                            slog_scope::warn!(
+                                "Failed to apply natural scrolling {:?} for device {:?}: {:?}",
+                                natural,
+                                device.name(),
+                                err
+                            );
                         }
                     }
                     if let Some(button) = scroll.scroll_button {
                         if let Err(err) = device.config_scroll_set_button(button) {
-                            slog_scope::warn!("Failed to apply scroll button {:?} for device {:?}: {:?}", button, device.name(), err);
+                            slog_scope::warn!(
+                                "Failed to apply scroll button {:?} for device {:?}: {:?}",
+                                button,
+                                device.name(),
+                                err
+                            );
                         }
                     }
                 }
                 if let Some(tap) = config.tap_config.as_ref() {
                     if let Err(err) = device.config_tap_set_enabled(tap.enabled) {
-                        slog_scope::warn!("Failed to apply tap-to-click {:?} for device {:?}: {:?}", tap.enabled, device.name(), err);
+                        slog_scope::warn!(
+                            "Failed to apply tap-to-click {:?} for device {:?}: {:?}",
+                            tap.enabled,
+                            device.name(),
+                            err
+                        );
                     }
                     if let Some(button_map) = tap.button_map {
                         if let Err(err) = device.config_tap_set_button_map(button_map) {
-                           slog_scope::warn!("Failed to apply button map {:?} for device {:?}: {:?}", button_map, device.name(), err);
+                            slog_scope::warn!(
+                                "Failed to apply button map {:?} for device {:?}: {:?}",
+                                button_map,
+                                device.name(),
+                                err
+                            );
                         }
                     }
                     if let Err(err) = device.config_tap_set_drag_enabled(tap.drag) {
-                        slog_scope::warn!("Failed to apply tap-drag {:?} for device {:?}: {:?}", tap.drag, device.name(), err);
+                        slog_scope::warn!(
+                            "Failed to apply tap-drag {:?} for device {:?}: {:?}",
+                            tap.drag,
+                            device.name(),
+                            err
+                        );
                     }
                     if let Err(err) = device.config_tap_set_drag_lock_enabled(tap.drag_lock) {
-                        slog_scope::warn!("Failed to apply tap-drag-lock {:?} for device {:?}: {:?}", tap.drag_lock, device.name(), err);
+                        slog_scope::warn!(
+                            "Failed to apply tap-drag-lock {:?} for device {:?}: {:?}",
+                            tap.drag_lock,
+                            device.name(),
+                            err
+                        );
                     }
                 }
-            },
+            }
             Entry::Vacant(entry) => {
                 entry.insert(InputConfig {
                     state: match device.config_send_events_mode() {
                         x if x.contains(SendEventsMode::ENABLED) => DeviceState::Enabled,
-                        x if x.contains(SendEventsMode::DISABLED_ON_EXTERNAL_MOUSE) => DeviceState::DisabledOnExternalMouse,
+                        x if x.contains(SendEventsMode::DISABLED_ON_EXTERNAL_MOUSE) => {
+                            DeviceState::DisabledOnExternalMouse
+                        }
                         x if x.contains(SendEventsMode::DISABLED) => DeviceState::Disabled,
                         _ => DeviceState::Disabled,
                     },
@@ -459,7 +537,9 @@ impl Config {
                             profile: device.config_accel_profile(),
                             speed: device.config_accel_speed(),
                         })
-                    } else { None },
+                    } else {
+                        None
+                    },
                     calibration: device.config_calibration_matrix(),
                     click_method: device.config_click_method(),
                     disable_while_typing: if device.config_dwt_is_available() {
@@ -482,7 +562,11 @@ impl Config {
                     } else {
                         None
                     },
-                    scroll_config: if device.config_scroll_methods().iter().any(|x| *x != ScrollMethod::NoScroll) {
+                    scroll_config: if device
+                        .config_scroll_methods()
+                        .iter()
+                        .any(|x| *x != ScrollMethod::NoScroll)
+                    {
                         Some(ScrollConfig {
                             method: device.config_scroll_method(),
                             natural_scroll: if device.config_scroll_has_natural_scroll() {
@@ -490,13 +574,17 @@ impl Config {
                             } else {
                                 None
                             },
-                            scroll_button: if device.config_scroll_method() == Some(ScrollMethod::OnButtonDown) {
+                            scroll_button: if device.config_scroll_method()
+                                == Some(ScrollMethod::OnButtonDown)
+                            {
                                 Some(device.config_scroll_button())
                             } else {
                                 None
                             },
                         })
-                    } else { None },
+                    } else {
+                        None
+                    },
                     tap_config: if device.config_tap_finger_count() > 0 {
                         Some(TapConfig {
                             enabled: device.config_tap_enabled(),
@@ -504,9 +592,11 @@ impl Config {
                             drag: device.config_tap_drag_enabled(),
                             drag_lock: device.config_tap_drag_lock_enabled(),
                         })
-                    } else { None },
+                    } else {
+                        None
+                    },
                 });
-            },
+            }
         }
     }
 }
@@ -556,7 +646,7 @@ impl DynamicConfig {
     pub fn outputs_mut<'a>(&'a mut self) -> PersistenceGuard<'a, OutputsConfig> {
         PersistenceGuard(self.outputs.0.clone(), &mut self.outputs.1)
     }
-    
+
     pub fn inputs(&self) -> &InputsConfig {
         &self.inputs.1
     }
