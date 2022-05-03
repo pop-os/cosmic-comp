@@ -202,7 +202,7 @@ impl Shell {
                     if self.spaces.iter().all(|w| w.ext_workspace.is_none()) {
                         for (idx, workspace) in self.spaces.iter_mut().enumerate() {
                             let ext_workspace = group.create_workspace(format!("{}", idx + 1));
-                            ext_workspace.set_coordinates(std::iter::once(idx as u32 + 1));
+                            ext_workspace.set_coordinates(std::iter::once(idx as u32));
                             workspace.ext_workspace = Some(ext_workspace);
                         }
                         self.spaces[_idx]
@@ -212,7 +212,7 @@ impl Shell {
                             .add_state(ext_work::State::Active);
                     } else {
                         let ext_workspace = group.create_workspace(format!("{}", _idx + 1));
-                        ext_workspace.set_coordinates(std::iter::once(_idx as u32 + 1));
+                        ext_workspace.set_coordinates(std::iter::once(_idx as u32));
                         ext_workspace.add_state(ext_work::State::Active);
                         if let Some(old) = self.spaces[_idx].ext_workspace.replace(ext_workspace) {
                             old.remove();
@@ -243,7 +243,7 @@ impl Shell {
                                 .as_mut()
                                 .unwrap()
                                 .create_workspace(format!("{}", idx + 1));
-                            ext_workspace.set_coordinates(std::iter::once(idx as u32 + 1));
+                            ext_workspace.set_coordinates(std::iter::once(idx as u32));
                             if idx == active {
                                 ext_workspace.add_state(ext_work::State::Active);
                             }
@@ -303,7 +303,7 @@ impl Shell {
                                     .as_mut()
                                     .unwrap()
                                     .create_workspace(format!("{}", idx + 1));
-                                ext_workspace.set_coordinates(std::iter::once(idx as u32 + 1));
+                                ext_workspace.set_coordinates(std::iter::once(idx as u32));
                                 workspace.ext_workspace = Some(ext_workspace);
                             }
                         }
@@ -426,7 +426,7 @@ impl Shell {
                             .unwrap_or(true)
                         {
                             let ext_workspace = group.create_workspace(format!("{}", idx + 1));
-                            ext_workspace.set_coordinates(std::iter::once(idx as u32 + 1));
+                            ext_workspace.set_coordinates(std::iter::once(idx as u32));
                             if let Some(old) = self.spaces[idx].ext_workspace.replace(ext_workspace)
                             {
                                 old.remove();
