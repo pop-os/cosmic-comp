@@ -255,12 +255,12 @@ where
     let transform = Transform::from(output.current_transform());
     let mode = output.current_mode().unwrap();
     let scale = output.current_scale().fractional_scale();
-    let output_geo = state.shell.output_geometry(output);
 
     let mut custom_elements = Vec::<CustomElem>::new();
 
     #[cfg(feature = "debug")]
     {
+        let output_geo = state.shell.output_geometry(output);
         let fps_overlay = fps_ui(
             _gpu,
             state,
