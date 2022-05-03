@@ -4,7 +4,7 @@
 use crate::wayland::workspace as ext_work;
 use crate::{
     config::{Config, OutputConfig},
-    input::active_output,
+    input::{active_output, set_active_output},
     state::Common,
 };
 pub use smithay::{
@@ -397,6 +397,7 @@ impl Shell {
                                 SERIAL_COUNTER.next_serial(),
                                 0,
                             );
+                            set_active_output(seat, output);
                             return;
                         }
                     }
