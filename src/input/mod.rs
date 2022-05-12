@@ -527,8 +527,13 @@ impl State {
                         let button = event.button_code();
                         let state = match event.state() {
                             ButtonState::Pressed => {
-                                // change the keyboard focus unless the pointer is grabbed
-                                if !seat.get_pointer().unwrap().is_grabbed() {
+                                // change the keyboard focus unless the pointer or keyboard is grabbed
+                                // We test for any matching surface type here but always use the root
+                                // (in case of a window the toplevel) surface for the focus.
+                                // see: https://gitlab.freedesktop.org/wayland/wayland/-/issues/294
+                                if !seat.get_pointer().unwrap().is_grabbed()
+                                    && !seat.get_keyboard().map(|k| k.is_grabbed()).unwrap_or(true)
+                                {
                                     let output = active_output(seat, &self.common);
                                     let pos = seat.get_pointer().unwrap().current_location();
                                     let output_geo = self.common.shell.output_geometry(&output);
@@ -551,17 +556,17 @@ impl State {
                                                     .surface_under(
                                                         pos - output_geo.loc.to_f64()
                                                             - layer_loc.to_f64(),
-                                                        WindowSurfaceType::TOPLEVEL,
+                                                        WindowSurfaceType::ALL,
                                                     )
-                                                    .map(|(s, _)| s);
+                                                    .and_then(|(_, _)| layer.get_surface().cloned());
                                             }
                                         } else {
                                             under = window
                                                 .surface_under(
                                                     pos - output_geo.loc.to_f64(),
-                                                    WindowSurfaceType::TOPLEVEL,
+                                                    WindowSurfaceType::ALL,
                                                 )
-                                                .map(|(s, _)| s);
+                                                .and_then(|(_, _)| window.toplevel().get_surface().cloned());
                                         }
                                     } else {
                                         if let Some(layer) = layers
@@ -577,14 +582,14 @@ impl State {
                                                     .surface_under(
                                                         pos - output_geo.loc.to_f64()
                                                             - layer_loc.to_f64(),
-                                                        WindowSurfaceType::TOPLEVEL,
+                                                        WindowSurfaceType::ALL,
                                                     )
-                                                    .map(|(s, _)| s);
+                                                    .and_then(|(_, _)| layer.get_surface().cloned());
                                             }
                                         } else if let Some((_, surface, _)) =
                                             workspace.space.surface_under(
                                                 relative_pos,
-                                                WindowSurfaceType::TOPLEVEL,
+                                                WindowSurfaceType::ALL,
                                             )
                                         {
                                             under = Some(surface);
@@ -600,9 +605,9 @@ impl State {
                                                     .surface_under(
                                                         pos - output_geo.loc.to_f64()
                                                             - layer_loc.to_f64(),
-                                                        WindowSurfaceType::TOPLEVEL,
+                                                        WindowSurfaceType::ALL,
                                                     )
-                                                    .map(|(s, _)| s);
+                                                    .and_then(|(_, _)| layer.get_surface().cloned());
                                             }
                                         };
                                     }
