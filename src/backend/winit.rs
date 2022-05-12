@@ -210,6 +210,7 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
         std::iter::once(&output),
         &mut state.backend,
         &mut state.common.shell,
+        &state.common.event_loop_handle,
     );
     state.common.shell.refresh_outputs();
     state.common.config.write_outputs(std::iter::once(&output));

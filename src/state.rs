@@ -118,10 +118,11 @@ impl BackendData {
         output: &Output,
         test_only: bool,
         shell: &mut Shell,
+        loop_handle: &LoopHandle<'_, State>,
     ) -> Result<(), anyhow::Error> {
         let result = match self {
             BackendData::Kms(ref mut state) => {
-                state.apply_config_for_output(output, shell, test_only)
+                state.apply_config_for_output(output, shell, test_only, loop_handle)
             }
             BackendData::Winit(ref mut state) => state.apply_config_for_output(output, test_only),
             BackendData::X11(ref mut state) => state.apply_config_for_output(output, test_only),
@@ -155,13 +156,17 @@ impl BackendData {
         result
     }
 
-    pub fn schedule_render(&mut self, output: &Output) {
+    pub fn schedule_render(&mut self, loop_handle: &LoopHandle<'_, State>, output: &Output) {
         match self {
             BackendData::Winit(_) => {} // We cannot do this on the winit backend.
             // Winit has a very strict render-loop and skipping frames breaks atleast the wayland winit-backend.
             // Swapping with damage (which should be empty on these frames) is likely good enough anyway.
             BackendData::X11(ref mut state) => state.schedule_render(output),
-            BackendData::Kms(ref mut state) => state.schedule_render(output),
+            BackendData::Kms(ref mut state) => {
+                if let Err(err) = state.schedule_render(loop_handle, output) {
+                    slog_scope::crit!("Failed to schedule event, are we shutting down? {:?}", err);
+                }
+            }
             _ => unreachable!("No backend was initialized"),
         }
     }
@@ -264,6 +269,7 @@ impl State {
                         output,
                         test_only,
                         &mut state.common.shell,
+                        &state.common.event_loop_handle,
                     ) {
                         slog_scope::warn!(
                             "Failed to apply config to {}: {}. Resetting",
@@ -284,6 +290,7 @@ impl State {
                                     output,
                                     false,
                                     &mut state.common.shell,
+                                    &state.common.event_loop_handle,
                                 ) {
                                     slog_scope::error!(
                                         "Failed to reset output config for {}: {}",

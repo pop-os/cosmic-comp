@@ -312,7 +312,9 @@ fn commit(surface: &WlSurface, state: &mut State) {
     // TODO figure out which output the surface is on.
     for output in state.common.shell.outputs() {
         //.cloned().collect::<Vec<_>>().into_iter() {
-        state.backend.schedule_render(output);
+        state
+            .backend
+            .schedule_render(&state.common.event_loop_handle, output);
         // let space = state.common.spaces.active_space(output);
         // get output for surface
     }

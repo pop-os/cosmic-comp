@@ -2,14 +2,17 @@
 
 use crate::{
     shell::{layout::FocusDirection, Shell},
-    state::BackendData,
+    state::{BackendData, State},
 };
 use serde::{Deserialize, Serialize};
 pub use smithay::{
     backend::input::KeyState,
-    reexports::input::{
-        AccelProfile, ClickMethod, Device as InputDevice, ScrollMethod, SendEventsMode,
-        TapButtonMap,
+    reexports::{
+        calloop::LoopHandle,
+        input::{
+            AccelProfile, ClickMethod, Device as InputDevice, ScrollMethod, SendEventsMode,
+            TapButtonMap,
+        },
     },
     utils::{Logical, Physical, Point, Size, Transform},
     wayland::{
@@ -270,6 +273,7 @@ impl Config {
         outputs: impl Iterator<Item = impl std::borrow::Borrow<Output>>,
         backend: &mut BackendData,
         shell: &mut Shell,
+        loop_handle: &LoopHandle<'_, State>,
     ) {
         let outputs = outputs.map(|x| x.borrow().clone()).collect::<Vec<_>>();
         let mut infos = outputs
@@ -300,7 +304,9 @@ impl Config {
                     .get::<RefCell<OutputConfig>>()
                     .unwrap()
                     .borrow_mut() = output_config;
-                if let Err(err) = backend.apply_config_for_output(&output, false, shell) {
+                if let Err(err) =
+                    backend.apply_config_for_output(&output, false, shell, loop_handle)
+                {
                     slog_scope::warn!(
                         "Failed to set new config for output {}: {}",
                         output.name(),
@@ -322,7 +328,9 @@ impl Config {
                         .get::<RefCell<OutputConfig>>()
                         .unwrap()
                         .borrow_mut() = output_config;
-                    if let Err(err) = backend.apply_config_for_output(&output, false, shell) {
+                    if let Err(err) =
+                        backend.apply_config_for_output(&output, false, shell, loop_handle)
+                    {
                         slog_scope::error!(
                             "Failed to reset config for output {}: {}",
                             output.name(),

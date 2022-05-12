@@ -27,7 +27,8 @@ fn main() -> Result<()> {
     slog_scope::info!("Cosmic starting up!");
 
     // init event loop
-    let mut event_loop = EventLoop::try_new().with_context(|| "Failed to initialize event loop")?;
+    let mut event_loop =
+        EventLoop::try_new_high_precision().with_context(|| "Failed to initialize event loop")?;
     // init wayland
     let (display, socket) = init_wayland_display(&mut event_loop)?;
     // init state
@@ -56,7 +57,9 @@ fn main() -> Result<()> {
         // do we need to trigger another render
         if state.common.dirty_flag.swap(false, Ordering::SeqCst) {
             for output in state.common.shell.outputs() {
-                state.backend.schedule_render(output)
+                state
+                    .backend
+                    .schedule_render(&state.common.event_loop_handle, output)
             }
         }
 
@@ -83,7 +86,7 @@ fn init_wayland_display(event_loop: &mut EventLoop<state::State>) -> Result<(Dis
     event_loop
         .handle()
         .insert_source(
-            Generic::from_fd(display.get_poll_fd(), Interest::READ, Mode::Level),
+            Generic::new(display.get_poll_fd(), Interest::READ, Mode::Level),
             move |_, _, state: &mut state::State| {
                 let display = state.common.display.clone();
                 let mut display = display.borrow_mut();
