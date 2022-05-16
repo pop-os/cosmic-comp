@@ -772,7 +772,7 @@ impl Shell {
         self.update_active(seats)
     }
 
-    fn update_active<'a>(&self, seats: impl Iterator<Item = &'a Seat>) {
+    fn update_active<'a>(&mut self, seats: impl Iterator<Item = &'a Seat>) {
         // update activate status
         let focused_windows = seats
             .flat_map(|seat| {
@@ -782,8 +782,22 @@ impl Shell {
             })
             .collect::<Vec<_>>();
 
-        for output in self.outputs() {
-            let workspace = self.active_space(output);
+        for output in self.outputs.iter() {
+            let workspace = match &self.mode {
+                Mode::OutputBound => {
+                    let active = output
+                        .user_data()
+                        .get::<ActiveWorkspace>()
+                        .unwrap()
+                        .get()
+                        .unwrap();
+                    &mut self.spaces[active]
+                }
+                Mode::Global { active } => &mut self.spaces[*active],
+            };
+            for focused in focused_windows.iter() {
+                workspace.space.raise_window(focused, true);
+            }
             for window in workspace.space.windows() {
                 window.set_activated(focused_windows.contains(window));
                 window.configure();
