@@ -532,7 +532,7 @@ impl State {
                                 // (in case of a window the toplevel) surface for the focus.
                                 // see: https://gitlab.freedesktop.org/wayland/wayland/-/issues/294
                                 if !seat.get_pointer().unwrap().is_grabbed()
-                                    && !seat.get_keyboard().map(|k| k.is_grabbed()).unwrap_or(true)
+                                    && !seat.get_keyboard().map(|k| k.is_grabbed()).unwrap_or(false)
                                 {
                                     let output = active_output(seat, &self.common);
                                     let pos = seat.get_pointer().unwrap().current_location();
@@ -586,13 +586,13 @@ impl State {
                                                     )
                                                     .and_then(|(_, _)| layer.get_surface().cloned());
                                             }
-                                        } else if let Some((_, surface, _)) =
+                                        } else if let Some((window, _, _)) =
                                             workspace.space.surface_under(
                                                 relative_pos,
                                                 WindowSurfaceType::ALL,
                                             )
                                         {
-                                            under = Some(surface);
+                                            under = window.toplevel().get_surface().cloned();
                                         } else if let Some(layer) =
                                             layers.layer_under(WlrLayer::Bottom, pos).or_else(
                                                 || layers.layer_under(WlrLayer::Background, pos),
