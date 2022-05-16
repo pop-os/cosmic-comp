@@ -8,7 +8,7 @@ use crate::{
     state::Common,
 };
 pub use smithay::{
-    desktop::{layer_map_for_output, PopupGrab, PopupManager, PopupUngrabStrategy, Space, Window},
+    desktop::{layer_map_for_output, PopupGrab, PopupManager, PopupUngrabStrategy, Space, Window, WindowSurfaceType},
     reexports::wayland_server::{protocol::wl_surface::WlSurface, Display},
     utils::{Logical, Point, Rectangle, Size},
     wayland::{
@@ -604,14 +604,14 @@ impl Shell {
                 .pending_windows
                 .iter()
                 .any(|(w, _)| w.toplevel().get_surface() == Some(surface))
-                || workspace.space.window_for_surface(surface).is_some()
+                || workspace.space.window_for_surface(surface, WindowSurfaceType::ALL).is_some()
         })
     }
 
     pub fn space_for_surface_mut(&mut self, surface: &WlSurface) -> Option<&mut Workspace> {
         self.spaces
             .iter_mut()
-            .find(|workspace| workspace.space.window_for_surface(surface).is_some())
+            .find(|workspace| workspace.space.window_for_surface(surface, WindowSurfaceType::ALL).is_some())
     }
 
     pub fn refresh(&mut self) {
@@ -731,7 +731,7 @@ impl Shell {
         // update FocusStack and notify layouts about new focus (if any window)
         if let Some(surface) = surface {
             if let Some(workspace) = self.space_for_surface_mut(surface) {
-                if let Some(window) = workspace.space.window_for_surface(surface) {
+                if let Some(window) = workspace.space.window_for_surface(surface, WindowSurfaceType::ALL) {
                     let mut focus_stack = workspace.focus_stack_mut(active_seat);
                     if Some(window) != focus_stack.last().as_ref() {
                         slog_scope::debug!("Focusing window: {:?}", window);
@@ -838,7 +838,7 @@ impl Common {
                     }
 
                     let workspace = self.shell.active_space(&output);
-                    if let Some(window) = workspace.space.window_for_surface(&surface) {
+                    if let Some(window) = workspace.space.window_for_surface(&surface, WindowSurfaceType::ALL) {
                         let focus_stack = workspace.focus_stack(&seat);
                         if focus_stack.last().map(|w| &w != window).unwrap_or(true) {
                             fixup = true;

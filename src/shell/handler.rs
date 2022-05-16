@@ -5,7 +5,7 @@ use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
     desktop::{
         layer_map_for_output, Kind, LayerSurface, PopupGrab, PopupKeyboardGrab, PopupKind,
-        PopupPointerGrab, PopupUngrabStrategy, Window,
+        PopupPointerGrab, PopupUngrabStrategy, Window, WindowSurfaceType,
     },
     reexports::{
         wayland_protocols::xdg_shell::server::xdg_toplevel,
@@ -101,7 +101,7 @@ pub fn init_shell(config: &Config, display: &mut Display) -> super::Shell {
                             .unwrap();
                         let window = workspace
                             .space
-                            .window_for_surface(surface.get_surface().unwrap())
+                            .window_for_surface(surface.get_surface().unwrap(), WindowSurfaceType::TOPLEVEL)
                             .unwrap()
                             .clone();
 
@@ -125,7 +125,7 @@ pub fn init_shell(config: &Config, display: &mut Display) -> super::Shell {
                             .unwrap();
                         let window = workspace
                             .space
-                            .window_for_surface(surface.get_surface().unwrap())
+                            .window_for_surface(surface.get_surface().unwrap(), WindowSurfaceType::TOPLEVEL)
                             .unwrap()
                             .clone();
 
@@ -140,7 +140,7 @@ pub fn init_shell(config: &Config, display: &mut Display) -> super::Shell {
                     if let Some(window) = state
                         .shell
                         .space_for_surface(&surface)
-                        .and_then(|workspace| workspace.space.window_for_surface(&surface))
+                        .and_then(|workspace| workspace.space.window_for_surface(&surface, WindowSurfaceType::TOPLEVEL))
                     {
                         crate::shell::layout::floating::ResizeSurfaceGrab::ack_configure(
                             window, configure,
@@ -154,7 +154,7 @@ pub fn init_shell(config: &Config, display: &mut Display) -> super::Shell {
 
                         if let Some(workspace) = state.shell.space_for_surface_mut(surface) {
                             let window =
-                                workspace.space.window_for_surface(surface).unwrap().clone();
+                                workspace.space.window_for_surface(surface, WindowSurfaceType::TOPLEVEL).unwrap().clone();
                             workspace.maximize_request(&window, &output)
                         }
                     }
@@ -222,7 +222,7 @@ pub fn init_shell(config: &Config, display: &mut Display) -> super::Shell {
                     if let Some(surface) = surface.get_surface() {
                         if let Some(workspace) = state.shell.space_for_surface_mut(surface) {
                             let window =
-                                workspace.space.window_for_surface(surface).unwrap().clone();
+                                workspace.space.window_for_surface(surface, WindowSurfaceType::TOPLEVEL).unwrap().clone();
                             workspace.fullscreen_request(&window, &output)
                         }
                     }
@@ -231,7 +231,7 @@ pub fn init_shell(config: &Config, display: &mut Display) -> super::Shell {
                     if let Some(surface) = surface.get_surface() {
                         if let Some(workspace) = state.shell.space_for_surface_mut(surface) {
                             let window =
-                                workspace.space.window_for_surface(surface).unwrap().clone();
+                                workspace.space.window_for_surface(surface, WindowSurfaceType::TOPLEVEL).unwrap().clone();
                             workspace.unfullscreen_request(&window)
                         }
                     }
@@ -358,7 +358,7 @@ fn commit(surface: &WlSurface, state: &mut State) {
             .and_then(|workspace| {
                 workspace
                     .space
-                    .window_for_surface(surface)
+                    .window_for_surface(surface, WindowSurfaceType::TOPLEVEL)
                     .cloned()
                     .map(|window| (&mut workspace.space, window))
             })
@@ -398,10 +398,10 @@ fn commit(surface: &WlSurface, state: &mut State) {
 
     if let Some(output) = state.shell.outputs().find(|o| {
         let map = layer_map_for_output(o);
-        map.layer_for_surface(surface).is_some()
+        map.layer_for_surface(surface, WindowSurfaceType::TOPLEVEL).is_some()
     }) {
         let mut map = layer_map_for_output(output);
-        let layer = map.layer_for_surface(surface).unwrap();
+        let layer = map.layer_for_surface(surface, WindowSurfaceType::TOPLEVEL).unwrap();
 
         // send the initial configure if relevant
         let initial_configure_sent = with_states(surface, |states| {

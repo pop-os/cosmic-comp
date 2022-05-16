@@ -785,7 +785,7 @@ impl State {
 pub fn handle_window_movement(surface: Option<&WlSurface>, space: &mut Space) {
     // TODO: this is why to hardcoded and hacky, but wayland-rs 0.30 will make this unnecessary anyway.
     if let Some(surface) = surface {
-        if let Some(window) = space.window_for_surface(&surface).cloned() {
+        if let Some(window) = space.window_for_surface(&surface, WindowSurfaceType::TOPLEVEL).cloned() {
             if let Some(new_position) =
                 crate::shell::layout::floating::MoveSurfaceGrab::apply_move_state(&window)
             {
