@@ -598,6 +598,15 @@ impl Shell {
         }
     }
 
+    pub fn outputs_for_surface(&self, surface: &WlSurface) -> impl Iterator<Item=Output> {
+        self.space_for_surface(surface)
+            .and_then(|w| if let Some(window) = w.space.window_for_surface(surface, WindowSurfaceType::ALL) {
+                Some(w.space.outputs_for_window(&window).into_iter())
+            } else { None })
+            .into_iter()
+            .flatten()
+    }
+
     pub fn space_for_surface(&self, surface: &WlSurface) -> Option<&Workspace> {
         self.spaces.iter().find(|workspace| {
             workspace

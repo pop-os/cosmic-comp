@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{config::Config, input::active_output, state::State, utils::SurfaceDropNotifier};
+use crate::{
+    config::Config,
+    input::active_output,
+    state::{BackendData, State},
+    utils::SurfaceDropNotifier,
+};
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
     desktop::{
@@ -309,14 +314,18 @@ fn check_grab_preconditions(
 }
 
 fn commit(surface: &WlSurface, state: &mut State) {
-    // TODO figure out which output the surface is on.
-    for output in state.common.shell.outputs() {
-        //.cloned().collect::<Vec<_>>().into_iter() {
+    let mut import_nodes = std::collections::HashSet::new();
+    for output in state.common.shell.outputs_for_surface(&surface) {
+        if let BackendData::Kms(ref mut kms_state) = &mut state.backend {
+            if let Some(target) = kms_state.target_node_for_output(&output) {
+                if import_nodes.insert(target) {
+                    kms_state.try_early_import(surface, &output, target, &state.common.shell);
+                }
+            }
+        }
         state
             .backend
-            .schedule_render(&state.common.event_loop_handle, output);
-        // let space = state.common.spaces.active_space(output);
-        // get output for surface
+            .schedule_render(&state.common.event_loop_handle, &output);
     }
 
     let state = &mut state.common;

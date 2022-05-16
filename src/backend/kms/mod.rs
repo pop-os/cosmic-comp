@@ -33,7 +33,7 @@ use smithay::{
         drm::control::{connector, crtc, Device as ControlDevice, ModeTypeFlags},
         input::Libinput,
         nix::{fcntl::OFlag, sys::stat::dev_t},
-        wayland_server::protocol::wl_output,
+        wayland_server::protocol::{wl_output, wl_surface::WlSurface},
     },
     utils::signaling::{Linkable, SignalToken, Signaler},
     wayland::output::{Mode as OutputMode, Output, PhysicalProperties},
@@ -658,6 +658,40 @@ impl Device {
 
 const MAX_CPU_COPIES: usize = 3;
 
+fn render_node_for_output(output: &Output, target_node: DrmNode, shell: &Shell) -> DrmNode {
+    let workspace = shell.active_space(output);
+        let nodes = workspace
+            .get_fullscreen(output)
+            .map(|w| vec![w])
+            .unwrap_or_else(|| workspace.space.windows().collect::<Vec<_>>())
+            .into_iter()
+            .flat_map(|w| {
+                w.toplevel()
+                    .get_surface()?
+                    .as_ref()
+                    .client()?
+                    .data_map()
+                    .get::<DrmNode>()
+                    .cloned()
+            })
+            .collect::<Vec<_>>();
+        if nodes.contains(&target_node) || nodes.len() < MAX_CPU_COPIES {
+            target_node
+        } else {
+            nodes
+                .iter()
+                .fold(HashMap::new(), |mut count_map, node| {
+                    let count = count_map.entry(node).or_insert(0);
+                    *count += 1;
+                    count_map
+                })
+                .into_iter()
+                .reduce(|a, b| if a.1 > b.1 { a } else { b })
+                .map(|(node, _)| *node)
+                .unwrap_or(target_node)
+        }
+}
+
 impl Surface {
     pub fn render_output(
         &mut self,
@@ -673,39 +707,8 @@ impl Surface {
             self.surface.as_mut().unwrap().reset_buffers();
         }
 
-        let workspace = state.shell.active_space(&self.output);
-        let nodes = workspace
-            .get_fullscreen(&self.output)
-            .map(|w| vec![w])
-            .unwrap_or_else(|| workspace.space.windows().collect::<Vec<_>>())
-            .into_iter()
-            .flat_map(|w| {
-                w.toplevel()
-                    .get_surface()?
-                    .as_ref()
-                    .client()?
-                    .data_map()
-                    .get::<DrmNode>()
-                    .cloned()
-            })
-            .collect::<Vec<_>>();
-        let render_node = if nodes.contains(&target_node) || nodes.len() < MAX_CPU_COPIES {
-            &target_node
-        } else {
-            nodes
-                .iter()
-                .fold(HashMap::new(), |mut count_map, node| {
-                    let count = count_map.entry(node).or_insert(0);
-                    *count += 1;
-                    count_map
-                })
-                .into_iter()
-                .reduce(|a, b| if a.1 > b.1 { a } else { b })
-                .map(|(node, _)| node)
-                .unwrap_or(&target_node)
-        };
-
-        let mut renderer = api.renderer(render_node, &target_node).unwrap();
+        let render_node = render_node_for_output(&self.output, *target_node, &state.shell);
+        let mut renderer = api.renderer(&render_node, &target_node).unwrap();
 
         let surface = self.surface.as_mut().unwrap();
         let (buffer, age) = surface
@@ -840,6 +843,20 @@ impl KmsState {
             }
         }
         Ok(())
+    }
+    pub fn target_node_for_output(&self, output: &Output) -> Option<DrmNode> {
+        self.devices.iter().find(|(_, dev)| dev.surfaces.values().any(|s| s.output == *output)).map(|(target, _)| target).copied()
+    }
+
+    pub fn try_early_import(&mut self, surface: &WlSurface, output: &Output, target: DrmNode, shell: &Shell) {
+        let render = render_node_for_output(&output, target, &shell);
+        if let Err(err) = self.api.early_import(
+            surface.as_ref().client().and_then(|c| c.data_map().get::<DrmNode>().cloned()),
+            render,
+            surface,
+        ) {
+            slog_scope::debug!("Early import failed: {}", err);
+        }
     }
 
     pub fn schedule_render(
