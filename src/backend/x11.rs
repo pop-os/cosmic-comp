@@ -47,6 +47,7 @@ impl X11State {
     pub fn add_window(&mut self, handle: LoopHandle<'_, State>) -> Result<Output> {
         let window = WindowBuilder::new()
             .title("COSMIC")
+            .set_grab_keyboard(true)
             .build(&self.handle)
             .with_context(|| "Failed to create window")?;
         let fourcc = window.format();
@@ -354,6 +355,12 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
                     }
                 }
             }
+            X11Event::EnterEvent { window_id } => {
+                for seat in state.common.seats.clone().iter() {
+                    seat.get_keyboard().unwrap().reset_modifiers();
+                }
+            }
+            X11Event::LeaveEvent { window_id } => {}
             X11Event::Input(event) => state.process_x11_event(event),
         })
         .map_err(|_| anyhow::anyhow!("Failed to insert X11 Backend into event loop"))?;
