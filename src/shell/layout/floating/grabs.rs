@@ -1,25 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use crate::utils::prelude::*;
 use smithay::{
     desktop::{Kind, Window},
     reexports::{
-        wayland_protocols::xdg::shell::server::xdg_toplevel,
-        wayland_server::DisplayHandle,
+        wayland_protocols::xdg::shell::server::xdg_toplevel, wayland_server::DisplayHandle,
     },
     utils::{IsAlive, Logical, Point, Size},
     wayland::{
         compositor::with_states,
-        seat::{AxisFrame, PointerGrab, PointerGrabStartData, PointerInnerHandle, MotionEvent, ButtonEvent},
+        seat::{
+            AxisFrame, ButtonEvent, MotionEvent, PointerGrab, PointerGrabStartData,
+            PointerInnerHandle,
+        },
         shell::xdg::{SurfaceCachedState, ToplevelConfigure, XdgToplevelSurfaceRoleAttributes},
         Serial,
     },
 };
-use crate::utils::prelude::*;
-use std::{
-    cell::RefCell,
-    convert::TryFrom,
-    sync::Mutex,
-};
+use std::{cell::RefCell, convert::TryFrom, sync::Mutex};
 
 pub struct MoveSurfaceGrab {
     start_data: PointerGrabStartData,
@@ -32,15 +30,19 @@ impl PointerGrab<State> for MoveSurfaceGrab {
     fn motion(
         &mut self,
         data: &mut State,
-        _dh: &DisplayHandle, 
-        handle: &mut PointerInnerHandle<'_, State>, 
-        event: &MotionEvent
+        _dh: &DisplayHandle,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &MotionEvent,
     ) {
         // While the grab is active, no client has pointer focus
         handle.motion(event.location, None, event.serial, event.time);
         self.delta = event.location - self.start_data.location;
-        
-        if let Some(workspace) = data.common.shell.space_for_surface_mut(self.window.toplevel().wl_surface()) {
+
+        if let Some(workspace) = data
+            .common
+            .shell
+            .space_for_surface_mut(self.window.toplevel().wl_surface())
+        {
             let new_location = (self.initial_window_location.to_f64() + self.delta).to_i32_round();
             workspace.space.map_window(&self.window, new_location, true);
         }
@@ -197,11 +199,10 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
             new_window_height = (self.initial_window_size.h as f64 + dy) as i32;
         }
 
-        let (min_size, max_size) =
-            with_states(self.window.toplevel().wl_surface(), |states| {
-                let data = states.cached_state.current::<SurfaceCachedState>();
-                (data.min_size, data.max_size)
-            });
+        let (min_size, max_size) = with_states(self.window.toplevel().wl_surface(), |states| {
+            let data = states.cached_state.current::<SurfaceCachedState>();
+            (data.min_size, data.max_size)
+        });
 
         let min_width = min_size.w.max(1);
         let min_height = min_size.h.max(1);

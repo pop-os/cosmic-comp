@@ -5,30 +5,24 @@ use std::sync::Mutex;
 use smithay::{
     desktop::Window,
     reexports::{
-        wayland_server::{
-            Client, DataInit,
-            DisplayHandle, Resource, New,
-            GlobalDispatch, Dispatch,
-            DelegateGlobalDispatch, DelegateDispatch,
-            backend::{ClientId, GlobalId, ObjectId},
-        },
         wayland_protocols::xdg::shell::server::xdg_toplevel,
-    },
-    wayland::{
-        compositor::with_states,
-        output::Output,
-        shell::xdg::XdgToplevelSurfaceRoleAttributes,
+        wayland_server::{
+            backend::{ClientId, GlobalId, ObjectId},
+            Client, DataInit, DelegateDispatch, DelegateGlobalDispatch, Dispatch, DisplayHandle,
+            GlobalDispatch, New, Resource,
+        },
     },
     utils::IsAlive,
+    wayland::{
+        compositor::with_states, output::Output, shell::xdg::XdgToplevelSurfaceRoleAttributes,
+    },
 };
 
-use super::workspace::{WorkspaceHandler, WorkspaceHandle, WorkspaceState};
+use super::workspace::{WorkspaceHandle, WorkspaceHandler, WorkspaceState};
 
-use cosmic_protocols::{
-    toplevel_info::v1::server::{
-        zcosmic_toplevel_info_v1::{self, ZcosmicToplevelInfoV1},
-        zcosmic_toplevel_handle_v1::{self, ZcosmicToplevelHandleV1, State as States},
-    },
+use cosmic_protocols::toplevel_info::v1::server::{
+    zcosmic_toplevel_handle_v1::{self, State as States, ZcosmicToplevelHandleV1},
+    zcosmic_toplevel_info_v1::{self, ZcosmicToplevelInfoV1},
 };
 
 pub struct ToplevelInfoState<D> {
@@ -67,13 +61,14 @@ pub struct ToplevelHandleStateInner {
 }
 pub type ToplevelHandleState = Mutex<ToplevelHandleStateInner>;
 
-impl<D> DelegateGlobalDispatch<ZcosmicToplevelInfoV1, ToplevelInfoGlobalData, D> for ToplevelInfoState<D>
+impl<D> DelegateGlobalDispatch<ZcosmicToplevelInfoV1, ToplevelInfoGlobalData, D>
+    for ToplevelInfoState<D>
 where
     D: GlobalDispatch<ZcosmicToplevelInfoV1, ToplevelInfoGlobalData>
         + Dispatch<ZcosmicToplevelInfoV1, ()>
         + Dispatch<ZcosmicToplevelHandleV1, ToplevelHandleState>
         + ToplevelInfoHandler
-        + 'static
+        + 'static,
 {
     fn bind(
         state: &mut D,
@@ -100,7 +95,7 @@ where
         + Dispatch<ZcosmicToplevelInfoV1, ()>
         + Dispatch<ZcosmicToplevelHandleV1, ToplevelHandleState>
         + ToplevelInfoHandler
-        + 'static
+        + 'static,
 {
     fn request(
         state: &mut D,
@@ -113,19 +108,20 @@ where
     ) {
         match request {
             zcosmic_toplevel_info_v1::Request::Stop => {
-                state.toplevel_info_state_mut().instances.retain(|i| i != obj);
-            },
-            _ => {},
+                state
+                    .toplevel_info_state_mut()
+                    .instances
+                    .retain(|i| i != obj);
+            }
+            _ => {}
         }
     }
 
-    fn destroyed(
-        state: &mut D, 
-        _client: ClientId, 
-        resource: ObjectId, 
-        _data: &(),
-    ) {
-        state.toplevel_info_state_mut().instances.retain(|i| i.id() != resource);
+    fn destroyed(state: &mut D, _client: ClientId, resource: ObjectId, _data: &()) {
+        state
+            .toplevel_info_state_mut()
+            .instances
+            .retain(|i| i.id() != resource);
     }
 }
 
@@ -135,7 +131,7 @@ where
         + Dispatch<ZcosmicToplevelInfoV1, ()>
         + Dispatch<ZcosmicToplevelHandleV1, ToplevelHandleState>
         + ToplevelInfoHandler
-        + 'static
+        + 'static,
 {
     fn request(
         _state: &mut D,
@@ -147,20 +143,24 @@ where
         _data_init: &mut DataInit<'_, D>,
     ) {
         match request {
-            zcosmic_toplevel_handle_v1::Request::Destroy => {},
-            _ => {},
+            zcosmic_toplevel_handle_v1::Request::Destroy => {}
+            _ => {}
         }
     }
 
     fn destroyed(
-        state: &mut D, 
-        _client: ClientId, 
-        resource: ObjectId, 
+        state: &mut D,
+        _client: ClientId,
+        resource: ObjectId,
         _data: &ToplevelHandleState,
     ) {
         for toplevel in &state.toplevel_info_state_mut().toplevels {
             if let Some(state) = toplevel.user_data().get::<ToplevelState>() {
-                state.lock().unwrap().instances.retain(|i| i.id() != resource);
+                state
+                    .lock()
+                    .unwrap()
+                    .instances
+                    .retain(|i| i.id() != resource);
             }
         }
     }
@@ -174,16 +174,16 @@ where
         + ToplevelInfoHandler
         + 'static,
 {
-    pub fn new<F>(
-        dh: &DisplayHandle,
-        client_filter: F,
-    ) -> ToplevelInfoState<D>
+    pub fn new<F>(dh: &DisplayHandle, client_filter: F) -> ToplevelInfoState<D>
     where
-       F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static
+        F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
-        let global = dh.create_global::<D, ZcosmicToplevelInfoV1, _>(1, ToplevelInfoGlobalData {
-            filter: Box::new(client_filter),
-        });
+        let global = dh.create_global::<D, ZcosmicToplevelInfoV1, _>(
+            1,
+            ToplevelInfoGlobalData {
+                filter: Box::new(client_filter),
+            },
+        );
         ToplevelInfoState {
             dh: dh.clone(),
             toplevels: Vec::new(),
@@ -194,7 +194,9 @@ where
     }
 
     pub fn new_toplevel(&mut self, toplevel: &Window) {
-        toplevel.user_data().insert_if_missing(ToplevelState::default);
+        toplevel
+            .user_data()
+            .insert_if_missing(ToplevelState::default);
         for instance in &self.instances {
             send_toplevel_to_client::<D>(&self.dh, None, instance, toplevel);
         }
@@ -233,10 +235,19 @@ where
                 }
                 true
             } else {
-                let state = window.user_data().get::<ToplevelState>().unwrap().lock().unwrap();
+                let state = window
+                    .user_data()
+                    .get::<ToplevelState>()
+                    .unwrap()
+                    .lock()
+                    .unwrap();
                 for handle in &state.instances {
                     // don't send events to stopped instances
-                    if self.instances.iter().any(|i| i.id().same_client_as(&handle.id())) {
+                    if self
+                        .instances
+                        .iter()
+                        .any(|i| i.id().same_client_as(&handle.id()))
+                    {
                         handle.closed();
                     }
                 }
@@ -250,20 +261,39 @@ where
     }
 }
 
-fn send_toplevel_to_client<D>(dh: &DisplayHandle, workspace_state: Option<&WorkspaceState<D>>, info: &ZcosmicToplevelInfoV1, window: &Window)
-where
+fn send_toplevel_to_client<D>(
+    dh: &DisplayHandle,
+    workspace_state: Option<&WorkspaceState<D>>,
+    info: &ZcosmicToplevelInfoV1,
+    window: &Window,
+) where
     D: GlobalDispatch<ZcosmicToplevelInfoV1, ToplevelInfoGlobalData>
         + Dispatch<ZcosmicToplevelInfoV1, ()>
         + Dispatch<ZcosmicToplevelHandleV1, ToplevelHandleState>
         + ToplevelInfoHandler
         + 'static,
 {
-    let mut state = window.user_data().get::<ToplevelState>().unwrap().lock().unwrap();
-    let instance = match state.instances.iter().find(|i| i.id().same_client_as(&info.id())) {
+    let mut state = window
+        .user_data()
+        .get::<ToplevelState>()
+        .unwrap()
+        .lock()
+        .unwrap();
+    let instance = match state
+        .instances
+        .iter()
+        .find(|i| i.id().same_client_as(&info.id()))
+    {
         Some(i) => i,
         None => {
             if let Ok(client) = dh.get_client(info.id()) {
-                if let Ok(toplevel_handle) = client.create_resource::<ZcosmicToplevelHandleV1, _, D>(dh, info.version(), ToplevelHandleState::default()) {
+                if let Ok(toplevel_handle) = client
+                    .create_resource::<ZcosmicToplevelHandleV1, _, D>(
+                        dh,
+                        info.version(),
+                        ToplevelHandleState::default(),
+                    )
+                {
                     state.instances.push(toplevel_handle);
                     state.instances.last().unwrap()
                 } else {
@@ -275,7 +305,11 @@ where
         }
     };
 
-    let mut handle_state = instance.data::<ToplevelHandleState>().unwrap().lock().unwrap();
+    let mut handle_state = instance
+        .data::<ToplevelHandleState>()
+        .unwrap()
+        .lock()
+        .unwrap();
     let mut changed = false;
     with_states(window.toplevel().wl_surface(), |states| {
         let attributes = states
@@ -284,7 +318,7 @@ where
             .unwrap()
             .lock()
             .unwrap();
-        
+
         if handle_state.title != attributes.title.as_deref().unwrap_or(&"") {
             handle_state.title = attributes.title.clone().unwrap_or_else(String::new);
             instance.title(handle_state.title.clone());
@@ -296,21 +330,50 @@ where
             changed = true;
         }
 
-        if (handle_state.states.contains(&States::Maximized) != attributes.current.states.contains(xdg_toplevel::State::Maximized))
-        || (handle_state.states.contains(&States::Fullscreen) != attributes.current.states.contains(xdg_toplevel::State::Fullscreen))
-        || (handle_state.states.contains(&States::Activated) != attributes.current.states.contains(xdg_toplevel::State::Activated))
-        || (handle_state.states.contains(&States::Minimized) != state.minimized) {    
+        if (handle_state.states.contains(&States::Maximized)
+            != attributes
+                .current
+                .states
+                .contains(xdg_toplevel::State::Maximized))
+            || (handle_state.states.contains(&States::Fullscreen)
+                != attributes
+                    .current
+                    .states
+                    .contains(xdg_toplevel::State::Fullscreen))
+            || (handle_state.states.contains(&States::Activated)
+                != attributes
+                    .current
+                    .states
+                    .contains(xdg_toplevel::State::Activated))
+            || (handle_state.states.contains(&States::Minimized) != state.minimized)
+        {
             let mut states = Vec::new();
-            if attributes.current.states.contains(xdg_toplevel::State::Maximized) {
+            if attributes
+                .current
+                .states
+                .contains(xdg_toplevel::State::Maximized)
+            {
                 states.push(States::Maximized);
             }
-            if attributes.current.states.contains(xdg_toplevel::State::Fullscreen) {
+            if attributes
+                .current
+                .states
+                .contains(xdg_toplevel::State::Fullscreen)
+            {
                 states.push(States::Fullscreen);
             }
-            if attributes.current.states.contains(xdg_toplevel::State::Activated) {
+            if attributes
+                .current
+                .states
+                .contains(xdg_toplevel::State::Activated)
+            {
                 states.push(States::Activated);
             }
-            if attributes.current.states.contains(xdg_toplevel::State::Maximized) {
+            if attributes
+                .current
+                .states
+                .contains(xdg_toplevel::State::Maximized)
+            {
                 states.push(States::Maximized);
             }
             handle_state.states = states.clone();
@@ -329,13 +392,21 @@ where
     });
 
     if let Ok(client) = dh.get_client(instance.id()) {
-        for new_output in state.outputs.iter().filter(|o| !handle_state.outputs.contains(o)) {
+        for new_output in state
+            .outputs
+            .iter()
+            .filter(|o| !handle_state.outputs.contains(o))
+        {
             new_output.with_client_outputs(dh, &client, |_dh, wl_output| {
                 instance.output_enter(wl_output);
             });
             changed = true;
         }
-        for old_output in handle_state.outputs.iter().filter(|o| !state.outputs.contains(o)) {
+        for old_output in handle_state
+            .outputs
+            .iter()
+            .filter(|o| !state.outputs.contains(o))
+        {
             old_output.with_client_outputs(dh, &client, |_dh, wl_output| {
                 instance.output_leave(wl_output);
             });
@@ -345,14 +416,26 @@ where
     }
 
     if let Some(workspace_state) = workspace_state {
-        for new_workspace in state.workspaces.iter().filter(|w| !handle_state.workspaces.contains(w)) {
-            if let Some(handle) = workspace_state.raw_workspace_handle(&new_workspace, &instance.id()) {
+        for new_workspace in state
+            .workspaces
+            .iter()
+            .filter(|w| !handle_state.workspaces.contains(w))
+        {
+            if let Some(handle) =
+                workspace_state.raw_workspace_handle(&new_workspace, &instance.id())
+            {
                 instance.workspace_enter(&handle);
                 changed = true;
             }
         }
-        for old_workspace in handle_state.workspaces.iter().filter(|w| !state.workspaces.contains(w)) {
-            if let Some(handle) = workspace_state.raw_workspace_handle(&old_workspace, &instance.id()) {
+        for old_workspace in handle_state
+            .workspaces
+            .iter()
+            .filter(|w| !state.workspaces.contains(w))
+        {
+            if let Some(handle) =
+                workspace_state.raw_workspace_handle(&old_workspace, &instance.id())
+            {
                 instance.workspace_leave(&handle);
                 changed = true;
             }

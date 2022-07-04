@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use smithay::delegate_viewporter;
 use crate::state::State;
+use smithay::delegate_viewporter;
 
 delegate_viewporter!(State);

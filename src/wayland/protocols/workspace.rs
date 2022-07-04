@@ -4,19 +4,17 @@ use std::sync::Mutex;
 
 use smithay::{
     reexports::wayland_server::{
-        Client, DataInit,
-        DisplayHandle, Resource, New,
-        GlobalDispatch, Dispatch,
-        DelegateGlobalDispatch, DelegateDispatch,
-        backend::{ClientId, ClientData, GlobalId, ObjectId},
+        backend::{ClientData, ClientId, GlobalId, ObjectId},
+        Client, DataInit, DelegateDispatch, DelegateGlobalDispatch, Dispatch, DisplayHandle,
+        GlobalDispatch, New, Resource,
     },
     wayland::output::Output,
 };
 
 use cosmic_protocols::workspace::v1::server::{
-    zcosmic_workspace_manager_v1::{self, ZcosmicWorkspaceManagerV1},
     zcosmic_workspace_group_handle_v1::{self, ZcosmicWorkspaceGroupHandleV1},
     zcosmic_workspace_handle_v1::{self, ZcosmicWorkspaceHandleV1},
+    zcosmic_workspace_manager_v1::{self, ZcosmicWorkspaceManagerV1},
 };
 
 pub use cosmic_protocols::workspace::v1::server::{
@@ -32,9 +30,7 @@ where
         + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
         + WorkspaceHandler
         + 'static,
-    <D as WorkspaceHandler>::Client: ClientData
-        + WorkspaceClientHandler
-        + 'static,
+    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
 {
     dh: DisplayHandle,
     global: GlobalId,
@@ -50,10 +46,7 @@ where
         + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
         + WorkspaceHandler
         + 'static,
-    <D as WorkspaceHandler>::Client: ClientData
-        + WorkspaceClientHandler
-        + 'static
-;
+    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static;
 
 crate::utils::id_gen!(next_group_id, GROUP_ID, GROUP_IDS);
 crate::utils::id_gen!(next_workspace_id, WORKSPACE_ID, WORKSPACE_IDS);
@@ -63,7 +56,7 @@ pub struct WorkspaceGroup {
     id: usize,
     instances: Vec<ZcosmicWorkspaceGroupHandleV1>,
     workspaces: Vec<Workspace>,
-    
+
     outputs: Vec<Output>,
     capabilities: Vec<GroupCapabilities>,
 }
@@ -114,9 +107,7 @@ where
         + Sized
         + 'static,
 {
-    type Client: ClientData
-        + WorkspaceClientHandler
-        + 'static;
+    type Client: ClientData + WorkspaceClientHandler + 'static;
 
     fn workspace_state(&self) -> &WorkspaceState<Self>;
     fn workspace_state_mut(&mut self) -> &mut WorkspaceState<Self>;
@@ -144,12 +135,12 @@ pub struct WorkspaceClientStateInner {
 }
 pub type WorkspaceClientState = Mutex<WorkspaceClientStateInner>;
 
-
 pub trait WorkspaceClientHandler {
     fn workspace_state(&self) -> &WorkspaceClientState;
 }
 
-impl<D> DelegateGlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData, D> for WorkspaceState<D>
+impl<D> DelegateGlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData, D>
+    for WorkspaceState<D>
 where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV1, ()>
@@ -157,9 +148,7 @@ where
         + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
         + WorkspaceHandler
         + 'static,
-    <D as WorkspaceHandler>::Client: ClientData
-        + WorkspaceClientHandler
-        + 'static,
+    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
 {
     fn bind(
         state: &mut D,
@@ -191,10 +180,8 @@ where
         + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
         + WorkspaceHandler
         + 'static,
-    <D as WorkspaceHandler>::Client: ClientData
-        + WorkspaceClientHandler
-        + 'static,
-{       
+    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
+{
     fn request(
         state: &mut D,
         client: &Client,
@@ -207,26 +194,29 @@ where
         match request {
             zcosmic_workspace_manager_v1::Request::Commit => {
                 if state.workspace_state().instances.contains(obj) {
-                    let mut client_state = client.get_data::<<D as WorkspaceHandler>::Client>().unwrap().workspace_state().lock().unwrap();
+                    let mut client_state = client
+                        .get_data::<<D as WorkspaceHandler>::Client>()
+                        .unwrap()
+                        .workspace_state()
+                        .lock()
+                        .unwrap();
                     state.commit_requests(dh, std::mem::take(&mut client_state.requests));
                 }
-            },
+            }
             zcosmic_workspace_manager_v1::Request::Stop => {
                 state.workspace_state_mut().instances.retain(|i| i != obj);
                 // without an instance, the whole send_group_to_client machinery doesn't work
                 // so there is no way for the whole clients hierachy to get any new events
-            },
-            _ => {},
+            }
+            _ => {}
         }
     }
 
-    fn destroyed(
-        state: &mut D, 
-        _client: ClientId, 
-        resource: ObjectId, 
-        _data: &(),
-    ) {
-        state.workspace_state_mut().instances.retain(|i| i.id() != resource);
+    fn destroyed(state: &mut D, _client: ClientId, resource: ObjectId, _data: &()) {
+        state
+            .workspace_state_mut()
+            .instances
+            .retain(|i| i.id() != resource);
     }
 }
 
@@ -237,10 +227,8 @@ where
         + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
         + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
         + WorkspaceHandler
-        + 'static, 
-    <D as WorkspaceHandler>::Client: ClientData
-       + WorkspaceClientHandler
         + 'static,
+    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
 {
     fn request(
         state: &mut D,
@@ -253,29 +241,35 @@ where
     ) {
         match request {
             zcosmic_workspace_group_handle_v1::Request::CreateWorkspace { workspace } => {
-                if let Some(id) = state.workspace_state().groups.iter().find(|g| g.instances.contains(obj)).map(|g| g.id) {
-                    let mut state = client.get_data::<<D as WorkspaceHandler>::Client>().unwrap().workspace_state().lock().unwrap();
+                if let Some(id) = state
+                    .workspace_state()
+                    .groups
+                    .iter()
+                    .find(|g| g.instances.contains(obj))
+                    .map(|g| g.id)
+                {
+                    let mut state = client
+                        .get_data::<<D as WorkspaceHandler>::Client>()
+                        .unwrap()
+                        .workspace_state()
+                        .lock()
+                        .unwrap();
                     state.requests.push(Request::Create {
                         in_group: WorkspaceGroupHandle { id },
                         name: workspace,
                     });
                 }
-            },
+            }
             zcosmic_workspace_group_handle_v1::Request::Destroy => {
                 for group in &mut state.workspace_state_mut().groups {
                     group.instances.retain(|i| i != obj)
                 }
-            },
-            _ => {},
+            }
+            _ => {}
         }
     }
 
-    fn destroyed(
-        state: &mut D, 
-        _client: ClientId, 
-        resource: ObjectId, 
-        _data: &WorkspaceGroupData,
-    ) {
+    fn destroyed(state: &mut D, _client: ClientId, resource: ObjectId, _data: &WorkspaceGroupData) {
         for group in &mut state.workspace_state_mut().groups {
             group.instances.retain(|i| i.id() != resource)
         }
@@ -290,9 +284,7 @@ where
         + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
         + WorkspaceHandler
         + 'static,
-    <D as WorkspaceHandler>::Client: ClientData
-        + WorkspaceClientHandler
-        + 'static,
+    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
 {
     fn request(
         state: &mut D,
@@ -305,30 +297,58 @@ where
     ) {
         match request {
             zcosmic_workspace_handle_v1::Request::Activate => {
-                if let Some(id) = state.workspace_state().groups.iter()
+                if let Some(id) = state
+                    .workspace_state()
+                    .groups
+                    .iter()
                     .find_map(|g| g.workspaces.iter().find(|w| w.instances.contains(obj)))
                     .map(|w| w.id)
                 {
-                    let mut state = client.get_data::<<D as WorkspaceHandler>::Client>().unwrap().workspace_state().lock().unwrap();
-                    state.requests.push(Request::Activate(WorkspaceHandle { id }));   
+                    let mut state = client
+                        .get_data::<<D as WorkspaceHandler>::Client>()
+                        .unwrap()
+                        .workspace_state()
+                        .lock()
+                        .unwrap();
+                    state
+                        .requests
+                        .push(Request::Activate(WorkspaceHandle { id }));
                 }
             }
             zcosmic_workspace_handle_v1::Request::Deactivate => {
-                if let Some(id) = state.workspace_state().groups.iter()
+                if let Some(id) = state
+                    .workspace_state()
+                    .groups
+                    .iter()
                     .find_map(|g| g.workspaces.iter().find(|w| w.instances.contains(obj)))
                     .map(|w| w.id)
                 {
-                    let mut state = client.get_data::<<D as WorkspaceHandler>::Client>().unwrap().workspace_state().lock().unwrap();
-                    state.requests.push(Request::Deactivate(WorkspaceHandle { id }));   
+                    let mut state = client
+                        .get_data::<<D as WorkspaceHandler>::Client>()
+                        .unwrap()
+                        .workspace_state()
+                        .lock()
+                        .unwrap();
+                    state
+                        .requests
+                        .push(Request::Deactivate(WorkspaceHandle { id }));
                 }
             }
             zcosmic_workspace_handle_v1::Request::Remove => {
-                if let Some(id) = state.workspace_state().groups.iter()
+                if let Some(id) = state
+                    .workspace_state()
+                    .groups
+                    .iter()
                     .find_map(|g| g.workspaces.iter().find(|w| w.instances.contains(obj)))
                     .map(|w| w.id)
                 {
-                    let mut state = client.get_data::<<D as WorkspaceHandler>::Client>().unwrap().workspace_state().lock().unwrap();
-                    state.requests.push(Request::Remove(WorkspaceHandle { id }));   
+                    let mut state = client
+                        .get_data::<<D as WorkspaceHandler>::Client>()
+                        .unwrap()
+                        .workspace_state()
+                        .lock()
+                        .unwrap();
+                    state.requests.push(Request::Remove(WorkspaceHandle { id }));
                 }
             }
             zcosmic_workspace_handle_v1::Request::Destroy => {
@@ -338,16 +358,11 @@ where
                     }
                 }
             }
-            _ => {},
+            _ => {}
         }
     }
 
-    fn destroyed(
-        state: &mut D, 
-        _client: ClientId, 
-        resource: ObjectId, 
-        _data: &WorkspaceData,
-    ) {
+    fn destroyed(state: &mut D, _client: ClientId, resource: ObjectId, _data: &WorkspaceData) {
         for group in &mut state.workspace_state_mut().groups {
             for workspace in &mut group.workspaces {
                 workspace.instances.retain(|i| i.id() != resource)
@@ -355,7 +370,6 @@ where
         }
     }
 }
-
 
 impl<D> WorkspaceState<D>
 where
@@ -365,20 +379,18 @@ where
         + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
         + WorkspaceHandler
         + 'static,
-    <D as WorkspaceHandler>::Client: ClientData
-        + WorkspaceClientHandler
-        + 'static,
+    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
 {
-    pub fn new<F>(
-        dh: &DisplayHandle,
-        client_filter: F,
-    ) -> WorkspaceState<D>
-    where    
+    pub fn new<F>(dh: &DisplayHandle, client_filter: F) -> WorkspaceState<D>
+    where
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
-        let global = dh.create_global::<D, ZcosmicWorkspaceManagerV1, _>(1, WorkspaceGlobalData {
-            filter: Box::new(client_filter),
-        });
+        let global = dh.create_global::<D, ZcosmicWorkspaceManagerV1, _>(
+            1,
+            WorkspaceGlobalData {
+                filter: Box::new(client_filter),
+            },
+        );
 
         WorkspaceState {
             dh: dh.clone(),
@@ -388,8 +400,12 @@ where
             _marker: std::marker::PhantomData,
         }
     }
-   
-    pub fn workspace_belongs_to_group(&self, group: &WorkspaceGroupHandle, workspace: &WorkspaceHandle) -> bool {
+
+    pub fn workspace_belongs_to_group(
+        &self,
+        group: &WorkspaceGroupHandle,
+        workspace: &WorkspaceHandle,
+    ) -> bool {
         if let Some(group) = self.groups.iter().find(|g| g.id == group.id) {
             group.workspaces.iter().any(|w| w.id == workspace.id)
         } else {
@@ -397,38 +413,86 @@ where
         }
     }
 
-    pub fn group_capabilities(&self, group: &WorkspaceGroupHandle) -> Option<impl Iterator<Item=&GroupCapabilities>> {
-        self.groups.iter().find(|g| g.id == group.id).map(|g| g.capabilities.iter())
+    pub fn group_capabilities(
+        &self,
+        group: &WorkspaceGroupHandle,
+    ) -> Option<impl Iterator<Item = &GroupCapabilities>> {
+        self.groups
+            .iter()
+            .find(|g| g.id == group.id)
+            .map(|g| g.capabilities.iter())
     }
 
-    pub fn group_outputs(&self, group: &WorkspaceGroupHandle) -> Option<impl Iterator<Item=&Output>> {
-        self.groups.iter().find(|g| g.id == group.id).map(|g| g.outputs.iter())
+    pub fn group_outputs(
+        &self,
+        group: &WorkspaceGroupHandle,
+    ) -> Option<impl Iterator<Item = &Output>> {
+        self.groups
+            .iter()
+            .find(|g| g.id == group.id)
+            .map(|g| g.outputs.iter())
     }
-    
-    pub fn workspace_capabilities(&self, workspace: &WorkspaceHandle) -> Option<impl Iterator<Item=&WorkspaceCapabilities>> {
-        self.groups.iter().find_map(|g| g.workspaces.iter().find(|w| w.id == workspace.id).map(|w| w.capabilities.iter()))
+
+    pub fn workspace_capabilities(
+        &self,
+        workspace: &WorkspaceHandle,
+    ) -> Option<impl Iterator<Item = &WorkspaceCapabilities>> {
+        self.groups.iter().find_map(|g| {
+            g.workspaces
+                .iter()
+                .find(|w| w.id == workspace.id)
+                .map(|w| w.capabilities.iter())
+        })
     }
 
     pub fn workspace_name(&self, workspace: &WorkspaceHandle) -> Option<&str> {
-        self.groups.iter().find_map(|g| g.workspaces.iter().find(|w| w.id == workspace.id).map(|w| &*w.name))
+        self.groups.iter().find_map(|g| {
+            g.workspaces
+                .iter()
+                .find(|w| w.id == workspace.id)
+                .map(|w| &*w.name)
+        })
     }
 
     pub fn workspace_coordinates(&self, workspace: &WorkspaceHandle) -> Option<&[u32]> {
-        self.groups.iter().find_map(|g| g.workspaces.iter().find(|w| w.id == workspace.id).map(|w| &*w.coordinates))
+        self.groups.iter().find_map(|g| {
+            g.workspaces
+                .iter()
+                .find(|w| w.id == workspace.id)
+                .map(|w| &*w.coordinates)
+        })
     }
 
-    pub fn workspace_states(&self, workspace: &WorkspaceHandle) -> Option<impl Iterator<Item=&zcosmic_workspace_handle_v1::State>> {
-        self.groups.iter().find_map(|g| g.workspaces.iter().find(|w| w.id == workspace.id).map(|w| w.states.iter()))
+    pub fn workspace_states(
+        &self,
+        workspace: &WorkspaceHandle,
+    ) -> Option<impl Iterator<Item = &zcosmic_workspace_handle_v1::State>> {
+        self.groups.iter().find_map(|g| {
+            g.workspaces
+                .iter()
+                .find(|w| w.id == workspace.id)
+                .map(|w| w.states.iter())
+        })
     }
 
-    pub fn raw_group_handle(&self, group: &WorkspaceGroupHandle, client: &ObjectId) -> Option<ZcosmicWorkspaceGroupHandleV1> {
-        self.groups.iter()
+    pub fn raw_group_handle(
+        &self,
+        group: &WorkspaceGroupHandle,
+        client: &ObjectId,
+    ) -> Option<ZcosmicWorkspaceGroupHandleV1> {
+        self.groups
+            .iter()
             .find(|g| g.id == group.id)
             .and_then(|g| g.instances.iter().find(|i| i.id().same_client_as(client)))
             .cloned()
     }
-    pub fn raw_workspace_handle(&self, workspace: &WorkspaceHandle, client: &ObjectId) -> Option<ZcosmicWorkspaceHandleV1> {
-        self.groups.iter()
+    pub fn raw_workspace_handle(
+        &self,
+        workspace: &WorkspaceHandle,
+        client: &ObjectId,
+    ) -> Option<ZcosmicWorkspaceHandleV1> {
+        self.groups
+            .iter()
             .find_map(|g| g.workspaces.iter().find(|w| w.id == workspace.id))
             .and_then(|w| w.instances.iter().find(|i| i.id().same_client_as(client)))
             .cloned()
@@ -467,9 +531,7 @@ where
         + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
         + WorkspaceHandler
         + 'static,
-    <D as WorkspaceHandler>::Client: ClientData
-        + WorkspaceClientHandler
-        + 'static,
+    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
 {
     pub fn create_workspace_group(&mut self) -> WorkspaceGroupHandle {
         let id = next_group_id();
@@ -478,9 +540,7 @@ where
             ..Default::default()
         };
         self.0.groups.push(group);
-        WorkspaceGroupHandle {
-            id
-        }
+        WorkspaceGroupHandle { id }
     }
 
     pub fn create_workspace(&mut self, group: &WorkspaceGroupHandle) -> Option<WorkspaceHandle> {
@@ -491,9 +551,7 @@ where
                 ..Default::default()
             };
             group.workspaces.push(workspace);
-            Some(WorkspaceHandle {
-                id
-            })
+            Some(WorkspaceHandle { id })
         } else {
             None
         }
@@ -501,10 +559,14 @@ where
 
     pub fn remove_workspace_group(&mut self, group: WorkspaceGroupHandle) {
         // "The compositor must remove all workspaces belonging to a workspace group before removing the workspace group."
-        for workspace in self.0.groups.iter()
+        for workspace in self
+            .0
+            .groups
+            .iter()
             .filter(|g| g.id == group.id)
             .flat_map(|g| g.workspaces.iter().map(|w| WorkspaceHandle { id: w.id }))
-            .collect::<Vec<_>>().into_iter()
+            .collect::<Vec<_>>()
+            .into_iter()
         {
             self.remove_workspace(workspace);
         }
@@ -518,7 +580,7 @@ where
         GROUP_IDS.lock().unwrap().remove(&group.id);
     }
 
-    pub fn remove_workspace(&mut self, workspace: WorkspaceHandle) { 
+    pub fn remove_workspace(&mut self, workspace: WorkspaceHandle) {
         for group in &mut self.0.groups {
             if let Some(workspace) = group.workspaces.iter().find(|w| w.id == workspace.id) {
                 for instance in &workspace.instances {
@@ -529,22 +591,36 @@ where
         }
         WORKSPACE_IDS.lock().unwrap().remove(&workspace.id);
     }
-    
-    pub fn workspace_belongs_to_group(&self, group: &WorkspaceGroupHandle, workspace: &WorkspaceHandle) -> bool {
+
+    pub fn workspace_belongs_to_group(
+        &self,
+        group: &WorkspaceGroupHandle,
+        workspace: &WorkspaceHandle,
+    ) -> bool {
         self.0.workspace_belongs_to_group(group, workspace)
     }
-    
-    pub fn group_capabilities(&mut self, group: &WorkspaceGroupHandle) -> Option<impl Iterator<Item=&GroupCapabilities>> {
+
+    pub fn group_capabilities(
+        &mut self,
+        group: &WorkspaceGroupHandle,
+    ) -> Option<impl Iterator<Item = &GroupCapabilities>> {
         self.0.group_capabilities(group)
     }
 
-    pub fn set_group_capabilities(&mut self, group: &WorkspaceGroupHandle, capabilities: impl Iterator<Item=GroupCapabilities>) {
+    pub fn set_group_capabilities(
+        &mut self,
+        group: &WorkspaceGroupHandle,
+        capabilities: impl Iterator<Item = GroupCapabilities>,
+    ) {
         if let Some(group) = self.0.groups.iter_mut().find(|g| g.id == group.id) {
             group.capabilities = capabilities.collect();
         }
     }
 
-    pub fn group_outputs(&self, group: &WorkspaceGroupHandle) -> Option<impl Iterator<Item=&Output>> {
+    pub fn group_outputs(
+        &self,
+        group: &WorkspaceGroupHandle,
+    ) -> Option<impl Iterator<Item = &Output>> {
         self.0.group_outputs(group)
     }
 
@@ -559,13 +635,23 @@ where
             group.outputs.retain(|o| o != output)
         }
     }
-    
-    pub fn workspace_capabilities(&self, workspace: &WorkspaceHandle) -> Option<impl Iterator<Item=&WorkspaceCapabilities>> {
+
+    pub fn workspace_capabilities(
+        &self,
+        workspace: &WorkspaceHandle,
+    ) -> Option<impl Iterator<Item = &WorkspaceCapabilities>> {
         self.0.workspace_capabilities(workspace)
     }
 
-    pub fn set_workspace_capabilities(&mut self, workspace: &WorkspaceHandle, capabilities: impl Iterator<Item=WorkspaceCapabilities>) {
-        if let Some(workspace) = self.0.groups.iter_mut()
+    pub fn set_workspace_capabilities(
+        &mut self,
+        workspace: &WorkspaceHandle,
+        capabilities: impl Iterator<Item = WorkspaceCapabilities>,
+    ) {
+        if let Some(workspace) = self
+            .0
+            .groups
+            .iter_mut()
             .find_map(|g| g.workspaces.iter_mut().find(|w| w.id == workspace.id))
         {
             workspace.capabilities = capabilities.collect();
@@ -577,7 +663,10 @@ where
     }
 
     pub fn set_workspace_name(&mut self, workspace: &WorkspaceHandle, name: impl Into<String>) {
-        if let Some(workspace) = self.0.groups.iter_mut()
+        if let Some(workspace) = self
+            .0
+            .groups
+            .iter_mut()
             .find_map(|g| g.workspaces.iter_mut().find(|w| w.id == workspace.id))
         {
             workspace.name = name.into();
@@ -588,28 +677,56 @@ where
         self.0.workspace_coordinates(workspace)
     }
 
-    pub fn set_workspace_coordinates(&mut self, workspace: &WorkspaceHandle, coords: [Option<u32>; 3]) {
-        if let Some(workspace) = self.0.groups.iter_mut()
+    pub fn set_workspace_coordinates(
+        &mut self,
+        workspace: &WorkspaceHandle,
+        coords: [Option<u32>; 3],
+    ) {
+        if let Some(workspace) = self
+            .0
+            .groups
+            .iter_mut()
             .find_map(|g| g.workspaces.iter_mut().find(|w| w.id == workspace.id))
         {
-            workspace.coordinates = coords.iter().flat_map(std::convert::identity).copied().collect();
+            workspace.coordinates = coords
+                .iter()
+                .flat_map(std::convert::identity)
+                .copied()
+                .collect();
         }
     }
 
-    pub fn workspace_states(&self, workspace: &WorkspaceHandle) -> Option<impl Iterator<Item=&zcosmic_workspace_handle_v1::State>> {
+    pub fn workspace_states(
+        &self,
+        workspace: &WorkspaceHandle,
+    ) -> Option<impl Iterator<Item = &zcosmic_workspace_handle_v1::State>> {
         self.0.workspace_states(workspace)
     }
 
-    pub fn add_workspace_state(&mut self, workspace: &WorkspaceHandle, state: zcosmic_workspace_handle_v1::State) {
-        if let Some(workspace) = self.0.groups.iter_mut()
+    pub fn add_workspace_state(
+        &mut self,
+        workspace: &WorkspaceHandle,
+        state: zcosmic_workspace_handle_v1::State,
+    ) {
+        if let Some(workspace) = self
+            .0
+            .groups
+            .iter_mut()
             .find_map(|g| g.workspaces.iter_mut().find(|w| w.id == workspace.id))
         {
             workspace.states.push(state);
         }
     }
 
-    pub fn remove_workspace_state(&mut self, workspace: &WorkspaceHandle, state: zcosmic_workspace_handle_v1::State) {
-        if let Some(workspace) = self.0.groups.iter_mut()
+    pub fn remove_workspace_state(
+        &mut self,
+        workspace: &WorkspaceHandle,
+        state: zcosmic_workspace_handle_v1::State,
+    ) {
+        if let Some(workspace) = self
+            .0
+            .groups
+            .iter_mut()
             .find_map(|g| g.workspaces.iter_mut().find(|w| w.id == workspace.id))
         {
             workspace.states.retain(|s| *s != state);
@@ -625,16 +742,18 @@ where
         + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
         + WorkspaceHandler
         + 'static,
-    <D as WorkspaceHandler>::Client: ClientData
-        + WorkspaceClientHandler
-        + 'static,
+    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
 {
     fn drop(&mut self) {
         self.0.done();
     }
 }
 
-fn send_group_to_client<D>(dh: &DisplayHandle, mngr: &ZcosmicWorkspaceManagerV1, group: &mut WorkspaceGroup) -> bool
+fn send_group_to_client<D>(
+    dh: &DisplayHandle,
+    mngr: &ZcosmicWorkspaceManagerV1,
+    group: &mut WorkspaceGroup,
+) -> bool
 where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV1, ()>
@@ -642,15 +761,21 @@ where
         + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
         + WorkspaceHandler
         + 'static,
-    <D as WorkspaceHandler>::Client: ClientData
-        + WorkspaceClientHandler
-        + 'static,
+    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
 {
-    let instance = match group.instances.iter_mut().find(|i| i.id().same_client_as(&mngr.id())) {
+    let instance = match group
+        .instances
+        .iter_mut()
+        .find(|i| i.id().same_client_as(&mngr.id()))
+    {
         Some(i) => i,
         None => {
             if let Ok(client) = dh.get_client(mngr.id()) {
-                if let Ok(handle) = client.create_resource::<ZcosmicWorkspaceGroupHandleV1, _, D>(dh, mngr.version(), WorkspaceGroupData::default()) {
+                if let Ok(handle) = client.create_resource::<ZcosmicWorkspaceGroupHandleV1, _, D>(
+                    dh,
+                    mngr.version(),
+                    WorkspaceGroupData::default(),
+                ) {
                     mngr.workspace_group(&handle);
                     group.instances.push(handle);
                     group.instances.last_mut().unwrap()
@@ -663,16 +788,28 @@ where
         }
     };
 
-    let mut handle_state = instance.data::<WorkspaceGroupData>().unwrap().lock().unwrap();
+    let mut handle_state = instance
+        .data::<WorkspaceGroupData>()
+        .unwrap()
+        .lock()
+        .unwrap();
     let mut changed = false;
     if let Ok(client) = dh.get_client(instance.id()) {
-        for new_output in group.outputs.iter().filter(|o| !handle_state.outputs.contains(o)) {
+        for new_output in group
+            .outputs
+            .iter()
+            .filter(|o| !handle_state.outputs.contains(o))
+        {
             new_output.with_client_outputs(dh, &client, |_dh, wl_output| {
                 instance.output_enter(wl_output);
             });
             changed = true;
         }
-        for old_output in handle_state.outputs.iter().filter(|o| group.outputs.contains(o)) {
+        for old_output in handle_state
+            .outputs
+            .iter()
+            .filter(|o| group.outputs.contains(o))
+        {
             old_output.with_client_outputs(dh, &client, |_dh, wl_output| {
                 instance.output_leave(wl_output);
             });
@@ -705,7 +842,11 @@ where
     changed
 }
 
-fn send_workspace_to_client<D>(dh: &DisplayHandle, group: &ZcosmicWorkspaceGroupHandleV1, workspace: &mut Workspace) -> bool
+fn send_workspace_to_client<D>(
+    dh: &DisplayHandle,
+    group: &ZcosmicWorkspaceGroupHandleV1,
+    workspace: &mut Workspace,
+) -> bool
 where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV1, ()>
@@ -713,15 +854,21 @@ where
         + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
         + WorkspaceHandler
         + 'static,
-    <D as WorkspaceHandler>::Client: ClientData
-        + WorkspaceClientHandler
-        + 'static,
+    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
 {
-    let instance = match workspace.instances.iter_mut().find(|i| i.id().same_client_as(&group.id())) {
+    let instance = match workspace
+        .instances
+        .iter_mut()
+        .find(|i| i.id().same_client_as(&group.id()))
+    {
         Some(i) => i,
         None => {
             if let Ok(client) = dh.get_client(group.id()) {
-                if let Ok(handle) = client.create_resource::<ZcosmicWorkspaceHandleV1, _, D>(dh, group.version(), WorkspaceData::default()) {
+                if let Ok(handle) = client.create_resource::<ZcosmicWorkspaceHandleV1, _, D>(
+                    dh,
+                    group.version(),
+                    WorkspaceData::default(),
+                ) {
                     group.workspace(&handle);
                     workspace.instances.push(handle);
                     workspace.instances.last_mut().unwrap()
@@ -736,7 +883,7 @@ where
 
     let mut handle_state = instance.data::<WorkspaceData>().unwrap().lock().unwrap();
     let mut changed = false;
-    
+
     if handle_state.name != workspace.name {
         instance.name(workspace.name.clone());
         handle_state.name = workspace.name.clone();
@@ -773,7 +920,8 @@ where
     if handle_state.states != workspace.states {
         let states: Vec<u8> = {
             let mut states = workspace.states.clone();
-            let ratio = std::mem::size_of::<zcosmic_workspace_handle_v1::State>() / std::mem::size_of::<u8>();
+            let ratio = std::mem::size_of::<zcosmic_workspace_handle_v1::State>()
+                / std::mem::size_of::<u8>();
             let ptr = states.as_mut_ptr() as *mut u8;
             let len = states.len() * ratio;
             let cap = states.capacity() * ratio;

@@ -1,12 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{
-    convert::{TryFrom, TryInto},
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-    },
-};
 use smithay::{
     reexports::{
         wayland_protocols_wlr::output_management::v1::server::{
@@ -17,16 +10,21 @@ use smithay::{
             zwlr_output_mode_v1::{self, ZwlrOutputModeV1},
         },
         wayland_server::{
-            Client, DisplayHandle,
-            GlobalDispatch, Dispatch,
-            DelegateGlobalDispatch, DelegateDispatch,
-            DataInit, New, Resource,
             backend::{ClientId, GlobalId, ObjectId},
             protocol::wl_output::WlOutput,
+            Client, DataInit, DelegateDispatch, DelegateGlobalDispatch, Dispatch, DisplayHandle,
+            GlobalDispatch, New, Resource,
         },
     },
-    wayland::output::{Output, Mode, OutputData},
     utils::{Logical, Physical, Point, Size, Transform},
+    wayland::output::{Mode, Output, OutputData},
+};
+use std::{
+    convert::{TryFrom, TryInto},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 
 pub struct OutputConfigurationState<D> {
@@ -105,7 +103,9 @@ pub enum OutputConfiguration {
 
 impl<'a> TryFrom<&'a mut PendingOutputConfigurationInner> for OutputConfiguration {
     type Error = zwlr_output_configuration_head_v1::Error;
-    fn try_from(pending: &'a mut PendingOutputConfigurationInner) -> Result<OutputConfiguration, Self::Error> {
+    fn try_from(
+        pending: &'a mut PendingOutputConfigurationInner,
+    ) -> Result<OutputConfiguration, Self::Error> {
         let mode = match pending.mode.clone() {
             Some(ModeConfiguration::Mode(wlr_mode)) => Some(ModeConfiguration::Mode(
                 wlr_mode
@@ -133,7 +133,8 @@ struct OutputStateInner {
 }
 type OutputState = Mutex<OutputStateInner>;
 
-impl<D> DelegateGlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData, D> for OutputConfigurationState<D>
+impl<D> DelegateGlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData, D>
+    for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>
@@ -142,7 +143,7 @@ where
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration>
         + OutputConfigurationHandler
-        + 'static
+        + 'static,
 {
     fn bind(
         state: &mut D,
@@ -161,7 +162,7 @@ where
             heads: Vec::new(),
             active,
         };
-        
+
         let mngr_state = state.output_configuration_state();
         for output in &mngr_state.outputs {
             send_head_to_client::<D>(dh, &mut instance, output);
@@ -175,7 +176,8 @@ where
     }
 }
 
-impl<D> DelegateDispatch<ZwlrOutputManagerV1, OutputMngrInstanceData, D> for OutputConfigurationState<D>
+impl<D> DelegateDispatch<ZwlrOutputManagerV1, OutputMngrInstanceData, D>
+    for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>
@@ -184,7 +186,7 @@ where
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration>
         + OutputConfigurationHandler
-        + 'static
+        + 'static,
 {
     fn request(
         state: &mut D,
@@ -196,25 +198,25 @@ where
         data_init: &mut DataInit<'_, D>,
     ) {
         match request {
-            zwlr_output_manager_v1::Request::CreateConfiguration {
-                id,
-                serial,
-            } => {
-                let conf = data_init.init(id, PendingConfiguration::new(PendingConfigurationInner {
-                    serial,
-                    used: false,
-                    heads: Vec::new(),
-                }));
+            zwlr_output_manager_v1::Request::CreateConfiguration { id, serial } => {
+                let conf = data_init.init(
+                    id,
+                    PendingConfiguration::new(PendingConfigurationInner {
+                        serial,
+                        used: false,
+                        heads: Vec::new(),
+                    }),
+                );
 
                 let state = state.output_configuration_state();
                 if serial != state.serial_counter {
                     conf.cancelled();
                 }
-            },
+            }
             zwlr_output_manager_v1::Request::Stop => {
                 data.active.store(false, Ordering::SeqCst);
-            },
-            _ => {},
+            }
+            _ => {}
         }
     }
 }
@@ -228,7 +230,7 @@ where
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration>
         + OutputConfigurationHandler
-        + 'static
+        + 'static,
 {
     fn request(
         _state: &mut D,
@@ -244,12 +246,7 @@ where
         }
     }
 
-    fn destroyed(
-        state: &mut D, 
-        _client: ClientId, 
-        resource: ObjectId, 
-        _data: &Output,
-    ) {
+    fn destroyed(state: &mut D, _client: ClientId, resource: ObjectId, _data: &Output) {
         for instance in &mut state.output_configuration_state().instances {
             instance.heads.retain(|h| h.head.id() != resource);
         }
@@ -265,7 +262,7 @@ where
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration>
         + OutputConfigurationHandler
-        + 'static
+        + 'static,
 {
     fn request(
         _state: &mut D,
@@ -282,7 +279,8 @@ where
     }
 }
 
-impl<D> DelegateDispatch<ZwlrOutputConfigurationV1, PendingConfiguration, D> for OutputConfigurationState<D>
+impl<D> DelegateDispatch<ZwlrOutputConfigurationV1, PendingConfiguration, D>
+    for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>
@@ -291,7 +289,7 @@ where
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration>
         + OutputConfigurationHandler
-        + 'static
+        + 'static,
 {
     fn request(
         state: &mut D,
@@ -315,7 +313,7 @@ where
 
                 let conf_head = data_init.init(id, PendingOutputConfiguration::default());
                 pending.heads.push((head, Some(conf_head)));
-            },
+            }
             zwlr_output_configuration_v1::Request::DisableHead { head } => {
                 let mut pending = data.lock().unwrap();
                 if pending.heads.iter().any(|(h, _)| *h == head) {
@@ -326,11 +324,11 @@ where
                     return;
                 }
                 pending.heads.push((head, None));
-            },
+            }
             x @ zwlr_output_configuration_v1::Request::Apply
             | x @ zwlr_output_configuration_v1::Request::Test => {
                 let mut pending = data.lock().unwrap();
-                
+
                 if pending.used {
                     return obj.post_error(
                         zwlr_output_configuration_v1::Error::AlreadyUsed,
@@ -350,16 +348,17 @@ where
                     .iter_mut()
                     .map(|(head, conf)| {
                         let output = match {
-                            inner.instances
+                            inner
+                                .instances
                                 .iter()
-                                .find_map(|instance| instance.heads.iter().find(|h| h.head == *head))
+                                .find_map(|instance| {
+                                    instance.heads.iter().find(|h| h.head == *head)
+                                })
                                 .map(|i| i.output.clone())
                         } {
                             Some(o) => o,
                             None => {
-                                return Err(
-                                    zwlr_output_configuration_head_v1::Error::InvalidMode,
-                                );
+                                return Err(zwlr_output_configuration_head_v1::Error::InvalidMode);
                             }
                         };
 
@@ -374,8 +373,10 @@ where
                             None => Ok((output, OutputConfiguration::Disabled)),
                         }
                     })
-                    .collect::<Result<Vec<(Output, OutputConfiguration)>, zwlr_output_configuration_head_v1::Error>>()
-                {
+                    .collect::<Result<
+                        Vec<(Output, OutputConfiguration)>,
+                        zwlr_output_configuration_head_v1::Error,
+                    >>() {
                     Ok(conf) => conf,
                     Err(code) => {
                         return obj.post_error(code, "Incomplete configuration".to_string());
@@ -393,14 +394,15 @@ where
                 } else {
                     obj.failed();
                 }
-            },
-            zwlr_output_configuration_v1::Request::Destroy => {},
-            _ => {},
+            }
+            zwlr_output_configuration_v1::Request::Destroy => {}
+            _ => {}
         }
     }
 }
 
-impl<D> DelegateDispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration, D> for OutputConfigurationState<D>
+impl<D> DelegateDispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration, D>
+    for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>
@@ -409,7 +411,7 @@ where
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration>
         + OutputConfigurationHandler
-        + 'static
+        + 'static,
 {
     fn request(
         _state: &mut D,
@@ -431,8 +433,12 @@ where
                     return;
                 }
                 pending.mode = Some(ModeConfiguration::Mode(mode));
-            },
-            zwlr_output_configuration_head_v1::Request::SetCustomMode { width, height, refresh } => {
+            }
+            zwlr_output_configuration_head_v1::Request::SetCustomMode {
+                width,
+                height,
+                refresh,
+            } => {
                 let mut pending = data.lock().unwrap();
                 if pending.mode.is_some() {
                     obj.post_error(
@@ -445,7 +451,7 @@ where
                     size: Size::from((width, height)),
                     refresh: if refresh == 0 { None } else { Some(refresh) },
                 });
-            },
+            }
             zwlr_output_configuration_head_v1::Request::SetPosition { x, y } => {
                 let mut pending = data.lock().unwrap();
                 if pending.position.is_some() {
@@ -456,7 +462,7 @@ where
                     return;
                 }
                 pending.position = Some(Point::from((x, y)));
-            },
+            }
             zwlr_output_configuration_head_v1::Request::SetScale { scale } => {
                 let mut pending = data.lock().unwrap();
                 if pending.scale.is_some() {
@@ -467,7 +473,7 @@ where
                     return;
                 }
                 pending.scale = Some(scale);
-            },
+            }
             zwlr_output_configuration_head_v1::Request::SetTransform { transform } => {
                 let mut pending = data.lock().unwrap();
                 if pending.transform.is_some() {
@@ -485,36 +491,36 @@ where
                             format!("Invalid transform: {:?}", err),
                         );
                         return;
-                    },
+                    }
                 });
-            },
-            _ => {},
+            }
+            _ => {}
         }
     }
 }
 
 impl<D> OutputConfigurationState<D>
 where
-        D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
-            + GlobalDispatch<WlOutput, OutputData>
-            + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>
-            + Dispatch<ZwlrOutputHeadV1, Output>
-            + Dispatch<ZwlrOutputModeV1, Mode>
-            + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
-            + Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration>
-            + OutputConfigurationHandler
-            + 'static,
+    D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
+        + GlobalDispatch<WlOutput, OutputData>
+        + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>
+        + Dispatch<ZwlrOutputHeadV1, Output>
+        + Dispatch<ZwlrOutputModeV1, Mode>
+        + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
+        + Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration>
+        + OutputConfigurationHandler
+        + 'static,
 {
-    pub fn new<F>(
-        dh: &DisplayHandle,
-        client_filter: F,
-    ) -> OutputConfigurationState<D>
+    pub fn new<F>(dh: &DisplayHandle, client_filter: F) -> OutputConfigurationState<D>
     where
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
-        let global = dh.create_global::<D, ZwlrOutputManagerV1, _>(2, OutputMngrGlobalData {
-            filter: Box::new(client_filter),
-        });
+        let global = dh.create_global::<D, ZwlrOutputManagerV1, _>(
+            2,
+            OutputMngrGlobalData {
+                filter: Box::new(client_filter),
+            },
+        );
 
         OutputConfigurationState {
             outputs: Vec::new(),
@@ -530,19 +536,23 @@ where
     pub fn global_id(&self) -> GlobalId {
         self.global.clone()
     }
-    
+
     pub fn add_heads<'a>(&mut self, outputs: impl Iterator<Item = &'a Output>) {
-        let new_outputs = outputs.filter(|o| !self.outputs.contains(o)).collect::<Vec<_>>();
+        let new_outputs = outputs
+            .filter(|o| !self.outputs.contains(o))
+            .collect::<Vec<_>>();
 
         for output in new_outputs {
-            output.user_data().insert_if_missing(|| OutputState::new(OutputStateInner {
-                enabled: true,
-                global: None,
-            }));
+            output.user_data().insert_if_missing(|| {
+                OutputState::new(OutputStateInner {
+                    enabled: true,
+                    global: None,
+                })
+            });
             self.outputs.push(output.clone());
         }
     }
-    
+
     pub fn remove_heads<'a>(&mut self, outputs: impl Iterator<Item = &'a Output>) {
         for output in outputs {
             if self.outputs.contains(output) {
@@ -577,17 +587,19 @@ where
     pub fn update(&mut self) {
         self.instances.retain(|x| x.active.load(Ordering::SeqCst));
         self.serial_counter += 1;
-       
+
         for output in std::mem::take(&mut self.removed_outputs).into_iter() {
             for instance in &mut self.instances {
-                instance.heads.retain_mut(|head| if &head.output == &output {
-                    for mode in &head.modes {
-                        mode.finished();
+                instance.heads.retain_mut(|head| {
+                    if &head.output == &output {
+                        for mode in &head.modes {
+                            mode.finished();
+                        }
+                        head.head.finished();
+                        false
+                    } else {
+                        true
                     }
-                    head.head.finished();
-                    false
-                } else {
-                    true
                 });
             }
         }
@@ -624,13 +636,17 @@ where
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + OutputConfigurationHandler
-        + 'static
+        + 'static,
 {
     let instance = match mngr.heads.iter_mut().find(|i| i.output == *output) {
         Some(i) => i,
         None => {
             if let Ok(client) = dh.get_client(mngr.obj.id()) {
-                if let Ok(head) = client.create_resource::<ZwlrOutputHeadV1, _, D>(dh, mngr.obj.version(), output.clone()) {
+                if let Ok(head) = client.create_resource::<ZwlrOutputHeadV1, _, D>(
+                    dh,
+                    mngr.obj.version(),
+                    output.clone(),
+                ) {
                     mngr.obj.head(&head);
                     let data = OutputHeadInstance {
                         head,
@@ -652,7 +668,9 @@ where
     instance.head.description(output.description());
     let physical = output.physical_properties();
     if !(physical.size.w == 0 || physical.size.h == 0) {
-        instance.head.physical_size(physical.size.w, physical.size.h);
+        instance
+            .head
+            .physical_size(physical.size.w, physical.size.h);
     }
 
     let inner = output
@@ -664,26 +682,37 @@ where
 
     let output_modes = output.modes();
     // remove old modes
-    instance.modes.retain_mut(|m| if !output_modes.contains(m.data::<Mode>().unwrap()) {
-        m.finished();
-        false
-    } else {
-        true
+    instance.modes.retain_mut(|m| {
+        if !output_modes.contains(m.data::<Mode>().unwrap()) {
+            m.finished();
+            false
+        } else {
+            true
+        }
     });
     // update other modes
     for output_mode in output_modes.into_iter() {
-        if let Some(mode) = if let Some(wlr_mode) = instance.modes
+        if let Some(mode) = if let Some(wlr_mode) = instance
+            .modes
             .iter()
             .find(|mode| *mode.data::<Mode>().unwrap() == output_mode)
         {
             Some(wlr_mode)
         } else if let Ok(client) = dh.get_client(instance.head.id()) {
             // create the mode if it does not exist yet
-            if let Ok(mode) = client.create_resource::<ZwlrOutputModeV1, _, D>(dh, instance.head.version(), output_mode) {
+            if let Ok(mode) = client.create_resource::<ZwlrOutputModeV1, _, D>(
+                dh,
+                instance.head.version(),
+                output_mode,
+            ) {
                 instance.head.mode(&mode);
                 mode.size(output_mode.size.w, output_mode.size.h);
                 mode.refresh(output_mode.refresh);
-                if output.preferred_mode().map(|p| p == output_mode).unwrap_or(false) {
+                if output
+                    .preferred_mode()
+                    .map(|p| p == output_mode)
+                    .unwrap_or(false)
+                {
                     mode.preferred();
                 }
                 instance.modes.push(mode);
@@ -694,7 +723,12 @@ where
         } else {
             None
         } {
-            if inner.enabled && output.current_mode().map(|c| c == output_mode).unwrap_or(false) {
+            if inner.enabled
+                && output
+                    .current_mode()
+                    .map(|c| c == output_mode)
+                    .unwrap_or(false)
+            {
                 instance.head.current_mode(&*mode);
             }
         }

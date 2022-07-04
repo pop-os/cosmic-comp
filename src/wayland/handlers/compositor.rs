@@ -1,43 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{
-    sync::Mutex,
-};
+use crate::{state::BackendData, utils::prelude::*};
 use smithay::{
-    backend::renderer::utils::{
-        on_commit_buffer_handler,
-    },
-    desktop::{
-        LayerSurface,
-        PopupKind,
-        Kind,
-        WindowSurfaceType,
-    },
-    reexports::wayland_server::{
-        DisplayHandle,
-        protocol::wl_surface::WlSurface,
-    },
-    wayland::{
-        compositor::{
-            CompositorHandler,
-            CompositorState,
-            with_states,
-        },
-        shell::{
-            xdg::{
-                ToplevelSurface,
-                XdgToplevelSurfaceRoleAttributes,
-                XdgPopupSurfaceRoleAttributes,
-            },
-            wlr_layer::LayerSurfaceAttributes,
-        },
-    },
+    backend::renderer::utils::on_commit_buffer_handler,
     delegate_compositor,
+    desktop::{Kind, LayerSurface, PopupKind, WindowSurfaceType},
+    reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
+    wayland::{
+        compositor::{with_states, CompositorHandler, CompositorState},
+        shell::{
+            wlr_layer::LayerSurfaceAttributes,
+            xdg::{
+                ToplevelSurface, XdgPopupSurfaceRoleAttributes, XdgToplevelSurfaceRoleAttributes,
+            },
+        },
+    },
 };
-use crate::{
-    state::BackendData,
-    utils::prelude::*,
-};
+use std::sync::Mutex;
 
 impl State {
     fn early_import_surface(&mut self, dh: &DisplayHandle, surface: &WlSurface) {
@@ -46,12 +25,17 @@ impl State {
             if let BackendData::Kms(ref mut kms_state) = &mut self.backend {
                 if let Some(target) = kms_state.target_node_for_output(&output) {
                     if import_nodes.insert(target) {
-                        kms_state.try_early_import(dh, surface, &output, target, &self.common.shell);
+                        kms_state.try_early_import(
+                            dh,
+                            surface,
+                            &output,
+                            target,
+                            &self.common.shell,
+                        );
                     }
                 }
             }
-            self
-                .backend
+            self.backend
                 .schedule_render(&self.common.event_loop_handle, &output);
         }
     }
@@ -119,9 +103,14 @@ impl CompositorHandler for State {
 
     fn commit(&mut self, dh: &DisplayHandle, surface: &WlSurface) {
         // initial configure
-        if let Some((window, seat)) = self.common.shell.pending_windows.iter().find(|(window, _)| {
-            window.toplevel().wl_surface() == surface
-        }).cloned() {
+        if let Some((window, seat)) = self
+            .common
+            .shell
+            .pending_windows
+            .iter()
+            .find(|(window, _)| window.toplevel().wl_surface() == surface)
+            .cloned()
+        {
             match window.toplevel() {
                 Kind::Xdg(toplevel) => {
                     if self.toplevel_ensure_initial_configure(&toplevel) {
@@ -134,9 +123,14 @@ impl CompositorHandler for State {
             }
         }
 
-        if let Some((layer_surface, _, _)) = self.common.shell.pending_layers.iter().find(|(layer_surface, _, _)| {
-            layer_surface.wl_surface() == surface
-        }).cloned() {
+        if let Some((layer_surface, _, _)) = self
+            .common
+            .shell
+            .pending_layers
+            .iter()
+            .find(|(layer_surface, _, _)| layer_surface.wl_surface() == surface)
+            .cloned()
+        {
             if self.layer_surface_ensure_inital_configure(&layer_surface) {
                 self.common.shell.map_layer(&layer_surface, dh);
             } else {
@@ -163,16 +157,17 @@ impl CompositorHandler for State {
                         .map(|window| (&mut workspace.space, window))
                 })
         {
-            let new_location = crate::shell::layout::floating::ResizeSurfaceGrab::apply_resize_state(
-                &window,
-                space.window_location(&window).unwrap(),
-                window.geometry().size,
-            );
+            let new_location =
+                crate::shell::layout::floating::ResizeSurfaceGrab::apply_resize_state(
+                    &window,
+                    space.window_location(&window).unwrap(),
+                    window.geometry().size,
+                );
             if let Some(location) = new_location {
                 space.map_window(&window, location, true);
             }
         }
-        
+
         on_commit_buffer_handler(surface);
         self.early_import_surface(dh, surface);
         self.common.shell.popups.commit(surface);

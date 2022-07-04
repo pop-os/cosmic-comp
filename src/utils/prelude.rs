@@ -1,19 +1,11 @@
-use std::cell::RefCell;
+use crate::{input::ActiveOutput, state::Common};
 use smithay::{
-    wayland::{
-        output::Output,
-        seat::Seat,
-    },
-    utils::{Rectangle, Transform, Logical},
+    utils::{Logical, Rectangle, Transform},
+    wayland::{output::Output, seat::Seat},
 };
-use crate::{
-    input::ActiveOutput,
-    state::Common,
-};
+use std::cell::RefCell;
 
-pub use crate::{
-    state::State,
-};
+pub use crate::state::State;
 
 pub trait OutputExt {
     fn geometry(&self) -> Rectangle<i32, Logical>;
@@ -21,14 +13,17 @@ pub trait OutputExt {
 
 impl OutputExt for Output {
     fn geometry(&self) -> Rectangle<i32, Logical> {
-        Rectangle::from_loc_and_size(
-            self.current_location(),
-            {
-                Transform::from(self.current_transform()).transform_size(
-                    self.current_mode().map(|m| m.size).unwrap_or_else(|| (0,0).into())
-                ).to_f64().to_logical(self.current_scale().fractional_scale()).to_i32_round()
-            },
-        )
+        Rectangle::from_loc_and_size(self.current_location(), {
+            Transform::from(self.current_transform())
+                .transform_size(
+                    self.current_mode()
+                        .map(|m| m.size)
+                        .unwrap_or_else(|| (0, 0).into()),
+                )
+                .to_f64()
+                .to_logical(self.current_scale().fractional_scale())
+                .to_i32_round()
+        })
     }
 }
 

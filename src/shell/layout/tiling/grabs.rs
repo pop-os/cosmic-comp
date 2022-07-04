@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{
-    utils::prelude::*,
-    shell::layout::Orientation,
-};
+use crate::{shell::layout::Orientation, utils::prelude::*};
 use atomic_float::AtomicF64;
 use smithay::{
-    reexports::wayland_server::{
-        DisplayHandle,
-    },
+    reexports::wayland_server::DisplayHandle,
     utils::{Logical, Size},
-    wayland::seat::{AxisFrame, PointerGrab, PointerGrabStartData, PointerInnerHandle, MotionEvent, ButtonEvent},
+    wayland::seat::{
+        AxisFrame, ButtonEvent, MotionEvent, PointerGrab, PointerGrabStartData, PointerInnerHandle,
+    },
 };
 use std::sync::{atomic::Ordering, Arc};
 
@@ -26,9 +23,9 @@ impl PointerGrab<State> for ResizeForkGrab {
     fn motion(
         &mut self,
         _data: &mut State,
-        _dh: &DisplayHandle, 
-        handle: &mut PointerInnerHandle<'_, State>, 
-        event: &MotionEvent
+        _dh: &DisplayHandle,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &MotionEvent,
     ) {
         // While the grab is active, no client has pointer focus
         handle.motion(event.location, None, event.serial, event.time);
@@ -58,7 +55,8 @@ impl PointerGrab<State> for ResizeForkGrab {
         }
     }
 
-    fn axis(&mut self,
+    fn axis(
+        &mut self,
         _data: &mut State,
         _dh: &DisplayHandle,
         handle: &mut PointerInnerHandle<'_, State>,

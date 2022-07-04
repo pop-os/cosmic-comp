@@ -6,7 +6,7 @@ use crate::{
     debug::{debug_ui, fps_ui, log_ui, EguiFrame},
     state::Fps,
     utils::prelude::*,
-}; 
+};
 
 use slog::Logger;
 use smithay::{
@@ -19,7 +19,8 @@ use smithay::{
         },
     },
     desktop::{
-        draw_layer_surface, draw_layer_popups, draw_window, draw_window_popups, layer_map_for_output,
+        draw_layer_popups, draw_layer_surface, draw_window, draw_window_popups,
+        layer_map_for_output,
         space::{RenderElement, RenderError, SpaceOutputTuple, SurfaceTree},
         utils::damage_from_surface_tree,
         Window,
@@ -201,13 +202,22 @@ where
             .unwrap_or(Rectangle::from_loc_and_size((0, 0), (0, 0)));
         let scale = output.current_scale().fractional_scale();
 
-        let fps_overlay = fps_ui(_gpu, state, fps, output_geo.to_f64().to_physical(scale), scale);
+        let fps_overlay = fps_ui(
+            _gpu,
+            state,
+            fps,
+            output_geo.to_f64().to_physical(scale),
+            scale,
+        );
         custom_elements.push(fps_overlay.into());
 
         let area = Rectangle::<f64, smithay::utils::Logical>::from_loc_and_size(
-            state.shell.space_relative_output_geometry((0.0f64, 0.0f64), output),
+            state
+                .shell
+                .space_relative_output_geometry((0.0f64, 0.0f64), output),
             state.shell.global_space().to_f64().size,
-        ).to_physical(scale);
+        )
+        .to_physical(scale);
         if let Some(log_ui) = log_ui(state, area, scale, output_geo.size.w as f32 * 0.6) {
             custom_elements.push(log_ui.into());
         }
@@ -272,7 +282,9 @@ where
             _gpu,
             state,
             fps,
-            Rectangle::from_loc_and_size((0, 0), output_geo.size).to_f64().to_physical(scale),
+            Rectangle::from_loc_and_size((0, 0), output_geo.size)
+                .to_f64()
+                .to_physical(scale),
             scale,
         );
         custom_elements.push(fps_overlay.into());
@@ -311,10 +323,7 @@ where
                 &window,
                 scale,
                 (0.0, 0.0),
-                &[Rectangle::from_loc_and_size(
-                    (0, 0),
-                    mode.size,
-                )],
+                &[Rectangle::from_loc_and_size((0, 0), mode.size)],
                 &slog_scope::logger(),
             )?;
             draw_window_popups(
@@ -323,10 +332,7 @@ where
                 &window,
                 scale,
                 (0.0, 0.0),
-                &[Rectangle::from_loc_and_size(
-                    (0, 0),
-                    mode.size,
-                )],
+                &[Rectangle::from_loc_and_size((0, 0), mode.size)],
                 &slog_scope::logger(),
             )?;
             let layer_map = layer_map_for_output(output);
@@ -338,7 +344,10 @@ where
                     layer_surface,
                     scale,
                     geo.loc.to_f64().to_physical(scale),
-                    &[Rectangle::from_loc_and_size((0, 0), geo.size.to_physical_precise_round(scale))],
+                    &[Rectangle::from_loc_and_size(
+                        (0, 0),
+                        geo.size.to_physical_precise_round(scale),
+                    )],
                     &slog_scope::logger(),
                 )?;
                 draw_layer_popups(
@@ -347,10 +356,18 @@ where
                     layer_surface,
                     scale,
                     geo.loc.to_f64().to_physical(scale),
-                    &[Rectangle::from_loc_and_size((0, 0), geo.size.to_physical_precise_round(scale))],
+                    &[Rectangle::from_loc_and_size(
+                        (0, 0),
+                        geo.size.to_physical_precise_round(scale),
+                    )],
                     &slog_scope::logger(),
                 )?;
-                damage.extend(damage_from_surface_tree(layer_surface.wl_surface(), geo.loc.to_f64().to_physical(scale), scale, None));
+                damage.extend(damage_from_surface_tree(
+                    layer_surface.wl_surface(),
+                    geo.loc.to_f64().to_physical(scale),
+                    scale,
+                    None,
+                ));
             }
             for elem in custom_elements {
                 let loc = elem.location(scale);

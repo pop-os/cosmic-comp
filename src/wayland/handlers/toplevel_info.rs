@@ -3,9 +3,7 @@
 use crate::{
     state::State,
     wayland::protocols::toplevel_info::{
-        ToplevelInfoHandler,
-        ToplevelInfoState,
-        delegate_toplevel_info,
+        delegate_toplevel_info, ToplevelInfoHandler, ToplevelInfoState,
     },
 };
 

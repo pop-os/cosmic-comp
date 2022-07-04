@@ -8,12 +8,9 @@ use smithay::{
     },
     reexports::{
         calloop::RegistrationToken,
-        wayland_server::{Client, DisplayHandle, backend::GlobalId},
+        wayland_server::{backend::GlobalId, Client, DisplayHandle},
     },
-    wayland::{
-        dmabuf::DmabufGlobal,
-        socket::ListeningSocketSource,
-    },
+    wayland::{dmabuf::DmabufGlobal, socket::ListeningSocketSource},
 };
 use std::sync::Arc;
 
@@ -53,50 +50,45 @@ impl State {
             dev_id == render_node
         };
 
-        let dmabuf_global = self.common.dmabuf_state.create_global_with_filter::<State, _, _>(
-            dh,
-            formats.clone(),
-            filter,
-            None,
-        );
+        let dmabuf_global = self
+            .common
+            .dmabuf_state
+            .create_global_with_filter::<State, _, _>(dh, formats.clone(), filter, None);
 
-        let drm_global_id = self.common.wl_drm_state.create_global_with_filter::<State, _>(
-            dh, 
-            render_node
-                .dev_path_with_type(NodeType::Render)
-                .or_else(|| render_node.dev_path())
-                .ok_or(anyhow!("Could not determine path for gpu node: {}", render_node))?,
-            formats,
-            &dmabuf_global,
-            filter,
-        );
-    
+        let drm_global_id = self
+            .common
+            .wl_drm_state
+            .create_global_with_filter::<State, _>(
+                dh,
+                render_node
+                    .dev_path_with_type(NodeType::Render)
+                    .or_else(|| render_node.dev_path())
+                    .ok_or(anyhow!(
+                        "Could not determine path for gpu node: {}",
+                        render_node
+                    ))?,
+                formats,
+                &dmabuf_global,
+                filter,
+            );
+
         // add a special socket for the gpu
         let listener = ListeningSocketSource::with_name(&socket_name, None)
             .with_context(|| format!("Failed to bind socket to {}", socket_name))?;
         let token = self
             .common
             .event_loop_handle
-            .insert_source(
-                listener,
-                move |client_stream, _, data: &mut Data| {
-                    if let Err(err) = data
-                        .display
-                        .handle()
-                        .insert_client(client_stream, Arc::new(data.state.new_client_state_with_node(render_node)))
-                    {
-                        slog_scope::warn!("Error adding wayland client ({}): {}", render_node, err);
-                    }
+            .insert_source(listener, move |client_stream, _, data: &mut Data| {
+                if let Err(err) = data.display.handle().insert_client(
+                    client_stream,
+                    Arc::new(data.state.new_client_state_with_node(render_node)),
+                ) {
+                    slog_scope::warn!("Error adding wayland client ({}): {}", render_node, err);
                 }
-            )
+            })
             .context("Failed to add gpu-wayland socket to the event loop")?;
 
-
-        slog_scope::info!(
-            "Added socket at {} for gpu {}",
-            socket_name,
-            render_node,
-        );
+        slog_scope::info!("Added socket at {} for gpu {}", socket_name, render_node,);
 
         Ok(Socket {
             token,

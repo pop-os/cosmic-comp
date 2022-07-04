@@ -1,23 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::cell::RefCell;
+use crate::state::State;
 use smithay::{
-    reexports::wayland_server::protocol::{
-        wl_data_source::WlDataSource,
-        wl_surface::WlSurface,
-    },
+    delegate_data_device,
+    reexports::wayland_server::protocol::{wl_data_source::WlDataSource, wl_surface::WlSurface},
     wayland::{
         data_device::{
-            DataDeviceState,
-            DataDeviceHandler,
-            ClientDndGrabHandler,
-            ServerDndGrabHandler,
+            ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
         },
         seat::Seat,
     },
-    delegate_data_device,
 };
-use crate::state::State;
+use std::cell::RefCell;
 
 pub struct DnDIcon {
     surface: RefCell<Option<WlSurface>>,
@@ -32,10 +26,10 @@ pub fn get_dnd_icon(seat: &Seat<State>) -> Option<WlSurface> {
 
 impl ClientDndGrabHandler for State {
     fn started(
-        &mut self, 
-        _source: Option<WlDataSource>, 
-        icon: Option<WlSurface>, 
-        seat: Seat<Self>
+        &mut self,
+        _source: Option<WlDataSource>,
+        icon: Option<WlSurface>,
+        seat: Seat<Self>,
     ) {
         let user_data = seat.user_data();
         user_data.insert_if_missing(|| DnDIcon {

@@ -9,7 +9,10 @@ use smithay::{
 };
 
 use anyhow::{Context, Result};
-use std::{ffi::OsString, sync::{Arc, atomic::Ordering}};
+use std::{
+    ffi::OsString,
+    sync::{atomic::Ordering, Arc},
+};
 
 pub mod backend;
 pub mod config;
@@ -47,10 +50,7 @@ fn main() -> Result<()> {
     // potentially tell systemd we are setup now
     systemd::ready(&state);
 
-    let mut data = state::Data {
-        display,
-        state,
-    };
+    let mut data = state::Data { display, state };
     // run the event loop
     event_loop.run(None, &mut data, |data| {
         // shall we shut down?
@@ -85,13 +85,15 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn init_wayland_display(event_loop: &mut EventLoop<state::Data>) -> Result<(Display<state::State>, OsString)> {
+fn init_wayland_display(
+    event_loop: &mut EventLoop<state::Data>,
+) -> Result<(Display<state::State>, OsString)> {
     let mut display = Display::new().unwrap();
 
     let source = ListeningSocketSource::new_auto(None).unwrap();
     let socket_name = source.socket_name().to_os_string();
     slog_scope::info!("Listening on {:?}", socket_name);
-    
+
     event_loop
         .handle()
         .insert_source(source, |client_stream, _, data| {
@@ -108,14 +110,13 @@ fn init_wayland_display(event_loop: &mut EventLoop<state::Data>) -> Result<(Disp
         .handle()
         .insert_source(
             Generic::new(display.backend().poll_fd(), Interest::READ, Mode::Level),
-            move |_, _, data: &mut state::Data| {
-                match data.display.dispatch_clients(&mut data.state) {
-                    Ok(_) => Ok(PostAction::Continue),
-                    Err(e) => {
-                        slog_scope::error!("I/O error on the Wayland display: {}", e);
-                        data.state.common.should_stop = true;
-                        Err(e)
-                    }
+            move |_, _, data: &mut state::Data| match data.display.dispatch_clients(&mut data.state)
+            {
+                Ok(_) => Ok(PostAction::Continue),
+                Err(e) => {
+                    slog_scope::error!("I/O error on the Wayland display: {}", e);
+                    data.state.common.should_stop = true;
+                    Err(e)
                 }
             },
         )

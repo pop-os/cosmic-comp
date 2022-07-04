@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use smithay::{
-    desktop::{layer_map_for_output, Kind, Space, Window, space::RenderZindex},
+    desktop::{layer_map_for_output, space::RenderZindex, Kind, Space, Window},
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
         ResizeEdge, State as XdgState,
     },
+    utils::IsAlive,
     wayland::{
         output::Output,
         seat::{PointerGrabStartData, Seat},
         Serial,
     },
-    utils::IsAlive,
 };
 use std::collections::HashSet;
 
@@ -30,12 +30,7 @@ impl FloatingLayout {
         Default::default()
     }
 
-    pub fn map_window(
-        &mut self,
-        space: &mut Space,
-        window: Window,
-        seat: &Seat<State>,
-    ) {
+    pub fn map_window(&mut self, space: &mut Space, window: Window, seat: &Seat<State>) {
         if let Some(output) = super::output_from_seat(Some(seat), space) {
             self.map_window_internal(space, window, &output);
         } else {
@@ -53,12 +48,7 @@ impl FloatingLayout {
         // TODO make sure all windows are still visible on any output or move them
     }
 
-    fn map_window_internal(
-        &mut self,
-        space: &mut Space,
-        window: Window,
-        output: &Output
-    ) {
+    fn map_window_internal(&mut self, space: &mut Space, window: Window, output: &Output) {
         let win_geo = window.bbox();
         let layers = layer_map_for_output(&output);
         let geometry = layers.non_exclusive_zone();

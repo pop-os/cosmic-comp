@@ -6,8 +6,7 @@ use crate::{
     logger::LogState,
     shell::Shell,
     wayland::protocols::{
-        drm::WlDrmState,
-        output_configuration::OutputConfigurationState,
+        drm::WlDrmState, output_configuration::OutputConfigurationState,
         workspace::WorkspaceClientState,
     },
 };
@@ -24,10 +23,7 @@ use smithay::{
         compositor::CompositorState,
         data_device::DataDeviceState,
         dmabuf::DmabufState,
-        output::{
-            OutputManagerState,
-            Mode as OutputMode, Output, Scale,
-        },
+        output::{Mode as OutputMode, Output, OutputManagerState, Scale},
         seat::{Seat, SeatState},
         shm::ShmState,
         viewporter::ViewporterState,

@@ -93,8 +93,8 @@ impl X11State {
                     .iter_mut()
                     .find(|s| s.output == output_ref)
                 {
-                    if let Err(err) = surface
-                        .render_output(&mut x11_state.renderer, &mut data.state.common)
+                    if let Err(err) =
+                        surface.render_output(&mut x11_state.renderer, &mut data.state.common)
                     {
                         slog_scope::error!("Error rendering: {}", err);
                     }
@@ -218,7 +218,11 @@ impl Surface {
     }
 }
 
-pub fn init_backend(dh: &DisplayHandle, event_loop: &mut EventLoop<Data>, state: &mut State) -> Result<()> {
+pub fn init_backend(
+    dh: &DisplayHandle,
+    event_loop: &mut EventLoop<Data>,
+    state: &mut State,
+) -> Result<()> {
     let backend = X11Backend::new(None).with_context(|| "Failed to initilize X11 backend")?;
     let handle = backend.handle();
 
@@ -253,11 +257,11 @@ pub fn init_backend(dh: &DisplayHandle, event_loop: &mut EventLoop<Data>, state:
         .x11()
         .add_window(event_loop.handle())
         .with_context(|| "Failed to create wl_output")?;
-    state.common.output_configuration_state.add_heads(std::iter::once(&output));
     state
         .common
         .output_configuration_state
-        .update();
+        .add_heads(std::iter::once(&output));
+    state.common.output_configuration_state.update();
     state.common.shell.add_output(&output);
     state.common.config.read_outputs(
         std::iter::once(&output),
@@ -303,7 +307,8 @@ pub fn init_backend(dh: &DisplayHandle, event_loop: &mut EventLoop<Data>, state:
                     size,
                     refresh: 60_000,
                 };
-                if let Some(surface) = data.state
+                if let Some(surface) = data
+                    .state
                     .backend
                     .x11()
                     .surfaces
@@ -324,10 +329,7 @@ pub fn init_backend(dh: &DisplayHandle, event_loop: &mut EventLoop<Data>, state:
                     output.change_current_state(Some(mode), None, None, None);
                     output.set_preferred(mode);
                     layer_map_for_output(output).arrange(&data.display.handle());
-                    data.state
-                        .common
-                        .output_configuration_state
-                        .update();
+                    data.state.common.output_configuration_state.update();
                     data.state.common.shell.refresh_outputs();
                     surface.dirty = true;
                     if !surface.pending {
@@ -358,20 +360,20 @@ pub fn init_backend(dh: &DisplayHandle, event_loop: &mut EventLoop<Data>, state:
     Ok(())
 }
 
-fn init_egl_client_side(dh: &DisplayHandle, state: &mut State, renderer: &mut Gles2Renderer) -> Result<()> {
+fn init_egl_client_side(
+    dh: &DisplayHandle,
+    state: &mut State,
+    renderer: &mut Gles2Renderer,
+) -> Result<()> {
     let bind_result = renderer.bind_wl_display(dh);
     match bind_result {
         Ok(_) => {
             slog_scope::info!("EGL hardware-acceleration enabled");
-            let dmabuf_formats = renderer
-                .dmabuf_formats()
-                .cloned()
-                .collect::<Vec<_>>();
-            state.common.dmabuf_state.create_global::<State, _>(
-                dh,
-                dmabuf_formats,
-                None,
-            );
+            let dmabuf_formats = renderer.dmabuf_formats().cloned().collect::<Vec<_>>();
+            state
+                .common
+                .dmabuf_state
+                .create_global::<State, _>(dh, dmabuf_formats, None);
         }
         Err(err) => slog_scope::warn!("Unable to initialize bind display to EGL: {}", err),
     };

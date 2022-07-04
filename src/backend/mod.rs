@@ -2,10 +2,7 @@
 
 use crate::state::{Data, State};
 use anyhow::Result;
-use smithay::reexports::{
-    calloop::EventLoop,
-    wayland_server::DisplayHandle,
-};
+use smithay::reexports::{calloop::EventLoop, wayland_server::DisplayHandle};
 
 pub mod render;
 

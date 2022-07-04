@@ -1,32 +1,23 @@
-use std::{
-    cell::{Ref, RefMut, RefCell},
-    collections::HashMap,
-    sync::Mutex,
+use crate::{
+    shell::{OutputBoundState, Shell, Workspace, WorkspaceMode},
+    state::Common,
+    utils::prelude::*,
+    wayland::handlers::xdg_shell::PopupGrabData,
 };
 use indexmap::IndexSet;
 use smithay::{
-    desktop::{
-        Window, WindowSurfaceType,
-        PopupUngrabStrategy,
-    },
-    reexports::wayland_server::{
-        DisplayHandle,
-        protocol::wl_surface::WlSurface,
-    },
+    desktop::{PopupUngrabStrategy, Window, WindowSurfaceType},
+    reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
+    utils::IsAlive,
     wayland::{
-        compositor::with_states,
-        seat::Seat,
-        shell::xdg::XdgToplevelSurfaceRoleAttributes,
-        Serial,
+        compositor::with_states, seat::Seat, shell::xdg::XdgToplevelSurfaceRoleAttributes, Serial,
         SERIAL_COUNTER,
     },
-    utils::IsAlive,
 };
-use crate::{
-    state::Common,
-    shell::{Shell, OutputBoundState, Workspace, WorkspaceMode},
-    wayland::handlers::xdg_shell::PopupGrabData,
-    utils::prelude::*,
+use std::{
+    cell::{Ref, RefCell, RefMut},
+    collections::HashMap,
+    sync::Mutex,
 };
 
 #[derive(Debug, serde::Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -130,7 +121,10 @@ impl Shell {
         // update FocusStack and notify layouts about new focus (if any window)
         if let Some(surface) = surface {
             if let Some(workspace) = self.space_for_surface_mut(surface) {
-                if let Some(window) = workspace.space.window_for_surface(surface, WindowSurfaceType::ALL) {
+                if let Some(window) = workspace
+                    .space
+                    .window_for_surface(surface, WindowSurfaceType::ALL)
+                {
                     let mut focus_stack = workspace.focus_stack_mut(active_seat);
                     if Some(window) != focus_stack.last().as_ref() {
                         slog_scope::debug!("Focusing window: {:?}", window);
@@ -226,7 +220,10 @@ impl Common {
                     }
 
                     let workspace = self.shell.active_space(&output);
-                    if let Some(window) = workspace.space.window_for_surface(&surface, WindowSurfaceType::ALL) {
+                    if let Some(window) = workspace
+                        .space
+                        .window_for_surface(&surface, WindowSurfaceType::ALL)
+                    {
                         let focus_stack = workspace.focus_stack(&seat);
                         if focus_stack.last().map(|w| &w != window).unwrap_or(true) {
                             fixup = true;

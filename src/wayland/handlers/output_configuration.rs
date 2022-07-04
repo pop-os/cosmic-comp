@@ -6,11 +6,8 @@ use crate::{
     config::OutputConfig,
     state::State,
     wayland::protocols::output_configuration::{
-        OutputConfigurationState,
-        OutputConfigurationHandler,
-        OutputConfiguration,
-        ModeConfiguration,
-        delegate_output_configuration,
+        delegate_output_configuration, ModeConfiguration, OutputConfiguration,
+        OutputConfigurationHandler, OutputConfigurationState,
     },
 };
 
@@ -30,8 +27,15 @@ impl OutputConfigurationHandler for State {
 }
 
 impl State {
-    fn output_configuration(&mut self, test_only: bool, conf: Vec<(Output, OutputConfiguration)>) -> bool {
-        if conf.iter().all(|(_, conf)| matches!(conf, OutputConfiguration::Disabled)) {
+    fn output_configuration(
+        &mut self,
+        test_only: bool,
+        conf: Vec<(Output, OutputConfiguration)>,
+    ) -> bool {
+        if conf
+            .iter()
+            .all(|(_, conf)| matches!(conf, OutputConfiguration::Disabled))
+        {
             return false; // we don't allow the user to accidentally disable all their outputs
         }
 
@@ -50,15 +54,15 @@ impl State {
                     scale,
                     transform,
                     position,
-                } = conf {
+                } = conf
+                {
                     match mode {
                         Some(ModeConfiguration::Mode(mode)) => {
                             current_config.mode =
                                 ((mode.size.w, mode.size.h), Some(mode.refresh as u32));
                         }
                         Some(ModeConfiguration::Custom { size, refresh }) => {
-                            current_config.mode =
-                                ((size.w, size.h), refresh.map(|x| x as u32));
+                            current_config.mode = ((size.w, size.h), refresh.map(|x| x as u32));
                         }
                         _ => {}
                     }
@@ -116,22 +120,25 @@ impl State {
             }
         }
 
-        for output in conf.iter().filter(|(_, c)| matches!(c, OutputConfiguration::Enabled { .. })).map(|(o, _)| o) {
+        for output in conf
+            .iter()
+            .filter(|(_, c)| matches!(c, OutputConfiguration::Enabled { .. }))
+            .map(|(o, _)| o)
+        {
             self.common.output_configuration_state.enable_head(output);
         }
-        for output in conf.iter().filter(|(_, c)| matches!(c, OutputConfiguration::Disabled)).map(|(o, _)| o) {
+        for output in conf
+            .iter()
+            .filter(|(_, c)| matches!(c, OutputConfiguration::Disabled))
+            .map(|(o, _)| o)
+        {
             self.common.output_configuration_state.disable_head(output);
         }
-        self
-            .common
+        self.common
             .config
             .write_outputs(self.common.output_configuration_state.outputs());
         self.common.event_loop_handle.insert_idle(move |data| {
-            data
-                .state
-                .common
-                .output_configuration_state
-                .update();
+            data.state.common.output_configuration_state.update();
         });
 
         true

@@ -1,7 +1,6 @@
-
 use crate::{
+    shell::layout::{floating::FloatingLayout, tiling::TilingLayout},
     state::State,
-    shell::layout::{tiling::TilingLayout, floating::FloatingLayout},
     wayland::protocols::workspace::WorkspaceHandle,
 };
 
@@ -11,12 +10,12 @@ use smithay::{
         wayland_protocols::xdg::shell::server::xdg_toplevel::{self, ResizeEdge},
         wayland_server::DisplayHandle,
     },
+    utils::IsAlive,
     wayland::{
         output::Output,
         seat::{PointerGrabStartData, Seat},
         Serial,
     },
-    utils::IsAlive,
 };
 use std::collections::HashMap;
 
@@ -64,7 +63,8 @@ impl Workspace {
             return;
         }
         if self.floating_layer.windows.contains(window) {
-            self.floating_layer.maximize_request(&mut self.space, window, output);
+            self.floating_layer
+                .maximize_request(&mut self.space, window, output);
         }
     }
 
@@ -79,7 +79,8 @@ impl Workspace {
             return;
         }
         if self.floating_layer.windows.contains(window) {
-            self.floating_layer.move_request(&mut self.space, window, seat, serial, start_data)
+            self.floating_layer
+                .move_request(&mut self.space, window, seat, serial, start_data)
         }
     }
 
@@ -95,10 +96,24 @@ impl Workspace {
             return;
         }
         if self.floating_layer.windows.contains(window) {
-            self.floating_layer.resize_request(&mut self.space, window, seat, serial, start_data.clone(), edges)
+            self.floating_layer.resize_request(
+                &mut self.space,
+                window,
+                seat,
+                serial,
+                start_data.clone(),
+                edges,
+            )
         }
         if self.tiling_layer.windows.contains(window) {
-            self.tiling_layer.resize_request(&mut self.space, window, seat, serial, start_data, edges)
+            self.tiling_layer.resize_request(
+                &mut self.space,
+                window,
+                seat,
+                serial,
+                start_data,
+                edges,
+            )
         }
     }
 
@@ -155,8 +170,6 @@ impl Workspace {
         if !self.space.outputs().any(|o| o == output) {
             return None;
         }
-        self.fullscreen
-            .get(&output.name())
-            .filter(|w| w.alive())
+        self.fullscreen.get(&output.name()).filter(|w| w.alive())
     }
 }

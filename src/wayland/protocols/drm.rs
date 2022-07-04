@@ -26,11 +26,8 @@ use smithay::{
         Format, Fourcc, Modifier,
     },
     reexports::wayland_server::{
-        Client, DataInit, DisplayHandle,
-        DelegateGlobalDispatch, DelegateDispatch,
-        GlobalDispatch, Dispatch, Resource,
-        New, backend::GlobalId,
-        protocol::wl_buffer::WlBuffer,
+        backend::GlobalId, protocol::wl_buffer::WlBuffer, Client, DataInit, DelegateDispatch,
+        DelegateGlobalDispatch, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
     },
     wayland::{
         buffer::BufferHandler,
@@ -38,11 +35,7 @@ use smithay::{
     },
 };
 
-use std::{
-    convert::TryFrom,
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{convert::TryFrom, path::PathBuf, sync::Arc};
 
 pub struct WlDrmState;
 
@@ -118,18 +111,14 @@ where
     ) {
         match request {
             wl_drm::Request::Authenticate { .. } => drm.authenticated(),
-            wl_drm::Request::CreateBuffer { .. } => {
-                drm.post_error(
-                    wl_drm::Error::InvalidName,
-                    String::from("Flink handles are unsupported, use PRIME"),
-                )
-            },
-            wl_drm::Request::CreatePlanarBuffer { .. } => {
-                drm.post_error(
-                    wl_drm::Error::InvalidName,
-                    String::from("Flink handles are unsupported, use PRIME"),
-                )
-            },
+            wl_drm::Request::CreateBuffer { .. } => drm.post_error(
+                wl_drm::Error::InvalidName,
+                String::from("Flink handles are unsupported, use PRIME"),
+            ),
+            wl_drm::Request::CreatePlanarBuffer { .. } => drm.post_error(
+                wl_drm::Error::InvalidName,
+                String::from("Flink handles are unsupported, use PRIME"),
+            ),
             wl_drm::Request::CreatePrimeBuffer {
                 id,
                 name,
@@ -150,7 +139,7 @@ where
                             return;
                         }
                         format
-                    },
+                    }
                     Err(_) => {
                         drm.post_error(
                             wl_drm::Error::InvalidFormat,
@@ -171,29 +160,30 @@ where
                 let mut dma = Dmabuf::builder((width, height), format, DmabufFlags::empty());
                 dma.add_plane(name, 0, offset0 as u32, stride0 as u32, Modifier::Invalid);
                 match dma.build() {
-                    Some(dmabuf) => match state.dmabuf_imported(dh, &data.dmabuf_global, dmabuf.clone()) {
-                        Ok(_) => {
-                            // import was successful
-                            data_init.init(id, dmabuf);
-                            slog_scope::trace!("Created a new validated dma wl_buffer via wl_drm.");
-                        },
+                    Some(dmabuf) => {
+                        match state.dmabuf_imported(dh, &data.dmabuf_global, dmabuf.clone()) {
+                            Ok(_) => {
+                                // import was successful
+                                data_init.init(id, dmabuf);
+                                slog_scope::trace!(
+                                    "Created a new validated dma wl_buffer via wl_drm."
+                                );
+                            }
 
-                        Err(ImportError::InvalidFormat) => {
-                            drm.post_error(
-                                wl_drm::Error::InvalidFormat,
-                                "format and plane combination are not valid",
-                            );
-                        }
+                            Err(ImportError::InvalidFormat) => {
+                                drm.post_error(
+                                    wl_drm::Error::InvalidFormat,
+                                    "format and plane combination are not valid",
+                                );
+                            }
 
-                        Err(ImportError::Failed) => {
-                            // Buffer import failed. The protocol documentation heavily implies killing the
-                            // client is the right thing to do here.
-                            drm.post_error(
-                                wl_drm::Error::InvalidName,
-                                "buffer import failed",
-                            );
+                            Err(ImportError::Failed) => {
+                                // Buffer import failed. The protocol documentation heavily implies killing the
+                                // client is the right thing to do here.
+                                drm.post_error(wl_drm::Error::InvalidName, "buffer import failed");
+                            }
                         }
-                    },
+                    }
                     None => {
                         // Buffer import failed. The protocol documentation heavily implies killing the
                         // client is the right thing to do here.
@@ -223,7 +213,9 @@ impl WlDrmState {
             + DmabufHandler
             + 'static,
     {
-        self.create_global_with_filter::<D, _>(display, device_path, formats, dmabuf_global, |_| true)
+        self.create_global_with_filter::<D, _>(display, device_path, formats, dmabuf_global, |_| {
+            true
+        })
     }
 
     pub fn create_global_with_filter<D, F>(
@@ -242,7 +234,13 @@ impl WlDrmState {
             + 'static,
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
-        let formats = Arc::new(formats.into_iter().filter(|f| f.modifier == Modifier::Invalid).map(|f| f.code).collect());
+        let formats = Arc::new(
+            formats
+                .into_iter()
+                .filter(|f| f.modifier == Modifier::Invalid)
+                .map(|f| f.code)
+                .collect(),
+        );
         let data = DrmGlobalData {
             filter: Box::new(client_filter),
             formats,
@@ -266,4 +264,3 @@ macro_rules! delegate_wl_drm {
     };
 }
 pub(crate) use delegate_wl_drm;
- 

@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    shell::{
-        layout::Orientation,
-        focus::FocusDirection,
-    },
+    shell::{focus::FocusDirection, layout::Orientation},
     utils::prelude::*,
 };
 
@@ -187,7 +184,12 @@ impl TilingLayout {
                 if let Some(root_id) = tree.root_node_id() {
                     for node in tree.traverse_pre_order(root_id).unwrap() {
                         if let Data::Window(window) = node.data() {
-                            self.map_window_internal(space, window, None, Option::<std::iter::Empty<&Window>>::None);
+                            self.map_window_internal(
+                                space,
+                                window,
+                                None,
+                                Option::<std::iter::Empty<&Window>>::None,
+                            );
                         }
                     }
                 }
@@ -274,7 +276,7 @@ impl TilingLayout {
             }
         }
     }
-    
+
     fn active_tree<'a>(trees: &'a mut Vec<Tree<Data>>, output: usize) -> &'a mut Tree<Data> {
         while trees.len() <= output {
             trees.push(Tree::new())
@@ -558,11 +560,8 @@ impl TilingLayout {
                                 if let Some(geo) = geo {
                                     #[allow(irrefutable_let_patterns)]
                                     if let Kind::Xdg(xdg) = &window.toplevel() {
-                                        if xdg
-                                            .current_state()
-                                            .states.contains(XdgState::Fullscreen)
-                                        || xdg
-                                            .with_pending_state(|pending| {
+                                        if xdg.current_state().states.contains(XdgState::Fullscreen)
+                                            || xdg.with_pending_state(|pending| {
                                                 pending.states.contains(XdgState::Fullscreen)
                                             })
                                         {

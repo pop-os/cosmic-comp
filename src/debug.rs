@@ -80,7 +80,9 @@ pub fn fps_ui(
                             .show(ui, |plot_ui| {
                                 plot_ui.bar_chart(fps_chart);
                                 plot_ui.hline(
-                                    HLine::new(avg).highlight(true).color(egui::Color32::LIGHT_BLUE),
+                                    HLine::new(avg)
+                                        .highlight(true)
+                                        .color(egui::Color32::LIGHT_BLUE),
                                 );
                             });
                     }
@@ -131,8 +133,10 @@ pub fn debug_ui(
                     state.shell.set_mode(mode);
 
                     let mode = match &state.shell.workspace_mode {
-                        WorkspaceMode::OutputBound =>  (ConfigMode::OutputBound, None),
-                        WorkspaceMode::Global { ref active, .. } =>  (ConfigMode::Global, Some(*active)),
+                        WorkspaceMode::OutputBound => (ConfigMode::OutputBound, None),
+                        WorkspaceMode::Global { ref active, .. } => {
+                            (ConfigMode::Global, Some(*active))
+                        }
                     };
                     match mode {
                         (ConfigMode::OutputBound, _) => {
@@ -180,7 +184,7 @@ pub fn debug_ui(
                                     );
                                 }
                             });
-                        },
+                        }
                         _ => unreachable!(),
                     }
 
@@ -225,10 +229,7 @@ pub fn debug_ui(
                         ui.separator();
                         ui.collapsing(output.name(), |ui| {
                             ui.label(format!("Output: {:#?}", output));
-                            ui.label(format!(
-                                "Geometry: {:?}",
-                                output.geometry()
-                            ));
+                            ui.label(format!("Geometry: {:?}", output.geometry()));
                             ui.label(format!(
                                 "Local Geometry: {:?}",
                                 state
@@ -239,7 +240,9 @@ pub fn debug_ui(
                             ));
                             ui.label(format!(
                                 "Relative Geometry: {:?}",
-                                state.shell.space_relative_output_geometry((0i32, 0i32), &output)
+                                state
+                                    .shell
+                                    .space_relative_output_geometry((0i32, 0i32), &output)
                             ));
                         });
                     }

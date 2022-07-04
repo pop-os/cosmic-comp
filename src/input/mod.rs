@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{
-    config::Action,
-    shell::Workspace,
-    utils::prelude::*,
-};
+use crate::{config::Action, shell::Workspace, utils::prelude::*};
 use smithay::{
     backend::input::{Device, DeviceCapability, InputBackend, InputEvent, KeyState},
     desktop::{layer_map_for_output, Kind, WindowSurfaceType},
@@ -13,7 +9,10 @@ use smithay::{
     wayland::{
         data_device::set_data_device_focus,
         output::Output,
-        seat::{keysyms, CursorImageStatus, FilterResult, KeysymHandle, Seat, XkbConfig, MotionEvent, ButtonEvent},
+        seat::{
+            keysyms, ButtonEvent, CursorImageStatus, FilterResult, KeysymHandle, MotionEvent, Seat,
+            XkbConfig,
+        },
         shell::wlr_layer::Layer as WlrLayer,
         SERIAL_COUNTER,
     },
@@ -92,7 +91,11 @@ pub fn add_seat(dh: &DisplayHandle, name: String) -> Seat<State> {
 }
 
 impl State {
-    pub fn process_input_event<B: InputBackend>(&mut self, dh: &DisplayHandle, event: InputEvent<B>) {
+    pub fn process_input_event<B: InputBackend>(
+        &mut self,
+        dh: &DisplayHandle,
+        event: InputEvent<B>,
+    ) {
         use smithay::backend::input::Event;
 
         match event {
@@ -104,16 +107,18 @@ impl State {
                     match cap {
                         DeviceCapability::Keyboard => {
                             let dh_clone = dh.clone();
-                            let _ =
-                                seat.add_keyboard(XkbConfig::default(), 200, 25, move |seat, focus| {
-                                    if let Some(client) = focus.and_then(|s| dh_clone.get_client(s.id()).ok()) {
-                                        set_data_device_focus(
-                                            &dh_clone,
-                                            seat,
-                                            Some(client),
-                                        )
+                            let _ = seat.add_keyboard(
+                                XkbConfig::default(),
+                                200,
+                                25,
+                                move |seat, focus| {
+                                    if let Some(client) =
+                                        focus.and_then(|s| dh_clone.get_client(s.id()).ok())
+                                    {
+                                        set_data_device_focus(&dh_clone, seat, Some(client))
                                     }
-                                });
+                                },
+                            );
                         }
                         DeviceCapability::Pointer => {
                             let output = self
@@ -302,15 +307,21 @@ impl State {
                                 }
                                 Action::Focus(focus) => {
                                     let current_output = active_output(seat, &self.common);
-                                    let workspace = self.common.shell.active_space_mut(&current_output);
+                                    let workspace =
+                                        self.common.shell.active_space_mut(&current_output);
                                     let focus_stack = workspace.focus_stack(seat);
                                     if let Some(window) = workspace.tiling_layer.move_focus(
                                         *focus,
                                         seat,
                                         &mut workspace.space,
-                                        focus_stack.iter()
+                                        focus_stack.iter(),
                                     ) {
-                                        self.common.set_focus(dh, Some(window.toplevel().wl_surface()), seat, None);
+                                        self.common.set_focus(
+                                            dh,
+                                            Some(window.toplevel().wl_surface()),
+                                            seat,
+                                            None,
+                                        );
                                     }
                                 }
                                 Action::Fullscreen => {
@@ -324,11 +335,14 @@ impl State {
                                 }
                                 Action::Orientation(orientation) => {
                                     let output = active_output(seat, &self.common);
-                                    let workspace = self.common
-                                        .shell
-                                        .active_space_mut(&output);
+                                    let workspace = self.common.shell.active_space_mut(&output);
                                     let focus_stack = workspace.focus_stack(seat);
-                                    workspace.tiling_layer.update_orientation(*orientation, &seat, &mut workspace.space, focus_stack.iter());
+                                    workspace.tiling_layer.update_orientation(
+                                        *orientation,
+                                        &seat,
+                                        &mut workspace.space,
+                                        focus_stack.iter(),
+                                    );
                                 }
                                 Action::Spawn(command) => {
                                     if let Err(err) = std::process::Command::new("/bin/sh")
@@ -363,11 +377,7 @@ impl State {
                             .common
                             .shell
                             .outputs()
-                            .find(|output| {
-                                output.geometry()
-                                    .to_f64()
-                                    .contains(position)
-                            })
+                            .find(|output| output.geometry().to_f64().contains(position))
                             .cloned()
                             .unwrap_or(current_output.clone());
                         if output != current_output {
@@ -395,14 +405,16 @@ impl State {
                             output_geometry,
                             &workspace,
                         );
-                        seat.get_pointer()
-                            .unwrap()
-                            .motion(self, dh, &MotionEvent {
+                        seat.get_pointer().unwrap().motion(
+                            self,
+                            dh,
+                            &MotionEvent {
                                 location: position,
                                 focus: under,
                                 serial,
-                                time: event.time()
-                            });
+                                time: event.time(),
+                            },
+                        );
 
                         #[cfg(feature = "debug")]
                         if self.common.seats.iter().position(|x| x == seat).unwrap() == 0 {
@@ -444,14 +456,16 @@ impl State {
                             geometry,
                             &workspace,
                         );
-                        seat.get_pointer()
-                            .unwrap()
-                            .motion(self, dh, &MotionEvent {
+                        seat.get_pointer().unwrap().motion(
+                            self,
+                            dh,
+                            &MotionEvent {
                                 location: position,
                                 focus: under,
                                 serial,
-                                time: event.time()
-                            });
+                                time: event.time(),
+                            },
+                        );
 
                         #[cfg(feature = "debug")]
                         if self.common.seats.iter().position(|x| x == seat).unwrap() == 0 {
@@ -548,7 +562,9 @@ impl State {
                                                     pos - output_geo.loc.to_f64(),
                                                     WindowSurfaceType::ALL,
                                                 )
-                                                .map(|(_, _)| window.toplevel().wl_surface().clone());
+                                                .map(|(_, _)| {
+                                                    window.toplevel().wl_surface().clone()
+                                                });
                                         }
                                     } else {
                                         if let Some(layer) = layers
@@ -568,11 +584,9 @@ impl State {
                                                     )
                                                     .map(|(_, _)| layer.wl_surface().clone());
                                             }
-                                        } else if let Some((window, _, _)) =
-                                            workspace.space.surface_under(
-                                                relative_pos,
-                                                WindowSurfaceType::ALL,
-                                            )
+                                        } else if let Some((window, _, _)) = workspace
+                                            .space
+                                            .surface_under(relative_pos, WindowSurfaceType::ALL)
                                         {
                                             under = Some(window.toplevel().wl_surface().clone());
                                         } else if let Some(layer) =
@@ -594,20 +608,23 @@ impl State {
                                         };
                                     }
 
-                                    self.common.set_focus(dh, under.as_ref(), seat, Some(serial));
+                                    self.common
+                                        .set_focus(dh, under.as_ref(), seat, Some(serial));
                                 }
                                 wl_pointer::ButtonState::Pressed
                             }
                             ButtonState::Released => wl_pointer::ButtonState::Released,
                         };
-                        seat.get_pointer()
-                            .unwrap()
-                            .button(self, dh, &ButtonEvent {
+                        seat.get_pointer().unwrap().button(
+                            self,
+                            dh,
+                            &ButtonEvent {
                                 button,
                                 state,
                                 serial,
-                                time: event.time()
-                            });
+                                time: event.time(),
+                            },
+                        );
                         break;
                     }
                 }

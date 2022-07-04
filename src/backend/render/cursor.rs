@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{
-    wayland::handlers::data_device::get_dnd_icon,
-    utils::prelude::*,
-};
+use crate::{utils::prelude::*, wayland::handlers::data_device::get_dnd_icon};
 use smithay::{
     backend::renderer::{Frame, ImportAll, ImportMem, Renderer, Texture},
     desktop::space::{RenderElement, SpaceOutputTuple, SurfaceTree},
     reexports::wayland_server::protocol::wl_surface,
-    utils::{IsAlive, Logical, Physical, Point, Rectangle, Size, Scale, Transform},
+    utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Size, Transform},
     wayland::{
         compositor::{get_role, with_states},
         seat::{CursorImageAttributes, CursorImageStatus, Seat},
@@ -198,7 +195,9 @@ where
     }
 
     fn geometry(&self, scale: impl Into<Scale<f64>>) -> Rectangle<i32, Physical> {
-        Rectangle::from_loc_and_size(self.position, self.size.to_f64()).to_physical(scale).to_i32_round()
+        Rectangle::from_loc_and_size(self.position, self.size.to_f64())
+            .to_physical(scale)
+            .to_i32_round()
     }
 
     fn accumulated_damage(
@@ -207,7 +206,10 @@ where
         _: Option<SpaceOutputTuple<'_, '_>>,
     ) -> Vec<Rectangle<i32, Physical>> {
         if self.new_frame {
-            vec![Rectangle::from_loc_and_size((0, 0), self.size.to_physical_precise_round(scale))]
+            vec![Rectangle::from_loc_and_size(
+                (0, 0),
+                self.size.to_physical_precise_round(scale),
+            )]
         } else {
             vec![]
         }
@@ -323,7 +325,8 @@ where
                     pointer_images.push((frame.clone(), Box::new(texture.clone())));
                     texture
                 });
-            let hotspot = Point::<i32, Logical>::from((frame.xhot as i32, frame.yhot as i32)).to_f64();
+            let hotspot =
+                Point::<i32, Logical>::from((frame.xhot as i32, frame.yhot as i32)).to_f64();
             *state.current_image.borrow_mut() = Some(frame);
 
             Some(PointerElement::new(pointer_image.clone(), location - hotspot, new_frame).into())

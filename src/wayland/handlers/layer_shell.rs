@@ -1,23 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use crate::utils::prelude::*;
 use smithay::{
+    delegate_layer_shell,
     desktop::LayerSurface,
-    reexports::wayland_server::{
-        DisplayHandle,
-        protocol::wl_output::WlOutput,
-    },
+    reexports::wayland_server::{protocol::wl_output::WlOutput, DisplayHandle},
     wayland::{
         output::Output,
         shell::wlr_layer::{
-            WlrLayerShellHandler,
-            WlrLayerShellState,
-            LayerSurface as WlrLayerSurface,
-            Layer,
+            Layer, LayerSurface as WlrLayerSurface, WlrLayerShellHandler, WlrLayerShellState,
         },
     },
-    delegate_layer_shell,
 };
-use crate::utils::prelude::*;
 
 impl WlrLayerShellHandler for State {
     fn shell_state(&mut self) -> &mut WlrLayerShellState {
@@ -25,12 +19,12 @@ impl WlrLayerShellHandler for State {
     }
 
     fn new_layer_surface(
-        &mut self, 
-        _dh: &DisplayHandle, 
-        surface: WlrLayerSurface, 
-        wl_output: Option<WlOutput>, 
-        _layer: Layer, 
-        namespace: String
+        &mut self,
+        _dh: &DisplayHandle,
+        surface: WlrLayerSurface,
+        wl_output: Option<WlOutput>,
+        _layer: Layer,
+        namespace: String,
     ) {
         super::mark_dirty_on_drop(&self.common, surface.wl_surface());
         let seat = self.common.last_active_seat.clone();

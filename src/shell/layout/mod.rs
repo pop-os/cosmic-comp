@@ -1,15 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{
-    input::ActiveOutput,
-    state::State,
-};
+use crate::{input::ActiveOutput, state::State};
 use smithay::{
     desktop::{Space, Window},
     wayland::{
-        compositor::with_states,
-        output::Output,
-        seat::Seat,
+        compositor::with_states, output::Output, seat::Seat,
         shell::xdg::XdgToplevelSurfaceRoleAttributes,
     },
 };
@@ -37,9 +32,7 @@ pub fn should_be_floating(window: &Window) -> bool {
         // simple heuristic taken from
         // sway/desktop/xdg_shell.c:188 @ 0ee54a52
         if attrs.parent.is_some()
-            || (attrs.min_size.w != 0
-                && attrs.min_size.h != 0
-                && attrs.min_size == attrs.max_size)
+            || (attrs.min_size.w != 0 && attrs.min_size.h != 0 && attrs.min_size == attrs.max_size)
         {
             return true;
         }

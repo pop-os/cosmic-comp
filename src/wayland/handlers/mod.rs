@@ -23,8 +23,8 @@ use smithay::{
 
 fn mark_dirty_on_drop(state: &Common, wl_surface: &WlSurface) {
     use std::sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
+        Arc,
     };
 
     let dirty = state.dirty_flag.clone();
@@ -33,7 +33,9 @@ fn mark_dirty_on_drop(state: &Common, wl_surface: &WlSurface) {
     with_states(wl_surface, |data| {
         data.data_map.insert_if_missing(|| DirtyFlag(dirty));
     });
-    add_destruction_hook(wl_surface, |data| if let Some(DirtyFlag(dirty)) = data.data_map.get::<DirtyFlag>() {
-        dirty.store(true, Ordering::SeqCst);
+    add_destruction_hook(wl_surface, |data| {
+        if let Some(DirtyFlag(dirty)) = data.data_map.get::<DirtyFlag>() {
+            dirty.store(true, Ordering::SeqCst);
+        }
     })
 }

@@ -43,7 +43,9 @@ impl WinitState {
             self.reset_buffers();
         }
 
-        self.backend.bind().with_context(|| "Failed to bind buffer")?;
+        self.backend
+            .bind()
+            .with_context(|| "Failed to bind buffer")?;
         let age = if self.age_reset > 0 {
             self.age_reset -= 1;
             0
@@ -110,7 +112,11 @@ impl WinitState {
     }
 }
 
-pub fn init_backend(dh: &DisplayHandle, event_loop: &mut EventLoop<Data>, state: &mut State) -> Result<()> {
+pub fn init_backend(
+    dh: &DisplayHandle,
+    event_loop: &mut EventLoop<Data>,
+    state: &mut State,
+) -> Result<()> {
     let (mut backend, mut input) =
         winit::init(None).map_err(|_| anyhow!("Failed to initilize winit backend"))?;
 
@@ -158,9 +164,12 @@ pub fn init_backend(dh: &DisplayHandle, event_loop: &mut EventLoop<Data>, state:
         event_loop
             .handle()
             .insert_source(render_source, move |_, _, data| {
-                if let Err(err) = data.state.backend.winit().render_output(
-                    &mut data.state.common
-                ) {
+                if let Err(err) = data
+                    .state
+                    .backend
+                    .winit()
+                    .render_output(&mut data.state.common)
+                {
                     slog_scope::error!("Failed to render frame: {}", err);
                     render_ping.ping();
                 }
@@ -171,13 +180,10 @@ pub fn init_backend(dh: &DisplayHandle, event_loop: &mut EventLoop<Data>, state:
     event_loop
         .handle()
         .insert_source(event_source, move |_, _, data| {
-            match input
-                .dispatch_new_events(|event| data.state.process_winit_event(
-                    &data.display.handle(),
-                    event,
-                    &render_ping_handle
-                ))
-            {
+            match input.dispatch_new_events(|event| {
+                data.state
+                    .process_winit_event(&data.display.handle(), event, &render_ping_handle)
+            }) {
                 Ok(_) => {
                     event_ping_handle.ping();
                     render_ping_handle.ping();
@@ -201,11 +207,11 @@ pub fn init_backend(dh: &DisplayHandle, event_loop: &mut EventLoop<Data>, state:
         fps: Fps::default(),
         age_reset: 0,
     });
-    state.common.output_configuration_state.add_heads(std::iter::once(&output));
     state
         .common
         .output_configuration_state
-        .update();
+        .add_heads(std::iter::once(&output));
+    state.common.output_configuration_state.update();
     state.common.shell.add_output(&output);
     state.common.config.read_outputs(
         std::iter::once(&output),
@@ -233,11 +239,10 @@ fn init_egl_client_side(
                 .dmabuf_formats()
                 .cloned()
                 .collect::<Vec<_>>();
-            state.common.dmabuf_state.create_global::<State, _>(
-                dh,
-                dmabuf_formats,
-                None,
-            );
+            state
+                .common
+                .dmabuf_state
+                .create_global::<State, _>(dh, dmabuf_formats, None);
         }
         Err(err) => slog_scope::warn!("Unable to initialize bind display to EGL: {}", err),
     };
@@ -246,7 +251,12 @@ fn init_egl_client_side(
 }
 
 impl State {
-    pub fn process_winit_event(&mut self, dh: &DisplayHandle, event: WinitEvent, render_ping: &ping::Ping) {
+    pub fn process_winit_event(
+        &mut self,
+        dh: &DisplayHandle,
+        event: WinitEvent,
+        render_ping: &ping::Ping,
+    ) {
         // here we can handle special cases for winit inputs
         match event {
             WinitEvent::Focus(true) => {
@@ -278,9 +288,7 @@ impl State {
                 output.set_preferred(mode);
                 output.change_current_state(Some(mode), None, None, None);
                 layer_map_for_output(output).arrange(dh);
-                self.common
-                    .output_configuration_state
-                    .update();
+                self.common.output_configuration_state.update();
                 self.common.shell.refresh_outputs();
                 render_ping.ping();
             }
