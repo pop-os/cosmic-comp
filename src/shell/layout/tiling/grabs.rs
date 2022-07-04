@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use super::Orientation;
+
+use crate::{
+    utils::prelude::*,
+    shell::layout::Orientation,
+};
 use atomic_float::AtomicF64;
 use smithay::{
-    reexports::wayland_server::protocol::{wl_pointer::ButtonState, wl_surface},
-    utils::{Logical, Point, Size},
-    wayland::{
-        seat::{AxisFrame, PointerGrab, PointerGrabStartData, PointerInnerHandle},
-        Serial,
+    reexports::wayland_server::{
+        DisplayHandle,
     },
+    utils::{Logical, Size},
+    wayland::seat::{AxisFrame, PointerGrab, PointerGrabStartData, PointerInnerHandle, MotionEvent, ButtonEvent},
 };
 use std::sync::{atomic::Ordering, Arc};
 
@@ -19,19 +22,18 @@ pub struct ResizeForkGrab {
     pub ratio: Arc<AtomicF64>,
 }
 
-impl PointerGrab for ResizeForkGrab {
+impl PointerGrab<State> for ResizeForkGrab {
     fn motion(
         &mut self,
-        handle: &mut PointerInnerHandle<'_>,
-        location: Point<f64, Logical>,
-        _focus: Option<(wl_surface::WlSurface, Point<i32, Logical>)>,
-        serial: Serial,
-        time: u32,
+        _data: &mut State,
+        _dh: &DisplayHandle, 
+        handle: &mut PointerInnerHandle<'_, State>, 
+        event: &MotionEvent
     ) {
         // While the grab is active, no client has pointer focus
-        handle.motion(location, None, serial, time);
+        handle.motion(event.location, None, event.serial, event.time);
 
-        let delta = location - self.start_data.location;
+        let delta = event.location - self.start_data.location;
         let delta = match self.orientation {
             Orientation::Vertical => delta.x / self.initial_size.w as f64,
             Orientation::Horizontal => delta.y / self.initial_size.h as f64,
@@ -44,20 +46,24 @@ impl PointerGrab for ResizeForkGrab {
 
     fn button(
         &mut self,
-        handle: &mut PointerInnerHandle<'_>,
-        button: u32,
-        state: ButtonState,
-        serial: Serial,
-        time: u32,
+        _data: &mut State,
+        _dh: &DisplayHandle,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &ButtonEvent,
     ) {
-        handle.button(button, state, serial, time);
+        handle.button(event.button, event.state, event.serial, event.time);
         if handle.current_pressed().is_empty() {
             // No more buttons are pressed, release the grab.
-            handle.unset_grab(serial, time);
+            handle.unset_grab(event.serial, event.time);
         }
     }
 
-    fn axis(&mut self, handle: &mut PointerInnerHandle<'_>, details: AxisFrame) {
+    fn axis(&mut self,
+        _data: &mut State,
+        _dh: &DisplayHandle,
+        handle: &mut PointerInnerHandle<'_, State>,
+        details: AxisFrame,
+    ) {
         handle.axis(details)
     }
 

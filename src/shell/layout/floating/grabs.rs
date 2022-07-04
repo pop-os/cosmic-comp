@@ -3,73 +3,70 @@
 use smithay::{
     desktop::{Kind, Window},
     reexports::{
-        wayland_protocols::xdg_shell::server::xdg_toplevel,
-        wayland_server::protocol::{wl_pointer::ButtonState, wl_surface},
+        wayland_protocols::xdg::shell::server::xdg_toplevel,
+        wayland_server::DisplayHandle,
     },
-    utils::{Logical, Point, Size},
+    utils::{IsAlive, Logical, Point, Size},
     wayland::{
         compositor::with_states,
-        seat::{AxisFrame, PointerGrab, PointerGrabStartData, PointerInnerHandle},
+        seat::{AxisFrame, PointerGrab, PointerGrabStartData, PointerInnerHandle, MotionEvent, ButtonEvent},
         shell::xdg::{SurfaceCachedState, ToplevelConfigure, XdgToplevelSurfaceRoleAttributes},
         Serial,
     },
 };
-use std::{cell::RefCell, sync::Mutex};
-
-#[derive(Debug, Default)]
-struct MoveData {
-    new_location: Point<i32, Logical>,
-}
+use crate::utils::prelude::*;
+use std::{
+    cell::RefCell,
+    convert::TryFrom,
+    sync::Mutex,
+};
 
 pub struct MoveSurfaceGrab {
     start_data: PointerGrabStartData,
     window: Window,
     initial_window_location: Point<i32, Logical>,
+    delta: Point<f64, Logical>,
 }
 
-impl PointerGrab for MoveSurfaceGrab {
+impl PointerGrab<State> for MoveSurfaceGrab {
     fn motion(
         &mut self,
-        handle: &mut PointerInnerHandle<'_>,
-        location: Point<f64, Logical>,
-        _focus: Option<(wl_surface::WlSurface, Point<i32, Logical>)>,
-        serial: Serial,
-        time: u32,
+        data: &mut State,
+        _dh: &DisplayHandle, 
+        handle: &mut PointerInnerHandle<'_, State>, 
+        event: &MotionEvent
     ) {
         // While the grab is active, no client has pointer focus
-        handle.motion(location, None, serial, time);
-
-        let delta = location - self.start_data.location;
-        let new_location = self.initial_window_location.to_f64() + delta;
-        self.window
-            .user_data()
-            .insert_if_missing(|| RefCell::<Option<MoveData>>::new(None));
-        let data = self
-            .window
-            .user_data()
-            .get::<RefCell<Option<MoveData>>>()
-            .unwrap();
-        *data.borrow_mut() = Some(MoveData {
-            new_location: new_location.to_i32_round(),
-        });
+        handle.motion(event.location, None, event.serial, event.time);
+        self.delta = event.location - self.start_data.location;
+        
+        if let Some(workspace) = data.common.shell.space_for_surface_mut(self.window.toplevel().wl_surface()) {
+            let new_location = (self.initial_window_location.to_f64() + self.delta).to_i32_round();
+            workspace.space.map_window(&self.window, new_location, true);
+        }
     }
 
     fn button(
         &mut self,
-        handle: &mut PointerInnerHandle<'_>,
-        button: u32,
-        state: ButtonState,
-        serial: Serial,
-        time: u32,
+        _data: &mut State,
+        _dh: &DisplayHandle,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &ButtonEvent,
     ) {
-        handle.button(button, state, serial, time);
+        handle.button(event.button, event.state, event.serial, event.time);
         if handle.current_pressed().is_empty() {
             // No more buttons are pressed, release the grab.
-            handle.unset_grab(serial, time);
+            handle.unset_grab(event.serial, event.time);
         }
     }
 
-    fn axis(&mut self, handle: &mut PointerInnerHandle<'_>, details: AxisFrame) {
+    fn axis(
+        &mut self,
+        _data: &mut State,
+        _dh: &DisplayHandle,
+        handle: &mut PointerInnerHandle<'_, State>,
+        details: AxisFrame,
+    ) {
         handle.axis(details)
     }
 
@@ -88,18 +85,8 @@ impl MoveSurfaceGrab {
             start_data,
             window,
             initial_window_location,
+            delta: (0.0, 0.0).into(),
         }
-    }
-
-    pub fn apply_move_state(window: &Window) -> Option<Point<i32, Logical>> {
-        window
-            .user_data()
-            .get::<RefCell<Option<MoveData>>>()
-            .and_then(|opt| {
-                opt.borrow_mut()
-                    .take()
-                    .map(|move_data| move_data.new_location)
-            })
     }
 }
 
@@ -120,14 +107,14 @@ bitflags::bitflags! {
 impl From<xdg_toplevel::ResizeEdge> for ResizeEdge {
     #[inline]
     fn from(x: xdg_toplevel::ResizeEdge) -> Self {
-        Self::from_bits(x.to_raw()).unwrap()
+        Self::from_bits(x.into()).unwrap()
     }
 }
 
 impl From<ResizeEdge> for xdg_toplevel::ResizeEdge {
     #[inline]
     fn from(x: ResizeEdge) -> Self {
-        Self::from_raw(x.bits()).unwrap()
+        Self::try_from(x.bits()).unwrap()
     }
 }
 
@@ -169,25 +156,24 @@ pub struct ResizeSurfaceGrab {
     last_window_size: Size<i32, Logical>,
 }
 
-impl PointerGrab for ResizeSurfaceGrab {
+impl PointerGrab<State> for ResizeSurfaceGrab {
     fn motion(
         &mut self,
-        handle: &mut PointerInnerHandle<'_>,
-        location: Point<f64, Logical>,
-        _focus: Option<(wl_surface::WlSurface, Point<i32, Logical>)>,
-        serial: Serial,
-        time: u32,
+        _data: &mut State,
+        _dh: &DisplayHandle,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &MotionEvent,
     ) {
         // While the grab is active, no client has pointer focus
-        handle.motion(location, None, serial, time);
+        handle.motion(event.location, None, event.serial, event.time);
 
         // It is impossible to get `min_size` and `max_size` of dead toplevel, so we return early.
-        if !self.window.toplevel().alive() | self.window.toplevel().get_surface().is_none() {
-            handle.unset_grab(serial, time);
+        if !self.window.alive() {
+            handle.unset_grab(event.serial, event.time);
             return;
         }
 
-        let (mut dx, mut dy) = (location - self.start_data.location).into();
+        let (mut dx, mut dy) = (event.location - self.start_data.location).into();
 
         let mut new_window_width = self.initial_window_size.w;
         let mut new_window_height = self.initial_window_size.h;
@@ -212,11 +198,10 @@ impl PointerGrab for ResizeSurfaceGrab {
         }
 
         let (min_size, max_size) =
-            with_states(self.window.toplevel().get_surface().unwrap(), |states| {
+            with_states(self.window.toplevel().wl_surface(), |states| {
                 let data = states.cached_state.current::<SurfaceCachedState>();
                 (data.min_size, data.max_size)
-            })
-            .unwrap();
+            });
 
         let min_width = min_size.w.max(1);
         let min_height = min_size.h.max(1);
@@ -238,44 +223,39 @@ impl PointerGrab for ResizeSurfaceGrab {
 
         match &self.window.toplevel() {
             Kind::Xdg(xdg) => {
-                let ret = xdg.with_pending_state(|state| {
+                xdg.with_pending_state(|state| {
                     state.states.set(xdg_toplevel::State::Resizing);
                     state.size = Some(self.last_window_size);
                 });
-                if ret.is_ok() {
-                    xdg.send_configure();
-                }
+                xdg.send_configure();
             }
         }
     }
 
     fn button(
         &mut self,
-        handle: &mut PointerInnerHandle<'_>,
-        button: u32,
-        state: ButtonState,
-        serial: Serial,
-        time: u32,
+        _data: &mut State,
+        _dh: &DisplayHandle,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &ButtonEvent,
     ) {
-        handle.button(button, state, serial, time);
+        handle.button(event.button, event.state, event.serial, event.time);
         if handle.current_pressed().is_empty() {
             // No more buttons are pressed, release the grab.
-            handle.unset_grab(serial, time);
+            handle.unset_grab(event.serial, event.time);
 
             // If toplevel is dead, we can't resize it, so we return early.
-            if !self.window.toplevel().alive() | self.window.toplevel().get_surface().is_none() {
+            if !self.window.alive() {
                 return;
             }
 
             #[allow(irrefutable_let_patterns)]
             if let Kind::Xdg(xdg) = &self.window.toplevel() {
-                let ret = xdg.with_pending_state(|state| {
+                xdg.with_pending_state(|state| {
                     state.states.unset(xdg_toplevel::State::Resizing);
                     state.size = Some(self.last_window_size);
                 });
-                if ret.is_ok() {
-                    xdg.send_configure();
-                }
+                xdg.send_configure();
             }
 
             let mut resize_state = self
@@ -285,14 +265,20 @@ impl PointerGrab for ResizeSurfaceGrab {
                 .unwrap()
                 .borrow_mut();
             if let ResizeState::Resizing(resize_data) = *resize_state {
-                *resize_state = ResizeState::WaitingForFinalAck(resize_data, serial);
+                *resize_state = ResizeState::WaitingForFinalAck(resize_data, event.serial);
             } else {
                 panic!("invalid resize state: {:?}", resize_state);
             }
         }
     }
 
-    fn axis(&mut self, handle: &mut PointerInnerHandle<'_>, details: AxisFrame) {
+    fn axis(
+        &mut self,
+        _data: &mut State,
+        _dh: &DisplayHandle,
+        handle: &mut PointerInnerHandle<'_, State>,
+        details: AxisFrame,
+    ) {
         handle.axis(details)
     }
 
@@ -334,11 +320,7 @@ impl ResizeSurfaceGrab {
     }
 
     pub fn ack_configure(window: &Window, configure: ToplevelConfigure) {
-        let surface = if let Some(surface) = window.toplevel().get_surface() {
-            surface
-        } else {
-            return;
-        };
+        let surface = window.toplevel().wl_surface();
 
         let waiting_for_serial =
             if let Some(data) = window.user_data().get::<RefCell<ResizeState>>() {
@@ -372,8 +354,7 @@ impl ResizeSurfaceGrab {
                     .current
                     .states
                     .contains(xdg_toplevel::State::Resizing)
-            })
-            .unwrap();
+            });
 
             if configure.serial >= serial && is_resizing {
                 let mut resize_state = window

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    shell::{layout::FocusDirection, Shell},
-    state::{BackendData, State},
+    shell::{focus::FocusDirection, Shell},
+    state::{BackendData, Data},
 };
 use serde::{Deserialize, Serialize};
 pub use smithay::{
@@ -33,7 +33,13 @@ pub struct Config {
 #[derive(Debug, Deserialize)]
 pub struct StaticConfig {
     pub key_bindings: HashMap<KeyPattern, Action>,
-    pub workspace_mode: crate::shell::Mode,
+    pub workspace_mode: WorkspaceMode,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy)]
+pub enum WorkspaceMode {
+    OutputBound,
+    Global,
 }
 
 pub struct DynamicConfig {
@@ -209,7 +215,7 @@ impl Config {
 
         StaticConfig {
             key_bindings: HashMap::new(),
-            workspace_mode: crate::shell::Mode::global(),
+            workspace_mode: WorkspaceMode::Global,
         }
     }
 
@@ -273,7 +279,7 @@ impl Config {
         outputs: impl Iterator<Item = impl std::borrow::Borrow<Output>>,
         backend: &mut BackendData,
         shell: &mut Shell,
-        loop_handle: &LoopHandle<'_, State>,
+        loop_handle: &LoopHandle<'_, Data>,
     ) {
         let outputs = outputs.map(|x| x.borrow().clone()).collect::<Vec<_>>();
         let mut infos = outputs

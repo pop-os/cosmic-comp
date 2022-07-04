@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::shell::layout::Layout;
 use smithay::{
-    desktop::{layer_map_for_output, Kind, Space, Window},
-    reexports::wayland_protocols::xdg_shell::server::xdg_toplevel::{
+    desktop::{layer_map_for_output, Kind, Space, Window, space::RenderZindex},
+    reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
         ResizeEdge, State as XdgState,
     },
     wayland::{
@@ -11,7 +10,11 @@ use smithay::{
         seat::{PointerGrabStartData, Seat},
         Serial,
     },
+    utils::IsAlive,
 };
+use std::collections::HashSet;
+
+use crate::state::State;
 
 mod grabs;
 pub use self::grabs::*;
@@ -19,61 +22,94 @@ pub use self::grabs::*;
 #[derive(Debug, Default)]
 pub struct FloatingLayout {
     pending_windows: Vec<Window>,
+    pub windows: HashSet<Window>,
 }
 
-impl Layout for FloatingLayout {
-    fn map_window<'a>(
+impl FloatingLayout {
+    pub fn new() -> FloatingLayout {
+        Default::default()
+    }
+
+    pub fn map_window(
         &mut self,
         space: &mut Space,
-        window: &Window,
-        seat: &Seat,
-        _focus_stack: Box<dyn Iterator<Item = &'a Window> + 'a>,
+        window: Window,
+        seat: &Seat<State>,
     ) {
         if let Some(output) = super::output_from_seat(Some(seat), space) {
-            Self::map_window(space, window, &output)
+            self.map_window_internal(space, window, &output);
         } else {
-            self.pending_windows.push(window.clone());
+            self.pending_windows.push(window);
         }
     }
 
-    fn refresh(&mut self, space: &mut Space) {
+    pub fn refresh(&mut self, space: &mut Space) {
         self.pending_windows.retain(|w| w.toplevel().alive());
         if let Some(output) = super::output_from_seat(None, space) {
-            for window in self.pending_windows.drain(..) {
-                Self::map_window(space, &window, &output);
+            for window in std::mem::take(&mut self.pending_windows).into_iter() {
+                self.map_window_internal(space, window, &output);
             }
         }
         // TODO make sure all windows are still visible on any output or move them
     }
 
-    fn unmap_window(&mut self, space: &mut Space, window: &Window) {
-        space.unmap_window(window);
-        self.pending_windows.retain(|w| w != window);
-    }
-
-    fn maximize_request(&mut self, space: &mut Space, window: &Window, output: &Output) {
+    fn map_window_internal(
+        &mut self,
+        space: &mut Space,
+        window: Window,
+        output: &Output
+    ) {
+        let win_geo = window.bbox();
         let layers = layer_map_for_output(&output);
         let geometry = layers.non_exclusive_zone();
 
-        space.map_window(&window, (-geometry.loc.x, -geometry.loc.y), true);
+        let position = (
+            -geometry.loc.x + (geometry.size.w / 2) - (win_geo.size.w / 2),
+            -geometry.loc.y + (geometry.size.h / 2) - (win_geo.size.h / 2),
+        );
+        #[allow(irrefutable_let_patterns)]
+        if let Kind::Xdg(xdg) = &window.toplevel() {
+            xdg.with_pending_state(|state| {
+                state.states.unset(XdgState::TiledLeft);
+                state.states.unset(XdgState::TiledRight);
+                state.states.unset(XdgState::TiledTop);
+                state.states.unset(XdgState::TiledBottom);
+            });
+            xdg.send_configure();
+        }
+
+        window.override_z_index(RenderZindex::Shell as u8 + 1);
+        space.map_window(&window, position, false);
+        self.windows.insert(window);
+    }
+
+    pub fn unmap_window(&mut self, space: &mut Space, window: &Window) {
+        window.clear_z_index();
+        space.unmap_window(window);
+        self.pending_windows.retain(|w| w != window);
+        self.windows.remove(window);
+    }
+
+    pub fn maximize_request(&mut self, space: &mut Space, window: &Window, output: &Output) {
+        let layers = layer_map_for_output(&output);
+        let geometry = layers.non_exclusive_zone();
+
+        space.map_window(&window, (geometry.loc.x, geometry.loc.y), true);
         #[allow(irrefutable_let_patterns)]
         if let Kind::Xdg(surface) = &window.toplevel() {
-            let ret = surface.with_pending_state(|state| {
+            surface.with_pending_state(|state| {
                 state.states.set(XdgState::Maximized);
                 state.size = Some(geometry.size);
             });
-
-            if ret.is_ok() {
-                window.configure();
-            }
+            window.configure();
         }
     }
 
-    fn move_request(
+    pub fn move_request(
         &mut self,
         space: &mut Space,
         window: &Window,
-        seat: &Seat,
+        seat: &Seat<State>,
         serial: Serial,
         start_data: PointerGrabStartData,
     ) {
@@ -83,31 +119,26 @@ impl Layout for FloatingLayout {
             #[allow(irrefutable_let_patterns)]
             if let Kind::Xdg(surface) = &window.toplevel() {
                 // If surface is maximized then unmaximize it
-                if let Some(current_state) = surface.current_state() {
-                    if current_state.states.contains(XdgState::Maximized) {
-                        let fs_changed = surface.with_pending_state(|state| {
-                            state.states.unset(XdgState::Maximized);
-                            state.size = None;
-                        });
+                let current_state = surface.current_state();
+                if current_state.states.contains(XdgState::Maximized) {
+                    surface.with_pending_state(|state| {
+                        state.states.unset(XdgState::Maximized);
+                        state.size = None;
+                    });
 
-                        if fs_changed.is_ok() {
-                            surface.send_configure();
+                    surface.send_configure();
 
-                            // NOTE: In real compositor mouse location should be mapped to a new window size
-                            // For example, you could:
-                            // 1) transform mouse pointer position from compositor space to window space (location relative)
-                            // 2) divide the x coordinate by width of the window to get the percentage
-                            //   - 0.0 would be on the far left of the window
-                            //   - 0.5 would be in middle of the window
-                            //   - 1.0 would be on the far right of the window
-                            // 3) multiply the percentage by new window width
-                            // 4) by doing that, drag will look a lot more natural
-                            //
-                            // but for anvil needs setting location to pointer location is fine
-                            let pos = pointer.current_location();
-                            initial_window_location = (pos.x as i32, pos.y as i32).into();
-                        }
-                    }
+                    // TODO: The mouse location should be mapped to a new window size
+                    // For example, you could:
+                    // 1) transform mouse pointer position from compositor space to window space (location relative)
+                    // 2) divide the x coordinate by width of the window to get the percentage
+                    //   - 0.0 would be on the far left of the window
+                    //   - 0.5 would be in middle of the window
+                    //   - 1.0 would be on the far right of the window
+                    // 3) multiply the percentage by new window width
+                    // 4) by doing that, drag will look a lot more natural
+                    let pos = pointer.current_location();
+                    initial_window_location = (pos.x as i32, pos.y as i32).into();
                 }
             }
 
@@ -117,11 +148,11 @@ impl Layout for FloatingLayout {
         }
     }
 
-    fn resize_request(
+    pub fn resize_request(
         &mut self,
         space: &mut Space,
         window: &Window,
-        seat: &Seat,
+        seat: &Seat<State>,
         serial: Serial,
         start_data: PointerGrabStartData,
         edges: ResizeEdge,
@@ -135,35 +166,5 @@ impl Layout for FloatingLayout {
 
             pointer.set_grab(grab, serial, 0);
         }
-    }
-}
-
-impl FloatingLayout {
-    pub fn new() -> FloatingLayout {
-        Default::default()
-    }
-
-    fn map_window(space: &mut Space, window: &Window, output: &Output) {
-        let win_geo = window.bbox();
-        let layers = layer_map_for_output(&output);
-        let geometry = layers.non_exclusive_zone();
-
-        let position = (
-            -geometry.loc.x + (geometry.size.w / 2) - (win_geo.size.w / 2),
-            -geometry.loc.y + (geometry.size.h / 2) - (win_geo.size.h / 2),
-        );
-        #[allow(irrefutable_let_patterns)]
-        if let Kind::Xdg(xdg) = &window.toplevel() {
-            let ret = xdg.with_pending_state(|state| {
-                state.states.unset(XdgState::TiledLeft);
-                state.states.unset(XdgState::TiledRight);
-                state.states.unset(XdgState::TiledTop);
-                state.states.unset(XdgState::TiledBottom);
-            });
-            if ret.is_ok() {
-                xdg.send_configure();
-            }
-        }
-        space.map_window(&window, position, false);
     }
 }

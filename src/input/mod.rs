@@ -3,17 +3,17 @@
 use crate::{
     config::Action,
     shell::Workspace,
-    state::{Common, State},
+    utils::prelude::*,
 };
 use smithay::{
     backend::input::{Device, DeviceCapability, InputBackend, InputEvent, KeyState},
-    desktop::{layer_map_for_output, Kind, Space, WindowSurfaceType},
-    reexports::wayland_server::{protocol::wl_surface::WlSurface, Display},
+    desktop::{layer_map_for_output, Kind, WindowSurfaceType},
+    reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle, Resource},
     utils::{Logical, Point, Rectangle},
     wayland::{
         data_device::set_data_device_focus,
         output::Output,
-        seat::{keysyms, CursorImageStatus, FilterResult, KeysymHandle, Seat, XkbConfig},
+        seat::{keysyms, CursorImageStatus, FilterResult, KeysymHandle, Seat, XkbConfig, MotionEvent, ButtonEvent},
         shell::wlr_layer::Layer as WlrLayer,
         SERIAL_COUNTER,
     },
@@ -82,8 +82,8 @@ impl Devices {
     }
 }
 
-pub fn add_seat(display: &mut Display, name: String) -> Seat {
-    let (seat, _) = Seat::new(display, name, None);
+pub fn add_seat(dh: &DisplayHandle, name: String) -> Seat<State> {
+    let seat = Seat::<State>::new(dh, name, None);
     let userdata = seat.user_data();
     userdata.insert_if_missing(|| Devices::new());
     userdata.insert_if_missing(|| SupressedKeys::new());
@@ -91,36 +91,8 @@ pub fn add_seat(display: &mut Display, name: String) -> Seat {
     seat
 }
 
-pub fn active_output(seat: &Seat, state: &Common) -> Output {
-    seat.user_data()
-        .get::<ActiveOutput>()
-        .map(|x| x.0.borrow().clone())
-        .unwrap_or_else(|| {
-            state
-                .shell
-                .outputs()
-                .next()
-                .cloned()
-                .expect("Backend has no outputs?")
-        })
-}
-
-pub fn set_active_output(seat: &Seat, output: &Output) {
-    if !seat
-        .user_data()
-        .insert_if_missing(|| ActiveOutput(RefCell::new(output.clone())))
-    {
-        *seat
-            .user_data()
-            .get::<ActiveOutput>()
-            .unwrap()
-            .0
-            .borrow_mut() = output.clone();
-    }
-}
-
 impl State {
-    pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>) {
+    pub fn process_input_event<B: InputBackend>(&mut self, dh: &DisplayHandle, event: InputEvent<B>) {
         use smithay::backend::input::Event;
 
         match event {
@@ -131,12 +103,16 @@ impl State {
                 for cap in devices.add_device(&device) {
                     match cap {
                         DeviceCapability::Keyboard => {
+                            let dh_clone = dh.clone();
                             let _ =
-                                seat.add_keyboard(XkbConfig::default(), 200, 25, |seat, focus| {
-                                    set_data_device_focus(
-                                        seat,
-                                        focus.and_then(|s| s.as_ref().client()),
-                                    )
+                                seat.add_keyboard(XkbConfig::default(), 200, 25, move |seat, focus| {
+                                    if let Some(client) = focus.and_then(|s| dh_clone.get_client(s.id()).ok()) {
+                                        set_data_device_focus(
+                                            &dh_clone,
+                                            seat,
+                                            Some(client),
+                                        )
+                                    }
                                 });
                         }
                         DeviceCapability::Pointer => {
@@ -209,7 +185,7 @@ impl State {
                         if let Some(action) = seat
                             .get_keyboard()
                             .unwrap()
-                            .input(keycode, state, serial, time, |modifiers, handle| {
+                            .input(dh, keycode, state, serial, time, |modifiers, handle| {
                                 if state == KeyState::Released
                                     && userdata.get::<SupressedKeys>().unwrap().filter(&handle)
                                 {
@@ -307,6 +283,7 @@ impl State {
                                         x => x - 1,
                                     };
                                     self.common.shell.activate(
+                                        dh,
                                         seat,
                                         &current_output,
                                         workspace as usize,
@@ -326,12 +303,16 @@ impl State {
                                 }
                                 Action::Focus(focus) => {
                                     let current_output = active_output(seat, &self.common);
-                                    self.common.shell.move_focus(
-                                        seat,
-                                        &current_output,
+                                    let workspace = self.common.shell.active_space_mut(&current_output);
+                                    let focus_stack = workspace.focus_stack(seat);
+                                    if let Some(window) = workspace.tiling_layer.move_focus(
                                         *focus,
-                                        self.common.seats.iter(),
-                                    );
+                                        seat,
+                                        &mut workspace.space,
+                                        focus_stack.iter()
+                                    ) {
+                                        self.common.set_focus(dh, Some(window.toplevel().wl_surface()), seat, None);
+                                    }
                                 }
                                 Action::Fullscreen => {
                                     let current_output = active_output(seat, &self.common);
@@ -344,9 +325,11 @@ impl State {
                                 }
                                 Action::Orientation(orientation) => {
                                     let output = active_output(seat, &self.common);
-                                    self.common
+                                    let workspace = self.common
                                         .shell
-                                        .set_orientation(&seat, &output, *orientation);
+                                        .active_space_mut(&output);
+                                    let focus_stack = workspace.focus_stack(seat);
+                                    workspace.tiling_layer.update_orientation(*orientation, &seat, &mut workspace.space, focus_stack.iter());
                                 }
                                 Action::Spawn(command) => {
                                     if let Err(err) = std::process::Command::new("/bin/sh")
@@ -382,9 +365,7 @@ impl State {
                             .shell
                             .outputs()
                             .find(|output| {
-                                self.common
-                                    .shell
-                                    .output_geometry(output)
+                                output.geometry()
                                     .to_f64()
                                     .contains(position)
                             })
@@ -393,7 +374,7 @@ impl State {
                         if output != current_output {
                             set_active_output(seat, &output);
                         }
-                        let output_geometry = self.common.shell.output_geometry(&output);
+                        let output_geometry = output.geometry();
 
                         position.x = 0.0f64
                             .max(position.x)
@@ -415,13 +396,14 @@ impl State {
                             output_geometry,
                             &workspace,
                         );
-                        handle_window_movement(
-                            under.as_ref().map(|(s, _)| s),
-                            &mut workspace.space,
-                        );
                         seat.get_pointer()
                             .unwrap()
-                            .motion(position, under, serial, event.time());
+                            .motion(self, dh, &MotionEvent {
+                                location: position,
+                                focus: under,
+                                serial,
+                                time: event.time()
+                            });
 
                         #[cfg(feature = "debug")]
                         if self.common.seats.iter().position(|x| x == seat).unwrap() == 0 {
@@ -447,7 +429,7 @@ impl State {
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
                         let output = active_output(seat, &self.common);
-                        let geometry = self.common.shell.output_geometry(&output);
+                        let geometry = output.geometry();
                         let position =
                             geometry.loc.to_f64() + event.position_transformed(geometry.size);
                         let relative_pos = self
@@ -463,13 +445,14 @@ impl State {
                             geometry,
                             &workspace,
                         );
-                        handle_window_movement(
-                            under.as_ref().map(|(s, _)| s),
-                            &mut workspace.space,
-                        );
                         seat.get_pointer()
                             .unwrap()
-                            .motion(position, under, serial, event.time());
+                            .motion(self, dh, &MotionEvent {
+                                location: position,
+                                focus: under,
+                                serial,
+                                time: event.time()
+                            });
 
                         #[cfg(feature = "debug")]
                         if self.common.seats.iter().position(|x| x == seat).unwrap() == 0 {
@@ -536,7 +519,7 @@ impl State {
                                 {
                                     let output = active_output(seat, &self.common);
                                     let pos = seat.get_pointer().unwrap().current_location();
-                                    let output_geo = self.common.shell.output_geometry(&output);
+                                    let output_geo = output.geometry();
                                     let relative_pos = self
                                         .common
                                         .shell
@@ -558,7 +541,7 @@ impl State {
                                                             - layer_loc.to_f64(),
                                                         WindowSurfaceType::ALL,
                                                     )
-                                                    .and_then(|(_, _)| layer.get_surface().cloned());
+                                                    .map(|(_, _)| layer.wl_surface().clone());
                                             }
                                         } else {
                                             under = window
@@ -566,7 +549,7 @@ impl State {
                                                     pos - output_geo.loc.to_f64(),
                                                     WindowSurfaceType::ALL,
                                                 )
-                                                .and_then(|(_, _)| window.toplevel().get_surface().cloned());
+                                                .map(|(_, _)| window.toplevel().wl_surface().clone());
                                         }
                                     } else {
                                         if let Some(layer) = layers
@@ -584,7 +567,7 @@ impl State {
                                                             - layer_loc.to_f64(),
                                                         WindowSurfaceType::ALL,
                                                     )
-                                                    .and_then(|(_, _)| layer.get_surface().cloned());
+                                                    .map(|(_, _)| layer.wl_surface().clone());
                                             }
                                         } else if let Some((window, _, _)) =
                                             workspace.space.surface_under(
@@ -592,7 +575,7 @@ impl State {
                                                 WindowSurfaceType::ALL,
                                             )
                                         {
-                                            under = window.toplevel().get_surface().cloned();
+                                            under = Some(window.toplevel().wl_surface().clone());
                                         } else if let Some(layer) =
                                             layers.layer_under(WlrLayer::Bottom, pos).or_else(
                                                 || layers.layer_under(WlrLayer::Background, pos),
@@ -607,12 +590,12 @@ impl State {
                                                             - layer_loc.to_f64(),
                                                         WindowSurfaceType::ALL,
                                                     )
-                                                    .and_then(|(_, _)| layer.get_surface().cloned());
+                                                    .map(|(_, _)| layer.wl_surface().clone());
                                             }
                                         };
                                     }
 
-                                    self.common.set_focus(under.as_ref(), seat, Some(serial));
+                                    self.common.set_focus(dh, under.as_ref(), seat, Some(serial));
                                 }
                                 wl_pointer::ButtonState::Pressed
                             }
@@ -620,7 +603,12 @@ impl State {
                         };
                         seat.get_pointer()
                             .unwrap()
-                            .button(button, state, serial, event.time());
+                            .button(self, dh, &ButtonEvent {
+                                button,
+                                state,
+                                serial,
+                                time: event.time()
+                            });
                         break;
                     }
                 }
@@ -712,7 +700,7 @@ impl State {
                             } else if source == wl_pointer::AxisSource::Finger {
                                 frame = frame.stop(wl_pointer::Axis::VerticalScroll);
                             }
-                            seat.get_pointer().unwrap().axis(frame);
+                            seat.get_pointer().unwrap().axis(self, dh, frame);
                         }
                         break;
                     }
@@ -777,19 +765,6 @@ impl State {
                     .map(|(s, loc)| (s, loc + layer_loc + output_geo.loc))
             } else {
                 None
-            }
-        }
-    }
-}
-
-pub fn handle_window_movement(surface: Option<&WlSurface>, space: &mut Space) {
-    // TODO: this is why to hardcoded and hacky, but wayland-rs 0.30 will make this unnecessary anyway.
-    if let Some(surface) = surface {
-        if let Some(window) = space.window_for_surface(&surface, WindowSurfaceType::TOPLEVEL).cloned() {
-            if let Some(new_position) =
-                crate::shell::layout::floating::MoveSurfaceGrab::apply_move_state(&window)
-            {
-                space.map_window(&window, new_position, true);
             }
         }
     }

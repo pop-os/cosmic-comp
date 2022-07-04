@@ -1,600 +1,337 @@
-// SPDX-License-Identifier: GPL-3.0-only
-
-#[cfg(feature = "experimental")]
-use crate::wayland::workspace as ext_work;
-use crate::{
-    config::{Config, OutputConfig},
-    input::{active_output, set_active_output},
-    state::Common,
+use std::{
+    cell::Cell,
+    mem::MaybeUninit,
 };
-pub use smithay::{
-    desktop::{layer_map_for_output, PopupGrab, PopupManager, PopupUngrabStrategy, Space, Window, WindowSurfaceType},
-    reexports::wayland_server::{protocol::wl_surface::WlSurface, Display},
-    utils::{Logical, Point, Rectangle, Size},
+
+use smithay::{
+    desktop::{
+        LayerSurface,
+        PopupManager,
+        Window,
+        WindowSurfaceType,
+        layer_map_for_output,
+    },
+    reexports::wayland_server::{
+        DisplayHandle,
+        protocol::wl_surface::WlSurface,
+    },
     wayland::{
         compositor::with_states,
-        output::{Mode as OutputMode, Output, Scale},
-        seat::Seat,
+        seat::{Seat, MotionEvent},
         shell::{
-            wlr_layer::{KeyboardInteractivity, Layer, LayerSurfaceCachedState},
-            xdg::XdgToplevelSurfaceRoleAttributes,
+            wlr_layer::{WlrLayerShellState, Layer, LayerSurfaceCachedState, KeyboardInteractivity},
+            xdg::XdgShellState,
         },
-        Serial, SERIAL_COUNTER,
+        output::Output,
+        SERIAL_COUNTER,
     },
+    utils::{Point, Rectangle, Logical},
 };
 
-use std::{
-    cell::{Cell, RefCell},
-    mem::MaybeUninit,
-    sync::Mutex,
+use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State as WState;
+
+use crate::{
+    config::{Config, WorkspaceMode as ConfigMode},
+    wayland::protocols::{
+        toplevel_info::ToplevelInfoState,
+        workspace::{
+            WorkspaceState,
+            WorkspaceGroupHandle,
+            WorkspaceHandle,
+            WorkspaceCapabilities,
+            WorkspaceUpdateGuard,
+        },
+    },
+    utils::prelude::*,
 };
 
-pub const MAX_WORKSPACES: usize = 10; // TODO?
-
-mod handler;
+pub const MAX_WORKSPACES: usize = 10;
 pub mod layout;
 mod workspace;
-pub use self::handler::{init_shell, PopupGrabData};
-pub use self::layout::Layout;
+pub mod focus;
 pub use self::workspace::*;
 
-pub struct ActiveWorkspace(Cell<Option<usize>>);
-impl ActiveWorkspace {
-    fn new() -> Self {
-        ActiveWorkspace(Cell::new(None))
-    }
-    pub fn get(&self) -> Option<usize> {
-        self.0.get()
-    }
-    fn set(&self, active: usize) -> Option<usize> {
-        self.0.replace(Some(active))
-    }
-    fn clear(&self) -> Option<usize> {
-        self.0.replace(None)
-    }
+pub struct Shell {
+    pub popups: PopupManager,
+    pub spaces: [Workspace; MAX_WORKSPACES],
+    pub outputs: Vec<Output>,
+    pub workspace_mode: WorkspaceMode,
+    pub shell_mode: ShellMode,
+
+    pub pending_windows: Vec<(Window, Seat<State>)>,
+    pub pending_layers: Vec<(LayerSurface, Output, Seat<State>)>,
+
+    // wayland_state
+    pub layer_shell_state: WlrLayerShellState,
+    pub toplevel_info_state: ToplevelInfoState<State>,
+    pub xdg_shell_state: XdgShellState,
+    pub workspace_state: WorkspaceState<State>,
 }
 
-#[derive(Debug, serde::Deserialize, PartialEq, Eq, Clone, Copy)]
-pub enum Mode {
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum WorkspaceMode {
     OutputBound,
     Global {
-        #[serde(default)]
         active: usize,
+        group: WorkspaceGroupHandle,
     },
 }
 
-impl Mode {
-    pub fn output_bound() -> Mode {
-        Mode::OutputBound
-    }
-
-    pub fn global() -> Mode {
-        Mode::Global { active: 0 }
-    }
+pub enum ShellMode {
+    Normal,
+    Resize,
+    Adjust,
 }
 
-pub struct Shell {
-    popups: PopupManager,
-    mode: Mode,
-    outputs: Vec<Output>,
-    pub spaces: [Workspace; MAX_WORKSPACES],
-    #[cfg(feature = "experimental")]
-    manager: ext_work::WorkspaceManager,
-    #[cfg(feature = "experimental")]
-    global_group: Option<ext_work::WorkspaceGroup>,
+#[derive(Debug, Clone)]
+pub struct OutputBoundState {
+    active: Cell<usize>,
+    group: Cell<WorkspaceGroupHandle>,
 }
 
 const UNINIT_SPACE: MaybeUninit<Workspace> = MaybeUninit::uninit();
 
 impl Shell {
-    fn new(config: &Config, _display: &mut Display) -> Self {
+    pub fn new(config: &Config, dh: &DisplayHandle) -> Self {
+        let layer_shell_state = WlrLayerShellState::new::<State, _>(dh, None);
+        let toplevel_info_state = ToplevelInfoState::new(dh, |_| true);
+        let xdg_shell_state = XdgShellState::new::<State, _>(dh, None);
+        let mut workspace_state = WorkspaceState::new(dh, |_| true);
+
+        let mut spaces = unsafe {
+            let mut spaces = [UNINIT_SPACE; MAX_WORKSPACES];
+            for (idx, space) in spaces.iter_mut().enumerate() {
+                *space = MaybeUninit::new(Workspace::new(idx as u8, std::mem::zeroed() /* Will be initialized by init_mode */));
+            }
+            std::mem::transmute(spaces)
+        };
+        let mode = init_mode(&config.static_conf.workspace_mode, None, &[], &mut workspace_state, &mut spaces);
+
         Shell {
             popups: PopupManager::new(None),
-            mode: config.static_conf.workspace_mode,
+            spaces,
             outputs: Vec::new(),
-            spaces: unsafe {
-                let mut spaces = [UNINIT_SPACE; MAX_WORKSPACES];
-                for (idx, space) in spaces.iter_mut().enumerate() {
-                    *space = MaybeUninit::new(Workspace::new(idx as u8));
-                }
-                std::mem::transmute(spaces)
-            },
-            #[cfg(feature = "experimental")]
-            manager: ext_work::init_ext_workspace(
-                _display,
-                |_, changes, mut ddata| {
-                    let state = ddata.get::<crate::state::State>().unwrap();
-                    if let Some((w, _)) = changes.into_iter().rev().find(|(_, p)| {
-                        p.into_iter()
-                            .rev()
-                            .find(|o| {
-                                **o == ext_work::PendingOperation::Activate
-                                    || **o == ext_work::PendingOperation::Deactivate
-                            })
-                            .map(|o| *o == ext_work::PendingOperation::Activate)
-                            .unwrap_or(false)
-                    }) {
-                        if let Some(idx) = state.common.shell.spaces.iter().position(|work| {
-                            work.ext_workspace.as_ref().map(|e| e == w).unwrap_or(false)
-                        }) {
-                            state.common.event_loop_handle.insert_idle(move |state| {
-                                let seat = &state.common.last_active_seat;
-                                let output = active_output(&seat, &state.common);
-                                state.common.shell.activate(seat, &output, idx);
-                            });
-                        }
-                    }
-                },
-                |_| true,
-            )
-            .0,
-            #[cfg(feature = "experimental")]
-            global_group: None,
+            workspace_mode: mode,
+            shell_mode: ShellMode::Normal,
+
+            pending_windows: Vec::new(),
+            pending_layers: Vec::new(),
+
+            layer_shell_state,
+            toplevel_info_state,
+            xdg_shell_state,
+            workspace_state,
         }
     }
 
+    pub fn add_output(&mut self, output: &Output) {
+        let was_empty = self.outputs.is_empty();
+        self.outputs.push(output.clone());
+        let mut state = self.workspace_state.update();
+
+        match self.workspace_mode {
+            WorkspaceMode::OutputBound => {
+                let idx = self.spaces
+                    .iter()
+                    .position(|x| x.space.outputs().next().is_none())
+                    .expect("More then 10 outputs?");
+
+                remap_output(output, &mut self.spaces, None, idx, Point::from((0, 0)), &mut self.toplevel_info_state);
+                let mut workspace = &mut self.spaces[idx];
+                
+                let group = state.create_workspace_group();
+                state.add_group_output(&group, output);
+                state.remove_workspace(workspace.handle);
+                let handle = init_workspace_handle(&mut state, &group, &mut workspace);
+                state.add_workspace_state(&handle, WState::Active);
+
+                let output_state = OutputBoundState {
+                    active: Cell::new(workspace.idx as usize),
+                    group: Cell::new(group),
+                };
+
+                if was_empty {
+                    for workspace in self.spaces.iter_mut().skip(1) {
+                        init_workspace_handle(&mut state, &group, workspace);
+                    }
+                }
+
+                if !output.user_data().insert_if_missing(|| output_state.clone()) {
+                    let existing_state = output.user_data().get::<OutputBoundState>().unwrap();
+                    existing_state.active.set(output_state.active.get());
+                    existing_state.group.set(output_state.group.get());
+                }
+            },
+            WorkspaceMode::Global { active, group } => {
+                state.add_group_output(&group, output);
+                
+                remap_output(output, &mut self.spaces, None, active, output.current_location(), &mut self.toplevel_info_state);
+            }
+        }
+    }
+
+    pub fn remove_output(&mut self, output: &Output) {
+        let mut state = self.workspace_state.update();
+        self.outputs.retain(|o| o != output);
+        
+        match self.workspace_mode {
+            WorkspaceMode::OutputBound => {
+                let output_state = output.user_data().get::<OutputBoundState>().unwrap();
+                remap_output(output, &mut self.spaces, output_state.active.get(), None, None, &mut self.toplevel_info_state);
+
+                // reassign workspaces to a different output
+                let new_group = self.outputs.iter().next().map(|o| o.user_data().get::<OutputBoundState>().unwrap().group.get());
+                for mut workspace in self.spaces.iter_mut() {
+                    if state.workspace_belongs_to_group(&output_state.group.get(), &workspace.handle) {
+                        state.remove_workspace(workspace.handle);
+                        if let Some(new_group) = new_group {
+                            init_workspace_handle(&mut state, &new_group, &mut workspace);
+                        }
+                    }
+                }
+
+                // destroy workspace group
+                state.remove_workspace_group(output_state.group.get());
+            },
+            WorkspaceMode::Global { active, group } => {
+                state.remove_group_output(&group, output);
+
+                remap_output(output, &mut self.spaces, active, None, None, &mut self.toplevel_info_state);
+            },
+        };
+    }
+
     pub fn refresh_outputs(&mut self) {
-        if let Mode::Global { active } = self.mode {
+        if let WorkspaceMode::Global { active, .. } = self.workspace_mode {
             let workspace = &mut self.spaces[active];
             for output in self.outputs.iter() {
-                let config = output
-                    .user_data()
-                    .get::<RefCell<OutputConfig>>()
-                    .unwrap()
-                    .borrow();
-                workspace.space.map_output(output, config.position);
+                workspace.space.map_output(output, output.current_location());
             }
         } else {
             for output in self.outputs.iter() {
                 let active = output
                     .user_data()
-                    .get::<ActiveWorkspace>()
+                    .get::<OutputBoundState>()
                     .unwrap()
-                    .get()
-                    .unwrap();
+                    .active
+                    .get();
                 let workspace = &mut self.spaces[active];
                 workspace.space.map_output(output, (0, 0));
             }
         }
     }
 
-    fn assign_next_free_output<'a>(
-        spaces: &'a mut [Workspace],
-        output: &Output,
-    ) -> (usize, &'a mut Workspace) {
-        output
-            .user_data()
-            .insert_if_missing(|| ActiveWorkspace::new());
-        let (idx, workspace) = spaces
-            .iter_mut()
-            .enumerate()
-            .find(|(_, x)| x.space.outputs().next().is_none())
-            .expect("More then 10 outputs?");
-        output
-            .user_data()
-            .get::<ActiveWorkspace>()
-            .unwrap()
-            .set(idx);
-
-        (idx, workspace)
+    pub fn set_mode(&mut self, mode: ConfigMode) {
+        match (&mut self.workspace_mode, mode) {
+            (WorkspaceMode::OutputBound, ConfigMode::Global) => {
+                let new_active = 0;
+                init_mode(&mode, Some(&WorkspaceMode::OutputBound), &self.outputs, &mut self.workspace_state, &mut self.spaces);
+                for output in &self.outputs {
+                    let old_active = output.user_data().get::<OutputBoundState>().unwrap().active.get();
+                    remap_output(output, &mut self.spaces, old_active, new_active, output.current_location(), &mut self.toplevel_info_state);
+                }
+            },
+            (x @ WorkspaceMode::Global { .. }, ConfigMode::OutputBound) => {
+                // inits OutputBoundState if it not exists
+                init_mode(&mode, Some(x), &self.outputs, &mut self.workspace_state, &mut self.spaces);
+                if let WorkspaceMode::Global { ref active, .. } = x {
+                    for output in &self.outputs {
+                        let new_active = output.user_data().get::<OutputBoundState>().unwrap().active.get();
+                        remap_output(output, &mut self.spaces, *active, new_active, Point::from((0, 0)), &mut self.toplevel_info_state);
+                    }
+                }
+            },
+            _ => {},
+        }
     }
 
-    pub fn add_output(&mut self, output: &Output) {
-        self.outputs.push(output.clone());
-        let config = output
-            .user_data()
-            .get::<RefCell<OutputConfig>>()
-            .unwrap()
-            .borrow();
+    pub fn activate(&mut self, _dh: &DisplayHandle, seat: &Seat<State>, output: &Output, idx: usize) -> Option<MotionEvent> {
+        if idx > MAX_WORKSPACES {
+            return None;
+        }
 
-        match self.mode {
-            Mode::OutputBound => {
-                let _idx = {
-                    let (idx, workspace) = Self::assign_next_free_output(&mut self.spaces, output);
-                    workspace.space.map_output(output, (0, 0));
-                    idx
-                };
-                #[cfg(feature = "experimental")]
-                {
-                    let group = self
-                        .manager
-                        .new_group(|_, _, _| {}, std::iter::once(output.clone()));
-                    if self.spaces.iter().all(|w| w.ext_workspace.is_none()) {
-                        for (idx, workspace) in self.spaces.iter_mut().enumerate() {
-                            let ext_workspace = group.create_workspace(format!("{}", idx + 1));
-                            ext_workspace.set_coordinates(std::iter::once(idx as u32));
-                            workspace.ext_workspace = Some(ext_workspace);
-                        }
-                        self.spaces[_idx]
-                            .ext_workspace
-                            .as_mut()
-                            .unwrap()
-                            .add_state(ext_work::State::Active);
-                    } else {
-                        let ext_workspace = group.create_workspace(format!("{}", _idx + 1));
-                        ext_workspace.set_coordinates(std::iter::once(_idx as u32));
-                        ext_workspace.add_state(ext_work::State::Active);
-                        if let Some(old) = self.spaces[_idx].ext_workspace.replace(ext_workspace) {
-                            old.remove();
-                        }
-                    }
-                    output.user_data().insert_if_missing(|| {
-                        RefCell::new(Option::<ext_work::WorkspaceGroup>::None)
-                    });
-                    *output
-                        .user_data()
-                        .get::<RefCell<Option<ext_work::WorkspaceGroup>>>()
-                        .unwrap()
-                        .borrow_mut() = Some(group);
-                    self.manager.done();
-                }
-            }
-            Mode::Global { active } => {
-                #[cfg(feature = "experimental")]
-                {
-                    if self.global_group.is_none() {
-                        self.global_group = Some(
-                            self.manager
-                                .new_group(|_, _, _| {}, std::iter::once(output.clone())),
-                        );
-                        for (idx, workspace) in self.spaces.iter_mut().enumerate() {
-                            let ext_workspace = self
-                                .global_group
-                                .as_mut()
-                                .unwrap()
-                                .create_workspace(format!("{}", idx + 1));
-                            ext_workspace.set_coordinates(std::iter::once(idx as u32));
-                            if idx == active {
-                                ext_workspace.add_state(ext_work::State::Active);
-                            }
-                            workspace.ext_workspace = Some(ext_workspace);
-                        }
-                    } else {
-                        self.manager.update_outputs(|_, outputs| {
-                            outputs.insert(output.clone());
+        match self.workspace_mode {
+            WorkspaceMode::OutputBound => {
+                // if the workspace is active on a different output, move the cursor over
+                for output in self.outputs.iter().filter(|o| o != &output) {
+                    if output.user_data().get::<OutputBoundState>().unwrap().active.get() == idx {
+                        let geometry = output.geometry();
+                        set_active_output(seat, output);
+                        return Some(MotionEvent {
+                            location: Point::<i32, Logical>::from((
+                                geometry.loc.x + (geometry.size.w / 2),
+                                geometry.loc.y + (geometry.size.h / 2),
+                            ))
+                            .to_f64(),
+                            focus: None, // This should actually be a surface, if there is one in the center
+                            serial: SERIAL_COUNTER.next_serial(),
+                            time: 0,
                         });
                     }
-                    self.manager.done();
                 }
 
-                let workspace = &mut self.spaces[active];
-                workspace.space.map_output(output, config.position);
-            }
-        }
-        output.change_current_state(None, None, Some(Scale::Fractional(config.scale)), None);
-    }
+                // else we exchange the workspace on the current output
+                let output_state = output.user_data().get::<OutputBoundState>().unwrap();
+                let old_active = output_state.active.get();
+                if idx != old_active {
+                    let mut state = self.workspace_state.update();
+                    output_state.active.set(idx);
 
-    pub fn remove_output(&mut self, output: &Output) {
-        match self.mode {
-            Mode::OutputBound => {
-                if let Some(idx) = output
-                    .user_data()
-                    .get::<ActiveWorkspace>()
-                    .and_then(|a| a.get())
-                {
-                    self.spaces[idx].space.unmap_output(output);
-                    self.outputs.retain(|o| o != output);
-                }
-                #[cfg(feature = "experimental")]
-                {
-                    let group = output
-                        .user_data()
-                        .get::<RefCell<Option<ext_work::WorkspaceGroup>>>()
-                        .unwrap()
-                        .borrow_mut()
-                        .take()
-                        .unwrap();
-                    let mut alternative_group = self.outputs.last_mut().map(|o| {
-                        o.user_data()
-                            .get::<RefCell<Option<ext_work::WorkspaceGroup>>>()
-                            .unwrap()
-                    });
-                    for (idx, workspace) in self.spaces.iter_mut().enumerate() {
-                        if workspace
-                            .ext_workspace
-                            .as_ref()
-                            .map(|w| group.belongs(w))
-                            .unwrap_or(false)
-                        {
-                            workspace.ext_workspace.take().unwrap().remove();
-                            if let Some(alternative) = alternative_group.as_mut() {
-                                let ext_workspace = alternative
-                                    .borrow_mut()
-                                    .as_mut()
-                                    .unwrap()
-                                    .create_workspace(format!("{}", idx + 1));
-                                ext_workspace.set_coordinates(std::iter::once(idx as u32));
-                                workspace.ext_workspace = Some(ext_workspace);
-                            }
-                        }
+                    if !state.workspace_belongs_to_group(&output_state.group.get(), &self.spaces[idx].handle) {
+                        state.remove_workspace(self.spaces[idx].handle);
+                        init_workspace_handle(&mut state, &output_state.group.get(), &mut self.spaces[idx]);
                     }
-                    self.manager.remove_group(&group);
+                    
+                    state.remove_workspace_state(&self.spaces[old_active].handle, WState::Active);
+                    state.add_workspace_state(&self.spaces[idx].handle, WState::Active);
+
+                    std::mem::drop(state);
+                    remap_output(output, &mut self.spaces, old_active, idx, Point::from((0, 0)), &mut self.toplevel_info_state);
                 }
-            }
-            Mode::Global { active } => {
-                #[cfg(feature = "experimental")]
-                self.manager.update_outputs(|_, outputs| {
-                    outputs.remove(output);
-                });
-                self.spaces[active].space.unmap_output(output);
-                self.outputs.retain(|o| o != output);
-                // TODO move windows and outputs farther on the right / or load save config for remaining monitors
-            }
-        }
-    }
-
-    pub fn output_size(&self, output: &Output) -> Size<i32, Logical> {
-        let workspace = self.active_space(output);
-        workspace
-            .space
-            .output_geometry(&output)
-            .unwrap_or(Rectangle::from_loc_and_size((0, 0), (0, 0)))
-            .size
-    }
-
-    pub fn global_space(&self) -> Rectangle<i32, Logical> {
-        self.outputs
-            .iter()
-            .fold(
-                Option::<Rectangle<i32, Logical>>::None,
-                |maybe_geo, output| match maybe_geo {
-                    Some(rect) => Some(rect.merge(self.output_geometry(output))),
-                    None => Some(self.output_geometry(output)),
-                },
-            )
-            .unwrap_or_else(|| Rectangle::from_loc_and_size((0, 0), (0, 0)))
-    }
-
-    pub fn space_relative_output_geometry<C: smithay::utils::Coordinate>(
-        &self,
-        global_loc: impl Into<Point<C, Logical>>,
-        output: &Output,
-    ) -> Point<C, Logical> {
-        match self.mode {
-            Mode::Global { .. } => global_loc.into(),
-            Mode::OutputBound => {
-                let p = global_loc.into().to_f64() - self.output_geometry(output).loc.to_f64();
-                (C::from_f64(p.x), C::from_f64(p.y)).into()
-            }
-        }
-    }
-
-    pub fn output_geometry(&self, output: &Output) -> Rectangle<i32, Logical> {
-        // due to our different modes, we cannot just ask the space for the global output coordinates,
-        // because for `Mode::OutputBound` the origin will always be (0, 0)
-
-        let config = output
-            .user_data()
-            .get::<RefCell<OutputConfig>>()
-            .unwrap()
-            .borrow();
-        Rectangle::from_loc_and_size(config.position, self.output_size(output))
-    }
-
-    pub fn activate(&mut self, seat: &Seat, output: &Output, idx: usize) {
-        if idx > MAX_WORKSPACES {
-            return;
-        }
-
-        match self.mode {
-            Mode::OutputBound => {
-                for output in &self.outputs {
-                    if output
-                        .user_data()
-                        .get::<ActiveWorkspace>()
-                        .and_then(|i| i.get().map(|i| i == idx))
-                        .unwrap_or(false)
-                    {
-                        let geometry = self.output_geometry(output);
-                        if let Some(ptr) = seat.get_pointer() {
-                            ptr.motion(
-                                Point::<i32, Logical>::from((
-                                    geometry.loc.x + (geometry.size.w / 2),
-                                    geometry.loc.y + (geometry.size.h / 2),
-                                ))
-                                .to_f64(),
-                                None,
-                                SERIAL_COUNTER.next_serial(),
-                                0,
-                            );
-                            set_active_output(seat, output);
-                            return;
-                        }
-                    }
-                }
-
-                if let Some(active) = output.user_data().get::<ActiveWorkspace>() {
-                    if let Some(old_idx) = active.set(idx) {
-                        #[cfg(feature = "experimental")]
-                        if let Some(ext_workspace) = self.spaces[old_idx].ext_workspace.as_mut() {
-                            ext_workspace.remove_state(ext_work::State::Active);
-                        }
-                        self.spaces[old_idx].space.unmap_output(output);
-                    }
-                    self.spaces[idx].space.map_output(output, (0, 0));
-                    #[cfg(feature = "experimental")]
-                    {
-                        let mut group_borrow = output
-                            .user_data()
-                            .get::<RefCell<Option<ext_work::WorkspaceGroup>>>()
-                            .unwrap()
-                            .borrow_mut();
-                        let group = group_borrow.as_mut().unwrap();
-                        if self.spaces[idx]
-                            .ext_workspace
-                            .as_ref()
-                            .map(|x| !group.belongs(x))
-                            .unwrap_or(true)
-                        {
-                            let ext_workspace = group.create_workspace(format!("{}", idx + 1));
-                            ext_workspace.set_coordinates(std::iter::once(idx as u32));
-                            if let Some(old) = self.spaces[idx].ext_workspace.replace(ext_workspace)
-                            {
-                                old.remove();
-                            }
-                        }
-                        self.spaces[idx]
-                            .ext_workspace
-                            .as_mut()
-                            .unwrap()
-                            .add_state(ext_work::State::Active);
-                        self.manager.done();
-                    }
-                    self.spaces[idx].refresh();
-                }
-            }
-            Mode::Global { ref mut active } => {
+            },
+            WorkspaceMode::Global { ref mut active, .. } => {
                 let old = *active;
                 *active = idx;
-                for output in &self.outputs {
-                    self.spaces[old].space.unmap_output(output);
-                    let config = output
-                        .user_data()
-                        .get::<RefCell<OutputConfig>>()
-                        .unwrap()
-                        .borrow();
-                    self.spaces[*active]
-                        .space
-                        .map_output(output, config.position);
-                }
-                #[cfg(feature = "experimental")]
-                {
-                    for (idx, workspace) in self.spaces.iter_mut().enumerate() {
-                        if idx == *active {
-                            workspace
-                                .ext_workspace
-                                .as_mut()
-                                .unwrap()
-                                .add_state(ext_work::State::Active);
-                        } else {
-                            workspace
-                                .ext_workspace
-                                .as_mut()
-                                .unwrap()
-                                .remove_state(ext_work::State::Active);
-                        }
-                    }
-                    self.manager.done();
-                }
-            }
-        };
-    }
 
-    pub fn move_current_window(&mut self, seat: &Seat, output: &Output, idx: usize) {
-        if idx > MAX_WORKSPACES {
-            return;
+                let mut state = self.workspace_state.update();
+                for output in &self.outputs {
+                    remap_output(output, &mut self.spaces, old, idx, output.current_location(), &mut self.toplevel_info_state);
+                }
+                state.remove_workspace_state(&self.spaces[old].handle, WState::Active);
+                state.add_workspace_state(&self.spaces[idx].handle, WState::Active);
+            }
         }
 
-        let workspace = self.active_space_mut(output);
-        if idx == workspace.idx as usize {
-            return;
-        }
-
-        let maybe_window = workspace.focus_stack(seat).last();
-        if let Some(window) = maybe_window {
-            workspace.unmap_window(&window);
-            self.spaces[idx].map_window(&window, seat);
-        }
-    }
-
-    #[cfg(feature = "debug")]
-    pub fn mode(&self) -> &Mode {
-        &self.mode
-    }
-
-    pub fn set_mode(&mut self, mode: Mode) {
-        match (&mut self.mode, mode) {
-            (Mode::OutputBound, Mode::Global { .. }) => {
-                let active = self
-                    .outputs
-                    .iter()
-                    .next()
-                    .map(|o| {
-                        o.user_data()
-                            .get::<ActiveWorkspace>()
-                            .unwrap()
-                            .get()
-                            .unwrap()
-                    })
-                    .unwrap_or(0);
-
-                for output in &self.outputs {
-                    let old_active = output
-                        .user_data()
-                        .get::<ActiveWorkspace>()
-                        .unwrap()
-                        .clear()
-                        .unwrap();
-                    let config = output
-                        .user_data()
-                        .get::<RefCell<OutputConfig>>()
-                        .unwrap()
-                        .borrow();
-                    self.spaces[old_active].space.unmap_output(output);
-                    self.spaces[active]
-                        .space
-                        .map_output(output, config.position);
-                    self.spaces[active].refresh();
-                }
-
-                self.mode = Mode::Global { active };
-            }
-            (Mode::Global { active }, new @ Mode::OutputBound) => {
-                for output in &self.outputs {
-                    self.spaces[*active].space.unmap_output(output);
-                }
-
-                let mut active = Some(active.clone());
-                self.mode = new;
-                for output in &self.outputs {
-                    let workspace = if let Some(a) = active.take() {
-                        output
-                            .user_data()
-                            .insert_if_missing(|| ActiveWorkspace::new());
-                        output.user_data().get::<ActiveWorkspace>().unwrap().set(a);
-                        &mut self.spaces[a]
-                    } else {
-                        Self::assign_next_free_output(&mut self.spaces, output).1
-                    };
-                    workspace.space.map_output(output, (0, 0));
-                    workspace.refresh();
-                }
-            }
-            _ => {}
-        };
-    }
-
-    pub fn outputs(&self) -> impl Iterator<Item = &Output> {
-        self.outputs.iter()
+        None
     }
 
     pub fn active_space(&self, output: &Output) -> &Workspace {
-        match &self.mode {
-            Mode::OutputBound => {
+        match &self.workspace_mode {
+            WorkspaceMode::OutputBound => {
                 let active = output
                     .user_data()
-                    .get::<ActiveWorkspace>()
+                    .get::<OutputBoundState>()
                     .unwrap()
-                    .get()
-                    .unwrap();
+                    .active
+                    .get();
                 &self.spaces[active]
             }
-            Mode::Global { active } => &self.spaces[*active],
+            WorkspaceMode::Global { active, .. } => &self.spaces[*active],
         }
     }
 
     pub fn active_space_mut(&mut self, output: &Output) -> &mut Workspace {
-        match &self.mode {
-            Mode::OutputBound => {
+        match &self.workspace_mode {
+            WorkspaceMode::OutputBound => {
                 let active = output
                     .user_data()
-                    .get::<ActiveWorkspace>()
+                    .get::<OutputBoundState>()
                     .unwrap()
-                    .get()
-                    .unwrap();
+                    .active
+                    .get();
                 &mut self.spaces[active]
             }
-            Mode::Global { active } => &mut self.spaces[*active],
+            WorkspaceMode::Global { active, .. } => &mut self.spaces[*active],
         }
     }
 
@@ -609,11 +346,7 @@ impl Shell {
 
     pub fn space_for_surface(&self, surface: &WlSurface) -> Option<&Workspace> {
         self.spaces.iter().find(|workspace| {
-            workspace
-                .pending_windows
-                .iter()
-                .any(|(w, _)| w.toplevel().get_surface() == Some(surface))
-                || workspace.space.window_for_surface(surface, WindowSurfaceType::ALL).is_some()
+            workspace.space.window_for_surface(surface, WindowSurfaceType::ALL).is_some()
         })
     }
 
@@ -622,284 +355,256 @@ impl Shell {
             .iter_mut()
             .find(|workspace| workspace.space.window_for_surface(surface, WindowSurfaceType::ALL).is_some())
     }
+    
+    pub fn outputs(&self) -> impl Iterator<Item=&Output> {
+        self.outputs.iter()
+    }
 
-    pub fn refresh(&mut self) {
+    pub fn global_space(&self) -> Rectangle<i32, Logical> {
+        self.outputs
+            .iter()
+            .fold(
+                Option::<Rectangle<i32, Logical>>::None,
+                |maybe_geo, output| match maybe_geo {
+                    Some(rect) => Some(rect.merge(output.geometry())),
+                    None => Some(output.geometry()),
+                },
+            )
+            .unwrap_or_else(|| Rectangle::from_loc_and_size((0, 0), (0, 0)))
+    }
+
+    pub fn space_relative_output_geometry<C: smithay::utils::Coordinate>(
+        &self,
+        global_loc: impl Into<Point<C, Logical>>,
+        output: &Output,
+    ) -> Point<C, Logical> {
+        match self.workspace_mode {
+            WorkspaceMode::Global { .. } => global_loc.into(),
+            WorkspaceMode::OutputBound => {
+                let p = global_loc.into().to_f64() - output.current_location().to_f64();
+                (C::from_f64(p.x), C::from_f64(p.y)).into()
+            }
+        }
+    }
+
+    pub fn refresh(&mut self, dh: &DisplayHandle) {
         self.popups.cleanup();
-        for output in self.outputs.iter() {
-            let workspace = match &self.mode {
-                Mode::OutputBound => {
+        let mut state = self.workspace_state.update();
+        for output in &self.outputs {
+            let workspace = match &self.workspace_mode {
+                WorkspaceMode::OutputBound => {
                     let active = output
                         .user_data()
-                        .get::<ActiveWorkspace>()
+                        .get::<OutputBoundState>()
                         .unwrap()
-                        .get()
-                        .unwrap();
+                        .active
+                        .get();
                     &mut self.spaces[active]
                 }
-                Mode::Global { active } => &mut self.spaces[*active],
+                WorkspaceMode::Global { active, .. } => &mut self.spaces[*active],
             };
-            workspace.refresh();
+            workspace.refresh(dh);
+            if workspace.space.windows().next().is_none() {
+                state.add_workspace_state(&workspace.handle, WState::Hidden);
+            }
             let mut map = layer_map_for_output(output);
             map.cleanup();
-            map.arrange();
         }
+        std::mem::drop(state);
+        self.toplevel_info_state.refresh(Some(&self.workspace_state));
     }
+    
+    pub fn map_window(&mut self, window: &Window, output: &Output) {
+        let pos = self.pending_windows.iter().position(|(w, _)| w == window).unwrap();
+        let (window, seat) = self.pending_windows.remove(pos);
 
-    pub fn commit<'a>(&mut self, surface: &WlSurface, seats: impl Iterator<Item = &'a Seat>) {
-        let mut new_focus = None;
-        for (idx, workspace) in self.spaces.iter_mut().enumerate() {
-            if let Some((window, seat)) = workspace
-                .pending_windows
-                .iter()
-                .find(|(w, _)| w.toplevel().get_surface() == Some(surface))
-                .cloned()
-            {
-                workspace.map_window(&window, &seat);
-                if match self.mode {
-                    Mode::OutputBound => self.outputs.iter().any(|o| {
-                        o.user_data()
-                            .get::<ActiveWorkspace>()
-                            .unwrap()
-                            .get()
-                            .unwrap()
-                            == idx
-                    }),
-                    Mode::Global { active } => active == idx,
-                } {
-                    new_focus = Some(seat);
-                }
-                workspace.pending_windows.retain(|(w, _)| w != &window);
-            }
-            if let Some((layer, output, seat)) = workspace
-                .pending_layers
-                .iter()
-                .find(|(l, _, _)| l.get_surface() == Some(surface))
-                .cloned()
-            {
-                let focus = layer
-                    .get_surface()
-                    .map(|surface| {
-                        with_states(surface, |states| {
-                            let state = states.cached_state.current::<LayerSurfaceCachedState>();
-                            matches!(state.layer, Layer::Top | Layer::Overlay)
-                                && dbg!(state.keyboard_interactivity) != KeyboardInteractivity::None
-                        })
-                        .unwrap()
-                    })
-                    .unwrap_or(false);
-
-                let mut map = layer_map_for_output(&output);
-                map.map_layer(&layer).unwrap();
-
-                if focus {
-                    new_focus = Some(seat);
-                }
-                workspace.pending_layers.retain(|(l, _, _)| l != &layer);
-            }
-            workspace.space.commit(surface);
-        }
-        if let Some(seat) = new_focus {
-            self.set_focus(Some(surface), &seat, seats, None)
-        }
-        self.popups.commit(&surface);
-    }
-
-    pub fn set_orientation(
-        &mut self,
-        seat: &Seat,
-        output: &Output,
-        orientation: layout::Orientation,
-    ) {
-        self.active_space_mut(output)
-            .update_orientation(seat, orientation)
-    }
-
-    pub fn move_focus<'a>(
-        &mut self,
-        seat: &Seat,
-        output: &Output,
-        focus: layout::FocusDirection,
-        seats: impl Iterator<Item = &'a Seat>,
-    ) {
-        if let Some(surface) = self
-            .active_space_mut(output)
-            .move_focus(seat, focus)
-            .and_then(|window| window.toplevel().get_surface().cloned())
-        {
-            self.set_focus(Some(&surface), seat, seats, None)
-        }
-    }
-
-    fn set_focus<'a>(
-        &mut self,
-        surface: Option<&WlSurface>,
-        active_seat: &Seat,
-        seats: impl Iterator<Item = &'a Seat>,
-        serial: Option<Serial>,
-    ) {
-        // update FocusStack and notify layouts about new focus (if any window)
-        if let Some(surface) = surface {
-            if let Some(workspace) = self.space_for_surface_mut(surface) {
-                if let Some(window) = workspace.space.window_for_surface(surface, WindowSurfaceType::ALL) {
-                    let mut focus_stack = workspace.focus_stack_mut(active_seat);
-                    if Some(window) != focus_stack.last().as_ref() {
-                        slog_scope::debug!("Focusing window: {:?}", window);
-                        focus_stack.append(window);
-                        // also remove popup grabs, if we are switching focus
-                        if let Some(mut popup_grab) = active_seat
-                            .user_data()
-                            .get::<PopupGrabData>()
-                            .and_then(|x| x.take())
-                        {
-                            if !popup_grab.has_ended() {
-                                popup_grab.ungrab(PopupUngrabStrategy::All);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // update keyboard focus
-        if let Some(keyboard) = active_seat.get_keyboard() {
-            ActiveFocus::set(active_seat, surface.cloned());
-            keyboard.set_focus(
-                surface,
-                serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
-            );
-        }
-
-        self.update_active(seats)
-    }
-
-    fn update_active<'a>(&mut self, seats: impl Iterator<Item = &'a Seat>) {
-        // update activate status
-        let focused_windows = seats
-            .flat_map(|seat| {
-                self.outputs
-                    .iter()
-                    .flat_map(|o| self.active_space(o).focus_stack(seat).last().clone())
-            })
-            .collect::<Vec<_>>();
-
-        for output in self.outputs.iter() {
-            let workspace = match &self.mode {
-                Mode::OutputBound => {
-                    let active = output
-                        .user_data()
-                        .get::<ActiveWorkspace>()
-                        .unwrap()
-                        .get()
-                        .unwrap();
-                    &mut self.spaces[active]
-                }
-                Mode::Global { active } => &mut self.spaces[*active],
-            };
-            for focused in focused_windows.iter() {
-                workspace.space.raise_window(focused, true);
-            }
-            for window in workspace.space.windows() {
-                window.set_activated(focused_windows.contains(window));
-                window.configure();
-            }
-        }
-    }
-}
-
-pub struct ActiveFocus(RefCell<Option<WlSurface>>);
-
-impl ActiveFocus {
-    fn set(seat: &Seat, surface: Option<WlSurface>) {
-        if !seat
-            .user_data()
-            .insert_if_missing(|| ActiveFocus(RefCell::new(surface.clone())))
-        {
-            *seat
-                .user_data()
-                .get::<ActiveFocus>()
-                .unwrap()
-                .0
-                .borrow_mut() = surface;
-        }
-    }
-
-    fn get(seat: &Seat) -> Option<WlSurface> {
-        seat.user_data()
-            .get::<ActiveFocus>()
-            .and_then(|a| a.0.borrow().clone())
-    }
-}
-
-impl Common {
-    pub fn set_focus(
-        &mut self,
-        surface: Option<&WlSurface>,
-        active_seat: &Seat,
-        serial: Option<Serial>,
-    ) {
-        self.shell
-            .set_focus(surface, active_seat, self.seats.iter(), serial)
-    }
-
-    pub fn refresh_focus(&mut self) {
-        for seat in &self.seats {
-            let mut fixup = false;
-            let output = active_output(seat, &self);
-            let last_known_focus = ActiveFocus::get(seat);
-
-            if let Some(surface) = last_known_focus {
-                if surface.as_ref().is_alive() {
-                    let is_toplevel = with_states(&surface, |states| {
-                        states
-                            .data_map
-                            .get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
-                            .is_some()
-                    })
-                    .unwrap_or(false);
-                    if !is_toplevel {
-                        continue;
-                    }
-
-                    let workspace = self.shell.active_space(&output);
-                    if let Some(window) = workspace.space.window_for_surface(&surface, WindowSurfaceType::ALL) {
-                        let focus_stack = workspace.focus_stack(&seat);
-                        if focus_stack.last().map(|w| &w != window).unwrap_or(true) {
-                            fixup = true;
-                        }
-                    } else {
-                        fixup = true;
-                    }
-                } else {
-                    fixup = true;
-                }
-            }
-
-            if fixup {
-                // also remove popup grabs, if we are switching focus
-                if let Some(mut popup_grab) = seat
+        let workspace = match &self.workspace_mode {
+            WorkspaceMode::OutputBound => {
+                let active = output
                     .user_data()
-                    .get::<PopupGrabData>()
-                    .and_then(|x| x.take())
-                {
-                    if !popup_grab.has_ended() {
-                        popup_grab.ungrab(PopupUngrabStrategy::All);
-                    }
-                }
-
-                // update keyboard focus
-                let surface = self
-                    .shell
-                    .active_space(&output)
-                    .focus_stack(seat)
-                    .last()
-                    .and_then(|w| w.toplevel().get_surface().cloned());
-                if let Some(keyboard) = seat.get_keyboard() {
-                    keyboard.set_focus(surface.as_ref(), SERIAL_COUNTER.next_serial());
-                    ActiveFocus::set(seat, surface);
-                }
+                    .get::<OutputBoundState>()
+                    .unwrap()
+                    .active
+                    .get();
+                &mut self.spaces[active]
             }
+            WorkspaceMode::Global { active, .. } => &mut self.spaces[*active],
+        };
+        self.workspace_state.update().remove_workspace_state(&workspace.handle, WState::Hidden);
+        self.toplevel_info_state.toplevel_enter_workspace(&window, &workspace.handle);
+        let focus_stack = workspace.focus_stack(&seat);
+        if layout::should_be_floating(&window) {
+            workspace.floating_layer.map_window(&mut workspace.space, window, &seat);
+        } else {
+            workspace.tiling_layer.map_window(&mut workspace.space, window, &seat, focus_stack.iter());
+        }
+    }
+
+    pub fn map_layer(&mut self, layer_surface: &LayerSurface, dh: &DisplayHandle) {
+        let pos = self.pending_layers.iter().position(|(l, _, _)| l == layer_surface).unwrap();
+        let (layer_surface, output, seat) = self.pending_layers.remove(pos);
+            
+        let surface = layer_surface.wl_surface();
+        let wants_focus = {
+            with_states(surface, |states| {
+                let state = states.cached_state.current::<LayerSurfaceCachedState>();
+                matches!(state.layer, Layer::Top | Layer::Overlay)
+                    && dbg!(state.keyboard_interactivity) != KeyboardInteractivity::None
+            })
+        };
+
+        let mut map = layer_map_for_output(&output);
+        map.map_layer(dh, &layer_surface).unwrap();
+
+        if wants_focus {
+            self.set_focus(dh, Some(surface), &seat, None)
+        }
+    }
+
+    pub fn move_current_window(&mut self, seat: &Seat<State>, output: &Output, idx: usize) {
+        if idx > MAX_WORKSPACES {
+            return;
         }
 
-        self.shell.update_active(self.seats.iter())
+        let workspace = match &self.workspace_mode {
+            WorkspaceMode::OutputBound => {
+                let active = output
+                    .user_data()
+                    .get::<OutputBoundState>()
+                    .unwrap()
+                    .active
+                    .get();
+                &mut self.spaces[active]
+            }
+            WorkspaceMode::Global { active, .. } => &mut self.spaces[*active],
+        };
+        if idx == workspace.idx as usize {
+            return;
+        }
+
+        let maybe_window = workspace.focus_stack(seat).last();
+        if let Some(window) = maybe_window {
+            workspace.floating_layer.unmap_window(&mut workspace.space, &window);
+            workspace.tiling_layer.unmap_window(&mut workspace.space, &window);
+            self.toplevel_info_state.toplevel_leave_workspace(&window, &workspace.handle);
+            
+            let new_workspace = &mut self.spaces[idx];
+            self.toplevel_info_state.toplevel_enter_workspace(&window, &new_workspace.handle);
+            let focus_stack = new_workspace.focus_stack(&seat);
+            if layout::should_be_floating(&window) {
+                new_workspace.floating_layer.map_window(&mut new_workspace.space, window, &seat);
+            } else {
+                new_workspace.tiling_layer.map_window(&mut new_workspace.space, window, &seat, focus_stack.iter());
+            }
+        }
+    }
+}
+
+fn init_mode(
+    config_mode: &ConfigMode,
+    old_mode: Option<&WorkspaceMode>,
+    outputs: &[Output],
+    state: &mut WorkspaceState<State>,
+    workspaces: &mut [Workspace; MAX_WORKSPACES]
+) -> WorkspaceMode {
+    let mut state = state.update();
+
+    // cleanup
+    for workspace in workspaces.iter_mut() {
+        state.remove_workspace(workspace.handle);
+    }
+    
+    match old_mode {
+        Some(WorkspaceMode::Global { group, .. }) => state.remove_workspace_group(group.clone()),
+        Some(WorkspaceMode::OutputBound) => for output in outputs {
+            if let Some(old_state) = output.user_data().get::<OutputBoundState>() {
+                state.remove_workspace_group(old_state.group.get());
+            }
+        },
+        _ => {},
+    };
+
+    // set the new state (especially cosmic_workspace state)
+    match config_mode {
+        ConfigMode::Global => {
+            let group = state.create_workspace_group();
+            for output in outputs {
+                state.add_group_output(&group, output)
+            }
+            for workspace in workspaces.iter_mut() {
+                init_workspace_handle(&mut state, &group, workspace);
+            }
+            state.add_workspace_state(&workspaces[0].handle, WState::Active);
+            state.remove_workspace_state(&workspaces[0].handle, WState::Hidden);
+            WorkspaceMode::Global {
+                active: 0,
+                group,
+            }
+        },
+        ConfigMode::OutputBound => {
+            for (i, output) in outputs.iter().enumerate() {
+                let group = state.create_workspace_group();
+                state.add_group_output(&group, output);
+
+                let workspace = workspaces.get_mut(i).expect("More then ten workspaces?!?");
+                let handle = init_workspace_handle(&mut state, &group, workspace);
+                state.add_workspace_state(&handle, WState::Active);
+                state.remove_workspace_state(&handle, WState::Hidden);
+
+                let output_state = OutputBoundState {
+                    active: Cell::new(i),
+                    group: Cell::new(group),
+                };
+                let map = output.user_data();
+                if !map.insert_if_missing(|| output_state) {
+                    let old_state = map.get::<OutputBoundState>().unwrap();
+                    old_state.active.set(i);
+                    old_state.group.set(group);
+                }
+            }
+            if !outputs.is_empty() {
+                for workspace in workspaces.iter_mut().skip(outputs.iter().count()) {
+                    let group = outputs[0].user_data().get::<OutputBoundState>().unwrap().group.get();
+                    init_workspace_handle(&mut state, &group, workspace);
+                }
+            }
+            WorkspaceMode::OutputBound
+        }
+    }
+}
+
+fn init_workspace_handle<'a>(state: &mut WorkspaceUpdateGuard<'a, State>, group: &WorkspaceGroupHandle, workspace: &mut Workspace) -> WorkspaceHandle {
+    let handle = state.create_workspace(&group).unwrap();
+    state.set_workspace_capabilities(&handle, [WorkspaceCapabilities::Activate].into_iter());
+    state.set_workspace_name(&handle, format!("{}", workspace.idx));
+    state.set_workspace_coordinates(&handle, [Some(workspace.idx as u32), None, None]);
+    if workspace.space.windows().next().is_none() {
+        state.add_workspace_state(&handle, WState::Hidden);
+    }
+    workspace.handle = handle.clone();
+    handle
+}
+
+fn remap_output(
+    output: &Output,
+    spaces: &mut [Workspace],
+    old: impl Into<Option<usize>>,
+    new: impl Into<Option<usize>>,
+    pos: impl Into<Option<Point<i32, Logical>>>,
+    info_state: &mut ToplevelInfoState<State>
+) {
+    if let Some(old) = old.into() {
+        let old_space = &mut spaces[old].space;
+        old_space.unmap_output(output);
+        for window in old_space.windows() {
+            info_state.toplevel_leave_output(window, output);
+        }
+    }
+    if let Some(new) = new.into() {
+        let new_space = &mut spaces[new].space;
+        new_space.map_output(output, pos.into().expect("new requires pos"));
+        for window in new_space.windows() {
+            info_state.toplevel_enter_output(window, output);
+        }
     }
 }

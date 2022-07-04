@@ -1,14 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::shell::layout::{FocusDirection, Layout, Orientation};
+use crate::{
+    shell::{
+        layout::Orientation,
+        focus::FocusDirection,
+    },
+    utils::prelude::*,
+};
+
 use atomic_float::AtomicF64;
 use id_tree::{InsertBehavior, MoveBehavior, Node, NodeId, NodeIdError, RemoveBehavior, Tree};
 use smithay::{
     desktop::{layer_map_for_output, Kind, Space, Window},
-    reexports::wayland_protocols::xdg_shell::server::xdg_toplevel::{
+    reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
         ResizeEdge, State as XdgState,
     },
-    utils::Rectangle,
+    utils::{IsAlive, Rectangle},
     wayland::{
         seat::{PointerGrabStartData, Seat},
         Serial,
@@ -16,6 +23,7 @@ use smithay::{
 };
 use std::{
     cell::RefCell,
+    collections::HashSet,
     sync::{atomic::Ordering, Arc},
 };
 
@@ -26,6 +34,7 @@ pub use self::grabs::*;
 pub struct TilingLayout {
     gaps: (i32, i32),
     trees: Vec<Tree<Data>>,
+    pub windows: HashSet<Window>,
 }
 
 #[derive(Debug)]
@@ -61,28 +70,30 @@ impl TilingLayout {
         TilingLayout {
             gaps: (0, 4),
             trees: Vec::new(),
+            windows: HashSet::new(),
         }
     }
 }
 
-impl Layout for TilingLayout {
-    fn map_window<'a>(
+impl TilingLayout {
+    pub fn map_window<'a>(
         &mut self,
         space: &mut Space,
-        window: &Window,
-        seat: &Seat,
-        focus_stack: Box<dyn Iterator<Item = &'a Window> + 'a>,
+        window: Window,
+        seat: &Seat<State>,
+        focus_stack: impl Iterator<Item = &'a Window> + 'a,
     ) {
-        self.map_window(space, window, Some(seat), Some(focus_stack));
+        self.map_window_internal(space, &window, Some(seat), Some(focus_stack));
+        self.windows.insert(window);
         self.refresh(space);
     }
 
-    fn move_focus<'a>(
+    pub fn move_focus<'a>(
         &mut self,
         direction: FocusDirection,
-        seat: &Seat,
+        seat: &Seat<State>,
         space: &mut Space,
-        focus_stack: Box<dyn Iterator<Item = &'a Window> + 'a>,
+        focus_stack: impl Iterator<Item = &'a Window> + 'a,
     ) -> Option<Window> {
         let output = super::output_from_seat(Some(seat), space);
         let idx = space
@@ -136,12 +147,13 @@ impl Layout for TilingLayout {
 
         None
     }
-    fn update_orientation<'a>(
+
+    pub fn update_orientation<'a>(
         &mut self,
         new_orientation: Orientation,
-        seat: &Seat,
+        seat: &Seat<State>,
         space: &mut Space,
-        focus_stack: Box<dyn Iterator<Item = &'a Window> + 'a>,
+        focus_stack: impl Iterator<Item = &'a Window> + 'a,
     ) {
         let output = super::output_from_seat(Some(seat), space);
         let idx = space
@@ -163,7 +175,7 @@ impl Layout for TilingLayout {
         self.refresh(space);
     }
 
-    fn refresh<'a>(&mut self, space: &mut Space) {
+    pub fn refresh<'a>(&mut self, space: &mut Space) {
         let active_outputs = space.outputs().count();
         if self.trees.len() > active_outputs {
             for tree in self
@@ -175,7 +187,7 @@ impl Layout for TilingLayout {
                 if let Some(root_id) = tree.root_node_id() {
                     for node in tree.traverse_pre_order(root_id).unwrap() {
                         if let Data::Window(window) = node.data() {
-                            self.map_window(space, window, None, None);
+                            self.map_window_internal(space, window, None, Option::<std::iter::Empty<&Window>>::None);
                         }
                     }
                 }
@@ -189,22 +201,32 @@ impl Layout for TilingLayout {
         .filter(|v| !v.is_empty())
         {
             for window in dead_windows {
-                self.unmap_window(&window);
+                self.unmap_window_internal(&window);
             }
         }
     }
 
-    fn unmap_window(&mut self, space: &mut Space, window: &Window) {
-        self.unmap_window(&window);
-        space.unmap_window(&window);
+    pub fn unmap_window(&mut self, space: &mut Space, window: &Window) {
+        self.unmap_window_internal(window);
+        space.unmap_window(window);
+        #[allow(irrefutable_let_patterns)]
+        if let Kind::Xdg(xdg) = &window.toplevel() {
+            xdg.with_pending_state(|state| {
+                state.states.unset(XdgState::TiledLeft);
+                state.states.unset(XdgState::TiledRight);
+                state.states.unset(XdgState::TiledTop);
+                state.states.unset(XdgState::TiledBottom);
+            });
+        }
+        self.windows.remove(window);
         self.refresh(space);
     }
 
-    fn resize_request(
+    pub fn resize_request(
         &mut self,
         space: &mut Space,
         window: &Window,
-        seat: &Seat,
+        seat: &Seat<State>,
         serial: Serial,
         start_data: PointerGrabStartData,
         edges: ResizeEdge,
@@ -252,9 +274,7 @@ impl Layout for TilingLayout {
             }
         }
     }
-}
-
-impl TilingLayout {
+    
     fn active_tree<'a>(trees: &'a mut Vec<Tree<Data>>, output: usize) -> &'a mut Tree<Data> {
         while trees.len() <= output {
             trees.push(Tree::new())
@@ -286,12 +306,12 @@ impl TilingLayout {
         None
     }
 
-    fn map_window<'a>(
+    fn map_window_internal<'a>(
         &mut self,
         space: &mut Space,
         window: &Window,
-        seat: Option<&Seat>,
-        focus_stack: Option<Box<dyn Iterator<Item = &'a Window> + 'a>>,
+        seat: Option<&Seat<State>>,
+        focus_stack: Option<impl Iterator<Item = &'a Window> + 'a>,
     ) {
         let output = super::output_from_seat(seat, space);
         let idx = space
@@ -353,7 +373,7 @@ impl TilingLayout {
         }
     }
 
-    fn unmap_window(&mut self, window: &Window) {
+    fn unmap_window_internal(&mut self, window: &Window) {
         if let Some(info) = window.user_data().get::<RefCell<WindowInfo>>() {
             let output = info.borrow().output;
             let tree = TilingLayout::active_tree(&mut self.trees, output);
@@ -534,25 +554,21 @@ impl TilingLayout {
                             }
                         }
                         Data::Window(window) => {
-                            if window.toplevel().alive() {
+                            if window.alive() {
                                 if let Some(geo) = geo {
                                     #[allow(irrefutable_let_patterns)]
                                     if let Kind::Xdg(xdg) = &window.toplevel() {
                                         if xdg
                                             .current_state()
-                                            .map(|state| {
-                                                state.states.contains(XdgState::Fullscreen)
+                                            .states.contains(XdgState::Fullscreen)
+                                        || xdg
+                                            .with_pending_state(|pending| {
+                                                pending.states.contains(XdgState::Fullscreen)
                                             })
-                                            .unwrap_or(false)
-                                            || xdg
-                                                .with_pending_state(|pending| {
-                                                    pending.states.contains(XdgState::Fullscreen)
-                                                })
-                                                .unwrap_or(false)
                                         {
                                             continue;
                                         }
-                                        let ret = xdg.with_pending_state(|state| {
+                                        xdg.with_pending_state(|state| {
                                             state.size = Some(
                                                 (geo.size.w - inner * 2, geo.size.h - inner * 2)
                                                     .into(),
@@ -562,9 +578,7 @@ impl TilingLayout {
                                             state.states.set(XdgState::TiledTop);
                                             state.states.set(XdgState::TiledBottom);
                                         });
-                                        if ret.is_ok() {
-                                            xdg.send_configure();
-                                        }
+                                        xdg.send_configure();
                                     }
                                     space.map_window(
                                         &window,
