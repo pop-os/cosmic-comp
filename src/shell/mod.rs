@@ -85,7 +85,7 @@ pub enum ShellMode {
 
 #[derive(Debug, Clone)]
 pub struct OutputBoundState {
-    active: Cell<usize>,
+    pub active: Cell<usize>,
     group: Cell<WorkspaceGroupHandle>,
 }
 
@@ -245,7 +245,7 @@ impl Shell {
         }
     }
 
-    pub fn activate(&mut self, _dh: &DisplayHandle, seat: &Seat<State>, output: &Output, idx: usize) -> Option<MotionEvent> {
+    pub fn activate(&mut self, seat: &Seat<State>, output: &Output, idx: usize) -> Option<MotionEvent> {
         if idx > MAX_WORKSPACES {
             return None;
         }

@@ -283,7 +283,6 @@ impl State {
                                         x => x - 1,
                                     };
                                     self.common.shell.activate(
-                                        dh,
                                         seat,
                                         &current_output,
                                         workspace as usize,

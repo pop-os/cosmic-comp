@@ -3,7 +3,7 @@
 use crate::state::{Common, Fps};
 use smithay::{
     backend::drm::DrmNode,
-    utils::{Logical, Rectangle},
+    utils::{Physical, Rectangle},
 };
 pub use smithay_egui::EguiFrame;
 
@@ -11,7 +11,7 @@ pub fn fps_ui(
     gpu: Option<&DrmNode>,
     state: &Common,
     fps: &mut Fps,
-    area: Rectangle<i32, Logical>,
+    area: Rectangle<f64, Physical>,
     scale: f64,
 ) -> EguiFrame {
     use egui::widgets::plot::{Bar, BarChart, HLine, Legend, Plot};
@@ -80,7 +80,7 @@ pub fn fps_ui(
                             .show(ui, |plot_ui| {
                                 plot_ui.bar_chart(fps_chart);
                                 plot_ui.hline(
-                                    HLine::new(avg).highlight().color(egui::Color32::LIGHT_BLUE),
+                                    HLine::new(avg).highlight(true).color(egui::Color32::LIGHT_BLUE),
                                 );
                             });
                     }
@@ -96,7 +96,7 @@ pub fn fps_ui(
 
 pub fn debug_ui(
     state: &mut Common,
-    area: Rectangle<i32, Logical>,
+    area: Rectangle<f64, Physical>,
     scale: f64,
 ) -> Option<EguiFrame> {
     if !state.egui.active {
@@ -105,39 +105,46 @@ pub fn debug_ui(
 
     Some(state.egui.debug_state.run(
         |ctx| {
+            use crate::utils::prelude::*;
+
             egui::Window::new("Workspaces")
                 .default_pos([0.0, 300.0])
                 .vscroll(true)
                 .collapsible(true)
                 .show(ctx, |ui| {
-                    use crate::shell::{ActiveWorkspace, Mode, MAX_WORKSPACES};
+                    use crate::{
+                        config::WorkspaceMode as ConfigMode,
+                        shell::{OutputBoundState, WorkspaceMode, MAX_WORKSPACES},
+                    };
 
                     ui.set_min_width(250.0);
 
                     // Mode
 
                     ui.label(egui::RichText::new("Mode").heading());
-                    let mut mode = *state.shell.mode();
-                    let active = if let Mode::Global { active } = mode {
-                        active
-                    } else {
-                        0
+                    let mut mode = match &state.shell.workspace_mode {
+                        WorkspaceMode::Global { .. } => ConfigMode::Global,
+                        WorkspaceMode::OutputBound => ConfigMode::OutputBound,
                     };
-                    ui.radio_value(&mut mode, Mode::OutputBound, "Output bound");
-                    ui.radio_value(&mut mode, Mode::Global { active }, "Global");
+                    ui.radio_value(&mut mode, ConfigMode::OutputBound, "Output bound");
+                    ui.radio_value(&mut mode, ConfigMode::Global, "Global");
                     state.shell.set_mode(mode);
 
-                    match *state.shell.mode() {
-                        Mode::OutputBound => {
+                    let mode = match &state.shell.workspace_mode {
+                        WorkspaceMode::OutputBound =>  (ConfigMode::OutputBound, None),
+                        WorkspaceMode::Global { ref active, .. } =>  (ConfigMode::Global, Some(*active)),
+                    };
+                    match mode {
+                        (ConfigMode::OutputBound, _) => {
                             ui.label("Workspaces:");
                             for output in state.shell.outputs().cloned().collect::<Vec<_>>() {
                                 ui.horizontal(|ui| {
                                     let active = output
                                         .user_data()
-                                        .get::<ActiveWorkspace>()
+                                        .get::<OutputBoundState>()
                                         .unwrap()
-                                        .get()
-                                        .unwrap();
+                                        .active
+                                        .get();
                                     let mut active_val = active as f64;
                                     ui.label(output.name());
                                     ui.add(
@@ -155,7 +162,7 @@ pub fn debug_ui(
                                 });
                             }
                         }
-                        Mode::Global { active } => {
+                        (ConfigMode::Global, Some(active)) => {
                             ui.horizontal(|ui| {
                                 let mut active_val = active as f64;
                                 ui.label("Workspace:");
@@ -173,7 +180,8 @@ pub fn debug_ui(
                                     );
                                 }
                             });
-                        }
+                        },
+                        _ => unreachable!(),
                     }
 
                     // Spaces
@@ -219,7 +227,7 @@ pub fn debug_ui(
                             ui.label(format!("Output: {:#?}", output));
                             ui.label(format!(
                                 "Geometry: {:?}",
-                                state.shell.output_geometry(&output)
+                                output.geometry()
                             ));
                             ui.label(format!(
                                 "Local Geometry: {:?}",
@@ -231,7 +239,7 @@ pub fn debug_ui(
                             ));
                             ui.label(format!(
                                 "Relative Geometry: {:?}",
-                                state.shell.space_relative_output_geometry((0, 0), &output)
+                                state.shell.space_relative_output_geometry((0i32, 0i32), &output)
                             ));
                         });
                     }
@@ -247,7 +255,7 @@ pub fn debug_ui(
 
 pub fn log_ui(
     state: &mut Common,
-    area: Rectangle<i32, Logical>,
+    area: Rectangle<f64, Physical>,
     scale: f64,
     default_width: f32,
 ) -> Option<EguiFrame> {
@@ -259,8 +267,9 @@ pub fn log_ui(
         |ctx| {
             egui::SidePanel::right("Log")
                 .frame(egui::Frame {
-                    margin: egui::Vec2::new(10.0, 10.0),
-                    corner_radius: 5.0,
+                    inner_margin: egui::Vec2::new(10.0, 10.0).into(),
+                    outer_margin: egui::Vec2::new(0.0, 0.0).into(),
+                    rounding: 5.0.into(),
                     shadow: egui::epaint::Shadow {
                         extrusion: 0.0,
                         color: egui::Color32::TRANSPARENT,
@@ -286,7 +295,7 @@ pub fn log_ui(
                                 let mut message = egui::text::LayoutJob::single_section(
                                     record.level.as_short_str().to_string(),
                                     egui::TextFormat::simple(
-                                        egui::TextStyle::Monospace,
+                                        egui::FontId::monospace(16.0),
                                         match record.level {
                                             slog::Level::Critical => egui::Color32::RED,
                                             slog::Level::Error => egui::Color32::LIGHT_RED,
@@ -301,7 +310,7 @@ pub fn log_ui(
                                     &record.message,
                                     6.0,
                                     egui::TextFormat::simple(
-                                        egui::TextStyle::Body,
+                                        egui::FontId::default(),
                                         egui::Color32::WHITE,
                                     ),
                                 );

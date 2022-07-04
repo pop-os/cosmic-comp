@@ -324,7 +324,7 @@ dependencies = [
  "bitflags",
  "cosmic-protocols",
  "edid-rs",
- "egui 0.16.1",
+ "egui",
  "id_tree",
  "indexmap",
  "lazy_static",
@@ -558,50 +558,20 @@ checksum = "2ab5fa33485cd85ac354df485819a63360fefa312fe04cffe65e6f175be1522c"
 
 [[package]]
 name = "egui"
-version = "0.16.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c733356eb5f1139fdeedc370c00e9ea689c5d9120502c43925285bc7249a333"
-dependencies = [
- "ahash",
- "epaint 0.16.0",
- "nohash-hasher",
-]
-
-[[package]]
-name = "egui"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb095a8b9feb9b7ff8f00b6776dffcef059538a3f4a91238e03c900e9c9ad9a2"
 dependencies = [
  "ahash",
- "epaint 0.18.1",
+ "epaint",
  "nohash-hasher",
 ]
-
-[[package]]
-name = "emath"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55673de2eb96660dde25ba7b2d36a7054beead1a2bec74dcfd5eb05a1e1ba76d"
 
 [[package]]
 name = "emath"
 version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c223f58c7e38abe1770f367b969f1b3fbd4704b67666bcb65dbb1adb0980ba72"
-
-[[package]]
-name = "epaint"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "adfd9296f7f92902e41c0e8e5deca6d2fb29f289c86d03a01ea01bd7498316c2"
-dependencies = [
- "ab_glyph",
- "ahash",
- "atomic_refcell",
- "emath 0.16.0",
- "nohash-hasher",
-]
 
 [[package]]
 name = "epaint"
@@ -612,7 +582,7 @@ dependencies = [
  "ab_glyph",
  "ahash",
  "atomic_refcell",
- "emath 0.18.0",
+ "emath",
  "nohash-hasher",
  "parking_lot 0.12.1",
 ]
@@ -1573,7 +1543,7 @@ version = "0.1.0"
 source = "git+https://github.com/Smithay/smithay-egui.git?rev=1969c96d#1969c96d21743134bb11eadde4866245ae7c0478"
 dependencies = [
  "cgmath",
- "egui 0.18.1",
+ "egui",
  "lazy_static",
  "memoffset",
  "slog",

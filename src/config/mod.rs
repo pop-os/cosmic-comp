@@ -36,7 +36,7 @@ pub struct StaticConfig {
     pub workspace_mode: WorkspaceMode,
 }
 
-#[derive(Debug, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceMode {
     OutputBound,
     Global,

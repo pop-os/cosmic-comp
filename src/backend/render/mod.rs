@@ -5,7 +5,8 @@ use crate::state::Common;
 use crate::{
     debug::{debug_ui, fps_ui, log_ui, EguiFrame},
     state::Fps,
-};
+    utils::prelude::*,
+}; 
 
 use slog::Logger;
 use smithay::{
@@ -200,11 +201,13 @@ where
             .unwrap_or(Rectangle::from_loc_and_size((0, 0), (0, 0)));
         let scale = output.current_scale().fractional_scale();
 
-        let fps_overlay = fps_ui(_gpu, state, fps, output_geo, scale);
+        let fps_overlay = fps_ui(_gpu, state, fps, output_geo.to_f64().to_physical(scale), scale);
         custom_elements.push(fps_overlay.into());
 
-        let mut area = state.shell.global_space();
-        area.loc = state.shell.space_relative_output_geometry((0, 0), output);
+        let area = Rectangle::<f64, smithay::utils::Logical>::from_loc_and_size(
+            state.shell.space_relative_output_geometry((0.0f64, 0.0f64), output),
+            state.shell.global_space().to_f64().size,
+        ).to_physical(scale);
         if let Some(log_ui) = log_ui(state, area, scale, output_geo.size.w as f32 * 0.6) {
             custom_elements.push(log_ui.into());
         }
@@ -264,12 +267,12 @@ where
 
     #[cfg(feature = "debug")]
     {
-        let output_geo = state.shell.output_geometry(output);
+        let output_geo = output.geometry();
         let fps_overlay = fps_ui(
             _gpu,
             state,
             fps,
-            Rectangle::from_loc_and_size((0, 0), output_geo.size),
+            Rectangle::from_loc_and_size((0, 0), output_geo.size).to_f64().to_physical(scale),
             scale,
         );
         custom_elements.push(fps_overlay.into());

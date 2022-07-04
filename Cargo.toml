@@ -15,7 +15,7 @@ slog-scope = "4.4"
 slog-stdlog = "4.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", optional = true }
-egui = { version = "0.16", optional = true }
+egui = { version = "0.18.1", optional = true }
 edid-rs = { version = "0.1" }
 lazy_static = "1.4.0"
 thiserror = "1.0.26"
