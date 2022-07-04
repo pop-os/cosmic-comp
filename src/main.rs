@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use smithay::reexports::{
-    calloop::{generic::Generic, EventLoop, Interest, Mode, PostAction},
-    wayland_server::Display,
+use smithay::{
+    reexports::{
+        calloop::{generic::Generic, EventLoop, Interest, Mode, PostAction},
+        wayland_server::Display,
+    },
+    wayland::socket::ListeningSocketSource,
 };
 
 use anyhow::{Context, Result};
-use std::{ffi::OsString, sync::atomic::Ordering};
+use std::{ffi::OsString, sync::{Arc, atomic::Ordering}};
 
 pub mod backend;
 pub mod config;
@@ -33,68 +36,84 @@ fn main() -> Result<()> {
     let (display, socket) = init_wayland_display(&mut event_loop)?;
     // init state
     let mut state = state::State::new(
-        display,
+        &display.handle(),
         socket,
         event_loop.handle(),
         event_loop.get_signal(),
         log,
     );
     // init backend
-    backend::init_backend_auto(&mut event_loop, &mut state)?;
+    backend::init_backend_auto(&display.handle(), &mut event_loop, &mut state)?;
     // potentially tell systemd we are setup now
     systemd::ready(&state);
 
+    let mut data = state::Data {
+        display,
+        state,
+    };
     // run the event loop
-    event_loop.run(None, &mut state, |state| {
+    event_loop.run(None, &mut data, |data| {
         // shall we shut down?
-        if state.common.shell.outputs().next().is_none() || state.common.should_stop {
+        if data.state.common.shell.outputs().next().is_none() || data.state.common.should_stop {
             slog_scope::info!("Shutting down");
-            state.common.event_loop_signal.stop();
-            state.common.event_loop_signal.wakeup();
+            data.state.common.event_loop_signal.stop();
+            data.state.common.event_loop_signal.wakeup();
             return;
         }
 
+        // trigger routines
+        data.state.common.shell.refresh(&data.display.handle());
+        data.state.common.refresh_focus(&data.display.handle());
+
         // do we need to trigger another render
-        if state.common.dirty_flag.swap(false, Ordering::SeqCst) {
-            for output in state.common.shell.outputs() {
-                state
+        if data.state.common.dirty_flag.swap(false, Ordering::SeqCst) {
+            for output in data.state.common.shell.outputs() {
+                data.state
                     .backend
-                    .schedule_render(&state.common.event_loop_handle, output)
+                    .schedule_render(&data.state.common.event_loop_handle, output)
             }
         }
 
         // send out events
-        let display = state.common.display.clone();
-        display.borrow_mut().flush_clients(state);
-        // trigger routines
-        state.common.shell.refresh();
-        state.common.refresh_focus();
+        let _ = data.display.flush_clients();
     })?;
 
-    let _log = state.destroy();
+    let _log = data.state.destroy();
     // drop eventloop before logger
     std::mem::drop(event_loop);
 
     Ok(())
 }
 
-fn init_wayland_display(event_loop: &mut EventLoop<state::State>) -> Result<(Display, OsString)> {
-    let mut display = Display::new();
-    let socket_name = display.add_socket_auto()?;
+fn init_wayland_display(event_loop: &mut EventLoop<state::Data>) -> Result<(Display<state::State>, OsString)> {
+    let mut display = Display::new().unwrap();
 
+    let source = ListeningSocketSource::new_auto(None).unwrap();
+    let socket_name = source.socket_name().to_os_string();
     slog_scope::info!("Listening on {:?}", socket_name);
+    
+    event_loop
+        .handle()
+        .insert_source(source, |client_stream, _, data| {
+            if let Err(err) = data
+                .display
+                .handle()
+                .insert_client(client_stream, Arc::new(data.state.new_client_state()))
+            {
+                slog_scope::warn!("Error adding wayland client: {}", err);
+            };
+        })
+        .with_context(|| "Failed to init the wayland socket source.")?;
     event_loop
         .handle()
         .insert_source(
-            Generic::new(display.get_poll_fd(), Interest::READ, Mode::Level),
-            move |_, _, state: &mut state::State| {
-                let display = state.common.display.clone();
-                let mut display = display.borrow_mut();
-                match display.dispatch(std::time::Duration::from_millis(0), state) {
+            Generic::new(display.backend().poll_fd(), Interest::READ, Mode::Level),
+            move |_, _, data: &mut state::Data| {
+                match data.display.dispatch_clients(&mut data.state) {
                     Ok(_) => Ok(PostAction::Continue),
                     Err(e) => {
                         slog_scope::error!("I/O error on the Wayland display: {}", e);
-                        state.common.should_stop = true;
+                        data.state.common.should_stop = true;
                         Err(e)
                     }
                 }

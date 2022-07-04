@@ -4,37 +4,59 @@ use crate::{
     backend::{kms::KmsState, winit::WinitState, x11::X11State},
     config::{Config, OutputConfig},
     logger::LogState,
-    shell::{init_shell, Shell},
+    shell::Shell,
+    wayland::protocols::{
+        drm::WlDrmState,
+        output_configuration::OutputConfigurationState,
+        workspace::WorkspaceClientState,
+    },
 };
 use smithay::{
+    backend::drm::DrmNode,
     reexports::{
         calloop::{LoopHandle, LoopSignal},
-        wayland_server::{protocol::wl_surface::WlSurface, Display},
+        wayland_server::{
+            backend::{ClientData, ClientId, DisconnectReason},
+            Display, DisplayHandle,
+        },
     },
     wayland::{
-        data_device::{default_action_chooser, init_data_device, DataDeviceEvent},
+        compositor::CompositorState,
+        data_device::DataDeviceState,
+        dmabuf::DmabufState,
         output::{
-            wlr_configuration::{
-                self, init_wlr_output_configuration, ConfigurationManager, ModeConfiguration,
-            },
-            xdg::init_xdg_output_manager,
+            OutputManagerState,
             Mode as OutputMode, Output, Scale,
         },
-        seat::Seat,
-        shell::xdg::ToplevelSurface,
-        shm::init_shm_global,
+        seat::{Seat, SeatState},
+        shm::ShmState,
+        viewporter::ViewporterState,
     },
 };
 
 use std::{
     cell::RefCell,
     ffi::OsString,
-    rc::Rc,
     sync::{atomic::AtomicBool, Arc},
     time::Instant,
 };
 #[cfg(feature = "debug")]
 use std::{collections::VecDeque, time::Duration};
+
+pub struct ClientState {
+    pub workspace_client_state: WorkspaceClientState,
+    pub drm_node: Option<DrmNode>,
+    pub privileged: bool,
+}
+impl ClientData for ClientState {
+    fn initialized(&self, _client_id: ClientId) {}
+    fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
+}
+
+pub struct Data {
+    pub display: Display<State>,
+    pub state: State,
+}
 
 pub struct State {
     pub backend: BackendData,
@@ -44,18 +66,16 @@ pub struct State {
 pub struct Common {
     pub config: Config,
 
-    pub display: Rc<RefCell<Display>>,
     pub socket: OsString,
-    pub event_loop_handle: LoopHandle<'static, State>,
+    pub event_loop_handle: LoopHandle<'static, Data>,
     pub event_loop_signal: LoopSignal,
 
-    pub output_conf: ConfigurationManager,
+    //pub output_conf: ConfigurationManager,
     pub shell: Shell,
-    pub pending_toplevels: Vec<ToplevelSurface>,
     pub dirty_flag: Arc<AtomicBool>,
 
-    pub seats: Vec<Seat>,
-    pub last_active_seat: Seat,
+    pub seats: Vec<Seat<State>>,
+    pub last_active_seat: Seat<State>,
 
     pub start_time: Instant,
     pub should_stop: bool,
@@ -63,6 +83,17 @@ pub struct Common {
     pub log: LogState,
     #[cfg(feature = "debug")]
     pub egui: Egui,
+
+    // wayland state
+    pub compositor_state: CompositorState,
+    pub data_device_state: DataDeviceState,
+    pub dmabuf_state: DmabufState,
+    pub output_state: OutputManagerState,
+    pub output_configuration_state: OutputConfigurationState<State>,
+    pub seat_state: SeatState<State>,
+    pub shm_state: ShmState,
+    pub wl_drm_state: WlDrmState,
+    pub viewporter_state: ViewporterState,
 }
 
 #[cfg(feature = "debug")]
@@ -118,7 +149,7 @@ impl BackendData {
         output: &Output,
         test_only: bool,
         shell: &mut Shell,
-        loop_handle: &LoopHandle<'_, State>,
+        loop_handle: &LoopHandle<'_, Data>,
     ) -> Result<(), anyhow::Error> {
         let result = match self {
             BackendData::Kms(ref mut state) => {
@@ -156,7 +187,7 @@ impl BackendData {
         result
     }
 
-    pub fn schedule_render(&mut self, loop_handle: &LoopHandle<'_, State>, output: &Output) {
+    pub fn schedule_render(&mut self, loop_handle: &LoopHandle<'_, Data>, output: &Output) {
         match self {
             BackendData::Winit(_) => {} // We cannot do this on the winit backend.
             // Winit has a very strict render-loop and skipping frames breaks atleast the wayland winit-backend.
@@ -172,159 +203,27 @@ impl BackendData {
     }
 }
 
-struct DnDIcon {
-    surface: RefCell<Option<WlSurface>>,
-}
-
-pub fn get_dnd_icon(seat: &Seat) -> Option<WlSurface> {
-    let userdata = seat.user_data();
-    userdata
-        .get::<DnDIcon>()
-        .and_then(|x| x.surface.borrow().clone())
-}
-
 impl State {
     pub fn new(
-        mut display: Display,
+        dh: &DisplayHandle,
         socket: OsString,
-        handle: LoopHandle<'static, State>,
+        handle: LoopHandle<'static, Data>,
         signal: LoopSignal,
         log: LogState,
     ) -> State {
         let config = Config::load();
-        init_shm_global(&mut display, vec![], None);
-        init_xdg_output_manager(&mut display, None);
-        let shell = init_shell(&config, &mut display);
-        let initial_seat = crate::input::add_seat(&mut display, "seat-0".into());
-        init_data_device(
-            &mut display,
-            |dnd_event| match dnd_event {
-                DataDeviceEvent::DnDStarted { icon, seat, .. } => {
-                    let user_data = seat.user_data();
-                    user_data.insert_if_missing(|| DnDIcon {
-                        surface: RefCell::new(None),
-                    });
-                    *user_data.get::<DnDIcon>().unwrap().surface.borrow_mut() = icon;
-                }
-                DataDeviceEvent::DnDDropped { seat } => {
-                    seat.user_data()
-                        .get::<DnDIcon>()
-                        .unwrap()
-                        .surface
-                        .borrow_mut()
-                        .take();
-                }
-                _ => {}
-            },
-            default_action_chooser,
-            None,
-        );
-        let (output_conf, _) = init_wlr_output_configuration(
-            &mut display,
-            |_| true,
-            |conf, test_only, mut ddata| {
-                let state = ddata.get::<State>().unwrap();
-                if conf.iter().all(|(_, conf)| conf.is_none()) {
-                    return false; // we don't allow the user to accidentally disable all their outputs
-                }
+        let compositor_state = CompositorState::new::<Self, _>(dh, None);
+        let data_device_state = DataDeviceState::new::<Self, _>(dh, None);
+        let dmabuf_state = DmabufState::new();
+        let output_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
+        let output_configuration_state = OutputConfigurationState::new(dh, |_| true);
+        let shm_state = ShmState::new::<Self, _>(dh, vec![], None);
+        let seat_state = SeatState::<Self>::new();
+        let viewporter_state = ViewporterState::new::<Self, _>(dh, None);
+        let wl_drm_state = WlDrmState;
 
-                let mut backups = Vec::new();
-                for (output, conf) in &conf {
-                    {
-                        let mut current_config = output
-                            .user_data()
-                            .get::<RefCell<OutputConfig>>()
-                            .unwrap()
-                            .borrow_mut();
-                        backups.push((output, current_config.clone()));
-
-                        if let Some(conf) = conf {
-                            match conf.mode {
-                                Some(ModeConfiguration::Mode(mode)) => {
-                                    current_config.mode =
-                                        ((mode.size.w, mode.size.h), Some(mode.refresh as u32));
-                                }
-                                Some(ModeConfiguration::Custom { size, refresh }) => {
-                                    current_config.mode =
-                                        ((size.w, size.h), refresh.map(|x| x as u32));
-                                }
-                                _ => {}
-                            }
-                            if let Some(scale) = conf.scale {
-                                current_config.scale = scale;
-                            }
-                            if let Some(transform) = conf.transform {
-                                current_config.transform = transform;
-                            }
-                            if let Some(position) = conf.position {
-                                current_config.position = position.into();
-                            }
-                            current_config.enabled = true;
-                        } else {
-                            current_config.enabled = false;
-                        }
-                    }
-
-                    if let Err(err) = state.backend.apply_config_for_output(
-                        output,
-                        test_only,
-                        &mut state.common.shell,
-                        &state.common.event_loop_handle,
-                    ) {
-                        slog_scope::warn!(
-                            "Failed to apply config to {}: {}. Resetting",
-                            output.name(),
-                            err
-                        );
-                        for (output, backup) in backups {
-                            {
-                                let mut current_config = output
-                                    .user_data()
-                                    .get::<RefCell<OutputConfig>>()
-                                    .unwrap()
-                                    .borrow_mut();
-                                *current_config = backup;
-                            }
-                            if !test_only {
-                                if let Err(err) = state.backend.apply_config_for_output(
-                                    output,
-                                    false,
-                                    &mut state.common.shell,
-                                    &state.common.event_loop_handle,
-                                ) {
-                                    slog_scope::error!(
-                                        "Failed to reset output config for {}: {}",
-                                        output.name(),
-                                        err
-                                    );
-                                }
-                            }
-                        }
-                        return false;
-                    }
-                }
-
-                for output in conf.iter().filter(|(_, c)| c.is_some()).map(|(o, _)| o) {
-                    wlr_configuration::enable_head(output);
-                }
-                for output in conf.iter().filter(|(_, c)| c.is_none()).map(|(o, _)| o) {
-                    wlr_configuration::disable_head(output);
-                }
-                state
-                    .common
-                    .config
-                    .write_outputs(state.common.output_conf.outputs());
-                state.common.event_loop_handle.insert_idle(move |state| {
-                    state
-                        .common
-                        .output_conf
-                        .update(&mut *state.common.display.borrow_mut());
-                });
-
-                true
-            },
-            None,
-        );
+        let shell = Shell::new(&config, dh);
+        let initial_seat = crate::input::add_seat(dh, "seat-0".into());
 
         #[cfg(not(feature = "debug"))]
         let dirty_flag = Arc::new(AtomicBool::new(false));
@@ -334,14 +233,11 @@ impl State {
         State {
             common: Common {
                 config,
-                display: Rc::new(RefCell::new(display)),
                 socket,
                 event_loop_handle: handle,
                 event_loop_signal: signal,
 
-                output_conf,
                 shell,
-                pending_toplevels: Vec::new(),
                 dirty_flag,
 
                 seats: vec![initial_seat.clone()],
@@ -364,8 +260,48 @@ impl State {
                     active: false,
                     alpha: 1.0,
                 },
+
+                compositor_state,
+                data_device_state,
+                dmabuf_state,
+                shm_state,
+                seat_state,
+                output_state,
+                output_configuration_state,
+                viewporter_state,
+                wl_drm_state,
             },
             backend: BackendData::Unset,
+        }
+    }
+
+    pub fn new_client_state(&self) -> ClientState {
+        ClientState {
+            workspace_client_state: WorkspaceClientState::default(),
+            drm_node: match &self.backend {
+                BackendData::Kms(kms_state) => Some(kms_state.primary),
+                _ => None,
+            },
+            privileged: false,
+        }
+    }
+
+    pub fn new_client_state_with_node(&self, drm_node: DrmNode) -> ClientState {
+        ClientState {
+            workspace_client_state: WorkspaceClientState::default(),
+            drm_node: Some(drm_node),
+            privileged: false,
+        }
+    }
+
+    pub fn new_privileged_client_state(&self) -> ClientState {
+        ClientState {
+            workspace_client_state: WorkspaceClientState::default(),
+            drm_node: match &self.backend {
+                BackendData::Kms(kms_state) => Some(kms_state.primary),
+                _ => None,
+            },
+            privileged: true,
         }
     }
 
