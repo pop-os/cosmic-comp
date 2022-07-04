@@ -8,7 +8,7 @@ authors = ["Victoria Brekenfeld"]
 [dependencies]
 anyhow = { version = "1.0.51", features = ["backtrace"] }
 bitflags = "1.3.2"
-slog = "2.7"
+slog = { version = "2.7", features = ["max_level_trace"] }
 slog-term = "2.8"
 slog-async = "2.7"
 slog-scope = "4.4"
@@ -17,6 +17,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", optional = true }
 egui = { version = "0.16", optional = true }
 edid-rs = { version = "0.1" }
+lazy_static = "1.4.0"
 thiserror = "1.0.26"
 xcursor = "0.3.3"
 id_tree = "1.8.0"
@@ -26,21 +27,21 @@ xdg = "^2.1"
 ron = "0.7"
 atomic_float = "0.1"
 libsystemd = "0.5"
+wayland-backend = "0.1.0-beta.7"
+wayland-scanner = "0.30.0-beta.7"
+cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", branch = "main" }
 
 [dependencies.smithay]
 version = "0.3"
 git = "https://github.com/Smithay/smithay.git"
-rev = "c30fc14a"
+rev = "11d48a76"
 default-features = false
 features = ["backend_drm", "backend_gbm", "backend_egl", "backend_libinput", "backend_session_libseat", "backend_udev", "backend_winit", "backend_x11", "desktop", "use_system_lib", "renderer_gl", "renderer_multi", "wayland_frontend", "slog-stdlog"]
 
 [dependencies.smithay-egui]
 git = "https://github.com/Smithay/smithay-egui.git"
-rev = "ce9750d4"
+rev = "1969c96d"
 optional = true
-
-[build-dependencies]
-wayland-scanner = "0.29"
 
 [features]
 default = []
