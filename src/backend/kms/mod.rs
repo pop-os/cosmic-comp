@@ -7,19 +7,25 @@ use crate::{
     backend::render,
     config::OutputConfig,
     shell::Shell,
-    state::{BackendData, Common, State},
+    state::{BackendData, ClientState, Common, Data},
+    utils::prelude::*,
 };
 
 use anyhow::{Context, Result};
 use smithay::{
     backend::{
-        allocator::{gbm::GbmDevice, Format},
+        allocator::{
+            dmabuf::Dmabuf,
+            gbm::GbmDevice,
+            Format,
+        },
         drm::{DrmDevice, DrmEvent, DrmEventTime, DrmNode, GbmBufferedSurface, NodeType},
         egl::{EGLContext, EGLDevice, EGLDisplay},
         input::InputEvent,
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
             multigpu::{egl::EglGlesBackend, GpuManager},
+            gles2::Gles2Renderbuffer,
             Bind,
         },
         session::{auto::AutoSession, Session, Signal},
@@ -33,10 +39,16 @@ use smithay::{
         drm::control::{connector, crtc, Device as ControlDevice, ModeTypeFlags},
         input::Libinput,
         nix::{fcntl::OFlag, sys::stat::dev_t},
-        wayland_server::protocol::{wl_output, wl_surface::WlSurface},
+        wayland_server::{
+            DisplayHandle, Resource,
+            protocol::{wl_output, wl_surface::WlSurface},
+        },
     },
     utils::signaling::{Linkable, SignalToken, Signaler},
-    wayland::output::{Mode as OutputMode, Output, PhysicalProperties},
+    wayland::{
+        dmabuf::DmabufGlobal,
+        output::{Mode as OutputMode, Output, PhysicalProperties},
+    },
 };
 
 use std::{
@@ -56,7 +68,7 @@ use socket::*;
 pub struct KmsState {
     devices: HashMap<DrmNode, Device>,
     api: GpuManager<EglGlesBackend>,
-    primary: DrmNode,
+    pub primary: DrmNode,
     session: AutoSession,
     signaler: Signaler<Signal>,
     _restart_token: SignalToken,
@@ -67,7 +79,7 @@ pub struct Device {
     render_node: DrmNode,
     surfaces: HashMap<crtc::Handle, Surface>,
     allocator: Rc<RefCell<GbmDevice<SessionFd>>>,
-    drm: Dispatcher<'static, DrmDevice<SessionFd>, State>,
+    drm: Dispatcher<'static, DrmDevice<SessionFd>, Data>,
     formats: HashSet<Format>,
     supports_atomic: bool,
     event_token: Option<RegistrationToken>,
@@ -87,7 +99,7 @@ pub struct Surface {
     fps: Fps,
 }
 
-pub fn init_backend(event_loop: &mut EventLoop<'static, State>, state: &mut State) -> Result<()> {
+pub fn init_backend(dh: &DisplayHandle, event_loop: &mut EventLoop<'static, Data>, state: &mut State) -> Result<()> {
     let (session, notifier) = AutoSession::new(None).context("Failed to acquire session")?;
     let signaler = notifier.signaler();
 
@@ -102,16 +114,16 @@ pub fn init_backend(event_loop: &mut EventLoop<'static, State>, state: &mut Stat
 
     let libinput_event_source = event_loop
         .handle()
-        .insert_source(libinput_backend, move |mut event, _, state| {
+        .insert_source(libinput_backend, move |mut event, _, data| {
             if let &mut InputEvent::DeviceAdded { ref mut device } = &mut event {
-                state.common.config.read_device(device);
+                data.state.common.config.read_device(device);
             }
-            state.process_input_event(event);
-            for output in state.common.shell.outputs() {
-                if let Err(err) = state
+            data.state.process_input_event(&data.display.handle(), event);
+            for output in data.state.common.shell.outputs() {
+                if let Err(err) = data.state
                     .backend
                     .kms()
-                    .schedule_render(&state.common.event_loop_handle, output)
+                    .schedule_render(&data.state.common.event_loop_handle, output)
                 {
                     slog_scope::crit!("Error scheduling event loop for output {}: {:?}", output.name(), err);
                 }
@@ -153,16 +165,16 @@ pub fn init_backend(event_loop: &mut EventLoop<'static, State>, state: &mut Stat
     };
     slog_scope::info!("Using {} as primary gpu for rendering", primary);
 
-    let udev_dispatcher = Dispatcher::new(udev_backend, move |event, _, state: &mut State| {
+    let udev_dispatcher = Dispatcher::new(udev_backend, move |event, _, data: &mut Data| {
         match match event {
-            UdevEvent::Added { device_id, path } => state
-                .device_added(device_id, path)
+            UdevEvent::Added { device_id, path } => data.state
+                .device_added(device_id, path, &data.display.handle())
                 .with_context(|| format!("Failed to add drm device: {}", device_id)),
-            UdevEvent::Changed { device_id } => state
+            UdevEvent::Changed { device_id } => data.state
                 .device_changed(device_id)
                 .with_context(|| format!("Failed to update drm device: {}", device_id)),
-            UdevEvent::Removed { device_id } => state
-                .device_removed(device_id)
+            UdevEvent::Removed { device_id } => data.state
+                .device_removed(device_id, &data.display.handle())
                 .with_context(|| format!("Failed to remove drm device: {}", device_id)),
         } {
             Ok(()) => {
@@ -184,7 +196,7 @@ pub fn init_backend(event_loop: &mut EventLoop<'static, State>, state: &mut Stat
     let _restart_token = signaler.register(move |signal| {
         if let Signal::ActivateSession = signal {
             let dispatcher = dispatcher.clone();
-            handle.insert_idle(move |state| {
+            handle.insert_idle(move |data| {
                 for (dev, path) in dispatcher.as_source_ref().device_list() {
                     let drm_node = match DrmNode::from_dev_id(dev) {
                         Ok(node) => node,
@@ -197,8 +209,8 @@ pub fn init_backend(event_loop: &mut EventLoop<'static, State>, state: &mut Stat
                             continue;
                         }
                     };
-                    if state.backend.kms().devices.contains_key(&drm_node) {
-                        if let Err(err) = state.device_changed(dev) {
+                    if data.state.backend.kms().devices.contains_key(&drm_node) {
+                        if let Err(err) = data.state.device_changed(dev) {
                             slog_scope::error!(
                                 "Failed to update drm device {}: {}",
                                 path.display(),
@@ -206,7 +218,7 @@ pub fn init_backend(event_loop: &mut EventLoop<'static, State>, state: &mut Stat
                             );
                         }
                     } else {
-                        if let Err(err) = state.device_added(dev, path.into()) {
+                        if let Err(err) = data.state.device_added(dev, path.into(), &data.display.handle()) {
                             slog_scope::error!(
                                 "Failed to add drm device {}: {}",
                                 path.display(),
@@ -215,24 +227,24 @@ pub fn init_backend(event_loop: &mut EventLoop<'static, State>, state: &mut Stat
                         }
                     }
                 }
-                state
+                data.state
                     .common
-                    .output_conf
-                    .update(&mut *state.common.display.borrow_mut());
+                    .output_configuration_state
+                    .update();
 
-                state.common.config.read_outputs(
-                    state.common.output_conf.outputs(),
-                    &mut state.backend,
-                    &mut state.common.shell,
-                    &state.common.event_loop_handle,
+                data.state.common.config.read_outputs(
+                    data.state.common.output_configuration_state.outputs(),
+                    &mut data.state.backend,
+                    &mut data.state.common.shell,
+                    &data.state.common.event_loop_handle,
                 );
-                state.common.shell.refresh_outputs();
-                state
+                data.state.common.shell.refresh_outputs();
+                data.state
                     .common
                     .config
-                    .write_outputs(state.common.output_conf.outputs());
+                    .write_outputs(data.state.common.output_configuration_state.outputs());
 
-                for surface in state
+                for surface in data.state
                     .backend
                     .kms()
                     .devices
@@ -241,11 +253,11 @@ pub fn init_backend(event_loop: &mut EventLoop<'static, State>, state: &mut Stat
                 {
                     surface.pending = false;
                 }
-                for output in state.common.shell.outputs() {
-                    if let Err(err) = state
+                for output in data.state.common.shell.outputs() {
+                    if let Err(err) = data.state
                         .backend
                         .kms()
-                        .schedule_render(&state.common.event_loop_handle, output)
+                        .schedule_render(&data.state.common.event_loop_handle, output)
                     {
                         slog_scope::crit!("Error scheduling event loop for output {}: {:?}", output.name(), err);
                     }
@@ -271,14 +283,14 @@ pub fn init_backend(event_loop: &mut EventLoop<'static, State>, state: &mut Stat
 
     for (dev, path) in udev_dispatcher.as_source_ref().device_list() {
         state
-            .device_added(dev, path.into())
+            .device_added(dev, path.into(), dh)
             .with_context(|| format!("Failed to add drm device: {}", path.display()))?;
     }
     Ok(())
 }
 
 impl State {
-    fn device_added(&mut self, dev: dev_t, path: PathBuf) -> Result<()> {
+    fn device_added(&mut self, dev: dev_t, path: PathBuf, dh: &DisplayHandle) -> Result<()> {
         if !self.backend.kms().session.is_active() {
             return Ok(());
         }
@@ -332,21 +344,21 @@ impl State {
 
         drm.link(self.backend.kms().signaler.clone());
         let dispatcher =
-            Dispatcher::new(drm, move |event, metadata, state: &mut State| match event {
+            Dispatcher::new(drm, move |event, metadata, data: &mut Data| match event {
                 DrmEvent::VBlank(crtc) => {
-                    if let Some(device) = state.backend.kms().devices.get_mut(&drm_node) {
+                    if let Some(device) = data.state.backend.kms().devices.get_mut(&drm_node) {
                         if let Some(surface) = device.surfaces.get_mut(&crtc) {
                             match surface.surface.as_mut().map(|x| x.frame_submitted()) {
                                 Some(Ok(_)) => {
                                     surface.last_submit = metadata.take().map(|data| data.time);
                                     surface.pending = false;
-                                    state
+                                    data.state
                                         .common
                                         .shell
                                         .active_space_mut(&surface.output)
                                         .space
                                         .send_frames(
-                                            state.common.start_time.elapsed().as_millis() as u32
+                                            data.state.common.start_time.elapsed().as_millis() as u32
                                         );
                                 }
                                 Some(Err(err)) => {
@@ -367,7 +379,7 @@ impl State {
             .register_dispatcher(dispatcher.clone())
             .with_context(|| format!("Failed to add drm device to event loop: {}", dev))?;
 
-        let socket = match self.create_socket(render_node, formats.clone().into_iter()) {
+        let socket = match self.create_socket(dh, render_node, formats.clone().into_iter()) {
             Ok(socket) => Some(socket),
             Err(err) => {
                 slog_scope::warn!(
@@ -410,10 +422,10 @@ impl State {
         }
         self.backend.kms().devices.insert(drm_node, device);
 
-        self.common.output_conf.add_heads(wl_outputs.iter());
+        self.common.output_configuration_state.add_heads(wl_outputs.iter());
         self.common
-            .output_conf
-            .update(&mut *self.common.display.borrow_mut());
+            .output_configuration_state
+            .update();
         for output in wl_outputs {
             if let Err(err) = self.backend.kms().apply_config_for_output(
                 &output,
@@ -425,7 +437,7 @@ impl State {
             }
         }
         self.common.config.read_outputs(
-            self.common.output_conf.outputs(),
+            self.common.output_configuration_state.outputs(),
             &mut self.backend,
             &mut self.common.shell,
             &self.common.event_loop_handle,
@@ -433,7 +445,7 @@ impl State {
         self.common.shell.refresh_outputs();
         self.common
             .config
-            .write_outputs(self.common.output_conf.outputs());
+            .write_outputs(self.common.output_configuration_state.outputs());
 
         Ok(())
     }
@@ -475,8 +487,8 @@ impl State {
             }
         }
 
-        self.common.output_conf.remove_heads(outputs_removed.iter());
-        self.common.output_conf.add_heads(outputs_added.iter());
+        self.common.output_configuration_state.remove_heads(outputs_removed.iter());
+        self.common.output_configuration_state.add_heads(outputs_added.iter());
         for output in outputs_added {
             if let Err(err) = self.backend.kms().apply_config_for_output(
                 &output,
@@ -488,10 +500,10 @@ impl State {
             }
         }
         self.common
-            .output_conf
-            .update(&mut self.common.display.borrow_mut());
+            .output_configuration_state
+            .update();
         self.common.config.read_outputs(
-            self.common.output_conf.outputs(),
+            self.common.output_configuration_state.outputs(),
             &mut self.backend,
             &mut self.common.shell,
             &self.common.event_loop_handle,
@@ -499,12 +511,12 @@ impl State {
         self.common.shell.refresh_outputs();
         self.common
             .config
-            .write_outputs(self.common.output_conf.outputs());
+            .write_outputs(self.common.output_configuration_state.outputs());
 
         Ok(())
     }
 
-    fn device_removed(&mut self, dev: dev_t) -> Result<()> {
+    fn device_removed(&mut self, dev: dev_t, dh: &DisplayHandle) -> Result<()> {
         let drm_node = DrmNode::from_dev_id(dev)?;
         let mut outputs_removed = Vec::new();
         if let Some(mut device) = self.backend.kms().devices.remove(&drm_node) {
@@ -519,16 +531,18 @@ impl State {
             }
             if let Some(socket) = device.socket.take() {
                 self.common.event_loop_handle.remove(socket.token);
+                self.common.dmabuf_state.destroy_global::<State>(dh, socket.dmabuf_global);
+                dh.remove_global(socket.drm_global);
             }
         }
-        self.common.output_conf.remove_heads(outputs_removed.iter());
+        self.common.output_configuration_state.remove_heads(outputs_removed.iter());
         self.common
-            .output_conf
-            .update(&mut *self.common.display.borrow_mut());
+            .output_configuration_state
+            .update();
 
         if self.backend.kms().session.is_active() {
             self.common.config.read_outputs(
-                self.common.output_conf.outputs(),
+                self.common.output_configuration_state.outputs(),
                 &mut self.backend,
                 &mut self.common.shell,
                 &self.common.event_loop_handle,
@@ -536,7 +550,7 @@ impl State {
             self.common.shell.refresh_outputs();
             self.common
                 .config
-                .write_outputs(self.common.output_conf.outputs());
+                .write_outputs(self.common.output_configuration_state.outputs());
         }
 
         Ok(())
@@ -658,7 +672,7 @@ impl Device {
 
 const MAX_CPU_COPIES: usize = 3;
 
-fn render_node_for_output(output: &Output, target_node: DrmNode, shell: &Shell) -> DrmNode {
+fn render_node_for_output(dh: &DisplayHandle, output: &Output, target_node: DrmNode, shell: &Shell) -> DrmNode {
     let workspace = shell.active_space(output);
         let nodes = workspace
             .get_fullscreen(output)
@@ -666,13 +680,10 @@ fn render_node_for_output(output: &Output, target_node: DrmNode, shell: &Shell) 
             .unwrap_or_else(|| workspace.space.windows().collect::<Vec<_>>())
             .into_iter()
             .flat_map(|w| {
-                w.toplevel()
-                    .get_surface()?
-                    .as_ref()
-                    .client()?
-                    .data_map()
-                    .get::<DrmNode>()
-                    .cloned()
+                dh.get_client(w.toplevel().wl_surface().id()).ok()?
+                    .get_data::<ClientState>().unwrap()
+                    .drm_node
+                    .clone()
             })
             .collect::<Vec<_>>();
         if nodes.contains(&target_node) || nodes.len() < MAX_CPU_COPIES {
@@ -695,6 +706,7 @@ fn render_node_for_output(output: &Output, target_node: DrmNode, shell: &Shell) 
 impl Surface {
     pub fn render_output(
         &mut self,
+        dh: &DisplayHandle,
         api: &mut GpuManager<EglGlesBackend>,
         target_node: &DrmNode,
         state: &mut Common,
@@ -707,7 +719,7 @@ impl Surface {
             self.surface.as_mut().unwrap().reset_buffers();
         }
 
-        let render_node = render_node_for_output(&self.output, *target_node, &state.shell);
+        let render_node = render_node_for_output(dh, &self.output, *target_node, &state.shell);
         let mut renderer = api.renderer(&render_node, &target_node).unwrap();
 
         let surface = self.surface.as_mut().unwrap();
@@ -753,7 +765,7 @@ impl KmsState {
         output: &Output,
         shell: &mut Shell,
         test_only: bool,
-        loop_handle: &LoopHandle<'_, State>,
+        loop_handle: &LoopHandle<'_, Data>,
     ) -> Result<(), anyhow::Error> {
         let recreated = if let Some(device) = self
             .devices
@@ -848,10 +860,10 @@ impl KmsState {
         self.devices.iter().find(|(_, dev)| dev.surfaces.values().any(|s| s.output == *output)).map(|(target, _)| target).copied()
     }
 
-    pub fn try_early_import(&mut self, surface: &WlSurface, output: &Output, target: DrmNode, shell: &Shell) {
-        let render = render_node_for_output(&output, target, &shell);
+    pub fn try_early_import(&mut self, dh: &DisplayHandle, surface: &WlSurface, output: &Output, target: DrmNode, shell: &Shell) {
+        let render = render_node_for_output(dh, &output, target, &shell);
         if let Err(err) = self.api.early_import(
-            surface.as_ref().client().and_then(|c| c.data_map().get::<DrmNode>().cloned()),
+            dh.get_client(surface.id()).ok().and_then(|c| c.get_data::<ClientState>().unwrap().drm_node.clone()),
             render,
             surface,
         ) {
@@ -859,9 +871,23 @@ impl KmsState {
         }
     }
 
+    pub fn dmabuf_imported(&mut self, _dh: &DisplayHandle, global: &DmabufGlobal, dmabuf: Dmabuf) -> Result<()> {
+        use smithay::backend::renderer::ImportDma;
+
+        for device in self.devices.values() {
+            if device.socket.as_ref().map(|s| &s.dmabuf_global == global).unwrap_or(false) {
+                return self.api.renderer::<Gles2Renderbuffer>(&device.render_node, &device.render_node)?
+                    .import_dmabuf(&dmabuf, None)
+                    .map(|_| ())
+                    .map_err(Into::into);
+            }
+        }
+        unreachable!()
+    }
+
     pub fn schedule_render(
         &mut self,
-        loop_handle: &LoopHandle<'_, State>,
+        loop_handle: &LoopHandle<'_, Data>,
         output: &Output,
     ) -> Result<(), InsertError<Timer>> {
         if let Some((device, crtc, surface)) = self
@@ -897,14 +923,15 @@ impl KmsState {
                     /*} else {
                         Timer::from_deadline(instant.unwrap())
                     }*/,
-                    move |_time, _, state| {
-                        let backend = state.backend.kms();
+                    move |_time, _, data| {
+                        let backend = data.state.backend.kms();
                         if let Some(device) = backend.devices.get_mut(&device) {
                             if let Some(surface) = device.surfaces.get_mut(&crtc) {
                                 if let Err(err) = surface.render_output(
+                                    &data.display.handle(),
                                     &mut backend.api,
                                     &device.render_node,
-                                    &mut state.common,
+                                    &mut data.state.common,
                                 ) {
                                     slog_scope::error!("Error rendering: {}", err);
                                     return TimeoutAction::ToDuration(Duration::from_secs_f64(

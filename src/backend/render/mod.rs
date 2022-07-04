@@ -18,12 +18,12 @@ use smithay::{
         },
     },
     desktop::{
-        draw_layer_surface, draw_window, layer_map_for_output,
+        draw_layer_surface, draw_layer_popups, draw_window, draw_window_popups, layer_map_for_output,
         space::{RenderElement, RenderError, SpaceOutputTuple, SurfaceTree},
         utils::damage_from_surface_tree,
         Window,
     },
-    utils::{Logical, Point, Rectangle, Transform},
+    utils::{Physical, Point, Rectangle, Scale, Transform},
     wayland::{output::Output, shell::wlr_layer::Layer as WlrLayer},
 };
 
@@ -44,7 +44,7 @@ smithay::custom_elements! {
     EguiFrame=EguiFrame,
 }
 
-// TODO: due to the lifetime, we cannot be generic over CustomElem's renderer
+// TODO: due to the lifetime of MultiRenderer, we cannot be generic over CustomElem's renderer
 // util after GATs land. So we generate with the macro for Gles2 and then
 // do a manual impl for MultiRenderer.
 impl RenderElement<GlMultiRenderer<'_>> for CustomElem {
@@ -52,24 +52,29 @@ impl RenderElement<GlMultiRenderer<'_>> for CustomElem {
         RenderElement::<Gles2Renderer>::id(self)
     }
 
-    fn geometry(&self) -> Rectangle<i32, Logical> {
-        RenderElement::<Gles2Renderer>::geometry(self)
+    fn location(&self, scale: impl Into<Scale<f64>>) -> Point<f64, Physical> {
+        RenderElement::<Gles2Renderer>::location(self, scale)
+    }
+
+    fn geometry(&self, scale: impl Into<Scale<f64>>) -> Rectangle<i32, Physical> {
+        RenderElement::<Gles2Renderer>::geometry(self, scale)
     }
 
     fn accumulated_damage(
         &self,
+        scale: impl Into<Scale<f64>>,
         for_values: Option<SpaceOutputTuple<'_, '_>>,
-    ) -> Vec<Rectangle<i32, Logical>> {
-        RenderElement::<Gles2Renderer>::accumulated_damage(self, for_values)
+    ) -> Vec<Rectangle<i32, Physical>> {
+        RenderElement::<Gles2Renderer>::accumulated_damage(self, scale, for_values)
     }
 
     fn draw(
         &self,
         renderer: &mut GlMultiRenderer<'_>,
         frame: &mut GlMultiFrame,
-        scale: f64,
-        location: Point<i32, Logical>,
-        damage: &[Rectangle<i32, Logical>],
+        scale: impl Into<Scale<f64>>,
+        location: Point<f64, Physical>,
+        damage: &[Rectangle<i32, Physical>],
         log: &Logger,
     ) -> Result<(), MultiError<EglGlesBackend, EglGlesBackend>> {
         RenderElement::<Gles2Renderer>::draw(
@@ -130,7 +135,7 @@ pub fn render_output<R>(
     output: &Output,
     hardware_cursor: bool,
     #[cfg(feature = "debug")] fps: &mut Fps,
-) -> Result<Option<Vec<Rectangle<i32, Logical>>>, RenderError<R>>
+) -> Result<Option<Vec<Rectangle<i32, Physical>>>, RenderError<R>>
 where
     R: Renderer + ImportAll + AsGles2Renderer,
     <R as Renderer>::TextureId: Clone + 'static,
@@ -140,7 +145,6 @@ where
     {
         fps.start();
     }
-
     let workspace = state.shell.active_space(output);
     let maybe_fullscreen_window = workspace.get_fullscreen(output).cloned();
     let res = if let Some(window) = maybe_fullscreen_window {
@@ -179,7 +183,7 @@ fn render_desktop<R>(
     output: &Output,
     hardware_cursor: bool,
     #[cfg(feature = "debug")] fps: &mut Fps,
-) -> Result<Option<Vec<Rectangle<i32, Logical>>>, RenderError<R>>
+) -> Result<Option<Vec<Rectangle<i32, Physical>>>, RenderError<R>>
 where
     R: Renderer + ImportAll + AsGles2Renderer,
     <R as Renderer>::TextureId: Clone + 'static,
@@ -246,7 +250,7 @@ fn render_fullscreen<R>(
     output: &Output,
     hardware_cursor: bool,
     #[cfg(feature = "debug")] fps: &mut Fps,
-) -> Result<Option<Vec<Rectangle<i32, Logical>>>, RenderError<R>>
+) -> Result<Option<Vec<Rectangle<i32, Physical>>>, RenderError<R>>
 where
     R: Renderer + ImportAll + AsGles2Renderer,
     <R as Renderer>::TextureId: Clone + 'static,
@@ -293,20 +297,32 @@ where
 
     renderer
         .render(mode.size, transform, |renderer, frame| {
-            let mut damage = window.accumulated_damage(None);
+            let mut damage = window.accumulated_damage((0.0, 0.0), scale, None);
             frame.clear(
                 CLEAR_COLOR,
-                &[Rectangle::from_loc_and_size((0, 0), mode.size).to_f64()],
+                &[Rectangle::from_loc_and_size((0, 0), mode.size)],
             )?;
             draw_window(
                 renderer,
                 frame,
                 &window,
                 scale,
-                (0, 0),
+                (0.0, 0.0),
                 &[Rectangle::from_loc_and_size(
                     (0, 0),
-                    mode.size.to_f64().to_logical(scale).to_i32_round(),
+                    mode.size,
+                )],
+                &slog_scope::logger(),
+            )?;
+            draw_window_popups(
+                renderer,
+                frame,
+                &window,
+                scale,
+                (0.0, 0.0),
+                &[Rectangle::from_loc_and_size(
+                    (0, 0),
+                    mode.size,
                 )],
                 &slog_scope::logger(),
             )?;
@@ -318,22 +334,30 @@ where
                     frame,
                     layer_surface,
                     scale,
-                    geo.loc,
-                    &[Rectangle::from_loc_and_size((0, 0), geo.size)],
+                    geo.loc.to_f64().to_physical(scale),
+                    &[Rectangle::from_loc_and_size((0, 0), geo.size.to_physical_precise_round(scale))],
                     &slog_scope::logger(),
                 )?;
-                if let Some(surface) = layer_surface.get_surface() {
-                    damage.extend(damage_from_surface_tree(surface, geo.loc, None));
-                }
+                draw_layer_popups(
+                    renderer,
+                    frame,
+                    layer_surface,
+                    scale,
+                    geo.loc.to_f64().to_physical(scale),
+                    &[Rectangle::from_loc_and_size((0, 0), geo.size.to_physical_precise_round(scale))],
+                    &slog_scope::logger(),
+                )?;
+                damage.extend(damage_from_surface_tree(layer_surface.wl_surface(), geo.loc.to_f64().to_physical(scale), scale, None));
             }
             for elem in custom_elements {
-                let geo = elem.geometry();
-                let elem_damage = elem.accumulated_damage(None);
+                let loc = elem.location(scale);
+                let geo = elem.geometry(scale);
+                let elem_damage = elem.accumulated_damage(scale, None);
                 elem.draw(
                     renderer,
                     frame,
                     scale,
-                    geo.loc,
+                    loc,
                     &[Rectangle::from_loc_and_size((0, 0), geo.size)],
                     &slog_scope::logger(),
                 )?;

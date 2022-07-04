@@ -3,8 +3,9 @@
 use crate::{
     backend::render,
     config::OutputConfig,
-    input::{set_active_output, Devices},
-    state::{BackendData, Common, State},
+    input::Devices,
+    state::{BackendData, Common, Data},
+    utils::prelude::*,
 };
 use anyhow::{Context, Result};
 use smithay::{
@@ -19,16 +20,12 @@ use smithay::{
     reexports::{
         calloop::{ping, EventLoop, LoopHandle},
         gbm::{Device as GbmDevice, FdWrapper},
-        wayland_server::{protocol::wl_output::Subpixel, Display},
+        wayland_server::{protocol::wl_output::Subpixel, DisplayHandle},
     },
-    wayland::{
-        dmabuf::init_dmabuf_global,
-        output::{Mode, Output, PhysicalProperties},
-    },
+    wayland::output::{Mode, Output, PhysicalProperties},
 };
 use std::{
     cell::RefCell,
-    rc::Rc,
     sync::{Arc, Mutex},
 };
 
@@ -38,13 +35,13 @@ use crate::state::Fps;
 pub struct X11State {
     allocator: Arc<Mutex<GbmDevice<FdWrapper>>>,
     _egl: EGLDisplay,
-    renderer: Rc<RefCell<Gles2Renderer>>,
+    pub renderer: Gles2Renderer,
     surfaces: Vec<Surface>,
     handle: X11Handle,
 }
 
 impl X11State {
-    pub fn add_window(&mut self, handle: LoopHandle<'_, State>) -> Result<Output> {
+    pub fn add_window(&mut self, handle: LoopHandle<'_, Data>) -> Result<Output> {
         let window = WindowBuilder::new()
             .title("COSMIC")
             .build(&self.handle)
@@ -55,7 +52,7 @@ impl X11State {
             .create_surface(
                 &window,
                 self.allocator.clone(),
-                Bind::<Dmabuf>::supported_formats(&*self.renderer.borrow())
+                Bind::<Dmabuf>::supported_formats(&self.renderer)
                     .unwrap()
                     .iter()
                     .filter(|format| format.code == fourcc)
@@ -89,15 +86,15 @@ impl X11State {
         let (ping, source) =
             ping::make_ping().with_context(|| "Failed to create output event loop source")?;
         let _token = handle
-            .insert_source(source, move |_, _, state| {
-                let x11_state = state.backend.x11();
+            .insert_source(source, move |_, _, data| {
+                let x11_state = data.state.backend.x11();
                 if let Some(surface) = x11_state
                     .surfaces
                     .iter_mut()
                     .find(|s| s.output == output_ref)
                 {
                     if let Err(err) = surface
-                        .render_output(&mut *x11_state.renderer.borrow_mut(), &mut state.common)
+                        .render_output(&mut x11_state.renderer, &mut data.state.common)
                     {
                         slog_scope::error!("Error rendering: {}", err);
                     }
@@ -221,7 +218,7 @@ impl Surface {
     }
 }
 
-pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Result<()> {
+pub fn init_backend(dh: &DisplayHandle, event_loop: &mut EventLoop<Data>, state: &mut State) -> Result<()> {
     let backend = X11Backend::new(None).with_context(|| "Failed to initilize X11 backend")?;
     let handle = backend.handle();
 
@@ -238,12 +235,10 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
     // Create the OpenGL context
     let context = EGLContext::new(&egl, None).with_context(|| "Failed to create EGL context")?;
     // Create a renderer
-    let renderer = Rc::new(RefCell::new(
-        unsafe { Gles2Renderer::new(context, None) }
-            .with_context(|| "Failed to initialize renderer")?,
-    ));
+    let mut renderer = unsafe { Gles2Renderer::new(context, None) }
+        .with_context(|| "Failed to initialize renderer")?;
 
-    init_egl_client_side(&mut *state.common.display.borrow_mut(), renderer.clone())?;
+    init_egl_client_side(dh, state, &mut renderer)?;
 
     state.backend = BackendData::X11(X11State {
         handle,
@@ -258,11 +253,11 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
         .x11()
         .add_window(event_loop.handle())
         .with_context(|| "Failed to create wl_output")?;
-    state.common.output_conf.add_heads(std::iter::once(&output));
+    state.common.output_configuration_state.add_heads(std::iter::once(&output));
     state
         .common
-        .output_conf
-        .update(&mut *state.common.display.borrow_mut());
+        .output_configuration_state
+        .update();
     state.common.shell.add_output(&output);
     state.common.config.read_outputs(
         std::iter::once(&output),
@@ -275,11 +270,12 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
 
     event_loop
         .handle()
-        .insert_source(backend, |event, _, state| match event {
+        .insert_source(backend, |event, _, data| match event {
             X11Event::CloseRequested { window_id } => {
                 // TODO: drain_filter
                 let mut outputs_removed = Vec::new();
-                for surface in state
+                for surface in data
+                    .state
                     .backend
                     .x11()
                     .surfaces
@@ -289,13 +285,13 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
                     surface.window.unmap();
                     outputs_removed.push(surface.output.clone());
                 }
-                state
+                data.state
                     .backend
                     .x11()
                     .surfaces
                     .retain(|s| s.window.id() != window_id);
                 for output in outputs_removed.into_iter() {
-                    state.common.shell.remove_output(&output);
+                    data.state.common.shell.remove_output(&output);
                 }
             }
             X11Event::Resized {
@@ -307,7 +303,7 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
                     size,
                     refresh: 60_000,
                 };
-                if let Some(surface) = state
+                if let Some(surface) = data.state
                     .backend
                     .x11()
                     .surfaces
@@ -327,12 +323,12 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
                     output.delete_mode(output.current_mode().unwrap());
                     output.change_current_state(Some(mode), None, None, None);
                     output.set_preferred(mode);
-                    layer_map_for_output(output).arrange();
-                    state
+                    layer_map_for_output(output).arrange(&data.display.handle());
+                    data.state
                         .common
-                        .output_conf
-                        .update(&mut *state.common.display.borrow_mut());
-                    state.common.shell.refresh_outputs();
+                        .output_configuration_state
+                        .update();
+                    data.state.common.shell.refresh_outputs();
                     surface.dirty = true;
                     if !surface.pending {
                         surface.render.ping();
@@ -340,7 +336,8 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
                 }
             }
             X11Event::Refresh { window_id } | X11Event::PresentCompleted { window_id } => {
-                if let Some(surface) = state
+                if let Some(surface) = data
+                    .state
                     .backend
                     .x11()
                     .surfaces
@@ -354,27 +351,25 @@ pub fn init_backend(event_loop: &mut EventLoop<State>, state: &mut State) -> Res
                     }
                 }
             }
-            X11Event::Input(event) => state.process_x11_event(event),
+            X11Event::Input(event) => data.state.process_x11_event(&data.display.handle(), event),
         })
         .map_err(|_| anyhow::anyhow!("Failed to insert X11 Backend into event loop"))?;
 
     Ok(())
 }
 
-fn init_egl_client_side(display: &mut Display, renderer: Rc<RefCell<Gles2Renderer>>) -> Result<()> {
-    let bind_result = renderer.borrow_mut().bind_wl_display(display);
+fn init_egl_client_side(dh: &DisplayHandle, state: &mut State, renderer: &mut Gles2Renderer) -> Result<()> {
+    let bind_result = renderer.bind_wl_display(dh);
     match bind_result {
         Ok(_) => {
             slog_scope::info!("EGL hardware-acceleration enabled");
             let dmabuf_formats = renderer
-                .borrow()
                 .dmabuf_formats()
                 .cloned()
                 .collect::<Vec<_>>();
-            init_dmabuf_global(
-                display,
+            state.common.dmabuf_state.create_global::<State, _>(
+                dh,
                 dmabuf_formats,
-                move |buffer, _| renderer.borrow_mut().import_dmabuf(buffer, None).is_ok(),
                 None,
             );
         }
@@ -385,7 +380,7 @@ fn init_egl_client_side(display: &mut Display, renderer: Rc<RefCell<Gles2Rendere
 }
 
 impl State {
-    pub fn process_x11_event(&mut self, event: InputEvent<X11Input>) {
+    pub fn process_x11_event(&mut self, dh: &DisplayHandle, event: InputEvent<X11Input>) {
         // here we can handle special cases for x11 inputs, like mapping them to windows
         match &event {
             InputEvent::PointerMotionAbsolute { event } => {
@@ -412,7 +407,7 @@ impl State {
             _ => {}
         };
 
-        self.process_input_event(event);
+        self.process_input_event(dh, event);
         // TODO actually figure out the output
         for output in self.common.shell.outputs() {
             self.backend

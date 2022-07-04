@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::state::get_dnd_icon;
+use crate::{
+    wayland::handlers::data_device::get_dnd_icon,
+    utils::prelude::*,
+};
 use smithay::{
     backend::renderer::{Frame, ImportAll, ImportMem, Renderer, Texture},
     desktop::space::{RenderElement, SpaceOutputTuple, SurfaceTree},
     reexports::wayland_server::protocol::wl_surface,
-    utils::{Logical, Point, Rectangle, Size, Transform},
+    utils::{IsAlive, Logical, Physical, Point, Rectangle, Size, Scale, Transform},
     wayland::{
         compositor::{get_role, with_states},
         seat::{CursorImageAttributes, CursorImageStatus, Seat},
@@ -125,27 +128,16 @@ pub fn draw_surface_cursor(
 where
 {
     let mut position = location.into();
-    let ret = with_states(&surface, |states| {
-        Some(
-            states
-                .data_map
-                .get::<Mutex<CursorImageAttributes>>()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .hotspot,
-        )
-    })
-    .unwrap_or(None);
-    position -= match ret {
-        Some(h) => h,
-        None => {
-            slog_scope::warn!(
-                "Trying to display as a cursor a surface that does not have the CursorImage role."
-            );
-            (0, 0).into()
-        }
-    };
+    let h = with_states(&surface, |states| {
+        states
+            .data_map
+            .get::<Mutex<CursorImageAttributes>>()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .hotspot
+    });
+    position -= h;
     SurfaceTree {
         surface,
         position,
@@ -171,7 +163,7 @@ pub fn draw_dnd_icon(
 
 pub struct PointerElement<T: Texture> {
     texture: T,
-    position: Point<i32, Logical>,
+    position: Point<f64, Logical>,
     size: Size<i32, Logical>,
     new_frame: bool,
 }
@@ -179,7 +171,7 @@ pub struct PointerElement<T: Texture> {
 impl<T: Texture> PointerElement<T> {
     pub fn new(
         texture: T,
-        relative_pointer_pos: Point<i32, Logical>,
+        relative_pointer_pos: Point<f64, Logical>,
         new_frame: bool,
     ) -> PointerElement<T> {
         let size = texture.size().to_logical(1, Transform::Normal);
@@ -201,16 +193,21 @@ where
         0
     }
 
-    fn geometry(&self) -> Rectangle<i32, Logical> {
-        Rectangle::from_loc_and_size(self.position, self.size)
+    fn location(&self, scale: impl Into<Scale<f64>>) -> Point<f64, Physical> {
+        self.position.to_physical(scale)
+    }
+
+    fn geometry(&self, scale: impl Into<Scale<f64>>) -> Rectangle<i32, Physical> {
+        Rectangle::from_loc_and_size(self.position, self.size.to_f64()).to_physical(scale).to_i32_round()
     }
 
     fn accumulated_damage(
         &self,
+        scale: impl Into<Scale<f64>>,
         _: Option<SpaceOutputTuple<'_, '_>>,
-    ) -> Vec<Rectangle<i32, Logical>> {
+    ) -> Vec<Rectangle<i32, Physical>> {
         if self.new_frame {
-            vec![Rectangle::from_loc_and_size((0, 0), self.size)]
+            vec![Rectangle::from_loc_and_size((0, 0), self.size.to_physical_precise_round(scale))]
         } else {
             vec![]
         }
@@ -220,21 +217,18 @@ where
         &self,
         _renderer: &mut R,
         frame: &mut <R as Renderer>::Frame,
-        scale: f64,
-        position: Point<i32, Logical>,
-        damage: &[Rectangle<i32, Logical>],
+        scale: impl Into<Scale<f64>>,
+        position: Point<f64, Physical>,
+        damage: &[Rectangle<i32, Physical>],
         _log: &slog::Logger,
     ) -> Result<(), <R as Renderer>::Error> {
         frame.render_texture_at(
             &self.texture,
-            position.to_f64().to_physical(scale as f64).to_i32_round(),
+            position.to_i32_round(),
             1,
-            scale as f64,
+            scale,
             Transform::Normal,
-            &*damage
-                .iter()
-                .map(|rect| rect.to_physical(1).to_f64())
-                .collect::<Vec<_>>(),
+            damage,
             1.0,
         )?;
         Ok(())
@@ -259,8 +253,8 @@ impl Default for CursorState {
 
 pub fn draw_cursor<R, I>(
     renderer: &mut R,
-    seat: &Seat,
-    location: Point<i32, Logical>,
+    seat: &Seat<State>,
+    location: Point<f64, Logical>,
     start_time: &std::time::Instant,
     draw_default: bool,
 ) -> Option<I>
@@ -272,8 +266,8 @@ where
     // draw the dnd icon if applicable
     {
         if let Some(wl_surface) = get_dnd_icon(seat) {
-            if wl_surface.as_ref().is_alive() {
-                return Some(draw_dnd_icon(wl_surface, location).into());
+            if wl_surface.alive() {
+                return Some(draw_dnd_icon(wl_surface, location.to_i32_round()).into());
             }
         }
     }
@@ -287,7 +281,7 @@ where
             .map(|cell| {
                 let mut cursor_status = cell.borrow_mut();
                 if let CursorImageStatus::Image(ref surface) = *cursor_status {
-                    if !surface.as_ref().is_alive() {
+                    if !surface.alive() {
                         *cursor_status = CursorImageStatus::Default;
                     }
                 }
@@ -296,7 +290,7 @@ where
             .unwrap_or(CursorImageStatus::Default);
 
         if let CursorImageStatus::Image(wl_surface) = cursor_status {
-            Some(draw_surface_cursor(wl_surface.clone(), location).into())
+            Some(draw_surface_cursor(wl_surface.clone(), location.to_i32_round()).into())
         } else if draw_default {
             let seat_userdata = seat.user_data();
             seat_userdata.insert_if_missing(CursorState::default);
@@ -329,7 +323,7 @@ where
                     pointer_images.push((frame.clone(), Box::new(texture.clone())));
                     texture
                 });
-            let hotspot = Point::<i32, Logical>::from((frame.xhot as i32, frame.yhot as i32));
+            let hotspot = Point::<i32, Logical>::from((frame.xhot as i32, frame.yhot as i32)).to_f64();
             *state.current_image.borrow_mut() = Some(frame);
 
             Some(PointerElement::new(pointer_image.clone(), location - hotspot, new_frame).into())
