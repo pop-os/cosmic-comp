@@ -4,7 +4,7 @@ use crate::{state::BackendData, utils::prelude::*};
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
     delegate_compositor,
-    desktop::{Kind, LayerSurface, PopupKind, WindowSurfaceType},
+    desktop::{Kind, LayerSurface, PopupKind, WindowSurfaceType, layer_map_for_output},
     reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
     wayland::{
         compositor::{with_states, CompositorHandler, CompositorState},
@@ -77,7 +77,7 @@ impl State {
         }
     }
 
-    fn layer_surface_ensure_inital_configure(&mut self, surface: &LayerSurface) -> bool {
+    fn layer_surface_ensure_inital_configure(&mut self, surface: &LayerSurface, dh: &DisplayHandle) -> bool {
         // send the initial configure if relevant
         let initial_configure_sent = with_states(surface.wl_surface(), |states| {
             states
@@ -89,8 +89,9 @@ impl State {
                 .initial_configure_sent
         });
         if !initial_configure_sent {
-            // TODO: we should be able to compute the initial dimensions
-            surface.layer_surface().send_configure();
+            // compute initial dimensions by mapping
+            self.common.shell.map_layer(&surface, dh);
+            // this will also send a configure
         }
         initial_configure_sent
     }
@@ -131,9 +132,7 @@ impl CompositorHandler for State {
             .find(|(layer_surface, _, _)| layer_surface.wl_surface() == surface)
             .cloned()
         {
-            if self.layer_surface_ensure_inital_configure(&layer_surface) {
-                self.common.shell.map_layer(&layer_surface, dh);
-            } else {
+            if !self.layer_surface_ensure_inital_configure(&layer_surface, dh) {
                 return;
             }
         };
@@ -166,6 +165,13 @@ impl CompositorHandler for State {
             if let Some(location) = new_location {
                 space.map_window(&window, location, true);
             }
+        }
+
+        if let Some(output) = self.common.shell.outputs().find(|o| {
+            let map = layer_map_for_output(o);
+            map.layer_for_surface(surface, WindowSurfaceType::ALL).is_some()
+        }) {
+            layer_map_for_output(output).arrange(dh);
         }
 
         on_commit_buffer_handler(surface);
