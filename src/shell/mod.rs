@@ -568,6 +568,10 @@ impl Shell {
                 focus_stack.iter(),
             );
         }
+
+        for window in self.active_space(output).space.windows() {
+            self.update_reactive_popups(window);
+        }
     }
 
     pub fn map_layer(&mut self, layer_surface: &LayerSurface, dh: &DisplayHandle) {
@@ -643,6 +647,13 @@ impl Shell {
                     focus_stack.iter(),
                 );
             }
+        }
+
+        for window in self.active_space(output).space.windows() {
+            self.update_reactive_popups(window);
+        }
+        for window in self.spaces[idx].space.windows() {
+            self.update_reactive_popups(window);
         }
     }
 }

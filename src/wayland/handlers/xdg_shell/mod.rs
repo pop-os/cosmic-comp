@@ -26,6 +26,8 @@ use smithay::{
 };
 use std::cell::Cell;
 
+pub mod popup;
+
 pub type PopupGrabData = Cell<Option<PopupGrab>>;
 
 impl XdgShellHandler for State {
@@ -50,15 +52,24 @@ impl XdgShellHandler for State {
         &mut self,
         _dh: &DisplayHandle,
         surface: PopupSurface,
-        _positioner: PositionerState,
+        positioner: PositionerState,
     ) {
         super::mark_dirty_on_drop(&self.common, surface.wl_surface());
 
-        self.common
-            .shell
-            .popups
-            .track_popup(PopupKind::from(surface))
-            .unwrap();
+        surface.with_pending_state(|state| {
+            state.geometry = positioner.get_geometry();
+            state.positioner = positioner;
+        });
+
+        self.common.shell.unconstrain_popup(&surface, &positioner);
+
+        if surface.send_configure().is_ok() {
+            self.common
+                .shell
+                .popups
+                .track_popup(PopupKind::from(surface))
+                .unwrap();
+        }
     }
 
     fn ack_configure(&mut self, _dh: &DisplayHandle, surface: WlSurface, configure: Configure) {
@@ -132,14 +143,13 @@ impl XdgShellHandler for State {
         token: u32,
     ) {
         surface.with_pending_state(|state| {
-            // TODO: This is a simplification, a proper compositor would
-            // calculate the geometry of the popup here.
-            // For now we just use the default implementation here that does not take the
-            // window position and output constraints into account.
             let geometry = positioner.get_geometry();
             state.geometry = geometry;
             state.positioner = positioner;
         });
+
+        self.common.shell.unconstrain_popup(&surface, &positioner);
+
         surface.send_repositioned(token);
     }
 

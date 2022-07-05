@@ -6,6 +6,7 @@ use smithay::{
 use std::cell::RefCell;
 
 pub use crate::state::State;
+pub use crate::wayland::handlers::xdg_shell::popup::update_reactive_popups;
 
 pub trait OutputExt {
     fn geometry(&self) -> Rectangle<i32, Logical>;

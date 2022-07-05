@@ -4,7 +4,7 @@ use crate::{state::BackendData, utils::prelude::*};
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
     delegate_compositor,
-    desktop::{Kind, LayerSurface, PopupKind, WindowSurfaceType, layer_map_for_output},
+    desktop::{layer_map_for_output, Kind, LayerSurface, PopupKind, WindowSurfaceType},
     reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
     wayland::{
         compositor::{with_states, CompositorHandler, CompositorState},
@@ -77,7 +77,11 @@ impl State {
         }
     }
 
-    fn layer_surface_ensure_inital_configure(&mut self, surface: &LayerSurface, dh: &DisplayHandle) -> bool {
+    fn layer_surface_ensure_inital_configure(
+        &mut self,
+        surface: &LayerSurface,
+        dh: &DisplayHandle,
+    ) -> bool {
         // send the initial configure if relevant
         let initial_configure_sent = with_states(surface.wl_surface(), |states| {
             states
@@ -164,12 +168,16 @@ impl CompositorHandler for State {
                 );
             if let Some(location) = new_location {
                 space.map_window(&window, location, true);
+                for window in space.windows() {
+                    update_reactive_popups(space, window);
+                }
             }
         }
 
         if let Some(output) = self.common.shell.outputs().find(|o| {
             let map = layer_map_for_output(o);
-            map.layer_for_surface(surface, WindowSurfaceType::ALL).is_some()
+            map.layer_for_surface(surface, WindowSurfaceType::ALL)
+                .is_some()
         }) {
             layer_map_for_output(output).arrange(dh);
         }

@@ -195,6 +195,8 @@ impl TilingLayout {
                 }
             }
         }
+
+        let mut changed = false;
         while let Some(dead_windows) = Some(TilingLayout::update_space_positions(
             &mut self.trees,
             space,
@@ -204,6 +206,12 @@ impl TilingLayout {
         {
             for window in dead_windows {
                 self.unmap_window_internal(&window);
+            }
+            changed = true;
+        }
+        if changed {
+            for window in &self.windows {
+                update_reactive_popups(space, window);
             }
         }
     }
