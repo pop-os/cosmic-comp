@@ -20,9 +20,12 @@ use smithay::{
     reexports::{
         calloop::{ping, EventLoop, LoopHandle},
         gbm::{Device as GbmDevice, FdWrapper},
-        wayland_server::{protocol::wl_output::Subpixel, DisplayHandle},
+        wayland_server::{
+            protocol::wl_output::{Subpixel, Transform},
+            DisplayHandle,
+        },
     },
-    wayland::output::{Mode, Output, PhysicalProperties},
+    wayland::output::{Mode, Output, PhysicalProperties, Scale},
 };
 use std::{
     cell::RefCell,
@@ -73,8 +76,14 @@ impl X11State {
             refresh: 60_000,
         };
         let output = Output::new(name, props, None);
-        output.change_current_state(Some(mode), None, None, Some((0, 0).into()));
+        output.add_mode(mode);
         output.set_preferred(mode);
+        output.change_current_state(
+            Some(mode),
+            Some(Transform::Normal),
+            Some(Scale::Integer(1)),
+            Some((0, 0).into()),
+        );
         output.user_data().insert_if_missing(|| {
             RefCell::new(OutputConfig {
                 mode: ((size.w as i32, size.h as i32), None),

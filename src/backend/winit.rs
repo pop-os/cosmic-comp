@@ -21,7 +21,7 @@ use smithay::{
             DisplayHandle,
         },
     },
-    wayland::output::{Mode, Output, PhysicalProperties},
+    wayland::output::{Mode, Output, PhysicalProperties, Scale},
 };
 use std::cell::RefCell;
 
@@ -136,13 +136,14 @@ pub fn init_backend(
     };
     let output = Output::new(name, props, None);
     let _global = output.create_global::<State>(dh);
+    output.add_mode(mode);
+    output.set_preferred(mode);
     output.change_current_state(
         Some(mode),
         Some(Transform::Flipped180),
-        None,
+        Some(Scale::Integer(1)),
         Some((0, 0).into()),
     );
-    output.set_preferred(mode);
     output.user_data().insert_if_missing(|| {
         RefCell::new(OutputConfig {
             mode: (
