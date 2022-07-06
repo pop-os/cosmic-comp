@@ -20,6 +20,7 @@ egui = { version = "0.18.1", optional = true }
 edid-rs = { version = "0.1" }
 lazy_static = "1.4.0"
 thiserror = "1.0.26"
+regex = "1"
 xcursor = "0.3.3"
 id_tree = "1.8.0"
 xkbcommon = "0.4"

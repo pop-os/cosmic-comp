@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{input::ActiveOutput, state::State};
+use regex::RegexSet;
 use smithay::{
     desktop::{Space, Window},
     wayland::{
@@ -17,6 +18,75 @@ pub mod tiling;
 pub enum Orientation {
     Horizontal,
     Vertical,
+}
+
+lazy_static::lazy_static! {
+    static ref EXCEPTIONS_APPID: RegexSet = RegexSet::new(&[
+        r"Authy Desktop",
+        r"Com.github.amezin.ddterm",
+        r"Com.github.donadigo.eddy",
+        r".*",
+        r"Enpass",
+        r"Gjs",
+        r"Gnome-initial-setup",
+        r"Gnome-terminal",
+        r"Guake",
+        r"Io.elementary.sideload",
+        r"KotatogramDesktop",
+        r"Mozilla VPN",
+        r"update-manager",
+        r"Solaar",
+        r"Steam",
+        r"TelegramDesktop",
+        r"Zotero",
+        r"gjs",
+        r"gnome-screenshot",
+        r"ibus-.*",
+        r"jetbrains-toolbox",
+        r"jetbrains-webstorm",
+        r"jetbrains-webstorm",
+        r"jetbrains-webstorm",
+        r"krunner",
+        r"pritunl",
+        r"re.sonny.Junction",
+        r"system76-driver",
+        r"tilda",
+        r"zoom",
+        r"^.*?action=join.*$",
+    ]).unwrap();
+    static ref EXCEPTIONS_TITLE: RegexSet = RegexSet::new(&[
+        r".*",
+        r".*",
+        r".*",
+        r"Discord Updater",
+        r"Enpass Assistant",
+        r"Settings",
+        r".*",
+        r"Preferences – General",
+        r".*",
+        r".*",
+        r"Media viewer",
+        r".*",
+        r"Software Updater",
+        r".*",
+        r"^.*?(Guard|Login).*",
+        r"Media viewer",
+        r"Quick Format Citation",
+        r".*",
+        r".*",
+        r".*",
+        r".*",
+        r"Customize WebStorm",
+        r"License Activation",
+        r"Welcome to WebStorm",
+        r".*",
+        r".*",
+        r".*",
+        r".*",
+        r".*",
+        r".*",
+        r".*",
+    ]).unwrap();
 }
 
 pub fn should_be_floating(window: &Window) -> bool {
@@ -38,13 +108,15 @@ pub fn should_be_floating(window: &Window) -> bool {
         }
 
         // else take a look at our exceptions
-        match (
-            attrs.app_id.as_deref().unwrap_or(""),
-            attrs.title.as_deref().unwrap_or(""),
-        ) {
-            ("gcr-prompter", _) => true,
-            _ => false,
+        let appid_matches = EXCEPTIONS_APPID.matches(attrs.app_id.as_deref().unwrap_or(""));
+        let title_matches = EXCEPTIONS_TITLE.matches(attrs.app_id.as_deref().unwrap_or(""));
+        for idx in appid_matches.into_iter() {
+            if title_matches.matched(idx) {
+                return true;
+            }
         }
+
+        false
     })
 }
 
