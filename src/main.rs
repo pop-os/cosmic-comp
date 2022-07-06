@@ -100,11 +100,14 @@ fn init_wayland_display(
     event_loop
         .handle()
         .insert_source(source, |client_stream, _, data| {
-            if let Err(err) = data
-                .display
-                .handle()
-                .insert_client(client_stream, Arc::new(data.state.new_client_state()))
-            {
+            if let Err(err) = data.display.handle().insert_client(
+                client_stream,
+                Arc::new(if cfg!(debug_assertions) {
+                    data.state.new_privileged_client_state()
+                } else {
+                    data.state.new_client_state()
+                }),
+            ) {
                 slog_scope::warn!("Error adding wayland client: {}", err);
             };
         })
