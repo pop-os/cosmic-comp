@@ -18,6 +18,7 @@ pub mod backend;
 pub mod config;
 pub mod input;
 mod logger;
+pub mod session;
 pub mod shell;
 pub mod state;
 pub mod systemd;
@@ -47,6 +48,8 @@ fn main() -> Result<()> {
     );
     // init backend
     backend::init_backend_auto(&display.handle(), &mut event_loop, &mut state)?;
+    // potentially tell the session we are setup now
+    session::setup_socket(event_loop.handle(), &state)?;
     // potentially tell systemd we are setup now
     systemd::ready(&state);
 

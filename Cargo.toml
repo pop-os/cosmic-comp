@@ -14,7 +14,8 @@ slog-async = "2.7"
 slog-scope = "4.4"
 slog-stdlog = "4.1"
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", optional = true }
+serde_json = "1"
+sendfd = "0.4.1"
 egui = { version = "0.18.1", optional = true }
 edid-rs = { version = "0.1" }
 lazy_static = "1.4.0"
@@ -45,7 +46,7 @@ optional = true
 
 [features]
 default = []
-debug = ["egui", "smithay-egui", "serde_json"]
+debug = ["egui", "smithay-egui"]
 experimental = []
 
 [profile.dev]
