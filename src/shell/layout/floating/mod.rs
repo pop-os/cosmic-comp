@@ -7,12 +7,14 @@ use smithay::{
     },
     utils::IsAlive,
     wayland::{
+        compositor::with_states,
         output::Output,
         seat::{PointerGrabStartData, Seat},
+        shell::xdg::XdgToplevelSurfaceRoleAttributes,
         Serial,
     },
 };
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Mutex};
 
 use crate::state::State;
 
@@ -49,14 +51,58 @@ impl FloatingLayout {
     }
 
     fn map_window_internal(&mut self, space: &mut Space, window: Window, output: &Output) {
-        let win_geo = window.bbox();
+        let mut win_geo = window.geometry();
         let layers = layer_map_for_output(&output);
         let geometry = layers.non_exclusive_zone();
 
+        let mut geo_updated = false;
+        {
+            let (min_size, max_size) = with_states(window.toplevel().wl_surface(), |states| {
+                let attrs = states
+                    .data_map
+                    .get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
+                    .unwrap()
+                    .lock()
+                    .unwrap();
+                (attrs.min_size, attrs.max_size)
+            });
+            if win_geo.size.w > geometry.size.w / 3 * 2 {
+                // try a more reasonable size
+                let mut width = geometry.size.w / 3 * 2;
+                if max_size.w != 0 {
+                    // don't go larger then the max_size ...
+                    width = std::cmp::min(max_size.w, width);
+                }
+                if min_size.w != 0 {
+                    // ... but also don't go smaller than the min_size
+                    width = std::cmp::max(min_size.w, width);
+                }
+                // but no matter the supported sizes, don't be larger than our non-exclusive-zone
+                win_geo.size.w = std::cmp::min(width, geometry.size.w);
+                geo_updated = true;
+            }
+            if win_geo.size.h > geometry.size.h / 3 * 2 {
+                // try a more reasonable size
+                let mut height = geometry.size.h / 3 * 2;
+                if max_size.h != 0 {
+                    // don't go larger then the max_size ...
+                    height = std::cmp::min(max_size.h, height);
+                }
+                if min_size.h != 0 {
+                    // ... but also don't go smaller than the min_size
+                    height = std::cmp::max(min_size.h, height);
+                }
+                // but no matter the supported sizes, don't be larger than our non-exclusive-zone
+                win_geo.size.h = std::cmp::min(height, geometry.size.h);
+                geo_updated = true;
+            }
+        }
+
         let position = (
-            -geometry.loc.x + (geometry.size.w / 2) - (win_geo.size.w / 2),
-            -geometry.loc.y + (geometry.size.h / 2) - (win_geo.size.h / 2),
+            geometry.loc.x + (geometry.size.w / 2) - (win_geo.size.w / 2) + win_geo.loc.x,
+            geometry.loc.y + (geometry.size.h / 2) - (win_geo.size.h / 2) + win_geo.loc.y,
         );
+
         #[allow(irrefutable_let_patterns)]
         if let Kind::Xdg(xdg) = &window.toplevel() {
             xdg.with_pending_state(|state| {
@@ -64,6 +110,9 @@ impl FloatingLayout {
                 state.states.unset(XdgState::TiledRight);
                 state.states.unset(XdgState::TiledTop);
                 state.states.unset(XdgState::TiledBottom);
+                if geo_updated {
+                    state.size = Some(win_geo.size);
+                }
             });
             xdg.send_configure();
         }

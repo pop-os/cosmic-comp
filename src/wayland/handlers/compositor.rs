@@ -107,6 +107,13 @@ impl CompositorHandler for State {
     }
 
     fn commit(&mut self, dh: &DisplayHandle, surface: &WlSurface) {
+        on_commit_buffer_handler(surface);
+        self.early_import_surface(dh, surface);
+        self.common.shell.popups.commit(surface);
+        for workspace in &self.common.shell.spaces {
+            workspace.space.commit(surface);
+        }
+
         // initial configure
         if let Some((window, seat)) = self
             .common
@@ -118,7 +125,11 @@ impl CompositorHandler for State {
         {
             match window.toplevel() {
                 Kind::Xdg(toplevel) => {
-                    if self.toplevel_ensure_initial_configure(&toplevel) {
+                    if self.toplevel_ensure_initial_configure(&toplevel)
+                        && with_renderer_surface_state(&surface, |state| {
+                            state.wl_buffer().is_some()
+                        })
+                    {
                         let output = active_output(&seat, &self.common);
                         self.common.shell.map_window(&window, &output, dh);
                     } else {
@@ -180,13 +191,6 @@ impl CompositorHandler for State {
                 .is_some()
         }) {
             layer_map_for_output(output).arrange(dh);
-        }
-
-        on_commit_buffer_handler(surface);
-        self.early_import_surface(dh, surface);
-        self.common.shell.popups.commit(surface);
-        for workspace in &self.common.shell.spaces {
-            workspace.space.commit(surface);
         }
     }
 }
