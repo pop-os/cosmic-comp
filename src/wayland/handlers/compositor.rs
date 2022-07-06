@@ -120,7 +120,7 @@ impl CompositorHandler for State {
                 Kind::Xdg(toplevel) => {
                     if self.toplevel_ensure_initial_configure(&toplevel) {
                         let output = active_output(&seat, &self.common);
-                        self.common.shell.map_window(&window, &output);
+                        self.common.shell.map_window(&window, &output, dh);
                     } else {
                         return;
                     }

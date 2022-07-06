@@ -530,13 +530,14 @@ impl Shell {
             .refresh(Some(&self.workspace_state));
     }
 
-    pub fn map_window(&mut self, window: &Window, output: &Output) {
+    pub fn map_window(&mut self, window: &Window, output: &Output, dh: &DisplayHandle) {
         let pos = self
             .pending_windows
             .iter()
             .position(|(w, _)| w == window)
             .unwrap();
         let (window, seat) = self.pending_windows.remove(pos);
+        let surface = window.toplevel().wl_surface().clone();
 
         let workspace = match &self.workspace_mode {
             WorkspaceMode::OutputBound => {
@@ -555,12 +556,12 @@ impl Shell {
             .remove_workspace_state(&workspace.handle, WState::Hidden);
         self.toplevel_info_state
             .toplevel_enter_workspace(&window, &workspace.handle);
-        let focus_stack = workspace.focus_stack(&seat);
         if layout::should_be_floating(&window) {
             workspace
                 .floating_layer
                 .map_window(&mut workspace.space, window, &seat);
         } else {
+            let focus_stack = workspace.focus_stack(&seat);
             workspace.tiling_layer.map_window(
                 &mut workspace.space,
                 window,
@@ -568,6 +569,8 @@ impl Shell {
                 focus_stack.iter(),
             );
         }
+
+        self.set_focus(dh, Some(&surface), &seat, None);
 
         for window in self.active_space(output).space.windows() {
             self.update_reactive_popups(window);
