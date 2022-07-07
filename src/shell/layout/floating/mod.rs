@@ -9,7 +9,7 @@ use smithay::{
     wayland::{
         compositor::with_states,
         output::Output,
-        seat::{PointerGrabStartData, Seat},
+        seat::{Focus, PointerGrabStartData, Seat},
         shell::xdg::XdgToplevelSurfaceRoleAttributes,
         Serial,
     },
@@ -20,6 +20,8 @@ use crate::state::State;
 
 mod grabs;
 pub use self::grabs::*;
+
+pub const FLOATING_INDEX: u8 = RenderZindex::Shell as u8 + 1;
 
 #[derive(Debug, Default)]
 pub struct FloatingLayout {
@@ -117,13 +119,11 @@ impl FloatingLayout {
             xdg.send_configure();
         }
 
-        window.override_z_index(RenderZindex::Shell as u8 + 1);
-        space.map_window(&window, position, false);
+        space.map_window(&window, position, FLOATING_INDEX, false);
         self.windows.insert(window);
     }
 
     pub fn unmap_window(&mut self, space: &mut Space, window: &Window) {
-        window.clear_z_index();
         space.unmap_window(window);
         self.pending_windows.retain(|w| w != window);
         self.windows.remove(window);
@@ -133,7 +133,12 @@ impl FloatingLayout {
         let layers = layer_map_for_output(&output);
         let geometry = layers.non_exclusive_zone();
 
-        space.map_window(&window, (geometry.loc.x, geometry.loc.y), true);
+        space.map_window(
+            &window,
+            (geometry.loc.x, geometry.loc.y),
+            FLOATING_INDEX,
+            true,
+        );
         #[allow(irrefutable_let_patterns)]
         if let Kind::Xdg(surface) = &window.toplevel() {
             surface.with_pending_state(|state| {
@@ -183,7 +188,7 @@ impl FloatingLayout {
 
             let grab = MoveSurfaceGrab::new(start_data, window.clone(), initial_window_location);
 
-            pointer.set_grab(grab, serial, 0);
+            pointer.set_grab(grab, serial, Focus::Clear);
         }
     }
 
@@ -203,7 +208,7 @@ impl FloatingLayout {
             let grab =
                 grabs::ResizeSurfaceGrab::new(start_data, window.clone(), edges, location, size);
 
-            pointer.set_grab(grab, serial, 0);
+            pointer.set_grab(grab, serial, Focus::Clear);
         }
     }
 }

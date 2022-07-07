@@ -16,7 +16,7 @@ use smithay::{
     },
     wayland::{
         output::Output,
-        seat::{PointerGrabStartData, Seat},
+        seat::{Focus, PointerGrabStartData, Seat},
         shell::xdg::{
             Configure, PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler,
             XdgShellState,
@@ -123,7 +123,7 @@ impl XdgShellHandler for State {
                     grab.ungrab(dh, PopupUngrabStrategy::All);
                     return;
                 }
-                pointer.set_grab(PopupPointerGrab::new(&grab), serial, 0);
+                pointer.set_grab(PopupPointerGrab::new(&grab), serial, Focus::Keep);
             }
 
             seat.user_data()

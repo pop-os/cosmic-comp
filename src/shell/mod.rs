@@ -523,7 +523,7 @@ impl Shell {
                 state.add_workspace_state(&workspace.handle, WState::Hidden);
             }
             let mut map = layer_map_for_output(output);
-            map.cleanup();
+            map.cleanup(dh);
         }
         std::mem::drop(state);
         self.toplevel_info_state

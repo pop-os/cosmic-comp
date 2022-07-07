@@ -14,7 +14,7 @@ use smithay::{
     },
     utils::{IsAlive, Rectangle},
     wayland::{
-        seat::{PointerGrabStartData, Seat},
+        seat::{Focus, PointerGrabStartData, Seat},
         Serial,
     },
 };
@@ -272,7 +272,7 @@ impl TilingLayout {
                                         ratio: ratio.clone(),
                                     };
 
-                                    pointer.set_grab(grab, serial, 0);
+                                    pointer.set_grab(grab, serial, Focus::Clear);
                                 }
                                 return;
                             }
@@ -590,6 +590,7 @@ impl TilingLayout {
                                     space.map_window(
                                         &window,
                                         (geo.loc.x + inner, geo.loc.y + inner),
+                                        None,
                                         false,
                                     );
                                 }

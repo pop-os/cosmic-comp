@@ -70,6 +70,13 @@ impl RenderElement<GlMultiRenderer<'_>> for CustomElem {
         RenderElement::<Gles2Renderer>::accumulated_damage(self, scale, for_values)
     }
 
+    fn opaque_regions(
+        &self,
+        scale: impl Into<Scale<f64>>,
+    ) -> Option<Vec<Rectangle<i32, Physical>>> {
+        RenderElement::<Gles2Renderer>::opaque_regions(self, scale)
+    }
+
     fn draw(
         &self,
         renderer: &mut GlMultiRenderer<'_>,

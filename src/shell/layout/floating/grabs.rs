@@ -44,7 +44,9 @@ impl PointerGrab<State> for MoveSurfaceGrab {
             .space_for_surface_mut(self.window.toplevel().wl_surface())
         {
             let new_location = (self.initial_window_location.to_f64() + self.delta).to_i32_round();
-            workspace.space.map_window(&self.window, new_location, true);
+            workspace
+                .space
+                .map_window(&self.window, new_location, super::FLOATING_INDEX, true);
         }
     }
 

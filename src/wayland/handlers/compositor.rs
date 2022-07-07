@@ -2,7 +2,7 @@
 
 use crate::{state::BackendData, utils::prelude::*};
 use smithay::{
-    backend::renderer::utils::on_commit_buffer_handler,
+    backend::renderer::utils::{on_commit_buffer_handler, with_renderer_surface_state},
     delegate_compositor,
     desktop::{layer_map_for_output, Kind, LayerSurface, PopupKind, WindowSurfaceType},
     reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
@@ -178,7 +178,12 @@ impl CompositorHandler for State {
                     window.geometry().size,
                 );
             if let Some(location) = new_location {
-                space.map_window(&window, location, true);
+                space.map_window(
+                    &window,
+                    location,
+                    crate::shell::layout::floating::FLOATING_INDEX,
+                    true,
+                );
                 for window in space.windows() {
                     update_reactive_popups(space, window);
                 }
