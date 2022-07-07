@@ -344,6 +344,16 @@ impl State {
                                         focus_stack.iter(),
                                     );
                                 }
+                                Action::ToggleTiling => {
+                                    let output = active_output(seat, &self.common);
+                                    let workspace = self.common.shell.active_space_mut(&output);
+                                    workspace.toggle_tiling(seat);
+                                }
+                                Action::ToggleWindowFloating => {
+                                    let output = active_output(seat, &self.common);
+                                    let workspace = self.common.shell.active_space_mut(&output);
+                                    workspace.toggle_floating_window(seat);
+                                }
                                 Action::Spawn(command) => {
                                     if let Err(err) = std::process::Command::new("/bin/sh")
                                         .arg("-c")
