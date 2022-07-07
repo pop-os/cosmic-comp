@@ -5,7 +5,7 @@ use smithay::{
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
         ResizeEdge, State as XdgState,
     },
-    utils::IsAlive,
+    utils::{IsAlive, Rectangle, Logical},
     wayland::{
         compositor::with_states,
         output::Output,
@@ -28,6 +28,12 @@ pub struct FloatingLayout {
     pending_windows: Vec<Window>,
     pub windows: HashSet<Window>,
 }
+
+#[derive(Default)]
+pub struct WindowUserDataInner {
+    last_geometry: Rectangle<i32, Logical>,
+}
+pub type WindowUserData = Mutex<WindowUserDataInner>;
 
 impl FloatingLayout {
     pub fn new() -> FloatingLayout {
@@ -53,11 +59,17 @@ impl FloatingLayout {
     }
 
     fn map_window_internal(&mut self, space: &mut Space, window: Window, output: &Output) {
+        let last_geometry = window.user_data().get::<WindowUserData>().map(|u| u.lock().unwrap().last_geometry);
         let mut win_geo = window.geometry();
+
         let layers = layer_map_for_output(&output);
         let geometry = layers.non_exclusive_zone();
 
         let mut geo_updated = false;
+        if let Some(size) = last_geometry.clone().map(|g| g.size) {
+            geo_updated = win_geo.size == size;
+            win_geo.size = size;
+        }
         {
             let (min_size, max_size) = with_states(window.toplevel().wl_surface(), |states| {
                 let attrs = states
@@ -100,10 +112,10 @@ impl FloatingLayout {
             }
         }
 
-        let position = (
+        let position = last_geometry.map(|g| g.loc).unwrap_or_else(|| (
             geometry.loc.x + (geometry.size.w / 2) - (win_geo.size.w / 2) + win_geo.loc.x,
             geometry.loc.y + (geometry.size.h / 2) - (win_geo.size.h / 2) + win_geo.loc.y,
-        );
+        ).into());
 
         #[allow(irrefutable_let_patterns)]
         if let Kind::Xdg(xdg) = &window.toplevel() {
@@ -124,6 +136,15 @@ impl FloatingLayout {
     }
 
     pub fn unmap_window(&mut self, space: &mut Space, window: &Window) {
+        if let Some(location) = space.window_location(window) {
+            let user_data = window.user_data();
+            user_data.insert_if_missing(|| WindowUserData::default());
+            user_data.get::<WindowUserData>().unwrap().lock().unwrap().last_geometry = Rectangle::from_loc_and_size(
+                location,
+                window.geometry().size,
+            );
+        }
+
         space.unmap_window(window);
         self.pending_windows.retain(|w| w != window);
         self.windows.remove(window);
