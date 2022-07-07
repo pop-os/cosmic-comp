@@ -3,12 +3,15 @@
 use crate::utils::prelude::*;
 use smithay::{
     delegate_layer_shell,
-    desktop::LayerSurface,
+    desktop::{LayerSurface, PopupKind},
     reexports::wayland_server::{protocol::wl_output::WlOutput, DisplayHandle},
     wayland::{
         output::Output,
-        shell::wlr_layer::{
-            Layer, LayerSurface as WlrLayerSurface, WlrLayerShellHandler, WlrLayerShellState,
+        shell::{
+            wlr_layer::{
+                Layer, LayerSurface as WlrLayerSurface, WlrLayerShellHandler, WlrLayerShellState,
+            },
+            xdg::PopupSurface,
         },
     },
 };
@@ -37,6 +40,19 @@ impl WlrLayerShellHandler for State {
             output,
             seat,
         ));
+    }
+
+    fn new_popup(&mut self, _dh: &DisplayHandle, _parent: WlrLayerSurface, popup: PopupSurface) {
+        let positioner = popup.with_pending_state(|state| state.positioner);
+        self.common.shell.unconstrain_popup(&popup, &positioner);
+
+        if popup.send_configure().is_ok() {
+            self.common
+                .shell
+                .popups
+                .track_popup(PopupKind::from(popup))
+                .unwrap();
+        }
     }
 }
 

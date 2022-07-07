@@ -61,14 +61,17 @@ impl XdgShellHandler for State {
             state.positioner = positioner;
         });
 
-        self.common.shell.unconstrain_popup(&surface, &positioner);
+        if surface.get_parent_surface().is_some() {
+            // let other shells deal with their popups
+            self.common.shell.unconstrain_popup(&surface, &positioner);
 
-        if surface.send_configure().is_ok() {
-            self.common
-                .shell
-                .popups
-                .track_popup(PopupKind::from(surface))
-                .unwrap();
+            if surface.send_configure().is_ok() {
+                self.common
+                    .shell
+                    .popups
+                    .track_popup(PopupKind::from(surface))
+                    .unwrap();
+            }
         }
     }
 
@@ -149,8 +152,13 @@ impl XdgShellHandler for State {
         });
 
         self.common.shell.unconstrain_popup(&surface, &positioner);
-
         surface.send_repositioned(token);
+        if let Err(err) = surface.send_configure() {
+            slog_scope::warn!(
+                "Compositor bug: Unable to re configure repositioned popup: {}",
+                err
+            );
+        }
     }
 
     fn move_request(
