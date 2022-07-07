@@ -556,6 +556,8 @@ impl Shell {
             .remove_workspace_state(&workspace.handle, WState::Hidden);
         self.toplevel_info_state
             .toplevel_enter_workspace(&window, &workspace.handle);
+        self.toplevel_info_state
+            .toplevel_enter_output(&window, &output);
         if layout::should_be_floating(&window) {
             workspace
                 .floating_layer
