@@ -1,4 +1,4 @@
-use crate::{input::ActiveOutput, state::Common};
+use crate::{input::{ActiveOutput, SeatId}, state::Common};
 use smithay::{
     utils::{Logical, Rectangle, Transform},
     wayland::{output::Output, seat::Seat},
@@ -25,6 +25,16 @@ impl OutputExt for Output {
                 .to_logical(self.current_scale().fractional_scale())
                 .to_i32_round()
         })
+    }
+}
+
+pub trait SeatExt {
+    fn id(&self) -> usize;
+}
+
+impl SeatExt for Seat<State> {
+    fn id(&self) -> usize {
+        self.user_data().get::<SeatId>().unwrap().0
     }
 }
 

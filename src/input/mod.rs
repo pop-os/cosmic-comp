@@ -20,9 +20,25 @@ use smithay::{
 use std::{cell::RefCell, collections::HashMap};
 use xkbcommon::xkb::KEY_XF86Switch_VT_12;
 
+crate::utils::id_gen!(next_seat_id, SEAT_ID, SEAT_IDS);
+
+#[repr(transparent)]
+pub struct SeatId(pub usize);
 pub struct ActiveOutput(pub RefCell<Output>);
 pub struct SupressedKeys(RefCell<Vec<u32>>);
 pub struct Devices(RefCell<HashMap<String, Vec<DeviceCapability>>>);
+
+impl Default for SeatId {
+    fn default() -> SeatId {
+        SeatId(next_seat_id())
+    }
+}
+
+impl Drop for SeatId {
+    fn drop(&mut self) {
+        SEAT_IDS.lock().unwrap().remove(&self.0);
+    }
+}
 
 impl SupressedKeys {
     fn new() -> SupressedKeys {
@@ -84,6 +100,7 @@ impl Devices {
 pub fn add_seat(dh: &DisplayHandle, name: String) -> Seat<State> {
     let seat = Seat::<State>::new(dh, name, None);
     let userdata = seat.user_data();
+    userdata.insert_if_missing(SeatId::default);
     userdata.insert_if_missing(|| Devices::new());
     userdata.insert_if_missing(|| SupressedKeys::new());
     userdata.insert_if_missing(|| RefCell::new(CursorImageStatus::Default));
