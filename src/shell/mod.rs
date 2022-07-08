@@ -505,7 +505,6 @@ impl Shell {
 
     pub fn refresh(&mut self, dh: &DisplayHandle) {
         self.popups.cleanup();
-        let mut state = self.workspace_state.update();
         for output in &self.outputs {
             let workspace = match &self.workspace_mode {
                 WorkspaceMode::OutputBound => {
@@ -520,13 +519,14 @@ impl Shell {
                 WorkspaceMode::Global { active, .. } => &mut self.spaces[*active],
             };
             workspace.refresh(dh);
-            if workspace.space.windows().next().is_none() {
-                state.add_workspace_state(&workspace.handle, WState::Hidden);
+            if workspace.space.windows().next().is_none()
+                && !self.workspace_state.workspace_states(&workspace.handle).map(|mut i| i.any(|s| s == &WState::Hidden)).unwrap_or(true)
+            {
+                self.workspace_state.update().add_workspace_state(&workspace.handle, WState::Hidden);
             }
             let mut map = layer_map_for_output(output);
             map.cleanup(dh);
         }
-        std::mem::drop(state);
         self.toplevel_info_state
             .refresh(Some(&self.workspace_state));
     }

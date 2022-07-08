@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::sync::Mutex;
+use std::{
+    collections::HashSet,
+    sync::Mutex,
+};
 
 use smithay::{
     reexports::wayland_server::{
@@ -81,7 +84,7 @@ pub struct Workspace {
     name: String,
     capabilities: Vec<WorkspaceCapabilities>,
     coordinates: Vec<u32>,
-    states: Vec<zcosmic_workspace_handle_v1::State>,
+    states: HashSet<zcosmic_workspace_handle_v1::State>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -94,7 +97,7 @@ pub struct WorkspaceDataInner {
     name: String,
     capabilities: Vec<WorkspaceCapabilities>,
     coordinates: Vec<u32>,
-    states: Vec<zcosmic_workspace_handle_v1::State>,
+    states: HashSet<zcosmic_workspace_handle_v1::State>,
 }
 pub type WorkspaceData = Mutex<WorkspaceDataInner>;
 
@@ -714,7 +717,7 @@ where
             .iter_mut()
             .find_map(|g| g.workspaces.iter_mut().find(|w| w.id == workspace.id))
         {
-            workspace.states.push(state);
+            workspace.states.insert(state);
         }
     }
 
@@ -729,7 +732,7 @@ where
             .iter_mut()
             .find_map(|g| g.workspaces.iter_mut().find(|w| w.id == workspace.id))
         {
-            workspace.states.retain(|s| *s != state);
+            workspace.states.remove(&state);
         }
     }
 }
@@ -808,7 +811,7 @@ where
         for old_output in handle_state
             .outputs
             .iter()
-            .filter(|o| group.outputs.contains(o))
+            .filter(|o| !group.outputs.contains(o))
         {
             old_output.with_client_outputs(dh, &client, |_dh, wl_output| {
                 instance.output_leave(wl_output);
@@ -919,7 +922,7 @@ where
     }
     if handle_state.states != workspace.states {
         let states: Vec<u8> = {
-            let mut states = workspace.states.clone();
+            let mut states = workspace.states.iter().cloned().collect::<Vec<_>>();
             let ratio = std::mem::size_of::<zcosmic_workspace_handle_v1::State>()
                 / std::mem::size_of::<u8>();
             let ptr = states.as_mut_ptr() as *mut u8;
