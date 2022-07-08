@@ -25,7 +25,9 @@ crate::utils::id_gen!(next_seat_id, SEAT_ID, SEAT_IDS);
 #[repr(transparent)]
 pub struct SeatId(pub usize);
 pub struct ActiveOutput(pub RefCell<Output>);
+#[derive(Default)]
 pub struct SupressedKeys(RefCell<Vec<u32>>);
+#[derive(Default)]
 pub struct Devices(RefCell<HashMap<String, Vec<DeviceCapability>>>);
 
 impl Default for SeatId {
@@ -41,10 +43,6 @@ impl Drop for SeatId {
 }
 
 impl SupressedKeys {
-    fn new() -> SupressedKeys {
-        SupressedKeys(RefCell::new(Vec::new()))
-    }
-
     fn add(&self, keysym: &KeysymHandle) {
         self.0.borrow_mut().push(keysym.raw_code());
     }
@@ -61,10 +59,6 @@ impl SupressedKeys {
 }
 
 impl Devices {
-    fn new() -> Devices {
-        Devices(RefCell::new(HashMap::new()))
-    }
-
     fn add_device<D: Device>(&self, device: &D) -> Vec<DeviceCapability> {
         let id = device.id();
         let mut map = self.0.borrow_mut();
@@ -101,8 +95,8 @@ pub fn add_seat(dh: &DisplayHandle, name: String) -> Seat<State> {
     let seat = Seat::<State>::new(dh, name, None);
     let userdata = seat.user_data();
     userdata.insert_if_missing(SeatId::default);
-    userdata.insert_if_missing(|| Devices::new());
-    userdata.insert_if_missing(|| SupressedKeys::new());
+    userdata.insert_if_missing(Devices::default);
+    userdata.insert_if_missing(SupressedKeys::default);
     userdata.insert_if_missing(|| RefCell::new(CursorImageStatus::Default));
     seat
 }
