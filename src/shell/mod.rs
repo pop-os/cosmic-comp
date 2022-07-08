@@ -753,7 +753,7 @@ fn init_workspace_handle<'a>(
 ) -> WorkspaceHandle {
     let handle = state.create_workspace(&group).unwrap();
     state.set_workspace_capabilities(&handle, [WorkspaceCapabilities::Activate].into_iter());
-    state.set_workspace_name(&handle, format!("{}", workspace.idx));
+    state.set_workspace_name(&handle, format!("{}", workspace.idx + 1));
     state.set_workspace_coordinates(&handle, [Some(workspace.idx as u32), None, None]);
     if workspace.space.windows().next().is_none() {
         state.add_workspace_state(&handle, WState::Hidden);
