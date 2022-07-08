@@ -55,5 +55,7 @@ install-bare-session: install
 	install -Dm0755 "data/cosmic-service" "$(DESTDIR)/$(bindir)/cosmic-service"
 
 uninstall:
-	rm "$(DESTDIR)$(sharedir)/wayland-sessions/cosmic.desktop"
 	rm "$(TARGET_BIN)"
+
+uninstall-bare-session:
+	rm "$(DESTDIR)$(sharedir)/wayland-sessions/cosmic.desktop"
