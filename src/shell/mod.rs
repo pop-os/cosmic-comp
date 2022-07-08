@@ -35,6 +35,7 @@ use crate::{
 pub const MAX_WORKSPACES: usize = 10;
 pub mod focus;
 pub mod layout;
+pub mod grabs;
 mod workspace;
 pub use self::workspace::*;
 
@@ -561,7 +562,7 @@ impl Shell {
         if layout::should_be_floating(&window) {
             workspace
                 .floating_layer
-                .map_window(&mut workspace.space, window, &seat);
+                .map_window(&mut workspace.space, window, &seat, None);
         } else {
             let focus_stack = workspace.focus_stack(&seat);
             workspace.tiling_layer.map_window(
@@ -627,6 +628,7 @@ impl Shell {
 
         let maybe_window = workspace.focus_stack(seat).last();
         if let Some(window) = maybe_window {
+            let mut workspace_state = self.workspace_state.update();
             workspace
                 .floating_layer
                 .unmap_window(&mut workspace.space, &window);
@@ -635,15 +637,19 @@ impl Shell {
                 .unmap_window(&mut workspace.space, &window);
             self.toplevel_info_state
                 .toplevel_leave_workspace(&window, &workspace.handle);
+            if workspace.space.windows().next().is_none() {
+                workspace_state.add_workspace_state(&workspace.handle, WState::Hidden);
+            }
 
             let new_workspace = &mut self.spaces[idx];
+            workspace_state.remove_workspace_state(&new_workspace.handle, WState::Hidden);
             self.toplevel_info_state
                 .toplevel_enter_workspace(&window, &new_workspace.handle);
             let focus_stack = new_workspace.focus_stack(&seat);
             if layout::should_be_floating(&window) {
                 new_workspace
                     .floating_layer
-                    .map_window(&mut new_workspace.space, window, &seat);
+                    .map_window(&mut new_workspace.space, window, &seat, None);
             } else {
                 new_workspace.tiling_layer.map_window(
                     &mut new_workspace.space,

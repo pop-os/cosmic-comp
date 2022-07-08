@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::state::Common;
+use crate::{
+    state::Common,
+    shell::grabs::{
+        SeatMoveGrabState,
+        MoveGrabRenderElement,
+    },
+};
 #[cfg(feature = "debug")]
 use crate::{
     debug::{debug_ui, fps_ui, log_ui, EguiFrame},
@@ -42,6 +48,7 @@ smithay::custom_elements! {
     pub CustomElem<=Gles2Renderer>;
     SurfaceTree=SurfaceTree,
     PointerElement=PointerElement::<Gles2Texture>,
+    MoveGrabRenderElement=MoveGrabRenderElement,
     #[cfg(feature = "debug")]
     EguiFrame=EguiFrame,
 }
@@ -241,6 +248,12 @@ where
         let location = state
             .shell
             .space_relative_output_geometry(pointer.current_location().to_i32_round(), output);
+
+        if let Some(grab) = seat.user_data().get::<SeatMoveGrabState>().unwrap().borrow()
+            .as_ref().and_then(|state| state.render(seat, output))
+        {
+            custom_elements.push(grab);
+        }
 
         if let Some(cursor) = cursor::draw_cursor(
             renderer.as_gles2(),

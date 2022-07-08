@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{config::Action, shell::Workspace, utils::prelude::*};
+use crate::{
+    config::Action,
+    shell::{
+        Workspace,
+        grabs::SeatMoveGrabState,
+    },
+    utils::prelude::*,
+};
 use smithay::{
     backend::input::{Device, DeviceCapability, InputBackend, InputEvent, KeyState},
     desktop::{layer_map_for_output, Kind, WindowSurfaceType},
@@ -97,6 +104,7 @@ pub fn add_seat(dh: &DisplayHandle, name: String) -> Seat<State> {
     userdata.insert_if_missing(SeatId::default);
     userdata.insert_if_missing(Devices::default);
     userdata.insert_if_missing(SupressedKeys::default);
+    userdata.insert_if_missing(SeatMoveGrabState::default);
     userdata.insert_if_missing(|| RefCell::new(CursorImageStatus::Default));
     seat
 }

@@ -80,22 +80,6 @@ impl Workspace {
         }
     }
 
-    pub fn move_request(
-        &mut self,
-        window: &Window,
-        seat: &Seat<State>,
-        serial: Serial,
-        start_data: PointerGrabStartData,
-    ) {
-        if self.fullscreen.values().any(|w| w == window) {
-            return;
-        }
-        if self.floating_layer.windows.contains(window) {
-            self.floating_layer
-                .move_request(&mut self.space, window, seat, serial, start_data)
-        }
-    }
-
     pub fn resize_request(
         &mut self,
         window: &Window,
@@ -189,7 +173,7 @@ impl Workspace {
         if self.tiling_enabled {
             for window in self.tiling_layer.windows.clone().into_iter() {
                 self.tiling_layer.unmap_window(&mut self.space, &window);
-                self.floating_layer.map_window(&mut self.space, window, seat);
+                self.floating_layer.map_window(&mut self.space, window, seat, None);
             }
             self.tiling_enabled = false;
         } else {
@@ -207,7 +191,7 @@ impl Workspace {
             if let Some(window) = self.focus_stack(seat).iter().next().cloned() {
                 if self.tiling_layer.windows.contains(&window) {
                     self.tiling_layer.unmap_window(&mut self.space, &window);
-                    self.floating_layer.map_window(&mut self.space, window, seat);
+                    self.floating_layer.map_window(&mut self.space, window, seat, None);
                 } else if self.floating_layer.windows.contains(&window) {
                     let focus_stack = self.focus_stack(seat);
                     self.floating_layer.unmap_window(&mut self.space, &window);

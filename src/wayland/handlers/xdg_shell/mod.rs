@@ -181,7 +181,7 @@ impl XdgShellHandler for State {
                 .unwrap()
                 .clone();
 
-            workspace.move_request(&window, &seat, serial, start_data);
+            self.common.shell.move_request(&window, &seat, serial, start_data);
         }
     }
 

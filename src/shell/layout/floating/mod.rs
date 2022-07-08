@@ -5,7 +5,7 @@ use smithay::{
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
         ResizeEdge, State as XdgState,
     },
-    utils::{IsAlive, Rectangle, Logical},
+    utils::{IsAlive, Rectangle, Point, Logical},
     wayland::{
         compositor::with_states,
         output::Output,
@@ -40,9 +40,9 @@ impl FloatingLayout {
         Default::default()
     }
 
-    pub fn map_window(&mut self, space: &mut Space, window: Window, seat: &Seat<State>) {
+    pub fn map_window(&mut self, space: &mut Space, window: Window, seat: &Seat<State>, position: impl Into<Option<Point<i32, Logical>>>) {
         if let Some(output) = super::output_from_seat(Some(seat), space) {
-            self.map_window_internal(space, window, &output);
+            self.map_window_internal(space, window, &output, position.into());
         } else {
             self.pending_windows.push(window);
         }
@@ -52,13 +52,13 @@ impl FloatingLayout {
         self.pending_windows.retain(|w| w.toplevel().alive());
         if let Some(output) = super::output_from_seat(None, space) {
             for window in std::mem::take(&mut self.pending_windows).into_iter() {
-                self.map_window_internal(space, window, &output);
+                self.map_window_internal(space, window, &output, None);
             }
         }
         // TODO make sure all windows are still visible on any output or move them
     }
 
-    fn map_window_internal(&mut self, space: &mut Space, window: Window, output: &Output) {
+    fn map_window_internal(&mut self, space: &mut Space, window: Window, output: &Output, position: Option<Point<i32, Logical>>) {
         let last_geometry = window.user_data().get::<WindowUserData>().map(|u| u.lock().unwrap().last_geometry);
         let mut win_geo = window.geometry();
 
@@ -112,7 +112,7 @@ impl FloatingLayout {
             }
         }
 
-        let position = last_geometry.map(|g| g.loc).unwrap_or_else(|| (
+        let position = position.or_else(|| last_geometry.map(|g| g.loc)).unwrap_or_else(|| (
             geometry.loc.x + (geometry.size.w / 2) - (win_geo.size.w / 2) + win_geo.loc.x,
             geometry.loc.y + (geometry.size.h / 2) - (win_geo.size.h / 2) + win_geo.loc.y,
         ).into());
@@ -206,49 +206,6 @@ impl FloatingLayout {
                 FLOATING_INDEX,
                 true,
             );
-        }
-    }
-
-    pub fn move_request(
-        &mut self,
-        space: &mut Space,
-        window: &Window,
-        seat: &Seat<State>,
-        serial: Serial,
-        start_data: PointerGrabStartData,
-    ) {
-        if let Some(pointer) = seat.get_pointer() {
-            let mut initial_window_location = space.window_location(&window).unwrap();
-
-            #[allow(irrefutable_let_patterns)]
-            if let Kind::Xdg(surface) = &window.toplevel() {
-                // If surface is maximized then unmaximize it
-                let current_state = surface.current_state();
-                if current_state.states.contains(XdgState::Maximized) {
-                    surface.with_pending_state(|state| {
-                        state.states.unset(XdgState::Maximized);
-                        state.size = None;
-                    });
-
-                    surface.send_configure();
-
-                    // TODO: The mouse location should be mapped to a new window size
-                    // For example, you could:
-                    // 1) transform mouse pointer position from compositor space to window space (location relative)
-                    // 2) divide the x coordinate by width of the window to get the percentage
-                    //   - 0.0 would be on the far left of the window
-                    //   - 0.5 would be in middle of the window
-                    //   - 1.0 would be on the far right of the window
-                    // 3) multiply the percentage by new window width
-                    // 4) by doing that, drag will look a lot more natural
-                    let pos = pointer.current_location();
-                    initial_window_location = (pos.x as i32, pos.y as i32).into();
-                }
-            }
-
-            let grab = MoveSurfaceGrab::new(start_data, window.clone(), initial_window_location);
-
-            pointer.set_grab(grab, serial, Focus::Clear);
         }
     }
 
