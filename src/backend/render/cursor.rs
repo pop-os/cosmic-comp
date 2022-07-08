@@ -159,6 +159,7 @@ pub fn draw_dnd_icon(
 }
 
 pub struct PointerElement<T: Texture> {
+    seat_id: usize,
     texture: T,
     position: Point<f64, Logical>,
     size: Size<i32, Logical>,
@@ -167,12 +168,14 @@ pub struct PointerElement<T: Texture> {
 
 impl<T: Texture> PointerElement<T> {
     pub fn new(
+        seat: &Seat<State>,
         texture: T,
         relative_pointer_pos: Point<f64, Logical>,
         new_frame: bool,
     ) -> PointerElement<T> {
         let size = texture.size().to_logical(1, Transform::Normal);
         PointerElement {
+            seat_id: seat.id(),
             texture,
             position: relative_pointer_pos,
             size,
@@ -187,7 +190,7 @@ where
     <R as Renderer>::TextureId: 'static,
 {
     fn id(&self) -> usize {
-        0
+        self.seat_id
     }
 
     fn location(&self, scale: impl Into<Scale<f64>>) -> Point<f64, Physical> {
@@ -336,7 +339,7 @@ where
                 Point::<i32, Logical>::from((frame.xhot as i32, frame.yhot as i32)).to_f64();
             *state.current_image.borrow_mut() = Some(frame);
 
-            Some(PointerElement::new(pointer_image.clone(), location - hotspot, new_frame).into())
+            Some(PointerElement::new(seat, pointer_image.clone(), location - hotspot, new_frame).into())
         } else {
             None
         }
