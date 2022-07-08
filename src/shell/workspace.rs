@@ -69,6 +69,16 @@ impl Workspace {
                 .maximize_request(&mut self.space, window, output);
         }
     }
+    
+    pub fn unmaximize_request(&mut self, window: &Window) {
+        if self.fullscreen.values().any(|w| w == window) {
+            return self.unfullscreen_request(window);
+        }
+        if self.floating_layer.windows.contains(window) {
+            self.floating_layer
+                .unmaximize_request(&mut self.space, window);
+        }
+    }
 
     pub fn move_request(
         &mut self,

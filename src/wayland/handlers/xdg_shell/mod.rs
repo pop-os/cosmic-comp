@@ -226,11 +226,16 @@ impl XdgShellHandler for State {
     }
 
     fn unmaximize_request(&mut self, _dh: &DisplayHandle, surface: ToplevelSurface) {
-        surface.with_pending_state(|state| {
-            state.states.unset(xdg_toplevel::State::Maximized);
-            state.size = None;
-        });
-        surface.send_configure();
+        let surface = surface.wl_surface();
+
+        if let Some(workspace) = self.common.shell.space_for_surface_mut(surface) {
+            let window = workspace
+                .space
+                .window_for_surface(surface, WindowSurfaceType::TOPLEVEL)
+                .unwrap()
+                .clone();
+            workspace.unmaximize_request(&window)
+        }
     }
 
     fn fullscreen_request(

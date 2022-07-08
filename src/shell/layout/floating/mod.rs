@@ -136,13 +136,22 @@ impl FloatingLayout {
     }
 
     pub fn unmap_window(&mut self, space: &mut Space, window: &Window) {
-        if let Some(location) = space.window_location(window) {
-            let user_data = window.user_data();
-            user_data.insert_if_missing(|| WindowUserData::default());
-            user_data.get::<WindowUserData>().unwrap().lock().unwrap().last_geometry = Rectangle::from_loc_and_size(
-                location,
-                window.geometry().size,
-            );
+        #[allow(irrefutable_let_patterns)]
+        let is_maximized = match &window.toplevel() {
+            Kind::Xdg(surface) => surface.with_pending_state(|state| {
+                state.states.contains(XdgState::Maximized)
+            })
+        };
+
+        if !is_maximized {
+            if let Some(location) = space.window_location(window) {
+                let user_data = window.user_data();
+                user_data.insert_if_missing(|| WindowUserData::default());
+                user_data.get::<WindowUserData>().unwrap().lock().unwrap().last_geometry = Rectangle::from_loc_and_size(
+                    location,
+                    window.geometry().size,
+                );
+            }
         }
 
         space.unmap_window(window);
@@ -153,7 +162,16 @@ impl FloatingLayout {
     pub fn maximize_request(&mut self, space: &mut Space, window: &Window, output: &Output) {
         let layers = layer_map_for_output(&output);
         let geometry = layers.non_exclusive_zone();
-
+        
+        if let Some(location) = space.window_location(window) {
+            let user_data = window.user_data();
+            user_data.insert_if_missing(|| WindowUserData::default());
+            user_data.get::<WindowUserData>().unwrap().lock().unwrap().last_geometry = Rectangle::from_loc_and_size(
+                location,
+                window.geometry().size,
+            );
+        }
+    
         space.map_window(
             &window,
             (geometry.loc.x, geometry.loc.y),
@@ -167,6 +185,27 @@ impl FloatingLayout {
                 state.size = Some(geometry.size);
             });
             window.configure();
+        }
+    }
+
+    pub fn unmaximize_request(&mut self, space: &mut Space, window: &Window) {
+        let last_geometry = window.user_data().get::<WindowUserData>().map(|u| u.lock().unwrap().last_geometry);
+        match window.toplevel() {
+            Kind::Xdg(toplevel) => {
+                toplevel.with_pending_state(|state| {
+                    state.states.unset(XdgState::Maximized);
+                    state.size = last_geometry.map(|g| g.size);
+                });
+                toplevel.send_configure();
+            }
+        }
+        if let Some(last_location) = last_geometry.map(|g| g.loc) {
+            space.map_window(
+                &window,
+                last_location,
+                FLOATING_INDEX,
+                true,
+            );
         }
     }
 
