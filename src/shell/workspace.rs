@@ -24,6 +24,7 @@ pub struct Workspace {
     pub space: Space,
     pub tiling_layer: TilingLayout,
     pub floating_layer: FloatingLayout,
+    tiling_enabled: bool,
     pub fullscreen: HashMap<String, Window>,
     pub handle: WorkspaceHandle,
 }
@@ -35,6 +36,7 @@ impl Workspace {
             space: Space::new(None),
             tiling_layer: TilingLayout::new(),
             floating_layer: FloatingLayout::new(),
+            tiling_enabled: true,
             fullscreen: HashMap::new(),
             handle,
         }
@@ -171,5 +173,37 @@ impl Workspace {
             return None;
         }
         self.fullscreen.get(&output.name()).filter(|w| w.alive())
+    }
+
+    pub fn toggle_tiling(&mut self, seat: &Seat<State>) {
+        if self.tiling_enabled {
+            for window in self.tiling_layer.windows.clone().into_iter() {
+                self.tiling_layer.unmap_window(&mut self.space, &window);
+                self.floating_layer.map_window(&mut self.space, window, seat);
+            }
+            self.tiling_enabled = false;
+        } else {
+            let focus_stack = self.focus_stack(seat);
+            for window in self.floating_layer.windows.clone().into_iter() {
+                self.floating_layer.unmap_window(&mut self.space, &window);
+                self.tiling_layer.map_window(&mut self.space, window, seat, focus_stack.iter())
+            }
+            self.tiling_enabled = true;
+        }
+    }
+
+    pub fn toggle_floating_window(&mut self, seat: &Seat<State>) {
+        if self.tiling_enabled {
+            if let Some(window) = self.focus_stack(seat).iter().next().cloned() {
+                if self.tiling_layer.windows.contains(&window) {
+                    self.tiling_layer.unmap_window(&mut self.space, &window);
+                    self.floating_layer.map_window(&mut self.space, window, seat);
+                } else if self.floating_layer.windows.contains(&window) {
+                    let focus_stack = self.focus_stack(seat);
+                    self.floating_layer.unmap_window(&mut self.space, &window);
+                    self.tiling_layer.map_window(&mut self.space, window, seat, focus_stack.iter())
+                }
+            }
+        }
     }
 }
