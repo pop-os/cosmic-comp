@@ -441,17 +441,21 @@ impl Shell {
         }
     }
 
-    pub fn outputs_for_surface(&self, surface: &WlSurface) -> impl Iterator<Item = Output> {
-        self.space_for_surface(surface)
-            .and_then(|w| {
+    pub fn outputs_for_surface<'a>(&'a self, surface: &'a WlSurface) -> impl Iterator<Item = Output> + 'a {
+        match self.outputs.iter().find(|o| {
+            let map = layer_map_for_output(o);
+            map.layer_for_surface(surface, WindowSurfaceType::ALL).is_some()
+        }) {
+            Some(output) => Box::new(std::iter::once(output.clone())) as Box<dyn Iterator<Item = Output>>,
+            None => Box::new(self.spaces.iter().filter_map(|w| {
                 if let Some(window) = w.space.window_for_surface(surface, WindowSurfaceType::ALL) {
                     Some(w.space.outputs_for_window(&window).into_iter())
                 } else {
                     None
                 }
             })
-            .into_iter()
-            .flatten()
+            .flatten()),
+        }
     }
 
     pub fn space_for_surface(&self, surface: &WlSurface) -> Option<&Workspace> {
