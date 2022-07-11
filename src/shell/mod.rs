@@ -505,25 +505,36 @@ impl Shell {
 
     pub fn refresh(&mut self, dh: &DisplayHandle) {
         self.popups.cleanup();
-        for output in &self.outputs {
-            let workspace = match &self.workspace_mode {
-                WorkspaceMode::OutputBound => {
+        match &self.workspace_mode {
+            WorkspaceMode::OutputBound => {
+                for output in &self.outputs {
                     let active = output
                         .user_data()
                         .get::<OutputBoundState>()
                         .unwrap()
                         .active
                         .get();
-                    &mut self.spaces[active]
+                    let workspace = &mut self.spaces[active];
+                    workspace.refresh(dh);
+                    if workspace.space.windows().next().is_none()
+                        && !self.workspace_state.workspace_states(&workspace.handle).map(|mut i| i.any(|s| s == &WState::Hidden)).unwrap_or(true)
+                    {
+                        self.workspace_state.update().add_workspace_state(&workspace.handle, WState::Hidden);
+                    }
+        
                 }
-                WorkspaceMode::Global { active, .. } => &mut self.spaces[*active],
-            };
-            workspace.refresh(dh);
-            if workspace.space.windows().next().is_none()
-                && !self.workspace_state.workspace_states(&workspace.handle).map(|mut i| i.any(|s| s == &WState::Hidden)).unwrap_or(true)
-            {
-                self.workspace_state.update().add_workspace_state(&workspace.handle, WState::Hidden);
             }
+            WorkspaceMode::Global { active, .. } => {
+                let workspace = &mut self.spaces[*active];
+                workspace.refresh(dh);
+                if workspace.space.windows().next().is_none()
+                    && !self.workspace_state.workspace_states(&workspace.handle).map(|mut i| i.any(|s| s == &WState::Hidden)).unwrap_or(true)
+                {
+                    self.workspace_state.update().add_workspace_state(&workspace.handle, WState::Hidden);
+                }
+            }
+        };
+        for output in &self.outputs {
             let mut map = layer_map_for_output(output);
             map.cleanup(dh);
         }
