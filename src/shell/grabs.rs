@@ -34,7 +34,7 @@ impl Shell {
     ) {
         // TODO touch grab
         if let Some(pointer) = seat.get_pointer() {
-            let workspace = self.space_for_surface_mut(window.toplevel().wl_surface()).unwrap();
+            let workspace = self.space_for_window_mut(window.toplevel().wl_surface()).unwrap();
             if workspace.fullscreen.values().any(|w| w == window) {
                 return;
             }

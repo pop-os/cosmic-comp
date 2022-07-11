@@ -120,7 +120,7 @@ impl Shell {
     ) {
         // update FocusStack and notify layouts about new focus (if any window)
         if let Some(surface) = surface {
-            if let Some(workspace) = self.space_for_surface_mut(surface) {
+            if let Some(workspace) = self.space_for_window_mut(surface) {
                 if let Some(window) = workspace
                     .space
                     .window_for_surface(surface, WindowSurfaceType::ALL)

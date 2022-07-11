@@ -458,7 +458,7 @@ impl Shell {
         }
     }
 
-    pub fn space_for_surface(&self, surface: &WlSurface) -> Option<&Workspace> {
+    pub fn space_for_window(&self, surface: &WlSurface) -> Option<&Workspace> {
         self.spaces.iter().find(|workspace| {
             workspace
                 .space
@@ -467,7 +467,7 @@ impl Shell {
         })
     }
 
-    pub fn space_for_surface_mut(&mut self, surface: &WlSurface) -> Option<&mut Workspace> {
+    pub fn space_for_window_mut(&mut self, surface: &WlSurface) -> Option<&mut Workspace> {
         self.spaces.iter_mut().find(|workspace| {
             workspace
                 .space

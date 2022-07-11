@@ -27,7 +27,7 @@ use std::sync::Mutex;
 impl Shell {
     pub fn unconstrain_popup(&self, surface: &PopupSurface, positioner: &PositionerState) {
         if let Some(parent) = get_popup_toplevel(&surface) {
-            if let Some(workspace) = self.space_for_surface(&parent) {
+            if let Some(workspace) = self.space_for_window(&parent) {
                 let window = workspace
                     .space
                     .window_for_surface(&parent, WindowSurfaceType::ALL)
@@ -44,7 +44,7 @@ impl Shell {
     }
 
     pub fn update_reactive_popups(&self, window: &Window) {
-        if let Some(workspace) = self.space_for_surface(window.toplevel().wl_surface()) {
+        if let Some(workspace) = self.space_for_window(window.toplevel().wl_surface()) {
             update_reactive_popups(&workspace.space, window);
         }
     }

@@ -162,7 +162,7 @@ impl CompositorHandler for State {
         if let Some((space, window)) =
             self.common
                 .shell
-                .space_for_surface_mut(surface)
+                .space_for_window_mut(surface)
                 .and_then(|workspace| {
                     workspace
                         .space

@@ -83,7 +83,7 @@ impl XdgShellHandler for State {
             if let Some(window) =
                 self.common
                     .shell
-                    .space_for_surface(&surface)
+                    .space_for_window(&surface)
                     .and_then(|workspace| {
                         workspace
                             .space
@@ -173,7 +173,7 @@ impl XdgShellHandler for State {
             let workspace = self
                 .common
                 .shell
-                .space_for_surface_mut(surface.wl_surface())
+                .space_for_window_mut(surface.wl_surface())
                 .unwrap();
             let window = workspace
                 .space
@@ -198,7 +198,7 @@ impl XdgShellHandler for State {
             let workspace = self
                 .common
                 .shell
-                .space_for_surface_mut(surface.wl_surface())
+                .space_for_window_mut(surface.wl_surface())
                 .unwrap();
             let window = workspace
                 .space
@@ -215,7 +215,7 @@ impl XdgShellHandler for State {
         let seat = &self.common.last_active_seat;
         let output = active_output(seat, &self.common);
 
-        if let Some(workspace) = self.common.shell.space_for_surface_mut(surface) {
+        if let Some(workspace) = self.common.shell.space_for_window_mut(surface) {
             let window = workspace
                 .space
                 .window_for_surface(surface, WindowSurfaceType::TOPLEVEL)
@@ -228,7 +228,7 @@ impl XdgShellHandler for State {
     fn unmaximize_request(&mut self, _dh: &DisplayHandle, surface: ToplevelSurface) {
         let surface = surface.wl_surface();
 
-        if let Some(workspace) = self.common.shell.space_for_surface_mut(surface) {
+        if let Some(workspace) = self.common.shell.space_for_window_mut(surface) {
             let window = workspace
                 .space
                 .window_for_surface(surface, WindowSurfaceType::TOPLEVEL)
@@ -253,7 +253,7 @@ impl XdgShellHandler for State {
             });
 
         let surface = surface.wl_surface();
-        if let Some(workspace) = self.common.shell.space_for_surface_mut(surface) {
+        if let Some(workspace) = self.common.shell.space_for_window_mut(surface) {
             let window = workspace
                 .space
                 .window_for_surface(surface, WindowSurfaceType::TOPLEVEL)
@@ -265,7 +265,7 @@ impl XdgShellHandler for State {
 
     fn unfullscreen_request(&mut self, _dh: &DisplayHandle, surface: ToplevelSurface) {
         let surface = surface.wl_surface();
-        if let Some(workspace) = self.common.shell.space_for_surface_mut(surface) {
+        if let Some(workspace) = self.common.shell.space_for_window_mut(surface) {
             let window = workspace
                 .space
                 .window_for_surface(surface, WindowSurfaceType::TOPLEVEL)
