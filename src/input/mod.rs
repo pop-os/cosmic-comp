@@ -335,6 +335,7 @@ impl State {
                                         &mut workspace.space,
                                         focus_stack.iter(),
                                     ) {
+                                        std::mem::drop(focus_stack);
                                         self.common.set_focus(
                                             dh,
                                             Some(window.toplevel().wl_surface()),
