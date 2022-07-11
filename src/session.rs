@@ -152,8 +152,9 @@ pub fn setup_socket(handle: LoopHandle<Data>, state: &State) -> Result<()> {
                     }
                 },
             ).with_context(|| "Failed to init the cosmic session socket source")?;
+        } else {
+            slog_scope::error!("COSMIC_SESSION_SOCK is no valid RawFd: {}", fd_num);
         }
-        slog_scope::error!("COSMIC_SESSION_SOCK is no valid RawFd: {}", fd_num);
     };
 
     Ok(())
