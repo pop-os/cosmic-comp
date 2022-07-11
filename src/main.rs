@@ -48,10 +48,12 @@ fn main() -> Result<()> {
     );
     // init backend
     backend::init_backend_auto(&display.handle(), &mut event_loop, &mut state)?;
+    // potentially tell systemd we are setup now
+    if let state::BackendData::Kms(_) = &state.backend {
+        systemd::ready(&state);
+    }
     // potentially tell the session we are setup now
     session::setup_socket(event_loop.handle(), &state)?;
-    // potentially tell systemd we are setup now
-    systemd::ready(&state);
 
     let mut data = state::Data { display, state };
     // run the event loop
