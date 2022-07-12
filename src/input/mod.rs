@@ -379,6 +379,7 @@ impl State {
                                         .arg("-c")
                                         .arg(command)
                                         .env("WAYLAND_DISPLAY", &self.common.socket)
+                                        .env_remove("COSMIC_SESSION_SOCK")
                                         .spawn()
                                     {
                                         slog_scope::warn!("Failed to spawn: {}", err);
