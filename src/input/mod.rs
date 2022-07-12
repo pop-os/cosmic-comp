@@ -306,11 +306,15 @@ impl State {
                                         0 => 9,
                                         x => x - 1,
                                     };
-                                    self.common.shell.activate(
+                                    if let Some(motion_event) = self.common.shell.activate(
                                         seat,
                                         &current_output,
                                         workspace as usize,
-                                    );
+                                    ) {
+                                        if let Some(ptr) = seat.get_pointer() {
+                                            ptr.motion(self, dh, &motion_event);
+                                        }
+                                    }
                                 }
                                 Action::MoveToWorkspace(key_num) => {
                                     let current_output = active_output(seat, &self.common);
