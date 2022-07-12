@@ -209,8 +209,9 @@ where
         _: Option<SpaceOutputTuple<'_, '_>>,
     ) -> Vec<Rectangle<i32, Physical>> {
         if self.new_frame {
+            let scale = scale.into();
             vec![Rectangle::from_loc_and_size(
-                (0, 0),
+                self.position.to_physical(scale).to_i32_round(),
                 self.size.to_physical_precise_round(scale),
             )]
         } else {
@@ -234,13 +235,17 @@ where
         damage: &[Rectangle<i32, Physical>],
         _log: &slog::Logger,
     ) -> Result<(), <R as Renderer>::Error> {
+        let scale = scale.into();
         frame.render_texture_at(
             &self.texture,
             position.to_i32_round(),
             1,
             scale,
             Transform::Normal,
-            damage,
+            &damage.iter().copied().map(|mut rect| {
+                rect.loc -= self.position.to_physical(scale).to_i32_round();
+                rect
+            }).collect::<Vec<_>>(),
             1.0,
         )?;
         Ok(())
