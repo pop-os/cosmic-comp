@@ -221,7 +221,11 @@ impl MoveGrabState {
         I: From<MoveGrabRenderElement>
     {
         let cursor_at = seat.get_pointer().unwrap().current_location();
-        if !output.geometry().contains(cursor_at.to_i32_round()) {
+        let delta = cursor_at - self.initial_cursor_location;
+        let mut window_geo = self.window.bbox();
+        window_geo.loc += (self.initial_window_location.to_f64() + delta).to_i32_round();
+                
+        if !output.geometry().intersection(window_geo).is_some() {
             return None;
         }
 
