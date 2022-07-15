@@ -3,7 +3,9 @@
 use crate::state::{Common, Fps};
 use smithay::{
     backend::drm::DrmNode,
-    utils::{Physical, Rectangle},
+    desktop::layer_map_for_output,
+    reexports::wayland_server::Resource,
+    utils::{Physical, Rectangle, IsAlive},
 };
 pub use smithay_egui::EguiFrame;
 
@@ -228,7 +230,9 @@ pub fn debug_ui(
                     {
                         ui.separator();
                         ui.collapsing(output.name(), |ui| {
-                            ui.label(format!("Output: {:#?}", output));
+                            ui.label(format!("Mode: {:#?}", output.current_mode()));
+                            ui.label(format!("Scale: {:#?}", output.current_scale()));
+                            ui.label(format!("Transform: {:#?}", output.current_transform()));
                             ui.label(format!("Geometry: {:?}", output.geometry()));
                             ui.label(format!(
                                 "Local Geometry: {:?}",
@@ -244,6 +248,22 @@ pub fn debug_ui(
                                     .shell
                                     .space_relative_output_geometry((0i32, 0i32), &output)
                             ));
+                            ui.separator();
+                            ui.collapsing("Layers:", |ui| {
+                                let map = layer_map_for_output(&output);
+                                for layer in map.layers() {
+                                    ui.collapsing(format!("{}/{:?}", layer.wl_surface().id(), layer.wl_surface().client_id()), |ui| {
+                                        ui.label(format!("Alive: {:?} {:?} {:?}", layer.alive(), layer.layer_surface().alive(), layer.wl_surface().alive()));
+                                        ui.label(format!("Layer: {:?}", layer.layer()));
+                                        ui.label(format!("Namespace: {:?}", layer.namespace()));
+                                        ui.label(format!("Geometry: {:?}", layer.bbox()));
+                                        ui.label(format!("Anchor: {:?}", layer.cached_state().anchor));
+                                        ui.label(format!("Margin: {:?}", layer.cached_state().margin));
+                                        ui.label(format!("Exclusive: {:?}", layer.cached_state().exclusive_zone));
+                                    });
+                                }
+                                ui.label(format!("{:?}", map));
+                            });
                         });
                     }
                 });
