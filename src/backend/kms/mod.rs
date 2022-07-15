@@ -422,7 +422,7 @@ impl State {
         let mut wl_outputs = Vec::new();
         let mut w = self.common.shell.global_space().size.w;
         for (crtc, conn) in outputs {
-            match device.setup_surface(crtc, conn, (0, w)) {
+            match device.setup_surface(crtc, conn, (w, 0)) {
                 Ok(output) => {
                     w += output
                         .user_data()
@@ -487,7 +487,7 @@ impl State {
                 }
             }
             for (crtc, conn) in changes.added {
-                match device.setup_surface(crtc, conn, (0, w)) {
+                match device.setup_surface(crtc, conn, (w, 0)) {
                     Ok(output) => {
                         w += output
                             .user_data()
