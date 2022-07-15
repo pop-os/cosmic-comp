@@ -7,6 +7,7 @@ pub mod dmabuf;
 pub mod layer_shell;
 pub mod output;
 pub mod output_configuration;
+pub mod primary_selection;
 pub mod seat;
 pub mod shm;
 pub mod toplevel_info;

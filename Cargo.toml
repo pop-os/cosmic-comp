@@ -61,4 +61,13 @@ debug = true
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/pop-os/smithay", branch = "main" }
+smithay = { git = "https://github.com/Smithay//smithay", branch = "feature/primary_selection" }
+
+[patch.crates-io]
+wayland-egl = { version = "=0.30.0-beta.7", git = "https://github.com/Drakulix/wayland-rs", branch = "nullable-str" }
+wayland-protocols = { version = "=0.30.0-beta.7", git = "https://github.com/Drakulix/wayland-rs", branch = "nullable-str" }
+wayland-protocols-wlr = { version = "=0.1.0-beta.7", git = "https://github.com/Drakulix/wayland-rs", branch = "nullable-str" }
+wayland-server = { version = "=0.30.0-beta.7", git = "https://github.com/Drakulix/wayland-rs", branch = "nullable-str" }
+wayland-sys = { version = "=0.30.0-beta.7", git = "https://github.com/Drakulix/wayland-rs", branch = "nullable-str" }
+wayland-backend = { version = "=0.1.0-beta.7", git = "https://github.com/Drakulix/wayland-rs", branch = "nullable-str" }
+wayland-scanner = { version = "=0.30.0-beta.7", git = "https://github.com/Drakulix/wayland-rs", branch = "nullable-str" }

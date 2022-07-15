@@ -16,6 +16,7 @@ use smithay::{
     wayland::{
         data_device::set_data_device_focus,
         output::Output,
+        primary_selection::set_primary_focus,
         seat::{
             keysyms, ButtonEvent, CursorImageStatus, FilterResult, KeysymHandle, MotionEvent, Seat,
             XkbConfig,
@@ -126,6 +127,8 @@ pub fn add_seat(dh: &DisplayHandle, name: String) -> Seat<State> {
                 focus.and_then(|s| dh_clone.get_client(s.id()).ok())
             {
                 set_data_device_focus(&dh_clone, seat, Some(client));
+                let client2 = focus.and_then(|s| dh_clone.get_client(s.id()).ok()).unwrap();
+                set_primary_focus(&dh_clone, seat, Some(client2))
             }
         },
     );

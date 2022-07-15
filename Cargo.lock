@@ -114,9 +114,9 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
 name = "backtrace"
-version = "0.3.65"
+version = "0.3.66"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11a17d453482a265fd5f8479f2a3f405566e6ca627837aaddb85af8b1ab8ef61"
+checksum = "cab84319d616cfb654d03394f38ab7e6f0919e181b1b57e1fd15e7fb4077d9a7"
 dependencies = [
  "addr2line",
  "cc",
@@ -365,7 +365,7 @@ source = "git+https://github.com/pop-os/cosmic-protocols?branch=main#1962ffdca3d
 dependencies = [
  "bitflags",
  "wayland-backend",
- "wayland-client 0.30.0-beta.7",
+ "wayland-client 0.30.0-beta.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "wayland-protocols 0.30.0-beta.7",
  "wayland-scanner 0.30.0-beta.7",
  "wayland-server",
@@ -402,9 +402,9 @@ dependencies = [
 
 [[package]]
 name = "crypto-common"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5999502d32b9c48d492abe66392408144895020ec4709e549e840799f3bb74c0"
+checksum = "2ccfd8c0ee4cce11e45b3fd6f9d5e69e0cc62912aa6a0cb1bf4617b0eba5a12f"
 dependencies = [
  "generic-array",
  "typenum",
@@ -736,9 +736,9 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.12.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db0d4cf898abf0081f964436dc980e96670a0f36863e4b83aaacdb65c9d7ccc3"
+checksum = "607c8a29735385251a339424dd462993c0fed8fa09d378f259377df08c126022"
 
 [[package]]
 name = "hermit-abi"
@@ -1147,9 +1147,9 @@ dependencies = [
 
 [[package]]
 name = "object"
-version = "0.28.4"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e42c982f2d955fac81dd7e1d0e1426a7d702acd9c98d19ab01083a6a0328c424"
+checksum = "21158b2c33aa6d4561f1c0a6ea283ca92bc54802a93b263e910746d679a7eb53"
 dependencies = [
  "memchr",
 ]
@@ -1406,18 +1406,18 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.138"
+version = "1.0.139"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1578c6245786b9d168c5447eeacfb96856573ca56c9d68fdcf394be134882a47"
+checksum = "0171ebb889e45aa68b44aee0859b3eede84c6f5f5c228e6f140c0b2a0a46cad6"
 dependencies = [
  "serde_derive",
 ]
 
 [[package]]
 name = "serde_derive"
-version = "1.0.138"
+version = "1.0.139"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "023e9b1467aef8a10fb88f25611870ada9800ef7e22afce356bb0d2387b6f27c"
+checksum = "dc1d3230c1de7932af58ad8ffbe1d784bd55efd5a9d84ac24f69c72d83543dfb"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1517,7 +1517,7 @@ checksum = "2fd0db749597d91ff862fd1d55ea87f7855a744a8425a64695b6fca237d1dad1"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/pop-os/smithay?branch=main#bb4bdc613ff91e06b2205d4021d8c2003e9ef660"
+source = "git+https://github.com/Smithay//smithay?branch=feature/primary_selection#1780a98d44bf2d95c479d6502e1a539804ed1a3f"
 dependencies = [
  "appendlist",
  "bitflags",
@@ -1817,8 +1817,7 @@ checksum = "6a89911bd99e5f3659ec4acf9c4d93b0a90fe4a2a11f15328472058edc5261be"
 [[package]]
 name = "wayland-backend"
 version = "0.1.0-beta.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a861eb7cd51f67de60f228a570f142396d94759babcb427f861071ffb0757c9e"
+source = "git+https://github.com/Drakulix/wayland-rs?branch=nullable-str#38c9f18d7a5c45ae47974e482fdefa9ff9ac4640"
 dependencies = [
  "cc",
  "downcast-rs",
@@ -1862,6 +1861,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "wayland-client"
+version = "0.30.0-beta.7"
+source = "git+https://github.com/Drakulix/wayland-rs?branch=nullable-str#38c9f18d7a5c45ae47974e482fdefa9ff9ac4640"
+dependencies = [
+ "bitflags",
+ "futures-channel",
+ "futures-core",
+ "log",
+ "nix 0.24.1",
+ "thiserror",
+ "wayland-backend",
+ "wayland-scanner 0.30.0-beta.7",
+]
+
+[[package]]
 name = "wayland-commons"
 version = "0.29.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1887,8 +1901,7 @@ dependencies = [
 [[package]]
 name = "wayland-egl"
 version = "0.30.0-beta.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c7512147494471c8ea9a0e7fe6375a72f94229520705ebf4e4ef92e53e855df"
+source = "git+https://github.com/Drakulix/wayland-rs?branch=nullable-str#38c9f18d7a5c45ae47974e482fdefa9ff9ac4640"
 dependencies = [
  "thiserror",
  "wayland-backend",
@@ -1910,12 +1923,11 @@ dependencies = [
 [[package]]
 name = "wayland-protocols"
 version = "0.30.0-beta.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d64adbf2e145b9da69ff0e9bb72fc513182978c826fc6f704c05f0f80b663a6d"
+source = "git+https://github.com/Drakulix/wayland-rs?branch=nullable-str#38c9f18d7a5c45ae47974e482fdefa9ff9ac4640"
 dependencies = [
  "bitflags",
  "wayland-backend",
- "wayland-client 0.30.0-beta.7",
+ "wayland-client 0.30.0-beta.7 (git+https://github.com/Drakulix/wayland-rs?branch=nullable-str)",
  "wayland-scanner 0.30.0-beta.7",
  "wayland-server",
 ]
@@ -1923,8 +1935,7 @@ dependencies = [
 [[package]]
 name = "wayland-protocols-wlr"
 version = "0.1.0-beta.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b547ed68f5ffa180f7941baa0593a183fcc40cd91276ab8fb95839d332aa5940"
+source = "git+https://github.com/Drakulix/wayland-rs?branch=nullable-str#38c9f18d7a5c45ae47974e482fdefa9ff9ac4640"
 dependencies = [
  "bitflags",
  "wayland-backend",
@@ -1947,8 +1958,7 @@ dependencies = [
 [[package]]
 name = "wayland-scanner"
 version = "0.30.0-beta.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3baff545c2f5a0c32d796595d0b3c8fafccf29e72e557ff1969fe552ff093d6"
+source = "git+https://github.com/Drakulix/wayland-rs?branch=nullable-str#38c9f18d7a5c45ae47974e482fdefa9ff9ac4640"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1959,8 +1969,7 @@ dependencies = [
 [[package]]
 name = "wayland-server"
 version = "0.30.0-beta.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1ae3737832840be32a0e715b665c36fc7df308724e82282580a1d592b7ca2a1"
+source = "git+https://github.com/Drakulix/wayland-rs?branch=nullable-str#38c9f18d7a5c45ae47974e482fdefa9ff9ac4640"
 dependencies = [
  "bitflags",
  "downcast-rs",
@@ -1985,8 +1994,7 @@ dependencies = [
 [[package]]
 name = "wayland-sys"
 version = "0.30.0-beta.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f62b62672d36b6cf2f7d936f95c9f5894c0609190fa789c2ce46b73912baf239"
+source = "git+https://github.com/Drakulix/wayland-rs?branch=nullable-str#38c9f18d7a5c45ae47974e482fdefa9ff9ac4640"
 dependencies = [
  "dlib",
  "libc",

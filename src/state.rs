@@ -24,6 +24,7 @@ use smithay::{
         data_device::DataDeviceState,
         dmabuf::DmabufState,
         output::{Mode as OutputMode, Output, OutputManagerState, Scale},
+        primary_selection::PrimarySelectionState,
         seat::{Seat, SeatState},
         shm::ShmState,
         viewporter::ViewporterState,
@@ -86,6 +87,7 @@ pub struct Common {
     pub dmabuf_state: DmabufState,
     pub output_state: OutputManagerState,
     pub output_configuration_state: OutputConfigurationState<State>,
+    pub primary_selection_state: PrimarySelectionState,
     pub seat_state: SeatState<State>,
     pub shm_state: ShmState,
     pub wl_drm_state: WlDrmState,
@@ -213,6 +215,7 @@ impl State {
         let dmabuf_state = DmabufState::new();
         let output_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
         let output_configuration_state = OutputConfigurationState::new(dh, |_| true);
+        let primary_selection_state = PrimarySelectionState::new::<Self, _>(dh, None);
         let shm_state = ShmState::new::<Self, _>(dh, vec![], None);
         let seat_state = SeatState::<Self>::new();
         let viewporter_state = ViewporterState::new::<Self, _>(dh, None);
@@ -264,6 +267,7 @@ impl State {
                 seat_state,
                 output_state,
                 output_configuration_state,
+                primary_selection_state,
                 viewporter_state,
                 wl_drm_state,
             },
