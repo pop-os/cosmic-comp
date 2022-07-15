@@ -72,10 +72,17 @@ pub fn display_configuration(
         for conn in connectors
             .iter()
             .flat_map(|conn| device.get_connector(*conn).ok())
-            .flat_map(|conn| conn.current_encoder())
-            .flat_map(|enc| device.get_encoder(enc).ok())
-            .flat_map(|enc| enc.crtc())
-            .filter(|c| cleanup.contains(&c))
+            .filter(|conn| {
+                if let Some(enc) = conn.current_encoder() {
+                    if let Some(enc) = device.get_encoder(enc).ok() {
+                        if let Some(crtc) = enc.crtc() {
+                            return cleanup.contains(&crtc);
+                        }
+                    }
+                }
+                false
+            })
+            .map(|info| info.handle())
         {
             let crtc_id = get_prop(device, conn, "CRTC_ID")?;
             req.add_property(conn, crtc_id, property::Value::CRTC(None));
