@@ -608,7 +608,7 @@ impl Shell {
             with_states(surface, |states| {
                 let state = states.cached_state.current::<LayerSurfaceCachedState>();
                 matches!(state.layer, Layer::Top | Layer::Overlay)
-                    && dbg!(state.keyboard_interactivity) != KeyboardInteractivity::None
+                    && state.keyboard_interactivity != KeyboardInteractivity::None
             })
         };
 

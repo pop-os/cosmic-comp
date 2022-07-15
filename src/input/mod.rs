@@ -99,13 +99,46 @@ impl Devices {
 }
 
 pub fn add_seat(dh: &DisplayHandle, name: String) -> Seat<State> {
-    let seat = Seat::<State>::new(dh, name, None);
+    let mut seat = Seat::<State>::new(dh, name, None);
     let userdata = seat.user_data();
     userdata.insert_if_missing(SeatId::default);
     userdata.insert_if_missing(Devices::default);
     userdata.insert_if_missing(SupressedKeys::default);
     userdata.insert_if_missing(SeatMoveGrabState::default);
     userdata.insert_if_missing(|| RefCell::new(CursorImageStatus::Default));
+
+    // A lot of clients bind keyboard and pointer unconditionally once on launch..
+    // Initial clients might race the compositor on adding periheral and
+    // end up in a state, where they are not able to receive input.
+    // Additionally a lot of clients don't handle keyboards/pointer objects being
+    // removed very well either and we don't want to crash applications, because the
+    // user is replugging their keyboard or mouse.
+    //
+    // So instead of doing the right thing (and initialize these capabilities as matching
+    // devices appear), we have to surrender to reality and just always expose a keyboard and pointer.
+    let dh_clone = dh.clone();
+    let _ = seat.add_keyboard(
+        XkbConfig::default(),
+        200,
+        25,
+        move |seat, focus| {
+            if let Some(client) =
+                focus.and_then(|s| dh_clone.get_client(s.id()).ok())
+            {
+                set_data_device_focus(&dh_clone, seat, Some(client));
+            }
+        },
+    );
+    
+    let owned_seat = seat.clone();
+    seat.add_pointer(move |status| {
+        *owned_seat
+            .user_data()
+            .get::<RefCell<CursorImageStatus>>()
+            .unwrap()
+            .borrow_mut() = status;
+    });
+
     seat
 }
 
@@ -124,40 +157,7 @@ impl State {
                 let devices = userdata.get::<Devices>().unwrap();
                 for cap in devices.add_device(&device) {
                     match cap {
-                        DeviceCapability::Keyboard => {
-                            let dh_clone = dh.clone();
-                            let _ = seat.add_keyboard(
-                                XkbConfig::default(),
-                                200,
-                                25,
-                                move |seat, focus| {
-                                    if let Some(client) =
-                                        focus.and_then(|s| dh_clone.get_client(s.id()).ok())
-                                    {
-                                        set_data_device_focus(&dh_clone, seat, Some(client))
-                                    }
-                                },
-                            );
-                        }
-                        DeviceCapability::Pointer => {
-                            let output = self
-                                .common
-                                .shell
-                                .outputs()
-                                .next()
-                                .expect("Backend initialized without output")
-                                .clone();
-                            seat.user_data()
-                                .insert_if_missing(|| ActiveOutput(RefCell::new(output)));
-                            let owned_seat = seat.clone();
-                            seat.add_pointer(move |status| {
-                                *owned_seat
-                                    .user_data()
-                                    .get::<RefCell<CursorImageStatus>>()
-                                    .unwrap()
-                                    .borrow_mut() = status;
-                            });
-                        }
+                        // TODO: Handle touch, tablet
                         _ => {}
                     }
                 }
@@ -174,13 +174,8 @@ impl State {
                     if devices.has_device(&device) {
                         for cap in devices.remove_device(&device) {
                             match cap {
-                                DeviceCapability::Keyboard => {
-                                    seat.remove_keyboard();
-                                }
-                                DeviceCapability::Pointer => {
-                                    seat.remove_pointer();
-                                }
-                                _ => {}
+                                // TODO: Handle touch, tablet
+                                _ => {},
                             }
                         }
                         break;

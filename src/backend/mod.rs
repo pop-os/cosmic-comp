@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::state::{Data, State};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use smithay::reexports::{calloop::EventLoop, wayland_server::DisplayHandle};
 
 pub mod render;
@@ -17,7 +17,7 @@ pub fn init_backend_auto(
     event_loop: &mut EventLoop<'static, Data>,
     state: &mut State,
 ) -> Result<()> {
-    match std::env::var("COSMIC_BACKEND") {
+    let res = match std::env::var("COSMIC_BACKEND") {
         Ok(x) if x == "x11" => x11::init_backend(dh, event_loop, state),
         Ok(x) if x == "winit" => winit::init_backend(dh, event_loop, state),
         Ok(x) if x == "kms" => kms::init_backend(dh, event_loop, state),
@@ -38,5 +38,19 @@ pub fn init_backend_auto(
                 kms::init_backend(dh, event_loop, state)
             }
         }
+    };
+    if res.is_ok() {
+        for seat in &state.common.seats {
+            let output = state
+                .common
+                .shell
+                .outputs()
+                .next()
+                .with_context(|| "Backend initialized without output")?
+                .clone();
+            seat.user_data()
+                .insert_if_missing(|| crate::input::ActiveOutput(std::cell::RefCell::new(output)));   
+        }
     }
+    res
 }
