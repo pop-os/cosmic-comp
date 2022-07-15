@@ -31,7 +31,7 @@
         (modifiers: [Logo], key: "j"): Focus(Down),
         (modifiers: [Logo], key: "k"): Focus(Up),
         (modifiers: [Logo], key: "l"): Focus(Right),
-		//TODO: automatic orientation with Logo+o toggling
+//TODO: automatic orientation with Logo+o toggling
         (modifiers: [Logo], key: "v"): Orientation(Vertical),
         (modifiers: [Logo], key: "o"): Orientation(Horizontal),
         (modifiers: [Logo], key: "y"): ToggleTiling,
@@ -43,8 +43,8 @@
         (modifiers: [Logo], key: "f"): Spawn("nautilus"),
         //TODO: ability to select default terminal
         (modifiers: [Logo], key: "t"): Spawn("gnome-terminal"),
-        (modifiers: [Logo], key: "a"): Spawn("simple-wrapper com.system76.CosmicAppLibrary"),
-        (modifiers: [Logo], key: "slash"): Spawn("simple-wrapper com.system76.CosmicLauncher"),
+        (modifiers: [Logo], key: "a"): Spawn("busctl --user call com.system76.CosmicAppletHost /com/system76/CosmicAppletHost com.system76.CosmicAppletHost Toggle s 'com.system76.CosmicAppLibrary'"),
+        (modifiers: [Logo], key: "slash"): Spawn("busctl --user call com.system76.CosmicAppletHost /com/system76/CosmicAppletHost com.system76.CosmicAppletHost Toggle s 'com.system76.CosmicLauncher'"),
     },
     workspace_mode: OutputBound,
 )

@@ -1,0 +1,2622 @@
+Jun 01 15:05:14.484 INFO Version: 0.1.0
+Jun 01 15:05:14.484 INFO Cosmic starting up!
+Jun 01 15:05:14.484 INFO Listening on "wayland-0"
+Jun 01 15:05:14.484 DEBG Trying config location: /home/me/.config/cosmic-comp.ron
+Jun 01 15:05:14.485 DEBG Trying config location: /home/me/.config/cosmic-comp/config.ron
+Jun 01 15:05:14.485 INFO Using config at /home/me/.config/cosmic-comp/config.ron
+Jun 01 15:05:14.485 INFO Trying to create libseat session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.485 ERRO [libseat/backend/seatd.c:82] Could not connect to socket /run/seatd.sock: Permission denied, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.485 INFO [libseat/libseat.c:76] Backend 'seatd' failed to open seat, skipping, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.493 INFO [libseat/libseat.c:73] Seat opened with backend 'logind', session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.494 DEBG Enable callback called, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.504 DEBG Opening device: "/dev/input/event3", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.506 DEBG Opening device: "/dev/input/event5", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.508 DEBG Opening device: "/dev/input/event8", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.510 DEBG Opening device: "/dev/input/event0", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.512 DEBG Opening device: "/dev/input/event2", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.514 DEBG Opening device: "/dev/input/event1", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.516 DEBG Opening device: "/dev/input/event11", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.518 DEBG Closing device: 25, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.556 DEBG Opening device: "/dev/input/event12", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.558 DEBG Closing device: 25, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.588 DEBG Opening device: "/dev/input/event13", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.591 DEBG Closing device: 25, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.620 DEBG Opening device: "/dev/input/event14", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.623 DEBG Closing device: 25, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.636 DEBG Opening device: "/dev/input/event15", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.639 DEBG Closing device: 25, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.668 DEBG Opening device: "/dev/input/event16", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.671 DEBG Closing device: 25, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.688 DEBG Opening device: "/dev/input/event6", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.691 DEBG Opening device: "/dev/input/event7", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.696 DEBG Opening device: "/dev/input/event10", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.701 DEBG Opening device: "/dev/input/event17", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.703 DEBG Closing device: 28, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.776 DEBG Opening device: "/dev/input/event18", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.779 DEBG Closing device: 28, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.808 DEBG Opening device: "/dev/input/event19", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.810 DEBG Closing device: 28, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.824 DEBG Opening device: "/dev/input/event20", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.826 DEBG Closing device: 28, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.840 DEBG Opening device: "/dev/input/event21", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.843 DEBG Closing device: 28, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.864 DEBG Opening device: "/dev/input/event22", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.866 DEBG Closing device: 28, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.888 DEBG Opening device: "/dev/input/event23", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.890 DEBG Closing device: 28, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.916 DEBG Opening device: "/dev/input/event24", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.919 DEBG Closing device: 28, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.932 DEBG Opening device: "/dev/input/event25", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.934 DEBG Closing device: 28, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.948 DEBG Opening device: "/dev/input/event26", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.950 DEBG Closing device: 28, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.972 DEBG Opening device: "/dev/input/event27", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.975 DEBG Closing device: 28, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.996 DEBG Opening device: "/dev/input/event28", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:14.999 DEBG Closing device: 28, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:15.020 DEBG Opening device: "/dev/input/event29", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:15.023 DEBG Closing device: 28, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:15.036 DEBG Opening device: "/dev/input/event30", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:15.039 DEBG Closing device: 28, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:15.064 DEBG Opening device: "/dev/input/event9", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:15.067 DEBG Opening device: "/dev/input/event4", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:15.071 INFO Initializing a libinput backend, smithay_module: backend_libinput
+Jun 01 15:05:16.164 INFO Trying to initialize EGLDevice { inner: 0x55c45b9ec3f0, device_extensions: ["EGL_EXT_device_drm", "EGL_EXT_device_drm_render_node"] } from renderD128
+Jun 01 15:05:16.164 DEBG Supported EGL client extensions: ["EGL_EXT_platform_base", "EGL_EXT_device_base", "EGL_EXT_device_enumeration", "EGL_EXT_device_query", "EGL_KHR_client_get_all_proc_addresses", "EGL_EXT_client_extensions", "EGL_KHR_debug", "EGL_KHR_platform_x11", "EGL_EXT_platform_x11", "EGL_EXT_platform_device", "EGL_KHR_platform_wayland", "EGL_EXT_platform_wayland", "EGL_KHR_platform_gbm", "EGL_MESA_platform_gbm", "EGL_MESA_platform_xcb", "EGL_MESA_platform_surfaceless"], smithay_module: backend_egl
+Jun 01 15:05:16.165 DEBG Trying EGL platform: PLATFORM_DEVICE_EXT, smithay_module: backend_egl
+Jun 01 15:05:16.165 INFO Successfully selected EGL platform: PLATFORM_DEVICE_EXT, platform: EGLPlatform { platform_name: "PLATFORM_DEVICE_EXT", required_extensions: ["EGL_EXT_platform_device"] }, smithay_module: backend_egl
+Jun 01 15:05:16.191 INFO EGL Initialized, smithay_module: backend_egl
+Jun 01 15:05:16.191 INFO EGL Version: (1, 5), smithay_module: backend_egl
+Jun 01 15:05:16.191 INFO Supported EGL display extensions: ["EGL_ANDROID_blob_cache", "EGL_ANDROID_native_fence_sync", "EGL_EXT_create_context_robustness", "EGL_EXT_image_dma_buf_import", "EGL_EXT_image_dma_buf_import_modifiers", "EGL_IMG_context_priority", "EGL_KHR_cl_event2", "EGL_KHR_config_attribs", "EGL_KHR_create_context", "EGL_KHR_create_context_no_error", "EGL_KHR_fence_sync", "EGL_KHR_get_all_proc_addresses", "EGL_KHR_gl_colorspace", "EGL_KHR_gl_renderbuffer_image", "EGL_KHR_gl_texture_2D_image", "EGL_KHR_gl_texture_3D_image", "EGL_KHR_gl_texture_cubemap_image", "EGL_KHR_image_base", "EGL_KHR_no_config_context", "EGL_KHR_reusable_sync", "EGL_KHR_surfaceless_context", "EGL_EXT_pixel_format_float", "EGL_KHR_wait_sync", "EGL_MESA_configless_context", "EGL_MESA_drm_image", "EGL_MESA_image_dma_buf_export", "EGL_MESA_query_driver", "EGL_WL_bind_wayland_display", ""], smithay_module: backend_egl
+Jun 01 15:05:16.193 TRCE Supported dmabuf import formats: {DrmFormat { code: DrmFourcc(NV16), modifier: Linear }, DrmFormat { code: DrmFourcc(GR88), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(YUV9), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XB4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(YV12), modifier: Linear }, DrmFormat { code: DrmFourcc(P016), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(YV24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR30), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AB30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(YV16), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(NV16), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(YV11), modifier: Linear }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(Y416), modifier: Linear }, DrmFormat { code: DrmFourcc(Y210), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(R8  ), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(YV12), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XYUV), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(NV16), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(YVU9), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(Y410), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(GR88), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YU16), modifier: Linear }, DrmFormat { code: DrmFourcc(Y212), modifier: Linear }, DrmFormat { code: DrmFourcc(AB30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR15), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XB4H), modifier: Linear }, DrmFormat { code: DrmFourcc(Y210), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(Y416), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR15), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(R8  ), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(Y410), modifier: Linear }, DrmFormat { code: DrmFourcc(NV12), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(GR88), modifier: Linear }, DrmFormat { code: DrmFourcc(AYUV), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(Y412), modifier: Linear }, DrmFormat { code: DrmFourcc(XB24), modifier: Linear }, DrmFormat { code: DrmFourcc(GR32), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(P012), modifier: Linear }, DrmFormat { code: DrmFourcc(NV12), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(Y212), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR30), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(UYVY), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XB4H), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(RG16), modifier: Linear }, DrmFormat { code: DrmFourcc(GR88), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(YVU9), modifier: Linear }, DrmFormat { code: DrmFourcc(XYUV), modifier: Linear }, DrmFormat { code: DrmFourcc(YV16), modifier: Linear }, DrmFormat { code: DrmFourcc(AR30), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(YU16), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XR30), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AB30), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(R16 ), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(R8  ), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(GR32), modifier: Linear }, DrmFormat { code: DrmFourcc(YUV9), modifier: Linear }, DrmFormat { code: DrmFourcc(YU12), modifier: Linear }, DrmFormat { code: DrmFourcc(Y410), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(RG16), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(R16 ), modifier: Linear }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(Y216), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(GR32), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(RG16), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR15), modifier: Linear }, DrmFormat { code: DrmFourcc(Y216), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(YV16), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB4H), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XR30), modifier: Linear }, DrmFormat { code: DrmFourcc(P010), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB30), modifier: Linear }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AYUV), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(NV12), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(YUYV), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(UYVY), modifier: Linear }, DrmFormat { code: DrmFourcc(GR32), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(RG16), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XR30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR15), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(GR32), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(P016), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(RG16), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AB4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(YV12), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YU24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(YV24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P010), modifier: Linear }, DrmFormat { code: DrmFourcc(P012), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(Y210), modifier: Linear }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(YV24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR30), modifier: Linear }, DrmFormat { code: DrmFourcc(AR30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(P012), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB4H), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AB24), modifier: Linear }, DrmFormat { code: DrmFourcc(YU12), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YU24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YVU9), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P012), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB30), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(GR88), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(R16 ), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(P016), modifier: Linear }, DrmFormat { code: DrmFourcc(YU11), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(YU11), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(NV12), modifier: Linear }, DrmFormat { code: DrmFourcc(XB4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(R16 ), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(P016), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(R16 ), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YU11), modifier: Linear }, DrmFormat { code: DrmFourcc(P010), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AYUV), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(Y216), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(YU16), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YUV9), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YU12), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(R8  ), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(YU24), modifier: Linear }, DrmFormat { code: DrmFourcc(YV11), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB4H), modifier: Linear }, DrmFormat { code: DrmFourcc(AB4H), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(NV16), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XYUV), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(Y412), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(Y416), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(P010), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(Y412), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YUYV), modifier: Linear }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(YV11), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(R8  ), modifier: Linear }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(Y212), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR15), modifier: I915_y_tiled }}, smithay_module: backend_egl
+Jun 01 15:05:16.202 TRCE Supported dmabuf render formats: {DrmFormat { code: DrmFourcc(GR88), modifier: Linear }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR15), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(RG16), modifier: Linear }, DrmFormat { code: DrmFourcc(R16 ), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR30), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AB4H), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(GR32), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR30), modifier: Linear }, DrmFormat { code: DrmFourcc(AR30), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(GR32), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(GR88), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XB4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB30), modifier: Linear }, DrmFormat { code: DrmFourcc(XR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AB30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB4H), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XR30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(R16 ), modifier: Linear }, DrmFormat { code: DrmFourcc(XB4H), modifier: Linear }, DrmFormat { code: DrmFourcc(XB4H), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(GR32), modifier: Linear }, DrmFormat { code: DrmFourcc(AR30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(GR88), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XR30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB30), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AB4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(R16 ), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(RG16), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(R16 ), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR15), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR15), modifier: Linear }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(R8  ), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(RG16), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XB24), modifier: Linear }, DrmFormat { code: DrmFourcc(R8  ), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AB4H), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XB4H), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR15), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(GR32), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(RG16), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(R8  ), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(GR88), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: Linear }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(R8  ), modifier: Linear }, DrmFormat { code: DrmFourcc(GR32), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(R16 ), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR30), modifier: Linear }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR15), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR30), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AB24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(RG16), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(R8  ), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB30), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(GR88), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XB4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XR30), modifier: Unrecognized(72057594037927944) }}, smithay_module: backend_egl
+Jun 01 15:05:16.206 TRCE Setting CONTEXT_CLIENT_VERSION to 2, smithay_module: backend_egl
+Jun 01 15:05:16.206 TRCE Creating EGL context..., smithay_module: backend_egl
+Jun 01 15:05:16.208 INFO EGL context created, smithay_module: backend_egl
+Jun 01 15:05:16.211 INFO Initializing OpenGL ES Renderer, smithay_module: renderer_gles2
+Jun 01 15:05:16.211 INFO GL Version: "OpenGL ES 3.2 Mesa 22.0.1", smithay_module: renderer_gles2
+Jun 01 15:05:16.211 INFO GL Vendor: "Intel", smithay_module: renderer_gles2
+Jun 01 15:05:16.211 INFO GL Renderer: "Mesa Intel(R) UHD Graphics (TGL GT1)", smithay_module: renderer_gles2
+Jun 01 15:05:16.211 INFO Supported GL Extensions: ["GL_EXT_blend_minmax", "GL_EXT_multi_draw_arrays", "GL_EXT_texture_filter_anisotropic", "GL_EXT_texture_compression_s3tc", "GL_EXT_texture_compression_dxt1", "GL_EXT_texture_compression_rgtc", "GL_EXT_texture_format_BGRA8888", "GL_OES_compressed_ETC1_RGB8_texture", "GL_OES_depth24", "GL_OES_element_index_uint", "GL_OES_fbo_render_mipmap", "GL_OES_mapbuffer", "GL_OES_rgb8_rgba8", "GL_OES_standard_derivatives", "GL_OES_stencil8", "GL_OES_texture_3D", "GL_OES_texture_float", "GL_OES_texture_float_linear", "GL_OES_texture_half_float", "GL_OES_texture_half_float_linear", "GL_OES_texture_npot", "GL_OES_vertex_half_float", "GL_EXT_draw_instanced", "GL_EXT_texture_sRGB_decode", "GL_OES_EGL_image", "GL_OES_depth_texture", "GL_AMD_performance_monitor", "GL_OES_packed_depth_stencil", "GL_EXT_texture_type_2_10_10_10_REV", "GL_NV_conditional_render", "GL_OES_get_program_binary", "GL_APPLE_texture_max_level", "GL_EXT_discard_framebuffer", "GL_EXT_read_format_bgra", "GL_EXT_frag_depth", "GL_NV_fbo_color_attachments", "GL_OES_EGL_image_external", "GL_OES_EGL_sync", "GL_OES_vertex_array_object", "GL_OES_viewport_array", "GL_ANGLE_pack_reverse_row_order", "GL_ANGLE_texture_compression_dxt3", "GL_ANGLE_texture_compression_dxt5", "GL_EXT_occlusion_query_boolean", "GL_EXT_robustness", "GL_EXT_texture_rg", "GL_EXT_unpack_subimage", "GL_NV_draw_buffers", "GL_NV_read_buffer", "GL_NV_read_depth", "GL_NV_read_depth_stencil", "GL_NV_read_stencil", "GL_EXT_draw_buffers", "GL_EXT_map_buffer_range", "GL_KHR_debug", "GL_KHR_robustness", "GL_KHR_texture_compression_astc_ldr", "GL_NV_pixel_buffer_object", "GL_OES_depth_texture_cube_map", "GL_OES_required_internalformat", "GL_OES_surfaceless_context", "GL_EXT_color_buffer_float", "GL_EXT_sRGB_write_control", "GL_EXT_separate_shader_objects", "GL_EXT_shader_framebuffer_fetch", "GL_EXT_shader_group_vote", "GL_EXT_shader_implicit_conversions", "GL_EXT_shader_integer_mix", "GL_EXT_tessellation_point_size", "GL_EXT_tessellation_shader", "GL_INTEL_conservative_rasterization", "GL_INTEL_performance_query", "GL_ANDROID_extension_pack_es31a", "GL_EXT_base_instance", "GL_EXT_compressed_ETC1_RGB8_sub_texture", "GL_EXT_copy_image", "GL_EXT_draw_buffers_indexed", "GL_EXT_draw_elements_base_vertex", "GL_EXT_gpu_shader5", "GL_EXT_polygon_offset_clamp", "GL_EXT_primitive_bounding_box", "GL_EXT_render_snorm", "GL_EXT_shader_io_blocks", "GL_EXT_texture_border_clamp", "GL_EXT_texture_buffer", "GL_EXT_texture_cube_map_array", "GL_EXT_texture_norm16", "GL_EXT_texture_view", "GL_KHR_blend_equation_advanced", "GL_KHR_blend_equation_advanced_coherent", "GL_KHR_context_flush_control", "GL_KHR_robust_buffer_access_behavior", "GL_NV_image_formats", "GL_OES_copy_image", "GL_OES_draw_buffers_indexed", "GL_OES_draw_elements_base_vertex", "GL_OES_gpu_shader5", "GL_OES_primitive_bounding_box", "GL_OES_sample_shading", "GL_OES_sample_variables", "GL_OES_shader_io_blocks", "GL_OES_shader_multisample_interpolation", "GL_OES_tessellation_point_size", "GL_OES_tessellation_shader", "GL_OES_texture_border_clamp", "GL_OES_texture_buffer", "GL_OES_texture_cube_map_array", "GL_OES_texture_stencil8", "GL_OES_texture_storage_multisample_2d_array", "GL_OES_texture_view", "GL_EXT_blend_func_extended", "GL_EXT_buffer_storage", "GL_EXT_float_blend", "GL_EXT_geometry_point_size", "GL_EXT_geometry_shader", "GL_EXT_shader_samples_identical", "GL_EXT_texture_sRGB_R8", "GL_KHR_no_error", "GL_KHR_texture_compression_astc_sliced_3d", "GL_NV_fragment_shader_interlock", "GL_OES_EGL_image_external_essl3", "GL_OES_geometry_point_size", "GL_OES_geometry_shader", "GL_OES_shader_image_atomic", "GL_EXT_clear_texture", "GL_EXT_clip_cull_distance", "GL_EXT_disjoint_timer_query", "GL_EXT_texture_compression_s3tc_srgb", "GL_MESA_shader_integer_functions", "GL_EXT_clip_control", "GL_EXT_color_buffer_half_float", "GL_EXT_memory_object", "GL_EXT_memory_object_fd", "GL_EXT_semaphore", "GL_EXT_semaphore_fd", "GL_EXT_texture_compression_bptc", "GL_EXT_texture_mirror_clamp_to_edge", "GL_KHR_parallel_shader_compile", "GL_EXT_EGL_image_storage", "GL_EXT_shader_framebuffer_fetch_non_coherent", "GL_EXT_texture_shadow_lod", "GL_INTEL_blackhole_render", "GL_MESA_framebuffer_flip_y", "GL_NV_compute_shader_derivatives", "GL_EXT_demote_to_helper_invocation", "GL_EXT_depth_clamp", "GL_EXT_texture_query_lod", "GL_MESA_bgra", ""], smithay_module: renderer_gles2
+Jun 01 15:05:16.224 INFO Using renderD128 as primary gpu for rendering
+Jun 01 15:05:16.229 DEBG Opening device: "/dev/dri/card0", session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:16.230 DEBG [libseat/backend/logind.c:155] DRM device opened, current total: 1, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:16.230 INFO DrmDevice initializing, smithay_module: backend_drm
+Jun 01 15:05:16.230 WARN Unable to become drm master, assuming unprivileged mode, smithay_module: backend_drm
+Jun 01 15:05:16.232 TRCE Mapping: (
+    {
+        connector::Handle(
+            339,
+        ): {
+            "non-desktop": property::Handle(
+                6,
+            ),
+            "link-status": property::Handle(
+                5,
+            ),
+            "subconnector": property::Handle(
+                322,
+            ),
+            "vrr_capable": property::Handle(
+                346,
+            ),
+            "TILE": property::Handle(
+                4,
+            ),
+            "max bpc": property::Handle(
+                344,
+            ),
+            "Colorspace": property::Handle(
+                345,
+            ),
+            "Broadcast RGB": property::Handle(
+                311,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "HDR_OUTPUT_METADATA": property::Handle(
+                7,
+            ),
+            "DPMS": property::Handle(
+                2,
+            ),
+            "HDCP Content Type": property::Handle(
+                328,
+            ),
+            "EDID": property::Handle(
+                1,
+            ),
+            "audio": property::Handle(
+                323,
+            ),
+            "Content Protection": property::Handle(
+                327,
+            ),
+        },
+        connector::Handle(
+            308,
+        ): {
+            "link-status": property::Handle(
+                5,
+            ),
+            "EDID": property::Handle(
+                1,
+            ),
+            "Broadcast RGB": property::Handle(
+                311,
+            ),
+            "non-desktop": property::Handle(
+                6,
+            ),
+            "HDR_OUTPUT_METADATA": property::Handle(
+                7,
+            ),
+            "vrr_capable": property::Handle(
+                315,
+            ),
+            "scaling mode": property::Handle(
+                314,
+            ),
+            "panel orientation": property::Handle(
+                309,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "TILE": property::Handle(
+                4,
+            ),
+            "max bpc": property::Handle(
+                312,
+            ),
+            "DPMS": property::Handle(
+                2,
+            ),
+            "Colorspace": property::Handle(
+                313,
+            ),
+        },
+        connector::Handle(
+            348,
+        ): {
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "subconnector": property::Handle(
+                322,
+            ),
+            "EDID": property::Handle(
+                1,
+            ),
+            "DPMS": property::Handle(
+                2,
+            ),
+            "max bpc": property::Handle(
+                353,
+            ),
+            "Colorspace": property::Handle(
+                354,
+            ),
+            "TILE": property::Handle(
+                4,
+            ),
+            "link-status": property::Handle(
+                5,
+            ),
+            "vrr_capable": property::Handle(
+                355,
+            ),
+            "Content Protection": property::Handle(
+                327,
+            ),
+            "Broadcast RGB": property::Handle(
+                311,
+            ),
+            "audio": property::Handle(
+                323,
+            ),
+            "HDR_OUTPUT_METADATA": property::Handle(
+                7,
+            ),
+            "non-desktop": property::Handle(
+                6,
+            ),
+            "HDCP Content Type": property::Handle(
+                328,
+            ),
+        },
+        connector::Handle(
+            330,
+        ): {
+            "max bpc": property::Handle(
+                335,
+            ),
+            "HDCP Content Type": property::Handle(
+                328,
+            ),
+            "link-status": property::Handle(
+                5,
+            ),
+            "DPMS": property::Handle(
+                2,
+            ),
+            "non-desktop": property::Handle(
+                6,
+            ),
+            "Colorspace": property::Handle(
+                336,
+            ),
+            "EDID": property::Handle(
+                1,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "vrr_capable": property::Handle(
+                337,
+            ),
+            "subconnector": property::Handle(
+                322,
+            ),
+            "TILE": property::Handle(
+                4,
+            ),
+            "audio": property::Handle(
+                323,
+            ),
+            "Broadcast RGB": property::Handle(
+                311,
+            ),
+            "HDR_OUTPUT_METADATA": property::Handle(
+                7,
+            ),
+            "Content Protection": property::Handle(
+                327,
+            ),
+        },
+        connector::Handle(
+            317,
+        ): {
+            "Content Protection": property::Handle(
+                327,
+            ),
+            "vrr_capable": property::Handle(
+                326,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "Colorspace": property::Handle(
+                325,
+            ),
+            "non-desktop": property::Handle(
+                6,
+            ),
+            "Broadcast RGB": property::Handle(
+                311,
+            ),
+            "max bpc": property::Handle(
+                324,
+            ),
+            "HDCP Content Type": property::Handle(
+                328,
+            ),
+            "subconnector": property::Handle(
+                322,
+            ),
+            "link-status": property::Handle(
+                5,
+            ),
+            "TILE": property::Handle(
+                4,
+            ),
+            "DPMS": property::Handle(
+                2,
+            ),
+            "HDR_OUTPUT_METADATA": property::Handle(
+                7,
+            ),
+            "audio": property::Handle(
+                323,
+            ),
+            "EDID": property::Handle(
+                1,
+            ),
+        },
+    },
+    {
+        crtc::Handle(
+            236,
+        ): {
+            "MODE_ID": property::Handle(
+                23,
+            ),
+            "DEGAMMA_LUT": property::Handle(
+                25,
+            ),
+            "DEGAMMA_LUT_SIZE": property::Handle(
+                26,
+            ),
+            "ACTIVE": property::Handle(
+                22,
+            ),
+            "VRR_ENABLED": property::Handle(
+                24,
+            ),
+            "GAMMA_LUT": property::Handle(
+                28,
+            ),
+            "OUT_FENCE_PTR": property::Handle(
+                19,
+            ),
+            "CTM": property::Handle(
+                27,
+            ),
+            "GAMMA_LUT_SIZE": property::Handle(
+                29,
+            ),
+            "SCALING_FILTER": property::Handle(
+                237,
+            ),
+        },
+        crtc::Handle(
+            98,
+        ): {
+            "SCALING_FILTER": property::Handle(
+                99,
+            ),
+            "OUT_FENCE_PTR": property::Handle(
+                19,
+            ),
+            "ACTIVE": property::Handle(
+                22,
+            ),
+            "GAMMA_LUT_SIZE": property::Handle(
+                29,
+            ),
+            "CTM": property::Handle(
+                27,
+            ),
+            "MODE_ID": property::Handle(
+                23,
+            ),
+            "GAMMA_LUT": property::Handle(
+                28,
+            ),
+            "VRR_ENABLED": property::Handle(
+                24,
+            ),
+            "DEGAMMA_LUT": property::Handle(
+                25,
+            ),
+            "DEGAMMA_LUT_SIZE": property::Handle(
+                26,
+            ),
+        },
+        crtc::Handle(
+            167,
+        ): {
+            "CTM": property::Handle(
+                27,
+            ),
+            "GAMMA_LUT": property::Handle(
+                28,
+            ),
+            "OUT_FENCE_PTR": property::Handle(
+                19,
+            ),
+            "VRR_ENABLED": property::Handle(
+                24,
+            ),
+            "ACTIVE": property::Handle(
+                22,
+            ),
+            "DEGAMMA_LUT": property::Handle(
+                25,
+            ),
+            "SCALING_FILTER": property::Handle(
+                168,
+            ),
+            "GAMMA_LUT_SIZE": property::Handle(
+                29,
+            ),
+            "DEGAMMA_LUT_SIZE": property::Handle(
+                26,
+            ),
+            "MODE_ID": property::Handle(
+                23,
+            ),
+        },
+        crtc::Handle(
+            305,
+        ): {
+            "CTM": property::Handle(
+                27,
+            ),
+            "MODE_ID": property::Handle(
+                23,
+            ),
+            "ACTIVE": property::Handle(
+                22,
+            ),
+            "DEGAMMA_LUT": property::Handle(
+                25,
+            ),
+            "GAMMA_LUT_SIZE": property::Handle(
+                29,
+            ),
+            "GAMMA_LUT": property::Handle(
+                28,
+            ),
+            "SCALING_FILTER": property::Handle(
+                306,
+            ),
+            "OUT_FENCE_PTR": property::Handle(
+                19,
+            ),
+            "DEGAMMA_LUT_SIZE": property::Handle(
+                26,
+            ),
+            "VRR_ENABLED": property::Handle(
+                24,
+            ),
+        },
+    },
+    {},
+    {
+        plane::Handle(
+            85,
+        ): {
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "pixel blend mode": property::Handle(
+                91,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "SCALING_FILTER": property::Handle(
+                93,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "zpos": property::Handle(
+                92,
+            ),
+            "alpha": property::Handle(
+                90,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "rotation": property::Handle(
+                87,
+            ),
+            "COLOR_RANGE": property::Handle(
+                89,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                88,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+        },
+        plane::Handle(
+            109,
+        ): {
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "COLOR_RANGE": property::Handle(
+                113,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "pixel blend mode": property::Handle(
+                115,
+            ),
+            "zpos": property::Handle(
+                116,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                112,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "rotation": property::Handle(
+                111,
+            ),
+            "alpha": property::Handle(
+                114,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "SCALING_FILTER": property::Handle(
+                117,
+            ),
+        },
+        plane::Handle(
+            118,
+        ): {
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "zpos": property::Handle(
+                125,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "alpha": property::Handle(
+                123,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "pixel blend mode": property::Handle(
+                124,
+            ),
+            "rotation": property::Handle(
+                120,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "SCALING_FILTER": property::Handle(
+                126,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                121,
+            ),
+            "COLOR_RANGE": property::Handle(
+                122,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+        },
+        plane::Handle(
+            127,
+        ): {
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "rotation": property::Handle(
+                129,
+            ),
+            "pixel blend mode": property::Handle(
+                133,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "COLOR_RANGE": property::Handle(
+                131,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "zpos": property::Handle(
+                134,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                130,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "SCALING_FILTER": property::Handle(
+                135,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "alpha": property::Handle(
+                132,
+            ),
+        },
+        plane::Handle(
+            154,
+        ): {
+            "alpha": property::Handle(
+                159,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "COLOR_RANGE": property::Handle(
+                158,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "SCALING_FILTER": property::Handle(
+                162,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "zpos": property::Handle(
+                161,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                157,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "pixel blend mode": property::Handle(
+                160,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "rotation": property::Handle(
+                156,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+        },
+        plane::Handle(
+            283,
+        ): {
+            "type": property::Handle(
+                8,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "rotation": property::Handle(
+                285,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                286,
+            ),
+            "COLOR_RANGE": property::Handle(
+                287,
+            ),
+            "pixel blend mode": property::Handle(
+                289,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "SCALING_FILTER": property::Handle(
+                291,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "alpha": property::Handle(
+                288,
+            ),
+            "zpos": property::Handle(
+                290,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+        },
+        plane::Handle(
+            238,
+        ): {
+            "rotation": property::Handle(
+                240,
+            ),
+            "COLOR_RANGE": property::Handle(
+                242,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "zpos": property::Handle(
+                245,
+            ),
+            "alpha": property::Handle(
+                243,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                241,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "SCALING_FILTER": property::Handle(
+                246,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "pixel blend mode": property::Handle(
+                244,
+            ),
+        },
+        plane::Handle(
+            292,
+        ): {
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "rotation": property::Handle(
+                294,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                295,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "zpos": property::Handle(
+                299,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "alpha": property::Handle(
+                297,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "pixel blend mode": property::Handle(
+                298,
+            ),
+            "SCALING_FILTER": property::Handle(
+                300,
+            ),
+            "COLOR_RANGE": property::Handle(
+                296,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+        },
+        plane::Handle(
+            94,
+        ): {
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "zpos": property::Handle(
+                97,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "rotation": property::Handle(
+                96,
+            ),
+        },
+        plane::Handle(
+            136,
+        ): {
+            "type": property::Handle(
+                8,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "zpos": property::Handle(
+                143,
+            ),
+            "SCALING_FILTER": property::Handle(
+                144,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "COLOR_RANGE": property::Handle(
+                140,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                139,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "alpha": property::Handle(
+                141,
+            ),
+            "rotation": property::Handle(
+                138,
+            ),
+            "pixel blend mode": property::Handle(
+                142,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+        },
+        plane::Handle(
+            274,
+        ): {
+            "COLOR_ENCODING": property::Handle(
+                277,
+            ),
+            "COLOR_RANGE": property::Handle(
+                278,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "alpha": property::Handle(
+                279,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "rotation": property::Handle(
+                276,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "pixel blend mode": property::Handle(
+                280,
+            ),
+            "SCALING_FILTER": property::Handle(
+                282,
+            ),
+            "zpos": property::Handle(
+                281,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+        },
+        plane::Handle(
+            178,
+        ): {
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "rotation": property::Handle(
+                180,
+            ),
+            "alpha": property::Handle(
+                183,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "COLOR_RANGE": property::Handle(
+                182,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "zpos": property::Handle(
+                185,
+            ),
+            "SCALING_FILTER": property::Handle(
+                186,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                181,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "pixel blend mode": property::Handle(
+                184,
+            ),
+        },
+        plane::Handle(
+            76,
+        ): {
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "COLOR_RANGE": property::Handle(
+                80,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "pixel blend mode": property::Handle(
+                82,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                79,
+            ),
+            "alpha": property::Handle(
+                81,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "zpos": property::Handle(
+                83,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "SCALING_FILTER": property::Handle(
+                84,
+            ),
+            "rotation": property::Handle(
+                78,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+        },
+        plane::Handle(
+            40,
+        ): {
+            "rotation": property::Handle(
+                42,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                43,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "alpha": property::Handle(
+                45,
+            ),
+            "zpos": property::Handle(
+                47,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "SCALING_FILTER": property::Handle(
+                48,
+            ),
+            "pixel blend mode": property::Handle(
+                46,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "COLOR_RANGE": property::Handle(
+                44,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+        },
+        plane::Handle(
+            247,
+        ): {
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "rotation": property::Handle(
+                249,
+            ),
+            "zpos": property::Handle(
+                254,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "pixel blend mode": property::Handle(
+                253,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "SCALING_FILTER": property::Handle(
+                255,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "alpha": property::Handle(
+                252,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                250,
+            ),
+            "COLOR_RANGE": property::Handle(
+                251,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+        },
+        plane::Handle(
+            67,
+        ): {
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                70,
+            ),
+            "SCALING_FILTER": property::Handle(
+                75,
+            ),
+            "COLOR_RANGE": property::Handle(
+                71,
+            ),
+            "zpos": property::Handle(
+                74,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "rotation": property::Handle(
+                69,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "alpha": property::Handle(
+                72,
+            ),
+            "pixel blend mode": property::Handle(
+                73,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+        },
+        plane::Handle(
+            187,
+        ): {
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "SCALING_FILTER": property::Handle(
+                195,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "COLOR_RANGE": property::Handle(
+                191,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                190,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "pixel blend mode": property::Handle(
+                193,
+            ),
+            "rotation": property::Handle(
+                189,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "zpos": property::Handle(
+                194,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "alpha": property::Handle(
+                192,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+        },
+        plane::Handle(
+            145,
+        ): {
+            "pixel blend mode": property::Handle(
+                151,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "alpha": property::Handle(
+                150,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "rotation": property::Handle(
+                147,
+            ),
+            "zpos": property::Handle(
+                152,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "COLOR_RANGE": property::Handle(
+                149,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "SCALING_FILTER": property::Handle(
+                153,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                148,
+            ),
+        },
+        plane::Handle(
+            214,
+        ): {
+            "pixel blend mode": property::Handle(
+                220,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                217,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "alpha": property::Handle(
+                219,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "rotation": property::Handle(
+                216,
+            ),
+            "zpos": property::Handle(
+                221,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "COLOR_RANGE": property::Handle(
+                218,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "SCALING_FILTER": property::Handle(
+                222,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+        },
+        plane::Handle(
+            301,
+        ): {
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "zpos": property::Handle(
+                304,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "rotation": property::Handle(
+                303,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+        },
+        plane::Handle(
+            223,
+        ): {
+            "COLOR_RANGE": property::Handle(
+                227,
+            ),
+            "rotation": property::Handle(
+                225,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "alpha": property::Handle(
+                228,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "zpos": property::Handle(
+                230,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "pixel blend mode": property::Handle(
+                229,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "SCALING_FILTER": property::Handle(
+                231,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                226,
+            ),
+        },
+        plane::Handle(
+            205,
+        ): {
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "zpos": property::Handle(
+                212,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                208,
+            ),
+            "alpha": property::Handle(
+                210,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "COLOR_RANGE": property::Handle(
+                209,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "rotation": property::Handle(
+                207,
+            ),
+            "SCALING_FILTER": property::Handle(
+                213,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "pixel blend mode": property::Handle(
+                211,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+        },
+        plane::Handle(
+            256,
+        ): {
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "SCALING_FILTER": property::Handle(
+                264,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "zpos": property::Handle(
+                263,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                259,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "pixel blend mode": property::Handle(
+                262,
+            ),
+            "COLOR_RANGE": property::Handle(
+                260,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "alpha": property::Handle(
+                261,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "rotation": property::Handle(
+                258,
+            ),
+        },
+        plane::Handle(
+            31,
+        ): {
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "zpos": property::Handle(
+                38,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "SCALING_FILTER": property::Handle(
+                39,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                34,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "rotation": property::Handle(
+                33,
+            ),
+            "COLOR_RANGE": property::Handle(
+                35,
+            ),
+            "alpha": property::Handle(
+                36,
+            ),
+            "pixel blend mode": property::Handle(
+                37,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+        },
+        plane::Handle(
+            163,
+        ): {
+            "type": property::Handle(
+                8,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "rotation": property::Handle(
+                165,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "zpos": property::Handle(
+                166,
+            ),
+        },
+        plane::Handle(
+            232,
+        ): {
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "zpos": property::Handle(
+                235,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "rotation": property::Handle(
+                234,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+        },
+        plane::Handle(
+            169,
+        ): {
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "alpha": property::Handle(
+                174,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                172,
+            ),
+            "COLOR_RANGE": property::Handle(
+                173,
+            ),
+            "pixel blend mode": property::Handle(
+                175,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "zpos": property::Handle(
+                176,
+            ),
+            "SCALING_FILTER": property::Handle(
+                177,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "rotation": property::Handle(
+                171,
+            ),
+        },
+        plane::Handle(
+            49,
+        ): {
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                52,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "zpos": property::Handle(
+                56,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "SCALING_FILTER": property::Handle(
+                57,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "rotation": property::Handle(
+                51,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "alpha": property::Handle(
+                54,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "COLOR_RANGE": property::Handle(
+                53,
+            ),
+            "pixel blend mode": property::Handle(
+                55,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+        },
+        plane::Handle(
+            265,
+        ): {
+            "SCALING_FILTER": property::Handle(
+                273,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                268,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "COLOR_RANGE": property::Handle(
+                269,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "alpha": property::Handle(
+                270,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "rotation": property::Handle(
+                267,
+            ),
+            "pixel blend mode": property::Handle(
+                271,
+            ),
+            "zpos": property::Handle(
+                272,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+        },
+        plane::Handle(
+            100,
+        ): {
+            "pixel blend mode": property::Handle(
+                106,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "alpha": property::Handle(
+                105,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                103,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "COLOR_RANGE": property::Handle(
+                104,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "SCALING_FILTER": property::Handle(
+                108,
+            ),
+            "zpos": property::Handle(
+                107,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "rotation": property::Handle(
+                102,
+            ),
+        },
+        plane::Handle(
+            196,
+        ): {
+            "alpha": property::Handle(
+                201,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "pixel blend mode": property::Handle(
+                202,
+            ),
+            "SCALING_FILTER": property::Handle(
+                204,
+            ),
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "zpos": property::Handle(
+                203,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                199,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "rotation": property::Handle(
+                198,
+            ),
+            "COLOR_RANGE": property::Handle(
+                200,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+        },
+        plane::Handle(
+            58,
+        ): {
+            "CRTC_W": property::Handle(
+                15,
+            ),
+            "CRTC_ID": property::Handle(
+                20,
+            ),
+            "type": property::Handle(
+                8,
+            ),
+            "SRC_X": property::Handle(
+                9,
+            ),
+            "IN_FENCE_FD": property::Handle(
+                18,
+            ),
+            "SCALING_FILTER": property::Handle(
+                66,
+            ),
+            "COLOR_ENCODING": property::Handle(
+                61,
+            ),
+            "CRTC_Y": property::Handle(
+                14,
+            ),
+            "pixel blend mode": property::Handle(
+                64,
+            ),
+            "CRTC_X": property::Handle(
+                13,
+            ),
+            "SRC_Y": property::Handle(
+                10,
+            ),
+            "FB_ID": property::Handle(
+                17,
+            ),
+            "FB_DAMAGE_CLIPS": property::Handle(
+                21,
+            ),
+            "SRC_H": property::Handle(
+                12,
+            ),
+            "IN_FORMATS": property::Handle(
+                30,
+            ),
+            "rotation": property::Handle(
+                60,
+            ),
+            "alpha": property::Handle(
+                63,
+            ),
+            "zpos": property::Handle(
+                65,
+            ),
+            "CRTC_H": property::Handle(
+                16,
+            ),
+            "COLOR_RANGE": property::Handle(
+                62,
+            ),
+            "SRC_W": property::Handle(
+                11,
+            ),
+        },
+    },
+), drm_module: device, smithay_module: backend_drm_atomic, smithay_module: backend_drm
+Jun 01 15:05:16.279 DEBG Supported EGL client extensions: ["EGL_EXT_platform_base", "EGL_EXT_device_base", "EGL_EXT_device_enumeration", "EGL_EXT_device_query", "EGL_KHR_client_get_all_proc_addresses", "EGL_EXT_client_extensions", "EGL_KHR_debug", "EGL_KHR_platform_x11", "EGL_EXT_platform_x11", "EGL_EXT_platform_device", "EGL_KHR_platform_wayland", "EGL_EXT_platform_wayland", "EGL_KHR_platform_gbm", "EGL_MESA_platform_gbm", "EGL_MESA_platform_xcb", "EGL_MESA_platform_surfaceless"], smithay_module: backend_egl
+Jun 01 15:05:16.279 DEBG Trying EGL platform: PLATFORM_GBM_KHR, smithay_module: backend_egl
+Jun 01 15:05:16.279 INFO Successfully selected EGL platform: PLATFORM_GBM_KHR, platform: EGLPlatform { platform_name: "PLATFORM_GBM_KHR", required_extensions: ["EGL_KHR_platform_gbm"] }, smithay_module: backend_egl
+Jun 01 15:05:16.281 INFO EGL Initialized, smithay_module: backend_egl
+Jun 01 15:05:16.281 INFO EGL Version: (1, 5), smithay_module: backend_egl
+Jun 01 15:05:16.281 INFO Supported EGL display extensions: ["EGL_ANDROID_blob_cache", "EGL_ANDROID_native_fence_sync", "EGL_EXT_buffer_age", "EGL_EXT_create_context_robustness", "EGL_EXT_image_dma_buf_import", "EGL_EXT_image_dma_buf_import_modifiers", "EGL_IMG_context_priority", "EGL_KHR_cl_event2", "EGL_KHR_config_attribs", "EGL_KHR_create_context", "EGL_KHR_create_context_no_error", "EGL_KHR_fence_sync", "EGL_KHR_get_all_proc_addresses", "EGL_KHR_gl_colorspace", "EGL_KHR_gl_renderbuffer_image", "EGL_KHR_gl_texture_2D_image", "EGL_KHR_gl_texture_3D_image", "EGL_KHR_gl_texture_cubemap_image", "EGL_KHR_image", "EGL_KHR_image_base", "EGL_KHR_image_pixmap", "EGL_KHR_no_config_context", "EGL_KHR_reusable_sync", "EGL_KHR_surfaceless_context", "EGL_EXT_pixel_format_float", "EGL_KHR_wait_sync", "EGL_MESA_configless_context", "EGL_MESA_drm_image", "EGL_MESA_image_dma_buf_export", "EGL_MESA_query_driver", "EGL_WL_bind_wayland_display", ""], smithay_module: backend_egl
+Jun 01 15:05:16.282 TRCE Supported dmabuf import formats: {DrmFormat { code: DrmFourcc(YU11), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(Y412), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XYUV), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR15), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(R16 ), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(NV16), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YV11), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P016), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AR15), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(Y416), modifier: Linear }, DrmFormat { code: DrmFourcc(P010), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(Y216), modifier: Linear }, DrmFormat { code: DrmFourcc(NV12), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(P012), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(GR32), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AB30), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(P016), modifier: Linear }, DrmFormat { code: DrmFourcc(Y210), modifier: Linear }, DrmFormat { code: DrmFourcc(Y210), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YU16), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR30), modifier: Linear }, DrmFormat { code: DrmFourcc(Y410), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AYUV), modifier: Linear }, DrmFormat { code: DrmFourcc(AB30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YVU9), modifier: Linear }, DrmFormat { code: DrmFourcc(YV24), modifier: Linear }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(R8  ), modifier: Linear }, DrmFormat { code: DrmFourcc(AR15), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(RG16), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YVU9), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(NV16), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(UYVY), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(GR88), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AB4H), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(YU16), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(P010), modifier: Linear }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(Y410), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YU12), modifier: Linear }, DrmFormat { code: DrmFourcc(YVU9), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YUV9), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P010), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AYUV), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR30), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(R16 ), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AYUV), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(GR88), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(NV12), modifier: Linear }, DrmFormat { code: DrmFourcc(YV12), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(R16 ), modifier: Linear }, DrmFormat { code: DrmFourcc(R16 ), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(Y212), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(YU24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(Y216), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR30), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(RG16), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(R8  ), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(YU24), modifier: Linear }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(YV12), modifier: Linear }, DrmFormat { code: DrmFourcc(R8  ), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB4H), modifier: Linear }, DrmFormat { code: DrmFourcc(YV16), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(P016), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: Linear }, DrmFormat { code: DrmFourcc(YU11), modifier: Linear }, DrmFormat { code: DrmFourcc(P012), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(R8  ), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(NV16), modifier: Linear }, DrmFormat { code: DrmFourcc(XYUV), modifier: Linear }, DrmFormat { code: DrmFourcc(GR32), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(Y412), modifier: Linear }, DrmFormat { code: DrmFourcc(Y412), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(Y416), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(R8  ), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(YV12), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(RG16), modifier: Linear }, DrmFormat { code: DrmFourcc(Y212), modifier: Linear }, DrmFormat { code: DrmFourcc(Y216), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB30), modifier: Linear }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR30), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(GR88), modifier: Linear }, DrmFormat { code: DrmFourcc(Y210), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(R16 ), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AB4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR15), modifier: Linear }, DrmFormat { code: DrmFourcc(GR32), modifier: Linear }, DrmFormat { code: DrmFourcc(YU12), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR24), modifier: Linear }, DrmFormat { code: DrmFourcc(YV11), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(P012), modifier: Linear }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR15), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(YU11), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(UYVY), modifier: Linear }, DrmFormat { code: DrmFourcc(YV16), modifier: Linear }, DrmFormat { code: DrmFourcc(YV24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(Y410), modifier: Linear }, DrmFormat { code: DrmFourcc(AB30), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(YUV9), modifier: Linear }, DrmFormat { code: DrmFourcc(YV16), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(NV16), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(RG16), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AB30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(P012), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB4H), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(YV11), modifier: Linear }, DrmFormat { code: DrmFourcc(GR32), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XR30), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XR30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(GR88), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XB4H), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(YU12), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(GR32), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(P016), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YUYV), modifier: Linear }, DrmFormat { code: DrmFourcc(Y416), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB4H), modifier: Linear }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(Y212), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XYUV), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YU16), modifier: Linear }, DrmFormat { code: DrmFourcc(XB4H), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(YUV9), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: Linear }, DrmFormat { code: DrmFourcc(AB24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(RG16), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XB4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(GR88), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XR30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P010), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(YUYV), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XR30), modifier: Linear }, DrmFormat { code: DrmFourcc(NV12), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(YU24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YV24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(NV12), modifier: I915_y_tiled_gen12_mc_ccs }}, smithay_module: backend_egl
+Jun 01 15:05:16.287 TRCE Supported dmabuf render formats: {DrmFormat { code: DrmFourcc(GR32), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(GR88), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(R16 ), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR30), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB30), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR15), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AB4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB30), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(RG16), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(R16 ), modifier: Linear }, DrmFormat { code: DrmFourcc(AB4H), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XB4H), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(R8  ), modifier: Linear }, DrmFormat { code: DrmFourcc(R16 ), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(GR88), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XB4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR30), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(R8  ), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR15), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR30), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XB4H), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XR30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XR30), modifier: Linear }, DrmFormat { code: DrmFourcc(AR15), modifier: Linear }, DrmFormat { code: DrmFourcc(GR88), modifier: Linear }, DrmFormat { code: DrmFourcc(R16 ), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(R8  ), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XR30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(GR32), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AB24), modifier: Linear }, DrmFormat { code: DrmFourcc(GR32), modifier: Linear }, DrmFormat { code: DrmFourcc(AB30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XR24), modifier: Linear }, DrmFormat { code: DrmFourcc(R16 ), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR30), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(GR32), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR30), modifier: Linear }, DrmFormat { code: DrmFourcc(XB4H), modifier: Linear }, DrmFormat { code: DrmFourcc(GR88), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AB30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(RG16), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(GR88), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AB24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR15), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB30), modifier: Linear }, DrmFormat { code: DrmFourcc(XB24), modifier: Linear }, DrmFormat { code: DrmFourcc(RG16), modifier: Linear }, DrmFormat { code: DrmFourcc(RG16), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB4H), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(RG16), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(GR32), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(R8  ), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AB4H), modifier: Linear }, DrmFormat { code: DrmFourcc(AR15), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(R8  ), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled_gen12_rc_ccs }}, smithay_module: backend_egl
+Jun 01 15:05:16.290 TRCE Setting CONTEXT_CLIENT_VERSION to 2, smithay_module: backend_egl
+Jun 01 15:05:16.290 TRCE Creating EGL context..., smithay_module: backend_egl
+Jun 01 15:05:16.291 INFO EGL context created, smithay_module: backend_egl
+Jun 01 15:05:16.291 TRCE Initializing DMABUF handler with 75 supported formats, smithay_module: dmabuf_handler
+Jun 01 15:05:16.291 INFO Adding socket at /run/user/1000/wayland-0-renderD128 for gpu renderD128
+Jun 01 15:05:16.303 INFO Creating new wl_output, smithay_module: output_handler, name: eDP-1
+Jun 01 15:05:16.305 INFO Initializing drm surface (crtc::Handle(98):plane::Handle(31)) with mode Mode { name: "1920x1080", clock: 352240, size: (1920, 1080), hsync: (1968, 2000, 2080), vsync: (1083, 1089, 1176), hskew: 0, vscan: 0, vrefresh: 144, mode_type: PREFERRED | DRIVER } and connectors [connector::Handle(308)], drm_module: surface, smithay_module: backend_drm_atomic, smithay_module: backend_drm
+Jun 01 15:05:16.306 TRCE Supported scan-out formats for plane (plane::Handle(31)): {DrmFormat { code: DrmFourcc(XB24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XV36), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XV30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(VYUY), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(RG16), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(NV12), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XYUV), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XV30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XV36), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XV48), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(C8  ), modifier: Linear }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(Y210), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB30), modifier: Linear }, DrmFormat { code: DrmFourcc(P012), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XB4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(YVYU), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(VYUY), modifier: Linear }, DrmFormat { code: DrmFourcc(Y212), modifier: Linear }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XB30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(Y210), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XYUV), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(VYUY), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XYUV), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(VYUY), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(Y212), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(Y216), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AB4H), modifier: Linear }, DrmFormat { code: DrmFourcc(NV12), modifier: Linear }, DrmFormat { code: DrmFourcc(XV30), modifier: Linear }, DrmFormat { code: DrmFourcc(XR24), modifier: Linear }, DrmFormat { code: DrmFourcc(UYVY), modifier: Linear }, DrmFormat { code: DrmFourcc(XB30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR4H), modifier: Linear }, DrmFormat { code: DrmFourcc(C8  ), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YUYV), modifier: Linear }, DrmFormat { code: DrmFourcc(Y210), modifier: Linear }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(P012), modifier: Linear }, DrmFormat { code: DrmFourcc(Y212), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(NV12), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(Y216), modifier: Linear }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(P010), modifier: Linear }, DrmFormat { code: DrmFourcc(XYUV), modifier: Linear }, DrmFormat { code: DrmFourcc(YVYU), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AB30), modifier: Linear }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(P012), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(P016), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(NV12), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XR30), modifier: Linear }, DrmFormat { code: DrmFourcc(XR30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YVYU), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(P012), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: Linear }, DrmFormat { code: DrmFourcc(RG16), modifier: Linear }, DrmFormat { code: DrmFourcc(P010), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR30), modifier: Linear }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XB4H), modifier: Linear }, DrmFormat { code: DrmFourcc(P016), modifier: Linear }, DrmFormat { code: DrmFourcc(P016), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P016), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AB24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XV48), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(C8  ), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XB24), modifier: Linear }, DrmFormat { code: DrmFourcc(XV36), modifier: Linear }, DrmFormat { code: DrmFourcc(AB4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(Y216), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR4H), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(RG16), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(P010), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(P010), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XR30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XR4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(YVYU), modifier: Linear }, DrmFormat { code: DrmFourcc(XV48), modifier: Linear }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_x_tiled }}, drm_module: surface, smithay_module: backend_drm_atomic, smithay_module: backend_drm
+Jun 01 15:05:16.309 TRCE Plane formats: {DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_mc_ccs }}, backend: drm_render
+Jun 01 15:05:16.310 TRCE Renderer formats: {DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }}, backend: drm_render
+Jun 01 15:05:16.310 DEBG Remaining intersected formats: {DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }}, backend: drm_render
+Jun 01 15:05:16.310 DEBG Testing Formats: [DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }], backend: drm_render
+Jun 01 15:05:17.990 WARN Failed to initialize output: Failed to initialize Gbm surface for eDP-1
+
+Caused by:
+    0: The underlying drm surface encounted an error: DRM access error: Failed to add framebuffer on device `Some("/dev/dri/card0")` (invalid argument)
+    1: DRM access error: Failed to add framebuffer on device `Some("/dev/dri/card0")` (invalid argument)
+    2: invalid argument
+Jun 01 15:05:17.992 INFO Initializing drm surface (crtc::Handle(98):plane::Handle(31)) with mode Mode { name: "1920x1080", clock: 352240, size: (1920, 1080), hsync: (1968, 2000, 2080), vsync: (1083, 1089, 1176), hskew: 0, vscan: 0, vrefresh: 144, mode_type: PREFERRED | DRIVER } and connectors [connector::Handle(308)], drm_module: surface, smithay_module: backend_drm_atomic, smithay_module: backend_drm
+Jun 01 15:05:17.993 TRCE Supported scan-out formats for plane (plane::Handle(31)): {DrmFormat { code: DrmFourcc(XYUV), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(NV12), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XR4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P012), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(Y210), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XYUV), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB30), modifier: Linear }, DrmFormat { code: DrmFourcc(XB30), modifier: Linear }, DrmFormat { code: DrmFourcc(P012), modifier: Linear }, DrmFormat { code: DrmFourcc(Y210), modifier: Linear }, DrmFormat { code: DrmFourcc(P012), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(XV30), modifier: Linear }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P016), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(C8  ), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(RG16), modifier: Linear }, DrmFormat { code: DrmFourcc(YUYV), modifier: Linear }, DrmFormat { code: DrmFourcc(XB4H), modifier: Linear }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XB4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XYUV), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(P010), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(C8  ), modifier: Linear }, DrmFormat { code: DrmFourcc(P012), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AB24), modifier: Linear }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(P010), modifier: Linear }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XB4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(Y210), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P016), modifier: Linear }, DrmFormat { code: DrmFourcc(XV36), modifier: Linear }, DrmFormat { code: DrmFourcc(YVYU), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(RG16), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(UYVY), modifier: Linear }, DrmFormat { code: DrmFourcc(P010), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XR30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR24), modifier: Linear }, DrmFormat { code: DrmFourcc(VYUY), modifier: Linear }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(Y216), modifier: Linear }, DrmFormat { code: DrmFourcc(XV48), modifier: Linear }, DrmFormat { code: DrmFourcc(RG16), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB4H), modifier: Linear }, DrmFormat { code: DrmFourcc(XB30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XYUV), modifier: Linear }, DrmFormat { code: DrmFourcc(AB4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(Y216), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(Y212), modifier: Linear }, DrmFormat { code: DrmFourcc(AR30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(P010), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XV30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XV48), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(VYUY), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(VYUY), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P016), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XV30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P016), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YVYU), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(NV12), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR30), modifier: Linear }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XV36), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XB30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XV36), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YVYU), modifier: Linear }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AB24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR4H), modifier: Linear }, DrmFormat { code: DrmFourcc(NV12), modifier: Linear }, DrmFormat { code: DrmFourcc(NV12), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AR4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XR30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(Y212), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(Y216), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XR30), modifier: Linear }, DrmFormat { code: DrmFourcc(YVYU), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(C8  ), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XR4H), modifier: Linear }, DrmFormat { code: DrmFourcc(VYUY), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XV48), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(Y212), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: Unrecognized(72057594037927944) }}, drm_module: surface, smithay_module: backend_drm_atomic, smithay_module: backend_drm
+Jun 01 15:05:17.997 TRCE Plane formats: {DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }}, backend: drm_render
+Jun 01 15:05:17.998 TRCE Renderer formats: {DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }}, backend: drm_render
+Jun 01 15:05:17.998 DEBG Remaining intersected formats: {DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }}, backend: drm_render
+Jun 01 15:05:17.998 DEBG Testing Formats: [DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }], backend: drm_render
+Jun 01 15:05:18.002 WARN Failed to set new config for output eDP-1: Failed to initialize Gbm surface for eDP-1
+Jun 01 15:05:18.004 INFO Initializing drm surface (crtc::Handle(98):plane::Handle(31)) with mode Mode { name: "1920x1080", clock: 352240, size: (1920, 1080), hsync: (1968, 2000, 2080), vsync: (1083, 1089, 1176), hskew: 0, vscan: 0, vrefresh: 144, mode_type: PREFERRED | DRIVER } and connectors [connector::Handle(308)], drm_module: surface, smithay_module: backend_drm_atomic, smithay_module: backend_drm
+Jun 01 15:05:18.005 TRCE Supported scan-out formats for plane (plane::Handle(31)): {DrmFormat { code: DrmFourcc(Y212), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XB4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR30), modifier: Linear }, DrmFormat { code: DrmFourcc(YUYV), modifier: Linear }, DrmFormat { code: DrmFourcc(P012), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P016), modifier: Linear }, DrmFormat { code: DrmFourcc(XB24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(Y210), modifier: Linear }, DrmFormat { code: DrmFourcc(XV36), modifier: Linear }, DrmFormat { code: DrmFourcc(P010), modifier: Linear }, DrmFormat { code: DrmFourcc(AR30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(YVYU), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AR4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XYUV), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P012), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XB4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(NV12), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P010), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(VYUY), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR4H), modifier: Linear }, DrmFormat { code: DrmFourcc(XB4H), modifier: Linear }, DrmFormat { code: DrmFourcc(P012), modifier: Linear }, DrmFormat { code: DrmFourcc(NV12), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XV48), modifier: Linear }, DrmFormat { code: DrmFourcc(Y210), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(RG16), modifier: Linear }, DrmFormat { code: DrmFourcc(AB30), modifier: Linear }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(VYUY), modifier: Linear }, DrmFormat { code: DrmFourcc(NV12), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XV30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P010), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P010), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(Y212), modifier: Linear }, DrmFormat { code: DrmFourcc(XR30), modifier: Linear }, DrmFormat { code: DrmFourcc(P016), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XV48), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XV30), modifier: Linear }, DrmFormat { code: DrmFourcc(XR4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(VYUY), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(P016), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XV36), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(Y216), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AB4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(Y216), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XV48), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XYUV), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(Y212), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(C8  ), modifier: Linear }, DrmFormat { code: DrmFourcc(XB30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(C8  ), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AB24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(YVYU), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XYUV), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P012), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XR30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P016), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XR30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XV36), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YVYU), modifier: Linear }, DrmFormat { code: DrmFourcc(UYVY), modifier: Linear }, DrmFormat { code: DrmFourcc(VYUY), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YVYU), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XV30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB30), modifier: Linear }, DrmFormat { code: DrmFourcc(XYUV), modifier: Linear }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR4H), modifier: Linear }, DrmFormat { code: DrmFourcc(RG16), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(C8  ), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: Linear }, DrmFormat { code: DrmFourcc(XB30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AB24), modifier: Linear }, DrmFormat { code: DrmFourcc(AB4H), modifier: Linear }, DrmFormat { code: DrmFourcc(NV12), modifier: Linear }, DrmFormat { code: DrmFourcc(Y210), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(Y216), modifier: Linear }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(RG16), modifier: I915_x_tiled }}, drm_module: surface, smithay_module: backend_drm_atomic, smithay_module: backend_drm
+Jun 01 15:05:18.008 TRCE Plane formats: {DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }}, backend: drm_render
+Jun 01 15:05:18.008 TRCE Renderer formats: {DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }}, backend: drm_render
+Jun 01 15:05:18.009 DEBG Remaining intersected formats: {DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }}, backend: drm_render
+Jun 01 15:05:18.009 DEBG Testing Formats: [DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }], backend: drm_render
+Jun 01 15:05:18.012 ERRO Failed to reset config for output eDP-1: Failed to initialize Gbm surface for eDP-1
+Jun 01 15:05:18.016 INFO Initializing drm surface (crtc::Handle(98):plane::Handle(31)) with mode Mode { name: "1920x1080", clock: 352240, size: (1920, 1080), hsync: (1968, 2000, 2080), vsync: (1083, 1089, 1176), hskew: 0, vscan: 0, vrefresh: 144, mode_type: PREFERRED | DRIVER } and connectors [connector::Handle(308)], drm_module: surface, smithay_module: backend_drm_atomic, smithay_module: backend_drm
+Jun 01 15:05:18.017 TRCE Supported scan-out formats for plane (plane::Handle(31)): {DrmFormat { code: DrmFourcc(YVYU), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(Y212), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: Linear }, DrmFormat { code: DrmFourcc(XR4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(Y216), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(VYUY), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(VYUY), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(NV12), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(C8  ), modifier: Linear }, DrmFormat { code: DrmFourcc(XB30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB30), modifier: Linear }, DrmFormat { code: DrmFourcc(AB30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB30), modifier: Linear }, DrmFormat { code: DrmFourcc(XV36), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XV30), modifier: Linear }, DrmFormat { code: DrmFourcc(AB4H), modifier: Linear }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(Y210), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(P012), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(YVYU), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XV48), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB4H), modifier: Linear }, DrmFormat { code: DrmFourcc(P016), modifier: Linear }, DrmFormat { code: DrmFourcc(XV36), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XB4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(RG16), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XYUV), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XB30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AB4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XYUV), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(NV12), modifier: Linear }, DrmFormat { code: DrmFourcc(P016), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P010), modifier: Linear }, DrmFormat { code: DrmFourcc(AB24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AR30), modifier: Linear }, DrmFormat { code: DrmFourcc(NV12), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(YUYV), modifier: Linear }, DrmFormat { code: DrmFourcc(VYUY), modifier: Linear }, DrmFormat { code: DrmFourcc(XYUV), modifier: Linear }, DrmFormat { code: DrmFourcc(AR4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XV36), modifier: Linear }, DrmFormat { code: DrmFourcc(P016), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P010), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AR30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(Y212), modifier: Linear }, DrmFormat { code: DrmFourcc(P010), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P016), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(C8  ), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XR30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XV48), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(P010), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(Y210), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(Y216), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(RG16), modifier: Linear }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(P012), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR30), modifier: Linear }, DrmFormat { code: DrmFourcc(Y216), modifier: Linear }, DrmFormat { code: DrmFourcc(P012), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XV30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(UYVY), modifier: Linear }, DrmFormat { code: DrmFourcc(NV12), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(P012), modifier: Linear }, DrmFormat { code: DrmFourcc(YVYU), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(C8  ), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XV30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YVYU), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(RG16), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: Linear }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XR24), modifier: Linear }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XR4H), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XYUV), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(VYUY), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(Y212), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR4H), modifier: Linear }, DrmFormat { code: DrmFourcc(Y210), modifier: Linear }, DrmFormat { code: DrmFourcc(XV48), modifier: Linear }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled_gen12_mc_ccs }}, drm_module: surface, smithay_module: backend_drm_atomic, smithay_module: backend_drm
+Jun 01 15:05:18.021 TRCE Plane formats: {DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }}, backend: drm_render
+Jun 01 15:05:18.022 TRCE Renderer formats: {DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }}, backend: drm_render
+Jun 01 15:05:18.022 DEBG Remaining intersected formats: {DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }}, backend: drm_render
+Jun 01 15:05:18.022 DEBG Testing Formats: [DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }], backend: drm_render
+Jun 01 15:05:18.026 WARN Failed to set new config for output eDP-1: Failed to initialize Gbm surface for eDP-1
+Jun 01 15:05:18.028 INFO Initializing drm surface (crtc::Handle(98):plane::Handle(31)) with mode Mode { name: "1920x1080", clock: 352240, size: (1920, 1080), hsync: (1968, 2000, 2080), vsync: (1083, 1089, 1176), hskew: 0, vscan: 0, vrefresh: 144, mode_type: PREFERRED | DRIVER } and connectors [connector::Handle(308)], drm_module: surface, smithay_module: backend_drm_atomic, smithay_module: backend_drm
+Jun 01 15:05:18.028 TRCE Supported scan-out formats for plane (plane::Handle(31)): {DrmFormat { code: DrmFourcc(RG16), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(YVYU), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(P016), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(NV12), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(P010), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB30), modifier: Linear }, DrmFormat { code: DrmFourcc(Y212), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P010), modifier: Linear }, DrmFormat { code: DrmFourcc(XV36), modifier: Linear }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XV36), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(UYVY), modifier: Linear }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(C8  ), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XB30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR4H), modifier: Linear }, DrmFormat { code: DrmFourcc(XB4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(YUYV), modifier: Linear }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(YVYU), modifier: Linear }, DrmFormat { code: DrmFourcc(XR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XR30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(Y210), modifier: Linear }, DrmFormat { code: DrmFourcc(XR30), modifier: Linear }, DrmFormat { code: DrmFourcc(XR24), modifier: Linear }, DrmFormat { code: DrmFourcc(XV48), modifier: Linear }, DrmFormat { code: DrmFourcc(Y216), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(VYUY), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(YUYV), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XV30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(P012), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AB30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(XV48), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(NV12), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AB4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XR4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB4H), modifier: Linear }, DrmFormat { code: DrmFourcc(Y216), modifier: Linear }, DrmFormat { code: DrmFourcc(XYUV), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XV36), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(P012), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: Linear }, DrmFormat { code: DrmFourcc(P016), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(YVYU), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(Y210), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR4H), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(C8  ), modifier: Linear }, DrmFormat { code: DrmFourcc(P016), modifier: Linear }, DrmFormat { code: DrmFourcc(AB24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(XYUV), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XB30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(Y212), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(RG16), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(VYUY), modifier: Linear }, DrmFormat { code: DrmFourcc(P016), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(RG16), modifier: Linear }, DrmFormat { code: DrmFourcc(AB4H), modifier: Linear }, DrmFormat { code: DrmFourcc(XYUV), modifier: Linear }, DrmFormat { code: DrmFourcc(AR30), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(Y210), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: Linear }, DrmFormat { code: DrmFourcc(XB4H), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(P010), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XB30), modifier: Linear }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(Y212), modifier: Linear }, DrmFormat { code: DrmFourcc(VYUY), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(YVYU), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XR24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(XYUV), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(XV48), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(C8  ), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XR4H), modifier: Linear }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(NV12), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(VYUY), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(NV12), modifier: Linear }, DrmFormat { code: DrmFourcc(Y216), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AB24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(P010), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(XB24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(UYVY), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P012), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR30), modifier: Linear }, DrmFormat { code: DrmFourcc(XV30), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(P012), modifier: Linear }, DrmFormat { code: DrmFourcc(XV30), modifier: Linear }}, drm_module: surface, smithay_module: backend_drm_atomic, smithay_module: backend_drm
+Jun 01 15:05:18.032 TRCE Plane formats: {DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_mc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }}, backend: drm_render
+Jun 01 15:05:18.033 TRCE Renderer formats: {DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }}, backend: drm_render
+Jun 01 15:05:18.033 DEBG Remaining intersected formats: {DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }}, backend: drm_render
+Jun 01 15:05:18.033 DEBG Testing Formats: [DrmFormat { code: DrmFourcc(AR24), modifier: I915_x_tiled }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled_gen12_rc_ccs }, DrmFormat { code: DrmFourcc(AR24), modifier: Linear }, DrmFormat { code: DrmFourcc(AR24), modifier: Unrecognized(72057594037927944) }, DrmFormat { code: DrmFourcc(AR24), modifier: I915_y_tiled }], backend: drm_render
+Jun 01 15:05:18.037 ERRO Failed to reset config for output eDP-1: Failed to initialize Gbm surface for eDP-1
+Jun 01 15:05:18.038 INFO Shutting down
+Jun 01 15:05:18.043 DEBG Closing device: 19, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:18.064 DEBG Closing device: 20, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:18.112 DEBG Closing device: 21, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:18.148 DEBG Closing device: 22, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:18.164 DEBG Closing device: 23, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:18.184 DEBG Closing device: 24, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:18.220 DEBG Closing device: 25, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:18.252 DEBG Closing device: 26, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:18.288 DEBG Closing device: 27, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:18.308 DEBG Closing device: 28, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:18.332 DEBG Closing device: 29, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:18.352 DEBG Closing seat, session_type: libseat, smithay_module: backend_session, session_type: auto, smithay_module: backend_session_auto
+Jun 01 15:05:18.640 ERRO Failed to restore previous state. Error: permission denied, drm_module: device, smithay_module: backend_drm_atomic, smithay_module: backend_drm
+Jun 01 15:05:18.640 INFO Dropping device: Some("/dev/dri/card0"), smithay_module: backend_drm
