@@ -26,7 +26,7 @@ pub fn display_configuration(
         .iter()
         .flat_map(|conn| device.get_connector(*conn).ok())
     {
-        if let Some(enc) = device.get_connector(conn.handle())?.current_encoder() {
+        if let Some(enc) = conn.current_encoder() {
             if let Some(crtc) = device.get_encoder(enc)?.crtc() {
                 // If is is connected we found a mapping
                 if conn.state() == ConnectorState::Connected {
