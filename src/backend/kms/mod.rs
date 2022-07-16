@@ -478,8 +478,8 @@ impl State {
             let changes = device.enumerate_surfaces()?;
             let mut w = self.common.shell.global_space().size.w;
             for crtc in changes.removed {
-                if let Some(surface) = device.surfaces.get_mut(&crtc) {
-                    if let Some(token) = surface.render_timer_token.take() {
+                if let Some(surface) = device.surfaces.remove(&crtc) {
+                    if let Some(token) = surface.render_timer_token {
                         self.common.event_loop_handle.remove(token);
                     }
                     w -= surface.output.current_mode().map(|m| m.size.w).unwrap_or(0);
