@@ -26,8 +26,8 @@ use smithay::{
         Format, Fourcc, Modifier,
     },
     reexports::wayland_server::{
-        backend::GlobalId, protocol::wl_buffer::WlBuffer, Client, DataInit, DelegateDispatch,
-        DelegateGlobalDispatch, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
+        backend::GlobalId, protocol::wl_buffer::WlBuffer, Client, DataInit,
+        Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
     },
     wayland::{
         buffer::BufferHandler,
@@ -53,7 +53,7 @@ pub struct DrmInstanceData {
     dmabuf_global: DmabufGlobal,
 }
 
-impl<D> DelegateGlobalDispatch<wl_drm::WlDrm, DrmGlobalData, D> for WlDrmState
+impl<D> GlobalDispatch<wl_drm::WlDrm, DrmGlobalData, D> for WlDrmState
 where
     D: GlobalDispatch<wl_drm::WlDrm, DrmGlobalData>
         + Dispatch<wl_drm::WlDrm, DrmInstanceData>
@@ -91,7 +91,7 @@ where
     }
 }
 
-impl<D> DelegateDispatch<wl_drm::WlDrm, DrmInstanceData, D> for WlDrmState
+impl<D> Dispatch<wl_drm::WlDrm, DrmInstanceData, D> for WlDrmState
 where
     D: GlobalDispatch<wl_drm::WlDrm, DrmGlobalData>
         + Dispatch<wl_drm::WlDrm, DrmInstanceData>

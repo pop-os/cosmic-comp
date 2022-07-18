@@ -8,7 +8,7 @@ use smithay::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::{
             backend::{ClientId, GlobalId, ObjectId},
-            Client, DataInit, DelegateDispatch, DelegateGlobalDispatch, Dispatch, DisplayHandle,
+            Client, DataInit, Dispatch, DisplayHandle,
             GlobalDispatch, New, Resource,
         },
     },
@@ -61,7 +61,7 @@ pub struct ToplevelHandleStateInner {
 }
 pub type ToplevelHandleState = Mutex<ToplevelHandleStateInner>;
 
-impl<D> DelegateGlobalDispatch<ZcosmicToplevelInfoV1, ToplevelInfoGlobalData, D>
+impl<D> GlobalDispatch<ZcosmicToplevelInfoV1, ToplevelInfoGlobalData, D>
     for ToplevelInfoState<D>
 where
     D: GlobalDispatch<ZcosmicToplevelInfoV1, ToplevelInfoGlobalData>
@@ -89,7 +89,7 @@ where
     }
 }
 
-impl<D> DelegateDispatch<ZcosmicToplevelInfoV1, (), D> for ToplevelInfoState<D>
+impl<D> Dispatch<ZcosmicToplevelInfoV1, (), D> for ToplevelInfoState<D>
 where
     D: GlobalDispatch<ZcosmicToplevelInfoV1, ToplevelInfoGlobalData>
         + Dispatch<ZcosmicToplevelInfoV1, ()>
@@ -125,7 +125,7 @@ where
     }
 }
 
-impl<D> DelegateDispatch<ZcosmicToplevelHandleV1, ToplevelHandleState, D> for ToplevelInfoState<D>
+impl<D> Dispatch<ZcosmicToplevelHandleV1, ToplevelHandleState, D> for ToplevelInfoState<D>
 where
     D: GlobalDispatch<ZcosmicToplevelInfoV1, ToplevelInfoGlobalData>
         + Dispatch<ZcosmicToplevelInfoV1, ()>

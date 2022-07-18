@@ -552,7 +552,7 @@ impl State {
                 self.common
                     .dmabuf_state
                     .destroy_global::<State>(dh, socket.dmabuf_global);
-                dh.remove_global(socket.drm_global);
+                dh.remove_global::<State>(socket.drm_global);
             }
         }
         self.common

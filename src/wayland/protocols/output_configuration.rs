@@ -12,7 +12,7 @@ use smithay::{
         wayland_server::{
             backend::{ClientId, GlobalId, ObjectId},
             protocol::wl_output::WlOutput,
-            Client, DataInit, DelegateDispatch, DelegateGlobalDispatch, Dispatch, DisplayHandle,
+            Client, DataInit, Dispatch, DisplayHandle,
             GlobalDispatch, New, Resource,
         },
     },
@@ -133,7 +133,7 @@ struct OutputStateInner {
 }
 type OutputState = Mutex<OutputStateInner>;
 
-impl<D> DelegateGlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData, D>
+impl<D> GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData, D>
     for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
@@ -176,7 +176,7 @@ where
     }
 }
 
-impl<D> DelegateDispatch<ZwlrOutputManagerV1, OutputMngrInstanceData, D>
+impl<D> Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData, D>
     for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
@@ -221,7 +221,7 @@ where
     }
 }
 
-impl<D> DelegateDispatch<ZwlrOutputHeadV1, Output, D> for OutputConfigurationState<D>
+impl<D> Dispatch<ZwlrOutputHeadV1, Output, D> for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>
@@ -253,7 +253,7 @@ where
     }
 }
 
-impl<D> DelegateDispatch<ZwlrOutputModeV1, Mode, D> for OutputConfigurationState<D>
+impl<D> Dispatch<ZwlrOutputModeV1, Mode, D> for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>
@@ -279,7 +279,7 @@ where
     }
 }
 
-impl<D> DelegateDispatch<ZwlrOutputConfigurationV1, PendingConfiguration, D>
+impl<D> Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration, D>
     for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
@@ -401,7 +401,7 @@ where
     }
 }
 
-impl<D> DelegateDispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration, D>
+impl<D> Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration, D>
     for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
@@ -562,7 +562,7 @@ where
                     // if it gets re-added it should start with being enabled and no global
                     inner.enabled = true;
                     if let Some(global) = inner.global.take() {
-                        self.dh.remove_global(global);
+                        self.dh.remove_global::<D>(global);
                     }
                 }
             }
@@ -611,7 +611,7 @@ where
                     inner.global = Some(output.create_global::<D>(&self.dh));
                 }
                 if !inner.enabled && inner.global.is_some() {
-                    self.dh.remove_global(inner.global.take().unwrap());
+                    self.dh.remove_global::<D>(inner.global.take().unwrap());
                 }
             }
             for manager in self.instances.iter_mut() {

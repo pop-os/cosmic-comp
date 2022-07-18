@@ -8,7 +8,7 @@ use std::{
 use smithay::{
     reexports::wayland_server::{
         backend::{ClientData, ClientId, GlobalId, ObjectId},
-        Client, DataInit, DelegateDispatch, DelegateGlobalDispatch, Dispatch, DisplayHandle,
+        Client, DataInit, Dispatch, DisplayHandle,
         GlobalDispatch, New, Resource,
     },
     wayland::output::Output,
@@ -142,7 +142,7 @@ pub trait WorkspaceClientHandler {
     fn workspace_state(&self) -> &WorkspaceClientState;
 }
 
-impl<D> DelegateGlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData, D>
+impl<D> GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData, D>
     for WorkspaceState<D>
 where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
@@ -175,7 +175,7 @@ where
     }
 }
 
-impl<D> DelegateDispatch<ZcosmicWorkspaceManagerV1, (), D> for WorkspaceState<D>
+impl<D> Dispatch<ZcosmicWorkspaceManagerV1, (), D> for WorkspaceState<D>
 where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV1, ()>
@@ -223,7 +223,7 @@ where
     }
 }
 
-impl<D> DelegateDispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData, D> for WorkspaceState<D>
+impl<D> Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData, D> for WorkspaceState<D>
 where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV1, ()>
@@ -279,7 +279,7 @@ where
     }
 }
 
-impl<D> DelegateDispatch<ZcosmicWorkspaceHandleV1, WorkspaceData, D> for WorkspaceState<D>
+impl<D> Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData, D> for WorkspaceState<D>
 where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV1, ()>
