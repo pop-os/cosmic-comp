@@ -61,4 +61,8 @@ debug = true
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/pop-os/smithay", branch = "main" }
+smithay = { git = "https://github.com/pop-os/smithay", branch = "deps/drm-rs-update" }
+
+[patch.crates-io]
+drm-ffi = { git = "https://github.com/Smithay/drm-rs", branch = "feature/force_probe" }
+drm = { git = "https://github.com/Smithay/drm-rs", branch = "feature/force_probe" }

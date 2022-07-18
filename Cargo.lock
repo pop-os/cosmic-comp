@@ -177,7 +177,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a22a6a8f622f797120d452c630b0ab12e1331a1a753e2039ce7868d4ac77b4ee"
 dependencies = [
  "log",
- "nix 0.24.1",
+ "nix 0.24.2",
  "slotmap",
  "thiserror",
  "vec_map",
@@ -402,9 +402,9 @@ dependencies = [
 
 [[package]]
 name = "crypto-common"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ccfd8c0ee4cce11e45b3fd6f9d5e69e0cc62912aa6a0cb1bf4617b0eba5a12f"
+checksum = "1bfb12502f3fc46cca1bb51ac28df9d618d813cdc3d2f25b9fe775a34af26bb3"
 dependencies = [
  "generic-array",
  "typenum",
@@ -527,23 +527,21 @@ checksum = "9ea835d29036a4087793836fa931b08837ad5e957da9e23886b29586fb9b6650"
 [[package]]
 name = "drm"
 version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "408e87132bd0d8a13a3b418b9d51fb92973b764d1d40785947d233ab2945fd27"
+source = "git+https://github.com/Smithay/drm-rs?branch=feature/force_probe#352ba9bfb483cb725840dd09df98f02e817a8494"
 dependencies = [
  "bitflags",
  "drm-ffi",
  "drm-fourcc",
- "nix 0.22.3",
+ "nix 0.24.2",
 ]
 
 [[package]]
 name = "drm-ffi"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "198d1b7fdb33b75e9bd08ba6842ddb730760f7eeea25552acc88c5403c4f0652"
+source = "git+https://github.com/Smithay/drm-rs?branch=feature/force_probe#352ba9bfb483cb725840dd09df98f02e817a8494"
 dependencies = [
  "drm-sys",
- "nix 0.22.3",
+ "nix 0.24.2",
 ]
 
 [[package]]
@@ -555,8 +553,7 @@ checksum = "0aafbcdb8afc29c1a7ee5fbe53b5d62f4565b35a042a662ca9fecd0b54dae6f4"
 [[package]]
 name = "drm-sys"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5f45fcdd3b2f3c13fadea11b2a4eda2023e7de55021da039eac4a3beecfe91c"
+source = "git+https://github.com/Smithay/drm-rs?branch=feature/force_probe#352ba9bfb483cb725840dd09df98f02e817a8494"
 dependencies = [
  "libc",
 ]
@@ -719,9 +716,9 @@ dependencies = [
 
 [[package]]
 name = "gimli"
-version = "0.26.1"
+version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78cc372d058dcf6d5ecd98510e7fbc9e5aec4d21de70f65fea8fecebcd881bd4"
+checksum = "22030e2c5a68ec659fde1e949a745124b48e6fa8b045b7ed5bd1fe4ccc5c4e5d"
 
 [[package]]
 name = "gl_generator"
@@ -736,9 +733,9 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.12.2"
+version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "607c8a29735385251a339424dd462993c0fed8fa09d378f259377df08c126022"
+checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
 
 [[package]]
 name = "hermit-abi"
@@ -1071,9 +1068,9 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.24.1"
+version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f17df307904acd05aa8e32e97bb20f2a0df1728bbc2d771ae8f9a90463441e9"
+checksum = "195cdbc1741b8134346d515b3a56a1c94b0912758009cfd53f99ea0f57b065fc"
 dependencies = [
  "bitflags",
  "cfg-if 1.0.0",
@@ -1367,9 +1364,9 @@ checksum = "7ef03e0a2b150c7a90d01faf6254c9c48a41e95fb2a8c2ac1c6f0d2b9aefc342"
 
 [[package]]
 name = "rustversion"
-version = "1.0.7"
+version = "1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0a5f7c728f5d284929a1cccb5bc19884422bfe6ef4d6c409da2c41838983fcf"
+checksum = "24c8ad4f0c00e1eb5bc7614d236a7f1300e3dbd76b68cac8e06fb00b015ad8d8"
 
 [[package]]
 name = "ryu"
@@ -1517,7 +1514,7 @@ checksum = "2fd0db749597d91ff862fd1d55ea87f7855a744a8425a64695b6fca237d1dad1"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/pop-os/smithay?branch=main#2a2c55b8cede75d988599e2320c53510dd9fabf6"
+source = "git+https://github.com/pop-os/smithay?branch=deps/drm-rs-update#16b54a23fc43b79ab8ad7a679c59527df555b074"
 dependencies = [
  "appendlist",
  "bitflags",
@@ -1535,7 +1532,7 @@ dependencies = [
  "libc",
  "libloading",
  "libseat",
- "nix 0.22.3",
+ "nix 0.24.2",
  "once_cell",
  "rand",
  "scan_fmt",
@@ -1729,9 +1726,9 @@ dependencies = [
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.1"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bd2fe26506023ed7b5e1e315add59d6f584c621d037f9368fea9cfb988f368c"
+checksum = "15c61ba63f9235225a22310255a29b806b907c9b8c964bcbd0a2c70f3f2deea7"
 
 [[package]]
 name = "uuid"
@@ -1823,7 +1820,7 @@ dependencies = [
  "cc",
  "downcast-rs",
  "log",
- "nix 0.24.1",
+ "nix 0.24.2",
  "scoped-tls",
  "smallvec",
  "wayland-sys 0.30.0-beta.7",
@@ -1855,7 +1852,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "log",
- "nix 0.24.1",
+ "nix 0.24.2",
  "thiserror",
  "wayland-backend",
  "wayland-scanner 0.30.0-beta.7",
@@ -1965,7 +1962,7 @@ dependencies = [
  "bitflags",
  "downcast-rs",
  "log",
- "nix 0.24.1",
+ "nix 0.24.2",
  "thiserror",
  "wayland-backend",
  "wayland-scanner 0.30.0-beta.7",
@@ -2130,7 +2127,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "592b4883219f345e712b3209c62654ebda0bb50887f330cbd018d0f654bfd507"
 dependencies = [
  "gethostname",
- "nix 0.24.1",
+ "nix 0.24.2",
  "winapi",
  "winapi-wsapoll",
  "x11rb-protocol",
@@ -2142,7 +2139,7 @@ version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56b245751c0ac9db0e006dc812031482784e434630205a93c73cfefcaabeac67"
 dependencies = [
- "nix 0.24.1",
+ "nix 0.24.2",
 ]
 
 [[package]]

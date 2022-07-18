@@ -618,7 +618,7 @@ impl Device {
     ) -> Result<Output> {
         let drm = &mut *self.drm.as_source_mut();
         let crtc_info = drm.get_crtc(crtc)?;
-        let conn_info = drm.get_connector(conn)?;
+        let conn_info = drm.get_connector(conn, false)?;
         let vrr = drm_helpers::set_vrr(drm, crtc, conn, true).unwrap_or(false);
         let interface = drm_helpers::interface_name(drm, conn)?;
         let edid_info = drm_helpers::edid_info(drm, conn)?;
@@ -821,7 +821,7 @@ impl KmsState {
             } else {
                 let drm = &mut *device.drm.as_source_mut();
                 let conn = surface.connector;
-                let conn_info = drm.get_connector(conn)?;
+                let conn_info = drm.get_connector(conn, false)?;
                 let mode = conn_info
                     .modes()
                     .iter()
