@@ -107,14 +107,10 @@ impl CompositorHandler for State {
     }
 
     fn commit(&mut self, dh: &DisplayHandle, surface: &WlSurface) {
+        // first load the buffer for various smithay helper functions
         on_commit_buffer_handler(surface);
-        self.early_import_surface(dh, surface);
-        self.common.shell.popups.commit(surface);
-        for workspace in &self.common.shell.spaces {
-            workspace.space.commit(surface);
-        }
 
-        // initial configure
+        // then handle initial configure events and map windows if necessary
         if let Some((window, seat)) = self
             .common
             .shell
@@ -156,6 +152,8 @@ impl CompositorHandler for State {
             self.xdg_popup_ensure_initial_configure(&popup);
         }
 
+        // at last handle some special cases, like grabs and changing layer surfaces
+
         // If we would re-position the window inside the grab we would get a weird jittery animation.
         // We only want to resize once the client has acknoledged & commited the new size,
         // so we need to carefully track the state through different handlers.
@@ -190,6 +188,17 @@ impl CompositorHandler for State {
             }
         }
 
+        // We need to know every potential output for importing to the right gpu and scheduling a render,
+        // so call this only after every potential surface map operation has been done.
+        self.early_import_surface(dh, surface);
+
+        // and refresh smithays internal state
+        self.common.shell.popups.commit(surface);
+        for workspace in &self.common.shell.spaces {
+            workspace.space.commit(surface);
+        }
+
+        // re-arrange layer-surfaces (commits may change size and positioning)
         if let Some(output) = self.common.shell.outputs().find(|o| {
             let map = layer_map_for_output(o);
             map.layer_for_surface(surface, WindowSurfaceType::ALL)
