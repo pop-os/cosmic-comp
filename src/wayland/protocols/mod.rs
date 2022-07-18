@@ -3,4 +3,5 @@
 pub mod drm;
 pub mod output_configuration;
 pub mod toplevel_info;
+pub mod toplevel_management;
 pub mod workspace;

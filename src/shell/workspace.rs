@@ -20,7 +20,7 @@ use smithay::{
 use std::collections::HashMap;
 
 pub struct Workspace {
-    pub(super) idx: u8,
+    pub idx: u8,
     pub space: Space,
     pub tiling_layer: TilingLayout,
     pub floating_layer: FloatingLayout,

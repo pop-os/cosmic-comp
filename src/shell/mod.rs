@@ -22,9 +22,11 @@ use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State 
 
 use crate::{
     config::{Config, WorkspaceMode as ConfigMode},
+    //state::ClientState,
     utils::prelude::*,
     wayland::protocols::{
         toplevel_info::ToplevelInfoState,
+        toplevel_management::{ToplevelManagementState, ManagementCapabilities},
         workspace::{
             WorkspaceCapabilities, WorkspaceGroupHandle, WorkspaceHandle, WorkspaceState,
             WorkspaceUpdateGuard,
@@ -52,6 +54,7 @@ pub struct Shell {
     // wayland_state
     pub layer_shell_state: WlrLayerShellState,
     pub toplevel_info_state: ToplevelInfoState<State>,
+    pub toplevel_management_state: ToplevelManagementState,
     pub xdg_shell_state: XdgShellState,
     pub workspace_state: WorkspaceState<State>,
 }
@@ -81,10 +84,24 @@ const UNINIT_SPACE: MaybeUninit<Workspace> = MaybeUninit::uninit();
 
 impl Shell {
     pub fn new(config: &Config, dh: &DisplayHandle) -> Self {
+        // TODO: Privileged protocols
         let layer_shell_state = WlrLayerShellState::new::<State, _>(dh, None);
-        let toplevel_info_state = ToplevelInfoState::new(dh, |_| true);
         let xdg_shell_state = XdgShellState::new::<State, _>(dh, None);
-        let mut workspace_state = WorkspaceState::new(dh, |_| true);
+        let toplevel_info_state = ToplevelInfoState::new(
+            dh,
+            //|client| client.get_data::<ClientState>().unwrap().privileged,
+            |_| true);
+        let toplevel_management_state = ToplevelManagementState::new::<State, _>(
+            dh,
+            vec![ManagementCapabilities::Close, ManagementCapabilities::Activate],
+            //|client| client.get_data::<ClientState>().unwrap().privileged,
+            |_| true,
+        );
+        let mut workspace_state = WorkspaceState::new(
+            dh,
+            //|client| client.get_data::<ClientState>().unwrap().privileged,
+            |_| true,
+        );
 
         let mut spaces = unsafe {
             let mut spaces = [UNINIT_SPACE; MAX_WORKSPACES];
@@ -116,6 +133,7 @@ impl Shell {
 
             layer_shell_state,
             toplevel_info_state,
+            toplevel_management_state,
             xdg_shell_state,
             workspace_state,
         }

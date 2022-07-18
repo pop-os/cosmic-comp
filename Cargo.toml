@@ -31,7 +31,7 @@ atomic_float = "0.1"
 libsystemd = "0.5"
 wayland-backend = "=0.1.0-beta.8"
 wayland-scanner = "=0.30.0-beta.8"
-cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", branch = "main" }
+cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", branch = "main", default-features = false, features = ["server"] }
 
 [dependencies.smithay]
 version = "0.3"

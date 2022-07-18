@@ -11,6 +11,7 @@ pub mod primary_selection;
 pub mod seat;
 pub mod shm;
 pub mod toplevel_info;
+pub mod toplevel_management;
 pub mod viewporter;
 pub mod wl_drm;
 pub mod workspace;

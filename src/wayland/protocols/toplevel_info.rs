@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::sync::Mutex;
+use std::{
+    collections::HashMap,
+    sync::Mutex,
+};
 
 use smithay::{
     desktop::Window,
@@ -8,11 +11,12 @@ use smithay::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::{
             backend::{ClientId, GlobalId, ObjectId},
+            protocol::wl_surface::WlSurface,
             Client, DataInit, Dispatch, DisplayHandle,
             GlobalDispatch, New, Resource,
         },
     },
-    utils::IsAlive,
+    utils::{IsAlive, Rectangle, Logical},
     wayland::{
         compositor::with_states, output::Output, shell::xdg::XdgToplevelSurfaceRoleAttributes,
     },
@@ -27,7 +31,7 @@ use cosmic_protocols::toplevel_info::v1::server::{
 
 pub struct ToplevelInfoState<D> {
     dh: DisplayHandle,
-    toplevels: Vec<Window>,
+    pub(super) toplevels: Vec<Window>,
     instances: Vec<ZcosmicToplevelInfoV1>,
     global: GlobalId,
     _dispatch_data: std::marker::PhantomData<D>,
@@ -43,23 +47,39 @@ pub struct ToplevelInfoGlobalData {
 }
 
 #[derive(Default)]
-struct ToplevelStateInner {
+pub(super) struct ToplevelStateInner {
     instances: Vec<ZcosmicToplevelHandleV1>,
     outputs: Vec<Output>,
     workspaces: Vec<WorkspaceHandle>,
     minimized: bool,
+    pub(super) rectangles: HashMap<ClientId, (WlSurface, Rectangle<i32, Logical>)>,
 }
-type ToplevelState = Mutex<ToplevelStateInner>;
+pub(super) type ToplevelState = Mutex<ToplevelStateInner>;
 
-#[derive(Default)]
 pub struct ToplevelHandleStateInner {
     outputs: Vec<Output>,
     workspaces: Vec<WorkspaceHandle>,
     title: String,
     app_id: String,
     states: Vec<States>,
+    pub(super) window: Window,
 }
 pub type ToplevelHandleState = Mutex<ToplevelHandleStateInner>;
+
+impl ToplevelHandleStateInner {
+    fn from_window(window: &Window) -> ToplevelHandleState {
+        ToplevelHandleState::new(
+            ToplevelHandleStateInner {
+                outputs: Vec::new(),
+                workspaces: Vec::new(),
+                title: String::new(),
+                app_id: String::new(),
+                states: Vec::new(),
+                window: window.clone(),
+            }
+        )
+    }
+}
 
 impl<D> GlobalDispatch<ZcosmicToplevelInfoV1, ToplevelInfoGlobalData, D>
     for ToplevelInfoState<D>
@@ -82,6 +102,7 @@ where
         for window in &state.toplevel_info_state().toplevels {
             send_toplevel_to_client::<D>(dh, Some(state.workspace_state()), &instance, window);
         }
+        state.toplevel_info_state_mut().instances.push(instance);
     }
 
     fn can_view(client: Client, global_data: &ToplevelInfoGlobalData) -> bool {
@@ -229,18 +250,21 @@ where
 
     pub fn refresh(&mut self, workspace_state: Option<&WorkspaceState<D>>) {
         self.toplevels.retain(|window| {
+            let mut state = window
+                .user_data()
+                .get::<ToplevelState>()
+                .unwrap()
+                .lock()
+                .unwrap();
+            state.rectangles
+                .retain(|_, (surface, _)| surface.alive());
             if window.alive() {
+                std::mem::drop(state);
                 for instance in &self.instances {
                     send_toplevel_to_client::<D>(&self.dh, workspace_state, instance, window);
                 }
                 true
             } else {
-                let state = window
-                    .user_data()
-                    .get::<ToplevelState>()
-                    .unwrap()
-                    .lock()
-                    .unwrap();
                 for handle in &state.instances {
                     // don't send events to stopped instances
                     if self
@@ -291,7 +315,7 @@ fn send_toplevel_to_client<D>(
                     .create_resource::<ZcosmicToplevelHandleV1, _, D>(
                         dh,
                         info.version(),
-                        ToplevelHandleState::default(),
+                        ToplevelHandleStateInner::from_window(window),
                     )
                 {
                     state.instances.push(toplevel_handle);
@@ -446,6 +470,16 @@ fn send_toplevel_to_client<D>(
     if changed {
         instance.done();
     }
+}
+
+pub(super) fn window_from_handle(handle: ZcosmicToplevelHandleV1) -> Window {
+    handle
+        .data::<ToplevelHandleState>()
+        .unwrap()
+        .lock()
+        .unwrap()
+        .window
+        .clone()
 }
 
 macro_rules! delegate_toplevel_info {
