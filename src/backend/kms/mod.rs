@@ -40,7 +40,7 @@ use smithay::{
             DisplayHandle, Resource,
         },
     },
-    utils::signaling::{Linkable, SignalToken, Signaler},
+    utils::{Size, signaling::{Linkable, SignalToken, Signaler}},
     wayland::{
         dmabuf::DmabufGlobal,
         output::{Mode as OutputMode, Output, PhysicalProperties},
@@ -825,6 +825,12 @@ impl KmsState {
                 let mode = conn_info
                     .modes()
                     .iter()
+                    // match the size
+                    .filter(|mode| {
+                        let (x, y) = mode.size();
+                        Size::from((x as i32, y as i32)) == output_config.mode_size()
+                    })
+                    // and then select the closest refresh rate (e.g. to match 59.98 as 60)
                     .min_by_key(|mode| {
                         let refresh_rate = drm_helpers::calculate_refresh_rate(**mode);
                         (output_config.mode.1.unwrap() as i32 - refresh_rate as i32).abs()
