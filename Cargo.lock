@@ -1501,7 +1501,7 @@ checksum = "2fd0db749597d91ff862fd1d55ea87f7855a744a8425a64695b6fca237d1dad1"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/pop-os/smithay?branch=main#2125a22dd29b59d0a52415cb8db8a76b76bd6c89"
+source = "git+https://github.com/Smithay/smithay.git?rev=b68c9ebc#b68c9ebc12e58f04583500e881e4bd6b69ab9c8d"
 dependencies = [
  "appendlist",
  "bitflags",
@@ -1561,7 +1561,7 @@ dependencies = [
 [[package]]
 name = "smithay-egui"
 version = "0.1.0"
-source = "git+https://github.com/Smithay/smithay-egui.git?rev=9bba86a7#9bba86a743b8bc1c30f236d2407525fde8bcad50"
+source = "git+https://github.com/Smithay/smithay-egui.git?rev=0f60dc43#0f60dc431f824e1351e5fd35f6c34e4a0b0d0d0c"
 dependencies = [
  "cgmath",
  "egui",
