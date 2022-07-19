@@ -318,6 +318,7 @@ fn send_toplevel_to_client<D>(
                         ToplevelHandleStateInner::from_window(window),
                     )
                 {
+                    info.toplevel(&toplevel_handle);
                     state.instances.push(toplevel_handle);
                     state.instances.last().unwrap()
                 } else {
