@@ -350,7 +350,7 @@ fn send_toplevel_to_client<D>(
             changed = true;
         }
         if handle_state.app_id != attributes.app_id.as_deref().unwrap_or(&"") {
-            handle_state.title = attributes.app_id.clone().unwrap_or_else(String::new);
+            handle_state.app_id = attributes.app_id.clone().unwrap_or_else(String::new);
             instance.app_id(handle_state.app_id.clone());
             changed = true;
         }
