@@ -752,5 +752,6 @@ pub enum Action {
     ToggleTiling,
     ToggleWindowFloating,
     Fullscreen,
+    Screenshot,
     Spawn(String),
 }

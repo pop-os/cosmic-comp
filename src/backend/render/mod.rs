@@ -150,7 +150,7 @@ pub fn render_output<R>(
     state: &mut Common,
     output: &Output,
     hardware_cursor: bool,
-    #[cfg(feature = "debug")] fps: &mut Fps,
+    #[cfg(feature = "debug")] fps: Option<&mut Fps>,
 ) -> Result<Option<Vec<Rectangle<i32, Physical>>>, RenderError<R>>
 where
     R: Renderer + ImportAll + AsGles2Renderer,
@@ -198,7 +198,7 @@ fn render_desktop<R>(
     state: &mut Common,
     output: &Output,
     hardware_cursor: bool,
-    #[cfg(feature = "debug")] fps: &mut Fps,
+    #[cfg(feature = "debug")] fps: Option<&mut Fps>,
 ) -> Result<Option<Vec<Rectangle<i32, Physical>>>, RenderError<R>>
 where
     R: Renderer + ImportAll + AsGles2Renderer,
@@ -216,14 +216,16 @@ where
             .unwrap_or(Rectangle::from_loc_and_size((0, 0), (0, 0)));
         let scale = output.current_scale().fractional_scale();
 
-        let fps_overlay = fps_ui(
-            _gpu,
-            state,
-            fps,
-            output_geo.to_f64().to_physical(scale),
-            scale,
-        );
-        custom_elements.push(fps_overlay.into());
+        if let Some(fps) = fps {
+            let fps_overlay = fps_ui(
+                _gpu,
+                state,
+                fps,
+                output_geo.to_f64().to_physical(scale),
+                scale,
+            );
+            custom_elements.push(fps_overlay.into());
+        }
 
         let area = Rectangle::<f64, smithay::utils::Logical>::from_loc_and_size(
             state
@@ -282,7 +284,7 @@ fn render_fullscreen<R>(
     state: &mut Common,
     output: &Output,
     hardware_cursor: bool,
-    #[cfg(feature = "debug")] fps: &mut Fps,
+    #[cfg(feature = "debug")] fps: Option<&mut Fps>,
 ) -> Result<Option<Vec<Rectangle<i32, Physical>>>, RenderError<R>>
 where
     R: Renderer + ImportAll + AsGles2Renderer,
@@ -296,7 +298,7 @@ where
     let mut custom_elements = Vec::<CustomElem>::new();
 
     #[cfg(feature = "debug")]
-    {
+    if let Some(fps) = fps {
         let output_geo = output.geometry();
         let fps_overlay = fps_ui(
             _gpu,

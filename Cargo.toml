@@ -18,6 +18,7 @@ serde_json = "1"
 sendfd = "0.4.1"
 egui = { version = "0.18.1", optional = true }
 edid-rs = { version = "0.1" }
+image = { version = "0.24.3", default-features = false, features = ["png"] }
 lazy_static = "1.4.0"
 thiserror = "1.0.26"
 regex = "1"

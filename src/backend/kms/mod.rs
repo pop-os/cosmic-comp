@@ -63,7 +63,7 @@ use socket::*;
 
 pub struct KmsState {
     devices: HashMap<DrmNode, Device>,
-    api: GpuManager<EglGlesBackend>,
+    pub api: GpuManager<EglGlesBackend>,
     pub primary: DrmNode,
     session: AutoSession,
     signaler: Signaler<Signal>,

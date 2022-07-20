@@ -387,6 +387,35 @@ impl State {
                                         slog_scope::warn!("Failed to spawn: {}", err);
                                     }
                                 }
+                                Action::Screenshot => {
+                                    let home = match std::env::var("HOME") {
+                                        Ok(home) => home,
+                                        Err(err) => {
+                                            slog_scope::error!("$HOME is not set, can't save screenshots: {}", err);
+                                            break;
+                                        }
+                                    };
+                                    let timestamp = match std::time::SystemTime::UNIX_EPOCH.elapsed() {
+                                        Ok(duration) => duration.as_secs(),
+                                        Err(err) => {
+                                            slog_scope::error!("Unable to get timestamp, can't save screenshots: {}", err);
+                                            break;
+                                        }
+                                    };
+                                    for output in self.common.shell.outputs.clone().into_iter() {
+                                        match self.backend.offscreen_for_output(&output, &mut self.common) {
+                                            Ok(buffer) => {
+                                                let mut path = std::path::PathBuf::new();
+                                                path.push(&home);
+                                                path.push(format!("{}_{}.png", output.name(), timestamp));
+                                                if let Err(err) = buffer.save(&path) {
+                                                    slog_scope::error!("Unable to save screenshot at {}: {}", path.display(), err);
+                                                }
+                                            },
+                                            Err(err) => slog_scope::error!("Could not save screenshot for output {}: {}", output.name(), err),
+                                        }
+                                    }
+                                }
                             }
                         }
                         break;
