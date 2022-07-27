@@ -24,6 +24,7 @@ Package: cosmic-comp
 Architecture: amd64 arm64
 Depends: ${misc:Depends}, ${shlibs:Depends}
 Recommends:
+    alsa-utils,
     cosmic-app-library,
     cosmic-launcher,
     xdg-shell-wrapper
