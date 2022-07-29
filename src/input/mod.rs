@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    config::Action,
+    config::{Action, Config},
     shell::{
         Workspace,
         grabs::SeatMoveGrabState,
@@ -19,7 +19,6 @@ use smithay::{
         primary_selection::set_primary_focus,
         seat::{
             keysyms, ButtonEvent, CursorImageStatus, FilterResult, KeysymHandle, MotionEvent, Seat,
-            XkbConfig,
         },
         shell::wlr_layer::Layer as WlrLayer,
         SERIAL_COUNTER,
@@ -99,7 +98,7 @@ impl Devices {
     }
 }
 
-pub fn add_seat(dh: &DisplayHandle, name: String) -> Seat<State> {
+pub fn add_seat(dh: &DisplayHandle, config: &Config, name: String) -> Seat<State> {
     let mut seat = Seat::<State>::new(dh, name, None);
     let userdata = seat.user_data();
     userdata.insert_if_missing(SeatId::default);
@@ -118,8 +117,9 @@ pub fn add_seat(dh: &DisplayHandle, name: String) -> Seat<State> {
     // So instead of doing the right thing (and initialize these capabilities as matching
     // devices appear), we have to surrender to reality and just always expose a keyboard and pointer.
     let dh_clone = dh.clone();
+    let conf = config.xkb_config();
     let _ = seat.add_keyboard(
-        XkbConfig::default(),
+        (&conf).into(),
         200,
         25,
         move |seat, focus| {

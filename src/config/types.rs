@@ -9,12 +9,12 @@ pub use smithay::{
     utils::{Logical, Physical, Point, Size, Transform},
     wayland::{
         output::{Mode, Output},
-        seat::{keysyms as KeySyms, Keysym, ModifiersState as KeyModifiers},
+        seat::{keysyms as KeySyms, Keysym, ModifiersState as KeyModifiers, XkbConfig as WlXkbConfig},
     },
 };
 use xkbcommon::xkb;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct XkbConfig {
     pub rules: String,
     pub model: String,
@@ -31,6 +31,18 @@ impl Default for XkbConfig {
             layout: String::new(),
             variant: String::new(),
             options: None,
+        }
+    }
+}
+
+impl<'a> Into<WlXkbConfig<'a>> for &'a XkbConfig {
+    fn into(self) -> WlXkbConfig<'a> {
+        WlXkbConfig {
+            rules: &self.rules,
+            model: &self.model,
+            layout: &self.layout,
+            variant: &self.variant,
+            options: self.options.clone(),
         }
     }
 }

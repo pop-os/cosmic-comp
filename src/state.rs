@@ -277,7 +277,7 @@ impl State {
         let wl_drm_state = WlDrmState;
 
         let shell = Shell::new(&config, dh);
-        let initial_seat = crate::input::add_seat(dh, "seat-0".into());
+        let initial_seat = crate::input::add_seat(dh, &config, "seat-0".into());
 
         #[cfg(not(feature = "debug"))]
         let dirty_flag = Arc::new(AtomicBool::new(false));

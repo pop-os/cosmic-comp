@@ -373,6 +373,10 @@ impl Config {
             .insert(infos, configs);
     }
 
+    pub fn xkb_config(&self) -> XkbConfig {
+        self.dynamic_conf.inputs().xkb.clone()
+    }
+
     pub fn read_device(&mut self, device: &mut InputDevice) {
         use std::collections::hash_map::Entry;
 
