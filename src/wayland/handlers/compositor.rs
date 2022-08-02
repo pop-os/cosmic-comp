@@ -206,6 +206,11 @@ impl CompositorHandler for State {
         }) {
             layer_map_for_output(output).arrange(dh);
         }
+
+        // schedule a new render
+        for output in self.common.shell.outputs_for_surface(surface) {
+            self.backend.schedule_render(&self.common.event_loop_handle, &output);
+        }
     }
 }
 
