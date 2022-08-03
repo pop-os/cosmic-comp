@@ -35,8 +35,6 @@ impl State {
                     }
                 }
             }
-            self.backend
-                .schedule_render(&self.common.event_loop_handle, &output);
         }
     }
 
