@@ -895,9 +895,9 @@ impl KmsState {
     }
     pub fn target_node_for_output(&self, output: &Output) -> Option<DrmNode> {
         self.devices
-            .iter()
-            .find(|(_, dev)| dev.surfaces.values().any(|s| s.output == *output))
-            .map(|(target, _)| target)
+            .values()
+            .find(|dev| dev.surfaces.values().any(|s| s.output == *output))
+            .map(|dev| &dev.render_node)
             .copied()
     }
 
