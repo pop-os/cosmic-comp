@@ -61,7 +61,7 @@ impl WinitState {
             &self.output,
             true,
             #[cfg(feature = "debug")]
-            &mut self.fps,
+            Some(&mut self.fps),
         ) {
             Ok(damage) => {
                 state

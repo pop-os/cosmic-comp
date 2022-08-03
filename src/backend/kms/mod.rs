@@ -766,7 +766,7 @@ impl Surface {
             &self.output,
             false,
             #[cfg(feature = "debug")]
-            &mut self.fps,
+            Some(&mut self.fps),
         ) {
             Ok(_) => {
                 surface

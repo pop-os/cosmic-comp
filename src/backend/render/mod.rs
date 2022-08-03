@@ -150,7 +150,7 @@ pub fn render_output<R>(
     state: &mut Common,
     output: &Output,
     hardware_cursor: bool,
-    #[cfg(feature = "debug")] fps: Option<&mut Fps>,
+    #[cfg(feature = "debug")] mut fps: Option<&mut Fps>,
 ) -> Result<Option<Vec<Rectangle<i32, Physical>>>, RenderError<R>>
 where
     R: Renderer + ImportAll + AsGles2Renderer,
@@ -158,7 +158,7 @@ where
     CustomElem: RenderElement<R>,
 {
     #[cfg(feature = "debug")]
-    {
+    if let Some(ref mut fps) = fps {
         fps.start();
     }
     let workspace = state.shell.active_space(output);
@@ -170,7 +170,7 @@ where
         }
         #[cfg(feature = "debug")]
         {
-            render_fullscreen(gpu, renderer, window, state, output, hardware_cursor, fps)
+            render_fullscreen(gpu, renderer, window, state, output, hardware_cursor, fps.as_deref_mut())
         }
     } else {
         #[cfg(not(feature = "debug"))]
@@ -179,12 +179,12 @@ where
         }
         #[cfg(feature = "debug")]
         {
-            render_desktop(gpu, renderer, age, state, output, hardware_cursor, fps)
+            render_desktop(gpu, renderer, age, state, output, hardware_cursor, fps.as_deref_mut())
         }
     };
 
     #[cfg(feature = "debug")]
-    {
+    if let Some(ref mut fps) = fps {
         fps.end();
     }
 

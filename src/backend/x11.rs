@@ -205,7 +205,7 @@ impl Surface {
             &self.output,
             true,
             #[cfg(feature = "debug")]
-            &mut self.fps,
+            Some(&mut self.fps),
         ) {
             Ok(_) => {
                 state
