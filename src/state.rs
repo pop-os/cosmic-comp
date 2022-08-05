@@ -216,43 +216,61 @@ impl BackendData {
             },
             utils::Rectangle,
         };
-        use crate::backend::render::render_output;
+        use crate::backend::render::{render_output, AsGles2Renderer, CustomElem};
+        use smithay::backend::renderer::{Renderer, ImportAll};
+        use smithay::desktop::space::RenderElement;
 
-        let mut _tmp_multirenderer = None;
-        let (node, renderer) = match self {
-            BackendData::Winit(winit) => (None, winit.backend.renderer()),
-            BackendData::X11(x11) => (None, &mut x11.renderer),
+        fn capture<E, T, R>(
+            gpu: Option<DrmNode>,
+            renderer: &mut R,
+            output: &Output,
+            state: &mut Common,
+        ) -> anyhow::Result<image::ImageBuffer<image::Rgba<u8>, Vec<u8>>>
+        where
+            E: std::error::Error + Send + Sync + 'static,
+            T: Clone + 'static,
+            R: Renderer<Error=E, TextureId=T>
+            + ImportAll
+            + AsGles2Renderer
+            + Offscreen<Gles2Renderbuffer>
+            + Bind<Gles2Renderbuffer>
+            + ExportMem,
+            CustomElem: RenderElement<R>,
+        {
+            let size = output.geometry().size.to_f64().to_buffer(
+                output.current_scale().fractional_scale(),
+                output.current_transform().into()
+            ).to_i32_round();
+            let buffer = Offscreen::<Gles2Renderbuffer>::create_buffer(renderer, size)?;
+            renderer.bind(buffer)?;
+            render_output(
+                gpu.as_ref(),
+                renderer,
+                0,
+                state,
+                output,
+                false,
+                #[cfg(feature = "debug")]
+                None,
+            ).map_err(|err| anyhow::anyhow!("Failed to render output: {:?}", err))?; // lifetime issue, grrr
+            let mapping = renderer.copy_framebuffer(Rectangle::from_loc_and_size((0, 0), size))?;
+            let data = Vec::from(renderer.map_texture(&mapping)?);
+
+            Ok(image::ImageBuffer::from_raw(size.w as u32, size.h as u32, data).with_context(|| "buffer smaller then dimensions")?)
+        }
+
+        match self {
+            BackendData::Winit(winit) => capture(None, winit.backend.renderer(), output, state),
+            BackendData::X11(x11) => capture(None, &mut x11.renderer, output, state),
             BackendData::Kms(kms) => {
                 let node = kms.target_node_for_output(output)
                     .unwrap_or(kms.primary)
                     .node_with_type(NodeType::Render)
                     .with_context(|| "Unable to find node")??;
-                _tmp_multirenderer = Some(kms.api.renderer::<Gles2Renderbuffer>(&node, &node)?);
-                (Some(node), _tmp_multirenderer.as_mut().map(|x| x.as_mut()).unwrap())
+                capture(Some(node), &mut kms.api.renderer::<Gles2Renderbuffer>(&node, &node)?, output, state)
             },
             BackendData::Unset => unreachable!(),
-        };
-
-        let size = output.geometry().size.to_f64().to_buffer(
-            output.current_scale().fractional_scale(),
-            output.current_transform().into()
-        ).to_i32_round();
-        let buffer = Offscreen::<Gles2Renderbuffer>::create_buffer(renderer, size)?;
-        renderer.bind(buffer)?;
-        render_output(
-            node.as_ref(),
-            renderer,
-            0,
-            state,
-            output,
-            false,
-            #[cfg(feature = "debug")]
-            None,
-        )?;
-        let mapping = renderer.copy_framebuffer(Rectangle::from_loc_and_size((0, 0), size))?;
-        let data = Vec::from(renderer.map_texture(&mapping)?);
-
-        Ok(image::ImageBuffer::from_raw(size.w as u32, size.h as u32, data).with_context(|| "buffer smaller then dimensions")?)
+        }
     }
 }
 
