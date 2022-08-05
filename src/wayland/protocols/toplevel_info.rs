@@ -473,14 +473,16 @@ fn send_toplevel_to_client<D>(
     }
 }
 
-pub(super) fn window_from_handle(handle: ZcosmicToplevelHandleV1) -> Window {
+pub fn window_from_handle(handle: ZcosmicToplevelHandleV1) -> Option<Window> {
     handle
         .data::<ToplevelHandleState>()
-        .unwrap()
-        .lock()
-        .unwrap()
-        .window
-        .clone()
+        .map(|state|
+            state
+            .lock()
+            .unwrap()
+            .window
+            .clone()
+        )
 }
 
 macro_rules! delegate_toplevel_info {

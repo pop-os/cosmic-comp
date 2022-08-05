@@ -23,7 +23,7 @@ use cosmic_protocols::toplevel_management::v1::server::{
 };
 pub use cosmic_protocols::toplevel_management::v1::server::zcosmic_toplevel_manager_v1::ZcosmicToplelevelManagementCapabilitiesV1 as ManagementCapabilities;
 
-use super::toplevel_info::{ToplevelInfoHandler, ToplevelHandleState, ToplevelState, window_from_handle};
+use super::toplevel_info::{ToplevelInfoHandler, ToplevelState, window_from_handle};
 
 
 pub struct ToplevelManagementState {
@@ -139,45 +139,39 @@ where
     ) {
         match request {
             zcosmic_toplevel_manager_v1::Request::Activate { toplevel, seat } => {
-                let window = window_from_handle(toplevel);
+                let window = window_from_handle(toplevel).unwrap();
                 state.activate(dh, &window, Seat::from_resource(&seat));
             },
             zcosmic_toplevel_manager_v1::Request::Close { toplevel } => {
-                let window = window_from_handle(toplevel);
+                let window = window_from_handle(toplevel).unwrap();
                 state.close(dh, &window);
             },
             zcosmic_toplevel_manager_v1::Request::SetFullscreen { toplevel, output } => {
-                let window = window_from_handle(toplevel);
+                let window = window_from_handle(toplevel).unwrap();
                 state.fullscreen(dh, &window, output.as_ref().and_then(Output::from_resource))
             },
             zcosmic_toplevel_manager_v1::Request::UnsetFullscreen { toplevel } => {
-                let window = window_from_handle(toplevel);
+                let window = window_from_handle(toplevel).unwrap();
                 state.unfullscreen(dh, &window);
             },
             zcosmic_toplevel_manager_v1::Request::SetMaximized { toplevel } => {
-                let window = window_from_handle(toplevel);
+                let window = window_from_handle(toplevel).unwrap();
                 state.maximize(dh, &window);
             },
             zcosmic_toplevel_manager_v1::Request::UnsetMaximized { toplevel } => {
-                let window = window_from_handle(toplevel);
+                let window = window_from_handle(toplevel).unwrap();
                 state.unmaximize(dh, &window);
             },
             zcosmic_toplevel_manager_v1::Request::SetMinimized { toplevel } => {
-                let window = window_from_handle(toplevel);
+                let window = window_from_handle(toplevel).unwrap();
                 state.minimize(dh, &window);
             },
             zcosmic_toplevel_manager_v1::Request::UnsetMinimized { toplevel } => {
-                let window = window_from_handle(toplevel);
+                let window = window_from_handle(toplevel).unwrap();
                 state.unminimize(dh, &window);
             },
             zcosmic_toplevel_manager_v1::Request::SetRectangle { toplevel, surface, x, y, width, height } => {
-                let window = toplevel
-                    .data::<ToplevelHandleState>()
-                    .unwrap()
-                    .lock()
-                    .unwrap()
-                    .window
-                    .clone();
+                let window = window_from_handle(toplevel).unwrap();
                 if let Some(toplevel_state) = window.user_data().get::<ToplevelState>() {
                     let mut toplevel_state = toplevel_state.lock().unwrap();
                     if let Some(client) = surface.client_id() {

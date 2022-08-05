@@ -4,6 +4,7 @@ pub mod buffer;
 pub mod compositor;
 pub mod data_device;
 pub mod dmabuf;
+pub mod export_dmabuf;
 pub mod layer_shell;
 pub mod output;
 pub mod output_configuration;

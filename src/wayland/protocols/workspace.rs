@@ -477,6 +477,25 @@ where
                 .map(|w| w.states.iter())
         })
     }
+    
+    pub fn group_handle(
+        &self,
+        group: &ZcosmicWorkspaceGroupHandleV1,
+    ) -> Option<WorkspaceGroupHandle> {
+        self.groups
+            .iter()
+            .find(|g| g.instances.contains(group))
+            .map(|g| WorkspaceGroupHandle { id: g.id })
+    }
+    pub fn workspace_handle(
+        &self,
+        workspace: &ZcosmicWorkspaceHandleV1,
+    ) -> Option<WorkspaceHandle> {
+        self.groups
+            .iter()
+            .find_map(|g| g.workspaces.iter().find(|w| w.instances.contains(workspace)))
+            .map(|w| WorkspaceHandle { id: w.id })
+    }
 
     pub fn raw_group_handle(
         &self,

@@ -35,7 +35,7 @@ use smithay::{
     wayland::{output::Output, shell::wlr_layer::Layer as WlrLayer},
 };
 
-mod cursor;
+pub mod cursor;
 use self::cursor::PointerElement;
 
 pub type GlMultiRenderer<'a> =
@@ -157,12 +157,42 @@ where
     <R as Renderer>::TextureId: Clone + 'static,
     CustomElem: RenderElement<R>,
 {
+    let workspace = state.shell.active_space(output).idx;
+    render_workspace(
+        gpu,
+        renderer,
+        age,
+        state,
+        workspace,
+        output,
+        hardware_cursor,
+    )
+}
+
+pub fn render_workspace<R>(
+    gpu: Option<&DrmNode>,
+    renderer: &mut R,
+    age: u8,
+    state: &mut Common,
+    space_idx: u8,
+    output: &Output,
+    hardware_cursor: bool,
+    #[cfg(feature = "debug")] mut fps: Option<&mut Fps>,
+) -> Result<Option<Vec<Rectangle<i32, Physical>>>, RenderError<R>>
+where
+    R: Renderer + ImportAll + AsGles2Renderer,
+    <R as Renderer>::TextureId: Clone + 'static,
+    CustomElem: RenderElement<R>,
+{
     #[cfg(feature = "debug")]
     if let Some(ref mut fps) = fps {
         fps.start();
     }
-    let workspace = state.shell.active_space(output);
+
+    let space_idx = space_idx as usize;
+    let workspace = &mut state.shell.spaces[space_idx];
     let maybe_fullscreen_window = workspace.get_fullscreen(output).cloned();
+
     let res = if let Some(window) = maybe_fullscreen_window {
         #[cfg(not(feature = "debug"))]
         {
@@ -175,11 +205,11 @@ where
     } else {
         #[cfg(not(feature = "debug"))]
         {
-            render_desktop(gpu, renderer, age, state, output, hardware_cursor)
+            render_desktop(gpu, renderer, age, state, space_idx, output, hardware_cursor)
         }
         #[cfg(feature = "debug")]
         {
-            render_desktop(gpu, renderer, age, state, output, hardware_cursor, fps.as_deref_mut())
+            render_desktop(gpu, renderer, age, state, space_idx, output, hardware_cursor, fps.as_deref_mut())
         }
     };
 
@@ -196,6 +226,7 @@ fn render_desktop<R>(
     renderer: &mut R,
     age: u8,
     state: &mut Common,
+    space_idx: usize,
     output: &Output,
     hardware_cursor: bool,
     #[cfg(feature = "debug")] fps: Option<&mut Fps>,
@@ -209,7 +240,7 @@ where
 
     #[cfg(feature = "debug")]
     {
-        let workspace = state.shell.active_space(output);
+        let workspace = &state.shell.spaces[space_idx];
         let output_geo = workspace
             .space
             .output_geometry(output)
@@ -268,7 +299,7 @@ where
         }
     }
 
-    state.shell.active_space_mut(output).space.render_output(
+    state.shell.spaces[space_idx].space.render_output(
         renderer,
         &output,
         age as usize,

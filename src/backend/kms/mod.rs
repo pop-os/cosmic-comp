@@ -52,7 +52,7 @@ use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
     rc::Rc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 mod drm_helpers;
@@ -86,6 +86,7 @@ pub struct Surface {
     surface: Option<GbmBufferedSurface<Rc<RefCell<GbmDevice<SessionFd>>>, SessionFd>>,
     connector: connector::Handle,
     output: Output,
+    last_render: Option<(Dmabuf, Instant)>,
     last_submit: Option<DrmEventTime>,
     refresh_rate: u32,
     vrr: bool,
@@ -679,6 +680,7 @@ impl Device {
             vrr,
             refresh_rate,
             last_submit: None,
+            last_render: None,
             pending: false,
             render_timer_token: None,
             #[cfg(feature = "debug")]
@@ -755,7 +757,7 @@ impl Surface {
             .with_context(|| "Failed to allocate buffer")?;
 
         renderer
-            .bind(buffer)
+            .bind(buffer.clone())
             .with_context(|| "Failed to bind buffer")?;
 
         match render::render_output(
@@ -769,6 +771,7 @@ impl Surface {
             Some(&mut self.fps),
         ) {
             Ok(_) => {
+                self.last_render = Some((buffer, Instant::now()));
                 surface
                     .queue_buffer()
                     .with_context(|| "Failed to submit buffer for display")?;
@@ -1007,5 +1010,15 @@ impl KmsState {
             }
         }
         Ok(())
+    }
+
+    pub fn capture_output(&self, output: &Output) -> Option<(DrmNode, Dmabuf, Instant)> {
+        self.devices
+            .values()
+            .find_map(|dev| dev.surfaces.values().find(|s| &s.output == output)
+                .and_then(|s| s.last_render.clone()
+                    .map(|(buf, time)| (dev.render_node.clone(), buf, time))
+                )
+            )
     }
 }

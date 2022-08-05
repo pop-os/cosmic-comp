@@ -6,7 +6,9 @@ use crate::{
     logger::LogState,
     shell::Shell,
     wayland::protocols::{
-        drm::WlDrmState, output_configuration::OutputConfigurationState,
+        drm::WlDrmState,
+        export_dmabuf::ExportDmabufState,
+        output_configuration::OutputConfigurationState,
         workspace::WorkspaceClientState,
     }, utils::prelude::OutputExt,
 };
@@ -85,6 +87,7 @@ pub struct Common {
     pub compositor_state: CompositorState,
     pub data_device_state: DataDeviceState,
     pub dmabuf_state: DmabufState,
+    pub export_dmabuf_state: ExportDmabufState,
     pub output_state: OutputManagerState,
     pub output_configuration_state: OutputConfigurationState<State>,
     pub primary_selection_state: PrimarySelectionState,
@@ -286,6 +289,11 @@ impl State {
         let compositor_state = CompositorState::new::<Self, _>(dh, None);
         let data_device_state = DataDeviceState::new::<Self, _>(dh, None);
         let dmabuf_state = DmabufState::new();
+        let export_dmabuf_state = ExportDmabufState::new::<Self, _>(
+            dh,
+            //|client| client.get_data::<ClientState>().unwrap().privileged,
+            |_| true,
+        );
         let output_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
         let output_configuration_state = OutputConfigurationState::new(dh, |_| true);
         let primary_selection_state = PrimarySelectionState::new::<Self, _>(dh, None);
@@ -336,6 +344,7 @@ impl State {
                 compositor_state,
                 data_device_state,
                 dmabuf_state,
+                export_dmabuf_state,
                 shm_state,
                 seat_state,
                 output_state,
