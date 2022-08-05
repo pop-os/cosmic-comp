@@ -10,6 +10,7 @@ use smithay::{
         },
         seat::Seat,
     },
+    utils::IsAlive
 };
 use std::cell::RefCell;
 
@@ -22,6 +23,7 @@ pub fn get_dnd_icon(seat: &Seat<State>) -> Option<WlSurface> {
     userdata
         .get::<DnDIcon>()
         .and_then(|x| x.surface.borrow().clone())
+        .filter(IsAlive::alive)
 }
 
 impl ClientDndGrabHandler for State {

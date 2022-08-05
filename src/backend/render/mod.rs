@@ -6,6 +6,7 @@ use crate::{
         SeatMoveGrabState,
         MoveGrabRenderElement,
     },
+    wayland::handlers::data_device::get_dnd_icon,
 };
 #[cfg(feature = "debug")]
 use crate::{
@@ -143,6 +144,50 @@ pub fn needs_buffer_reset(output: &Output, state: &Common) -> bool {
         != will_render_custom
 }
 
+pub fn cursor_custom_elements<R>(
+    renderer: &mut R,
+    state: &Common,
+    output: &Output,
+    hardware_cursor: bool,
+) -> Vec<CustomElem>
+where
+    R: AsGles2Renderer
+{
+    let mut custom_elements = Vec::new();
+
+    for seat in &state.seats {
+        let pointer = match seat.get_pointer() {
+            Some(ptr) => ptr,
+            None => continue,
+        };
+        let location = state
+            .shell
+            .space_relative_output_geometry(pointer.current_location().to_i32_round(), output);
+
+        if let Some(grab) = seat.user_data().get::<SeatMoveGrabState>().unwrap().borrow()
+            .as_ref().and_then(|state| state.render(seat, output))
+        {
+            custom_elements.push(grab);
+        }
+        
+        if let Some(wl_surface) = get_dnd_icon(seat) {
+            custom_elements.push(cursor::draw_dnd_icon(wl_surface, location.to_i32_round()).into());
+        }
+
+        if let Some(cursor) = cursor::draw_cursor(
+            renderer.as_gles2(),
+            seat,
+            location,
+            &state.start_time,
+            !hardware_cursor,
+        ) {
+            custom_elements.push(cursor)
+        }
+    }
+
+    custom_elements
+}
+
 pub fn render_output<R>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,
@@ -273,31 +318,7 @@ where
         }
     }
 
-    for seat in &state.seats {
-        let pointer = match seat.get_pointer() {
-            Some(ptr) => ptr,
-            None => continue,
-        };
-        let location = state
-            .shell
-            .space_relative_output_geometry(pointer.current_location().to_i32_round(), output);
-
-        if let Some(grab) = seat.user_data().get::<SeatMoveGrabState>().unwrap().borrow()
-            .as_ref().and_then(|state| state.render(seat, output))
-        {
-            custom_elements.push(grab);
-        }
-
-        if let Some(cursor) = cursor::draw_cursor(
-            renderer.as_gles2(),
-            seat,
-            location,
-            &state.start_time,
-            !hardware_cursor,
-        ) {
-            custom_elements.push(cursor)
-        }
-    }
+    custom_elements.extend(cursor_custom_elements(renderer, state, output, hardware_cursor));
 
     state.shell.spaces[space_idx].space.render_output(
         renderer,
@@ -343,25 +364,7 @@ where
         custom_elements.push(fps_overlay.into());
     }
 
-    for seat in &state.seats {
-        let pointer = match seat.get_pointer() {
-            Some(ptr) => ptr,
-            None => continue,
-        };
-        let location = state
-            .shell
-            .space_relative_output_geometry(pointer.current_location().to_i32_round(), output);
-
-        if let Some(cursor) = cursor::draw_cursor(
-            renderer.as_gles2(),
-            seat,
-            location,
-            &state.start_time,
-            !hardware_cursor,
-        ) {
-            custom_elements.push(cursor)
-        }
-    }
+    custom_elements.extend(cursor_custom_elements(renderer, state, output, hardware_cursor));
 
     renderer
         .render(mode.size, transform, |renderer, frame| {

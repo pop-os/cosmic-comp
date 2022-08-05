@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{utils::prelude::*, wayland::handlers::data_device::get_dnd_icon};
+use crate::utils::prelude::*;
 use smithay::{
     backend::renderer::{Frame, ImportAll, ImportMem, Renderer, Texture},
     desktop::space::{RenderElement, SpaceOutputTuple, SurfaceTree},
@@ -280,15 +280,6 @@ where
     R: Renderer + ImportAll + ImportMem,
     <R as Renderer>::TextureId: Clone + 'static,
 {
-    // draw the dnd icon if applicable
-    {
-        if let Some(wl_surface) = get_dnd_icon(seat) {
-            if wl_surface.alive() {
-                return Some(draw_dnd_icon(wl_surface, location.to_i32_round()).into());
-            }
-        }
-    }
-
     // draw the cursor as relevant
     {
         // reset the cursor if the surface is no longer alive
