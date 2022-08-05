@@ -10,7 +10,8 @@ use crate::{
         export_dmabuf::ExportDmabufState,
         output_configuration::OutputConfigurationState,
         workspace::WorkspaceClientState,
-    }, utils::prelude::OutputExt,
+    },
+    utils::prelude::*,
 };
 use smithay::{
     backend::drm::DrmNode,
@@ -361,7 +362,17 @@ impl State {
         ClientState {
             workspace_client_state: WorkspaceClientState::default(),
             drm_node: match &self.backend {
-                BackendData::Kms(kms_state) => Some(kms_state.primary),
+                BackendData::Kms(kms_state) => {
+                    match std::env::var("COSMIC_RENDER_AUTO_ASSIGN").map(|val| val.to_lowercase()) {
+                        Ok(val) if val == "y" || val == "yes" || val == "true" =>
+                            Some(
+                                kms_state.target_node_for_output(
+                                    &active_output(&self.common.last_active_seat, &self.common)
+                                ).unwrap_or(kms_state.primary)
+                            ),
+                        _ => Some(kms_state.primary),
+                    }
+                },
                 _ => None,
             },
             privileged: false,
