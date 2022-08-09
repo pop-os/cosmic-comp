@@ -431,6 +431,16 @@ impl Config {
                         );
                     }
                 }
+                if let Some(method) = config.click_method {
+                    if let Err(err) = device.config_click_set_method(method) {
+                        slog_scope::warn!(
+                            "Failed to apply click method {:?} for device {:?}: {:?}",
+                            method,
+                            device.name(),
+                            err
+                        );
+                    }
+                }
                 if let Some(dwt) = config.disable_while_typing {
                     if let Err(err) = device.config_dwt_set_enabled(dwt) {
                         slog_scope::warn!(
