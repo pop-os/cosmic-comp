@@ -120,14 +120,14 @@ impl Shell {
             &mut workspace_state,
             &mut spaces,
         );
-        let floatdefault = config.static_conf.floating_default;
+        let floating_default = config.static_conf.floating_default;
 
         Shell {
             popups: PopupManager::new(None),
             spaces,
             outputs: Vec::new(),
             workspace_mode: mode,
-            floating_default: floatdefault,
+            floating_default,
             shell_mode: ShellMode::Normal,
 
             pending_windows: Vec::new(),
@@ -594,7 +594,7 @@ impl Shell {
             .toplevel_enter_workspace(&window, &workspace.handle);
         self.toplevel_info_state
             .toplevel_enter_output(&window, &output);
-        if layout::should_be_floating(&window) || self.floating_default == true {
+        if layout::should_be_floating(&window) || self.floating_default {
             workspace
                 .floating_layer
                 .map_window(&mut workspace.space, window, &seat, None);
