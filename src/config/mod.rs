@@ -34,6 +34,7 @@ pub struct Config {
 pub struct StaticConfig {
     pub key_bindings: HashMap<KeyPattern, Action>,
     pub workspace_mode: WorkspaceMode,
+    pub floating_default: bool,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -216,6 +217,7 @@ impl Config {
         StaticConfig {
             key_bindings: HashMap::new(),
             workspace_mode: WorkspaceMode::Global,
+            floating_default: false,
         }
     }
 
