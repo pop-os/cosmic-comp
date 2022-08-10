@@ -434,13 +434,10 @@ where
                     frame,
                     scale,
                     loc,
-                    &[Rectangle::from_loc_and_size((0, 0), geo.size)],
+                    &[geo],
                     &slog_scope::logger(),
                 )?;
-                damage.extend(elem_damage.into_iter().map(|mut rect| {
-                    rect.loc += geo.loc;
-                    rect
-                }))
+                damage.extend(elem_damage)
             }
             Ok(Some(damage))
         })
