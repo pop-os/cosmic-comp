@@ -24,7 +24,7 @@ pub fn display_configuration(
     // That means, to reduce flickering, we try to keep an established mapping.
     for conn in connectors
         .iter()
-        .flat_map(|conn| device.get_connector(*conn).ok())
+        .flat_map(|conn| device.get_connector(*conn, true).ok())
     {
         if let Some(enc) = conn.current_encoder() {
             if let Some(crtc) = device.get_encoder(enc)?.crtc() {
@@ -43,7 +43,7 @@ pub fn display_configuration(
     // But just in case we try to match all remaining connectors.
     for conn in connectors
         .iter()
-        .flat_map(|conn| device.get_connector(*conn).ok())
+        .flat_map(|conn| device.get_connector(*conn, false).ok())
         .filter(|conn| conn.state() == ConnectorState::Connected)
         .filter(|conn| !map.contains_key(&conn.handle()))
         .collect::<Vec<_>>()
@@ -52,8 +52,7 @@ pub fn display_configuration(
         'outer: for encoder_info in conn
             .encoders()
             .iter()
-            .filter_map(|e| *e)
-            .flat_map(|encoder_handle| device.get_encoder(encoder_handle))
+            .flat_map(|encoder_handle| device.get_encoder(*encoder_handle))
         {
             for crtc in res_handles.filter_crtcs(encoder_info.possible_crtcs()) {
                 if !map.values().any(|v| *v == crtc) {
@@ -71,7 +70,7 @@ pub fn display_configuration(
 
         for conn in connectors
             .iter()
-            .flat_map(|conn| device.get_connector(*conn).ok())
+            .flat_map(|conn| device.get_connector(*conn, false).ok())
             .filter(|conn| {
                 if let Some(enc) = conn.current_encoder() {
                     if let Some(enc) = device.get_encoder(enc).ok() {
@@ -90,14 +89,14 @@ pub fn display_configuration(
 
         // We cannot just shortcut and use the legacy api for all cleanups because of this.
         // (Technically a device does not need to be atomic for planes to be used, but nobody does this otherwise.)
-        for plane in plane_handles.planes() {
-            let info = device.get_plane(*plane)?;
+        for plane in plane_handles {
+            let info = device.get_plane(plane)?;
             if let Some(crtc) = info.crtc() {
                 if cleanup.contains(&crtc) {
-                    let crtc_id = get_prop(device, *plane, "CRTC_ID")?;
-                    let fb_id = get_prop(device, *plane, "FB_ID")?;
-                    req.add_property(*plane, crtc_id, property::Value::CRTC(None));
-                    req.add_property(*plane, fb_id, property::Value::Framebuffer(None));
+                    let crtc_id = get_prop(device, plane, "CRTC_ID")?;
+                    let fb_id = get_prop(device, plane, "FB_ID")?;
+                    req.add_property(plane, crtc_id, property::Value::CRTC(None));
+                    req.add_property(plane, fb_id, property::Value::Framebuffer(None));
                 }
             }
         }
@@ -123,7 +122,7 @@ pub fn display_configuration(
 }
 
 pub fn interface_name(device: &impl ControlDevice, connector: connector::Handle) -> Result<String> {
-    let conn_info = device.get_connector(connector)?;
+    let conn_info = device.get_connector(connector, false)?;
 
     let other_short_name;
     let interface_short_name = match conn_info.interface() {

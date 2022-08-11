@@ -569,23 +569,21 @@ checksum = "9ea835d29036a4087793836fa931b08837ad5e957da9e23886b29586fb9b6650"
 [[package]]
 name = "drm"
 version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "408e87132bd0d8a13a3b418b9d51fb92973b764d1d40785947d233ab2945fd27"
+source = "git+https://github.com/Smithay/drm-rs.git?rev=6d34866#6d348667fee897442672f15ce480676d47ce58aa"
 dependencies = [
  "bitflags",
  "drm-ffi",
  "drm-fourcc",
- "nix 0.22.3",
+ "nix 0.24.2",
 ]
 
 [[package]]
 name = "drm-ffi"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "198d1b7fdb33b75e9bd08ba6842ddb730760f7eeea25552acc88c5403c4f0652"
+source = "git+https://github.com/Smithay/drm-rs.git?rev=6d34866#6d348667fee897442672f15ce480676d47ce58aa"
 dependencies = [
  "drm-sys",
- "nix 0.22.3",
+ "nix 0.24.2",
 ]
 
 [[package]]
@@ -597,8 +595,7 @@ checksum = "0aafbcdb8afc29c1a7ee5fbe53b5d62f4565b35a042a662ca9fecd0b54dae6f4"
 [[package]]
 name = "drm-sys"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5f45fcdd3b2f3c13fadea11b2a4eda2023e7de55021da039eac4a3beecfe91c"
+source = "git+https://github.com/Smithay/drm-rs.git?rev=6d34866#6d348667fee897442672f15ce480676d47ce58aa"
 dependencies = [
  "libc",
 ]
@@ -693,9 +690,8 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 
 [[package]]
 name = "gbm"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06678321b809dfa34ca3be8ac2cb91b22116f86ba37b1610a752eaf90594c450"
+version = "0.9.0"
+source = "git+https://github.com/Smithay/gbm.rs?rev=b35994d#b35994de29098415cf53a45482276d3b8b658cfc"
 dependencies = [
  "bitflags",
  "drm",
@@ -707,8 +703,7 @@ dependencies = [
 [[package]]
 name = "gbm-sys"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1e3b363aeecb97d9f246e810af154a02701c80008f4da39f0c57740513102de"
+source = "git+https://github.com/Smithay/gbm.rs?rev=b35994d#b35994de29098415cf53a45482276d3b8b658cfc"
 dependencies = [
  "libc",
 ]
@@ -1592,7 +1587,7 @@ checksum = "2fd0db749597d91ff862fd1d55ea87f7855a744a8425a64695b6fca237d1dad1"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/Smithay/smithay.git?rev=606d2d5c#606d2d5c75d738c907e2db63c919f2949a1d06f0"
+source = "git+https://github.com/Smithay//smithay?rev=4b927c32df#4b927c32dfdbfa4006cd605d7738c098c0e9b0fd"
 dependencies = [
  "appendlist",
  "bitflags",
@@ -1610,7 +1605,7 @@ dependencies = [
  "libc",
  "libloading",
  "libseat",
- "nix 0.22.3",
+ "nix 0.24.2",
  "once_cell",
  "rand",
  "scan_fmt",

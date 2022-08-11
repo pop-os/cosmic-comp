@@ -60,3 +60,6 @@ debug = true
 
 [profile.release]
 lto = "fat"
+
+[patch."https://github.com/Smithay/smithay.git"]
+smithay = { git = "https://github.com/Smithay//smithay", rev = "4b927c32df" }

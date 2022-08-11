@@ -520,6 +520,9 @@ impl State {
                 slog_scope::warn!("Failed to initialize output: {}", err);
             }
         }
+        for output in outputs_removed {
+            self.common.shell.remove_output(&output);
+        }
         self.common.output_configuration_state.update();
         self.common.config.read_outputs(
             self.common.output_configuration_state.outputs(),
@@ -562,6 +565,9 @@ impl State {
         self.common.output_configuration_state.update();
 
         if self.backend.kms().session.is_active() {
+            for output in outputs_removed {
+                self.common.shell.remove_output(&output);
+            }
             self.common.config.read_outputs(
                 self.common.output_configuration_state.outputs(),
                 &mut self.backend,
@@ -619,7 +625,7 @@ impl Device {
     ) -> Result<Output> {
         let drm = &mut *self.drm.as_source_mut();
         let crtc_info = drm.get_crtc(crtc)?;
-        let conn_info = drm.get_connector(conn)?;
+        let conn_info = drm.get_connector(conn, false)?;
         let vrr = drm_helpers::set_vrr(drm, crtc, conn, true).unwrap_or(false);
         let interface = drm_helpers::interface_name(drm, conn)?;
         let edid_info = drm_helpers::edid_info(drm, conn)?;
@@ -824,7 +830,7 @@ impl KmsState {
             } else {
                 let drm = &mut *device.drm.as_source_mut();
                 let conn = surface.connector;
-                let conn_info = drm.get_connector(conn)?;
+                let conn_info = drm.get_connector(conn, false)?;
                 let mode = conn_info
                     .modes()
                     .iter()
