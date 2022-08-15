@@ -12,7 +12,7 @@ use smithay::{
     backend::input::{Device, DeviceCapability, InputBackend, InputEvent, KeyState},
     desktop::{layer_map_for_output, Kind, WindowSurfaceType},
     reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle, Resource},
-    utils::{Logical, Point, Rectangle},
+    utils::{Logical, Point, Rectangle, Size, Buffer},
     wayland::{
         data_device::set_data_device_focus,
         output::Output,
@@ -402,21 +402,32 @@ impl State {
                                             break;
                                         }
                                     };
-                                    /*
                                     for output in self.common.shell.outputs.clone().into_iter() {
                                         match self.backend.offscreen_for_output(&output, &mut self.common) {
-                                            Ok(buffer) => {
+                                            Ok((buffer, size)) => {
                                                 let mut path = std::path::PathBuf::new();
                                                 path.push(&home);
                                                 path.push(format!("{}_{}.png", output.name(), timestamp));
-                                                if let Err(err) = buffer.save(&path) {
+
+                                                fn write_png(path: impl AsRef<std::path::Path>, data: Vec<u8>, size: Size<i32, Buffer>) -> anyhow::Result<()> {
+                                                    use std::{io, fs};
+
+                                                    let file = io::BufWriter::new(fs::File::create(&path)?);
+                                                    let mut encoder = png::Encoder::new(file, size.w as u32, size.h as u32);
+                                                    encoder.set_color(png::ColorType::Rgba);
+                                                    encoder.set_depth(png::BitDepth::Eight);
+                                                    let mut writer = encoder.write_header()?;
+                                                    writer.write_image_data(&data)?;
+                                                    Ok(())
+                                                }
+
+                                                if let Err(err) = write_png(&path, buffer, size) {
                                                     slog_scope::error!("Unable to save screenshot at {}: {}", path.display(), err);
                                                 }
                                             },
                                             Err(err) => slog_scope::error!("Could not save screenshot for output {}: {}", output.name(), err),
                                         }
                                     }
-                                    */
                                 }
                             }
                         }

@@ -32,6 +32,7 @@ use smithay::{
         shm::ShmState,
         viewporter::ViewporterState,
     },
+    utils::{Size, Buffer},
 };
 
 use std::{
@@ -204,12 +205,11 @@ impl BackendData {
         }
     }
 
-    /*
     pub fn offscreen_for_output(
         &mut self,
         output: &Output,
         state: &mut Common,
-    ) -> anyhow::Result<image::ImageBuffer<image::Rgba<u8>, Vec<u8>>> {
+    ) -> anyhow::Result<(Vec<u8>, Size<i32, Buffer>)> {
         use anyhow::Context;
         use smithay::{
             backend::{
@@ -230,7 +230,7 @@ impl BackendData {
             renderer: &mut R,
             output: &Output,
             state: &mut Common,
-        ) -> anyhow::Result<image::ImageBuffer<image::Rgba<u8>, Vec<u8>>>
+        ) -> anyhow::Result<(Vec<u8>, Size<i32, Buffer>)>
         where
             E: std::error::Error + Send + Sync + 'static,
             T: Clone + 'static,
@@ -261,7 +261,7 @@ impl BackendData {
             let mapping = renderer.copy_framebuffer(Rectangle::from_loc_and_size((0, 0), size))?;
             let data = Vec::from(renderer.map_texture(&mapping)?);
 
-            Ok(image::ImageBuffer::from_raw(size.w as u32, size.h as u32, data).with_context(|| "buffer smaller then dimensions")?)
+            Ok((data, size))
         }
 
         match self {
@@ -277,7 +277,6 @@ impl BackendData {
             BackendData::Unset => unreachable!(),
         }
     }
-    */
 }
 
 impl State {
