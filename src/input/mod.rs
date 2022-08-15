@@ -402,6 +402,7 @@ impl State {
                                             break;
                                         }
                                     };
+                                    /*
                                     for output in self.common.shell.outputs.clone().into_iter() {
                                         match self.backend.offscreen_for_output(&output, &mut self.common) {
                                             Ok(buffer) => {
@@ -415,6 +416,7 @@ impl State {
                                             Err(err) => slog_scope::error!("Could not save screenshot for output {}: {}", output.name(), err),
                                         }
                                     }
+                                    */
                                 }
                             }
                         }

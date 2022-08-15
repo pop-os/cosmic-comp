@@ -204,6 +204,7 @@ impl BackendData {
         }
     }
 
+    /*
     pub fn offscreen_for_output(
         &mut self,
         output: &Output,
@@ -276,6 +277,7 @@ impl BackendData {
             BackendData::Unset => unreachable!(),
         }
     }
+    */
 }
 
 impl State {

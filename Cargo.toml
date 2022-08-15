@@ -18,7 +18,7 @@ serde_json = "1"
 sendfd = "0.4.1"
 egui = { version = "0.18.1", optional = true }
 edid-rs = { version = "0.1" }
-image = { version = "0.24.3", default-features = false, features = ["png"] }
+#image = { version = "0.24.3", default-features = false, features = ["png"] }
 lazy_static = "1.4.0"
 thiserror = "1.0.26"
 regex = "1"
@@ -62,4 +62,7 @@ debug = true
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/Smithay//smithay", rev = "4b927c32df" }
+smithay = { git = "https://github.com/Smithay//smithay", branch = "update/drm-0.7" }
+
+[patch."https://github.com/Smithay/drm-rs.git"]
+drm = { git = "https://github.com/Smithay//drm-rs", branch = "fix/non_force_probe_memory" }
