@@ -18,7 +18,7 @@ endif
 
 VENDOR ?= 0
 ifneq ($(VENDOR),0)
-	ARGS += --frozen
+	ARGS += --locked
 endif
 
 TARGET_BIN="$(DESTDIR)$(bindir)/$(BINARY)"
