@@ -514,7 +514,7 @@ checksum = "9ea835d29036a4087793836fa931b08837ad5e957da9e23886b29586fb9b6650"
 [[package]]
 name = "drm"
 version = "0.6.2"
-source = "git+https://github.com/Smithay//drm-rs?branch=fix/non_force_probe_memory#d213cfb6793e675d55d56f3e2273b86db402d1b6"
+source = "git+https://github.com/Smithay//drm-rs?branch=fix/non_force_probe_memory#3ce92fd7fd9335144d1174a48851c10fd7845a7b"
 dependencies = [
  "bitflags",
  "bytemuck",
@@ -526,7 +526,7 @@ dependencies = [
 [[package]]
 name = "drm-ffi"
 version = "0.2.1"
-source = "git+https://github.com/Smithay//drm-rs?branch=fix/non_force_probe_memory#d213cfb6793e675d55d56f3e2273b86db402d1b6"
+source = "git+https://github.com/Smithay//drm-rs?branch=fix/non_force_probe_memory#3ce92fd7fd9335144d1174a48851c10fd7845a7b"
 dependencies = [
  "drm-sys 0.1.2 (git+https://github.com/Smithay//drm-rs?branch=fix/non_force_probe_memory)",
  "nix 0.24.2",
@@ -550,7 +550,7 @@ checksum = "0aafbcdb8afc29c1a7ee5fbe53b5d62f4565b35a042a662ca9fecd0b54dae6f4"
 [[package]]
 name = "drm-sys"
 version = "0.1.2"
-source = "git+https://github.com/Smithay//drm-rs?branch=fix/non_force_probe_memory#d213cfb6793e675d55d56f3e2273b86db402d1b6"
+source = "git+https://github.com/Smithay//drm-rs?branch=fix/non_force_probe_memory#3ce92fd7fd9335144d1174a48851c10fd7845a7b"
 dependencies = [
  "libc",
 ]
