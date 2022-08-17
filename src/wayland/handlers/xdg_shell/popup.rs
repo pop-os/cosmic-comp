@@ -116,7 +116,7 @@ fn unconstrain_layer_popup(
     let layer_geo = map.layer_geometry(layer_surface).unwrap();
 
     // the output_rect represented relative to the parents coordinate system
-    let mut relative = output.geometry();
+    let mut relative = Rectangle::from_loc_and_size((0, 0), output.geometry().size);
     relative.loc -= layer_geo.loc;
     let offset = check_constrained(&surface, positioner.get_geometry(), relative);
 
