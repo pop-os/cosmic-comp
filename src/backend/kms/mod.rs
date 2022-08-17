@@ -989,6 +989,9 @@ impl KmsState {
 
                 let device = *device;
                 let crtc = *crtc;
+                if let Some(token) = surface.render_timer_token.take() {
+                    loop_handle.remove(token);
+                }
                 surface.render_timer_token = Some(loop_handle.insert_source(
                     //if surface.vrr || instant.is_none() {
                     Timer::immediate(), /*} else {
