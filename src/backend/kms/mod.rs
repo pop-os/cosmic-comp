@@ -824,6 +824,7 @@ impl KmsState {
                     if surface.surface.take().is_some() {
                         // just drop it
                         shell.remove_output(output);
+                        surface.pending = false;
                     }
                 }
                 false
