@@ -6,7 +6,8 @@ use smithay::reexports::drm::control::{
     connector::{self, State as ConnectorState},
     crtc,
     dumbbuffer::DumbBuffer,
-    property, AtomicCommitFlags, Device as ControlDevice, Mode, ModeFlags, ResourceHandle,
+    property, AtomicCommitFlags, Device as ControlDevice, Mode, ModeFlags, PlaneType,
+    ResourceHandle,
 };
 use std::collections::HashMap;
 
@@ -92,7 +93,15 @@ pub fn display_configuration(
         for plane in plane_handles {
             let info = device.get_plane(plane)?;
             if let Some(crtc) = info.crtc() {
-                if cleanup.contains(&crtc) {
+                let is_primary = get_property_val(device, plane, "type").map(
+                    |(val_type, val)| match val_type.convert_value(val) {
+                        property::Value::Enum(Some(val)) => {
+                            val.value() == PlaneType::Primary as u64
+                        }
+                        _ => false,
+                    },
+                )?;
+                if cleanup.contains(&crtc) || !is_primary {
                     let crtc_id = get_prop(device, plane, "CRTC_ID")?;
                     let fb_id = get_prop(device, plane, "FB_ID")?;
                     req.add_property(plane, crtc_id, property::Value::CRTC(None));
