@@ -2,17 +2,14 @@
 
 use crate::{
     config::{Action, Config},
-    shell::{
-        Workspace,
-        grabs::SeatMoveGrabState,
-    },
+    shell::{grabs::SeatMoveGrabState, Workspace},
     utils::prelude::*,
 };
 use smithay::{
     backend::input::{Device, DeviceCapability, InputBackend, InputEvent, KeyState},
     desktop::{layer_map_for_output, Kind, WindowSurfaceType},
     reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle, Resource},
-    utils::{Logical, Point, Rectangle, Size, Buffer},
+    utils::{Buffer, Logical, Point, Rectangle, Size},
     wayland::{
         data_device::set_data_device_focus,
         output::Output,
@@ -118,21 +115,16 @@ pub fn add_seat(dh: &DisplayHandle, config: &Config, name: String) -> Seat<State
     // devices appear), we have to surrender to reality and just always expose a keyboard and pointer.
     let dh_clone = dh.clone();
     let conf = config.xkb_config();
-    let _ = seat.add_keyboard(
-        (&conf).into(),
-        200,
-        25,
-        move |seat, focus| {
-            if let Some(client) =
-                focus.and_then(|s| dh_clone.get_client(s.id()).ok())
-            {
-                set_data_device_focus(&dh_clone, seat, Some(client));
-                let client2 = focus.and_then(|s| dh_clone.get_client(s.id()).ok()).unwrap();
-                set_primary_focus(&dh_clone, seat, Some(client2))
-            }
-        },
-    );
-    
+    let _ = seat.add_keyboard((&conf).into(), 200, 25, move |seat, focus| {
+        if let Some(client) = focus.and_then(|s| dh_clone.get_client(s.id()).ok()) {
+            set_data_device_focus(&dh_clone, seat, Some(client));
+            let client2 = focus
+                .and_then(|s| dh_clone.get_client(s.id()).ok())
+                .unwrap();
+            set_primary_focus(&dh_clone, seat, Some(client2))
+        }
+    });
+
     let owned_seat = seat.clone();
     seat.add_pointer(move |status| {
         *owned_seat
@@ -178,7 +170,7 @@ impl State {
                         for cap in devices.remove_device(&device) {
                             match cap {
                                 // TODO: Handle touch, tablet
-                                _ => {},
+                                _ => {}
                             }
                         }
                         break;
@@ -391,11 +383,16 @@ impl State {
                                     let home = match std::env::var("HOME") {
                                         Ok(home) => home,
                                         Err(err) => {
-                                            slog_scope::error!("$HOME is not set, can't save screenshots: {}", err);
+                                            slog_scope::error!(
+                                                "$HOME is not set, can't save screenshots: {}",
+                                                err
+                                            );
                                             break;
                                         }
                                     };
-                                    let timestamp = match std::time::SystemTime::UNIX_EPOCH.elapsed() {
+                                    let timestamp = match std::time::SystemTime::UNIX_EPOCH
+                                        .elapsed()
+                                    {
                                         Ok(duration) => duration.as_secs(),
                                         Err(err) => {
                                             slog_scope::error!("Unable to get timestamp, can't save screenshots: {}", err);
@@ -403,17 +400,35 @@ impl State {
                                         }
                                     };
                                     for output in self.common.shell.outputs.clone().into_iter() {
-                                        match self.backend.offscreen_for_output(&output, &mut self.common) {
+                                        match self
+                                            .backend
+                                            .offscreen_for_output(&output, &mut self.common)
+                                        {
                                             Ok((buffer, size)) => {
                                                 let mut path = std::path::PathBuf::new();
                                                 path.push(&home);
-                                                path.push(format!("{}_{}.png", output.name(), timestamp));
+                                                path.push(format!(
+                                                    "{}_{}.png",
+                                                    output.name(),
+                                                    timestamp
+                                                ));
 
-                                                fn write_png(path: impl AsRef<std::path::Path>, data: Vec<u8>, size: Size<i32, Buffer>) -> anyhow::Result<()> {
-                                                    use std::{io, fs};
+                                                fn write_png(
+                                                    path: impl AsRef<std::path::Path>,
+                                                    data: Vec<u8>,
+                                                    size: Size<i32, Buffer>,
+                                                ) -> anyhow::Result<()>
+                                                {
+                                                    use std::{fs, io};
 
-                                                    let file = io::BufWriter::new(fs::File::create(&path)?);
-                                                    let mut encoder = png::Encoder::new(file, size.w as u32, size.h as u32);
+                                                    let file = io::BufWriter::new(
+                                                        fs::File::create(&path)?,
+                                                    );
+                                                    let mut encoder = png::Encoder::new(
+                                                        file,
+                                                        size.w as u32,
+                                                        size.h as u32,
+                                                    );
                                                     encoder.set_color(png::ColorType::Rgba);
                                                     encoder.set_depth(png::BitDepth::Eight);
                                                     let mut writer = encoder.write_header()?;
@@ -422,10 +437,18 @@ impl State {
                                                 }
 
                                                 if let Err(err) = write_png(&path, buffer, size) {
-                                                    slog_scope::error!("Unable to save screenshot at {}: {}", path.display(), err);
+                                                    slog_scope::error!(
+                                                        "Unable to save screenshot at {}: {}",
+                                                        path.display(),
+                                                        err
+                                                    );
                                                 }
-                                            },
-                                            Err(err) => slog_scope::error!("Could not save screenshot for output {}: {}", output.name(), err),
+                                            }
+                                            Err(err) => slog_scope::error!(
+                                                "Could not save screenshot for output {}: {}",
+                                                output.name(),
+                                                err
+                                            ),
                                         }
                                     }
                                 }

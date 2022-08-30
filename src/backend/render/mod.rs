@@ -1,18 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{
-    state::Common,
-    shell::grabs::{
-        SeatMoveGrabState,
-        MoveGrabRenderElement,
-    },
-    wayland::handlers::data_device::get_dnd_icon,
-};
 #[cfg(feature = "debug")]
 use crate::{
     debug::{debug_ui, fps_ui, log_ui, EguiFrame},
     state::Fps,
     utils::prelude::*,
+};
+use crate::{
+    shell::grabs::{MoveGrabRenderElement, SeatMoveGrabState},
+    state::Common,
+    wayland::handlers::data_device::get_dnd_icon,
 };
 
 use slog::Logger;
@@ -151,7 +148,7 @@ pub fn cursor_custom_elements<R>(
     hardware_cursor: bool,
 ) -> Vec<CustomElem>
 where
-    R: AsGles2Renderer
+    R: AsGles2Renderer,
 {
     let mut custom_elements = Vec::new();
 
@@ -164,12 +161,17 @@ where
             .shell
             .space_relative_output_geometry(pointer.current_location().to_i32_round(), output);
 
-        if let Some(grab) = seat.user_data().get::<SeatMoveGrabState>().unwrap().borrow()
-            .as_ref().and_then(|state| state.render(seat, output))
+        if let Some(grab) = seat
+            .user_data()
+            .get::<SeatMoveGrabState>()
+            .unwrap()
+            .borrow()
+            .as_ref()
+            .and_then(|state| state.render(seat, output))
         {
             custom_elements.push(grab);
         }
-        
+
         if let Some(wl_surface) = get_dnd_icon(seat) {
             custom_elements.push(cursor::draw_dnd_icon(wl_surface, location.to_i32_round()).into());
         }
@@ -245,16 +247,41 @@ where
         }
         #[cfg(feature = "debug")]
         {
-            render_fullscreen(gpu, renderer, window, state, output, hardware_cursor, fps.as_deref_mut())
+            render_fullscreen(
+                gpu,
+                renderer,
+                window,
+                state,
+                output,
+                hardware_cursor,
+                fps.as_deref_mut(),
+            )
         }
     } else {
         #[cfg(not(feature = "debug"))]
         {
-            render_desktop(gpu, renderer, age, state, space_idx, output, hardware_cursor)
+            render_desktop(
+                gpu,
+                renderer,
+                age,
+                state,
+                space_idx,
+                output,
+                hardware_cursor,
+            )
         }
         #[cfg(feature = "debug")]
         {
-            render_desktop(gpu, renderer, age, state, space_idx, output, hardware_cursor, fps.as_deref_mut())
+            render_desktop(
+                gpu,
+                renderer,
+                age,
+                state,
+                space_idx,
+                output,
+                hardware_cursor,
+                fps.as_deref_mut(),
+            )
         }
     };
 
@@ -318,7 +345,12 @@ where
         }
     }
 
-    custom_elements.extend(cursor_custom_elements(renderer, state, output, hardware_cursor));
+    custom_elements.extend(cursor_custom_elements(
+        renderer,
+        state,
+        output,
+        hardware_cursor,
+    ));
 
     state.shell.spaces[space_idx].space.render_output(
         renderer,
@@ -364,7 +396,12 @@ where
         custom_elements.push(fps_overlay.into());
     }
 
-    custom_elements.extend(cursor_custom_elements(renderer, state, output, hardware_cursor));
+    custom_elements.extend(cursor_custom_elements(
+        renderer,
+        state,
+        output,
+        hardware_cursor,
+    ));
 
     renderer
         .render(mode.size, transform, |renderer, frame| {
@@ -429,14 +466,7 @@ where
                 let loc = elem.location(scale);
                 let geo = elem.geometry(scale);
                 let elem_damage = elem.accumulated_damage(scale, None);
-                elem.draw(
-                    renderer,
-                    frame,
-                    scale,
-                    loc,
-                    &[geo],
-                    &slog_scope::logger(),
-                )?;
+                elem.draw(renderer, frame, scale, loc, &[geo], &slog_scope::logger())?;
                 damage.extend(elem_damage)
             }
             Ok(Some(damage))

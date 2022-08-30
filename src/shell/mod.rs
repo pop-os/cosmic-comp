@@ -26,7 +26,7 @@ use crate::{
     utils::prelude::*,
     wayland::protocols::{
         toplevel_info::ToplevelInfoState,
-        toplevel_management::{ToplevelManagementState, ManagementCapabilities},
+        toplevel_management::{ManagementCapabilities, ToplevelManagementState},
         workspace::{
             WorkspaceCapabilities, WorkspaceGroupHandle, WorkspaceHandle, WorkspaceState,
             WorkspaceUpdateGuard,
@@ -36,8 +36,8 @@ use crate::{
 
 pub const MAX_WORKSPACES: usize = 10;
 pub mod focus;
-pub mod layout;
 pub mod grabs;
+pub mod layout;
 mod workspace;
 pub use self::workspace::*;
 
@@ -90,10 +90,14 @@ impl Shell {
         let toplevel_info_state = ToplevelInfoState::new(
             dh,
             //|client| client.get_data::<ClientState>().unwrap().privileged,
-            |_| true);
+            |_| true,
+        );
         let toplevel_management_state = ToplevelManagementState::new::<State, _>(
             dh,
-            vec![ManagementCapabilities::Close, ManagementCapabilities::Activate],
+            vec![
+                ManagementCapabilities::Close,
+                ManagementCapabilities::Activate,
+            ],
             //|client| client.get_data::<ClientState>().unwrap().privileged,
             |_| true,
         );
@@ -461,20 +465,32 @@ impl Shell {
         }
     }
 
-    pub fn outputs_for_surface<'a>(&'a self, surface: &'a WlSurface) -> impl Iterator<Item = Output> + 'a {
+    pub fn outputs_for_surface<'a>(
+        &'a self,
+        surface: &'a WlSurface,
+    ) -> impl Iterator<Item = Output> + 'a {
         match self.outputs.iter().find(|o| {
             let map = layer_map_for_output(o);
-            map.layer_for_surface(surface, WindowSurfaceType::ALL).is_some()
+            map.layer_for_surface(surface, WindowSurfaceType::ALL)
+                .is_some()
         }) {
-            Some(output) => Box::new(std::iter::once(output.clone())) as Box<dyn Iterator<Item = Output>>,
-            None => Box::new(self.spaces.iter().filter_map(|w| {
-                if let Some(window) = w.space.window_for_surface(surface, WindowSurfaceType::ALL) {
-                    Some(w.space.outputs_for_window(&window).into_iter())
-                } else {
-                    None
-                }
-            })
-            .flatten()),
+            Some(output) => {
+                Box::new(std::iter::once(output.clone())) as Box<dyn Iterator<Item = Output>>
+            }
+            None => Box::new(
+                self.spaces
+                    .iter()
+                    .filter_map(|w| {
+                        if let Some(window) =
+                            w.space.window_for_surface(surface, WindowSurfaceType::ALL)
+                        {
+                            Some(w.space.outputs_for_window(&window).into_iter())
+                        } else {
+                            None
+                        }
+                    })
+                    .flatten(),
+            ),
         }
     }
 
@@ -541,20 +557,31 @@ impl Shell {
                     let workspace = &mut self.spaces[active];
                     workspace.refresh(dh);
                     if workspace.space.windows().next().is_none()
-                        && !self.workspace_state.workspace_states(&workspace.handle).map(|mut i| i.any(|s| s == &WState::Hidden)).unwrap_or(true)
+                        && !self
+                            .workspace_state
+                            .workspace_states(&workspace.handle)
+                            .map(|mut i| i.any(|s| s == &WState::Hidden))
+                            .unwrap_or(true)
                     {
-                        self.workspace_state.update().add_workspace_state(&workspace.handle, WState::Hidden);
+                        self.workspace_state
+                            .update()
+                            .add_workspace_state(&workspace.handle, WState::Hidden);
                     }
-        
                 }
             }
             WorkspaceMode::Global { active, .. } => {
                 let workspace = &mut self.spaces[*active];
                 workspace.refresh(dh);
                 if workspace.space.windows().next().is_none()
-                    && !self.workspace_state.workspace_states(&workspace.handle).map(|mut i| i.any(|s| s == &WState::Hidden)).unwrap_or(true)
+                    && !self
+                        .workspace_state
+                        .workspace_states(&workspace.handle)
+                        .map(|mut i| i.any(|s| s == &WState::Hidden))
+                        .unwrap_or(true)
                 {
-                    self.workspace_state.update().add_workspace_state(&workspace.handle, WState::Hidden);
+                    self.workspace_state
+                        .update()
+                        .add_workspace_state(&workspace.handle, WState::Hidden);
                 }
             }
         };
@@ -682,9 +709,12 @@ impl Shell {
                 .toplevel_enter_workspace(&window, &new_workspace.handle);
             let focus_stack = new_workspace.focus_stack(&seat);
             if layout::should_be_floating(&window) {
-                new_workspace
-                    .floating_layer
-                    .map_window(&mut new_workspace.space, window, &seat, None);
+                new_workspace.floating_layer.map_window(
+                    &mut new_workspace.space,
+                    window,
+                    &seat,
+                    None,
+                );
             } else {
                 new_workspace.tiling_layer.map_window(
                     &mut new_workspace.space,

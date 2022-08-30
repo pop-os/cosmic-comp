@@ -1,45 +1,32 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use smithay::{
+    backend::{
+        allocator::{dmabuf::Dmabuf, Buffer},
+        drm::DrmNode,
+    },
+    desktop::Window,
+    reexports::wayland_server::{
+        self, backend::GlobalId, protocol::wl_output::WlOutput, Client, Dispatch, DisplayHandle,
+        GlobalDispatch,
+    },
+};
 use std::{
     fs::File,
     io::{Seek, SeekFrom},
     os::unix::io::{FromRawFd, IntoRawFd},
     time::Instant,
 };
-use smithay::{
-    backend::{
-        allocator::{
-            Buffer,
-            dmabuf::Dmabuf,
-        },
-        drm::DrmNode,
-    },
-    desktop::Window,
-    reexports::{
-        wayland_server::{
-            self,
-            Client,
-            Dispatch,
-            GlobalDispatch,
-            DisplayHandle,
-            backend::GlobalId,
-            protocol::wl_output::WlOutput,
-        },
-    },
-};
 
-use cosmic_protocols::{
-    export_dmabuf::v1::server::{
-        zcosmic_export_dmabuf_manager_v1::{self, ZcosmicExportDmabufManagerV1},
-        zcosmic_export_dmabuf_frame_v1::{self, CancelReason, Flags, ZcosmicExportDmabufFrameV1},
-    },
+use cosmic_protocols::export_dmabuf::v1::server::{
+    zcosmic_export_dmabuf_frame_v1::{self, CancelReason, Flags, ZcosmicExportDmabufFrameV1},
+    zcosmic_export_dmabuf_manager_v1::{self, ZcosmicExportDmabufManagerV1},
 };
 
 use crate::wayland::protocols::{
-    toplevel_info::{ToplevelInfoHandler, window_from_handle},
+    toplevel_info::{window_from_handle, ToplevelInfoHandler},
     workspace::{WorkspaceHandle, WorkspaceHandler},
 };
-
 
 /// Export Dmabuf global state
 #[derive(Debug)]
@@ -63,9 +50,12 @@ impl ExportDmabufState {
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
         ExportDmabufState {
-            global: display.create_global::<D, ZcosmicExportDmabufManagerV1, _>(1, ExportDmabufGlobalData {
-                filter: Box::new(client_filter),
-            }),
+            global: display.create_global::<D, ZcosmicExportDmabufManagerV1, _>(
+                1,
+                ExportDmabufGlobalData {
+                    filter: Box::new(client_filter),
+                },
+            ),
         }
     }
 
@@ -88,18 +78,35 @@ pub struct Capture {
 }
 
 pub trait ExportDmabufHandler {
-    fn capture_output(&mut self, dh: &DisplayHandle, output: WlOutput, overlay_cursor: bool) -> Result<Capture, CaptureError>;
-    fn capture_workspace(&mut self, dh: &DisplayHandle, workspace: WorkspaceHandle, output: WlOutput, overlay_cursor: bool) -> Result<Capture, CaptureError>;
-    fn capture_toplevel(&mut self, dh: &DisplayHandle, toplevel: Window, overlay_cursor: bool) -> Result<Capture, CaptureError>;
+    fn capture_output(
+        &mut self,
+        dh: &DisplayHandle,
+        output: WlOutput,
+        overlay_cursor: bool,
+    ) -> Result<Capture, CaptureError>;
+    fn capture_workspace(
+        &mut self,
+        dh: &DisplayHandle,
+        workspace: WorkspaceHandle,
+        output: WlOutput,
+        overlay_cursor: bool,
+    ) -> Result<Capture, CaptureError>;
+    fn capture_toplevel(
+        &mut self,
+        dh: &DisplayHandle,
+        toplevel: Window,
+        overlay_cursor: bool,
+    ) -> Result<Capture, CaptureError>;
     fn start_time(&mut self) -> Instant;
 }
 
-impl<D> GlobalDispatch<ZcosmicExportDmabufManagerV1, ExportDmabufGlobalData, D> for ExportDmabufState
+impl<D> GlobalDispatch<ZcosmicExportDmabufManagerV1, ExportDmabufGlobalData, D>
+    for ExportDmabufState
 where
     D: GlobalDispatch<ZcosmicExportDmabufManagerV1, ExportDmabufGlobalData>
-     + Dispatch<ZcosmicExportDmabufManagerV1, ()>
-     + Dispatch<ZcosmicExportDmabufFrameV1, ()>
-     + ExportDmabufHandler,
+        + Dispatch<ZcosmicExportDmabufManagerV1, ()>
+        + Dispatch<ZcosmicExportDmabufFrameV1, ()>
+        + ExportDmabufHandler,
 {
     fn bind(
         _state: &mut D,
@@ -120,11 +127,11 @@ where
 impl<D> Dispatch<ZcosmicExportDmabufManagerV1, (), D> for ExportDmabufState
 where
     D: GlobalDispatch<ZcosmicExportDmabufManagerV1, ExportDmabufGlobalData>
-     + Dispatch<ZcosmicExportDmabufManagerV1, ()>
-     + Dispatch<ZcosmicExportDmabufFrameV1, ()>
-     + ExportDmabufHandler
-     + WorkspaceHandler
-     + ToplevelInfoHandler
+        + Dispatch<ZcosmicExportDmabufManagerV1, ()>
+        + Dispatch<ZcosmicExportDmabufFrameV1, ()>
+        + ExportDmabufHandler
+        + WorkspaceHandler
+        + ToplevelInfoHandler,
 {
     fn request(
         state: &mut D,
@@ -147,7 +154,7 @@ where
                     Ok(capture) => handle_capture(capture, frame, start_time),
                     Err(err) => frame.cancel(err.into()),
                 }
-            },
+            }
             zcosmic_export_dmabuf_manager_v1::Request::CaptureWorkspace {
                 frame,
                 overlay_cursor,
@@ -157,14 +164,19 @@ where
                 let frame = data_init.init(frame, ());
                 match state.workspace_state().workspace_handle(&workspace) {
                     Some(workspace) => {
-                        match state.capture_workspace(dhandle, workspace, output, overlay_cursor != 0) {
+                        match state.capture_workspace(
+                            dhandle,
+                            workspace,
+                            output,
+                            overlay_cursor != 0,
+                        ) {
                             Ok(capture) => handle_capture(capture, frame, start_time),
                             Err(err) => frame.cancel(err.into()),
                         }
-                    },
+                    }
                     None => frame.cancel(CancelReason::Permanent),
                 }
-            },
+            }
             zcosmic_export_dmabuf_manager_v1::Request::CaptureToplevel {
                 frame,
                 overlay_cursor,
@@ -177,36 +189,38 @@ where
                             Ok(capture) => handle_capture(capture, frame, start_time),
                             Err(err) => frame.cancel(err.into()),
                         }
-                    },
+                    }
                     None => frame.cancel(CancelReason::Permanent),
                 }
-            },
-            zcosmic_export_dmabuf_manager_v1::Request::Destroy => {},
-            _ => {},
+            }
+            zcosmic_export_dmabuf_manager_v1::Request::Destroy => {}
+            _ => {}
         }
     }
 }
 
 impl From<CaptureError> for CancelReason {
     fn from(err: CaptureError) -> Self {
-       match err {
+        match err {
             CaptureError::Temporary(err) => {
                 slog_scope::debug!("Temporary Capture Error: {}", err);
                 CancelReason::Temporary
-            },
+            }
             CaptureError::Permanent(err) => {
                 slog_scope::warn!("Permanent Capture Error: {}", err);
                 CancelReason::Permanent
-            },
-            CaptureError::Resizing => {
-                CancelReason::Resizing
             }
-        } 
+            CaptureError::Resizing => CancelReason::Resizing,
+        }
     }
 }
 
 fn handle_capture(capture: Capture, frame: ZcosmicExportDmabufFrameV1, start_time: Instant) {
-    let Capture { device, dmabuf, presentation_time } = capture;
+    let Capture {
+        device,
+        dmabuf,
+        presentation_time,
+    } = capture;
     let format = dmabuf.format();
     let modifier: u64 = format.modifier.into();
 
@@ -224,7 +238,11 @@ fn handle_capture(capture: Capture, frame: ZcosmicExportDmabufFrameV1, start_tim
         dmabuf.num_planes() as u32,
     );
 
-    for (i, (handle, (offset, stride))) in dmabuf.handles().zip(dmabuf.offsets().zip(dmabuf.strides())).enumerate() {
+    for (i, (handle, (offset, stride))) in dmabuf
+        .handles()
+        .zip(dmabuf.offsets().zip(dmabuf.strides()))
+        .enumerate()
+    {
         let mut file = unsafe { File::from_raw_fd(handle) };
         let size = match file.seek(SeekFrom::End(0)) {
             Ok(size) => size,
@@ -240,31 +258,20 @@ fn handle_capture(capture: Capture, frame: ZcosmicExportDmabufFrameV1, start_tim
             return;
         }
         let handle = file.into_raw_fd();
-        frame.object(
-            i as u32,
-            handle,
-            size as u32,
-            offset,
-            stride,
-            i as u32,
-        );
+        frame.object(i as u32, handle, size as u32, offset, stride, i as u32);
     }
-   
+
     let duration = presentation_time.duration_since(start_time);
     let (tv_sec, tv_nsec) = (duration.as_secs(), duration.subsec_nanos());
-    frame.ready(
-        (tv_sec >> 32) as u32,
-        (tv_sec & 0xFFFFFFFF) as u32,
-        tv_nsec,
-    );
+    frame.ready((tv_sec >> 32) as u32, (tv_sec & 0xFFFFFFFF) as u32, tv_nsec);
 }
 
 impl<D> Dispatch<ZcosmicExportDmabufFrameV1, (), D> for ExportDmabufState
 where
     D: GlobalDispatch<ZcosmicExportDmabufManagerV1, ExportDmabufGlobalData>
-     + Dispatch<ZcosmicExportDmabufManagerV1, ()>
-     + Dispatch<ZcosmicExportDmabufFrameV1, ()>
-     + ExportDmabufHandler,
+        + Dispatch<ZcosmicExportDmabufManagerV1, ()>
+        + Dispatch<ZcosmicExportDmabufFrameV1, ()>
+        + ExportDmabufHandler,
 {
     fn request(
         _state: &mut D,
@@ -276,8 +283,8 @@ where
         _data_init: &mut wayland_server::DataInit<'_, D>,
     ) {
         match request {
-            zcosmic_export_dmabuf_frame_v1::Request::Destroy => {},
-            _ => {},
+            zcosmic_export_dmabuf_frame_v1::Request::Destroy => {}
+            _ => {}
         }
     }
 }

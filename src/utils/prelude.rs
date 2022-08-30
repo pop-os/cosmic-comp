@@ -1,4 +1,7 @@
-use crate::{input::{ActiveOutput, SeatId}, state::Common};
+use crate::{
+    input::{ActiveOutput, SeatId},
+    state::Common,
+};
 use smithay::{
     utils::{Logical, Rectangle, Transform},
     wayland::{output::Output, seat::Seat},

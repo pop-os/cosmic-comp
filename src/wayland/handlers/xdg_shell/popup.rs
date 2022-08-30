@@ -87,7 +87,12 @@ fn unconstrain_xdg_popup(
     if let Some(output_rect) = space
         .outputs_for_window(window)
         .into_iter()
-        .find(|o| space.output_geometry(o).map(|rect| rect.contains(anchor_point)).unwrap_or(false))
+        .find(|o| {
+            space
+                .output_geometry(o)
+                .map(|rect| rect.contains(anchor_point))
+                .unwrap_or(false)
+        })
         .map(|o| space.output_geometry(&o).unwrap())
     {
         // the output_rect represented relative to the parents coordinate system

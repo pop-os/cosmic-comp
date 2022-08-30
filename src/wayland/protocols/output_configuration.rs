@@ -12,8 +12,7 @@ use smithay::{
         wayland_server::{
             backend::{ClientId, GlobalId, ObjectId},
             protocol::wl_output::WlOutput,
-            Client, DataInit, Dispatch, DisplayHandle,
-            GlobalDispatch, New, Resource,
+            Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
         },
     },
     utils::{Logical, Physical, Point, Size, Transform},
@@ -133,8 +132,7 @@ struct OutputStateInner {
 }
 type OutputState = Mutex<OutputStateInner>;
 
-impl<D> GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData, D>
-    for OutputConfigurationState<D>
+impl<D> GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData, D> for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>
@@ -176,8 +174,7 @@ where
     }
 }
 
-impl<D> Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData, D>
-    for OutputConfigurationState<D>
+impl<D> Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData, D> for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>
@@ -279,8 +276,7 @@ where
     }
 }
 
-impl<D> Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration, D>
-    for OutputConfigurationState<D>
+impl<D> Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration, D> for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>

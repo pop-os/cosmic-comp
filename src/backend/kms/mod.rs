@@ -40,7 +40,10 @@ use smithay::{
             DisplayHandle, Resource,
         },
     },
-    utils::{Size, signaling::{Linkable, SignalToken, Signaler}},
+    utils::{
+        signaling::{Linkable, SignalToken, Signaler},
+        Size,
+    },
     wayland::{
         dmabuf::DmabufGlobal,
         output::{Mode as OutputMode, Output, PhysicalProperties},
@@ -1023,12 +1026,15 @@ impl KmsState {
     }
 
     pub fn capture_output(&self, output: &Output) -> Option<(DrmNode, Dmabuf, Instant)> {
-        self.devices
-            .values()
-            .find_map(|dev| dev.surfaces.values().find(|s| &s.output == output)
-                .and_then(|s| s.last_render.clone()
-                    .map(|(buf, time)| (dev.render_node.clone(), buf, time))
-                )
-            )
+        self.devices.values().find_map(|dev| {
+            dev.surfaces
+                .values()
+                .find(|s| &s.output == output)
+                .and_then(|s| {
+                    s.last_render
+                        .clone()
+                        .map(|(buf, time)| (dev.render_node.clone(), buf, time))
+                })
+        })
     }
 }

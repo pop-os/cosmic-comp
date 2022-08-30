@@ -242,10 +242,14 @@ where
             1,
             scale,
             Transform::Normal,
-            &damage.iter().copied().map(|mut rect| {
-                rect.loc -= self.position.to_physical(scale).to_i32_round();
-                rect
-            }).collect::<Vec<_>>(),
+            &damage
+                .iter()
+                .copied()
+                .map(|mut rect| {
+                    rect.loc -= self.position.to_physical(scale).to_i32_round();
+                    rect
+                })
+                .collect::<Vec<_>>(),
             1.0,
         )?;
         Ok(())
@@ -335,7 +339,10 @@ where
                 Point::<i32, Logical>::from((frame.xhot as i32, frame.yhot as i32)).to_f64();
             *state.current_image.borrow_mut() = Some(frame);
 
-            Some(PointerElement::new(seat, pointer_image.clone(), location - hotspot, new_frame).into())
+            Some(
+                PointerElement::new(seat, pointer_image.clone(), location - hotspot, new_frame)
+                    .into(),
+            )
         } else {
             None
         }

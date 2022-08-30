@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{
-    collections::HashMap,
-    sync::Mutex,
-};
+use std::{collections::HashMap, sync::Mutex};
 
 use smithay::{
     desktop::Window,
@@ -12,11 +9,10 @@ use smithay::{
         wayland_server::{
             backend::{ClientId, GlobalId, ObjectId},
             protocol::wl_surface::WlSurface,
-            Client, DataInit, Dispatch, DisplayHandle,
-            GlobalDispatch, New, Resource,
+            Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
         },
     },
-    utils::{IsAlive, Rectangle, Logical},
+    utils::{IsAlive, Logical, Rectangle},
     wayland::{
         compositor::with_states, output::Output, shell::xdg::XdgToplevelSurfaceRoleAttributes,
     },
@@ -68,21 +64,18 @@ pub type ToplevelHandleState = Mutex<ToplevelHandleStateInner>;
 
 impl ToplevelHandleStateInner {
     fn from_window(window: &Window) -> ToplevelHandleState {
-        ToplevelHandleState::new(
-            ToplevelHandleStateInner {
-                outputs: Vec::new(),
-                workspaces: Vec::new(),
-                title: String::new(),
-                app_id: String::new(),
-                states: Vec::new(),
-                window: window.clone(),
-            }
-        )
+        ToplevelHandleState::new(ToplevelHandleStateInner {
+            outputs: Vec::new(),
+            workspaces: Vec::new(),
+            title: String::new(),
+            app_id: String::new(),
+            states: Vec::new(),
+            window: window.clone(),
+        })
     }
 }
 
-impl<D> GlobalDispatch<ZcosmicToplevelInfoV1, ToplevelInfoGlobalData, D>
-    for ToplevelInfoState<D>
+impl<D> GlobalDispatch<ZcosmicToplevelInfoV1, ToplevelInfoGlobalData, D> for ToplevelInfoState<D>
 where
     D: GlobalDispatch<ZcosmicToplevelInfoV1, ToplevelInfoGlobalData>
         + Dispatch<ZcosmicToplevelInfoV1, ()>
@@ -256,8 +249,7 @@ where
                 .unwrap()
                 .lock()
                 .unwrap();
-            state.rectangles
-                .retain(|_, (surface, _)| surface.alive());
+            state.rectangles.retain(|_, (surface, _)| surface.alive());
             if window.alive() {
                 std::mem::drop(state);
                 for instance in &self.instances {
@@ -476,13 +468,7 @@ fn send_toplevel_to_client<D>(
 pub fn window_from_handle(handle: ZcosmicToplevelHandleV1) -> Option<Window> {
     handle
         .data::<ToplevelHandleState>()
-        .map(|state|
-            state
-            .lock()
-            .unwrap()
-            .window
-            .clone()
-        )
+        .map(|state| state.lock().unwrap().window.clone())
 }
 
 macro_rules! delegate_toplevel_info {

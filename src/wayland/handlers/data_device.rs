@@ -4,13 +4,13 @@ use crate::state::State;
 use smithay::{
     delegate_data_device,
     reexports::wayland_server::protocol::{wl_data_source::WlDataSource, wl_surface::WlSurface},
+    utils::IsAlive,
     wayland::{
         data_device::{
             ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
         },
         seat::Seat,
     },
-    utils::IsAlive
 };
 use std::cell::RefCell;
 

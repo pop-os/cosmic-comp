@@ -2,29 +2,21 @@
 
 use smithay::{
     desktop::Window,
-    reexports::{
-        wayland_server::{
-            backend::{ClientId, GlobalId, ObjectId},
-            protocol::wl_surface::WlSurface,
-            Client, DataInit, Dispatch, DisplayHandle,
-            GlobalDispatch, New, Resource,
-        },
+    reexports::wayland_server::{
+        backend::{ClientId, GlobalId, ObjectId},
+        protocol::wl_surface::WlSurface,
+        Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
     },
     utils::{Logical, Rectangle},
-    wayland::{
-        output::Output,
-        seat::Seat,
-    },
+    wayland::{output::Output, seat::Seat},
 };
 
-
-use cosmic_protocols::toplevel_management::v1::server::{
-    zcosmic_toplevel_manager_v1::{self, ZcosmicToplevelManagerV1},
-};
 pub use cosmic_protocols::toplevel_management::v1::server::zcosmic_toplevel_manager_v1::ZcosmicToplelevelManagementCapabilitiesV1 as ManagementCapabilities;
+use cosmic_protocols::toplevel_management::v1::server::zcosmic_toplevel_manager_v1::{
+    self, ZcosmicToplevelManagerV1,
+};
 
-use super::toplevel_info::{ToplevelInfoHandler, ToplevelState, window_from_handle};
-
+use super::toplevel_info::{window_from_handle, ToplevelInfoHandler, ToplevelState};
 
 pub struct ToplevelManagementState {
     instances: Vec<ZcosmicToplevelManagerV1>,
@@ -52,13 +44,17 @@ pub struct ToplevelManagerGlobalData {
 }
 
 impl ToplevelManagementState {
-    pub fn new<D, F>(dh: &DisplayHandle, capabilities: Vec<ManagementCapabilities>, client_filter: F) -> ToplevelManagementState
+    pub fn new<D, F>(
+        dh: &DisplayHandle,
+        capabilities: Vec<ManagementCapabilities>,
+        client_filter: F,
+    ) -> ToplevelManagementState
     where
         D: GlobalDispatch<ZcosmicToplevelManagerV1, ToplevelManagerGlobalData>
             + Dispatch<ZcosmicToplevelManagerV1, ()>
             + ToplevelManagementHandler
             + 'static,
-        F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static
+        F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
         let global = dh.create_global::<D, ZcosmicToplevelManagerV1, _>(
             1,
@@ -73,7 +69,11 @@ impl ToplevelManagementState {
         }
     }
 
-    pub fn rectangle_for(&mut self, window: &Window, client: &ClientId) -> Option<(WlSurface, Rectangle<i32, Logical>)> {
+    pub fn rectangle_for(
+        &mut self,
+        window: &Window,
+        client: &ClientId,
+    ) -> Option<(WlSurface, Rectangle<i32, Logical>)> {
         if let Some(state) = window.user_data().get::<ToplevelState>() {
             state.lock().unwrap().rectangles.get(client).cloned()
         } else {
@@ -86,12 +86,13 @@ impl ToplevelManagementState {
     }
 }
 
-impl<D> GlobalDispatch<ZcosmicToplevelManagerV1, ToplevelManagerGlobalData, D> for ToplevelManagementState
+impl<D> GlobalDispatch<ZcosmicToplevelManagerV1, ToplevelManagerGlobalData, D>
+    for ToplevelManagementState
 where
     D: GlobalDispatch<ZcosmicToplevelManagerV1, ToplevelManagerGlobalData>
         + Dispatch<ZcosmicToplevelManagerV1, ()>
         + ToplevelManagementHandler
-        + 'static
+        + 'static,
 {
     fn bind(
         state: &mut D,
@@ -120,13 +121,12 @@ where
     }
 }
 
-
 impl<D> Dispatch<ZcosmicToplevelManagerV1, (), D> for ToplevelManagementState
 where
     D: GlobalDispatch<ZcosmicToplevelManagerV1, ToplevelManagerGlobalData>
         + Dispatch<ZcosmicToplevelManagerV1, ()>
         + ToplevelManagementHandler
-        + 'static
+        + 'static,
 {
     fn request(
         state: &mut D,
@@ -141,36 +141,43 @@ where
             zcosmic_toplevel_manager_v1::Request::Activate { toplevel, seat } => {
                 let window = window_from_handle(toplevel).unwrap();
                 state.activate(dh, &window, Seat::from_resource(&seat));
-            },
+            }
             zcosmic_toplevel_manager_v1::Request::Close { toplevel } => {
                 let window = window_from_handle(toplevel).unwrap();
                 state.close(dh, &window);
-            },
+            }
             zcosmic_toplevel_manager_v1::Request::SetFullscreen { toplevel, output } => {
                 let window = window_from_handle(toplevel).unwrap();
                 state.fullscreen(dh, &window, output.as_ref().and_then(Output::from_resource))
-            },
+            }
             zcosmic_toplevel_manager_v1::Request::UnsetFullscreen { toplevel } => {
                 let window = window_from_handle(toplevel).unwrap();
                 state.unfullscreen(dh, &window);
-            },
+            }
             zcosmic_toplevel_manager_v1::Request::SetMaximized { toplevel } => {
                 let window = window_from_handle(toplevel).unwrap();
                 state.maximize(dh, &window);
-            },
+            }
             zcosmic_toplevel_manager_v1::Request::UnsetMaximized { toplevel } => {
                 let window = window_from_handle(toplevel).unwrap();
                 state.unmaximize(dh, &window);
-            },
+            }
             zcosmic_toplevel_manager_v1::Request::SetMinimized { toplevel } => {
                 let window = window_from_handle(toplevel).unwrap();
                 state.minimize(dh, &window);
-            },
+            }
             zcosmic_toplevel_manager_v1::Request::UnsetMinimized { toplevel } => {
                 let window = window_from_handle(toplevel).unwrap();
                 state.unminimize(dh, &window);
-            },
-            zcosmic_toplevel_manager_v1::Request::SetRectangle { toplevel, surface, x, y, width, height } => {
+            }
+            zcosmic_toplevel_manager_v1::Request::SetRectangle {
+                toplevel,
+                surface,
+                x,
+                y,
+                width,
+                height,
+            } => {
                 let window = window_from_handle(toplevel).unwrap();
                 if let Some(toplevel_state) = window.user_data().get::<ToplevelState>() {
                     let mut toplevel_state = toplevel_state.lock().unwrap();
@@ -178,11 +185,17 @@ where
                         if width == 0 && height == 0 {
                             toplevel_state.rectangles.remove(&client);
                         } else {
-                            toplevel_state.rectangles.insert(client, (surface, Rectangle::from_loc_and_size((x, y), (width, height))));
+                            toplevel_state.rectangles.insert(
+                                client,
+                                (
+                                    surface,
+                                    Rectangle::from_loc_and_size((x, y), (width, height)),
+                                ),
+                            );
                         }
                     }
                 }
-            },
+            }
             _ => unreachable!(),
         }
     }
@@ -190,7 +203,11 @@ where
     fn destroyed(state: &mut D, client: ClientId, resource: ObjectId, _data: &()) {
         let mng_state = state.toplevel_management_state();
         mng_state.instances.retain(|i| i.id() != resource);
-        if !mng_state.instances.iter().any(|i| i.client_id().map(|c| c == client).unwrap_or(false)) {
+        if !mng_state
+            .instances
+            .iter()
+            .any(|i| i.client_id().map(|c| c == client).unwrap_or(false))
+        {
             for toplevel in state.toplevel_info_state_mut().toplevels.iter() {
                 if let Some(toplevel_state) = toplevel.user_data().get::<ToplevelState>() {
                     toplevel_state.lock().unwrap().rectangles.remove(&client);

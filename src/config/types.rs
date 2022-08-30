@@ -9,7 +9,9 @@ pub use smithay::{
     utils::{Logical, Physical, Point, Size, Transform},
     wayland::{
         output::{Mode, Output},
-        seat::{keysyms as KeySyms, Keysym, ModifiersState as KeyModifiers, XkbConfig as WlXkbConfig},
+        seat::{
+            keysyms as KeySyms, Keysym, ModifiersState as KeyModifiers, XkbConfig as WlXkbConfig,
+        },
     },
 };
 use xkbcommon::xkb;

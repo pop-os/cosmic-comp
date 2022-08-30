@@ -19,18 +19,19 @@ impl ToplevelManagementHandler for State {
     }
 
     fn activate(&mut self, dh: &DisplayHandle, window: &Window, seat: Option<Seat<Self>>) {
-        if let Some(idx) = self.common.shell.space_for_window(window.toplevel().wl_surface()).map(|w| w.idx) {
+        if let Some(idx) = self
+            .common
+            .shell
+            .space_for_window(window.toplevel().wl_surface())
+            .map(|w| w.idx)
+        {
             let seat = seat.unwrap_or(self.common.last_active_seat.clone());
             let output = active_output(&seat, &self.common);
             if self.common.shell.active_space(&output).idx != idx {
                 self.common.shell.activate(&seat, &output, idx as usize);
             }
-            self.common.set_focus(
-                dh,
-                Some(window.toplevel().wl_surface()),
-                &seat,
-                None,
-            );
+            self.common
+                .set_focus(dh, Some(window.toplevel().wl_surface()), &seat, None);
         }
     }
 

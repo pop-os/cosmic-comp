@@ -5,7 +5,7 @@ use smithay::{
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
         ResizeEdge, State as XdgState,
     },
-    utils::{IsAlive, Rectangle, Point, Logical},
+    utils::{IsAlive, Logical, Point, Rectangle},
     wayland::{
         compositor::with_states,
         output::Output,
@@ -40,7 +40,13 @@ impl FloatingLayout {
         Default::default()
     }
 
-    pub fn map_window(&mut self, space: &mut Space, window: Window, seat: &Seat<State>, position: impl Into<Option<Point<i32, Logical>>>) {
+    pub fn map_window(
+        &mut self,
+        space: &mut Space,
+        window: Window,
+        seat: &Seat<State>,
+        position: impl Into<Option<Point<i32, Logical>>>,
+    ) {
         if let Some(output) = super::output_from_seat(Some(seat), space) {
             self.map_window_internal(space, window, &output, position.into());
         } else {
@@ -58,8 +64,17 @@ impl FloatingLayout {
         // TODO make sure all windows are still visible on any output or move them
     }
 
-    fn map_window_internal(&mut self, space: &mut Space, window: Window, output: &Output, position: Option<Point<i32, Logical>>) {
-        let last_geometry = window.user_data().get::<WindowUserData>().map(|u| u.lock().unwrap().last_geometry);
+    fn map_window_internal(
+        &mut self,
+        space: &mut Space,
+        window: Window,
+        output: &Output,
+        position: Option<Point<i32, Logical>>,
+    ) {
+        let last_geometry = window
+            .user_data()
+            .get::<WindowUserData>()
+            .map(|u| u.lock().unwrap().last_geometry);
         let mut win_geo = window.geometry();
 
         let layers = layer_map_for_output(&output);
@@ -112,10 +127,15 @@ impl FloatingLayout {
             }
         }
 
-        let position = position.or_else(|| last_geometry.map(|g| g.loc)).unwrap_or_else(|| (
-            geometry.loc.x + (geometry.size.w / 2) - (win_geo.size.w / 2) + win_geo.loc.x,
-            geometry.loc.y + (geometry.size.h / 2) - (win_geo.size.h / 2) + win_geo.loc.y,
-        ).into());
+        let position = position
+            .or_else(|| last_geometry.map(|g| g.loc))
+            .unwrap_or_else(|| {
+                (
+                    geometry.loc.x + (geometry.size.w / 2) - (win_geo.size.w / 2) + win_geo.loc.x,
+                    geometry.loc.y + (geometry.size.h / 2) - (win_geo.size.h / 2) + win_geo.loc.y,
+                )
+                    .into()
+            });
 
         #[allow(irrefutable_let_patterns)]
         if let Kind::Xdg(xdg) = &window.toplevel() {
@@ -138,19 +158,21 @@ impl FloatingLayout {
     pub fn unmap_window(&mut self, space: &mut Space, window: &Window) {
         #[allow(irrefutable_let_patterns)]
         let is_maximized = match &window.toplevel() {
-            Kind::Xdg(surface) => surface.with_pending_state(|state| {
-                state.states.contains(XdgState::Maximized)
-            })
+            Kind::Xdg(surface) => {
+                surface.with_pending_state(|state| state.states.contains(XdgState::Maximized))
+            }
         };
 
         if !is_maximized {
             if let Some(location) = space.window_location(window) {
                 let user_data = window.user_data();
                 user_data.insert_if_missing(|| WindowUserData::default());
-                user_data.get::<WindowUserData>().unwrap().lock().unwrap().last_geometry = Rectangle::from_loc_and_size(
-                    location,
-                    window.geometry().size,
-                );
+                user_data
+                    .get::<WindowUserData>()
+                    .unwrap()
+                    .lock()
+                    .unwrap()
+                    .last_geometry = Rectangle::from_loc_and_size(location, window.geometry().size);
             }
         }
 
@@ -162,16 +184,18 @@ impl FloatingLayout {
     pub fn maximize_request(&mut self, space: &mut Space, window: &Window, output: &Output) {
         let layers = layer_map_for_output(&output);
         let geometry = layers.non_exclusive_zone();
-        
+
         if let Some(location) = space.window_location(window) {
             let user_data = window.user_data();
             user_data.insert_if_missing(|| WindowUserData::default());
-            user_data.get::<WindowUserData>().unwrap().lock().unwrap().last_geometry = Rectangle::from_loc_and_size(
-                location,
-                window.geometry().size,
-            );
+            user_data
+                .get::<WindowUserData>()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .last_geometry = Rectangle::from_loc_and_size(location, window.geometry().size);
         }
-    
+
         space.map_window(
             &window,
             (geometry.loc.x, geometry.loc.y),
@@ -189,7 +213,10 @@ impl FloatingLayout {
     }
 
     pub fn unmaximize_request(&mut self, space: &mut Space, window: &Window) {
-        let last_geometry = window.user_data().get::<WindowUserData>().map(|u| u.lock().unwrap().last_geometry);
+        let last_geometry = window
+            .user_data()
+            .get::<WindowUserData>()
+            .map(|u| u.lock().unwrap().last_geometry);
         match window.toplevel() {
             Kind::Xdg(toplevel) => {
                 toplevel.with_pending_state(|state| {
@@ -200,12 +227,7 @@ impl FloatingLayout {
             }
         }
         if let Some(last_location) = last_geometry.map(|g| g.loc) {
-            space.map_window(
-                &window,
-                last_location,
-                FLOATING_INDEX,
-                true,
-            );
+            space.map_window(&window, last_location, FLOATING_INDEX, true);
         }
     }
 

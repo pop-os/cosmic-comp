@@ -26,8 +26,8 @@ use smithay::{
         Format, Fourcc, Modifier,
     },
     reexports::wayland_server::{
-        backend::GlobalId, protocol::wl_buffer::WlBuffer, Client, DataInit,
-        Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
+        backend::GlobalId, protocol::wl_buffer::WlBuffer, Client, DataInit, Dispatch,
+        DisplayHandle, GlobalDispatch, New, Resource,
     },
     wayland::{
         buffer::BufferHandler,

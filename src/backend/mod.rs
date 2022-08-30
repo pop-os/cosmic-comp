@@ -49,7 +49,7 @@ pub fn init_backend_auto(
                 .with_context(|| "Backend initialized without output")?
                 .clone();
             seat.user_data()
-                .insert_if_missing(|| crate::input::ActiveOutput(std::cell::RefCell::new(output)));   
+                .insert_if_missing(|| crate::input::ActiveOutput(std::cell::RefCell::new(output)));
         }
     }
     res

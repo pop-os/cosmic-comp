@@ -69,7 +69,7 @@ impl Workspace {
                 .maximize_request(&mut self.space, window, output);
         }
     }
-    
+
     pub fn unmaximize_request(&mut self, window: &Window) {
         if self.fullscreen.values().any(|w| w == window) {
             return self.unfullscreen_request(window);
@@ -173,14 +173,16 @@ impl Workspace {
         if self.tiling_enabled {
             for window in self.tiling_layer.windows.clone().into_iter() {
                 self.tiling_layer.unmap_window(&mut self.space, &window);
-                self.floating_layer.map_window(&mut self.space, window, seat, None);
+                self.floating_layer
+                    .map_window(&mut self.space, window, seat, None);
             }
             self.tiling_enabled = false;
         } else {
             let focus_stack = self.focus_stack(seat);
             for window in self.floating_layer.windows.clone().into_iter() {
                 self.floating_layer.unmap_window(&mut self.space, &window);
-                self.tiling_layer.map_window(&mut self.space, window, seat, focus_stack.iter())
+                self.tiling_layer
+                    .map_window(&mut self.space, window, seat, focus_stack.iter())
             }
             self.tiling_enabled = true;
         }
@@ -191,11 +193,13 @@ impl Workspace {
             if let Some(window) = self.focus_stack(seat).iter().next().cloned() {
                 if self.tiling_layer.windows.contains(&window) {
                     self.tiling_layer.unmap_window(&mut self.space, &window);
-                    self.floating_layer.map_window(&mut self.space, window, seat, None);
+                    self.floating_layer
+                        .map_window(&mut self.space, window, seat, None);
                 } else if self.floating_layer.windows.contains(&window) {
                     let focus_stack = self.focus_stack(seat);
                     self.floating_layer.unmap_window(&mut self.space, &window);
-                    self.tiling_layer.map_window(&mut self.space, window, seat, focus_stack.iter())
+                    self.tiling_layer
+                        .map_window(&mut self.space, window, seat, focus_stack.iter())
                 }
             }
         }

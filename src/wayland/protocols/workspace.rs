@@ -1,15 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{
-    collections::HashSet,
-    sync::Mutex,
-};
+use std::{collections::HashSet, sync::Mutex};
 
 use smithay::{
     reexports::wayland_server::{
         backend::{ClientData, ClientId, GlobalId, ObjectId},
-        Client, DataInit, Dispatch, DisplayHandle,
-        GlobalDispatch, New, Resource,
+        Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
     },
     wayland::output::Output,
 };
@@ -142,8 +138,7 @@ pub trait WorkspaceClientHandler {
     fn workspace_state(&self) -> &WorkspaceClientState;
 }
 
-impl<D> GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData, D>
-    for WorkspaceState<D>
+impl<D> GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData, D> for WorkspaceState<D>
 where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV1, ()>
@@ -477,7 +472,7 @@ where
                 .map(|w| w.states.iter())
         })
     }
-    
+
     pub fn group_handle(
         &self,
         group: &ZcosmicWorkspaceGroupHandleV1,
@@ -493,7 +488,11 @@ where
     ) -> Option<WorkspaceHandle> {
         self.groups
             .iter()
-            .find_map(|g| g.workspaces.iter().find(|w| w.instances.contains(workspace)))
+            .find_map(|g| {
+                g.workspaces
+                    .iter()
+                    .find(|w| w.instances.contains(workspace))
+            })
             .map(|w| WorkspaceHandle { id: w.id })
     }
 

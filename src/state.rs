@@ -5,13 +5,11 @@ use crate::{
     config::{Config, OutputConfig},
     logger::LogState,
     shell::Shell,
-    wayland::protocols::{
-        drm::WlDrmState,
-        export_dmabuf::ExportDmabufState,
-        output_configuration::OutputConfigurationState,
-        workspace::WorkspaceClientState,
-    },
     utils::prelude::*,
+    wayland::protocols::{
+        drm::WlDrmState, export_dmabuf::ExportDmabufState,
+        output_configuration::OutputConfigurationState, workspace::WorkspaceClientState,
+    },
 };
 use smithay::{
     backend::drm::DrmNode,
@@ -22,6 +20,7 @@ use smithay::{
             Display, DisplayHandle,
         },
     },
+    utils::{Buffer, Size},
     wayland::{
         compositor::CompositorState,
         data_device::DataDeviceState,
@@ -32,7 +31,6 @@ use smithay::{
         shm::ShmState,
         viewporter::ViewporterState,
     },
-    utils::{Size, Buffer},
 };
 
 use std::{
@@ -210,20 +208,17 @@ impl BackendData {
         output: &Output,
         state: &mut Common,
     ) -> anyhow::Result<(Vec<u8>, Size<i32, Buffer>)> {
+        use crate::backend::render::{render_output, AsGles2Renderer, CustomElem};
         use anyhow::Context;
+        use smithay::backend::renderer::{ImportAll, Renderer};
+        use smithay::desktop::space::RenderElement;
         use smithay::{
             backend::{
                 drm::NodeType,
-                renderer::{
-                    Bind, Offscreen, ExportMem,
-                    gles2::Gles2Renderbuffer,
-                },
+                renderer::{gles2::Gles2Renderbuffer, Bind, ExportMem, Offscreen},
             },
             utils::Rectangle,
         };
-        use crate::backend::render::{render_output, AsGles2Renderer, CustomElem};
-        use smithay::backend::renderer::{Renderer, ImportAll};
-        use smithay::desktop::space::RenderElement;
 
         fn capture<E, T, R>(
             gpu: Option<DrmNode>,
@@ -234,18 +229,23 @@ impl BackendData {
         where
             E: std::error::Error + Send + Sync + 'static,
             T: Clone + 'static,
-            R: Renderer<Error=E, TextureId=T>
-            + ImportAll
-            + AsGles2Renderer
-            + Offscreen<Gles2Renderbuffer>
-            + Bind<Gles2Renderbuffer>
-            + ExportMem,
+            R: Renderer<Error = E, TextureId = T>
+                + ImportAll
+                + AsGles2Renderer
+                + Offscreen<Gles2Renderbuffer>
+                + Bind<Gles2Renderbuffer>
+                + ExportMem,
             CustomElem: RenderElement<R>,
         {
-            let size = output.geometry().size.to_f64().to_buffer(
-                output.current_scale().fractional_scale(),
-                output.current_transform().into()
-            ).to_i32_round();
+            let size = output
+                .geometry()
+                .size
+                .to_f64()
+                .to_buffer(
+                    output.current_scale().fractional_scale(),
+                    output.current_transform().into(),
+                )
+                .to_i32_round();
             let buffer = Offscreen::<Gles2Renderbuffer>::create_buffer(renderer, size)?;
             renderer.bind(buffer)?;
             render_output(
@@ -257,7 +257,8 @@ impl BackendData {
                 false,
                 #[cfg(feature = "debug")]
                 None,
-            ).map_err(|err| anyhow::anyhow!("Failed to render output: {:?}", err))?; // lifetime issue, grrr
+            )
+            .map_err(|err| anyhow::anyhow!("Failed to render output: {:?}", err))?; // lifetime issue, grrr
             let mapping = renderer.copy_framebuffer(Rectangle::from_loc_and_size((0, 0), size))?;
             let data = Vec::from(renderer.map_texture(&mapping)?);
 
@@ -268,12 +269,18 @@ impl BackendData {
             BackendData::Winit(winit) => capture(None, winit.backend.renderer(), output, state),
             BackendData::X11(x11) => capture(None, &mut x11.renderer, output, state),
             BackendData::Kms(kms) => {
-                let node = kms.target_node_for_output(output)
+                let node = kms
+                    .target_node_for_output(output)
                     .unwrap_or(kms.primary)
                     .node_with_type(NodeType::Render)
                     .with_context(|| "Unable to find node")??;
-                capture(Some(node), &mut kms.api.renderer::<Gles2Renderbuffer>(&node, &node)?, output, state)
-            },
+                capture(
+                    Some(node),
+                    &mut kms.api.renderer::<Gles2Renderbuffer>(&node, &node)?,
+                    output,
+                    state,
+                )
+            }
             BackendData::Unset => unreachable!(),
         }
     }
@@ -365,15 +372,17 @@ impl State {
             drm_node: match &self.backend {
                 BackendData::Kms(kms_state) => {
                     match std::env::var("COSMIC_RENDER_AUTO_ASSIGN").map(|val| val.to_lowercase()) {
-                        Ok(val) if val == "y" || val == "yes" || val == "true" =>
-                            Some(
-                                kms_state.target_node_for_output(
-                                    &active_output(&self.common.last_active_seat, &self.common)
-                                ).unwrap_or(kms_state.primary)
-                            ),
+                        Ok(val) if val == "y" || val == "yes" || val == "true" => Some(
+                            kms_state
+                                .target_node_for_output(&active_output(
+                                    &self.common.last_active_seat,
+                                    &self.common,
+                                ))
+                                .unwrap_or(kms_state.primary),
+                        ),
                         _ => Some(kms_state.primary),
                     }
-                },
+                }
                 _ => None,
             },
             privileged: false,
