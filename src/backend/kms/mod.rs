@@ -1004,10 +1004,12 @@ impl KmsState {
                                     &device.render_node,
                                     &mut data.state.common,
                                 ) {
-                                    slog_scope::error!("Error rendering: {}", err);
-                                    return TimeoutAction::ToDuration(Duration::from_secs_f64(
-                                        1.0 / surface.refresh_rate as f64,
-                                    ));
+                                    if backend.session.is_active() {
+                                        slog_scope::error!("Error rendering: {}", err);
+                                        return TimeoutAction::ToDuration(Duration::from_secs_f64(
+                                            1.0 / surface.refresh_rate as f64,
+                                        ));
+                                    }
                                 }
                             }
                         }
