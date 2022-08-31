@@ -2,8 +2,8 @@
 
 use smithay::{
     desktop::{Kind, Window},
+    input::Seat,
     reexports::wayland_server::DisplayHandle,
-    wayland::seat::Seat,
 };
 
 use crate::{
@@ -18,7 +18,7 @@ impl ToplevelManagementHandler for State {
         &mut self.common.shell.toplevel_management_state
     }
 
-    fn activate(&mut self, dh: &DisplayHandle, window: &Window, seat: Option<Seat<Self>>) {
+    fn activate(&mut self, _dh: &DisplayHandle, window: &Window, seat: Option<Seat<Self>>) {
         if let Some(idx) = self
             .common
             .shell
@@ -30,8 +30,7 @@ impl ToplevelManagementHandler for State {
             if self.common.shell.active_space(&output).idx != idx {
                 self.common.shell.activate(&seat, &output, idx as usize);
             }
-            self.common
-                .set_focus(dh, Some(window.toplevel().wl_surface()), &seat, None);
+            Common::set_focus(self, Some(window.toplevel().wl_surface()), &seat, None);
         }
     }
 

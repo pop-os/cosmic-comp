@@ -7,6 +7,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 pub use smithay::{
     backend::input::KeyState,
+    input::keyboard::{keysyms as KeySyms, Keysym, ModifiersState},
     reexports::{
         calloop::LoopHandle,
         input::{
@@ -15,10 +16,7 @@ pub use smithay::{
         },
     },
     utils::{Logical, Physical, Point, Size, Transform},
-    wayland::{
-        output::{Mode, Output},
-        seat::{keysyms as KeySyms, Keysym, ModifiersState as KeyModifiers},
-    },
+    wayland::output::{Mode, Output},
 };
 use std::{cell::RefCell, collections::HashMap, fs::OpenOptions, path::PathBuf};
 
@@ -694,6 +692,27 @@ pub enum KeyModifier {
     Logo,
     CapsLock,
     NumLock,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct KeyModifiers {
+    ctrl: bool,
+    alt: bool,
+    shift: bool,
+    logo: bool,
+    caps_lock: bool,
+    num_lock: bool,
+}
+
+impl PartialEq<ModifiersState> for KeyModifiers {
+    fn eq(&self, other: &ModifiersState) -> bool {
+        self.ctrl == other.ctrl
+            && self.alt == other.alt
+            && self.shift == other.shift
+            && self.logo == other.logo
+            && self.caps_lock == other.caps_lock
+            && self.num_lock == other.num_lock
+    }
 }
 
 impl std::ops::AddAssign<KeyModifier> for KeyModifiers {

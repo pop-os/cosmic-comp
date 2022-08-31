@@ -1,14 +1,13 @@
-use crate::{
-    input::{ActiveOutput, SeatId},
-    state::Common,
-};
+use crate::input::{ActiveOutput, SeatId};
 use smithay::{
+    input::Seat,
     utils::{Logical, Rectangle, Transform},
-    wayland::{output::Output, seat::Seat},
+    wayland::output::Output,
 };
 use std::cell::RefCell;
 
-pub use crate::state::State;
+pub use crate::shell::{Shell, Workspace};
+pub use crate::state::{Common, State};
 pub use crate::wayland::handlers::xdg_shell::popup::update_reactive_popups;
 
 pub trait OutputExt {

@@ -9,14 +9,14 @@ use atomic_float::AtomicF64;
 use id_tree::{InsertBehavior, MoveBehavior, Node, NodeId, NodeIdError, RemoveBehavior, Tree};
 use smithay::{
     desktop::{layer_map_for_output, Kind, Space, Window},
+    input::{
+        pointer::{Focus, GrabStartData as PointerGrabStartData},
+        Seat,
+    },
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
         ResizeEdge, State as XdgState,
     },
-    utils::{IsAlive, Rectangle},
-    wayland::{
-        seat::{Focus, PointerGrabStartData, Seat},
-        Serial,
-    },
+    utils::{IsAlive, Rectangle, Serial},
 };
 use std::{
     cell::RefCell,
@@ -233,18 +233,26 @@ impl TilingLayout {
     }
 
     pub fn resize_request(
-        &mut self,
-        space: &mut Space,
+        state: &mut State,
         window: &Window,
         seat: &Seat<State>,
         serial: Serial,
-        start_data: PointerGrabStartData,
+        start_data: PointerGrabStartData<State>,
         edges: ResizeEdge,
     ) {
+        // it is so stupid, that we have to do this here. TODO: Refactor grabs
+        let workspace = state
+            .common
+            .shell
+            .space_for_window_mut(window.toplevel().wl_surface())
+            .unwrap();
+        let space = &mut workspace.space;
+        let trees = &mut workspace.tiling_layer.trees;
+
         if let Some(pointer) = seat.get_pointer() {
             if let Some(info) = window.user_data().get::<RefCell<WindowInfo>>() {
                 let output = info.borrow().output;
-                let tree = TilingLayout::active_tree(&mut self.trees, output);
+                let tree = TilingLayout::active_tree(trees, output);
                 let mut node_id = info.borrow().node.clone();
 
                 while let Some((fork, child)) = TilingLayout::find_fork(tree, node_id) {
@@ -261,18 +269,19 @@ impl TilingLayout {
                             | (false, Orientation::Horizontal, ResizeEdge::Top)
                             | (true, Orientation::Vertical, ResizeEdge::Right)
                             | (false, Orientation::Vertical, ResizeEdge::Left) => {
-                                if let Some(output) = space.outputs().nth(output) {
+                                let output = space.outputs().nth(output).cloned();
+                                if let Some(output) = output {
                                     let grab = ResizeForkGrab {
                                         start_data,
                                         orientation: *orientation,
                                         initial_ratio: ratio.load(Ordering::SeqCst),
-                                        initial_size: layer_map_for_output(output)
+                                        initial_size: layer_map_for_output(&output)
                                             .non_exclusive_zone()
                                             .size,
                                         ratio: ratio.clone(),
                                     };
 
-                                    pointer.set_grab(grab, serial, Focus::Clear);
+                                    pointer.set_grab(state, grab, serial, Focus::Clear);
                                 }
                                 return;
                             }

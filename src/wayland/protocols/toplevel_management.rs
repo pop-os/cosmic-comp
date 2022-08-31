@@ -2,13 +2,14 @@
 
 use smithay::{
     desktop::Window,
+    input::{Seat, SeatHandler},
     reexports::wayland_server::{
         backend::{ClientId, GlobalId, ObjectId},
         protocol::wl_surface::WlSurface,
         Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
     },
     utils::{Logical, Rectangle},
-    wayland::{output::Output, seat::Seat},
+    wayland::output::Output,
 };
 
 pub use cosmic_protocols::toplevel_management::v1::server::zcosmic_toplevel_manager_v1::ZcosmicToplelevelManagementCapabilitiesV1 as ManagementCapabilities;
@@ -25,7 +26,7 @@ pub struct ToplevelManagementState {
 }
 
 #[allow(unused_variables)]
-pub trait ToplevelManagementHandler: ToplevelInfoHandler {
+pub trait ToplevelManagementHandler: ToplevelInfoHandler + SeatHandler {
     fn toplevel_management_state(&mut self) -> &mut ToplevelManagementState;
 
     fn activate(&mut self, dh: &DisplayHandle, window: &Window, seat: Option<Seat<Self>>) {}

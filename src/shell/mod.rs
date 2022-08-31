@@ -2,19 +2,18 @@ use std::{cell::Cell, mem::MaybeUninit};
 
 use smithay::{
     desktop::{layer_map_for_output, LayerSurface, PopupManager, Window, WindowSurfaceType},
+    input::{pointer::MotionEvent, Seat},
     reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
-    utils::{Logical, Point, Rectangle},
+    utils::{Logical, Point, Rectangle, SERIAL_COUNTER},
     wayland::{
         compositor::with_states,
         output::Output,
-        seat::{MotionEvent, Seat},
         shell::{
             wlr_layer::{
                 KeyboardInteractivity, Layer, LayerSurfaceCachedState, WlrLayerShellState,
             },
             xdg::XdgShellState,
         },
-        SERIAL_COUNTER,
     },
 };
 
@@ -372,7 +371,6 @@ impl Shell {
                                 geometry.loc.y + (geometry.size.h / 2),
                             ))
                             .to_f64(),
-                            focus: None, // This should actually be a surface, if there is one in the center
                             serial: SERIAL_COUNTER.next_serial(),
                             time: 0,
                         });
@@ -593,16 +591,18 @@ impl Shell {
             .refresh(Some(&self.workspace_state));
     }
 
-    pub fn map_window(&mut self, window: &Window, output: &Output, dh: &DisplayHandle) {
-        let pos = self
+    pub fn map_window(state: &mut State, window: &Window, output: &Output) {
+        let pos = state
+            .common
+            .shell
             .pending_windows
             .iter()
             .position(|(w, _)| w == window)
             .unwrap();
-        let (window, seat) = self.pending_windows.remove(pos);
+        let (window, seat) = state.common.shell.pending_windows.remove(pos);
         let surface = window.toplevel().wl_surface().clone();
 
-        let workspace = match &self.workspace_mode {
+        let workspace = match &state.common.shell.workspace_mode {
             WorkspaceMode::OutputBound => {
                 let active = output
                     .user_data()
@@ -610,18 +610,27 @@ impl Shell {
                     .unwrap()
                     .active
                     .get();
-                &mut self.spaces[active]
+                &mut state.common.shell.spaces[active]
             }
-            WorkspaceMode::Global { active, .. } => &mut self.spaces[*active],
+            WorkspaceMode::Global { active, .. } => &mut state.common.shell.spaces[*active],
         };
-        self.workspace_state
+        state
+            .common
+            .shell
+            .workspace_state
             .update()
             .remove_workspace_state(&workspace.handle, WState::Hidden);
-        self.toplevel_info_state
+        state
+            .common
+            .shell
+            .toplevel_info_state
             .toplevel_enter_workspace(&window, &workspace.handle);
-        self.toplevel_info_state
+        state
+            .common
+            .shell
+            .toplevel_info_state
             .toplevel_enter_output(&window, &output);
-        if layout::should_be_floating(&window) || self.floating_default {
+        if layout::should_be_floating(&window) || state.common.shell.floating_default {
             workspace
                 .floating_layer
                 .map_window(&mut workspace.space, window, &seat, None);
@@ -635,20 +644,22 @@ impl Shell {
             );
         }
 
-        self.set_focus(dh, Some(&surface), &seat, None);
+        Shell::set_focus(state, Some(&surface), &seat, None);
 
-        for window in self.active_space(output).space.windows() {
-            self.update_reactive_popups(window);
+        for window in state.common.shell.active_space(output).space.windows() {
+            state.common.shell.update_reactive_popups(window);
         }
     }
 
-    pub fn map_layer(&mut self, layer_surface: &LayerSurface, dh: &DisplayHandle) {
-        let pos = self
+    pub fn map_layer(state: &mut State, layer_surface: &LayerSurface) {
+        let pos = state
+            .common
+            .shell
             .pending_layers
             .iter()
             .position(|(l, _, _)| l == layer_surface)
             .unwrap();
-        let (layer_surface, output, seat) = self.pending_layers.remove(pos);
+        let (layer_surface, output, seat) = state.common.shell.pending_layers.remove(pos);
 
         let surface = layer_surface.wl_surface();
         let wants_focus = {
@@ -660,10 +671,11 @@ impl Shell {
         };
 
         let mut map = layer_map_for_output(&output);
-        map.map_layer(dh, &layer_surface).unwrap();
+        map.map_layer(&state.common.display_handle, &layer_surface)
+            .unwrap();
 
         if wants_focus {
-            self.set_focus(dh, Some(surface), &seat, None)
+            Shell::set_focus(state, Some(surface), &seat, None)
         }
     }
 

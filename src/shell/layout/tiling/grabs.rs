@@ -3,16 +3,17 @@
 use crate::{shell::layout::Orientation, utils::prelude::*};
 use atomic_float::AtomicF64;
 use smithay::{
-    reexports::wayland_server::DisplayHandle,
-    utils::{Logical, Size},
-    wayland::seat::{
-        AxisFrame, ButtonEvent, MotionEvent, PointerGrab, PointerGrabStartData, PointerInnerHandle,
+    input::pointer::{
+        AxisFrame, ButtonEvent, GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab,
+        PointerInnerHandle,
     },
+    reexports::wayland_server::protocol::wl_surface::WlSurface,
+    utils::{Logical, Point, Size},
 };
 use std::sync::{atomic::Ordering, Arc};
 
 pub struct ResizeForkGrab {
-    pub start_data: PointerGrabStartData,
+    pub start_data: PointerGrabStartData<State>,
     pub orientation: Orientation,
     pub initial_size: Size<i32, Logical>,
     pub initial_ratio: f64,
@@ -22,13 +23,13 @@ pub struct ResizeForkGrab {
 impl PointerGrab<State> for ResizeForkGrab {
     fn motion(
         &mut self,
-        _data: &mut State,
-        _dh: &DisplayHandle,
+        data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
+        _focus: Option<(WlSurface, Point<i32, Logical>)>,
         event: &MotionEvent,
     ) {
         // While the grab is active, no client has pointer focus
-        handle.motion(event.location, None, event.serial, event.time);
+        handle.motion(data, None, event);
 
         let delta = event.location - self.start_data.location;
         let delta = match self.orientation {
@@ -43,29 +44,27 @@ impl PointerGrab<State> for ResizeForkGrab {
 
     fn button(
         &mut self,
-        _data: &mut State,
-        _dh: &DisplayHandle,
+        data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
         event: &ButtonEvent,
     ) {
-        handle.button(event.button, event.state, event.serial, event.time);
+        handle.button(data, event);
         if handle.current_pressed().is_empty() {
             // No more buttons are pressed, release the grab.
-            handle.unset_grab(event.serial, event.time);
+            handle.unset_grab(data, event.serial, event.time);
         }
     }
 
     fn axis(
         &mut self,
-        _data: &mut State,
-        _dh: &DisplayHandle,
+        data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
         details: AxisFrame,
     ) {
-        handle.axis(details)
+        handle.axis(data, details)
     }
 
-    fn start_data(&self) -> &PointerGrabStartData {
+    fn start_data(&self) -> &PointerGrabStartData<State> {
         &self.start_data
     }
 }

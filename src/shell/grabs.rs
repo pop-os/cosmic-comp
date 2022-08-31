@@ -11,34 +11,35 @@ use smithay::{
         space::{RenderElement, SpaceOutputTuple},
         Kind, Window,
     },
+    input::{
+        pointer::{
+            AxisFrame, ButtonEvent, Focus, GrabStartData as PointerGrabStartData, MotionEvent,
+            PointerGrab, PointerInnerHandle,
+        },
+        Seat,
+    },
     reexports::{
         wayland_protocols::xdg::shell::server::xdg_toplevel::State as XdgState,
-        wayland_server::DisplayHandle,
+        wayland_server::protocol::wl_surface::WlSurface,
     },
-    utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale},
-    wayland::{
-        output::Output,
-        seat::{
-            AxisFrame, ButtonEvent, MotionEvent, PointerGrab, PointerGrabStartData,
-            PointerInnerHandle,
-        },
-        seat::{Focus, Seat},
-        Serial,
-    },
+    utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial},
+    wayland::output::Output,
 };
 use std::cell::RefCell;
 
 impl Shell {
     pub fn move_request(
-        &mut self,
+        state: &mut State,
         window: &Window,
         seat: &Seat<State>,
         serial: Serial,
-        start_data: PointerGrabStartData,
+        start_data: PointerGrabStartData<State>,
     ) {
         // TODO touch grab
         if let Some(pointer) = seat.get_pointer() {
-            let workspace = self
+            let workspace = state
+                .common
+                .shell
                 .space_for_window_mut(window.toplevel().wl_surface())
                 .unwrap();
             if workspace.fullscreen.values().any(|w| w == window) {
@@ -91,16 +92,25 @@ impl Shell {
             let workspace_is_empty = workspace.space.windows().next().is_none();
 
             if workspace_is_empty {
-                self.workspace_state
+                state
+                    .common
+                    .shell
+                    .workspace_state
                     .update()
                     .add_workspace_state(&workspace_handle, WState::Hidden);
             }
-            self.toplevel_info_state
+            state
+                .common
+                .shell
+                .toplevel_info_state
                 .toplevel_leave_workspace(&window, &workspace_handle);
-            self.toplevel_info_state
+            state
+                .common
+                .shell
+                .toplevel_info_state
                 .toplevel_leave_output(&window, &output);
 
-            let state = MoveGrabState {
+            let grab_state = MoveGrabState {
                 window: window.clone(),
                 was_tiled,
                 initial_cursor_location: pointer.current_location(),
@@ -112,12 +122,12 @@ impl Shell {
                 .user_data()
                 .get::<SeatMoveGrabState>()
                 .unwrap()
-                .borrow_mut() = Some(state);
-            pointer.set_grab(grab, serial, Focus::Clear);
+                .borrow_mut() = Some(grab_state);
+            pointer.set_grab(state, grab, serial, Focus::Clear);
         }
     }
 
-    fn drop_move(&mut self, dh: &DisplayHandle, seat: &Seat<State>, output: &Output) {
+    fn drop_move(state: &mut State, seat: &Seat<State>, output: &Output) {
         if let Some(move_state) = seat
             .user_data()
             .get::<SeatMoveGrabState>()
@@ -134,16 +144,25 @@ impl Shell {
                     (move_state.initial_window_location.to_f64() + delta).to_i32_round();
                 let surface = window.toplevel().wl_surface().clone();
 
-                let workspace_handle = self.active_space(output).handle;
-                self.workspace_state
+                let workspace_handle = state.common.shell.active_space(output).handle;
+                state
+                    .common
+                    .shell
+                    .workspace_state
                     .update()
                     .remove_workspace_state(&workspace_handle, WState::Hidden);
-                self.toplevel_info_state
+                state
+                    .common
+                    .shell
+                    .toplevel_info_state
                     .toplevel_enter_workspace(&window, &workspace_handle);
-                self.toplevel_info_state
+                state
+                    .common
+                    .shell
+                    .toplevel_info_state
                     .toplevel_enter_output(&window, &output);
 
-                let workspace = self.active_space_mut(output);
+                let workspace = state.common.shell.active_space_mut(output);
                 if move_state.was_tiled {
                     let focus_stack = workspace.focus_stack(&seat);
                     workspace.tiling_layer.map_window(
@@ -161,10 +180,10 @@ impl Shell {
                     );
                 }
 
-                self.set_focus(dh, Some(&surface), &seat, None);
+                Shell::set_focus(state, Some(&surface), &seat, None);
 
-                for window in self.active_space(output).space.windows() {
-                    self.update_reactive_popups(window);
+                for window in state.common.shell.active_space(output).space.windows() {
+                    state.common.shell.update_reactive_popups(window);
                 }
             }
         }
@@ -267,7 +286,7 @@ impl MoveGrabState {
 
 pub struct MoveSurfaceGrab {
     window: Window,
-    start_data: PointerGrabStartData,
+    start_data: PointerGrabStartData<State>,
     seat: Seat<State>,
 }
 
@@ -275,48 +294,46 @@ impl PointerGrab<State> for MoveSurfaceGrab {
     fn motion(
         &mut self,
         state: &mut State,
-        dh: &DisplayHandle,
         handle: &mut PointerInnerHandle<'_, State>,
+        _focus: Option<(WlSurface, Point<i32, Logical>)>,
         event: &MotionEvent,
     ) {
         // While the grab is active, no client has pointer focus
-        handle.motion(event.location, None, event.serial, event.time);
+        handle.motion(state, None, event);
         if !self.window.alive() {
-            self.ungrab(dh, state, handle, event.serial, event.time);
+            self.ungrab(state, handle, event.serial, event.time);
         }
     }
 
     fn button(
         &mut self,
         state: &mut State,
-        dh: &DisplayHandle,
         handle: &mut PointerInnerHandle<'_, State>,
         event: &ButtonEvent,
     ) {
-        handle.button(event.button, event.state, event.serial, event.time);
+        handle.button(state, event);
         if handle.current_pressed().is_empty() {
-            self.ungrab(dh, state, handle, event.serial, event.time);
+            self.ungrab(state, handle, event.serial, event.time);
         }
     }
 
     fn axis(
         &mut self,
-        _state: &mut State,
-        _dh: &DisplayHandle,
+        state: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
         details: AxisFrame,
     ) {
-        handle.axis(details);
+        handle.axis(state, details);
     }
 
-    fn start_data(&self) -> &PointerGrabStartData {
+    fn start_data(&self) -> &PointerGrabStartData<State> {
         &self.start_data
     }
 }
 
 impl MoveSurfaceGrab {
     pub fn new(
-        start_data: PointerGrabStartData,
+        start_data: PointerGrabStartData<State>,
         window: Window,
         seat: &Seat<State>,
     ) -> MoveSurfaceGrab {
@@ -329,7 +346,6 @@ impl MoveSurfaceGrab {
 
     fn ungrab(
         &mut self,
-        dh: &DisplayHandle,
         state: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
         serial: Serial,
@@ -337,12 +353,11 @@ impl MoveSurfaceGrab {
     ) {
         // No more buttons are pressed, release the grab.
         let output = active_output(&self.seat, &state.common);
-        let dh = dh.clone();
         let seat = self.seat.clone();
 
         state.common.event_loop_handle.insert_idle(move |data| {
-            data.state.common.shell.drop_move(&dh, &seat, &output);
+            Shell::drop_move(&mut data.state, &seat, &output);
         });
-        handle.unset_grab(serial, time);
+        handle.unset_grab(state, serial, time);
     }
 }

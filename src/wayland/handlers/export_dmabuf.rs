@@ -15,13 +15,13 @@ use smithay::{
         },
     },
     desktop::{draw_window, draw_window_popups, space::RenderElement, Kind, Window},
+    input::pointer::CursorImageStatus,
     reexports::wayland_server::{protocol::wl_output::WlOutput, DisplayHandle, Resource},
     utils::{IsAlive, Size, Transform},
     wayland::{
         compositor::{get_children, with_states, SurfaceAttributes},
         dmabuf::get_dmabuf,
         output::Output,
-        seat::CursorImageStatus,
     },
 };
 
@@ -201,7 +201,7 @@ impl ExportDmabufHandler for State {
                         .get::<RefCell<CursorImageStatus>>()
                         .map(|cell| {
                             let mut cursor_status = cell.borrow_mut();
-                            if let CursorImageStatus::Image(ref surface) = *cursor_status {
+                            if let CursorImageStatus::Surface(ref surface) = *cursor_status {
                                 if !surface.alive() {
                                     *cursor_status = CursorImageStatus::Default;
                                 }

@@ -3,18 +3,18 @@
 use crate::utils::prelude::*;
 use smithay::{
     desktop::{Kind, Window},
-    reexports::{
-        wayland_protocols::xdg::shell::server::xdg_toplevel, wayland_server::DisplayHandle,
+    input::pointer::{
+        AxisFrame, ButtonEvent, GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab,
+        PointerInnerHandle,
     },
-    utils::{IsAlive, Logical, Point, Size},
+    reexports::{
+        wayland_protocols::xdg::shell::server::xdg_toplevel,
+        wayland_server::protocol::wl_surface::WlSurface,
+    },
+    utils::{IsAlive, Logical, Point, Serial, Size},
     wayland::{
         compositor::with_states,
-        seat::{
-            AxisFrame, ButtonEvent, MotionEvent, PointerGrab, PointerGrabStartData,
-            PointerInnerHandle,
-        },
         shell::xdg::{SurfaceCachedState, ToplevelConfigure, XdgToplevelSurfaceRoleAttributes},
-        Serial,
     },
 };
 use std::{cell::RefCell, convert::TryFrom, sync::Mutex};
@@ -78,7 +78,7 @@ impl Default for ResizeState {
 }
 
 pub struct ResizeSurfaceGrab {
-    start_data: PointerGrabStartData,
+    start_data: PointerGrabStartData<State>,
     window: Window,
     edges: ResizeEdge,
     initial_window_size: Size<i32, Logical>,
@@ -88,17 +88,17 @@ pub struct ResizeSurfaceGrab {
 impl PointerGrab<State> for ResizeSurfaceGrab {
     fn motion(
         &mut self,
-        _data: &mut State,
-        _dh: &DisplayHandle,
+        data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
+        _focus: Option<(WlSurface, Point<i32, Logical>)>,
         event: &MotionEvent,
     ) {
         // While the grab is active, no client has pointer focus
-        handle.motion(event.location, None, event.serial, event.time);
+        handle.motion(data, None, event);
 
         // It is impossible to get `min_size` and `max_size` of dead toplevel, so we return early.
         if !self.window.alive() {
-            handle.unset_grab(event.serial, event.time);
+            handle.unset_grab(data, event.serial, event.time);
             return;
         }
 
@@ -162,15 +162,14 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
 
     fn button(
         &mut self,
-        _data: &mut State,
-        _dh: &DisplayHandle,
+        data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
         event: &ButtonEvent,
     ) {
-        handle.button(event.button, event.state, event.serial, event.time);
+        handle.button(data, event);
         if handle.current_pressed().is_empty() {
             // No more buttons are pressed, release the grab.
-            handle.unset_grab(event.serial, event.time);
+            handle.unset_grab(data, event.serial, event.time);
 
             // If toplevel is dead, we can't resize it, so we return early.
             if !self.window.alive() {
@@ -202,22 +201,21 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
 
     fn axis(
         &mut self,
-        _data: &mut State,
-        _dh: &DisplayHandle,
+        data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
         details: AxisFrame,
     ) {
-        handle.axis(details)
+        handle.axis(data, details)
     }
 
-    fn start_data(&self) -> &PointerGrabStartData {
+    fn start_data(&self) -> &PointerGrabStartData<State> {
         &self.start_data
     }
 }
 
 impl ResizeSurfaceGrab {
     pub fn new(
-        start_data: PointerGrabStartData,
+        start_data: PointerGrabStartData<State>,
         window: Window,
         edges: xdg_toplevel::ResizeEdge,
         initial_window_location: Point<i32, Logical>,

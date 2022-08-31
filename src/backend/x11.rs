@@ -362,7 +362,7 @@ pub fn init_backend(
                     }
                 }
             }
-            X11Event::Input(event) => data.state.process_x11_event(&data.display.handle(), event),
+            X11Event::Input(event) => data.state.process_x11_event(event),
         })
         .map_err(|_| anyhow::anyhow!("Failed to insert X11 Backend into event loop"))?;
 
@@ -391,7 +391,7 @@ fn init_egl_client_side(
 }
 
 impl State {
-    pub fn process_x11_event(&mut self, dh: &DisplayHandle, event: InputEvent<X11Input>) {
+    pub fn process_x11_event(&mut self, event: InputEvent<X11Input>) {
         // here we can handle special cases for x11 inputs, like mapping them to windows
         match &event {
             InputEvent::PointerMotionAbsolute { event } => {
@@ -418,7 +418,7 @@ impl State {
             _ => {}
         };
 
-        self.process_input_event(dh, event);
+        self.process_input_event(event);
         // TODO actually figure out the output
         for output in self.common.shell.outputs() {
             self.backend

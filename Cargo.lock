@@ -513,8 +513,9 @@ checksum = "9ea835d29036a4087793836fa931b08837ad5e957da9e23886b29586fb9b6650"
 
 [[package]]
 name = "drm"
-version = "0.6.2"
-source = "git+https://github.com/Smithay//drm-rs?rev=8b54f45831932fb1f7d6c1b9cb76ff68c342dfd0#8b54f45831932fb1f7d6c1b9cb76ff68c342dfd0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01406fcc6bf5180bf107c2922c8f37a875440c56a4d436b4c4cc8c09f433cc2d"
 dependencies = [
  "bitflags",
  "bytemuck",
@@ -525,8 +526,9 @@ dependencies = [
 
 [[package]]
 name = "drm-ffi"
-version = "0.2.1"
-source = "git+https://github.com/Smithay//drm-rs?rev=8b54f45831932fb1f7d6c1b9cb76ff68c342dfd0#8b54f45831932fb1f7d6c1b9cb76ff68c342dfd0"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e538131f5ca07f76483b6bcdb18f540fdfe4bb0c95742f64e7d2c5649c61bca5"
 dependencies = [
  "drm-sys",
  "nix 0.24.2",
@@ -540,8 +542,9 @@ checksum = "0aafbcdb8afc29c1a7ee5fbe53b5d62f4565b35a042a662ca9fecd0b54dae6f4"
 
 [[package]]
 name = "drm-sys"
-version = "0.1.2"
-source = "git+https://github.com/Smithay//drm-rs?rev=8b54f45831932fb1f7d6c1b9cb76ff68c342dfd0#8b54f45831932fb1f7d6c1b9cb76ff68c342dfd0"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "abe573f73b81a2127a5d5989e12a4ea4a4dab7800e53c73c663494d6c342a338"
 dependencies = [
  "libc",
 ]
@@ -637,7 +640,8 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 [[package]]
 name = "gbm"
 version = "0.9.0"
-source = "git+https://github.com/Smithay/gbm.rs?rev=b35994d#b35994de29098415cf53a45482276d3b8b658cfc"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f388f2b6aa25fbf6730726f714b3c8653b05e529defc63589d3be945df431897"
 dependencies = [
  "bitflags",
  "drm",
@@ -648,8 +652,9 @@ dependencies = [
 
 [[package]]
 name = "gbm-sys"
-version = "0.2.0"
-source = "git+https://github.com/Smithay/gbm.rs?rev=b35994d#b35994de29098415cf53a45482276d3b8b658cfc"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c366578b2e6e7caf75f1a17e64f026dddf814d39844e77e7857a4106232c7e15"
 dependencies = [
  "libc",
 ]
@@ -1487,7 +1492,7 @@ checksum = "2fd0db749597d91ff862fd1d55ea87f7855a744a8425a64695b6fca237d1dad1"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/Smithay//smithay?branch=update/drm-0.7#382ac1a0d2351222509d185e4e32231f20c1dda4"
+source = "git+https://github.com/Smithay//smithay?rev=6e6f1f4d#6e6f1f4d2969d10d1dc6f922f28bdd6977b3ac32"
 dependencies = [
  "appendlist",
  "bitflags",
@@ -1517,6 +1522,7 @@ dependencies = [
  "wayland-backend",
  "wayland-egl",
  "wayland-protocols 0.30.0-beta.8",
+ "wayland-protocols-misc",
  "wayland-protocols-wlr",
  "wayland-server",
  "wayland-sys 0.30.0-beta.8",
@@ -1868,6 +1874,19 @@ checksum = "e47c45a60d531d5a513601f47f51a4743901836778ddae208ae9124606be1719"
 dependencies = [
  "bitflags",
  "wayland-backend",
+ "wayland-scanner 0.30.0-beta.8",
+ "wayland-server",
+]
+
+[[package]]
+name = "wayland-protocols-misc"
+version = "0.1.0-beta.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b660ecc6e9709a438d9e227eedbea31d6c551672ff75eec90eeef0447c8ecc7c"
+dependencies = [
+ "bitflags",
+ "wayland-backend",
+ "wayland-protocols 0.30.0-beta.8",
  "wayland-scanner 0.30.0-beta.8",
  "wayland-server",
 ]

@@ -4,7 +4,6 @@ use crate::state::{BackendData, State};
 use smithay::{
     backend::{allocator::dmabuf::Dmabuf, renderer::ImportDma},
     delegate_dmabuf,
-    reexports::wayland_server::DisplayHandle,
     wayland::dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportError},
 };
 
@@ -15,13 +14,12 @@ impl DmabufHandler for State {
 
     fn dmabuf_imported(
         &mut self,
-        dh: &DisplayHandle,
         global: &DmabufGlobal,
         dmabuf: Dmabuf,
     ) -> Result<(), ImportError> {
         match &mut self.backend {
             BackendData::Kms(ref mut state) => state
-                .dmabuf_imported(dh, global, dmabuf)
+                .dmabuf_imported(global, dmabuf)
                 .map_err(|_| ImportError::Failed),
             BackendData::Winit(ref mut state) => state
                 .backend

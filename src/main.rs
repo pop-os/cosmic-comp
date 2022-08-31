@@ -68,7 +68,7 @@ fn main() -> Result<()> {
 
         // trigger routines
         data.state.common.shell.refresh(&data.display.handle());
-        data.state.common.refresh_focus(&data.display.handle());
+        state::Common::refresh_focus(&mut data.state);
 
         // do we need to trigger another render
         if data.state.common.dirty_flag.swap(false, Ordering::SeqCst) {

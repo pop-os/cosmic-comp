@@ -106,7 +106,7 @@ where
         drm: &wl_drm::WlDrm,
         request: wl_drm::Request,
         data: &DrmInstanceData,
-        dh: &DisplayHandle,
+        _dh: &DisplayHandle,
         data_init: &mut DataInit<'_, D>,
     ) {
         match request {
@@ -161,7 +161,7 @@ where
                 dma.add_plane(name, 0, offset0 as u32, stride0 as u32, Modifier::Invalid);
                 match dma.build() {
                     Some(dmabuf) => {
-                        match state.dmabuf_imported(dh, &data.dmabuf_global, dmabuf.clone()) {
+                        match state.dmabuf_imported(&data.dmabuf_global, dmabuf.clone()) {
                             Ok(_) => {
                                 // import was successful
                                 data_init.init(id, dmabuf);

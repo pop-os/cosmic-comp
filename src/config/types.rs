@@ -1,18 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #![allow(non_snake_case)]
 
-use super::KeyModifier;
+use super::{KeyModifier, KeyModifiers};
 use serde::{Deserialize, Serialize};
 pub use smithay::{
     backend::input::KeyState,
+    input::keyboard::{keysyms as KeySyms, Keysym, XkbConfig as WlXkbConfig},
     reexports::input::{AccelProfile, ClickMethod, ScrollMethod, TapButtonMap},
     utils::{Logical, Physical, Point, Size, Transform},
-    wayland::{
-        output::{Mode, Output},
-        seat::{
-            keysyms as KeySyms, Keysym, ModifiersState as KeyModifiers, XkbConfig as WlXkbConfig,
-        },
-    },
+    wayland::output::{Mode, Output},
 };
 use xkbcommon::xkb;
 

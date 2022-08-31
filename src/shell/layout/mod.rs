@@ -4,9 +4,9 @@ use crate::{input::ActiveOutput, state::State};
 use regex::RegexSet;
 use smithay::{
     desktop::{Space, Window},
+    input::Seat,
     wayland::{
-        compositor::with_states, output::Output, seat::Seat,
-        shell::xdg::XdgToplevelSurfaceRoleAttributes,
+        compositor::with_states, output::Output, shell::xdg::XdgToplevelSurfaceRoleAttributes,
     },
 };
 use std::sync::Mutex;

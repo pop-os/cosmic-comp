@@ -3,24 +3,25 @@
 use crate::{
     config::{Action, Config},
     shell::{grabs::SeatMoveGrabState, Workspace},
+    state::Common,
     utils::prelude::*,
 };
 use smithay::{
-    backend::input::{Device, DeviceCapability, InputBackend, InputEvent, KeyState},
-    desktop::{layer_map_for_output, Kind, WindowSurfaceType},
-    reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle, Resource},
-    utils::{Buffer, Logical, Point, Rectangle, Size},
-    wayland::{
-        data_device::set_data_device_focus,
-        output::Output,
-        primary_selection::set_primary_focus,
-        seat::{
-            keysyms, ButtonEvent, CursorImageStatus, FilterResult, KeysymHandle, MotionEvent, Seat,
-        },
-        shell::wlr_layer::Layer as WlrLayer,
-        SERIAL_COUNTER,
+    backend::input::{
+        AbsolutePositionEvent, Axis, AxisSource, Device, DeviceCapability, InputBackend,
+        InputEvent, KeyState, PointerAxisEvent,
     },
+    desktop::{layer_map_for_output, Kind, WindowSurfaceType},
+    input::{
+        keyboard::{keysyms, FilterResult, KeysymHandle},
+        pointer::{AxisFrame, ButtonEvent, CursorImageStatus, MotionEvent},
+        Seat, SeatState,
+    },
+    reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
+    utils::{Buffer, Logical, Point, Rectangle, Size, SERIAL_COUNTER},
+    wayland::{output::Output, shell::wlr_layer::Layer as WlrLayer},
 };
+
 use std::{cell::RefCell, collections::HashMap};
 use xkbcommon::xkb::KEY_XF86Switch_VT_12;
 
@@ -95,8 +96,13 @@ impl Devices {
     }
 }
 
-pub fn add_seat(dh: &DisplayHandle, config: &Config, name: String) -> Seat<State> {
-    let mut seat = Seat::<State>::new(dh, name, None);
+pub fn add_seat(
+    dh: &DisplayHandle,
+    seat_state: &mut SeatState<State>,
+    config: &Config,
+    name: String,
+) -> Seat<State> {
+    let mut seat = seat_state.new_wl_seat(dh, name, None);
     let userdata = seat.user_data();
     userdata.insert_if_missing(SeatId::default);
     userdata.insert_if_missing(Devices::default);
@@ -113,36 +119,15 @@ pub fn add_seat(dh: &DisplayHandle, config: &Config, name: String) -> Seat<State
     //
     // So instead of doing the right thing (and initialize these capabilities as matching
     // devices appear), we have to surrender to reality and just always expose a keyboard and pointer.
-    let dh_clone = dh.clone();
     let conf = config.xkb_config();
-    let _ = seat.add_keyboard((&conf).into(), 200, 25, move |seat, focus| {
-        if let Some(client) = focus.and_then(|s| dh_clone.get_client(s.id()).ok()) {
-            set_data_device_focus(&dh_clone, seat, Some(client));
-            let client2 = focus
-                .and_then(|s| dh_clone.get_client(s.id()).ok())
-                .unwrap();
-            set_primary_focus(&dh_clone, seat, Some(client2))
-        }
-    });
-
-    let owned_seat = seat.clone();
-    seat.add_pointer(move |status| {
-        *owned_seat
-            .user_data()
-            .get::<RefCell<CursorImageStatus>>()
-            .unwrap()
-            .borrow_mut() = status;
-    });
+    let _ = seat.add_keyboard((&conf).into(), 200, 25);
+    let _ = seat.add_pointer();
 
     seat
 }
 
 impl State {
-    pub fn process_input_event<B: InputBackend>(
-        &mut self,
-        dh: &DisplayHandle,
-        event: InputEvent<B>,
-    ) {
+    pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>) {
         use smithay::backend::input::Event;
 
         match event {
@@ -199,72 +184,85 @@ impl State {
                         if let Some(action) = seat
                             .get_keyboard()
                             .unwrap()
-                            .input(dh, keycode, state, serial, time, |modifiers, handle| {
-                                if state == KeyState::Released
-                                    && userdata.get::<SupressedKeys>().unwrap().filter(&handle)
-                                {
-                                    return FilterResult::Intercept(None);
-                                }
-
-                                #[cfg(feature = "debug")]
-                                {
-                                    if self.common.seats.iter().position(|x| x == seat).unwrap()
-                                        == 0
-                                        && self.common.egui.active
+                            .input(
+                                self,
+                                keycode,
+                                state,
+                                serial,
+                                time,
+                                |data, modifiers, handle| {
+                                    if state == KeyState::Released
+                                        && userdata.get::<SupressedKeys>().unwrap().filter(&handle)
                                     {
-                                        if self.common.egui.debug_state.wants_keyboard() {
-                                            self.common.egui.debug_state.handle_keyboard(
-                                                &handle,
-                                                state == KeyState::Pressed,
-                                                modifiers.clone(),
-                                            );
-                                            userdata.get::<SupressedKeys>().unwrap().add(&handle);
-                                            return FilterResult::Intercept(None);
-                                        }
-                                        if self.common.egui.log_state.wants_keyboard() {
-                                            self.common.egui.log_state.handle_keyboard(
-                                                &handle,
-                                                state == KeyState::Pressed,
-                                                modifiers.clone(),
-                                            );
-                                            userdata.get::<SupressedKeys>().unwrap().add(&handle);
-                                            return FilterResult::Intercept(None);
+                                        return FilterResult::Intercept(None);
+                                    }
+                                    #[cfg(feature = "debug")]
+                                    {
+                                        if data.common.seats.iter().position(|x| x == seat).unwrap()
+                                            == 0
+                                            && data.common.egui.active
+                                        {
+                                            if data.common.egui.debug_state.wants_keyboard() {
+                                                data.common.egui.debug_state.handle_keyboard(
+                                                    &handle,
+                                                    state == KeyState::Pressed,
+                                                    modifiers.clone(),
+                                                );
+                                                userdata
+                                                    .get::<SupressedKeys>()
+                                                    .unwrap()
+                                                    .add(&handle);
+                                                return FilterResult::Intercept(None);
+                                            }
+                                            if data.common.egui.log_state.wants_keyboard() {
+                                                data.common.egui.log_state.handle_keyboard(
+                                                    &handle,
+                                                    state == KeyState::Pressed,
+                                                    modifiers.clone(),
+                                                );
+                                                userdata
+                                                    .get::<SupressedKeys>()
+                                                    .unwrap()
+                                                    .add(&handle);
+                                                return FilterResult::Intercept(None);
+                                            }
                                         }
                                     }
-                                }
 
-                                if state == KeyState::Pressed
-                                    && (keysyms::KEY_XF86Switch_VT_1..=KEY_XF86Switch_VT_12)
-                                        .contains(&handle.modified_sym())
-                                {
-                                    if let Err(err) = self.backend.kms().switch_vt(
-                                        (handle.modified_sym() - keysyms::KEY_XF86Switch_VT_1 + 1)
-                                            as i32,
-                                    ) {
-                                        slog_scope::error!(
-                                            "Failed switching virtual terminal: {}",
-                                            err
-                                        );
-                                    }
-                                    userdata.get::<SupressedKeys>().unwrap().add(&handle);
-                                    return FilterResult::Intercept(None);
-                                }
-
-                                // here we can handle global shortcuts and the like
-                                for (binding, action) in
-                                    self.common.config.static_conf.key_bindings.iter()
-                                {
                                     if state == KeyState::Pressed
-                                        && binding.modifiers == *modifiers
-                                        && handle.raw_syms().contains(&binding.key)
+                                        && (keysyms::KEY_XF86Switch_VT_1..=KEY_XF86Switch_VT_12)
+                                            .contains(&handle.modified_sym())
                                     {
+                                        if let Err(err) = data.backend.kms().switch_vt(
+                                            (handle.modified_sym() - keysyms::KEY_XF86Switch_VT_1
+                                                + 1)
+                                                as i32,
+                                        ) {
+                                            slog_scope::error!(
+                                                "Failed switching virtual terminal: {}",
+                                                err
+                                            );
+                                        }
                                         userdata.get::<SupressedKeys>().unwrap().add(&handle);
-                                        return FilterResult::Intercept(Some(action));
+                                        return FilterResult::Intercept(None);
                                     }
-                                }
 
-                                FilterResult::Forward
-                            })
+                                    // here we can handle global shortcuts and the like
+                                    for (binding, action) in
+                                        data.common.config.static_conf.key_bindings.iter()
+                                    {
+                                        if state == KeyState::Pressed
+                                            && binding.modifiers == *modifiers
+                                            && handle.raw_syms().contains(&binding.key)
+                                        {
+                                            userdata.get::<SupressedKeys>().unwrap().add(&handle);
+                                            return FilterResult::Intercept(Some(action.clone()));
+                                        }
+                                    }
+
+                                    FilterResult::Forward
+                                },
+                            )
                             .flatten()
                         {
                             match action {
@@ -302,7 +300,7 @@ impl State {
                                         workspace as usize,
                                     ) {
                                         if let Some(ptr) = seat.get_pointer() {
-                                            ptr.motion(self, dh, &motion_event);
+                                            ptr.motion(self, None, &motion_event);
                                         }
                                     }
                                 }
@@ -324,14 +322,14 @@ impl State {
                                         self.common.shell.active_space_mut(&current_output);
                                     let focus_stack = workspace.focus_stack(seat);
                                     if let Some(window) = workspace.tiling_layer.move_focus(
-                                        *focus,
+                                        focus,
                                         seat,
                                         &mut workspace.space,
                                         focus_stack.iter(),
                                     ) {
                                         std::mem::drop(focus_stack);
-                                        self.common.set_focus(
-                                            dh,
+                                        Common::set_focus(
+                                            self,
                                             Some(window.toplevel().wl_surface()),
                                             seat,
                                             None,
@@ -352,7 +350,7 @@ impl State {
                                     let workspace = self.common.shell.active_space_mut(&output);
                                     let focus_stack = workspace.focus_stack(seat);
                                     workspace.tiling_layer.update_orientation(
-                                        *orientation,
+                                        orientation,
                                         &seat,
                                         &mut workspace.space,
                                         focus_stack.iter(),
@@ -505,10 +503,9 @@ impl State {
                         );
                         seat.get_pointer().unwrap().motion(
                             self,
-                            dh,
+                            under,
                             &MotionEvent {
                                 location: position,
-                                focus: under,
                                 serial,
                                 time: event.time(),
                             },
@@ -530,8 +527,6 @@ impl State {
                 }
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
-                use smithay::backend::input::PointerMotionAbsoluteEvent;
-
                 let device = event.device();
                 for seat in self.common.seats.clone().iter() {
                     let userdata = seat.user_data();
@@ -556,10 +551,9 @@ impl State {
                         );
                         seat.get_pointer().unwrap().motion(
                             self,
-                            dh,
+                            under,
                             &MotionEvent {
                                 location: position,
-                                focus: under,
                                 serial,
                                 time: event.time(),
                             },
@@ -581,10 +575,7 @@ impl State {
                 }
             }
             InputEvent::PointerButton { event, .. } => {
-                use smithay::{
-                    backend::input::{ButtonState, PointerButtonEvent},
-                    reexports::wayland_server::protocol::wl_pointer,
-                };
+                use smithay::backend::input::{ButtonState, PointerButtonEvent};
 
                 let device = event.device();
                 for seat in self.common.seats.clone().iter() {
@@ -619,106 +610,95 @@ impl State {
 
                         let serial = SERIAL_COUNTER.next_serial();
                         let button = event.button_code();
-                        let state = match event.state() {
-                            ButtonState::Pressed => {
-                                // change the keyboard focus unless the pointer or keyboard is grabbed
-                                // We test for any matching surface type here but always use the root
-                                // (in case of a window the toplevel) surface for the focus.
-                                // see: https://gitlab.freedesktop.org/wayland/wayland/-/issues/294
-                                if !seat.get_pointer().unwrap().is_grabbed()
-                                    && !seat.get_keyboard().map(|k| k.is_grabbed()).unwrap_or(false)
-                                {
-                                    let output = active_output(seat, &self.common);
-                                    let pos = seat.get_pointer().unwrap().current_location();
-                                    let output_geo = output.geometry();
-                                    let relative_pos = self
-                                        .common
-                                        .shell
-                                        .space_relative_output_geometry(pos, &output);
-                                    let workspace = self.common.shell.active_space_mut(&output);
-                                    let layers = layer_map_for_output(&output);
-                                    let mut under = None;
+                        if event.state() == ButtonState::Pressed {
+                            // change the keyboard focus unless the pointer or keyboard is grabbed
+                            // We test for any matching surface type here but always use the root
+                            // (in case of a window the toplevel) surface for the focus.
+                            // see: https://gitlab.freedesktop.org/wayland/wayland/-/issues/294
+                            if !seat.get_pointer().unwrap().is_grabbed()
+                                && !seat.get_keyboard().map(|k| k.is_grabbed()).unwrap_or(false)
+                            {
+                                let output = active_output(seat, &self.common);
+                                let pos = seat.get_pointer().unwrap().current_location();
+                                let output_geo = output.geometry();
+                                let relative_pos = self
+                                    .common
+                                    .shell
+                                    .space_relative_output_geometry(pos, &output);
+                                let workspace = self.common.shell.active_space_mut(&output);
+                                let layers = layer_map_for_output(&output);
+                                let mut under = None;
 
-                                    if let Some(window) = workspace.get_fullscreen(&output) {
-                                        if let Some(layer) =
-                                            layers.layer_under(WlrLayer::Overlay, relative_pos)
-                                        {
-                                            if layer.can_receive_keyboard_focus() {
-                                                let layer_loc =
-                                                    layers.layer_geometry(layer).unwrap().loc;
-                                                under = layer
-                                                    .surface_under(
-                                                        pos - output_geo.loc.to_f64()
-                                                            - layer_loc.to_f64(),
-                                                        WindowSurfaceType::ALL,
-                                                    )
-                                                    .map(|(_, _)| layer.wl_surface().clone());
-                                            }
-                                        } else {
-                                            under = window
+                                if let Some(window) = workspace.get_fullscreen(&output) {
+                                    if let Some(layer) =
+                                        layers.layer_under(WlrLayer::Overlay, relative_pos)
+                                    {
+                                        if layer.can_receive_keyboard_focus() {
+                                            let layer_loc =
+                                                layers.layer_geometry(layer).unwrap().loc;
+                                            under = layer
                                                 .surface_under(
-                                                    pos - output_geo.loc.to_f64(),
+                                                    pos - output_geo.loc.to_f64()
+                                                        - layer_loc.to_f64(),
                                                     WindowSurfaceType::ALL,
                                                 )
-                                                .map(|(_, _)| {
-                                                    window.toplevel().wl_surface().clone()
-                                                });
+                                                .map(|(_, _)| layer.wl_surface().clone());
                                         }
                                     } else {
-                                        if let Some(layer) = layers
-                                            .layer_under(WlrLayer::Overlay, relative_pos)
-                                            .or_else(|| {
-                                                layers.layer_under(WlrLayer::Top, relative_pos)
-                                            })
-                                        {
-                                            if layer.can_receive_keyboard_focus() {
-                                                let layer_loc =
-                                                    layers.layer_geometry(layer).unwrap().loc;
-                                                under = layer
-                                                    .surface_under(
-                                                        pos - output_geo.loc.to_f64()
-                                                            - layer_loc.to_f64(),
-                                                        WindowSurfaceType::ALL,
-                                                    )
-                                                    .map(|(_, _)| layer.wl_surface().clone());
-                                            }
-                                        } else if let Some((window, _, _)) = workspace
-                                            .space
-                                            .surface_under(relative_pos, WindowSurfaceType::ALL)
-                                        {
-                                            under = Some(window.toplevel().wl_surface().clone());
-                                        } else if let Some(layer) =
-                                            layers.layer_under(WlrLayer::Bottom, pos).or_else(
-                                                || layers.layer_under(WlrLayer::Background, pos),
+                                        under = window
+                                            .surface_under(
+                                                pos - output_geo.loc.to_f64(),
+                                                WindowSurfaceType::ALL,
                                             )
-                                        {
-                                            if layer.can_receive_keyboard_focus() {
-                                                let layer_loc =
-                                                    layers.layer_geometry(layer).unwrap().loc;
-                                                under = layer
-                                                    .surface_under(
-                                                        pos - output_geo.loc.to_f64()
-                                                            - layer_loc.to_f64(),
-                                                        WindowSurfaceType::ALL,
-                                                    )
-                                                    .map(|(_, _)| layer.wl_surface().clone());
-                                            }
-                                        };
+                                            .map(|(_, _)| window.toplevel().wl_surface().clone());
                                     }
-
-                                    self.common
-                                        .set_focus(dh, under.as_ref(), seat, Some(serial));
+                                } else {
+                                    if let Some(layer) = layers
+                                        .layer_under(WlrLayer::Overlay, relative_pos)
+                                        .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos))
+                                    {
+                                        if layer.can_receive_keyboard_focus() {
+                                            let layer_loc =
+                                                layers.layer_geometry(layer).unwrap().loc;
+                                            under = layer
+                                                .surface_under(
+                                                    pos - output_geo.loc.to_f64()
+                                                        - layer_loc.to_f64(),
+                                                    WindowSurfaceType::ALL,
+                                                )
+                                                .map(|(_, _)| layer.wl_surface().clone());
+                                        }
+                                    } else if let Some((window, _, _)) = workspace
+                                        .space
+                                        .surface_under(relative_pos, WindowSurfaceType::ALL)
+                                    {
+                                        under = Some(window.toplevel().wl_surface().clone());
+                                    } else if let Some(layer) = layers
+                                        .layer_under(WlrLayer::Bottom, pos)
+                                        .or_else(|| layers.layer_under(WlrLayer::Background, pos))
+                                    {
+                                        if layer.can_receive_keyboard_focus() {
+                                            let layer_loc =
+                                                layers.layer_geometry(layer).unwrap().loc;
+                                            under = layer
+                                                .surface_under(
+                                                    pos - output_geo.loc.to_f64()
+                                                        - layer_loc.to_f64(),
+                                                    WindowSurfaceType::ALL,
+                                                )
+                                                .map(|(_, _)| layer.wl_surface().clone());
+                                        }
+                                    };
                                 }
-                                wl_pointer::ButtonState::Pressed
+
+                                Common::set_focus(self, under.as_ref(), seat, Some(serial));
                             }
-                            ButtonState::Released => wl_pointer::ButtonState::Released,
                         };
                         seat.get_pointer().unwrap().button(
                             self,
-                            dh,
                             &ButtonEvent {
                                 button,
-                                state,
+                                state: event.state(),
                                 serial,
                                 time: event.time(),
                             },
@@ -728,12 +708,6 @@ impl State {
                 }
             }
             InputEvent::PointerAxis { event, .. } => {
-                use smithay::{
-                    backend::input::{Axis, AxisSource, PointerAxisEvent},
-                    reexports::wayland_server::protocol::wl_pointer,
-                    wayland::seat::AxisFrame,
-                };
-
                 let device = event.device();
                 for seat in self.common.seats.clone().iter() {
                     #[cfg(feature = "debug")]
@@ -771,13 +745,6 @@ impl State {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
-                        let source = match event.source() {
-                            AxisSource::Continuous => wl_pointer::AxisSource::Continuous,
-                            AxisSource::Finger => wl_pointer::AxisSource::Finger,
-                            AxisSource::Wheel | AxisSource::WheelTilt => {
-                                wl_pointer::AxisSource::Wheel
-                            }
-                        };
                         let horizontal_amount =
                             event.amount(Axis::Horizontal).unwrap_or_else(|| {
                                 event.amount_discrete(Axis::Horizontal).unwrap_or(0.0) * 3.0
@@ -789,32 +756,24 @@ impl State {
                         let vertical_amount_discrete = event.amount_discrete(Axis::Vertical);
 
                         {
-                            let mut frame = AxisFrame::new(event.time()).source(source);
+                            let mut frame = AxisFrame::new(event.time()).source(event.source());
                             if horizontal_amount != 0.0 {
-                                frame = frame
-                                    .value(wl_pointer::Axis::HorizontalScroll, horizontal_amount);
+                                frame = frame.value(Axis::Horizontal, horizontal_amount);
                                 if let Some(discrete) = horizontal_amount_discrete {
-                                    frame = frame.discrete(
-                                        wl_pointer::Axis::HorizontalScroll,
-                                        discrete as i32,
-                                    );
+                                    frame = frame.discrete(Axis::Horizontal, discrete as i32);
                                 }
-                            } else if source == wl_pointer::AxisSource::Finger {
-                                frame = frame.stop(wl_pointer::Axis::HorizontalScroll);
+                            } else if event.source() == AxisSource::Finger {
+                                frame = frame.stop(Axis::Horizontal);
                             }
                             if vertical_amount != 0.0 {
-                                frame =
-                                    frame.value(wl_pointer::Axis::VerticalScroll, vertical_amount);
+                                frame = frame.value(Axis::Vertical, vertical_amount);
                                 if let Some(discrete) = vertical_amount_discrete {
-                                    frame = frame.discrete(
-                                        wl_pointer::Axis::VerticalScroll,
-                                        discrete as i32,
-                                    );
+                                    frame = frame.discrete(Axis::Vertical, discrete as i32);
                                 }
-                            } else if source == wl_pointer::AxisSource::Finger {
-                                frame = frame.stop(wl_pointer::Axis::VerticalScroll);
+                            } else if event.source() == AxisSource::Finger {
+                                frame = frame.stop(Axis::Vertical);
                             }
-                            seat.get_pointer().unwrap().axis(self, dh, frame);
+                            seat.get_pointer().unwrap().axis(self, frame);
                         }
                         break;
                     }

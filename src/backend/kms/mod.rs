@@ -122,8 +122,7 @@ pub fn init_backend(
             if let &mut InputEvent::DeviceAdded { ref mut device } = &mut event {
                 data.state.common.config.read_device(device);
             }
-            data.state
-                .process_input_event(&data.display.handle(), event);
+            data.state.process_input_event(event);
             for output in data.state.common.shell.outputs() {
                 if let Err(err) = data
                     .state
@@ -934,12 +933,7 @@ impl KmsState {
         }
     }
 
-    pub fn dmabuf_imported(
-        &mut self,
-        _dh: &DisplayHandle,
-        global: &DmabufGlobal,
-        dmabuf: Dmabuf,
-    ) -> Result<()> {
+    pub fn dmabuf_imported(&mut self, global: &DmabufGlobal, dmabuf: Dmabuf) -> Result<()> {
         use smithay::backend::renderer::ImportDma;
 
         for device in self.devices.values() {

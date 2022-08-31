@@ -13,6 +13,7 @@ use crate::{
 };
 use smithay::{
     backend::drm::DrmNode,
+    input::{Seat, SeatState},
     reexports::{
         calloop::{LoopHandle, LoopSignal},
         wayland_server::{
@@ -27,7 +28,6 @@ use smithay::{
         dmabuf::DmabufState,
         output::{Mode as OutputMode, Output, OutputManagerState, Scale},
         primary_selection::PrimarySelectionState,
-        seat::{Seat, SeatState},
         shm::ShmState,
         viewporter::ViewporterState,
     },
@@ -66,6 +66,7 @@ pub struct Common {
     pub config: Config,
 
     pub socket: OsString,
+    pub display_handle: DisplayHandle,
     pub event_loop_handle: LoopHandle<'static, Data>,
     pub event_loop_signal: LoopSignal,
 
@@ -307,12 +308,12 @@ impl State {
         let output_configuration_state = OutputConfigurationState::new(dh, |_| true);
         let primary_selection_state = PrimarySelectionState::new::<Self, _>(dh, None);
         let shm_state = ShmState::new::<Self, _>(dh, vec![], None);
-        let seat_state = SeatState::<Self>::new();
+        let mut seat_state = SeatState::<Self>::new();
         let viewporter_state = ViewporterState::new::<Self, _>(dh, None);
         let wl_drm_state = WlDrmState;
 
         let shell = Shell::new(&config, dh);
-        let initial_seat = crate::input::add_seat(dh, &config, "seat-0".into());
+        let initial_seat = crate::input::add_seat(dh, &mut seat_state, &config, "seat-0".into());
 
         #[cfg(not(feature = "debug"))]
         let dirty_flag = Arc::new(AtomicBool::new(false));
@@ -323,6 +324,7 @@ impl State {
             common: Common {
                 config,
                 socket,
+                display_handle: dh.clone(),
                 event_loop_handle: handle,
                 event_loop_signal: signal,
 

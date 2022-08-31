@@ -4,7 +4,7 @@ use crate::utils::prelude::*;
 use smithay::{
     delegate_layer_shell,
     desktop::{LayerSurface, PopupKind},
-    reexports::wayland_server::{protocol::wl_output::WlOutput, DisplayHandle},
+    reexports::wayland_server::protocol::wl_output::WlOutput,
     wayland::{
         output::Output,
         shell::{
@@ -23,7 +23,6 @@ impl WlrLayerShellHandler for State {
 
     fn new_layer_surface(
         &mut self,
-        _dh: &DisplayHandle,
         surface: WlrLayerSurface,
         wl_output: Option<WlOutput>,
         _layer: Layer,
@@ -42,7 +41,7 @@ impl WlrLayerShellHandler for State {
         ));
     }
 
-    fn new_popup(&mut self, _dh: &DisplayHandle, _parent: WlrLayerSurface, popup: PopupSurface) {
+    fn new_popup(&mut self, _parent: WlrLayerSurface, popup: PopupSurface) {
         let positioner = popup.with_pending_state(|state| state.positioner);
         self.common.shell.unconstrain_popup(&popup, &positioner);
 

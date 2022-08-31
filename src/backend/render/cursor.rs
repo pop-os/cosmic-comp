@@ -4,12 +4,13 @@ use crate::utils::prelude::*;
 use smithay::{
     backend::renderer::{Frame, ImportAll, ImportMem, Renderer, Texture},
     desktop::space::{RenderElement, SpaceOutputTuple, SurfaceTree},
+    input::{
+        pointer::{CursorImageAttributes, CursorImageStatus},
+        Seat,
+    },
     reexports::wayland_server::protocol::wl_surface,
     utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Size, Transform},
-    wayland::{
-        compositor::{get_role, with_states},
-        seat::{CursorImageAttributes, CursorImageStatus, Seat},
-    },
+    wayland::compositor::{get_role, with_states},
 };
 use std::{
     any::{Any, TypeId},
@@ -292,7 +293,7 @@ where
             .get::<RefCell<CursorImageStatus>>()
             .map(|cell| {
                 let mut cursor_status = cell.borrow_mut();
-                if let CursorImageStatus::Image(ref surface) = *cursor_status {
+                if let CursorImageStatus::Surface(ref surface) = *cursor_status {
                     if !surface.alive() {
                         *cursor_status = CursorImageStatus::Default;
                     }
@@ -301,7 +302,7 @@ where
             })
             .unwrap_or(CursorImageStatus::Default);
 
-        if let CursorImageStatus::Image(wl_surface) = cursor_status {
+        if let CursorImageStatus::Surface(wl_surface) = cursor_status {
             Some(draw_surface_cursor(wl_surface.clone(), location.to_i32_round()).into())
         } else if draw_default {
             let seat_userdata = seat.user_data();

@@ -62,8 +62,4 @@ debug = true
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/Smithay//smithay", branch = "update/drm-0.7" }
-
-[patch."https://github.com/Smithay/drm-rs.git"]
-drm = { git = "https://github.com/Smithay//drm-rs", rev = "8b54f45831932fb1f7d6c1b9cb76ff68c342dfd0" }
-drm-ffi = { git = "https://github.com/Smithay//drm-rs", rev = "8b54f45831932fb1f7d6c1b9cb76ff68c342dfd0" }
+smithay = { git = "https://github.com/Smithay//smithay", rev = "6e6f1f4d" }

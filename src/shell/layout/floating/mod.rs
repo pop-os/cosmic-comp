@@ -2,16 +2,16 @@
 
 use smithay::{
     desktop::{layer_map_for_output, space::RenderZindex, Kind, Space, Window},
+    input::{
+        pointer::{Focus, GrabStartData as PointerGrabStartData},
+        Seat,
+    },
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
         ResizeEdge, State as XdgState,
     },
-    utils::{IsAlive, Logical, Point, Rectangle},
+    utils::{IsAlive, Logical, Point, Rectangle, Serial},
     wayland::{
-        compositor::with_states,
-        output::Output,
-        seat::{Focus, PointerGrabStartData, Seat},
-        shell::xdg::XdgToplevelSurfaceRoleAttributes,
-        Serial,
+        compositor::with_states, output::Output, shell::xdg::XdgToplevelSurfaceRoleAttributes,
     },
 };
 use std::{collections::HashSet, sync::Mutex};
@@ -232,14 +232,21 @@ impl FloatingLayout {
     }
 
     pub fn resize_request(
-        &mut self,
-        space: &mut Space,
+        state: &mut State,
         window: &Window,
         seat: &Seat<State>,
         serial: Serial,
-        start_data: PointerGrabStartData,
+        start_data: PointerGrabStartData<State>,
         edges: ResizeEdge,
     ) {
+        // it is so stupid, that we have to do this here. TODO: Refactor grabs
+        let workspace = state
+            .common
+            .shell
+            .space_for_window_mut(window.toplevel().wl_surface())
+            .unwrap();
+        let space = &mut workspace.space;
+
         if let Some(pointer) = seat.get_pointer() {
             let location = space.window_location(&window).unwrap();
             let size = window.geometry().size;
@@ -247,7 +254,7 @@ impl FloatingLayout {
             let grab =
                 grabs::ResizeSurfaceGrab::new(start_data, window.clone(), edges, location, size);
 
-            pointer.set_grab(grab, serial, Focus::Clear);
+            pointer.set_grab(state, grab, serial, Focus::Clear);
         }
     }
 }

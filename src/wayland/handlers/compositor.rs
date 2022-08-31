@@ -5,7 +5,7 @@ use smithay::{
     backend::renderer::utils::{on_commit_buffer_handler, with_renderer_surface_state},
     delegate_compositor,
     desktop::{layer_map_for_output, Kind, LayerSurface, PopupKind, WindowSurfaceType},
-    reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
+    reexports::wayland_server::protocol::wl_surface::WlSurface,
     wayland::{
         compositor::{with_states, CompositorHandler, CompositorState},
         shell::{
@@ -19,8 +19,9 @@ use smithay::{
 use std::sync::Mutex;
 
 impl State {
-    fn early_import_surface(&mut self, dh: &DisplayHandle, surface: &WlSurface) {
+    fn early_import_surface(&mut self, surface: &WlSurface) {
         let mut import_nodes = std::collections::HashSet::new();
+        let dh = &self.common.display_handle;
         for output in self.common.shell.outputs_for_surface(&surface) {
             if let BackendData::Kms(ref mut kms_state) = &mut self.backend {
                 if let Some(target) = kms_state.target_node_for_output(&output) {
@@ -75,11 +76,7 @@ impl State {
         }
     }
 
-    fn layer_surface_ensure_inital_configure(
-        &mut self,
-        surface: &LayerSurface,
-        dh: &DisplayHandle,
-    ) -> bool {
+    fn layer_surface_ensure_inital_configure(&mut self, surface: &LayerSurface) -> bool {
         // send the initial configure if relevant
         let initial_configure_sent = with_states(surface.wl_surface(), |states| {
             states
@@ -92,7 +89,7 @@ impl State {
         });
         if !initial_configure_sent {
             // compute initial dimensions by mapping
-            self.common.shell.map_layer(&surface, dh);
+            Shell::map_layer(self, &surface);
             // this will also send a configure
         }
         initial_configure_sent
@@ -104,7 +101,7 @@ impl CompositorHandler for State {
         &mut self.common.compositor_state
     }
 
-    fn commit(&mut self, dh: &DisplayHandle, surface: &WlSurface) {
+    fn commit(&mut self, surface: &WlSurface) {
         // first load the buffer for various smithay helper functions
         on_commit_buffer_handler(surface);
 
@@ -125,7 +122,7 @@ impl CompositorHandler for State {
                         })
                     {
                         let output = active_output(&seat, &self.common);
-                        self.common.shell.map_window(&window, &output, dh);
+                        Shell::map_window(self, &window, &output);
                     } else {
                         return;
                     }
@@ -141,7 +138,7 @@ impl CompositorHandler for State {
             .find(|(layer_surface, _, _)| layer_surface.wl_surface() == surface)
             .cloned()
         {
-            if !self.layer_surface_ensure_inital_configure(&layer_surface, dh) {
+            if !self.layer_surface_ensure_inital_configure(&layer_surface) {
                 return;
             }
         };
@@ -188,7 +185,7 @@ impl CompositorHandler for State {
 
         // We need to know every potential output for importing to the right gpu and scheduling a render,
         // so call this only after every potential surface map operation has been done.
-        self.early_import_surface(dh, surface);
+        self.early_import_surface(surface);
 
         // and refresh smithays internal state
         self.common.shell.popups.commit(surface);
@@ -202,6 +199,7 @@ impl CompositorHandler for State {
             map.layer_for_surface(surface, WindowSurfaceType::ALL)
                 .is_some()
         }) {
+            let dh = &self.common.display_handle;
             layer_map_for_output(output).arrange(dh);
         }
 

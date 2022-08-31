@@ -7,35 +7,35 @@ use smithay::{
         Kind, PopupGrab, PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupUngrabStrategy,
         Window, WindowSurfaceType,
     },
+    input::{
+        pointer::{Focus, GrabStartData as PointerGrabStartData},
+        Seat,
+    },
     reexports::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
-        wayland_server::{
-            protocol::{wl_output::WlOutput, wl_seat::WlSeat, wl_surface::WlSurface},
-            DisplayHandle,
-        },
+        wayland_server::protocol::{wl_output::WlOutput, wl_seat::WlSeat, wl_surface::WlSurface},
     },
+    utils::Serial,
     wayland::{
         output::Output,
-        seat::{Focus, PointerGrabStartData, Seat},
         shell::xdg::{
             Configure, PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler,
             XdgShellState,
         },
-        Serial,
     },
 };
 use std::cell::Cell;
 
 pub mod popup;
 
-pub type PopupGrabData = Cell<Option<PopupGrab>>;
+pub type PopupGrabData = Cell<Option<PopupGrab<State>>>;
 
 impl XdgShellHandler for State {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
         &mut self.common.shell.xdg_shell_state
     }
 
-    fn new_toplevel(&mut self, _dh: &DisplayHandle, surface: ToplevelSurface) {
+    fn new_toplevel(&mut self, surface: ToplevelSurface) {
         super::mark_dirty_on_drop(&self.common, surface.wl_surface());
 
         let seat = &self.common.last_active_seat;
@@ -48,12 +48,7 @@ impl XdgShellHandler for State {
         // We will position the window after the first commit, when we know its size hints
     }
 
-    fn new_popup(
-        &mut self,
-        _dh: &DisplayHandle,
-        surface: PopupSurface,
-        positioner: PositionerState,
-    ) {
+    fn new_popup(&mut self, surface: PopupSurface, positioner: PositionerState) {
         super::mark_dirty_on_drop(&self.common, surface.wl_surface());
 
         surface.with_pending_state(|state| {
@@ -75,7 +70,7 @@ impl XdgShellHandler for State {
         }
     }
 
-    fn ack_configure(&mut self, _dh: &DisplayHandle, surface: WlSurface, configure: Configure) {
+    fn ack_configure(&mut self, surface: WlSurface, configure: Configure) {
         if let Configure::Toplevel(configure) = configure {
             // If we would re-position the window inside the grab we would get a weird jittery animation.
             // We only want to resize once the client has acknoledged & commited the new size,
@@ -95,13 +90,14 @@ impl XdgShellHandler for State {
         }
     }
 
-    fn grab(&mut self, dh: &DisplayHandle, surface: PopupSurface, seat: WlSeat, serial: Serial) {
+    fn grab(&mut self, surface: PopupSurface, seat: WlSeat, serial: Serial) {
         let seat = Seat::from_resource(&seat).unwrap();
-        let ret = self
-            .common
-            .shell
-            .popups
-            .grab_popup(dh, surface.into(), &seat, serial);
+        let dh = &self.common.display_handle;
+        let ret =
+            self.common
+                .shell
+                .popups
+                .grab_popup(dh, surface.wl_surface().clone(), &seat, serial);
 
         if let Ok(mut grab) = ret {
             if let Some(keyboard) = seat.get_keyboard() {
@@ -109,11 +105,15 @@ impl XdgShellHandler for State {
                     && !(keyboard.has_grab(serial)
                         || keyboard.has_grab(grab.previous_serial().unwrap_or(serial)))
                 {
-                    grab.ungrab(dh, PopupUngrabStrategy::All);
+                    grab.ungrab(PopupUngrabStrategy::All);
                     return;
                 }
-                self.common
-                    .set_focus(dh, grab.current_grab().as_ref(), &seat, Some(serial));
+                Common::set_focus(
+                    self,
+                    grab.current_grab().as_ref().map(|x| &x.0),
+                    &seat,
+                    Some(serial),
+                );
                 keyboard.set_grab(PopupKeyboardGrab::new(&grab), serial);
             }
 
@@ -123,10 +123,10 @@ impl XdgShellHandler for State {
                         || pointer
                             .has_grab(grab.previous_serial().unwrap_or_else(|| grab.serial())))
                 {
-                    grab.ungrab(dh, PopupUngrabStrategy::All);
+                    grab.ungrab(PopupUngrabStrategy::All);
                     return;
                 }
-                pointer.set_grab(PopupPointerGrab::new(&grab), serial, Focus::Keep);
+                pointer.set_grab(self, PopupPointerGrab::new(&grab), serial, Focus::Keep);
             }
 
             seat.user_data()
@@ -140,7 +140,6 @@ impl XdgShellHandler for State {
 
     fn reposition_request(
         &mut self,
-        _dh: &DisplayHandle,
         surface: PopupSurface,
         positioner: PositionerState,
         token: u32,
@@ -161,13 +160,7 @@ impl XdgShellHandler for State {
         }
     }
 
-    fn move_request(
-        &mut self,
-        _dh: &DisplayHandle,
-        surface: ToplevelSurface,
-        seat: WlSeat,
-        serial: Serial,
-    ) {
+    fn move_request(&mut self, surface: ToplevelSurface, seat: WlSeat, serial: Serial) {
         let seat = Seat::from_resource(&seat).unwrap();
         if let Some(start_data) = check_grab_preconditions(&seat, surface.wl_surface(), serial) {
             let workspace = self
@@ -181,15 +174,12 @@ impl XdgShellHandler for State {
                 .unwrap()
                 .clone();
 
-            self.common
-                .shell
-                .move_request(&window, &seat, serial, start_data);
+            Shell::move_request(self, &window, &seat, serial, start_data);
         }
     }
 
     fn resize_request(
         &mut self,
-        _dh: &DisplayHandle,
         surface: ToplevelSurface,
         seat: WlSeat,
         serial: Serial,
@@ -197,22 +187,11 @@ impl XdgShellHandler for State {
     ) {
         let seat = Seat::from_resource(&seat).unwrap();
         if let Some(start_data) = check_grab_preconditions(&seat, surface.wl_surface(), serial) {
-            let workspace = self
-                .common
-                .shell
-                .space_for_window_mut(surface.wl_surface())
-                .unwrap();
-            let window = workspace
-                .space
-                .window_for_surface(surface.wl_surface(), WindowSurfaceType::TOPLEVEL)
-                .unwrap()
-                .clone();
-
-            workspace.resize_request(&window, &seat, serial, start_data, edges);
+            Workspace::resize_request(self, surface.wl_surface(), &seat, serial, start_data, edges);
         }
     }
 
-    fn maximize_request(&mut self, _dh: &DisplayHandle, surface: ToplevelSurface) {
+    fn maximize_request(&mut self, surface: ToplevelSurface) {
         let surface = surface.wl_surface();
         let seat = &self.common.last_active_seat;
         let output = active_output(seat, &self.common);
@@ -227,7 +206,7 @@ impl XdgShellHandler for State {
         }
     }
 
-    fn unmaximize_request(&mut self, _dh: &DisplayHandle, surface: ToplevelSurface) {
+    fn unmaximize_request(&mut self, surface: ToplevelSurface) {
         let surface = surface.wl_surface();
 
         if let Some(workspace) = self.common.shell.space_for_window_mut(surface) {
@@ -240,12 +219,7 @@ impl XdgShellHandler for State {
         }
     }
 
-    fn fullscreen_request(
-        &mut self,
-        _dh: &DisplayHandle,
-        surface: ToplevelSurface,
-        output: Option<WlOutput>,
-    ) {
+    fn fullscreen_request(&mut self, surface: ToplevelSurface, output: Option<WlOutput>) {
         let output = output
             .as_ref()
             .and_then(Output::from_resource)
@@ -265,7 +239,7 @@ impl XdgShellHandler for State {
         }
     }
 
-    fn unfullscreen_request(&mut self, _dh: &DisplayHandle, surface: ToplevelSurface) {
+    fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
         let surface = surface.wl_surface();
         if let Some(workspace) = self.common.shell.space_for_window_mut(surface) {
             let window = workspace
@@ -282,7 +256,7 @@ fn check_grab_preconditions(
     seat: &Seat<State>,
     surface: &WlSurface,
     serial: Serial,
-) -> Option<PointerGrabStartData> {
+) -> Option<PointerGrabStartData<State>> {
     use smithay::reexports::wayland_server::Resource;
 
     // TODO: touch resize.

@@ -5,17 +5,14 @@ use crate::{
 };
 
 use smithay::{
-    desktop::{Kind, Space, Window},
+    desktop::{Kind, Space, Window, WindowSurfaceType},
+    input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     reexports::{
         wayland_protocols::xdg::shell::server::xdg_toplevel::{self, ResizeEdge},
-        wayland_server::DisplayHandle,
+        wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
     },
-    utils::IsAlive,
-    wayland::{
-        output::Output,
-        seat::{PointerGrabStartData, Seat},
-        Serial,
-    },
+    utils::{IsAlive, Serial},
+    wayland::output::Output,
 };
 use std::collections::HashMap;
 
@@ -81,35 +78,27 @@ impl Workspace {
     }
 
     pub fn resize_request(
-        &mut self,
-        window: &Window,
+        state: &mut State,
+        surface: &WlSurface,
         seat: &Seat<State>,
         serial: Serial,
-        start_data: PointerGrabStartData,
+        start_data: PointerGrabStartData<State>,
         edges: ResizeEdge,
     ) {
-        if self.fullscreen.values().any(|w| w == window) {
+        let workspace = state.common.shell.space_for_window_mut(surface).unwrap();
+        let window = workspace
+            .space
+            .window_for_surface(surface, WindowSurfaceType::TOPLEVEL)
+            .unwrap()
+            .clone();
+
+        if workspace.fullscreen.values().any(|w| w == &window) {
             return;
         }
-        if self.floating_layer.windows.contains(window) {
-            self.floating_layer.resize_request(
-                &mut self.space,
-                window,
-                seat,
-                serial,
-                start_data.clone(),
-                edges,
-            )
-        }
-        if self.tiling_layer.windows.contains(window) {
-            self.tiling_layer.resize_request(
-                &mut self.space,
-                window,
-                seat,
-                serial,
-                start_data,
-                edges,
-            )
+        if workspace.floating_layer.windows.contains(&window) {
+            FloatingLayout::resize_request(state, &window, seat, serial, start_data.clone(), edges)
+        } else if workspace.tiling_layer.windows.contains(&window) {
+            TilingLayout::resize_request(state, &window, seat, serial, start_data, edges)
         }
     }
 
