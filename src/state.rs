@@ -25,8 +25,8 @@ use smithay::{
     utils::{Buffer, Size},
     wayland::{
         compositor::CompositorState, data_device::DataDeviceState, dmabuf::DmabufState,
-        output::OutputManagerState, primary_selection::PrimarySelectionState, shm::ShmState,
-        viewporter::ViewporterState,
+        keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState, output::OutputManagerState,
+        primary_selection::PrimarySelectionState, shm::ShmState, viewporter::ViewporterState,
     },
 };
 
@@ -86,6 +86,7 @@ pub struct Common {
     pub data_device_state: DataDeviceState,
     pub dmabuf_state: DmabufState,
     pub export_dmabuf_state: ExportDmabufState,
+    pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
     pub output_state: OutputManagerState,
     pub output_configuration_state: OutputConfigurationState<State>,
     pub primary_selection_state: PrimarySelectionState,
@@ -301,6 +302,7 @@ impl State {
             //|client| client.get_data::<ClientState>().unwrap().privileged,
             |_| true,
         );
+        let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<Self>(dh);
         let output_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
         let output_configuration_state = OutputConfigurationState::new(dh, |_| true);
         let primary_selection_state = PrimarySelectionState::new::<Self, _>(dh, None);
@@ -355,6 +357,7 @@ impl State {
                 export_dmabuf_state,
                 shm_state,
                 seat_state,
+                keyboard_shortcuts_inhibit_state,
                 output_state,
                 output_configuration_state,
                 primary_selection_state,

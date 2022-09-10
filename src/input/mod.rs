@@ -20,7 +20,10 @@ use smithay::{
     output::Output,
     reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
     utils::{Buffer, Logical, Point, Rectangle, Size, SERIAL_COUNTER},
-    wayland::shell::wlr_layer::Layer as WlrLayer,
+    wayland::{
+        keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
+        shell::wlr_layer::Layer as WlrLayer,
+    },
 };
 
 use std::{cell::RefCell, collections::HashMap};
@@ -173,6 +176,19 @@ impl State {
 
                 let device = event.device();
                 for seat in self.common.seats.clone().iter() {
+                    let current_output = active_output(seat, &self.common);
+                    let workspace = self.common.shell.active_space_mut(&current_output);
+                    let shortcuts_inhibited = workspace
+                        .focus_stack(seat)
+                        .last()
+                        .and_then(|window| {
+                            seat.keyboard_shortcuts_inhibitor_for_surface(
+                                &window.toplevel().wl_surface(),
+                            )
+                        })
+                        .map(|inhibitor| inhibitor.is_active())
+                        .unwrap_or(false);
+
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
@@ -249,15 +265,22 @@ impl State {
                                     }
 
                                     // here we can handle global shortcuts and the like
-                                    for (binding, action) in
-                                        data.common.config.static_conf.key_bindings.iter()
-                                    {
-                                        if state == KeyState::Pressed
-                                            && binding.modifiers == *modifiers
-                                            && handle.raw_syms().contains(&binding.key)
+                                    if !shortcuts_inhibited {
+                                        for (binding, action) in
+                                            data.common.config.static_conf.key_bindings.iter()
                                         {
-                                            userdata.get::<SupressedKeys>().unwrap().add(&handle);
-                                            return FilterResult::Intercept(Some(action.clone()));
+                                            if state == KeyState::Pressed
+                                                && binding.modifiers == *modifiers
+                                                && handle.raw_syms().contains(&binding.key)
+                                            {
+                                                userdata
+                                                    .get::<SupressedKeys>()
+                                                    .unwrap()
+                                                    .add(&handle);
+                                                return FilterResult::Intercept(Some(
+                                                    action.clone(),
+                                                ));
+                                            }
                                         }
                                     }
 
