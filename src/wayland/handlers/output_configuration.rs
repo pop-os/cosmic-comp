@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use smithay::wayland::output::Output;
+use smithay::output::Output;
 
 use crate::{
     config::OutputConfig,

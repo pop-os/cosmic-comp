@@ -14,6 +14,7 @@ use crate::{
 use smithay::{
     backend::drm::DrmNode,
     input::{Seat, SeatState},
+    output::{Mode as OutputMode, Output, Scale},
     reexports::{
         calloop::{LoopHandle, LoopSignal},
         wayland_server::{
@@ -23,12 +24,8 @@ use smithay::{
     },
     utils::{Buffer, Size},
     wayland::{
-        compositor::CompositorState,
-        data_device::DataDeviceState,
-        dmabuf::DmabufState,
-        output::{Mode as OutputMode, Output, OutputManagerState, Scale},
-        primary_selection::PrimarySelectionState,
-        shm::ShmState,
+        compositor::CompositorState, data_device::DataDeviceState, dmabuf::DmabufState,
+        output::OutputManagerState, primary_selection::PrimarySelectionState, shm::ShmState,
         viewporter::ViewporterState,
     },
 };

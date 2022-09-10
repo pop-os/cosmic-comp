@@ -17,15 +17,13 @@ use smithay::{
         x11::{Window, WindowBuilder, X11Backend, X11Event, X11Handle, X11Input, X11Surface},
     },
     desktop::layer_map_for_output,
+    output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
         calloop::{ping, EventLoop, LoopHandle},
         gbm::{Device as GbmDevice, FdWrapper},
-        wayland_server::{
-            protocol::wl_output::{Subpixel, Transform},
-            DisplayHandle,
-        },
+        wayland_server::DisplayHandle,
     },
-    wayland::output::{Mode, Output, PhysicalProperties, Scale},
+    utils::Transform,
 };
 use std::{
     cell::RefCell,

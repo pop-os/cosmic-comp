@@ -4,15 +4,13 @@ use crate::utils::prelude::*;
 use smithay::{
     delegate_layer_shell,
     desktop::{LayerSurface, PopupKind},
+    output::Output,
     reexports::wayland_server::protocol::wl_output::WlOutput,
-    wayland::{
-        output::Output,
-        shell::{
-            wlr_layer::{
-                Layer, LayerSurface as WlrLayerSurface, WlrLayerShellHandler, WlrLayerShellState,
-            },
-            xdg::PopupSurface,
+    wayland::shell::{
+        wlr_layer::{
+            Layer, LayerSurface as WlrLayerSurface, WlrLayerShellHandler, WlrLayerShellState,
         },
+        xdg::PopupSurface,
     },
 };
 

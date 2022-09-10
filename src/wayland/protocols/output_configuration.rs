@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use smithay::{
+    output::{Mode, Output, OutputData},
     reexports::{
         wayland_protocols_wlr::output_management::v1::server::{
             zwlr_output_configuration_head_v1::{self, ZwlrOutputConfigurationHeadV1},
@@ -16,7 +17,6 @@ use smithay::{
         },
     },
     utils::{Logical, Physical, Point, Size, Transform},
-    wayland::output::{Mode, Output, OutputData},
 };
 use std::{
     convert::{TryFrom, TryInto},
@@ -734,7 +734,7 @@ where
     if inner.enabled {
         let point = output.current_location();
         instance.head.position(point.x, point.y);
-        instance.head.transform(output.current_transform());
+        instance.head.transform(output.current_transform().into());
         instance
             .head
             .scale(output.current_scale().fractional_scale());
@@ -759,10 +759,10 @@ macro_rules! delegate_output_configuration {
             smithay::reexports::wayland_protocols_wlr::output_management::v1::server::zwlr_output_manager_v1::ZwlrOutputManagerV1: $crate::wayland::protocols::output_configuration::OutputMngrInstanceData
         ] => $crate::wayland::protocols::output_configuration::OutputConfigurationState<Self>);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            smithay::reexports::wayland_protocols_wlr::output_management::v1::server::zwlr_output_head_v1::ZwlrOutputHeadV1: smithay::wayland::output::Output
+            smithay::reexports::wayland_protocols_wlr::output_management::v1::server::zwlr_output_head_v1::ZwlrOutputHeadV1: smithay::output::Output
         ] => $crate::wayland::protocols::output_configuration::OutputConfigurationState<Self>);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            smithay::reexports::wayland_protocols_wlr::output_management::v1::server::zwlr_output_mode_v1::ZwlrOutputModeV1: smithay::wayland::output::Mode
+            smithay::reexports::wayland_protocols_wlr::output_management::v1::server::zwlr_output_mode_v1::ZwlrOutputModeV1: smithay::output::Mode
         ] => $crate::wayland::protocols::output_configuration::OutputConfigurationState<Self>);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
             smithay::reexports::wayland_protocols_wlr::output_management::v1::server::zwlr_output_configuration_v1::ZwlrOutputConfigurationV1: $crate::wayland::protocols::output_configuration::PendingConfiguration

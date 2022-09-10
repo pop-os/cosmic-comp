@@ -29,8 +29,9 @@ use smithay::{
         utils::damage_from_surface_tree,
         Window,
     },
+    output::Output,
     utils::{Physical, Point, Rectangle, Scale, Transform},
-    wayland::{output::Output, shell::wlr_layer::Layer as WlrLayer},
+    wayland::shell::wlr_layer::Layer as WlrLayer,
 };
 
 pub mod cursor;

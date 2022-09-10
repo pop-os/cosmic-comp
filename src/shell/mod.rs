@@ -3,11 +3,11 @@ use std::{cell::Cell, mem::MaybeUninit};
 use smithay::{
     desktop::{layer_map_for_output, LayerSurface, PopupManager, Window, WindowSurfaceType},
     input::{pointer::MotionEvent, Seat},
+    output::Output,
     reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
     utils::{Logical, Point, Rectangle, SERIAL_COUNTER},
     wayland::{
         compositor::with_states,
-        output::Output,
         shell::{
             wlr_layer::{
                 KeyboardInteractivity, Layer, LayerSurfaceCachedState, WlrLayerShellState,

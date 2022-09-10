@@ -27,6 +27,7 @@ use smithay::{
         session::{auto::AutoSession, Session, Signal},
         udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
     },
+    output::{Mode as OutputMode, Output, PhysicalProperties, Subpixel},
     reexports::{
         calloop::{
             timer::{TimeoutAction, Timer},
@@ -35,19 +36,13 @@ use smithay::{
         drm::control::{connector, crtc, Device as ControlDevice, ModeTypeFlags},
         input::Libinput,
         nix::{fcntl::OFlag, sys::stat::dev_t},
-        wayland_server::{
-            protocol::{wl_output, wl_surface::WlSurface},
-            DisplayHandle, Resource,
-        },
+        wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle, Resource},
     },
     utils::{
         signaling::{Linkable, SignalToken, Signaler},
-        Size,
+        Size, Transform,
     },
-    wayland::{
-        dmabuf::DmabufGlobal,
-        output::{Mode as OutputMode, Output, PhysicalProperties},
-    },
+    wayland::dmabuf::DmabufGlobal,
 };
 
 use std::{
@@ -650,7 +645,7 @@ impl Device {
             PhysicalProperties {
                 size: (phys_w as i32, phys_h as i32).into(),
                 // TODO: We need to read that from the connector properties
-                subpixel: wl_output::Subpixel::Unknown,
+                subpixel: Subpixel::Unknown,
                 make: edid_info.manufacturer,
                 model: edid_info.model,
             },
@@ -668,7 +663,7 @@ impl Device {
         output.change_current_state(
             Some(output_mode),
             // TODO: Readout property for monitor rotation
-            Some(wl_output::Transform::Normal),
+            Some(Transform::Normal),
             None,
             Some(position.into()),
         );

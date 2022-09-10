@@ -7,12 +7,12 @@ use crate::{
 use smithay::{
     desktop::{Kind, Space, Window, WindowSurfaceType},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
+    output::Output,
     reexports::{
         wayland_protocols::xdg::shell::server::xdg_toplevel::{self, ResizeEdge},
         wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
     },
     utils::{IsAlive, Serial},
-    wayland::output::Output,
 };
 use std::collections::HashMap;
 

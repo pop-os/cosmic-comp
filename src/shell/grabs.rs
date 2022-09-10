@@ -18,12 +18,12 @@ use smithay::{
         },
         Seat,
     },
+    output::Output,
     reexports::{
         wayland_protocols::xdg::shell::server::xdg_toplevel::State as XdgState,
         wayland_server::protocol::wl_surface::WlSurface,
     },
     utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial},
-    wayland::output::Output,
 };
 use std::cell::RefCell;
 

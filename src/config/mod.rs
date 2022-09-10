@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 pub use smithay::{
     backend::input::KeyState,
     input::keyboard::{keysyms as KeySyms, Keysym, ModifiersState},
+    output::{Mode, Output},
     reexports::{
         calloop::LoopHandle,
         input::{
@@ -16,7 +17,6 @@ pub use smithay::{
         },
     },
     utils::{Logical, Physical, Point, Size, Transform},
-    wayland::output::{Mode, Output},
 };
 use std::{cell::RefCell, collections::HashMap, fs::OpenOptions, path::PathBuf};
 

@@ -3,11 +3,11 @@
 use std::{collections::HashSet, sync::Mutex};
 
 use smithay::{
+    output::Output,
     reexports::wayland_server::{
         backend::{ClientData, ClientId, GlobalId, ObjectId},
         Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
     },
-    wayland::output::Output,
 };
 
 use cosmic_protocols::workspace::v1::server::{

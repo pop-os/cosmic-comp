@@ -4,24 +4,21 @@ use crate::utils::prelude::*;
 use smithay::{
     delegate_xdg_shell,
     desktop::{
-        Kind, PopupGrab, PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupUngrabStrategy,
-        Window, WindowSurfaceType,
+        find_popup_root_surface, Kind, PopupGrab, PopupKeyboardGrab, PopupKind, PopupPointerGrab,
+        PopupUngrabStrategy, Window, WindowSurfaceType,
     },
     input::{
         pointer::{Focus, GrabStartData as PointerGrabStartData},
         Seat,
     },
+    output::Output,
     reexports::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::protocol::{wl_output::WlOutput, wl_seat::WlSeat, wl_surface::WlSurface},
     },
     utils::Serial,
-    wayland::{
-        output::Output,
-        shell::xdg::{
-            Configure, PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler,
-            XdgShellState,
-        },
+    wayland::shell::xdg::{
+        Configure, PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
     },
 };
 use std::cell::Cell;
@@ -92,49 +89,46 @@ impl XdgShellHandler for State {
 
     fn grab(&mut self, surface: PopupSurface, seat: WlSeat, serial: Serial) {
         let seat = Seat::from_resource(&seat).unwrap();
-        let dh = &self.common.display_handle;
-        let ret =
-            self.common
+        let kind = PopupKind::Xdg(surface);
+        if let Ok(root) = find_popup_root_surface(&kind) {
+            let ret = self
+                .common
                 .shell
                 .popups
-                .grab_popup(dh, surface.wl_surface().clone(), &seat, serial);
+                .grab_popup(root, kind, &seat, serial);
 
-        if let Ok(mut grab) = ret {
-            if let Some(keyboard) = seat.get_keyboard() {
-                if keyboard.is_grabbed()
-                    && !(keyboard.has_grab(serial)
-                        || keyboard.has_grab(grab.previous_serial().unwrap_or(serial)))
-                {
-                    grab.ungrab(PopupUngrabStrategy::All);
-                    return;
+            if let Ok(mut grab) = ret {
+                if let Some(keyboard) = seat.get_keyboard() {
+                    if keyboard.is_grabbed()
+                        && !(keyboard.has_grab(serial)
+                            || keyboard.has_grab(grab.previous_serial().unwrap_or(serial)))
+                    {
+                        grab.ungrab(PopupUngrabStrategy::All);
+                        return;
+                    }
+                    Common::set_focus(self, grab.current_grab().as_ref(), &seat, Some(serial));
+                    keyboard.set_grab(PopupKeyboardGrab::new(&grab), serial);
                 }
-                Common::set_focus(
-                    self,
-                    grab.current_grab().as_ref().map(|x| &x.0),
-                    &seat,
-                    Some(serial),
-                );
-                keyboard.set_grab(PopupKeyboardGrab::new(&grab), serial);
-            }
 
-            if let Some(pointer) = seat.get_pointer() {
-                if pointer.is_grabbed()
-                    && !(pointer.has_grab(serial)
-                        || pointer
-                            .has_grab(grab.previous_serial().unwrap_or_else(|| grab.serial())))
-                {
-                    grab.ungrab(PopupUngrabStrategy::All);
-                    return;
+                if let Some(pointer) = seat.get_pointer() {
+                    if pointer.is_grabbed()
+                        && !(pointer.has_grab(serial)
+                            || pointer
+                                .has_grab(grab.previous_serial().unwrap_or_else(|| grab.serial())))
+                    {
+                        grab.ungrab(PopupUngrabStrategy::All);
+                        return;
+                    }
+                    pointer.set_grab(self, PopupPointerGrab::new(&grab), serial, Focus::Keep);
                 }
-                pointer.set_grab(self, PopupPointerGrab::new(&grab), serial, Focus::Keep);
-            }
 
-            seat.user_data()
-                .insert_if_missing(|| PopupGrabData::new(None));
-            seat.user_data()
-                .get::<PopupGrabData>()
-                .unwrap()
-                .set(Some(grab));
+                seat.user_data()
+                    .insert_if_missing(|| PopupGrabData::new(None));
+                seat.user_data()
+                    .get::<PopupGrabData>()
+                    .unwrap()
+                    .set(Some(grab));
+            }
         }
     }
 

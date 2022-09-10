@@ -17,9 +17,10 @@ use smithay::{
         pointer::{AxisFrame, ButtonEvent, CursorImageStatus, MotionEvent},
         Seat, SeatState,
     },
+    output::Output,
     reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
     utils::{Buffer, Logical, Point, Rectangle, Size, SERIAL_COUNTER},
-    wayland::{output::Output, shell::wlr_layer::Layer as WlrLayer},
+    wayland::shell::wlr_layer::Layer as WlrLayer,
 };
 
 use std::{cell::RefCell, collections::HashMap};
