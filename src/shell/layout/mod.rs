@@ -5,9 +5,8 @@ use regex::RegexSet;
 use smithay::{
     desktop::{Space, Window},
     input::Seat,
-    wayland::{
-        compositor::with_states, output::Output, shell::xdg::XdgToplevelSurfaceRoleAttributes,
-    },
+    output::Output,
+    wayland::{compositor::with_states, shell::xdg::XdgToplevelSurfaceRoleAttributes},
 };
 use std::sync::Mutex;
 

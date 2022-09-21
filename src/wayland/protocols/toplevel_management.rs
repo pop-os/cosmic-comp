@@ -3,13 +3,13 @@
 use smithay::{
     desktop::Window,
     input::{Seat, SeatHandler},
+    output::Output,
     reexports::wayland_server::{
         backend::{ClientId, GlobalId, ObjectId},
         protocol::wl_surface::WlSurface,
         Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
     },
     utils::{Logical, Rectangle},
-    wayland::output::Output,
 };
 
 pub use cosmic_protocols::toplevel_management::v1::server::zcosmic_toplevel_manager_v1::ZcosmicToplelevelManagementCapabilitiesV1 as ManagementCapabilities;

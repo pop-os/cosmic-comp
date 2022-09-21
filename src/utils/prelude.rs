@@ -1,8 +1,8 @@
 use crate::input::{ActiveOutput, SeatId};
 use smithay::{
     input::Seat,
+    output::Output,
     utils::{Logical, Rectangle, Transform},
-    wayland::output::Output,
 };
 use std::cell::RefCell;
 

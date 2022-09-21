@@ -6,13 +6,12 @@ use smithay::{
         pointer::{Focus, GrabStartData as PointerGrabStartData},
         Seat,
     },
+    output::Output,
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
         ResizeEdge, State as XdgState,
     },
     utils::{IsAlive, Logical, Point, Rectangle, Serial},
-    wayland::{
-        compositor::with_states, output::Output, shell::xdg::XdgToplevelSurfaceRoleAttributes,
-    },
+    wayland::{compositor::with_states, shell::xdg::XdgToplevelSurfaceRoleAttributes},
 };
 use std::{collections::HashSet, sync::Mutex};
 

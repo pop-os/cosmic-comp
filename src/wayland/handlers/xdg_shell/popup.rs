@@ -6,6 +6,7 @@ use smithay::{
         layer_map_for_output, LayerSurface, PopupKind, PopupManager, Space, Window,
         WindowSurfaceType,
     },
+    output::Output,
     reexports::{
         wayland_protocols::xdg::shell::server::xdg_positioner::{
             Anchor, ConstraintAdjustment, Gravity,
@@ -15,7 +16,6 @@ use smithay::{
     utils::{Logical, Point, Rectangle},
     wayland::{
         compositor::{get_role, with_states},
-        output::Output,
         shell::xdg::{
             PopupSurface, PositionerState, SurfaceCachedState, XdgPopupSurfaceRoleAttributes,
             XDG_POPUP_ROLE,

@@ -4,6 +4,7 @@ use std::{collections::HashMap, sync::Mutex};
 
 use smithay::{
     desktop::Window,
+    output::Output,
     reexports::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::{
@@ -13,9 +14,7 @@ use smithay::{
         },
     },
     utils::{IsAlive, Logical, Rectangle},
-    wayland::{
-        compositor::with_states, output::Output, shell::xdg::XdgToplevelSurfaceRoleAttributes,
-    },
+    wayland::{compositor::with_states, shell::xdg::XdgToplevelSurfaceRoleAttributes},
 };
 
 use super::workspace::{WorkspaceHandle, WorkspaceHandler, WorkspaceState};

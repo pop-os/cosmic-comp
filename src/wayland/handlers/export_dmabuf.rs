@@ -16,12 +16,12 @@ use smithay::{
     },
     desktop::{draw_window, draw_window_popups, space::RenderElement, Kind, Window},
     input::pointer::CursorImageStatus,
+    output::Output,
     reexports::wayland_server::{protocol::wl_output::WlOutput, DisplayHandle, Resource},
     utils::{IsAlive, Size, Transform},
     wayland::{
         compositor::{get_children, with_states, SurfaceAttributes},
         dmabuf::get_dmabuf,
-        output::Output,
     },
 };
 

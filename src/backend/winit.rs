@@ -14,14 +14,12 @@ use smithay::{
         winit::{self, WinitEvent, WinitGraphicsBackend, WinitVirtualDevice},
     },
     desktop::layer_map_for_output,
+    output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
         calloop::{ping, EventLoop},
-        wayland_server::{
-            protocol::wl_output::{Subpixel, Transform},
-            DisplayHandle,
-        },
+        wayland_server::DisplayHandle,
     },
-    wayland::output::{Mode, Output, PhysicalProperties, Scale},
+    utils::Transform,
 };
 use std::cell::RefCell;
 
