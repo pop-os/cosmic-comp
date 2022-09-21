@@ -55,7 +55,7 @@ impl Shell {
                 .unwrap();
             let mut initial_window_location = workspace.space.window_location(&window).unwrap();
 
-            let output = match &window.toplevel() {
+            match &window.toplevel() {
                 Kind::Xdg(surface) => {
                     // If surface is maximized then unmaximize it
                     let current_state = surface.current_state();
@@ -71,8 +71,6 @@ impl Shell {
                             .unwrap_or_else(|| pos)
                             .to_i32_round();
                     }
-
-                    output
                 }
             };
 
@@ -115,6 +113,7 @@ impl Shell {
                 was_tiled,
                 initial_cursor_location: pointer.current_location(),
                 initial_window_location,
+                initial_output_location: output.geometry().loc,
             };
             let grab = MoveSurfaceGrab::new(start_data, window.clone(), seat);
 
@@ -140,8 +139,11 @@ impl Shell {
 
             if window.alive() {
                 let delta = pointer.current_location() - move_state.initial_cursor_location;
-                let window_location =
-                    (move_state.initial_window_location.to_f64() + delta).to_i32_round();
+                let window_location = (move_state.initial_window_location.to_f64()
+                    + move_state.initial_output_location.to_f64()
+                    - output.geometry().loc.to_f64()
+                    + delta)
+                    .to_i32_round();
                 let surface = window.toplevel().wl_surface().clone();
 
                 let workspace_handle = state.common.shell.active_space(output).handle;
@@ -197,6 +199,7 @@ pub struct MoveGrabState {
     was_tiled: bool,
     initial_cursor_location: Point<f64, Logical>,
     initial_window_location: Point<i32, Logical>,
+    initial_output_location: Point<i32, Logical>,
 }
 
 pub struct MoveGrabRenderElement {
@@ -266,20 +269,19 @@ impl MoveGrabState {
     {
         let cursor_at = seat.get_pointer().unwrap().current_location();
         let delta = cursor_at - self.initial_cursor_location;
-        let mut window_geo = self.window.bbox();
-        window_geo.loc += (self.initial_window_location.to_f64() + delta).to_i32_round();
+        let location =
+            self.initial_output_location.to_f64() + self.initial_window_location.to_f64() + delta;
 
+        let mut window_geo = self.window.bbox();
+        window_geo.loc += location.to_i32_round();
         if !output.geometry().intersection(window_geo).is_some() {
             return None;
         }
 
-        let delta = cursor_at - self.initial_cursor_location;
-        let window_location =
-            self.initial_window_location.to_f64() + delta - output.geometry().loc.to_f64();
         Some(I::from(MoveGrabRenderElement {
             seat_id: seat.id(),
             window: self.window.clone(),
-            window_location,
+            window_location: location - output.geometry().loc.to_f64(),
         }))
     }
 }
