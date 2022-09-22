@@ -47,12 +47,14 @@ impl Shell {
             }
 
             let pos = pointer.current_location();
-            let output = workspace
+            let output = match workspace
                 .space
                 .outputs_for_window(&window)
                 .into_iter()
-                .find(|o| o.geometry().contains(pos.to_i32_round()))
-                .unwrap();
+                .find(|o| o.geometry().contains(pos.to_i32_round())) {
+                    Some(o) => o,
+                    None => return,
+                };
             let mut initial_window_location = workspace.space.window_location(&window).unwrap();
 
             let output = match &window.toplevel() {
