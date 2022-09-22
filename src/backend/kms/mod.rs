@@ -625,7 +625,7 @@ impl Device {
         let conn_info = drm.get_connector(conn, false)?;
         let vrr = drm_helpers::set_vrr(drm, crtc, conn, true).unwrap_or(false);
         let interface = drm_helpers::interface_name(drm, conn)?;
-        let edid_info = drm_helpers::edid_info(drm, conn)?;
+        let edid_info = drm_helpers::edid_info(drm, conn);
         let mode = crtc_info.mode().unwrap_or_else(|| {
             conn_info
                 .modes()
@@ -646,8 +646,14 @@ impl Device {
                 size: (phys_w as i32, phys_h as i32).into(),
                 // TODO: We need to read that from the connector properties
                 subpixel: Subpixel::Unknown,
-                make: edid_info.manufacturer,
-                model: edid_info.model,
+                make: edid_info
+                    .as_ref()
+                    .map(|info| info.manufacturer.clone())
+                    .unwrap_or_else(|_| String::from("Unknown")),
+                model: edid_info
+                    .as_ref()
+                    .map(|info| info.model.clone())
+                    .unwrap_or_else(|_| String::from("Unknown")),
             },
             None,
         );
