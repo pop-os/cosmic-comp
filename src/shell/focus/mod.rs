@@ -6,17 +6,21 @@ use crate::{
 };
 use indexmap::IndexSet;
 use smithay::{
-    desktop::{PopupUngrabStrategy, Window, WindowSurfaceType},
+    desktop::{layer_map_for_output, PopupUngrabStrategy, Window, WindowSurfaceType},
     input::Seat,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{IsAlive, Serial, SERIAL_COUNTER},
-    wayland::{compositor::with_states, shell::xdg::XdgToplevelSurfaceRoleAttributes},
+    wayland::{
+        compositor::get_role,
+        shell::{wlr_layer::LAYER_SURFACE_ROLE, xdg::XDG_TOPLEVEL_ROLE},
+    },
 };
 use std::{
     cell::{Ref, RefCell, RefMut},
     collections::HashMap,
-    sync::Mutex,
 };
+
+pub mod target;
 
 #[derive(Debug, serde::Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum FocusDirection {
@@ -200,40 +204,47 @@ impl Common {
     pub fn refresh_focus(state: &mut State) {
         let seats = state.common.seats.clone();
         for seat in seats {
-            let mut fixup = false;
             let output = active_output(&seat, &state.common);
             let last_known_focus = ActiveFocus::get(&seat);
 
             if let Some(surface) = last_known_focus {
                 if surface.alive() {
-                    let is_toplevel = with_states(&surface, |states| {
-                        states
-                            .data_map
-                            .get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
-                            .is_some()
-                    });
-                    if !is_toplevel {
-                        continue;
-                    }
+                    let is_toplevel = matches!(get_role(&surface), Some(XDG_TOPLEVEL_ROLE));
+                    let is_layer = matches!(get_role(&surface), Some(LAYER_SURFACE_ROLE));
 
-                    let workspace = state.common.shell.active_space(&output);
-                    if let Some(window) = workspace
-                        .space
-                        .window_for_surface(&surface, WindowSurfaceType::ALL)
-                    {
-                        let focus_stack = workspace.focus_stack(&seat);
-                        if focus_stack.last().map(|w| &w != window).unwrap_or(true) {
-                            fixup = true;
+                    if is_layer {
+                        if layer_map_for_output(&output)
+                            .layer_for_surface(&surface, WindowSurfaceType::ALL)
+                            .is_some()
+                        {
+                            continue; // Focus is valid
+                        }
+                    } else if is_toplevel {
+                        let workspace = state.common.shell.active_space(&output);
+                        if let Some(window) = workspace
+                            .space
+                            .window_for_surface(&surface, WindowSurfaceType::ALL)
+                        {
+                            let focus_stack = workspace.focus_stack(&seat);
+                            if !focus_stack.last().map(|w| &w != window).unwrap_or(true) {
+                                continue; // Focus is valid
+                            } else {
+                                slog_scope::debug!("Wrong Window, focus fixup");
+                            }
+                        } else {
+                            slog_scope::debug!("Different workspaces Window, focus fixup");
                         }
                     } else {
-                        fixup = true;
+                        // unknown surface type, fixup
+                        slog_scope::debug!("Surface unmapped, focus fixup");
                     }
                 } else {
-                    fixup = true;
+                    slog_scope::debug!("Surface dead, focus fixup");
                 }
             }
 
-            if fixup {
+            // fixup focus
+            {
                 // also remove popup grabs, if we are switching focus
                 if let Some(mut popup_grab) = seat
                     .user_data()
@@ -246,14 +257,15 @@ impl Common {
                 }
 
                 // update keyboard focus
-                let surface = state
+                let surface = dbg!(state
                     .common
                     .shell
                     .active_space(&output)
                     .focus_stack(&seat)
-                    .last()
-                    .map(|w| w.toplevel().wl_surface().clone());
+                    .last())
+                .map(|w| w.toplevel().wl_surface().clone());
                 if let Some(keyboard) = seat.get_keyboard() {
+                    slog_scope::info!("restoring focus to: {:?}", surface.as_ref());
                     keyboard.set_focus(state, surface.clone(), SERIAL_COUNTER.next_serial());
                     ActiveFocus::set(&seat, surface);
                 }
