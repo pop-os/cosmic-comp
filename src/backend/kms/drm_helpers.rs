@@ -216,7 +216,7 @@ pub fn get_prop(
             return Ok(*prop);
         }
     }
-    anyhow::bail!("No prop found")
+    anyhow::bail!("No prop found for {}", name)
 }
 
 pub fn get_property_val(
@@ -233,7 +233,7 @@ pub fn get_property_val(
             return Ok((val_type, val));
         }
     }
-    anyhow::bail!("No prop found")
+    anyhow::bail!("No prop found for {}", name)
 }
 
 fn get_manufacturer(vendor: &[char; 3]) -> &'static str {
