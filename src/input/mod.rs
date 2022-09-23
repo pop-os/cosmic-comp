@@ -13,7 +13,7 @@ use smithay::{
     },
     desktop::{layer_map_for_output, Kind, WindowSurfaceType},
     input::{
-        keyboard::{keysyms, FilterResult, KeysymHandle},
+        keyboard::{keysyms, FilterResult, KeysymHandle, XkbConfig},
         pointer::{AxisFrame, ButtonEvent, CursorImageStatus, MotionEvent},
         Seat, SeatState,
     },
@@ -124,8 +124,15 @@ pub fn add_seat(
     // So instead of doing the right thing (and initialize these capabilities as matching
     // devices appear), we have to surrender to reality and just always expose a keyboard and pointer.
     let conf = config.xkb_config();
-    let _ = seat.add_keyboard((&conf).into(), 200, 25);
-    let _ = seat.add_pointer();
+    if let Err(err) = seat.add_keyboard((&conf).into(), 200, 25) {
+        slog_scope::warn!(
+            "Failed to load provided xkb config: {}. Trying default...",
+            err
+        );
+        seat.add_keyboard(XkbConfig::default(), 200, 25)
+            .expect("Failed to load xkb configuration files");
+    }
+    seat.add_pointer();
 
     seat
 }
