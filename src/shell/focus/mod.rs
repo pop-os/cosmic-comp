@@ -241,6 +241,8 @@ impl Common {
                 } else {
                     slog_scope::debug!("Surface dead, focus fixup");
                 }
+            } else {
+                continue;
             }
 
             // fixup focus
@@ -257,13 +259,13 @@ impl Common {
                 }
 
                 // update keyboard focus
-                let surface = dbg!(state
+                let surface = state
                     .common
                     .shell
                     .active_space(&output)
                     .focus_stack(&seat)
-                    .last())
-                .map(|w| w.toplevel().wl_surface().clone());
+                    .last()
+                    .map(|w| w.toplevel().wl_surface().clone());
                 if let Some(keyboard) = seat.get_keyboard() {
                     slog_scope::info!("restoring focus to: {:?}", surface.as_ref());
                     keyboard.set_focus(state, surface.clone(), SERIAL_COUNTER.next_serial());
