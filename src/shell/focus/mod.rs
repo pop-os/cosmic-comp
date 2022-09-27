@@ -212,7 +212,11 @@ impl Common {
                     let is_toplevel = matches!(get_role(&surface), Some(XDG_TOPLEVEL_ROLE));
                     let is_layer = matches!(get_role(&surface), Some(LAYER_SURFACE_ROLE));
 
-                    if is_layer {
+                    if let Some(popup) = state.common.shell.popups.find_popup(&surface) {
+                        if popup.alive() {
+                            continue;
+                        }
+                    } else if is_layer {
                         if layer_map_for_output(&output)
                             .layer_for_surface(&surface, WindowSurfaceType::ALL)
                             .is_some()
