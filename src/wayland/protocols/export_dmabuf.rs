@@ -14,7 +14,7 @@ use smithay::{
 use std::{
     fs::File,
     io::{Seek, SeekFrom},
-    os::unix::io::{FromRawFd, IntoRawFd},
+    os::unix::io::{AsRawFd, FromRawFd, IntoRawFd},
     time::Instant,
 };
 
@@ -243,7 +243,8 @@ fn handle_capture(capture: Capture, frame: ZcosmicExportDmabufFrameV1, start_tim
         .zip(dmabuf.offsets().zip(dmabuf.strides()))
         .enumerate()
     {
-        let mut file = unsafe { File::from_raw_fd(handle) };
+        // SAFETY: BorrowedFd is used for seeking
+        let mut file = unsafe { File::from_raw_fd(handle.as_raw_fd()) };
         let size = match file.seek(SeekFrom::End(0)) {
             Ok(size) => size,
             Err(err) => {
@@ -257,7 +258,9 @@ fn handle_capture(capture: Capture, frame: ZcosmicExportDmabufFrameV1, start_tim
             frame.cancel(zcosmic_export_dmabuf_frame_v1::CancelReason::Temporary);
             return;
         }
+        // SAFETY: Converted back to raw_fd, no chance in ownership
         let handle = file.into_raw_fd();
+        // FDs are dup'ed by wayland-rs before sending them
         frame.object(i as u32, handle, size as u32, offset, stride, i as u32);
     }
 

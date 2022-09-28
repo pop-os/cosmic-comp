@@ -242,7 +242,8 @@ pub fn init_backend(
     let device =
         unsafe { GbmDevice::new_from_fd(fd) }.with_context(|| "Failed to create GBM device")?;
     // Initialize EGL using the GBM device.
-    let egl = EGLDisplay::new(&device, None).with_context(|| "Failed to create EGL display")?;
+    let egl =
+        unsafe { EGLDisplay::new(&device, None).with_context(|| "Failed to create EGL display")? };
     // Create the OpenGL context
     let context = EGLContext::new(&egl, None).with_context(|| "Failed to create EGL context")?;
     // Create a renderer

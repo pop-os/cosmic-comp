@@ -48,6 +48,7 @@ use smithay::{
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
+    os::unix::io::{FromRawFd, OwnedFd},
     path::PathBuf,
     rc::Rc,
     time::{Duration, Instant},
@@ -308,21 +309,23 @@ impl State {
             return Ok(());
         }
 
-        let fd = SessionFd::new(
-            self.backend
-                .kms()
-                .session
-                .open(
-                    &path,
-                    OFlag::O_RDWR | OFlag::O_CLOEXEC | OFlag::O_NOCTTY | OFlag::O_NONBLOCK,
-                )
-                .with_context(|| {
-                    format!(
-                        "Failed to optain file descriptor for drm device: {}",
-                        path.display()
+        let fd = SessionFd::new(unsafe {
+            OwnedFd::from_raw_fd(
+                self.backend
+                    .kms()
+                    .session
+                    .open(
+                        &path,
+                        OFlag::O_RDWR | OFlag::O_CLOEXEC | OFlag::O_NOCTTY | OFlag::O_NONBLOCK,
                     )
-                })?,
-        );
+                    .with_context(|| {
+                        format!(
+                            "Failed to optain file descriptor for drm device: {}",
+                            path.display()
+                        )
+                    })?,
+            )
+        });
         let mut drm = DrmDevice::new(fd.clone(), false, None)
             .with_context(|| format!("Failed to initialize drm device for: {}", path.display()))?;
         let drm_node = DrmNode::from_dev_id(dev)?;
@@ -330,9 +333,11 @@ impl State {
 
         let gbm = GbmDevice::new(fd)
             .with_context(|| format!("Failed to initialize GBM device for {}", path.display()))?;
-        let egl_display = EGLDisplay::new(&gbm, None).with_context(|| {
-            format!("Failed to create EGLDisplay for device: {}", path.display())
-        })?;
+        let egl_display = unsafe {
+            EGLDisplay::new(&gbm, None).with_context(|| {
+                format!("Failed to create EGLDisplay for device: {}", path.display())
+            })?
+        };
         let egl_device = EGLDevice::device_for_display(&egl_display).with_context(|| {
             format!("Unable to find matching egl device for {}", path.display())
         })?;

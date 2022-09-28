@@ -11,6 +11,7 @@ use smithay::{
 use anyhow::{Context, Result};
 use std::{
     ffi::OsString,
+    os::unix::prelude::AsRawFd,
     sync::{atomic::Ordering, Arc},
 };
 
@@ -117,7 +118,11 @@ fn init_wayland_display(
     event_loop
         .handle()
         .insert_source(
-            Generic::new(display.backend().poll_fd(), Interest::READ, Mode::Level),
+            Generic::new(
+                display.backend().poll_fd().as_raw_fd(),
+                Interest::READ,
+                Mode::Level,
+            ),
             move |_, _, data: &mut state::Data| match data.display.dispatch_clients(&mut data.state)
             {
                 Ok(_) => Ok(PostAction::Continue),

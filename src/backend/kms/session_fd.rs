@@ -1,39 +1,38 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use smithay::reexports::nix::unistd::close;
 use std::{
     fmt,
-    os::unix::io::{AsRawFd, RawFd},
+    os::unix::io::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd},
     sync::Arc,
 };
 
 #[derive(Clone)]
-pub struct SessionFd(Arc<DropFd>);
-
-struct DropFd(RawFd);
+pub struct SessionFd(Arc<OwnedFd>);
 
 impl SessionFd {
-    pub fn new(fd: RawFd) -> SessionFd {
-        SessionFd(Arc::new(DropFd(fd)))
+    pub fn new(fd: OwnedFd) -> SessionFd {
+        SessionFd(Arc::new(fd))
     }
 }
 
 impl fmt::Debug for SessionFd {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Session-provided File Descriptor [{}]", self.0 .0)
+        write!(
+            f,
+            "Session-provided File Descriptor [{}]",
+            self.0.as_raw_fd()
+        )
+    }
+}
+
+impl AsFd for SessionFd {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.0.as_fd()
     }
 }
 
 impl AsRawFd for SessionFd {
     fn as_raw_fd(&self) -> RawFd {
-        self.0 .0
-    }
-}
-
-impl Drop for DropFd {
-    fn drop(&mut self) {
-        if let Err(err) = close(self.0) {
-            slog_scope::warn!("Failed to close file descriptor {}: {}", self.0, err);
-        }
+        self.0.as_raw_fd()
     }
 }
