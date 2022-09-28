@@ -37,7 +37,7 @@
         (modifiers: [Logo], key: "y"): ToggleTiling,
         (modifiers: [Logo], key: "g"): ToggleWindowFloating,
         (modifiers: [Logo, Shift], key: "f"): Fullscreen,
-        (modifiers: [Logo, Shift], key: "s"): Screenshot,
+        //(modifiers: [Logo, Shift], key: "s"): Screenshot,
         //TODO: ability to select default web browser
         (modifiers: [Logo], key: "b"): Spawn("firefox"),
         //TODO: ability to select default file browser
@@ -53,5 +53,6 @@
         (modifiers: [], key: "XF86MonBrightnessDown"): Spawn("busctl --user call com.system76.CosmicSettingsDaemon /com/system76/CosmicSettingsDaemon com.system76.CosmicSettingsDaemon DecreaseDisplayBrightness"),
     },
     workspace_mode: OutputBound,
+    workspace_amount: Dynamic,
     floating_default: false,
 )

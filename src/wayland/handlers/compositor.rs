@@ -121,7 +121,7 @@ impl CompositorHandler for State {
                             state.wl_buffer().is_some()
                         })
                     {
-                        let output = active_output(&seat, &self.common);
+                        let output = seat.active_output();
                         Shell::map_window(self, &window, &output);
                     } else {
                         return;
@@ -147,6 +147,7 @@ impl CompositorHandler for State {
             self.xdg_popup_ensure_initial_configure(&popup);
         }
 
+        /*
         // at last handle some special cases, like grabs and changing layer surfaces
 
         // If we would re-position the window inside the grab we would get a weird jittery animation.
@@ -182,6 +183,7 @@ impl CompositorHandler for State {
                 }
             }
         }
+        */
 
         // We need to know every potential output for importing to the right gpu and scheduling a render,
         // so call this only after every potential surface map operation has been done.
@@ -189,8 +191,8 @@ impl CompositorHandler for State {
 
         // and refresh smithays internal state
         self.common.shell.popups.commit(surface);
-        for workspace in &self.common.shell.spaces {
-            workspace.space.commit(surface);
+        for workspace in self.common.shell.workspaces.spaces_mut() {
+            workspace.commit(surface);
         }
 
         // re-arrange layer-surfaces (commits may change size and positioning)
@@ -199,8 +201,7 @@ impl CompositorHandler for State {
             map.layer_for_surface(surface, WindowSurfaceType::ALL)
                 .is_some()
         }) {
-            let dh = &self.common.display_handle;
-            layer_map_for_output(output).arrange(dh);
+            layer_map_for_output(output).arrange();
         }
 
         // schedule a new render

@@ -3,8 +3,7 @@
 use crate::{shell::Shell, utils::prelude::*};
 use smithay::{
     desktop::{
-        layer_map_for_output, LayerSurface, PopupKind, PopupManager, Space, Window,
-        WindowSurfaceType,
+        layer_map_for_output, LayerSurface, PopupKind, PopupManager, Window, WindowSurfaceType,
     },
     output::Output,
     reexports::{
@@ -27,12 +26,19 @@ use std::sync::Mutex;
 impl Shell {
     pub fn unconstrain_popup(&self, surface: &PopupSurface, positioner: &PositionerState) {
         if let Some(parent) = get_popup_toplevel(&surface) {
-            if let Some(workspace) = self.space_for_window(&parent) {
-                let window = workspace
-                    .space
-                    .window_for_surface(&parent, WindowSurfaceType::ALL)
+            if let Some(elem) = self.element_for_surface(&parent) {
+                let workspace = self.space_for(elem).unwrap();
+                let element_loc = workspace.element_geometry(elem).unwrap().loc;
+                let (window, offset) = elem
+                    .windows()
+                    .find(|(w, _)| w.toplevel().wl_surface() == &parent)
                     .unwrap();
-                unconstrain_xdg_popup(surface, positioner, &workspace.space, window);
+                let window_geo_offset = window.geometry().loc;
+                let window_loc = element_loc + offset + window_geo_offset;
+                let anchor_point = get_anchor_point(&positioner) + window_loc;
+                if let Some(output) = workspace.output_under(anchor_point) {
+                    unconstrain_xdg_popup(surface, positioner, window_loc, output.geometry());
+                }
             } else if let Some((output, layer_surface)) = self.outputs().find_map(|o| {
                 let map = layer_map_for_output(o);
                 map.layer_for_surface(&parent, WindowSurfaceType::ALL)
@@ -42,15 +48,14 @@ impl Shell {
             }
         }
     }
-
-    pub fn update_reactive_popups(&self, window: &Window) {
-        if let Some(workspace) = self.space_for_window(window.toplevel().wl_surface()) {
-            update_reactive_popups(&workspace.space, window);
-        }
-    }
 }
 
-pub fn update_reactive_popups(space: &Space, window: &Window) {
+pub fn update_reactive_popups<'a>(
+    window: &Window,
+    loc: Point<i32, Logical>,
+    outputs: impl Iterator<Item = &'a Output>,
+) {
+    let output_geo = outputs.map(|o| o.geometry()).collect::<Vec<_>>();
     for (popup, _) in PopupManager::popups_for_surface(window.toplevel().wl_surface()) {
         match popup {
             PopupKind::Xdg(surface) => {
@@ -64,12 +69,19 @@ pub fn update_reactive_popups(space: &Space, window: &Window) {
                     attributes.current.positioner.clone()
                 });
                 if positioner.reactive {
-                    unconstrain_xdg_popup(&surface, &positioner, space, window);
-                    if let Err(err) = surface.send_configure() {
-                        slog_scope::warn!(
-                            "Compositor bug: Unable to re-configure reactive popup: {}",
-                            err
-                        );
+                    let anchor_point = get_anchor_point(&positioner) + loc;
+                    if let Some(rect) = output_geo
+                        .iter()
+                        .find(|geo| geo.contains(anchor_point))
+                        .copied()
+                    {
+                        unconstrain_xdg_popup(&surface, &positioner, loc, rect);
+                        if let Err(err) = surface.send_configure() {
+                            slog_scope::warn!(
+                                "Compositor bug: Unable to re-configure reactive popup: {}",
+                                err
+                            );
+                        }
                     }
                 }
             }
@@ -80,32 +92,18 @@ pub fn update_reactive_popups(space: &Space, window: &Window) {
 fn unconstrain_xdg_popup(
     surface: &PopupSurface,
     positioner: &PositionerState,
-    space: &Space,
-    window: &Window,
+    window_loc: Point<i32, Logical>,
+    rect: Rectangle<i32, Logical>,
 ) {
-    let anchor_point = get_anchor_point(&positioner) + space.window_location(&window).unwrap();
-    if let Some(output_rect) = space
-        .outputs_for_window(window)
-        .into_iter()
-        .find(|o| {
-            space
-                .output_geometry(o)
-                .map(|rect| rect.contains(anchor_point))
-                .unwrap_or(false)
-        })
-        .map(|o| space.output_geometry(&o).unwrap())
-    {
-        // the output_rect represented relative to the parents coordinate system
-        let mut relative = output_rect;
-        relative.loc -= space.window_location(&window).unwrap();
-        let offset = check_constrained(&surface, positioner.get_geometry(), relative);
+    let mut relative = rect;
+    relative.loc -= window_loc;
+    let offset = check_constrained(&surface, positioner.get_geometry(), relative);
 
-        if offset.x != 0 || offset.y != 0 {
-            slog_scope::debug!("Unconstraining popup: {:?}", surface);
-            if !unconstrain_flip(&surface, &positioner, relative) {
-                if !unconstrain_slide(&surface, &positioner, relative) {
-                    unconstrain_resize(&surface, &positioner, relative);
-                }
+    if offset.x != 0 || offset.y != 0 {
+        slog_scope::debug!("Unconstraining popup: {:?}", surface);
+        if !unconstrain_flip(&surface, &positioner, relative) {
+            if !unconstrain_slide(&surface, &positioner, relative) {
+                unconstrain_resize(&surface, &positioner, relative);
             }
         }
     }

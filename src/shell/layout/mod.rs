@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{input::ActiveOutput, state::State};
 use regex::RegexSet;
 use smithay::{
-    desktop::{Space, Window},
-    input::Seat,
-    output::Output,
+    desktop::Window,
     wayland::{compositor::with_states, shell::xdg::XdgToplevelSurfaceRoleAttributes},
 };
 use std::sync::Mutex;
@@ -117,18 +114,4 @@ pub fn should_be_floating(window: &Window) -> bool {
 
         false
     })
-}
-
-fn output_from_seat(seat: Option<&Seat<State>>, space: &Space) -> Option<Output> {
-    seat.and_then(|seat| {
-        seat.user_data()
-            .get::<ActiveOutput>()
-            .map(|active| active.0.borrow().clone())
-            .or_else(|| {
-                seat.get_pointer()
-                    .map(|ptr| space.output_under(ptr.current_location()).next().unwrap())
-                    .cloned()
-            })
-    })
-    .or_else(|| space.outputs().next().cloned())
 }

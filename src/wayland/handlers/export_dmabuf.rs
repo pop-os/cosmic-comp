@@ -213,7 +213,7 @@ impl ExportDmabufHandler for State {
                     if cursor_status != CursorImageStatus::Hidden {
                         let workspace = workspace.as_deref()?;
                         let loc = seat.get_pointer().map(|ptr| ptr.current_location())?;
-                        let output = active_output(seat, &self.common);
+                        let output = seat.active_output();
 
                         if self.common.shell.active_space(&output).idx == workspace.idx {
                             let relative = self

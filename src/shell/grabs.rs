@@ -51,10 +51,11 @@ impl Shell {
                 .space
                 .outputs_for_window(&window)
                 .into_iter()
-                .find(|o| o.geometry().contains(pos.to_i32_round())) {
-                    Some(o) => o,
-                    None => return,
-                };
+                .find(|o| o.geometry().contains(pos.to_i32_round()))
+            {
+                Some(o) => o,
+                None => return,
+            };
             let mut initial_window_location = workspace.space.window_location(&window).unwrap();
 
             match &window.toplevel() {
@@ -356,7 +357,7 @@ impl MoveSurfaceGrab {
         time: u32,
     ) {
         // No more buttons are pressed, release the grab.
-        let output = active_output(&self.seat, &state.common);
+        let output = self.seat.active_output();
         let seat = self.seat.clone();
 
         state.common.event_loop_handle.insert_idle(move |data| {

@@ -4,7 +4,7 @@ pub mod buffer;
 pub mod compositor;
 pub mod data_device;
 pub mod dmabuf;
-pub mod export_dmabuf;
+//pub mod export_dmabuf;
 pub mod keyboard_shortcuts_inhibit;
 pub mod layer_shell;
 pub mod output;

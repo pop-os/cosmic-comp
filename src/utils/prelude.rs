@@ -4,7 +4,6 @@ use smithay::{
     output::Output,
     utils::{Logical, Rectangle, Transform},
 };
-use std::cell::RefCell;
 
 pub use crate::shell::{Shell, Workspace};
 pub use crate::state::{Common, State};
@@ -32,34 +31,25 @@ impl OutputExt for Output {
 
 pub trait SeatExt {
     fn id(&self) -> usize;
+
+    fn active_output(&self) -> Output;
+    fn set_active_output(&self, output: &Output);
 }
 
 impl SeatExt for Seat<State> {
     fn id(&self) -> usize {
         self.user_data().get::<SeatId>().unwrap().0
     }
-}
 
-pub fn active_output(seat: &Seat<State>, state: &Common) -> Output {
-    seat.user_data()
-        .get::<ActiveOutput>()
-        .map(|x| x.0.borrow().clone())
-        .unwrap_or_else(|| {
-            state
-                .shell
-                .outputs()
-                .next()
-                .cloned()
-                .expect("Backend has no outputs?")
-        })
-}
+    fn active_output(&self) -> Output {
+        self.user_data()
+            .get::<ActiveOutput>()
+            .map(|x| x.0.borrow().clone())
+            .unwrap()
+    }
 
-pub fn set_active_output(seat: &Seat<State>, output: &Output) {
-    if !seat
-        .user_data()
-        .insert_if_missing(|| ActiveOutput(RefCell::new(output.clone())))
-    {
-        *seat
+    fn set_active_output(&self, output: &Output) {
+        *self
             .user_data()
             .get::<ActiveOutput>()
             .unwrap()

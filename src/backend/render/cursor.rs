@@ -2,14 +2,20 @@
 
 use crate::utils::prelude::*;
 use smithay::{
-    backend::renderer::{Frame, ImportAll, ImportMem, Renderer, Texture},
-    desktop::space::{RenderElement, SpaceOutputTuple, SurfaceTree},
+    backend::renderer::{
+        element::{
+            surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
+            texture::{TextureBuffer, TextureRenderElement},
+        },
+        ImportAll, ImportMem, Renderer,
+    },
     input::{
         pointer::{CursorImageAttributes, CursorImageStatus},
         Seat,
     },
     reexports::wayland_server::protocol::wl_surface,
-    utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Size, Transform},
+    render_elements,
+    utils::{IsAlive, Logical, Point, Scale, Transform},
     wayland::compositor::{get_role, with_states},
 };
 use std::{
@@ -119,13 +125,21 @@ fn load_icon(theme: &CursorTheme) -> Result<Vec<Image>, Error> {
     parse_xcursor(&cursor_data).ok_or(Error::Parse)
 }
 
-pub fn draw_surface_cursor(
-    surface: wl_surface::WlSurface,
+render_elements! {
+    pub CursorRenderElement<R> where R: ImportAll;
+    Static=TextureRenderElement<<R as Renderer>::TextureId>,
+    Surface=WaylandSurfaceRenderElement,
+}
+
+pub fn draw_surface_cursor<R: Renderer + ImportAll>(
+    surface: &wl_surface::WlSurface,
     location: impl Into<Point<i32, Logical>>,
-) -> SurfaceTree
+    scale: impl Into<Scale<f64>>,
+) -> Vec<CursorRenderElement<R>>
 where
 {
     let mut position = location.into();
+    let scale = scale.into();
     let h = with_states(&surface, |states| {
         states
             .data_map
@@ -136,125 +150,26 @@ where
             .hotspot
     });
     position -= h;
-    SurfaceTree {
-        surface,
-        position,
-        z_index: 100,
-    }
+
+    render_elements_from_surface_tree(surface, position.to_physical_precise_round(scale), scale)
 }
 
-pub fn draw_dnd_icon(
-    surface: wl_surface::WlSurface,
+pub fn draw_dnd_icon<R: Renderer + ImportAll>(
+    surface: &wl_surface::WlSurface,
     location: impl Into<Point<i32, Logical>>,
-) -> SurfaceTree {
+    scale: impl Into<Scale<f64>>,
+) -> Vec<CursorRenderElement<R>> {
     if get_role(&surface) != Some("dnd_icon") {
         slog_scope::warn!(
             "Trying to display as a dnd icon a surface that does not have the DndIcon role."
         );
     }
-    SurfaceTree {
+    let scale = scale.into();
+    render_elements_from_surface_tree(
         surface,
-        position: location.into(),
-        z_index: 100,
-    }
-}
-
-pub struct PointerElement<T: Texture> {
-    seat_id: usize,
-    texture: T,
-    position: Point<f64, Logical>,
-    size: Size<i32, Logical>,
-    new_frame: bool,
-}
-
-impl<T: Texture> PointerElement<T> {
-    pub fn new(
-        seat: &Seat<State>,
-        texture: T,
-        relative_pointer_pos: Point<f64, Logical>,
-        new_frame: bool,
-    ) -> PointerElement<T> {
-        let size = texture.size().to_logical(1, Transform::Normal);
-        PointerElement {
-            seat_id: seat.id(),
-            texture,
-            position: relative_pointer_pos,
-            size,
-            new_frame,
-        }
-    }
-}
-
-impl<R> RenderElement<R> for PointerElement<<R as Renderer>::TextureId>
-where
-    R: Renderer + ImportAll,
-    <R as Renderer>::TextureId: 'static,
-{
-    fn id(&self) -> usize {
-        self.seat_id
-    }
-
-    fn location(&self, scale: impl Into<Scale<f64>>) -> Point<f64, Physical> {
-        self.position.to_physical(scale)
-    }
-
-    fn geometry(&self, scale: impl Into<Scale<f64>>) -> Rectangle<i32, Physical> {
-        Rectangle::from_loc_and_size(self.position, self.size.to_f64())
-            .to_physical(scale)
-            .to_i32_round()
-    }
-
-    fn accumulated_damage(
-        &self,
-        scale: impl Into<Scale<f64>>,
-        _: Option<SpaceOutputTuple<'_, '_>>,
-    ) -> Vec<Rectangle<i32, Physical>> {
-        if self.new_frame {
-            let scale = scale.into();
-            vec![Rectangle::from_loc_and_size(
-                self.position.to_physical(scale).to_i32_round(),
-                self.size.to_physical_precise_round(scale),
-            )]
-        } else {
-            vec![]
-        }
-    }
-
-    fn opaque_regions(
-        &self,
-        _scale: impl Into<Scale<f64>>,
-    ) -> Option<Vec<Rectangle<i32, Physical>>> {
-        None
-    }
-
-    fn draw(
-        &self,
-        _renderer: &mut R,
-        frame: &mut <R as Renderer>::Frame,
-        scale: impl Into<Scale<f64>>,
-        position: Point<f64, Physical>,
-        damage: &[Rectangle<i32, Physical>],
-        _log: &slog::Logger,
-    ) -> Result<(), <R as Renderer>::Error> {
-        let scale = scale.into();
-        frame.render_texture_at(
-            &self.texture,
-            position.to_i32_round(),
-            1,
-            scale,
-            Transform::Normal,
-            &damage
-                .iter()
-                .copied()
-                .map(|mut rect| {
-                    rect.loc -= self.position.to_physical(scale).to_i32_round();
-                    rect
-                })
-                .collect::<Vec<_>>(),
-            1.0,
-        )?;
-        Ok(())
-    }
+        location.into().to_physical_precise_round(scale),
+        scale,
+    )
 }
 
 struct CursorState {
@@ -273,15 +188,15 @@ impl Default for CursorState {
     }
 }
 
-pub fn draw_cursor<R, I>(
+pub fn draw_cursor<R>(
     renderer: &mut R,
     seat: &Seat<State>,
     location: Point<f64, Logical>,
+    scale: Scale<f64>,
     start_time: &std::time::Instant,
     draw_default: bool,
-) -> Option<I>
+) -> Vec<CursorRenderElement<R>>
 where
-    I: From<SurfaceTree> + From<PointerElement<<R as Renderer>::TextureId>>,
     R: Renderer + ImportAll + ImportMem,
     <R as Renderer>::TextureId: Clone + 'static,
 {
@@ -302,50 +217,69 @@ where
             })
             .unwrap_or(CursorImageStatus::Default);
 
-        if let CursorImageStatus::Surface(wl_surface) = cursor_status {
-            Some(draw_surface_cursor(wl_surface.clone(), location.to_i32_round()).into())
+        if let CursorImageStatus::Surface(ref wl_surface) = cursor_status {
+            return draw_surface_cursor(wl_surface, location.to_i32_round(), scale);
         } else if draw_default {
+            let integer_scale = scale.x.max(scale.y).ceil() as u32;
+
             let seat_userdata = seat.user_data();
             seat_userdata.insert_if_missing(CursorState::default);
             let state = seat_userdata.get::<CursorState>().unwrap();
             let frame = state
                 .cursor
-                .get_image(1, start_time.elapsed().as_millis() as u32);
-            let new_frame = state.current_image.borrow().as_ref() != Some(&frame);
+                .get_image(integer_scale, start_time.elapsed().as_millis() as u32);
 
             let mut cache = state.image_cache.borrow_mut();
             let pointer_images = cache
-                .entry((TypeId::of::<<R as Renderer>::TextureId>(), renderer.id()))
+                .entry((
+                    TypeId::of::<TextureBuffer<<R as Renderer>::TextureId>>(),
+                    renderer.id(),
+                ))
                 .or_default();
-            let pointer_image = pointer_images
+
+            let maybe_image = pointer_images
                 .iter()
                 .find_map(|(image, texture)| if image == &frame { Some(texture) } else { None })
                 .and_then(|texture| {
-                    texture
-                        .downcast_ref::<<R as Renderer>::TextureId>()
-                        .cloned()
-                })
-                .unwrap_or_else(|| {
-                    let texture = renderer
-                        .import_memory(
-                            &frame.pixels_rgba,
-                            (frame.width as i32, frame.height as i32).into(),
-                            false,
-                        )
-                        .expect("Failed to import cursor bitmap");
-                    pointer_images.push((frame.clone(), Box::new(texture.clone())));
-                    texture
+                    texture.downcast_ref::<TextureBuffer<<R as Renderer>::TextureId>>()
                 });
+            let pointer_image = match maybe_image {
+                Some(image) => image,
+                None => {
+                    let texture = TextureBuffer::from_memory(
+                        renderer,
+                        &frame.pixels_rgba,
+                        (frame.width as i32, frame.height as i32),
+                        false,
+                        integer_scale as i32,
+                        Transform::Normal,
+                        None,
+                    )
+                    .expect("Failed to import cursor bitmap");
+                    pointer_images.push((frame.clone(), Box::new(texture.clone())));
+                    pointer_images
+                        .last()
+                        .and_then(|(_, i)| {
+                            i.downcast_ref::<TextureBuffer<<R as Renderer>::TextureId>>()
+                        })
+                        .unwrap()
+                }
+            };
+
             let hotspot =
                 Point::<i32, Logical>::from((frame.xhot as i32, frame.yhot as i32)).to_f64();
             *state.current_image.borrow_mut() = Some(frame);
 
-            Some(
-                PointerElement::new(seat, pointer_image.clone(), location - hotspot, new_frame)
-                    .into(),
-            )
+            return vec![CursorRenderElement::Static(
+                TextureRenderElement::from_texture_buffer(
+                    (location - hotspot).to_physical(scale),
+                    pointer_image,
+                    None,
+                    None,
+                ),
+            )];
         } else {
-            None
+            Vec::new()
         }
     }
 }

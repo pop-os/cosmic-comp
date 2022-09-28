@@ -29,16 +29,15 @@ impl WorkspaceHandler for State {
         for request in requests.into_iter() {
             match request {
                 Request::Activate(handle) => {
-                    if let Some(idx) = self
+                    let output = self.common.last_active_seat().active_output();
+                    let maybe_idx = self
                         .common
                         .shell
-                        .spaces
-                        .iter()
-                        .position(|w| w.handle == handle)
-                    {
-                        let seat = &self.common.last_active_seat;
-                        let output = active_output(seat, &self.common);
-                        self.common.shell.activate(seat, &output, idx);
+                        .workspaces
+                        .spaces_for_output(&output)
+                        .position(|w| w.handle == handle);
+                    if let Some(idx) = maybe_idx {
+                        self.common.shell.activate(&output, idx);
                     }
                 }
                 _ => {}

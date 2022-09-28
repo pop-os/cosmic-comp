@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    shell::{focus::FocusDirection, Shell},
+    shell::{focus::FocusDirection, Shell, WorkspaceAmount},
     state::{BackendData, Data},
 };
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,7 @@ pub struct Config {
 pub struct StaticConfig {
     pub key_bindings: HashMap<KeyPattern, Action>,
     pub workspace_mode: WorkspaceMode,
+    pub workspace_amount: WorkspaceAmount,
     pub floating_default: bool,
 }
 
@@ -215,6 +216,7 @@ impl Config {
         StaticConfig {
             key_bindings: HashMap::new(),
             workspace_mode: WorkspaceMode::Global,
+            workspace_amount: WorkspaceAmount::Dynamic,
             floating_default: false,
         }
     }
@@ -787,6 +789,6 @@ pub enum Action {
     ToggleTiling,
     ToggleWindowFloating,
     Fullscreen,
-    Screenshot,
+    //Screenshot,
     Spawn(String),
 }

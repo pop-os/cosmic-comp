@@ -39,18 +39,22 @@ pub fn init_backend_auto(
             }
         }
     };
+
     if res.is_ok() {
-        for seat in &state.common.seats {
-            let output = state
-                .common
-                .shell
-                .outputs()
-                .next()
-                .with_context(|| "Backend initialized without output")?
-                .clone();
-            seat.user_data()
-                .insert_if_missing(|| crate::input::ActiveOutput(std::cell::RefCell::new(output)));
-        }
+        let output = state
+            .common
+            .shell
+            .outputs()
+            .next()
+            .with_context(|| "Backend initialized without output")?;
+        let initial_seat = crate::input::add_seat(
+            dh,
+            &mut state.common.seat_state,
+            output,
+            &state.common.config,
+            "seat-0".into(),
+        );
+        state.common.add_seat(initial_seat);
     }
     res
 }

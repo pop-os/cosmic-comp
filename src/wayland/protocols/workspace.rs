@@ -821,7 +821,7 @@ where
             .iter()
             .filter(|o| !handle_state.outputs.contains(o))
         {
-            new_output.with_client_outputs(dh, &client, |_dh, wl_output| {
+            new_output.with_client_outputs(&client, |wl_output| {
                 instance.output_enter(wl_output);
             });
             changed = true;
@@ -831,7 +831,7 @@ where
             .iter()
             .filter(|o| !group.outputs.contains(o))
         {
-            old_output.with_client_outputs(dh, &client, |_dh, wl_output| {
+            old_output.with_client_outputs(&client, |wl_output| {
                 instance.output_leave(wl_output);
             });
             changed = true;

@@ -10,7 +10,7 @@ use crate::{
 use anyhow::{anyhow, Context, Result};
 use smithay::{
     backend::{
-        renderer::{ImportDma, ImportEgl},
+        renderer::{damage::DamageTrackedRenderer, ImportDma, ImportEgl},
         winit::{self, WinitEvent, WinitGraphicsBackend, WinitVirtualDevice},
     },
     desktop::layer_map_for_output,
@@ -30,31 +30,23 @@ pub struct WinitState {
     // The winit backend currently has no notion of multiple windows
     pub backend: WinitGraphicsBackend,
     output: Output,
-    age_reset: u8,
+    damage_tracker: DamageTrackedRenderer,
     #[cfg(feature = "debug")]
     fps: Fps,
 }
 
 impl WinitState {
     pub fn render_output(&mut self, state: &mut Common) -> Result<()> {
-        if render::needs_buffer_reset(&self.output, state) {
-            self.reset_buffers();
-        }
-
         self.backend
             .bind()
             .with_context(|| "Failed to bind buffer")?;
-        let age = if self.age_reset > 0 {
-            self.age_reset -= 1;
-            0
-        } else {
-            self.backend.buffer_age().unwrap_or(0)
-        };
+        let age = self.backend.buffer_age().unwrap_or(0);
 
         match render::render_output(
             None,
             self.backend.renderer(),
-            age as u8,
+            &mut self.damage_tracker,
+            age,
             state,
             &self.output,
             true,
@@ -62,11 +54,7 @@ impl WinitState {
             Some(&mut self.fps),
         ) {
             Ok(damage) => {
-                state
-                    .shell
-                    .active_space_mut(&self.output)
-                    .space
-                    .send_frames(state.start_time.elapsed().as_millis() as u32);
+                state.send_frames(&self.output);
                 self.backend
                     .submit(damage.as_ref().map(|x| &**x))
                     .with_context(|| "Failed to submit buffer for display")?;
@@ -103,10 +91,6 @@ impl WinitState {
         } else {
             Ok(())
         }
-    }
-
-    pub fn reset_buffers(&mut self) {
-        self.age_reset = 3;
     }
 }
 
@@ -180,8 +164,7 @@ pub fn init_backend(
         .handle()
         .insert_source(event_source, move |_, _, data| {
             match input.dispatch_new_events(|event| {
-                data.state
-                    .process_winit_event(&data.display.handle(), event, &render_ping_handle)
+                data.state.process_winit_event(event, &render_ping_handle)
             }) {
                 Ok(_) => {
                     event_ping_handle.ping();
@@ -202,9 +185,9 @@ pub fn init_backend(
     state.backend = BackendData::Winit(WinitState {
         backend,
         output: output.clone(),
+        damage_tracker: DamageTrackedRenderer::from_output(&output),
         #[cfg(feature = "debug")]
         fps: Fps::default(),
-        age_reset: 0,
     });
     state
         .common
@@ -250,19 +233,14 @@ fn init_egl_client_side(
 }
 
 impl State {
-    pub fn process_winit_event(
-        &mut self,
-        dh: &DisplayHandle,
-        event: WinitEvent,
-        render_ping: &ping::Ping,
-    ) {
+    pub fn process_winit_event(&mut self, event: WinitEvent, render_ping: &ping::Ping) {
         // here we can handle special cases for winit inputs
         match event {
             WinitEvent::Focus(true) => {
-                for seat in self.common.seats.clone().iter() {
+                for seat in self.common.seats().cloned().collect::<Vec<_>>().iter() {
                     let devices = seat.user_data().get::<Devices>().unwrap();
                     if devices.has_device(&WinitVirtualDevice) {
-                        set_active_output(seat, &self.backend.winit().output);
+                        seat.set_active_output(&self.backend.winit().output);
                         break;
                     }
                 }
@@ -286,7 +264,7 @@ impl State {
                 output.delete_mode(output.current_mode().unwrap());
                 output.set_preferred(mode);
                 output.change_current_state(Some(mode), None, None, None);
-                layer_map_for_output(output).arrange(dh);
+                layer_map_for_output(output).arrange();
                 self.common.output_configuration_state.update();
                 self.common.shell.refresh_outputs();
                 render_ping.ping();

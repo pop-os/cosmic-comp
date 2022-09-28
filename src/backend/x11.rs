@@ -13,7 +13,9 @@ use smithay::{
         allocator::dmabuf::Dmabuf,
         egl::{EGLContext, EGLDisplay},
         input::{Event, InputEvent},
-        renderer::{gles2::Gles2Renderer, Bind, ImportDma, ImportEgl},
+        renderer::{
+            damage::DamageTrackedRenderer, gles2::Gles2Renderer, Bind, ImportDma, ImportEgl,
+        },
         x11::{Window, WindowBuilder, X11Backend, X11Event, X11Handle, X11Input, X11Surface},
     },
     desktop::layer_map_for_output,
@@ -114,6 +116,7 @@ impl X11State {
         self.surfaces.push(Surface {
             window,
             surface,
+            damage_tracker: DamageTrackedRenderer::from_output(&output),
             output: output.clone(),
             render: ping.clone(),
             dirty: false,
@@ -168,6 +171,7 @@ impl X11State {
 
 pub struct Surface {
     window: Window,
+    damage_tracker: DamageTrackedRenderer,
     surface: X11Surface,
     output: Output,
     render: ping::Ping,
@@ -183,10 +187,6 @@ impl Surface {
         renderer: &mut Gles2Renderer,
         state: &mut Common,
     ) -> Result<()> {
-        if render::needs_buffer_reset(&self.output, state) {
-            self.surface.reset_buffers();
-        }
-
         let (buffer, age) = self
             .surface
             .buffer()
@@ -198,7 +198,8 @@ impl Surface {
         match render::render_output(
             None,
             renderer,
-            age as u8,
+            &mut self.damage_tracker,
+            age as usize,
             state,
             &self.output,
             true,
@@ -206,11 +207,7 @@ impl Surface {
             Some(&mut self.fps),
         ) {
             Ok(_) => {
-                state
-                    .shell
-                    .active_space_mut(&self.output)
-                    .space
-                    .send_frames(state.start_time.elapsed().as_millis() as u32);
+                state.send_frames(&self.output);
                 self.surface
                     .submit()
                     .with_context(|| "Failed to submit buffer for display")?;
@@ -336,7 +333,7 @@ pub fn init_backend(
                     output.delete_mode(output.current_mode().unwrap());
                     output.change_current_state(Some(mode), None, None, None);
                     output.set_preferred(mode);
-                    layer_map_for_output(output).arrange(&data.display.handle());
+                    layer_map_for_output(output).arrange();
                     data.state.common.output_configuration_state.update();
                     data.state.common.shell.refresh_outputs();
                     surface.dirty = true;
@@ -405,10 +402,10 @@ impl State {
                         .unwrap();
 
                     let device = event.device();
-                    for seat in self.common.seats.clone().iter() {
+                    for seat in self.common.seats().cloned().collect::<Vec<_>>().iter() {
                         let devices = seat.user_data().get::<Devices>().unwrap();
                         if devices.has_device(&device) {
-                            set_active_output(seat, &output);
+                            seat.set_active_output(&output);
                             break;
                         }
                     }

@@ -27,11 +27,11 @@ impl WlrLayerShellHandler for State {
         namespace: String,
     ) {
         super::mark_dirty_on_drop(&self.common, surface.wl_surface());
-        let seat = self.common.last_active_seat.clone();
+        let seat = self.common.last_active_seat().clone();
         let output = wl_output
             .as_ref()
             .and_then(Output::from_resource)
-            .unwrap_or_else(|| active_output(&seat, &self.common));
+            .unwrap_or_else(|| seat.active_output());
         self.common.shell.pending_layers.push((
             LayerSurface::new(surface, namespace),
             output,

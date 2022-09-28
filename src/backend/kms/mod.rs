@@ -20,7 +20,8 @@ use smithay::{
         input::InputEvent,
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
-            gles2::Gles2Renderbuffer,
+            damage::DamageTrackedRenderer,
+            gles2::{Gles2Renderbuffer, Gles2Renderer},
             multigpu::{egl::EglGlesBackend, GpuManager},
             Bind,
         },
@@ -51,7 +52,7 @@ use std::{
     os::unix::io::{FromRawFd, OwnedFd},
     path::PathBuf,
     rc::Rc,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 mod drm_helpers;
@@ -60,9 +61,11 @@ mod socket;
 use session_fd::*;
 use socket::*;
 
+use super::render::GlMultiRenderer;
+
 pub struct KmsState {
     devices: HashMap<DrmNode, Device>,
-    pub api: GpuManager<EglGlesBackend>,
+    pub api: GpuManager<EglGlesBackend<Gles2Renderer>>,
     pub primary: DrmNode,
     session: AutoSession,
     signaler: Signaler<Signal>,
@@ -83,9 +86,9 @@ pub struct Device {
 
 pub struct Surface {
     surface: Option<GbmBufferedSurface<Rc<RefCell<GbmDevice<SessionFd>>>, SessionFd>>,
+    damage_tracker: DamageTrackedRenderer,
     connector: connector::Handle,
     output: Output,
-    last_render: Option<(Dmabuf, Instant)>,
     last_submit: Option<DrmEventTime>,
     refresh_rate: u32,
     vrr: bool,
@@ -142,7 +145,8 @@ pub fn init_backend(
         .map_err(|err| err.error)
         .context("Failed to initialize session event source")?;
 
-    let api = GpuManager::new(EglGlesBackend, None).context("Failed to initialize renderers")?;
+    let api = GpuManager::new(EglGlesBackend::<Gles2Renderer>::default(), None)
+        .context("Failed to initialize renderers")?;
 
     // TODO get this info from system76-power, if available and setup a watcher
     let primary = if let Some(path) = std::env::var("COSMIC_RENDER_DEVICE")
@@ -370,15 +374,7 @@ impl State {
                                 Some(Ok(_)) => {
                                     surface.last_submit = metadata.take().map(|data| data.time);
                                     surface.pending = false;
-                                    data.state
-                                        .common
-                                        .shell
-                                        .active_space_mut(&surface.output)
-                                        .space
-                                        .send_frames(
-                                            data.state.common.start_time.elapsed().as_millis()
-                                                as u32,
-                                        );
+                                    data.state.common.send_frames(&surface.output);
                                 }
                                 Some(Err(err)) => {
                                     slog_scope::warn!("Failed to submit frame: {}", err)
@@ -689,12 +685,12 @@ impl Device {
 
         let data = Surface {
             output: output.clone(),
+            damage_tracker: DamageTrackedRenderer::from_output(&output),
             surface: None,
             connector: conn,
             vrr,
             refresh_rate,
             last_submit: None,
-            last_render: None,
             pending: false,
             render_timer_token: None,
             #[cfg(feature = "debug")]
@@ -717,8 +713,8 @@ fn render_node_for_output(
     let workspace = shell.active_space(output);
     let nodes = workspace
         .get_fullscreen(output)
-        .map(|w| vec![w])
-        .unwrap_or_else(|| workspace.space.windows().collect::<Vec<_>>())
+        .map(|w| vec![w.clone()])
+        .unwrap_or_else(|| workspace.windows().collect::<Vec<_>>())
         .into_iter()
         .flat_map(|w| {
             dh.get_client(w.toplevel().wl_surface().id())
@@ -750,7 +746,7 @@ impl Surface {
     pub fn render_output(
         &mut self,
         dh: &DisplayHandle,
-        api: &mut GpuManager<EglGlesBackend>,
+        api: &mut GpuManager<EglGlesBackend<Gles2Renderer>>,
         target_node: &DrmNode,
         state: &mut Common,
     ) -> Result<()> {
@@ -758,12 +754,8 @@ impl Surface {
             return Ok(());
         }
 
-        if render::needs_buffer_reset(&self.output, state) {
-            self.surface.as_mut().unwrap().reset_buffers();
-        }
-
         let render_node = render_node_for_output(dh, &self.output, *target_node, &state.shell);
-        let mut renderer = api.renderer(&render_node, &target_node).unwrap();
+        let mut renderer: GlMultiRenderer = api.renderer(&render_node, &target_node).unwrap();
 
         let surface = self.surface.as_mut().unwrap();
         let (buffer, age) = surface
@@ -777,7 +769,8 @@ impl Surface {
         match render::render_output(
             Some(&render_node),
             &mut renderer,
-            age,
+            &mut self.damage_tracker,
+            age as usize,
             state,
             &self.output,
             false,
@@ -785,7 +778,6 @@ impl Surface {
             Some(&mut self.fps),
         ) {
             Ok(_) => {
-                self.last_render = Some((buffer, Instant::now()));
                 surface
                     .queue_buffer()
                     .with_context(|| "Failed to submit buffer for display")?;
@@ -1025,18 +1017,5 @@ impl KmsState {
             }
         }
         Ok(())
-    }
-
-    pub fn capture_output(&self, output: &Output) -> Option<(DrmNode, Dmabuf, Instant)> {
-        self.devices.values().find_map(|dev| {
-            dev.surfaces
-                .values()
-                .find(|s| &s.output == output)
-                .and_then(|s| {
-                    s.last_render
-                        .clone()
-                        .map(|(buf, time)| (dev.render_node.clone(), buf, time))
-                })
-        })
     }
 }

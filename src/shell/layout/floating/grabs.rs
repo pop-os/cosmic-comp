@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::utils::prelude::*;
+use crate::{shell::focus::target::PointerFocusTarget, utils::prelude::*};
 use smithay::{
     desktop::{Kind, Window},
     input::pointer::{
         AxisFrame, ButtonEvent, GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab,
         PointerInnerHandle,
     },
-    reexports::{
-        wayland_protocols::xdg::shell::server::xdg_toplevel,
-        wayland_server::protocol::wl_surface::WlSurface,
-    },
+    reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
     utils::{IsAlive, Logical, Point, Serial, Size},
     wayland::{
         compositor::with_states,
@@ -90,7 +87,7 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
         &mut self,
         data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        _focus: Option<(WlSurface, Point<i32, Logical>)>,
+        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
         event: &MotionEvent,
     ) {
         // While the grab is active, no client has pointer focus

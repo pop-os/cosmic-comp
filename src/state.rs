@@ -7,8 +7,8 @@ use crate::{
     shell::Shell,
     utils::prelude::*,
     wayland::protocols::{
-        drm::WlDrmState, export_dmabuf::ExportDmabufState,
-        output_configuration::OutputConfigurationState, workspace::WorkspaceClientState,
+        drm::WlDrmState, output_configuration::OutputConfigurationState,
+        workspace::WorkspaceClientState,
     },
 };
 use smithay::{
@@ -22,7 +22,6 @@ use smithay::{
             Display, DisplayHandle,
         },
     },
-    utils::{Buffer, Size},
     wayland::{
         compositor::CompositorState, data_device::DataDeviceState, dmabuf::DmabufState,
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState, output::OutputManagerState,
@@ -71,8 +70,8 @@ pub struct Common {
     pub shell: Shell,
     pub dirty_flag: Arc<AtomicBool>,
 
-    pub seats: Vec<Seat<State>>,
-    pub last_active_seat: Seat<State>,
+    seats: Vec<Seat<State>>,
+    last_active_seat: Option<Seat<State>>,
 
     pub start_time: Instant,
     pub should_stop: bool,
@@ -85,7 +84,6 @@ pub struct Common {
     pub compositor_state: CompositorState,
     pub data_device_state: DataDeviceState,
     pub dmabuf_state: DmabufState,
-    pub export_dmabuf_state: ExportDmabufState,
     pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
     pub output_state: OutputManagerState,
     pub output_configuration_state: OutputConfigurationState<State>,
@@ -201,88 +199,6 @@ impl BackendData {
             _ => unreachable!("No backend was initialized"),
         }
     }
-
-    pub fn offscreen_for_output(
-        &mut self,
-        output: &Output,
-        state: &mut Common,
-    ) -> anyhow::Result<(Vec<u8>, Size<i32, Buffer>)> {
-        use crate::backend::render::{render_output, AsGles2Renderer, CustomElem};
-        use anyhow::Context;
-        use smithay::backend::renderer::{ImportAll, Renderer};
-        use smithay::desktop::space::RenderElement;
-        use smithay::{
-            backend::{
-                drm::NodeType,
-                renderer::{gles2::Gles2Renderbuffer, Bind, ExportMem, Offscreen},
-            },
-            utils::Rectangle,
-        };
-
-        fn capture<E, T, R>(
-            gpu: Option<DrmNode>,
-            renderer: &mut R,
-            output: &Output,
-            state: &mut Common,
-        ) -> anyhow::Result<(Vec<u8>, Size<i32, Buffer>)>
-        where
-            E: std::error::Error + Send + Sync + 'static,
-            T: Clone + 'static,
-            R: Renderer<Error = E, TextureId = T>
-                + ImportAll
-                + AsGles2Renderer
-                + Offscreen<Gles2Renderbuffer>
-                + Bind<Gles2Renderbuffer>
-                + ExportMem,
-            CustomElem: RenderElement<R>,
-        {
-            let size = output
-                .geometry()
-                .size
-                .to_f64()
-                .to_buffer(
-                    output.current_scale().fractional_scale(),
-                    output.current_transform().into(),
-                )
-                .to_i32_round();
-            let buffer = Offscreen::<Gles2Renderbuffer>::create_buffer(renderer, size)?;
-            renderer.bind(buffer)?;
-            render_output(
-                gpu.as_ref(),
-                renderer,
-                0,
-                state,
-                output,
-                false,
-                #[cfg(feature = "debug")]
-                None,
-            )
-            .map_err(|err| anyhow::anyhow!("Failed to render output: {:?}", err))?; // lifetime issue, grrr
-            let mapping = renderer.copy_framebuffer(Rectangle::from_loc_and_size((0, 0), size))?;
-            let data = Vec::from(renderer.map_texture(&mapping)?);
-
-            Ok((data, size))
-        }
-
-        match self {
-            BackendData::Winit(winit) => capture(None, winit.backend.renderer(), output, state),
-            BackendData::X11(x11) => capture(None, &mut x11.renderer, output, state),
-            BackendData::Kms(kms) => {
-                let node = kms
-                    .target_node_for_output(output)
-                    .unwrap_or(kms.primary)
-                    .node_with_type(NodeType::Render)
-                    .with_context(|| "Unable to find node")??;
-                capture(
-                    Some(node),
-                    &mut kms.api.renderer::<Gles2Renderbuffer>(&node, &node)?,
-                    output,
-                    state,
-                )
-            }
-            BackendData::Unset => unreachable!(),
-        }
-    }
 }
 
 impl State {
@@ -297,22 +213,16 @@ impl State {
         let compositor_state = CompositorState::new::<Self, _>(dh, None);
         let data_device_state = DataDeviceState::new::<Self, _>(dh, None);
         let dmabuf_state = DmabufState::new();
-        let export_dmabuf_state = ExportDmabufState::new::<Self, _>(
-            dh,
-            //|client| client.get_data::<ClientState>().unwrap().privileged,
-            |_| true,
-        );
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<Self>(dh);
         let output_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
         let output_configuration_state = OutputConfigurationState::new(dh, |_| true);
         let primary_selection_state = PrimarySelectionState::new::<Self, _>(dh, None);
         let shm_state = ShmState::new::<Self, _>(dh, vec![], None);
-        let mut seat_state = SeatState::<Self>::new();
+        let seat_state = SeatState::<Self>::new();
         let viewporter_state = ViewporterState::new::<Self, _>(dh, None);
         let wl_drm_state = WlDrmState;
 
         let shell = Shell::new(&config, dh);
-        let initial_seat = crate::input::add_seat(dh, &mut seat_state, &config, "seat-0".into());
 
         #[cfg(not(feature = "debug"))]
         let dirty_flag = Arc::new(AtomicBool::new(false));
@@ -330,8 +240,8 @@ impl State {
                 shell,
                 dirty_flag,
 
-                seats: vec![initial_seat.clone()],
-                last_active_seat: initial_seat,
+                seats: Vec::new(),
+                last_active_seat: None,
 
                 start_time: Instant::now(),
                 should_stop: false,
@@ -354,7 +264,6 @@ impl State {
                 compositor_state,
                 data_device_state,
                 dmabuf_state,
-                export_dmabuf_state,
                 shm_state,
                 seat_state,
                 keyboard_shortcuts_inhibit_state,
@@ -376,10 +285,9 @@ impl State {
                     match std::env::var("COSMIC_RENDER_AUTO_ASSIGN").map(|val| val.to_lowercase()) {
                         Ok(val) if val == "y" || val == "yes" || val == "true" => Some(
                             kms_state
-                                .target_node_for_output(&active_output(
-                                    &self.common.last_active_seat,
-                                    &self.common,
-                                ))
+                                .target_node_for_output(
+                                    &self.common.last_active_seat().active_output(),
+                                )
                                 .unwrap_or(kms_state.primary),
                         ),
                         _ => Some(kms_state.primary),
@@ -412,6 +320,46 @@ impl State {
 
     pub fn destroy(self) -> LogState {
         self.common.log
+    }
+}
+
+impl Common {
+    pub fn add_seat(&mut self, seat: Seat<State>) {
+        if self.seats.is_empty() {
+            self.last_active_seat = Some(seat.clone());
+        }
+        self.seats.push(seat);
+    }
+
+    pub fn remove_seat(&mut self, seat: &Seat<State>) {
+        self.seats.retain(|s| s != seat);
+        if self.seats.is_empty() {
+            self.last_active_seat = None;
+        } else if self.last_active_seat() == seat {
+            self.last_active_seat = Some(self.seats[0].clone());
+        }
+    }
+
+    pub fn seats(&self) -> impl Iterator<Item = &Seat<State>> {
+        self.seats.iter()
+    }
+
+    pub fn last_active_seat(&self) -> &Seat<State> {
+        self.last_active_seat.as_ref().expect("No seat?")
+    }
+
+    pub fn send_frames(&self, output: &Output) {
+        let workspace = self.shell.active_space(output);
+        workspace.mapped().for_each(|mapped| {
+            if workspace.outputs_for_element(mapped).any(|o| &o == output) {
+                let window = mapped.active_window();
+                window.send_frame(self.start_time.elapsed().as_millis() as u32)
+            }
+        });
+        let map = smithay::desktop::layer_map_for_output(output);
+        for layer_surface in map.layers() {
+            layer_surface.send_frame(self.start_time.elapsed().as_millis() as u32)
+        }
     }
 }
 
