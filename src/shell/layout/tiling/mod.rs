@@ -28,7 +28,7 @@ use smithay::{
 use std::{
     borrow::Borrow,
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     hash::Hash,
     sync::{atomic::AtomicBool, Arc},
 };
@@ -756,7 +756,7 @@ impl TilingLayout {
             .map(|(output_data, tree)| (&output_data.output, tree))
         {
             if let Some(root) = tree.root_node_id() {
-                let mut stack = Vec::new();
+                let mut stack = VecDeque::new();
 
                 let mut geo = Some(layer_map_for_output(&output).non_exclusive_zone());
                 // TODO saturate? minimum?
@@ -778,7 +778,7 @@ impl TilingLayout {
                     .into_iter()
                 {
                     let node = tree.get_mut(&node_id).unwrap();
-                    let geo = stack.pop().unwrap_or(geo);
+                    let geo = stack.pop_front().unwrap_or(geo);
                     if let Some(geo) = geo {
                         let data = node.data_mut();
                         data.update_geometry(geo);
@@ -789,7 +789,7 @@ impl TilingLayout {
                                 Orientation::Horizontal => {
                                     let mut previous = 0;
                                     for size in sizes {
-                                        stack.push(Some(Rectangle::from_loc_and_size(
+                                        stack.push_back(Some(Rectangle::from_loc_and_size(
                                             (geo.loc.x, geo.loc.y + previous),
                                             (geo.size.w, *size),
                                         )));
@@ -799,7 +799,7 @@ impl TilingLayout {
                                 Orientation::Vertical => {
                                     let mut previous = 0;
                                     for size in sizes {
-                                        stack.push(Some(Rectangle::from_loc_and_size(
+                                        stack.push_back(Some(Rectangle::from_loc_and_size(
                                             (geo.loc.x + previous, geo.loc.y),
                                             (*size, geo.size.h),
                                         )));
@@ -818,8 +818,8 @@ impl TilingLayout {
                             }
                         }
                     } else if node.data().is_group() {
-                        stack.push(None);
-                        stack.push(None);
+                        stack.push_back(None);
+                        stack.push_back(None);
                     }
                 }
             }
