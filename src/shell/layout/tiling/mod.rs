@@ -305,20 +305,7 @@ impl TilingLayout {
                     Orientation::Horizontal
                 }
             };
-
-            let parent_id = tree.get(node_id).unwrap().parent().cloned();
-            match parent_id {
-                Some(group_id) if tree.get(&group_id).unwrap().data().is_group() => {
-                    TilingLayout::new_group(tree, &group_id, new_window, orientation)
-                }
-                None => {
-                    // if there is no window, we couldn't have found the window_id.
-                    // so if there is no parent, we have found a root, thus it is safe to unwrap.
-                    let root_id = tree.root_node_id().cloned().unwrap();
-                    TilingLayout::new_group(tree, &root_id, new_window, orientation)
-                }
-                _ => panic!("Illegal tiling tree structure"),
-            }
+            TilingLayout::new_group(tree, &node_id, new_window, orientation)
         } else {
             // nothing? then we add to the root
             if let Some(root_id) = tree.root_node_id().cloned() {
