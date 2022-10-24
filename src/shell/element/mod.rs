@@ -107,6 +107,12 @@ impl CosmicMapped {
         }
     }
 
+    pub fn set_active(&self, window: &Window) {
+        if let CosmicMappedInternal::Stack(stack) = &self.element {
+            stack.set_active(window);
+        }
+    }
+
     pub fn focus_window(&self, window: &Window) {
         match &self.element {
             CosmicMappedInternal::Stack(stack) => stack.set_active(window),

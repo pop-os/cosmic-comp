@@ -155,30 +155,34 @@ impl FloatingLayout {
         self.space.element_geometry(elem)
     }
 
-    pub fn maximize_request(&mut self, window: &CosmicMapped, output: &Output) {
-        let layers = layer_map_for_output(&output);
-        let geometry = layers.non_exclusive_zone();
-
-        if let Some(location) = self.space.element_location(window) {
-            *window.last_geometry.lock().unwrap() = Some(Rectangle::from_loc_and_size(
-                location,
-                window.geometry().size,
-            ));
+    pub fn maximize_request(&mut self, window: &Window) {
+        if let Some(mapped) = self
+            .space
+            .elements()
+            .find(|m| m.windows().any(|(w, _)| &w == window))
+        {
+            if let Some(location) = self.space.element_location(mapped) {
+                *mapped.last_geometry.lock().unwrap() = Some(Rectangle::from_loc_and_size(
+                    location,
+                    mapped.geometry().size,
+                ));
+            }
         }
-
-        self.space.map_element(window.clone(), geometry.loc, true);
-        window.set_maximized(true);
-        window.set_size(geometry.size);
-        window.configure();
     }
 
-    pub fn unmaximize_request(&mut self, window: &CosmicMapped) {
-        let last_geometry = window.last_geometry.lock().unwrap().clone();
-        window.set_maximized(false);
-        window.set_size(last_geometry.map(|g| g.size).expect("No previous size?"));
-        window.configure();
-        let last_location = last_geometry.map(|g| g.loc).expect("No previous location?");
-        self.space.map_element(window.clone(), last_location, true);
+    pub fn unmaximize_request(&mut self, window: &Window) {
+        let maybe_mapped = self
+            .space
+            .elements()
+            .find(|m| m.windows().any(|(w, _)| &w == window))
+            .cloned();
+
+        if let Some(mapped) = maybe_mapped {
+            let last_geometry = mapped.last_geometry.lock().unwrap().clone();
+            mapped.set_size(last_geometry.map(|g| g.size).expect("No previous size?"));
+            let last_location = last_geometry.map(|g| g.loc).expect("No previous location?");
+            self.space.map_element(mapped, last_location, true);
+        }
     }
 
     /*

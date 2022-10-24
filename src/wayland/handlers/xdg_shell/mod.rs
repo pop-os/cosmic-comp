@@ -176,23 +176,38 @@ impl XdgShellHandler for State {
     }
 
     fn maximize_request(&mut self, surface: ToplevelSurface) {
-        let surface = surface.wl_surface();
         let seat = self.common.last_active_seat();
         let output = seat.active_output();
 
-        if let Some(mapped) = self.common.shell.element_for_surface(surface).cloned() {
+        if let Some(mapped) = self
+            .common
+            .shell
+            .element_for_surface(surface.wl_surface())
+            .cloned()
+        {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
-                //workspace.maximize_request(mapped, &output)
+                let (window, _) = mapped
+                    .windows()
+                    .find(|(w, _)| matches!(w.toplevel(), Kind::Xdg(s) if s == &surface))
+                    .unwrap();
+                workspace.maximize_request(&window, &output)
             }
         }
     }
 
     fn unmaximize_request(&mut self, surface: ToplevelSurface) {
-        let surface = surface.wl_surface();
-
-        if let Some(mapped) = self.common.shell.element_for_surface(surface).cloned() {
+        if let Some(mapped) = self
+            .common
+            .shell
+            .element_for_surface(surface.wl_surface())
+            .cloned()
+        {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
-                //workspace.unmaximize_request(mapped, &output)
+                let (window, _) = mapped
+                    .windows()
+                    .find(|(w, _)| matches!(w.toplevel(), Kind::Xdg(s) if s == &surface))
+                    .unwrap();
+                workspace.unmaximize_request(&window)
             }
         }
     }
@@ -206,22 +221,36 @@ impl XdgShellHandler for State {
                 seat.active_output()
             });
 
-        let surface = surface.wl_surface();
-        if let Some(mapped) = self.common.shell.element_for_surface(surface).cloned() {
+        if let Some(mapped) = self
+            .common
+            .shell
+            .element_for_surface(surface.wl_surface())
+            .cloned()
+        {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
-                workspace.fullscreen_request(&mapped.active_window(), &output)
+                let (window, _) = mapped
+                    .windows()
+                    .find(|(w, _)| matches!(w.toplevel(), Kind::Xdg(s) if s == &surface))
+                    .unwrap();
+                workspace.fullscreen_request(&window, &output)
             }
         }
     }
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
-        if let Some((workspace, window)) = self.common.shell.workspaces.spaces_mut().find_map(|w| {
-            let window = w
-                .windows()
-                .find(|w| w.toplevel().wl_surface() == surface.wl_surface());
-            window.map(|win| (w, win))
-        }) {
-            workspace.unfullscreen_request(&window)
+        if let Some(mapped) = self
+            .common
+            .shell
+            .element_for_surface(surface.wl_surface())
+            .cloned()
+        {
+            if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
+                let (window, _) = mapped
+                    .windows()
+                    .find(|(w, _)| matches!(w.toplevel(), Kind::Xdg(s) if s == &surface))
+                    .unwrap();
+                workspace.unfullscreen_request(&window)
+            }
         }
     }
 }

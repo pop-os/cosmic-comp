@@ -795,7 +795,7 @@ impl TilingLayout {
                                 }
                             },
                             Data::Mapped { mapped, .. } => {
-                                if !mapped.is_fullscreen() {
+                                if !(mapped.is_fullscreen() || mapped.is_maximized()) {
                                     mapped.set_tiled(true);
                                     mapped.set_size(
                                         (geo.size.w - inner * 2, geo.size.h - inner * 2).into(),

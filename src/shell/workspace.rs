@@ -157,26 +157,103 @@ impl Workspace {
             })
     }
 
-    /*
-    pub fn maximize_request(&mut self, window: &CosmicWindow, output: &Output) {
-        if self.fullscreen.values().any(|w| w == window) {
+    pub fn maximize_request(&mut self, window: &Window, output: &Output) {
+        if self.fullscreen.contains_key(output) {
             return;
         }
-        if self.floating_layer.windows.contains(window) {
-            self.floating_layer
-                .maximize_request(, window, output);
+
+        self.floating_layer.maximize_request(window);
+
+        #[allow(irrefutable_let_patterns)]
+        if let Kind::Xdg(xdg) = &window.toplevel() {
+            xdg.with_pending_state(|state| {
+                state.states.set(xdg_toplevel::State::Maximized);
+                state.states.unset(xdg_toplevel::State::Fullscreen);
+            });
         }
+
+        self.set_fullscreen(window, output)
     }
-    pub fn unmaximize_request(&mut self, window: &CosmicMapped) {
+    pub fn unmaximize_request(&mut self, window: &Window) {
         if self.fullscreen.values().any(|w| w == window) {
+            self.floating_layer.unmaximize_request(window);
             return self.unfullscreen_request(window);
-        }
-        if self.floating_layer.windows.contains(window) {
-            self.floating_layer
-                .unmaximize_request(window);
         }
     }
 
+    pub fn fullscreen_request(&mut self, window: &Window, output: &Output) {
+        if self.fullscreen.contains_key(output) {
+            return;
+        }
+
+        #[allow(irrefutable_let_patterns)]
+        if let Kind::Xdg(xdg) = &window.toplevel() {
+            xdg.with_pending_state(|state| {
+                state.states.set(xdg_toplevel::State::Fullscreen);
+                state.states.unset(xdg_toplevel::State::Maximized);
+            });
+        }
+
+        self.set_fullscreen(window, output)
+    }
+
+    fn set_fullscreen(&mut self, window: &Window, output: &Output) {
+        if let Some(mapped) = self
+            .mapped()
+            .find(|m| m.windows().any(|(w, _)| &w == window))
+        {
+            mapped.set_active(window);
+        }
+
+        #[allow(irrefutable_let_patterns)]
+        if let Kind::Xdg(xdg) = &window.toplevel() {
+            xdg.with_pending_state(|state| {
+                state.size = Some(
+                    output
+                        .current_mode()
+                        .map(|m| m.size)
+                        .unwrap_or((0, 0).into())
+                        .to_f64()
+                        .to_logical(output.current_scale().fractional_scale())
+                        .to_i32_round(),
+                );
+            });
+
+            xdg.send_configure();
+        }
+        self.fullscreen.insert(output.clone(), window.clone());
+    }
+
+    pub fn unfullscreen_request(&mut self, window: &Window) {
+        if self.fullscreen.values().any(|w| w == window) {
+            #[allow(irrefutable_let_patterns)]
+            if let Kind::Xdg(xdg) = &window.toplevel() {
+                xdg.with_pending_state(|state| {
+                    state.states.unset(xdg_toplevel::State::Fullscreen);
+                    state.states.unset(xdg_toplevel::State::Maximized);
+                    state.size = None;
+                });
+                self.floating_layer.refresh();
+                self.tiling_layer.refresh();
+                xdg.send_configure();
+            }
+            self.fullscreen.retain(|_, w| w != window);
+        }
+    }
+
+    pub fn fullscreen_toggle(&mut self, window: &Window, output: &Output) {
+        if self.fullscreen.contains_key(output) {
+            self.unfullscreen_request(window)
+        } else {
+            self.fullscreen_request(window, output)
+        }
+    }
+
+    pub fn get_fullscreen(&self, output: &Output) -> Option<&Window> {
+        self.fullscreen.get(output).filter(|w| w.alive())
+    }
+
+    /*
     pub fn resize_request(
         state: &mut State,
         surface: &WlSurface,
@@ -202,59 +279,6 @@ impl Workspace {
         }
     }
     */
-
-    pub fn fullscreen_request(&mut self, window: &Window, output: &Output) {
-        if self.fullscreen.contains_key(output) {
-            return;
-        }
-
-        #[allow(irrefutable_let_patterns)]
-        if let Kind::Xdg(xdg) = &window.toplevel() {
-            xdg.with_pending_state(|state| {
-                state.states.set(xdg_toplevel::State::Fullscreen);
-                state.size = Some(
-                    output
-                        .current_mode()
-                        .map(|m| m.size)
-                        .unwrap_or((0, 0).into())
-                        .to_f64()
-                        .to_logical(output.current_scale().fractional_scale())
-                        .to_i32_round(),
-                );
-            });
-
-            xdg.send_configure();
-            self.fullscreen.insert(output.clone(), window.clone());
-        }
-    }
-
-    pub fn unfullscreen_request(&mut self, window: &Window) {
-        if self.fullscreen.values().any(|w| w == window) {
-            #[allow(irrefutable_let_patterns)]
-            if let Kind::Xdg(xdg) = &window.toplevel() {
-                xdg.with_pending_state(|state| {
-                    state.states.unset(xdg_toplevel::State::Fullscreen);
-                    state.size = None;
-                });
-                self.floating_layer.refresh();
-                self.tiling_layer.refresh();
-                xdg.send_configure();
-            }
-            self.fullscreen.retain(|_, w| w != window);
-        }
-    }
-
-    pub fn fullscreen_toggle(&mut self, window: &Window, output: &Output) {
-        if self.fullscreen.contains_key(output) {
-            self.unfullscreen_request(window)
-        } else {
-            self.fullscreen_request(window, output)
-        }
-    }
-
-    pub fn get_fullscreen(&self, output: &Output) -> Option<&Window> {
-        self.fullscreen.get(output).filter(|w| w.alive())
-    }
 
     pub fn toggle_tiling(&mut self, seat: &Seat<State>) {
         if self.tiling_enabled {
