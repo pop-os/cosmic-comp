@@ -16,7 +16,7 @@ use crate::{
 use id_tree::{InsertBehavior, MoveBehavior, Node, NodeId, NodeIdError, RemoveBehavior, Tree};
 use smithay::{
     backend::renderer::{element::AsRenderElements, ImportAll, Renderer},
-    desktop::{layer_map_for_output, Window},
+    desktop::{layer_map_for_output, space::SpaceElement, Window},
     input::{
         pointer::{Focus, GrabStartData as PointerGrabStartData},
         Seat,
@@ -899,7 +899,6 @@ impl TilingLayout {
         <R as Renderer>::TextureId: 'static,
     {
         let output_scale = output.current_scale().fractional_scale();
-        let int_scale = output.current_scale().integer_scale();
 
         if !self.trees.contains_key(output) {
             return Err(OutputNotMapped);
@@ -916,7 +915,11 @@ impl TilingLayout {
             })
             .flat_map(|(mapped, loc)| {
                 mapped.render_elements::<TilingRenderElement<R>>(
-                    loc.to_physical(int_scale),
+                    loc.to_physical_precise_round(output_scale)
+                        - mapped
+                            .geometry()
+                            .loc
+                            .to_physical_precise_round(output_scale),
                     Scale::from(output_scale),
                 )
             })

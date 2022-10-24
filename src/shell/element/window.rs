@@ -221,7 +221,7 @@ where
     ) -> Vec<C> {
         AsRenderElements::<R>::render_elements::<CosmicWindowRenderElement<R>>(
             &self.window,
-            location - self.window.geometry().loc.to_physical_precise_round(scale),
+            location,
             scale,
         )
         .into_iter()
