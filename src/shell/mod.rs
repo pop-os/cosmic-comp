@@ -116,24 +116,34 @@ impl WorkspaceSet {
         }
     }
 
-    fn refresh(
+    fn refresh<'a>(
         &mut self,
         amount: WorkspaceAmount,
         state: &mut WorkspaceState<State>,
         toplevel_info: &mut ToplevelInfoState<State>,
+        outputs: impl Iterator<Item = (&'a Output, Point<i32, Logical>)>,
     ) {
         match amount {
-            WorkspaceAmount::Dynamic => self.ensure_last_empty(state),
-            WorkspaceAmount::Static(len) => self.ensure_static(len as usize, state, toplevel_info),
+            WorkspaceAmount::Dynamic => self.ensure_last_empty(state, outputs),
+            WorkspaceAmount::Static(len) => {
+                self.ensure_static(len as usize, state, toplevel_info, outputs)
+            }
         }
         self.workspaces[self.active].refresh();
     }
 
-    fn ensure_last_empty(&mut self, state: &mut WorkspaceState<State>) {
+    fn ensure_last_empty<'a>(
+        &mut self,
+        state: &mut WorkspaceState<State>,
+        outputs: impl Iterator<Item = (&'a Output, Point<i32, Logical>)>,
+    ) {
         // add empty at the end, if necessary
         if self.workspaces.last().unwrap().windows().next().is_some() {
-            self.workspaces
-                .push(create_workspace(&mut state.update(), &self.group, false));
+            let mut workspace = create_workspace(&mut state.update(), &self.group, false);
+            for (output, location) in outputs {
+                workspace.map_output(output, location);
+            }
+            self.workspaces.push(workspace);
         }
 
         let len = self.workspaces.len();
@@ -153,11 +163,12 @@ impl WorkspaceSet {
         self.workspaces.retain(|_| *iter.next().unwrap());
     }
 
-    fn ensure_static(
+    fn ensure_static<'a>(
         &mut self,
         amount: usize,
         state: &mut WorkspaceState<State>,
         toplevel_info: &mut ToplevelInfoState<State>,
+        outputs: impl Iterator<Item = (&'a Output, Point<i32, Logical>)>,
     ) {
         if amount < self.workspaces.len() {
             let mut state = state.update();
@@ -189,9 +200,13 @@ impl WorkspaceSet {
         } else if amount > self.workspaces.len() {
             let mut state = state.update();
             // add empty ones
+            let outputs = outputs.collect::<Vec<_>>();
             while amount > self.workspaces.len() {
-                self.workspaces
-                    .push(create_workspace(&mut state, &self.group, false));
+                let mut workspace = create_workspace(&mut state, &self.group, false);
+                for &(output, location) in outputs.iter() {
+                    workspace.map_output(output, location);
+                }
+                self.workspaces.push(workspace);
             }
         }
     }
@@ -759,11 +774,12 @@ impl Shell {
 
         match &mut self.workspaces {
             WorkspaceMode::OutputBound(sets) => {
-                for set in sets.values_mut() {
+                for (output, set) in sets.iter_mut() {
                     set.refresh(
                         self.workspace_amount,
                         &mut self.workspace_state,
                         &mut self.toplevel_info_state,
+                        std::iter::once((output, (0, 0).into())),
                     );
                 }
             }
@@ -771,6 +787,7 @@ impl Shell {
                 self.workspace_amount,
                 &mut self.workspace_state,
                 &mut self.toplevel_info_state,
+                self.outputs.iter().map(|o| (o, o.current_location())),
             ),
         }
 
