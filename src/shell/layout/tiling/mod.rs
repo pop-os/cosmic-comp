@@ -435,13 +435,14 @@ impl TilingLayout {
         // TODO: Rather use something like seat.current_keyboard_focus
         // TODO https://github.com/Smithay/smithay/pull/777
         if let Some(last_active) = TilingLayout::last_active_window(tree, focus_stack) {
-            let (last_window, mut node_id) = last_active;
+            let (last_window, last_node_id) = last_active;
 
             // stacks may handle focus internally
             if last_window.handle_focus(direction) {
                 return None;
             }
 
+            let mut node_id = last_node_id.clone();
             while let Some(group) = tree.get(&node_id).unwrap().parent() {
                 let child = node_id.clone();
                 let group_data = tree.get(&group).unwrap().data();
@@ -511,50 +512,46 @@ impl TilingLayout {
                             }
                             Data::Group { .. } => {
                                 let center = {
-                                    let geo = tree.get(&child).unwrap().data().geometry();
+                                    let geo = tree.get(&last_node_id).unwrap().data().geometry();
                                     let mut point = geo.loc;
                                     match direction {
                                         FocusDirection::Down => {
-                                            point += Point::from((geo.size.w / 2, geo.size.h))
+                                            point += Point::from((geo.size.w / 2 - 1, geo.size.h))
                                         }
-                                        FocusDirection::Up => point.x += geo.size.w,
-                                        FocusDirection::Left => point.y += geo.size.h / 2,
+                                        FocusDirection::Up => point.x += geo.size.w / 2 - 1,
+                                        FocusDirection::Left => point.y += geo.size.h / 2 - 1,
                                         FocusDirection::Right => {
-                                            point += Point::from((geo.size.w, geo.size.h / 2))
+                                            point += Point::from((geo.size.w, geo.size.h / 2 - 1))
                                         }
                                         _ => unreachable!(),
                                     };
                                     point.to_f64()
                                 };
 
+                                let distance = |candidate: &&NodeId| -> f64 {
+                                    let geo = tree.get(candidate).unwrap().data().geometry();
+                                    let mut point = geo.loc;
+                                    match direction {
+                                        FocusDirection::Up => {
+                                            point += Point::from((geo.size.w / 2, geo.size.h))
+                                        }
+                                        FocusDirection::Down => point.x += geo.size.w,
+                                        FocusDirection::Right => point.y += geo.size.h / 2,
+                                        FocusDirection::Left => {
+                                            point += Point::from((geo.size.w, geo.size.h / 2))
+                                        }
+                                        _ => unreachable!(),
+                                    };
+                                    let point = point.to_f64();
+                                    ((point.x - center.x).powi(2) + (point.y - center.y).powi(2))
+                                        .sqrt()
+                                };
+
                                 node_id = tree
                                     .children_ids(node_id.as_ref().unwrap())
                                     .unwrap()
                                     .min_by(|node1, node2| {
-                                        let distance = |candidate: &&NodeId| -> f64 {
-                                            let geo =
-                                                tree.get(candidate).unwrap().data().geometry();
-                                            let mut point = geo.loc;
-                                            match direction {
-                                                FocusDirection::Up => {
-                                                    point +=
-                                                        Point::from((geo.size.w / 2, geo.size.h))
-                                                }
-                                                FocusDirection::Down => point.x += geo.size.w,
-                                                FocusDirection::Right => point.y += geo.size.h / 2,
-                                                FocusDirection::Left => {
-                                                    point +=
-                                                        Point::from((geo.size.w, geo.size.h / 2))
-                                                }
-                                                _ => unreachable!(),
-                                            };
-                                            let point = point.to_f64();
-                                            ((point.x - center.x).powi(2)
-                                                + (point.y - center.y).powi(2))
-                                            .sqrt()
-                                        };
-
-                                        distance(node1).total_cmp(&distance(node2))
+                                        distance(node1).abs().total_cmp(&distance(node2).abs())
                                     });
                             }
                             Data::Mapped { mapped, .. } => {
@@ -745,7 +742,7 @@ impl TilingLayout {
             .map(|(output_data, tree)| (&output_data.output, tree))
         {
             if let Some(root) = tree.root_node_id() {
-                let mut stack = VecDeque::new();
+                let mut stack = Vec::new();
 
                 let mut geo = Some(layer_map_for_output(&output).non_exclusive_zone());
                 // TODO saturate? minimum?
@@ -763,7 +760,7 @@ impl TilingLayout {
                     .into_iter()
                 {
                     let node = tree.get_mut(&node_id).unwrap();
-                    let geo = stack.pop_front().unwrap_or(geo);
+                    let geo = stack.pop().unwrap_or(geo);
                     if let Some(geo) = geo {
                         let data = node.data_mut();
                         data.update_geometry(geo);
@@ -772,23 +769,23 @@ impl TilingLayout {
                                 orientation, sizes, ..
                             } => match orientation {
                                 Orientation::Horizontal => {
-                                    let mut previous = 0;
-                                    for size in sizes {
-                                        stack.push_back(Some(Rectangle::from_loc_and_size(
+                                    let mut previous: i32 = sizes.iter().sum();
+                                    for size in sizes.iter().rev() {
+                                        previous -= *size;
+                                        stack.push(Some(Rectangle::from_loc_and_size(
                                             (geo.loc.x, geo.loc.y + previous),
                                             (geo.size.w, *size),
                                         )));
-                                        previous += *size;
                                     }
                                 }
                                 Orientation::Vertical => {
-                                    let mut previous = 0;
-                                    for size in sizes {
-                                        stack.push_back(Some(Rectangle::from_loc_and_size(
+                                    let mut previous: i32 = sizes.iter().sum();
+                                    for size in sizes.iter().rev() {
+                                        previous -= *size;
+                                        stack.push(Some(Rectangle::from_loc_and_size(
                                             (geo.loc.x + previous, geo.loc.y),
                                             (*size, geo.size.h),
                                         )));
-                                        previous += *size;
                                     }
                                 }
                             },
@@ -803,8 +800,8 @@ impl TilingLayout {
                             }
                         }
                     } else if node.data().is_group() {
-                        stack.push_back(None);
-                        stack.push_back(None);
+                        stack.push(None);
+                        stack.push(None);
                     }
                 }
             }
