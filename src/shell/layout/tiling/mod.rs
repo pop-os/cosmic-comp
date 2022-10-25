@@ -435,7 +435,7 @@ impl TilingLayout {
         // TODO: Rather use something like seat.current_keyboard_focus
         // TODO https://github.com/Smithay/smithay/pull/777
         if let Some(last_active) = TilingLayout::last_active_window(tree, focus_stack) {
-            let (last_window, node_id) = last_active;
+            let (last_window, mut node_id) = last_active;
 
             // stacks may handle focus internally
             if last_window.handle_focus(direction) {
@@ -562,6 +562,8 @@ impl TilingLayout {
                             }
                         }
                     }
+                } else {
+                    node_id = group.clone();
                 }
             }
         }
