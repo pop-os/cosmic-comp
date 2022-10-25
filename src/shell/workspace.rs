@@ -33,7 +33,10 @@ use std::{collections::HashMap, time::Duration};
 use super::{
     element::CosmicMapped,
     focus::{FocusStack, FocusStackMut},
-    layout::{floating::FloatingRenderElement, tiling::TilingRenderElement},
+    layout::{
+        floating::{FloatingRenderElement, ResizeSurfaceGrab},
+        tiling::TilingRenderElement,
+    },
 };
 
 #[derive(Debug)]
@@ -253,32 +256,27 @@ impl Workspace {
         self.fullscreen.get(output).filter(|w| w.alive())
     }
 
-    /*
     pub fn resize_request(
-        state: &mut State,
-        surface: &WlSurface,
+        &mut self,
+        mapped: &CosmicMapped,
         seat: &Seat<State>,
         serial: Serial,
         start_data: PointerGrabStartData<State>,
         edges: ResizeEdge,
-    ) {
-        let workspace = state.common.shell.space_for_window_mut(surface).unwrap();
-        let window = workspace
-            .space
-            .window_for_surface(surface, WindowSurfaceType::TOPLEVEL)
-            .unwrap()
-            .clone();
-
-        if workspace.fullscreen.values().any(|w| w == &window) {
-            return;
+    ) -> Option<ResizeSurfaceGrab> {
+        if mapped.is_fullscreen() || mapped.is_maximized() {
+            return None;
         }
-        if workspace.floating_layer.windows.contains(&window) {
-            FloatingLayout::resize_request(state, &window, seat, serial, start_data.clone(), edges)
-        } else if workspace.tiling_layer.windows.contains(&window) {
-            TilingLayout::resize_request(state, &window, seat, serial, start_data, edges)
+        if self.floating_layer.mapped().any(|m| m == mapped) {
+            self.floating_layer
+                .resize_request(mapped, seat, serial, start_data.clone(), edges)
+        } else if self.tiling_layer.mapped().any(|(_, m, _)| m == mapped) {
+            //self.tiling_layer.resize_request(mapped, seat, serial, start_data, edges)
+            None
+        } else {
+            None
         }
     }
-    */
 
     pub fn toggle_tiling(&mut self, seat: &Seat<State>) {
         if self.tiling_enabled {

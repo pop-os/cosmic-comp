@@ -3,10 +3,11 @@
 use smithay::{
     backend::renderer::{ImportAll, Renderer},
     desktop::{layer_map_for_output, space::SpaceElement, Space, Window},
-    input::Seat,
+    input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
+    reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge,
     render_elements,
-    utils::{Logical, Point, Rectangle},
+    utils::{Logical, Point, Rectangle, Serial},
 };
 use std::collections::HashMap;
 
@@ -185,33 +186,31 @@ impl FloatingLayout {
         }
     }
 
-    /*
     pub fn resize_request(
-        window: &CosmicWindow,
+        &mut self,
+        mapped: &CosmicMapped,
         seat: &Seat<State>,
         serial: Serial,
         start_data: PointerGrabStartData<State>,
         edges: ResizeEdge,
-    ) {
-        // it is so stupid, that we have to do this here. TODO: Refactor grabs
-        let workspace = state
-            .common
-            .shell
-            .space_for_window_mut(window.toplevel().wl_surface())
-            .unwrap();
-        let space = &mut workspace.space;
-
+    ) -> Option<ResizeSurfaceGrab> {
         if let Some(pointer) = seat.get_pointer() {
-            let location = space.window_location(&window).unwrap();
-            let size = window.geometry().size;
+            let location = self.space.element_location(&mapped).unwrap();
+            let size = mapped.geometry().size;
 
-            let grab =
-                grabs::ResizeSurfaceGrab::new(start_data, window.clone(), edges, location, size);
+            Some(grabs::ResizeSurfaceGrab::new(
+                start_data,
+                mapped.clone(),
+                edges,
+                location,
+                size,
+            ))
 
-            pointer.set_grab(state, grab, serial, Focus::Clear);
+            //pointer.set_grab(state, grab, serial, Focus::Clear);
+        } else {
+            None
         }
     }
-    */
 
     pub fn mapped(&self) -> impl Iterator<Item = &CosmicMapped> {
         self.space.elements()

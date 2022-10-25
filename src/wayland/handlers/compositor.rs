@@ -147,43 +147,18 @@ impl CompositorHandler for State {
             self.xdg_popup_ensure_initial_configure(&popup);
         }
 
-        /*
         // at last handle some special cases, like grabs and changing layer surfaces
 
         // If we would re-position the window inside the grab we would get a weird jittery animation.
         // We only want to resize once the client has acknoledged & commited the new size,
         // so we need to carefully track the state through different handlers.
-        if let Some((space, window)) =
-            self.common
-                .shell
-                .space_for_window_mut(surface)
-                .and_then(|workspace| {
-                    workspace
-                        .space
-                        .window_for_surface(surface, WindowSurfaceType::TOPLEVEL)
-                        .cloned()
-                        .map(|window| (&mut workspace.space, window))
-                })
-        {
-            let new_location =
-                crate::shell::layout::floating::ResizeSurfaceGrab::apply_resize_state(
-                    &window,
-                    space.window_location(&window).unwrap(),
-                    window.geometry().size,
+        if let Some(element) = self.common.shell.element_for_surface(surface).cloned() {
+            if let Some(workspace) = self.common.shell.space_for_mut(&element) {
+                crate::shell::layout::floating::ResizeSurfaceGrab::apply_resize_to_location(
+                    element, workspace,
                 );
-            if let Some(location) = new_location {
-                space.map_window(
-                    &window,
-                    location,
-                    crate::shell::layout::floating::FLOATING_INDEX,
-                    true,
-                );
-                for window in space.windows() {
-                    update_reactive_popups(space, window);
-                }
             }
         }
-        */
 
         // We need to know every potential output for importing to the right gpu and scheduling a render,
         // so call this only after every potential surface map operation has been done.

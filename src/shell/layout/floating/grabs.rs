@@ -1,32 +1,32 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{shell::focus::target::PointerFocusTarget, utils::prelude::*};
+use crate::{
+    shell::{element::CosmicMapped, focus::target::PointerFocusTarget},
+    utils::prelude::*,
+};
 use smithay::{
-    desktop::{Kind, Window},
+    desktop::space::SpaceElement,
     input::pointer::{
         AxisFrame, ButtonEvent, GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab,
         PointerInnerHandle,
     },
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
-    utils::{IsAlive, Logical, Point, Serial, Size},
-    wayland::{
-        compositor::with_states,
-        shell::xdg::{SurfaceCachedState, ToplevelConfigure, XdgToplevelSurfaceRoleAttributes},
-    },
+    utils::{IsAlive, Logical, Point, Size},
 };
-use std::{cell::RefCell, convert::TryFrom, sync::Mutex};
+use std::convert::TryFrom;
 
 bitflags::bitflags! {
-    struct ResizeEdge: u32 {
-        const NONE = 0;
-        const TOP = 1;
-        const BOTTOM = 2;
-        const LEFT = 4;
-        const TOP_LEFT = 5;
-        const BOTTOM_LEFT = 6;
-        const RIGHT = 8;
-        const TOP_RIGHT = 9;
-        const BOTTOM_RIGHT = 10;
+    pub struct ResizeEdge: u32 {
+        const TOP          = 0b0001;
+        const BOTTOM       = 0b0010;
+        const LEFT         = 0b0100;
+        const RIGHT        = 0b1000;
+
+        const TOP_LEFT     = Self::TOP.bits | Self::LEFT.bits;
+        const BOTTOM_LEFT  = Self::BOTTOM.bits | Self::LEFT.bits;
+
+        const TOP_RIGHT    = Self::TOP.bits | Self::RIGHT.bits;
+        const BOTTOM_RIGHT = Self::BOTTOM.bits | Self::RIGHT.bits;
     }
 }
 
@@ -46,7 +46,7 @@ impl From<ResizeEdge> for xdg_toplevel::ResizeEdge {
 
 /// Information about the resize operation.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-struct ResizeData {
+pub struct ResizeData {
     /// The edges the surface is being resized with.
     edges: ResizeEdge,
     /// The initial window location.
@@ -57,26 +57,16 @@ struct ResizeData {
 
 /// State of the resize operation.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum ResizeState {
-    /// The surface is not being resized.
-    NotResizing,
+pub enum ResizeState {
     /// The surface is currently being resized.
     Resizing(ResizeData),
-    /// The resize has finished, and the surface needs to ack the final configure.
-    WaitingForFinalAck(ResizeData, Serial),
     /// The resize has finished, and the surface needs to commit its final state.
     WaitingForCommit(ResizeData),
 }
 
-impl Default for ResizeState {
-    fn default() -> Self {
-        ResizeState::NotResizing
-    }
-}
-
 pub struct ResizeSurfaceGrab {
     start_data: PointerGrabStartData<State>,
-    window: Window,
+    window: CosmicMapped,
     edges: ResizeEdge,
     initial_window_size: Size<i32, Logical>,
     last_window_size: Size<i32, Logical>,
@@ -123,10 +113,7 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
             new_window_height = (self.initial_window_size.h as f64 + dy) as i32;
         }
 
-        let (min_size, max_size) = with_states(self.window.toplevel().wl_surface(), |states| {
-            let data = states.cached_state.current::<SurfaceCachedState>();
-            (data.min_size, data.max_size)
-        });
+        let (min_size, max_size) = (self.window.min_size(), self.window.max_size());
 
         let min_width = min_size.w.max(1);
         let min_height = min_size.h.max(1);
@@ -146,15 +133,9 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
 
         self.last_window_size = (new_window_width, new_window_height).into();
 
-        match &self.window.toplevel() {
-            Kind::Xdg(xdg) => {
-                xdg.with_pending_state(|state| {
-                    state.states.set(xdg_toplevel::State::Resizing);
-                    state.size = Some(self.last_window_size);
-                });
-                xdg.send_configure();
-            }
-        }
+        self.window.set_resizing(true);
+        self.window.set_size(self.last_window_size);
+        self.window.configure();
     }
 
     fn button(
@@ -173,23 +154,13 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
                 return;
             }
 
-            #[allow(irrefutable_let_patterns)]
-            if let Kind::Xdg(xdg) = &self.window.toplevel() {
-                xdg.with_pending_state(|state| {
-                    state.states.unset(xdg_toplevel::State::Resizing);
-                    state.size = Some(self.last_window_size);
-                });
-                xdg.send_configure();
-            }
+            self.window.set_resizing(false);
+            self.window.set_size(self.last_window_size);
+            self.window.configure();
 
-            let mut resize_state = self
-                .window
-                .user_data()
-                .get::<RefCell<ResizeState>>()
-                .unwrap()
-                .borrow_mut();
-            if let ResizeState::Resizing(resize_data) = *resize_state {
-                *resize_state = ResizeState::WaitingForFinalAck(resize_data, event.serial);
+            let mut resize_state = self.window.resize_state.lock().unwrap();
+            if let Some(ResizeState::Resizing(resize_data)) = *resize_state {
+                *resize_state = Some(ResizeState::WaitingForCommit(resize_data));
             } else {
                 panic!("invalid resize state: {:?}", resize_state);
             }
@@ -213,7 +184,7 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
 impl ResizeSurfaceGrab {
     pub fn new(
         start_data: PointerGrabStartData<State>,
-        window: Window,
+        mapped: CosmicMapped,
         edges: xdg_toplevel::ResizeEdge,
         initial_window_location: Point<i32, Logical>,
         initial_window_size: Size<i32, Logical>,
@@ -224,92 +195,27 @@ impl ResizeSurfaceGrab {
             initial_window_size,
         });
 
-        window
-            .user_data()
-            .insert_if_missing(|| RefCell::new(ResizeState::default()));
-        *window
-            .user_data()
-            .get::<RefCell<ResizeState>>()
-            .unwrap()
-            .borrow_mut() = resize_state;
+        *mapped.resize_state.lock().unwrap() = Some(resize_state);
 
         ResizeSurfaceGrab {
             start_data,
-            window,
+            window: mapped,
             edges: edges.into(),
             initial_window_size,
             last_window_size: initial_window_size,
         }
     }
 
-    pub fn ack_configure(window: &Window, configure: ToplevelConfigure) {
-        let surface = window.toplevel().wl_surface();
+    pub fn apply_resize_to_location(window: CosmicMapped, space: &mut Workspace) {
+        if let Some(mut location) = space.floating_layer.space.element_location(&window) {
+            let mut new_location = None;
 
-        let waiting_for_serial =
-            if let Some(data) = window.user_data().get::<RefCell<ResizeState>>() {
-                if let ResizeState::WaitingForFinalAck(_, serial) = *data.borrow() {
-                    Some(serial)
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-        if let Some(serial) = waiting_for_serial {
-            // When the resize grab is released the surface
-            // resize state will be set to WaitingForFinalAck
-            // and the client will receive a configure request
-            // without the resize state to inform the client
-            // resizing has finished. Here we will wait for
-            // the client to acknowledge the end of the
-            // resizing. To check if the surface was resizing
-            // before sending the configure we need to use
-            // the current state as the received acknowledge
-            // will no longer have the resize state set
-            let is_resizing = with_states(&surface, |states| {
-                states
-                    .data_map
-                    .get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
-                    .unwrap()
-                    .lock()
-                    .unwrap()
-                    .current
-                    .states
-                    .contains(xdg_toplevel::State::Resizing)
-            });
-
-            if configure.serial >= serial && is_resizing {
-                let mut resize_state = window
-                    .user_data()
-                    .get::<RefCell<ResizeState>>()
-                    .unwrap()
-                    .borrow_mut();
-                if let ResizeState::WaitingForFinalAck(resize_data, _) = *resize_state {
-                    *resize_state = ResizeState::WaitingForCommit(resize_data);
-                } else {
-                    unreachable!()
-                }
-            }
-        }
-    }
-
-    pub fn apply_resize_state(
-        window: &Window,
-        mut location: Point<i32, Logical>,
-        size: Size<i32, Logical>,
-    ) -> Option<Point<i32, Logical>> {
-        let mut new_location = None;
-
-        if let Some(resize_state) = window.user_data().get::<RefCell<ResizeState>>() {
-            let mut resize_state = resize_state.borrow_mut();
-
+            let mut resize_state = window.resize_state.lock().unwrap();
             // If the window is being resized by top or left, its location must be adjusted
             // accordingly.
             match *resize_state {
-                ResizeState::Resizing(resize_data)
-                | ResizeState::WaitingForFinalAck(resize_data, _)
-                | ResizeState::WaitingForCommit(resize_data) => {
+                Some(ResizeState::Resizing(resize_data))
+                | Some(ResizeState::WaitingForCommit(resize_data)) => {
                     let ResizeData {
                         edges,
                         initial_window_location,
@@ -317,6 +223,7 @@ impl ResizeSurfaceGrab {
                     } = resize_data;
 
                     if edges.intersects(ResizeEdge::TOP_LEFT) {
+                        let size = window.geometry().size;
                         if edges.intersects(ResizeEdge::LEFT) {
                             location.x =
                                 initial_window_location.x + (initial_window_size.w - size.w);
@@ -329,15 +236,30 @@ impl ResizeSurfaceGrab {
                         new_location = Some(location);
                     }
                 }
-                ResizeState::NotResizing => (),
-            }
+                _ => {}
+            };
 
             // Finish resizing.
-            if let ResizeState::WaitingForCommit(_) = *resize_state {
-                *resize_state = ResizeState::NotResizing;
+            if let Some(ResizeState::WaitingForCommit(_)) = *resize_state {
+                if !window.is_resizing() {
+                    *resize_state = None;
+                }
+            }
+            std::mem::drop(resize_state);
+
+            if let Some(new_location) = new_location {
+                for (window, offset) in window.windows() {
+                    update_reactive_popups(
+                        &window,
+                        new_location + offset,
+                        space.floating_layer.space.outputs(),
+                    );
+                }
+                space
+                    .floating_layer
+                    .space
+                    .map_element(window, new_location, false);
             }
         }
-
-        new_location
     }
 }

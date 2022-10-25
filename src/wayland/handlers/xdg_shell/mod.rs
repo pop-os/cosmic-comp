@@ -169,8 +169,21 @@ impl XdgShellHandler for State {
     ) {
         let seat = Seat::from_resource(&seat).unwrap();
         if let Some(start_data) = check_grab_preconditions(&seat, surface.wl_surface(), serial) {
-            if let Some(mapped) = self.common.shell.element_for_surface(surface.wl_surface()) {
-                // Shell::resize_request(self, mapped, &seat, serial, start_data, edges);
+            if let Some(mapped) = self
+                .common
+                .shell
+                .element_for_surface(surface.wl_surface())
+                .cloned()
+            {
+                if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
+                    if let Some(grab) =
+                        workspace.resize_request(&mapped, &seat, serial, start_data, edges)
+                    {
+                        seat.get_pointer()
+                            .unwrap()
+                            .set_grab(self, grab, serial, Focus::Clear);
+                    }
+                }
             }
         }
     }

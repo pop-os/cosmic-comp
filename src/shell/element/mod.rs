@@ -34,7 +34,7 @@ pub use self::stack::CosmicStack;
 pub mod window;
 pub use self::window::CosmicWindow;
 
-use super::focus::FocusDirection;
+use super::{focus::FocusDirection, layout::floating::ResizeState};
 
 space_elements! {
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -53,6 +53,7 @@ pub struct CosmicMapped {
     pub(super) tiling_node_id: Arc<Mutex<Option<NodeId>>>,
     //floating
     pub(super) last_geometry: Arc<Mutex<Option<Rectangle<i32, Logical>>>>,
+    pub(super) resize_state: Arc<Mutex<Option<ResizeState>>>,
 }
 
 impl PartialEq for CosmicMapped {
@@ -162,6 +163,40 @@ impl CosmicMapped {
             false
         } else {
             false
+        }
+    }
+
+    pub fn set_resizing(&self, resizing: bool) {
+        for window in match &self.element {
+            CosmicMappedInternal::Stack(s) => {
+                Box::new(s.windows()) as Box<dyn Iterator<Item = Window>>
+            }
+            CosmicMappedInternal::Window(w) => Box::new(std::iter::once(w.window.clone())),
+            _ => unreachable!(),
+        } {
+            match window.toplevel() {
+                Kind::Xdg(xdg) => xdg.with_pending_state(|state| {
+                    if resizing {
+                        state.states.set(XdgState::Resizing);
+                    } else {
+                        state.states.unset(XdgState::Resizing);
+                    }
+                }),
+                // Kind::X11?
+            };
+        }
+    }
+
+    pub fn is_resizing(&self) -> bool {
+        let window = match &self.element {
+            CosmicMappedInternal::Stack(s) => s.active(),
+            CosmicMappedInternal::Window(w) => w.window.clone(),
+            _ => unreachable!(),
+        };
+
+        match window.toplevel() {
+            Kind::Xdg(xdg) => xdg.current_state().states.contains(XdgState::Resizing),
+            // Kind::X11?
         }
     }
 
@@ -590,6 +625,7 @@ impl From<CosmicWindow> for CosmicMapped {
             element: CosmicMappedInternal::Window(w),
             tiling_node_id: Arc::new(Mutex::new(None)),
             last_geometry: Arc::new(Mutex::new(None)),
+            resize_state: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -600,6 +636,7 @@ impl From<CosmicStack> for CosmicMapped {
             element: CosmicMappedInternal::Stack(s),
             tiling_node_id: Arc::new(Mutex::new(None)),
             last_geometry: Arc::new(Mutex::new(None)),
+            resize_state: Arc::new(Mutex::new(None)),
         }
     }
 }
