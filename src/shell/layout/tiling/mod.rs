@@ -754,10 +754,6 @@ impl TilingLayout {
                     geo.loc.y += outer;
                     geo.size.w -= outer * 2;
                     geo.size.h -= outer * 2;
-
-                    if tree.get(root).unwrap().data().geometry() == geo {
-                        continue;
-                    }
                 }
 
                 for node_id in tree
