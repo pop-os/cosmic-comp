@@ -866,12 +866,12 @@ impl Shell {
         }
     }
 
-    pub fn move_current_window(&mut self, seat: &Seat<State>, output: &Output, idx: usize) {
-        if idx == self.workspaces.active_num(output) {
+    pub fn move_current_window(state: &mut State, seat: &Seat<State>, output: &Output, idx: usize) {
+        if idx == state.common.shell.workspaces.active_num(output) {
             return;
         }
 
-        let old_workspace = self.workspaces.active_mut(output);
+        let old_workspace = state.common.shell.workspaces.active_mut(output);
         let maybe_window = old_workspace.focus_stack.get(seat).last().cloned();
         if let Some(mapped) = maybe_window {
             let was_floating = old_workspace.floating_layer.unmap(&mapped);
@@ -879,16 +879,19 @@ impl Shell {
             assert!(was_floating != was_tiling);
 
             for (toplevel, _) in mapped.windows() {
-                self.toplevel_info_state
+                state
+                    .common
+                    .shell
+                    .toplevel_info_state
                     .toplevel_leave_workspace(&toplevel, &old_workspace.handle);
             }
             let elements = old_workspace.mapped().cloned().collect::<Vec<_>>();
             std::mem::drop(old_workspace);
             for mapped in elements.into_iter() {
-                self.update_reactive_popups(&mapped);
+                state.common.shell.update_reactive_popups(&mapped);
             }
 
-            let new_workspace = self.workspaces.get_mut(idx, output).unwrap(); // checked above
+            let new_workspace = state.common.shell.workspaces.get_mut(idx, output).unwrap(); // checked above
             let focus_stack = new_workspace.focus_stack.get(&seat);
             if was_floating {
                 new_workspace
@@ -900,12 +903,24 @@ impl Shell {
                     .map(mapped.clone(), &seat, focus_stack.iter());
             }
             for (toplevel, _) in mapped.windows() {
-                self.toplevel_info_state
+                state
+                    .common
+                    .shell
+                    .toplevel_info_state
                     .toplevel_enter_workspace(&toplevel, &new_workspace.handle);
             }
 
-            let mut workspace_state = self.workspace_state.update();
-            workspace_state.remove_workspace_state(&new_workspace.handle, WState::Hidden);
+            for mapped in new_workspace
+                .mapped()
+                .cloned()
+                .collect::<Vec<_>>()
+                .into_iter()
+            {
+                state.common.shell.update_reactive_popups(&mapped);
+            }
+
+            state.common.shell.activate(output, idx);
+            Common::set_focus(state, Some(&KeyboardFocusTarget::from(mapped)), &seat, None);
         }
     }
 
@@ -932,5 +947,4 @@ fn init_workspace_handle<'a>(
     state.set_workspace_capabilities(&handle, [WorkspaceCapabilities::Activate].into_iter());
     state.set_workspace_name(&handle, format!("{}", idx + 1));
     state.set_workspace_coordinates(&handle, [Some(idx as u32), None, None]);
-    state.add_workspace_state(&handle, WState::Hidden);
 }

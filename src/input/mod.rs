@@ -341,7 +341,8 @@ impl State {
                                         0 => 9,
                                         x => x - 1,
                                     };
-                                    self.common.shell.move_current_window(
+                                    Shell::move_current_window(
+                                        self,
                                         seat,
                                         &current_output,
                                         workspace as usize,
