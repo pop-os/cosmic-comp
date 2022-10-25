@@ -161,6 +161,11 @@ impl WorkspaceSet {
 
         let mut iter = keep.iter();
         self.workspaces.retain(|_| *iter.next().unwrap());
+        self.active -= keep
+            .iter()
+            .take(self.active + 1)
+            .filter(|keep| !**keep)
+            .count();
     }
 
     fn ensure_static<'a>(
