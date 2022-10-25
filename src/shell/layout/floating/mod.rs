@@ -77,7 +77,7 @@ impl FloatingLayout {
 
         let mut geo_updated = false;
         if let Some(size) = last_geometry.map(|g| g.size) {
-            geo_updated = win_geo.size == size;
+            geo_updated = win_geo.size != size;
             win_geo.size = size;
         }
         {
@@ -124,7 +124,6 @@ impl FloatingLayout {
                     .into()
             });
 
-        // TODO: Move this into CosmicMapped, this needs to differciate between stacks and windows
         mapped.set_tiled(false);
         if geo_updated {
             mapped.set_size(win_geo.size);
@@ -221,6 +220,7 @@ impl FloatingLayout {
     }
 
     pub fn refresh(&mut self) {
+        self.space.refresh();
         for element in self
             .space
             .elements()
@@ -234,7 +234,6 @@ impl FloatingLayout {
             let output = self.space.outputs().next().unwrap().clone();
             self.map_internal(element, &output, None);
         }
-        self.space.refresh()
     }
 
     pub fn most_overlapped_output_for_element(&self, elem: &CosmicMapped) -> Option<Output> {
