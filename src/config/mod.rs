@@ -785,6 +785,7 @@ pub enum Action {
     Workspace(u8),
     MoveToWorkspace(u8),
     Focus(FocusDirection),
+    ToggleOrientation,
     Orientation(crate::shell::layout::Orientation),
     ToggleTiling,
     ToggleWindowFloating,

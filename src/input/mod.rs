@@ -373,12 +373,22 @@ impl State {
                                         workspace.fullscreen_toggle(&window, &current_output);
                                     }
                                 }
+                                Action::ToggleOrientation => {
+                                    let output = seat.active_output();
+                                    let workspace = self.common.shell.active_space_mut(&output);
+                                    let focus_stack = workspace.focus_stack.get(seat);
+                                    workspace.tiling_layer.update_orientation(
+                                        None,
+                                        &seat,
+                                        focus_stack.iter(),
+                                    );
+                                }
                                 Action::Orientation(orientation) => {
                                     let output = seat.active_output();
                                     let workspace = self.common.shell.active_space_mut(&output);
                                     let focus_stack = workspace.focus_stack.get(seat);
                                     workspace.tiling_layer.update_orientation(
-                                        orientation,
+                                        Some(orientation),
                                         &seat,
                                         focus_stack.iter(),
                                     );

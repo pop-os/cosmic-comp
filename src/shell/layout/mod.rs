@@ -16,6 +16,16 @@ pub enum Orientation {
     Vertical,
 }
 
+impl std::ops::Not for Orientation {
+    type Output = Self;
+    fn not(self) -> Self::Output {
+        match self {
+            Orientation::Horizontal => Orientation::Vertical,
+            Orientation::Vertical => Orientation::Horizontal,
+        }
+    }
+}
+
 lazy_static::lazy_static! {
     static ref EXCEPTIONS_APPID: RegexSet = RegexSet::new(&[
         r"Authy Desktop",

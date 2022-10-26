@@ -570,7 +570,7 @@ impl TilingLayout {
 
     pub fn update_orientation<'a>(
         &mut self,
-        new_orientation: Orientation,
+        new_orientation: Option<Orientation>,
         seat: &Seat<State>,
         focus_stack: impl Iterator<Item = &'a CosmicMapped> + 'a,
     ) {
@@ -589,6 +589,7 @@ impl TilingLayout {
                         Orientation::Horizontal => last_geometry.size.h,
                         Orientation::Vertical => last_geometry.size.w,
                     };
+                    let new_orientation = new_orientation.unwrap_or(!*orientation);
                     let new_length = match new_orientation {
                         Orientation::Horizontal => last_geometry.size.h,
                         Orientation::Vertical => last_geometry.size.w,
