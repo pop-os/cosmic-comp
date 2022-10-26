@@ -1,7 +1,10 @@
 use crate::{
     shell::{
         element::CosmicWindow,
-        layout::{floating::FloatingLayout, tiling::TilingLayout},
+        layout::{
+            floating::{FloatingLayout, MoveSurfaceGrab},
+            tiling::TilingLayout,
+        },
     },
     state::State,
     utils::prelude::*,
@@ -179,8 +182,8 @@ impl Workspace {
     }
     pub fn unmaximize_request(&mut self, window: &Window) {
         if self.fullscreen.values().any(|w| w == window) {
+            self.unfullscreen_request(window);
             self.floating_layer.unmaximize_request(window);
-            return self.unfullscreen_request(window);
         }
     }
 
@@ -275,6 +278,55 @@ impl Workspace {
             None
         } else {
             None
+        }
+    }
+
+    pub fn move_request(
+        &mut self,
+        window: &Window,
+        seat: &Seat<State>,
+        output: &Output,
+        _serial: Serial,
+        start_data: PointerGrabStartData<State>,
+    ) -> Option<MoveSurfaceGrab> {
+        let pointer = seat.get_pointer().unwrap();
+        let pos = pointer.current_location();
+
+        let mapped = self
+            .element_for_surface(window.toplevel().wl_surface())?
+            .clone();
+        let mut initial_window_location = self.element_geometry(&mapped).unwrap().loc;
+
+        if mapped.is_fullscreen() || mapped.is_maximized() {
+            // If surface is maximized then unmaximize it
+            self.unmaximize_request(window);
+            let new_size = match window.toplevel() {
+                Kind::Xdg(toplevel) => toplevel.with_pending_state(|state| state.size),
+                //_ => unreachable!(), // TODO x11
+            };
+            let ratio = pos.x / output.geometry().size.w as f64;
+
+            initial_window_location = new_size
+                .map(|size| (pos.x - (size.w as f64 * ratio), pos.y).into())
+                .unwrap_or_else(|| pos)
+                .to_i32_round();
+        }
+
+        let was_floating = self.floating_layer.unmap(&mapped);
+        //let was_tiled = self.tiling_layer.unmap(&mapped);
+        //assert!(was_floating != was_tiled);
+
+        if was_floating {
+            Some(MoveSurfaceGrab::new(
+                start_data,
+                mapped,
+                seat,
+                pos,
+                initial_window_location,
+                output.geometry().loc,
+            ))
+        } else {
+            None // TODO
         }
     }
 

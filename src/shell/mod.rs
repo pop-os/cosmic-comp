@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{cell::Cell, collections::HashMap};
+use std::collections::HashMap;
 
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State as WState;
 use smithay::{
@@ -7,7 +7,7 @@ use smithay::{
     input::{pointer::MotionEvent, Seat},
     output::Output,
     reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
-    utils::{Logical, Point, Rectangle, SERIAL_COUNTER},
+    utils::{Logical, Point, Rectangle},
     wayland::{
         compositor::with_states,
         shell::{
@@ -34,9 +34,9 @@ use crate::{
 
 mod element;
 pub mod focus;
-//pub mod grabs;
 pub mod layout;
 mod workspace;
+pub use self::element::CosmicMappedRenderElement;
 pub use self::workspace::*;
 use self::{
     element::{CosmicMapped, CosmicWindow},

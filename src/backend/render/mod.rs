@@ -6,9 +6,12 @@ use crate::{
     state::Fps,
     utils::prelude::*,
 };
-//grabs::{MoveGrabRenderElement, SeatMoveGrabState},
 use crate::{
-    shell::WorkspaceRenderElement, state::Common, wayland::handlers::data_device::get_dnd_icon,
+    shell::{
+        layout::floating::SeatMoveGrabState, CosmicMappedRenderElement, WorkspaceRenderElement,
+    },
+    state::Common,
+    wayland::handlers::data_device::get_dnd_icon,
 };
 
 use smithay::{
@@ -45,7 +48,7 @@ smithay::render_elements! {
     pub CosmicElement<R> where R: ImportAll;
     WorkspaceElement=WorkspaceRenderElement<R>,
     CursorElement=CursorRenderElement<R>,
-    //MoveGrabRenderElement=MoveGrabRenderElement,
+    MoveGrabRenderElement=CosmicMappedRenderElement<R>,
     //#[cfg(feature = "debug")]
     //EguiFrame=EguiFrame,
 }
@@ -59,7 +62,7 @@ pub fn cursor_elements<E, R>(
 where
     R: Renderer + ImportAll + ImportMem,
     <R as Renderer>::TextureId: Clone + 'static,
-    E: From<CursorRenderElement<R>>,
+    E: From<CursorRenderElement<R>> + From<CosmicMappedRenderElement<R>>,
 {
     let scale = output.current_scale().fractional_scale();
     let mut elements = Vec::new();
@@ -73,27 +76,6 @@ where
             .shell
             .map_global_to_space(pointer.current_location().to_i32_round(), output);
 
-        /*
-        if let Some(grab) = seat
-            .user_data()
-            .get::<SeatMoveGrabState>()
-            .unwrap()
-            .borrow()
-            .as_ref()
-            .and_then(|state| state.render(seat, output))
-        {
-            custom_elements.push(grab);
-        }
-        */
-
-        if let Some(wl_surface) = get_dnd_icon(seat) {
-            elements.extend(
-                cursor::draw_dnd_icon(&wl_surface, location.to_i32_round(), scale)
-                    .into_iter()
-                    .map(E::from),
-            );
-        }
-
         elements.extend(
             cursor::draw_cursor(
                 renderer,
@@ -106,6 +88,25 @@ where
             .into_iter()
             .map(E::from),
         );
+
+        if let Some(wl_surface) = get_dnd_icon(seat) {
+            elements.extend(
+                cursor::draw_dnd_icon(&wl_surface, location.to_i32_round(), scale)
+                    .into_iter()
+                    .map(E::from),
+            );
+        }
+
+        if let Some(grab_elements) = seat
+            .user_data()
+            .get::<SeatMoveGrabState>()
+            .unwrap()
+            .borrow()
+            .as_ref()
+            .map(|state| state.render::<E, R>(seat, output))
+        {
+            elements.extend(grab_elements);
+        }
     }
 
     elements

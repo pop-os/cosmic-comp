@@ -2,7 +2,7 @@
 
 use crate::{
     config::{Action, Config},
-    shell::{focus::target::PointerFocusTarget, Workspace}, // shell::grabs::SeatMoveGrabState
+    shell::{focus::target::PointerFocusTarget, layout::floating::SeatMoveGrabState, Workspace}, // shell::grabs::SeatMoveGrabState
     state::Common,
     utils::prelude::*,
 };
@@ -112,7 +112,7 @@ pub fn add_seat(
     userdata.insert_if_missing(SeatId::default);
     userdata.insert_if_missing(Devices::default);
     userdata.insert_if_missing(SupressedKeys::default);
-    //userdata.insert_if_missing(SeatMoveGrabState::default);
+    userdata.insert_if_missing(SeatMoveGrabState::default);
     userdata.insert_if_missing(|| ActiveOutput(RefCell::new(output.clone())));
     userdata.insert_if_missing(|| RefCell::new(CursorImageStatus::Default));
 

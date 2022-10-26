@@ -154,8 +154,35 @@ impl XdgShellHandler for State {
     fn move_request(&mut self, surface: ToplevelSurface, seat: WlSeat, serial: Serial) {
         let seat = Seat::from_resource(&seat).unwrap();
         if let Some(start_data) = check_grab_preconditions(&seat, surface.wl_surface(), serial) {
-            if let Some(mapped) = self.common.shell.element_for_surface(surface.wl_surface()) {
-                // Shell::move_request(self, &window, &seat, serial, start_data);
+            if let Some(mapped) = self
+                .common
+                .shell
+                .element_for_surface(surface.wl_surface())
+                .cloned()
+            {
+                if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
+                    let output = seat.active_output();
+                    let (window, _) = mapped
+                        .windows()
+                        .find(|(w, _)| matches!(w.toplevel(), Kind::Xdg(s) if s == &surface))
+                        .unwrap();
+                    if let Some(grab) =
+                        workspace.move_request(&window, &seat, &output, serial, start_data)
+                    {
+                        let handle = workspace.handle;
+                        self.common
+                            .shell
+                            .toplevel_info_state
+                            .toplevel_leave_workspace(&window, &handle);
+                        self.common
+                            .shell
+                            .toplevel_info_state
+                            .toplevel_leave_output(&window, &output);
+                        seat.get_pointer()
+                            .unwrap()
+                            .set_grab(self, grab, serial, Focus::Clear);
+                    }
+                }
             }
         }
     }
