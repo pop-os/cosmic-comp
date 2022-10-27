@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    shell::{element::CosmicMapped, focus::target::PointerFocusTarget},
+    shell::{element::CosmicMapped, focus::target::PointerFocusTarget, grabs::ResizeEdge},
     utils::prelude::*,
 };
 use smithay::{
@@ -10,39 +10,8 @@ use smithay::{
         AxisFrame, ButtonEvent, GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab,
         PointerInnerHandle,
     },
-    reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
     utils::{IsAlive, Logical, Point, Size},
 };
-use std::convert::TryFrom;
-
-bitflags::bitflags! {
-    pub struct ResizeEdge: u32 {
-        const TOP          = 0b0001;
-        const BOTTOM       = 0b0010;
-        const LEFT         = 0b0100;
-        const RIGHT        = 0b1000;
-
-        const TOP_LEFT     = Self::TOP.bits | Self::LEFT.bits;
-        const BOTTOM_LEFT  = Self::BOTTOM.bits | Self::LEFT.bits;
-
-        const TOP_RIGHT    = Self::TOP.bits | Self::RIGHT.bits;
-        const BOTTOM_RIGHT = Self::BOTTOM.bits | Self::RIGHT.bits;
-    }
-}
-
-impl From<xdg_toplevel::ResizeEdge> for ResizeEdge {
-    #[inline]
-    fn from(x: xdg_toplevel::ResizeEdge) -> Self {
-        Self::from_bits(x.into()).unwrap()
-    }
-}
-
-impl From<ResizeEdge> for xdg_toplevel::ResizeEdge {
-    #[inline]
-    fn from(x: ResizeEdge) -> Self {
-        Self::try_from(x.bits()).unwrap()
-    }
-}
 
 /// Information about the resize operation.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -185,12 +154,12 @@ impl ResizeSurfaceGrab {
     pub fn new(
         start_data: PointerGrabStartData<State>,
         mapped: CosmicMapped,
-        edges: xdg_toplevel::ResizeEdge,
+        edges: ResizeEdge,
         initial_window_location: Point<i32, Logical>,
         initial_window_size: Size<i32, Logical>,
     ) -> ResizeSurfaceGrab {
         let resize_state = ResizeState::Resizing(ResizeData {
-            edges: edges.into(),
+            edges,
             initial_window_location,
             initial_window_size,
         });
@@ -200,7 +169,7 @@ impl ResizeSurfaceGrab {
         ResizeSurfaceGrab {
             start_data,
             window: mapped,
-            edges: edges.into(),
+            edges,
             initial_window_size,
             last_window_size: initial_window_size,
         }

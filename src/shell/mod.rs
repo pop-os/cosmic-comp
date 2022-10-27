@@ -34,6 +34,7 @@ use crate::{
 
 mod element;
 pub mod focus;
+pub mod grabs;
 pub mod layout;
 mod workspace;
 pub use self::element::CosmicMappedRenderElement;

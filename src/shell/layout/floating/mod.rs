@@ -5,7 +5,6 @@ use smithay::{
     desktop::{layer_map_for_output, space::SpaceElement, Space, Window},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
-    reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge,
     render_elements,
     utils::{Logical, Point, Rectangle, Serial},
 };
@@ -14,6 +13,7 @@ use std::collections::HashMap;
 use crate::{
     shell::{
         element::{CosmicMapped, CosmicMappedRenderElement},
+        grabs::ResizeEdge,
         OutputNotMapped,
     },
     state::State,

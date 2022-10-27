@@ -7,37 +7,27 @@ use crate::{
             target::{KeyboardFocusTarget, WindowGroup},
             FocusDirection,
         },
+        grabs::ResizeEdge,
         layout::Orientation,
         OutputNotMapped,
     },
     utils::prelude::*,
-    wayland::handlers::xdg_shell::popup::{self, get_popup_toplevel},
+    wayland::handlers::xdg_shell::popup::get_popup_toplevel,
 };
 
 use id_tree::{InsertBehavior, MoveBehavior, Node, NodeId, NodeIdError, RemoveBehavior, Tree};
 use smithay::{
     backend::renderer::{element::AsRenderElements, ImportAll, Renderer},
-    desktop::{layer_map_for_output, space::SpaceElement, PopupKind, PopupManager, Window},
-    input::{
-        pointer::{Focus, GrabStartData as PointerGrabStartData},
-        Seat,
-    },
-    output::{Output, WeakOutput},
+    desktop::{layer_map_for_output, space::SpaceElement, PopupKind, Window},
+    input::{pointer::GrabStartData as PointerGrabStartData, Seat},
+    output::Output,
     render_elements,
     utils::{IsAlive, Logical, Point, Rectangle, Scale, Serial},
 };
-use std::{
-    borrow::Borrow,
-    cell::RefCell,
-    collections::{HashMap, VecDeque},
-    hash::Hash,
-    sync::{atomic::AtomicBool, Arc},
-};
+use std::{borrow::Borrow, collections::HashMap, hash::Hash, sync::Arc};
 
-/*
 mod grabs;
 pub use self::grabs::*;
-*/
 
 #[derive(Debug, Clone)]
 struct OutputData {
@@ -908,68 +898,58 @@ impl TilingLayout {
         TilingLayout::update_space_positions(&mut self.trees, self.gaps);
     }
 
-    /*
     pub fn resize_request(
-        window: &CosmicWindow,
-        seat: &Seat<State>,
-        serial: Serial,
+        &self,
+        mapped: &CosmicMapped,
+        _seat: &Seat<State>,
+        _serial: Serial,
         start_data: PointerGrabStartData<State>,
         edges: ResizeEdge,
-    ) {
-        // it is so stupid, that we have to do this here. TODO: Refactor grabs
-        let workspace = state
-            .common
-            .shell
-            .space_for_window_mut(window.toplevel().wl_surface())
-            .unwrap();
-        let space = &mut workspace.space;
-        let trees = &mut workspace.tiling_layer.trees;
+    ) -> Option<ResizeForkGrab> {
+        let (output, mut node_id) = self.trees.iter().find_map(|(output, tree)| {
+            let root_id = tree.root_node_id()?;
+            tree.traverse_pre_order_ids(root_id)
+                .unwrap()
+                .find(|id| tree.get(id).unwrap().data().is_mapped(Some(mapped)))
+                .map(|id| (&output.output, id))
+        })?;
 
-        if let Some(pointer) = seat.get_pointer() {
-            if let Some(info) = window.user_data().get::<RefCell<WindowInfo>>() {
-                let output = info.borrow().output;
-                let tree = TilingLayout::active_tree(trees, output);
-                let mut node_id = info.borrow().node.clone();
-
-                while let Some((fork, child)) = TilingLayout::find_fork(tree, node_id) {
-                    if let &Data::Fork {
-                        ref orientation,
-                        ref ratio,
-                    } = tree.get(&fork).unwrap().data()
-                    {
-                        // found a fork
-                        // which child are we?
-                        let first = tree.children_ids(&fork).unwrap().next() == Some(&child);
-                        match (first, orientation, edges) {
-                            (true, Orientation::Horizontal, ResizeEdge::Bottom)
-                            | (false, Orientation::Horizontal, ResizeEdge::Top)
-                            | (true, Orientation::Vertical, ResizeEdge::Right)
-                            | (false, Orientation::Vertical, ResizeEdge::Left) => {
-                                let output = space.outputs().nth(output).cloned();
-                                if let Some(output) = output {
-                                    let grab = ResizeForkGrab {
-                                        start_data,
-                                        orientation: *orientation,
-                                        initial_ratio: ratio.load(Ordering::SeqCst),
-                                        initial_size: layer_map_for_output(&output)
-                                            .non_exclusive_zone()
-                                            .size,
-                                        ratio: ratio.clone(),
-                                    };
-
-                                    pointer.set_grab(state, grab, serial, Focus::Clear);
-                                }
-                                return;
-                            }
-                            _ => {} // continue iterating
-                        }
-                    }
-                    node_id = fork;
-                }
+        let tree = self.trees.get(output).unwrap();
+        while let Some(group_id) = tree.get(&node_id).unwrap().parent() {
+            let orientation = tree.get(group_id).unwrap().data().orientation();
+            if !((orientation == Orientation::Vertical
+                && (edges.contains(ResizeEdge::LEFT) || edges.contains(ResizeEdge::RIGHT)))
+                || (orientation == Orientation::Horizontal
+                    && (edges.contains(ResizeEdge::TOP) || edges.contains(ResizeEdge::BOTTOM))))
+            {
+                node_id = group_id.clone();
+                continue;
             }
+
+            let node_idx = tree
+                .children_ids(group_id)
+                .unwrap()
+                .position(|id| id == &node_id)
+                .unwrap();
+            let idx = match edges {
+                x if x.intersects(ResizeEdge::TOP_LEFT) => node_idx - 1,
+                _ => node_idx,
+            };
+            if idx > tree.get(&group_id).unwrap().data().len() {
+                return None;
+            }
+
+            return Some(ResizeForkGrab::new(
+                start_data,
+                group_id.clone(),
+                output,
+                tree.get(&group_id).unwrap().data(),
+                idx,
+            ));
         }
+
+        None
     }
-    */
 
     fn last_active_window<'a>(
         tree: &mut Tree<Data>,

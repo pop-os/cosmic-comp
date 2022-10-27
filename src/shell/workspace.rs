@@ -36,10 +36,8 @@ use std::{collections::HashMap, time::Duration};
 use super::{
     element::CosmicMapped,
     focus::{FocusStack, FocusStackMut},
-    layout::{
-        floating::{FloatingRenderElement, ResizeSurfaceGrab},
-        tiling::TilingRenderElement,
-    },
+    grabs::ResizeGrab,
+    layout::{floating::FloatingRenderElement, tiling::TilingRenderElement},
 };
 
 #[derive(Debug)]
@@ -266,16 +264,20 @@ impl Workspace {
         serial: Serial,
         start_data: PointerGrabStartData<State>,
         edges: ResizeEdge,
-    ) -> Option<ResizeSurfaceGrab> {
+    ) -> Option<ResizeGrab> {
         if mapped.is_fullscreen() || mapped.is_maximized() {
             return None;
         }
+
+        let edges = edges.into();
         if self.floating_layer.mapped().any(|m| m == mapped) {
             self.floating_layer
                 .resize_request(mapped, seat, serial, start_data.clone(), edges)
+                .map(Into::into)
         } else if self.tiling_layer.mapped().any(|(_, m, _)| m == mapped) {
-            //self.tiling_layer.resize_request(mapped, seat, serial, start_data, edges)
-            None
+            self.tiling_layer
+                .resize_request(mapped, seat, serial, start_data, edges)
+                .map(Into::into)
         } else {
             None
         }
