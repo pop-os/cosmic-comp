@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    shell::{focus::FocusDirection, Shell, WorkspaceAmount},
+    shell::{focus::FocusDirection, layout::tiling::Direction, Shell, WorkspaceAmount},
     state::{BackendData, Data},
 };
 use serde::{Deserialize, Serialize};
@@ -785,6 +785,7 @@ pub enum Action {
     Workspace(u8),
     MoveToWorkspace(u8),
     Focus(FocusDirection),
+    Move(Direction),
     ToggleOrientation,
     Orientation(crate::shell::layout::Orientation),
     ToggleTiling,

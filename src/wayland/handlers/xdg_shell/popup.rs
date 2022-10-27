@@ -317,7 +317,7 @@ fn get_anchor_point(positioner: &PositionerState) -> Point<i32, Logical> {
     .into()
 }
 
-fn get_popup_toplevel(popup: &PopupSurface) -> Option<WlSurface> {
+pub fn get_popup_toplevel(popup: &PopupSurface) -> Option<WlSurface> {
     let mut parent = popup.get_parent_surface()?;
     while get_role(&parent) == Some(XDG_POPUP_ROLE) {
         parent = with_states(&parent, |states| {

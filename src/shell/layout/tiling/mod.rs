@@ -11,12 +11,13 @@ use crate::{
         OutputNotMapped,
     },
     utils::prelude::*,
+    wayland::handlers::xdg_shell::popup::{self, get_popup_toplevel},
 };
 
 use id_tree::{InsertBehavior, MoveBehavior, Node, NodeId, NodeIdError, RemoveBehavior, Tree};
 use smithay::{
     backend::renderer::{element::AsRenderElements, ImportAll, Renderer},
-    desktop::{layer_map_for_output, space::SpaceElement, Window},
+    desktop::{layer_map_for_output, space::SpaceElement, PopupKind, PopupManager, Window},
     input::{
         pointer::{Focus, GrabStartData as PointerGrabStartData},
         Seat,
@@ -68,6 +69,14 @@ impl Hash for OutputData {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.output.hash(state)
     }
+}
+
+#[derive(Debug, serde::Deserialize, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Left,
+    Right,
+    Up,
+    Down,
 }
 
 #[derive(Debug, Clone)]
@@ -147,6 +156,15 @@ impl Data {
                 sizes.insert(idx, new_size);
             }
             Data::Mapped { .. } => panic!("Adding window to leaf?"),
+        }
+    }
+
+    fn swap_windows(&mut self, i: usize, j: usize) {
+        match self {
+            Data::Group { sizes, .. } => {
+                sizes.swap(i, j);
+            }
+            Data::Mapped { .. } => panic!("Swapping windows to a leaf?"),
         }
     }
 
@@ -305,7 +323,9 @@ impl TilingLayout {
                     Orientation::Horizontal
                 }
             };
-            TilingLayout::new_group(tree, &node_id, new_window, orientation)
+            let new_id = tree.insert(new_window, InsertBehavior::AsRoot).unwrap();
+            TilingLayout::new_group(tree, &node_id, &new_id, orientation).unwrap();
+            new_id
         } else {
             // nothing? then we add to the root
             if let Some(root_id) = tree.root_node_id().cloned() {
@@ -317,12 +337,13 @@ impl TilingLayout {
                         Orientation::Horizontal
                     }
                 };
-                TilingLayout::new_group(tree, &root_id, new_window, orientation)
+                let new_id = tree.insert(new_window, InsertBehavior::AsRoot).unwrap();
+                TilingLayout::new_group(tree, &root_id, &new_id, orientation).unwrap();
+                new_id
             } else {
-                tree.insert(new_window, InsertBehavior::AsRoot)
+                tree.insert(new_window, InsertBehavior::AsRoot).unwrap()
             }
-        }
-        .unwrap();
+        };
 
         *window.tiling_node_id.lock().unwrap() = Some(window_id);
     }
@@ -421,6 +442,227 @@ impl TilingLayout {
             }
         }
         None
+    }
+
+    pub fn move_current_window<'a>(
+        &mut self,
+        direction: Direction,
+        seat: &Seat<State>,
+    ) -> Option<CosmicMapped /*TODO move window groups across screens?*/> {
+        let output = seat.active_output();
+        let tree = self.trees.get_mut(&output).unwrap();
+
+        let node_id = match TilingLayout::currently_focused_node(tree, seat) {
+            Some(node_id) => node_id,
+            None => {
+                return None;
+            }
+        };
+
+        let mut child_id = node_id.clone();
+        // Without a parent to start with, just return
+        let og_parent = tree.get(&node_id).unwrap().parent().cloned()?;
+        let og_idx = tree
+            .children_ids(&og_parent)
+            .unwrap()
+            .position(|id| id == &child_id)
+            .unwrap();
+        let mut maybe_parent = Some(og_parent.clone());
+
+        while let Some(parent) = maybe_parent {
+            let parent_data = tree.get(&parent).unwrap().data();
+            let orientation = parent_data.orientation();
+            let len = parent_data.len();
+
+            // which child are we?
+            let idx = tree
+                .children_ids(&parent)
+                .unwrap()
+                .position(|id| id == &child_id)
+                .unwrap();
+
+            // if the orientation does not match, we want to create a new group with our parent.
+            if matches!(
+                (orientation, direction),
+                (Orientation::Horizontal, Direction::Right)
+                    | (Orientation::Horizontal, Direction::Left)
+                    | (Orientation::Vertical, Direction::Up)
+                    | (Orientation::Vertical, Direction::Down)
+            ) {
+                TilingLayout::new_group(
+                    tree,
+                    &parent,
+                    &node_id,
+                    match direction {
+                        Direction::Left | Direction::Right => Orientation::Vertical,
+                        Direction::Up | Direction::Down => Orientation::Horizontal,
+                    },
+                )
+                .unwrap();
+                tree.make_nth_sibling(
+                    &node_id,
+                    if direction == Direction::Left || direction == Direction::Up {
+                        0
+                    } else {
+                        1
+                    },
+                )
+                .unwrap();
+
+                tree.get_mut(&og_parent)
+                    .unwrap()
+                    .data_mut()
+                    .remove_window(og_idx);
+                self.refresh();
+                return None;
+            }
+
+            // now if the orientation matches
+
+            // if we are not already in this group, we just move into it (up)
+            if child_id != node_id {
+                tree.move_node(&node_id, MoveBehavior::ToParent(&parent))
+                    .unwrap();
+                tree.make_nth_sibling(
+                    &node_id,
+                    if direction == Direction::Left || direction == Direction::Up {
+                        idx
+                    } else {
+                        idx + 1
+                    },
+                )
+                .unwrap();
+                tree.get_mut(&parent).unwrap().data_mut().add_window(idx);
+                tree.get_mut(&og_parent)
+                    .unwrap()
+                    .data_mut()
+                    .remove_window(og_idx);
+                self.refresh();
+                return None;
+            }
+
+            // we can maybe move inside the group, if we don't run out of elements
+            if let Some(next_idx) = match (orientation, direction) {
+                (Orientation::Horizontal, Direction::Down)
+                | (Orientation::Vertical, Direction::Right)
+                    if idx < (len - 1) =>
+                {
+                    Some(idx + 1)
+                }
+                (Orientation::Horizontal, Direction::Up)
+                | (Orientation::Vertical, Direction::Left)
+                    if idx > 0 =>
+                {
+                    Some(idx - 1)
+                }
+                _ => None,
+            } {
+                // if we can, we need to check the next element and move "into" it (down)
+                let next_child_id = tree
+                    .children_ids(&parent)
+                    .unwrap()
+                    .nth(next_idx)
+                    .unwrap()
+                    .clone();
+                if tree.get(&next_child_id).unwrap().data().is_group() {
+                    // if it is a group, we want to move into the group
+                    tree.move_node(&node_id, MoveBehavior::ToParent(&next_child_id))
+                        .unwrap();
+                    let group_orientation = tree.get(&next_child_id).unwrap().data().orientation();
+                    match (group_orientation, direction) {
+                        (Orientation::Horizontal, Direction::Down)
+                        | (Orientation::Vertical, Direction::Right) => {
+                            tree.make_first_sibling(&node_id).unwrap();
+                            tree.get_mut(&next_child_id)
+                                .unwrap()
+                                .data_mut()
+                                .add_window(0);
+                        }
+                        (Orientation::Horizontal, Direction::Up)
+                        | (Orientation::Vertical, Direction::Left) => {
+                            tree.make_last_sibling(&node_id).unwrap();
+                            let group = tree.get_mut(&next_child_id).unwrap().data_mut();
+                            group.add_window(group.len());
+                        }
+                        _ => {
+                            // we want the middle
+                            let group_len = tree.get(&next_child_id).unwrap().data().len();
+                            if group_len % 2 == 0 {
+                                tree.make_nth_sibling(&node_id, group_len / 2).unwrap();
+                                tree.get_mut(&next_child_id)
+                                    .unwrap()
+                                    .data_mut()
+                                    .add_window(group_len / 2);
+                            } else {
+                                // we move again by making a new fork
+                                let old_id = tree
+                                    .children_ids(&next_child_id)
+                                    .unwrap()
+                                    .skip(group_len / 2)
+                                    .next()
+                                    .unwrap()
+                                    .clone();
+                                TilingLayout::new_group(
+                                    tree,
+                                    &old_id,
+                                    &node_id,
+                                    !group_orientation,
+                                )
+                                .unwrap();
+                                tree.make_nth_sibling(
+                                    &node_id,
+                                    if direction == Direction::Left || direction == Direction::Up {
+                                        0
+                                    } else {
+                                        1
+                                    },
+                                )
+                                .unwrap();
+                            }
+                        }
+                    };
+                    tree.get_mut(&og_parent)
+                        .unwrap()
+                        .data_mut()
+                        .remove_window(og_idx);
+                } else if len == 2 && child_id == node_id {
+                    // if we are just us two in the group, lets swap
+                    tree.make_nth_sibling(&node_id, next_idx).unwrap();
+                    // also swap sizes
+                    tree.get_mut(&og_parent)
+                        .unwrap()
+                        .data_mut()
+                        .swap_windows(idx, next_idx);
+                } else {
+                    // else we make a new fork
+                    TilingLayout::new_group(tree, &next_child_id, &node_id, orientation).unwrap();
+                    tree.make_nth_sibling(
+                        &node_id,
+                        if direction == Direction::Left || direction == Direction::Up {
+                            1
+                        } else {
+                            0
+                        },
+                    )
+                    .unwrap();
+                    tree.get_mut(&og_parent)
+                        .unwrap()
+                        .data_mut()
+                        .remove_window(og_idx);
+                }
+                self.refresh();
+                return None;
+            }
+
+            // We have reached the end of our parent group, try to move out even higher.
+            maybe_parent = tree.get(&parent).unwrap().parent().cloned();
+            child_id = parent.clone();
+        }
+
+        match tree.get(&node_id).unwrap().data() {
+            Data::Mapped { mapped, .. } => Some(mapped.clone()),
+            Data::Group { .. } => None, // TODO move groups to other screens
+        }
     }
 
     pub fn next_focus<'a>(
@@ -620,6 +862,49 @@ impl TilingLayout {
         for dead_window in dead_windows.iter() {
             self.unmap_window_internal(&dead_window);
         }
+        // flatten trees
+        for tree in self.trees.values_mut() {
+            let root_id = match tree.root_node_id() {
+                Some(root) => root,
+                None => {
+                    continue;
+                }
+            };
+            for node_id in tree
+                .traverse_pre_order_ids(root_id)
+                .unwrap()
+                .collect::<Vec<_>>()
+                .into_iter()
+            {
+                let node = tree.get(&node_id).unwrap();
+                let data = node.data();
+                if data.is_group() && data.len() == 1 {
+                    // RemoveBehavior::LiftChildren sadly does not what we want: lifting them into the same place.
+                    // So we need to fix that manually..
+                    let child_id = tree
+                        .children_ids(&node_id)
+                        .unwrap()
+                        .cloned()
+                        .next()
+                        .unwrap();
+                    let idx = node.parent().map(|parent_id| {
+                        tree.children_ids(&parent_id)
+                            .unwrap()
+                            .position(|id| id == &node_id)
+                            .unwrap()
+                    });
+                    tree.remove_node(node_id, RemoveBehavior::LiftChildren)
+                        .unwrap();
+                    if let Some(idx) = idx {
+                        tree.make_nth_sibling(&child_id, idx).unwrap();
+                    } else {
+                        // additionally `RemoveBehavior::LiftChildren` doesn't work, when removing the root-node,
+                        // even with just one child. *sigh*
+                        tree.move_node(&child_id, MoveBehavior::ToRoot).unwrap();
+                    }
+                }
+            }
+        }
         TilingLayout::update_space_positions(&mut self.trees, self.gaps);
     }
 
@@ -698,10 +983,58 @@ impl TilingLayout {
             )
     }
 
+    fn currently_focused_node(tree: &mut Tree<Data>, seat: &Seat<State>) -> Option<NodeId> {
+        let mut target = seat.get_keyboard().unwrap().current_focus()?;
+
+        // if the focus is currently on a popup, treat it's toplevel as the target
+        if let KeyboardFocusTarget::Popup(popup) = target {
+            let toplevel_surface = match popup {
+                PopupKind::Xdg(xdg) => get_popup_toplevel(&xdg),
+            }?;
+            let root_id = tree.root_node_id()?;
+            let node =
+                tree.traverse_pre_order(root_id)
+                    .unwrap()
+                    .find(|node| match node.data() {
+                        Data::Mapped { mapped, .. } => mapped
+                            .windows()
+                            .any(|(w, _)| w.toplevel().wl_surface() == &toplevel_surface),
+                        _ => false,
+                    })?;
+
+            target = KeyboardFocusTarget::Element(match node.data() {
+                Data::Mapped { mapped, .. } => mapped.clone(),
+                _ => unreachable!(),
+            });
+        }
+
+        match target {
+            KeyboardFocusTarget::Element(mapped) => {
+                let node_id = mapped.tiling_node_id.lock().unwrap().clone()?;
+                let node = tree.get(&node_id).ok()?;
+                let data = node.data();
+                if data.is_mapped(Some(&mapped)) {
+                    return Some(node_id);
+                }
+            }
+            KeyboardFocusTarget::Group(window_group) => {
+                if window_group.output == seat.active_output() {
+                    let node = tree.get(&window_group.node).ok()?;
+                    if node.data().is_group() {
+                        return Some(window_group.node);
+                    }
+                }
+            }
+            _ => {}
+        };
+
+        None
+    }
+
     fn new_group(
         tree: &mut Tree<Data>,
         old_id: &NodeId,
-        new: Node<Data>,
+        new_id: &NodeId,
         orientation: Orientation,
     ) -> Result<NodeId, NodeIdError> {
         let new_group = Node::new(Data::new_group(
@@ -733,7 +1066,10 @@ impl TilingLayout {
         if let Some(old_pos) = pos {
             tree.make_nth_sibling(&group_id, old_pos).unwrap();
         }
-        tree.insert(new, InsertBehavior::UnderNode(&group_id))
+        tree.move_node(new_id, MoveBehavior::ToParent(&group_id))
+            .unwrap();
+
+        Ok(group_id)
     }
 
     fn update_space_positions(trees: &mut HashMap<OutputData, Tree<Data>>, gaps: (i32, i32)) {
@@ -864,13 +1200,12 @@ impl TilingLayout {
 
             let root_node = src.get(root_id).unwrap();
             let new_node = Node::new(root_node.data().clone());
-            let into_node_id = match dst.root_node_id().cloned() {
-                Some(root) => TilingLayout::new_group(dst, &root, new_node, orientation),
-                None => dst.insert(new_node, InsertBehavior::AsRoot),
+            let new_id = dst.insert(new_node, InsertBehavior::AsRoot).unwrap();
+            if let Some(root) = dst.root_node_id().cloned() {
+                TilingLayout::new_group(dst, &root, &new_id, orientation).unwrap();
             }
-            .unwrap();
 
-            stack.push((root_id.clone(), into_node_id));
+            stack.push((root_id.clone(), new_id));
             while let Some((src_id, dst_id)) = stack.pop() {
                 for child_id in src.children_ids(&src_id).unwrap() {
                     let src_node = src.get(&child_id).unwrap();

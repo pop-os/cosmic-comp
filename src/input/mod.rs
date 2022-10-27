@@ -362,6 +362,16 @@ impl State {
                                         Common::set_focus(self, Some(&target), seat, None);
                                     }
                                 }
+                                Action::Move(direction) => {
+                                    let current_output = seat.active_output();
+                                    let workspace =
+                                        self.common.shell.active_space_mut(&current_output);
+                                    if let Some(_move_further) =
+                                        workspace.tiling_layer.move_current_window(direction, seat)
+                                    {
+                                        // TODO moving across workspaces/displays
+                                    }
+                                }
                                 Action::Fullscreen => {
                                     let current_output = seat.active_output();
                                     let workspace =
