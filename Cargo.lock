@@ -309,7 +309,7 @@ dependencies = [
  "smithay-egui",
  "thiserror",
  "wayland-backend",
- "wayland-scanner 0.30.0-beta.10",
+ "wayland-scanner 0.30.0-beta.12",
  "xcursor",
  "xdg",
  "xkbcommon 0.4.1",
@@ -318,12 +318,12 @@ dependencies = [
 [[package]]
 name = "cosmic-protocols"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-protocols?branch=main#3ff11df30ef551e1ccbdcb091930fe0d72266195"
+source = "git+https://github.com/pop-os/cosmic-protocols?branch=screencopy#e96daeceac966b6d21c79f2ebcc4b9934a69fa75"
 dependencies = [
  "bitflags",
  "wayland-backend",
- "wayland-protocols 0.30.0-beta.10",
- "wayland-scanner 0.30.0-beta.10",
+ "wayland-protocols 0.30.0-beta.12",
+ "wayland-scanner 0.30.0-beta.12",
  "wayland-server",
 ]
 
@@ -1049,6 +1049,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e322c04a9e3440c327fca7b6c8a63e6890a32fa2ad689db972425f07e0d22abb"
+dependencies = [
+ "autocfg",
+ "bitflags",
+ "cfg-if",
+ "libc",
+ "memoffset",
+]
+
+[[package]]
 name = "nohash-hasher"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1490,11 +1503,12 @@ checksum = "2fd0db749597d91ff862fd1d55ea87f7855a744a8425a64695b6fca237d1dad1"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/Smithay//smithay?rev=625cbca5#625cbca54981021000d5a33c1bdc711056ff6000"
+source = "git+https://github.com/Smithay//smithay?rev=0c7dbfa8#0c7dbfa830496df064a721f9cbbff6b474e6a268"
 dependencies = [
  "appendlist",
  "bitflags",
  "calloop",
+ "cc",
  "cgmath",
  "downcast-rs",
  "drm",
@@ -1511,6 +1525,7 @@ dependencies = [
  "libseat",
  "nix 0.24.2",
  "once_cell",
+ "pkg-config",
  "rand",
  "scan_fmt",
  "slog",
@@ -1520,11 +1535,11 @@ dependencies = [
  "udev",
  "wayland-backend",
  "wayland-egl",
- "wayland-protocols 0.30.0-beta.10",
+ "wayland-protocols 0.30.0-beta.12",
  "wayland-protocols-misc",
  "wayland-protocols-wlr",
  "wayland-server",
- "wayland-sys 0.30.0-beta.10",
+ "wayland-sys 0.30.0-beta.12",
  "winit",
  "x11rb",
  "xkbcommon 0.5.0",
@@ -1791,17 +1806,17 @@ checksum = "1c38c045535d93ec4f0b4defec448e4291638ee608530863b1e2ba115d4fff7f"
 
 [[package]]
 name = "wayland-backend"
-version = "0.1.0-beta.10"
+version = "0.1.0-beta.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30c089c872513a8dcc2b5cc26209d83f5ffab1841d8c7973edf2583620ebc018"
+checksum = "2fe32234ad38fee0755aeec26db486a4b788dd3cc2c9dc86ceda31bb38a53f32"
 dependencies = [
  "cc",
  "downcast-rs",
  "io-lifetimes",
- "nix 0.24.2",
+ "nix 0.25.0",
  "scoped-tls",
  "smallvec",
- "wayland-sys 0.30.0-beta.10",
+ "wayland-sys 0.30.0-beta.12",
 ]
 
 [[package]]
@@ -1845,13 +1860,13 @@ dependencies = [
 
 [[package]]
 name = "wayland-egl"
-version = "0.30.0-beta.10"
+version = "0.30.0-beta.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6cb5591d75142e1b180691df4d27f164a09abbd6efc7cba9b119ca40646809c"
+checksum = "cfc1309ddfeabd942c09c21e9db2ed3de81b84d0ea7ebcdd2e503a0be0fe9c5f"
 dependencies = [
  "thiserror",
  "wayland-backend",
- "wayland-sys 0.30.0-beta.10",
+ "wayland-sys 0.30.0-beta.12",
 ]
 
 [[package]]
@@ -1868,39 +1883,39 @@ dependencies = [
 
 [[package]]
 name = "wayland-protocols"
-version = "0.30.0-beta.10"
+version = "0.30.0-beta.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60406a2fb43ff670ece4976cdd0537bbcd1e583b54c3cd9a1b61065e966df0a7"
+checksum = "ca770dc814b3c93db1b4ba12a5bdfe899f8d68f9b4b06fc31e53959261cd0c39"
 dependencies = [
  "bitflags",
  "wayland-backend",
- "wayland-scanner 0.30.0-beta.10",
+ "wayland-scanner 0.30.0-beta.12",
  "wayland-server",
 ]
 
 [[package]]
 name = "wayland-protocols-misc"
-version = "0.1.0-beta.10"
+version = "0.1.0-beta.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "653c3e200343bcfae719b668959efb9475bf9fcf43591cccfead308d32d67049"
+checksum = "25bfcd2c16bed3540d1c5662d97708ac4f14d92b7b5c52c85860cdc17a96a126"
 dependencies = [
  "bitflags",
  "wayland-backend",
- "wayland-protocols 0.30.0-beta.10",
- "wayland-scanner 0.30.0-beta.10",
+ "wayland-protocols 0.30.0-beta.12",
+ "wayland-scanner 0.30.0-beta.12",
  "wayland-server",
 ]
 
 [[package]]
 name = "wayland-protocols-wlr"
-version = "0.1.0-beta.10"
+version = "0.1.0-beta.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1cfe42e0cfcce47a421844ee82e49316cfab3ec6bcbb3a1076a0a2dd6c8d61e"
+checksum = "8795f1c689bce3845292c1d84b8866fa65d1d1845e76769b13f71cadeb8b5853"
 dependencies = [
  "bitflags",
  "wayland-backend",
- "wayland-protocols 0.30.0-beta.10",
- "wayland-scanner 0.30.0-beta.10",
+ "wayland-protocols 0.30.0-beta.12",
+ "wayland-scanner 0.30.0-beta.12",
  "wayland-server",
 ]
 
@@ -1917,9 +1932,9 @@ dependencies = [
 
 [[package]]
 name = "wayland-scanner"
-version = "0.30.0-beta.10"
+version = "0.30.0-beta.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1398566f240c3ef845bdfd310c8ee6ba800d4db695d007f23f2190eeedfff93"
+checksum = "87def40ed0bc26c3eff1498812543b6d55bbd13b93e36d368052b7390a57c4ac"
 dependencies = [
  "proc-macro2",
  "quick-xml",
@@ -1929,16 +1944,16 @@ dependencies = [
 
 [[package]]
 name = "wayland-server"
-version = "0.30.0-beta.10"
+version = "0.30.0-beta.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "030557c71dfa3d7e0d0b5975bbdfee2eee319fde3e4c420cde63474c61331347"
+checksum = "8d54b4a800b230f4fb0f42cae245cc0aaa02bf14bf7c1c3a5e1a822d05fd2cb3"
 dependencies = [
  "bitflags",
  "downcast-rs",
- "nix 0.24.2",
+ "nix 0.25.0",
  "thiserror",
  "wayland-backend",
- "wayland-scanner 0.30.0-beta.10",
+ "wayland-scanner 0.30.0-beta.12",
 ]
 
 [[package]]
@@ -1954,9 +1969,9 @@ dependencies = [
 
 [[package]]
 name = "wayland-sys"
-version = "0.30.0-beta.10"
+version = "0.30.0-beta.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bacc6b678c3350910e5ad6c057b7503666080952c4ece0a7e8958fd33937b1f5"
+checksum = "1117fe4570fe063122ba2b1b1e39e56fb1a73921d395f9288af06af0dd1c7f55"
 dependencies = [
  "dlib",
  "libc",
