@@ -57,7 +57,7 @@ impl ScreencopyState {
     where
         D: GlobalDispatch<ZcosmicScreencopyManagerV1, ScreencopyGlobalData>
             + Dispatch<ZcosmicScreencopyManagerV1, ()>
-            + Dispatch<ZcosmicScreencopySessionV1, ()>
+            + Dispatch<ZcosmicScreencopySessionV1, SessionData>
             + ScreencopyHandler
             + WorkspaceHandler
             + 'static,
@@ -799,15 +799,16 @@ where
                 data.inner.lock().unwrap().pending_buffer = Some(params);
             }
             zcosmic_screencopy_session_v1::Request::Commit { options } => {
-                {
-                    let resource_data = data.inner.lock().unwrap();
+                let buffer = {
+                    let mut resource_data = data.inner.lock().unwrap();
                     if resource_data.is_cursor() || resource_data.gone {
                         resource.failed(FailureReason::Unspec);
                         return;
                     }
-                }
+                    resource_data.pending_buffer.take()
+                };
 
-                if let Some(buffer) = data.inner.lock().unwrap().pending_buffer.take() {
+                if let Some(buffer) = buffer {
                     let session = Session {
                         obj: SessionResource::Alive(resource.clone()),
                         data: data.clone(),
@@ -889,3 +890,18 @@ fn send_formats(session: &SessionResource, formats: Vec<BufferInfo>) {
 
     session.init_done();
 }
+
+macro_rules! delegate_screencopy {
+    ($(@<$( $lt:tt $( : $clt:tt $(+ $dlt:tt )* )? ),+>)? $ty: ty) => {
+        smithay::reexports::wayland_server::delegate_global_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
+            cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_manager_v1::ZcosmicScreencopyManagerV1: $crate::wayland::protocols::screencopy::ScreencopyGlobalData
+        ] => $crate::wayland::protocols::screencopy::ScreencopyState);
+        smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
+            cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_manager_v1::ZcosmicScreencopyManagerV1: ()
+        ] => $crate::wayland::protocols::screencopy::ScreencopyState);
+        smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
+            cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::ZcosmicScreencopySessionV1: $crate::wayland::protocols::screencopy::SessionData
+        ] => $crate::wayland::protocols::screencopy::ScreencopyState);
+    };
+}
+pub(crate) use delegate_screencopy;

@@ -9,10 +9,11 @@ use crate::{
     wayland::protocols::{
         drm::WlDrmState,
         output_configuration::OutputConfigurationState,
-        screencopy::{BufferParams, Session as ScreencopySession},
+        screencopy::{BufferParams, ScreencopyState, Session as ScreencopySession},
         workspace::WorkspaceClientState,
     },
 };
+use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_manager_v1::CursorMode;
 use smithay::{
     backend::{
         drm::DrmNode,
@@ -94,6 +95,7 @@ pub struct Common {
     pub output_state: OutputManagerState,
     pub output_configuration_state: OutputConfigurationState<State>,
     pub primary_selection_state: PrimarySelectionState,
+    pub screencopy_state: ScreencopyState,
     pub seat_state: SeatState<State>,
     pub shm_state: ShmState,
     pub wl_drm_state: WlDrmState,
@@ -228,6 +230,11 @@ impl State {
         let output_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
         let output_configuration_state = OutputConfigurationState::new(dh, |_| true);
         let primary_selection_state = PrimarySelectionState::new::<Self, _>(dh, None);
+        let screencopy_state = ScreencopyState::new::<Self, _, _>(
+            dh,
+            vec![CursorMode::Embedded, CursorMode::Hidden],
+            |_| true,
+        ); // TODO: privileged
         let shm_state = ShmState::new::<Self, _>(dh, vec![], None);
         let seat_state = SeatState::<Self>::new();
         let viewporter_state = ViewporterState::new::<Self, _>(dh, None);
@@ -275,6 +282,7 @@ impl State {
                 compositor_state,
                 data_device_state,
                 dmabuf_state,
+                screencopy_state,
                 shm_state,
                 seat_state,
                 keyboard_shortcuts_inhibit_state,

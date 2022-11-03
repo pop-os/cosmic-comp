@@ -41,8 +41,8 @@ use crate::{
     utils::prelude::OutputExt,
     wayland::protocols::{
         screencopy::{
-            BufferInfo, BufferParams, CursorMode as ScreencopyCursorMode, CursorSession,
-            ScreencopyHandler, Session, SessionType,
+            delegate_screencopy, BufferInfo, BufferParams, CursorMode as ScreencopyCursorMode,
+            CursorSession, ScreencopyHandler, Session, SessionType,
         },
         workspace::WorkspaceHandle,
     },
@@ -177,14 +177,14 @@ impl ScreencopyHandler for State {
 
         let mut formats = vec![
             BufferInfo::Shm {
-                format: ShmFormat::Abgr8888,
+                format: ShmFormat::Argb8888,
                 size,
-                stride: 0,
+                stride: size.w as u32 * 4,
             },
             BufferInfo::Shm {
-                format: ShmFormat::Xbgr8888,
+                format: ShmFormat::Xrgb8888,
                 size,
-                stride: 0,
+                stride: size.w as u32 * 4,
             },
         ];
 
@@ -276,7 +276,7 @@ impl ScreencopyHandler for State {
 
         if let Some(BufferType::Shm) = buffer_type(&params.buffer) {
             if with_buffer_contents(&params.buffer, |_, info| {
-                info.format != ShmFormat::Abgr8888 && info.format != ShmFormat::Xbgr8888
+                info.format != ShmFormat::Argb8888 && info.format != ShmFormat::Xrgb8888
             })
             .unwrap()
             {
@@ -415,14 +415,14 @@ fn formats_for_output(
 
     let mut formats = vec![
         BufferInfo::Shm {
-            format: ShmFormat::Abgr8888,
+            format: ShmFormat::Argb8888,
             size: mode,
-            stride: 0,
+            stride: mode.w as u32 * 4,
         },
         BufferInfo::Shm {
-            format: ShmFormat::Xbgr8888,
+            format: ShmFormat::Xrgb8888,
             size: mode,
-            stride: 0,
+            stride: mode.w as u32 * 4,
         },
     ];
 
@@ -793,3 +793,5 @@ impl UserdataExt for Window {
             .flatten()
     }
 }
+
+delegate_screencopy!(State);
