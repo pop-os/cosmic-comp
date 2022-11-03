@@ -137,7 +137,6 @@ pub fn init_backend(
         refresh: 60_000,
     };
     let output = Output::new(name, props, None);
-    let _global = output.create_global::<State>(dh);
     output.add_mode(mode);
     output.set_preferred(mode);
     output.change_current_state(
