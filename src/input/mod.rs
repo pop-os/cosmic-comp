@@ -5,7 +5,9 @@ use crate::{
     shell::{focus::target::PointerFocusTarget, layout::floating::SeatMoveGrabState, Workspace}, // shell::grabs::SeatMoveGrabState
     state::Common,
     utils::prelude::*,
+    wayland::{handlers::screencopy::ScreencopySessions, protocols::screencopy::Session},
 };
+use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
 use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisSource, Device, DeviceCapability, InputBackend,
@@ -525,6 +527,14 @@ impl State {
                             .cloned()
                             .unwrap_or(current_output.clone());
                         if output != current_output {
+                            for session in sessions_for_output(&self.common, &current_output) {
+                                session.cursor_leave(seat, InputType::Pointer);
+                            }
+
+                            for session in sessions_for_output(&self.common, &output) {
+                                session.cursor_enter(seat, InputType::Pointer);
+                            }
+
                             seat.set_active_output(&output);
                         }
                         let output_geometry = output.geometry();
@@ -546,6 +556,19 @@ impl State {
                             output_geometry,
                             &workspace,
                         );
+
+                        for session in sessions_for_output(&self.common, &output) {
+                            if let Some((geometry, offset)) = seat.cursor_geometry(
+                                position.to_buffer(
+                                    output.current_scale().fractional_scale(),
+                                    output.current_transform(),
+                                    &output.geometry().size.to_f64(),
+                                ),
+                                &self.common.start_time,
+                            ) {
+                                session.cursor_info(seat, InputType::Pointer, geometry, offset);
+                            }
+                        }
                         seat.get_pointer().unwrap().motion(
                             self,
                             under,
@@ -833,4 +856,45 @@ impl State {
             }
         }
     }
+}
+
+fn sessions_for_output(state: &Common, output: &Output) -> impl Iterator<Item = Session> {
+    let workspace = state.shell.active_space(&output);
+    let maybe_fullscreen = workspace.get_fullscreen(&output);
+    workspace
+        .screencopy_sessions
+        .iter()
+        .map(|s| (&**s).clone())
+        .chain(
+            maybe_fullscreen
+                .and_then(|w| w.user_data().get::<ScreencopySessions>())
+                .map(|sessions| {
+                    sessions
+                        .0
+                        .borrow()
+                        .iter()
+                        .map(|s| (&**s).clone())
+                        .collect::<Vec<_>>()
+                })
+                .into_iter()
+                .flatten(),
+        )
+        .chain(
+            output
+                .user_data()
+                .get::<ScreencopySessions>()
+                .map(|sessions| {
+                    sessions
+                        .0
+                        .borrow()
+                        .iter()
+                        .map(|s| (&**s).clone())
+                        .collect::<Vec<_>>()
+                })
+                .into_iter()
+                .into_iter()
+                .flatten(),
+        )
+        .collect::<Vec<_>>()
+        .into_iter()
 }

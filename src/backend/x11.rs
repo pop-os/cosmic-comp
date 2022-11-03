@@ -6,6 +6,7 @@ use crate::{
     input::Devices,
     state::{BackendData, Common, Data},
     utils::prelude::*,
+    wayland::protocols::screencopy::{BufferParams, Session as ScreencopySession},
 };
 use anyhow::{Context, Result};
 use smithay::{
@@ -14,7 +15,9 @@ use smithay::{
         egl::{EGLContext, EGLDisplay},
         input::{Event, InputEvent},
         renderer::{
-            damage::DamageTrackedRenderer, gles2::Gles2Renderer, Bind, ImportDma, ImportEgl,
+            damage::DamageTrackedRenderer,
+            gles2::{Gles2Renderbuffer, Gles2Renderer},
+            Bind, ImportDma, ImportEgl,
         },
         x11::{Window, WindowBuilder, X11Backend, X11Event, X11Handle, X11Input, X11Surface},
     },
@@ -121,6 +124,7 @@ impl X11State {
             render: ping.clone(),
             dirty: false,
             pending: true,
+            screencopy: Vec::new(),
             #[cfg(feature = "debug")]
             fps: Fps::default(),
         });
@@ -130,9 +134,16 @@ impl X11State {
         Ok(output)
     }
 
-    pub fn schedule_render(&mut self, output: &Output) {
+    pub fn schedule_render(
+        &mut self,
+        output: &Output,
+        screencopy: Option<Vec<(ScreencopySession, BufferParams)>>,
+    ) {
         if let Some(surface) = self.surfaces.iter_mut().find(|s| s.output == *output) {
             surface.dirty = true;
+            if let Some(sessions) = screencopy {
+                surface.screencopy.extend(sessions);
+            }
             if !surface.pending {
                 surface.render.ping();
             }
@@ -172,6 +183,7 @@ impl X11State {
 pub struct Surface {
     window: Window,
     damage_tracker: DamageTrackedRenderer,
+    screencopy: Vec<(ScreencopySession, BufferParams)>,
     surface: X11Surface,
     output: Output,
     render: ping::Ping,
@@ -192,27 +204,36 @@ impl Surface {
             .buffer()
             .with_context(|| "Failed to allocate buffer")?;
         renderer
-            .bind(buffer)
+            .bind(buffer.clone())
             .with_context(|| "Failed to bind buffer")?;
 
-        match render::render_output(
+        match render::render_output::<_, Gles2Renderbuffer, _>(
             None,
             renderer,
             &mut self.damage_tracker,
             age as usize,
             state,
             &self.output,
-            true,
+            render::CursorMode::NotDefault,
+            if !self.screencopy.is_empty() {
+                Some((buffer, &self.screencopy))
+            } else {
+                None
+            },
             #[cfg(feature = "debug")]
             Some(&mut self.fps),
         ) {
-            Ok(_) => {
-                state.send_frames(&self.output);
+            Ok((_damage, states)) => {
+                self.screencopy.clear();
                 self.surface
                     .submit()
                     .with_context(|| "Failed to submit buffer for display")?;
+                state.send_frames(&self.output, &states);
             }
             Err(err) => {
+                for (session, params) in self.screencopy.drain(..) {
+                    state.still_pending(session, params)
+                }
                 self.surface.reset_buffers();
                 anyhow::bail!("Rendering failed: {}", err);
             }
@@ -417,8 +438,7 @@ impl State {
         self.process_input_event(event);
         // TODO actually figure out the output
         for output in self.common.shell.outputs() {
-            self.backend
-                .schedule_render(&self.common.event_loop_handle, output);
+            self.backend.x11().schedule_render(output, None);
         }
     }
 }

@@ -1,4 +1,6 @@
-use crate::state::State;
+use crate::{
+    state::State, utils::prelude::SeatExt, wayland::handlers::screencopy::ScreencopySessions,
+};
 use smithay::{
     backend::{
         input::KeyState,
@@ -187,9 +189,30 @@ impl KeyboardTarget<State> for CosmicWindow {
 
 impl PointerTarget<State> for CosmicWindow {
     fn enter(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
+        use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
+
+        if let Some(sessions) = self.window.user_data().get::<ScreencopySessions>() {
+            for session in &*sessions.0.borrow() {
+                session.cursor_enter(seat, InputType::Pointer)
+            }
+        }
+
         PointerTarget::enter(&self.window, seat, data, event)
     }
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
+        use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
+
+        if let Some(sessions) = self.window.user_data().get::<ScreencopySessions>() {
+            for session in &*sessions.0.borrow() {
+                let buffer_loc = (event.location.x, event.location.y); // we always screencast windows at 1x1 scale
+                if let Some((geo, hotspot)) =
+                    seat.cursor_geometry(buffer_loc, &data.common.start_time)
+                {
+                    session.cursor_info(seat, InputType::Pointer, geo, hotspot);
+                }
+            }
+        }
+
         PointerTarget::motion(&self.window, seat, data, event)
     }
     fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
@@ -199,6 +222,14 @@ impl PointerTarget<State> for CosmicWindow {
         PointerTarget::axis(&self.window, seat, data, frame)
     }
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
+        use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
+
+        if let Some(sessions) = self.window.user_data().get::<ScreencopySessions>() {
+            for session in &*sessions.0.borrow() {
+                session.cursor_leave(seat, InputType::Pointer)
+            }
+        }
+
         PointerTarget::leave(&self.window, seat, data, serial, time)
     }
 }

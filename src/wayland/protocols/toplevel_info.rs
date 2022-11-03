@@ -413,9 +413,9 @@ fn send_toplevel_to_client<D>(
             .iter()
             .filter(|o| !handle_state.outputs.contains(o))
         {
-            new_output.with_client_outputs(&client, |wl_output| {
-                instance.output_enter(wl_output);
-            });
+            for wl_output in new_output.client_outputs(&client) {
+                instance.output_enter(&wl_output);
+            }
             changed = true;
         }
         for old_output in handle_state
@@ -423,9 +423,9 @@ fn send_toplevel_to_client<D>(
             .iter()
             .filter(|o| !state.outputs.contains(o))
         {
-            old_output.with_client_outputs(&client, |wl_output| {
-                instance.output_leave(wl_output);
-            });
+            for wl_output in old_output.client_outputs(&client) {
+                instance.output_leave(&wl_output);
+            }
             changed = true;
         }
         handle_state.outputs = state.outputs.clone();

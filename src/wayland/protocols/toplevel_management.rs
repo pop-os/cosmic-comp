@@ -182,12 +182,12 @@ where
                 let window = window_from_handle(toplevel).unwrap();
                 if let Some(toplevel_state) = window.user_data().get::<ToplevelState>() {
                     let mut toplevel_state = toplevel_state.lock().unwrap();
-                    if let Some(client) = surface.client_id() {
+                    if let Some(client) = surface.client() {
                         if width == 0 && height == 0 {
-                            toplevel_state.rectangles.remove(&client);
+                            toplevel_state.rectangles.remove(&client.id());
                         } else {
                             toplevel_state.rectangles.insert(
-                                client,
+                                client.id(),
                                 (
                                     surface,
                                     Rectangle::from_loc_and_size((x, y), (width, height)),
@@ -207,7 +207,7 @@ where
         if !mng_state
             .instances
             .iter()
-            .any(|i| i.client_id().map(|c| c == client).unwrap_or(false))
+            .any(|i| i.client().map(|c| c.id() == client).unwrap_or(false))
         {
             for toplevel in state.toplevel_info_state_mut().toplevels.iter() {
                 if let Some(toplevel_state) = toplevel.user_data().get::<ToplevelState>() {

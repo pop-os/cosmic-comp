@@ -203,7 +203,7 @@ impl CosmicMapped {
     pub fn set_tiled(&self, tiled: bool) {
         for toplevel in match &self.element {
             // we use the tiled state of stack windows anyway to get rid of decorations
-            CosmicMappedInternal::Stack(s) => None,
+            CosmicMappedInternal::Stack(_) => None,
             CosmicMappedInternal::Window(w) => Some(w.window.toplevel()),
             _ => unreachable!(),
         } {

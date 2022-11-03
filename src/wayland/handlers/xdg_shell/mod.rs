@@ -20,8 +20,7 @@ use smithay::{
     wayland::{
         seat::WaylandFocus,
         shell::xdg::{
-            Configure, PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler,
-            XdgShellState,
+            PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
         },
     },
 };
@@ -64,18 +63,6 @@ impl XdgShellHandler for State {
                     .popups
                     .track_popup(PopupKind::from(surface))
                     .unwrap();
-            }
-        }
-    }
-
-    fn ack_configure(&mut self, surface: WlSurface, configure: Configure) {
-        if let Configure::Toplevel(configure) = configure {
-            // If we would re-position the window inside the grab we would get a weird jittery animation.
-            // We only want to resize once the client has acknoledged & commited the new size,
-            // so we need to carefully track the state through different handlers.
-            if let Some(mapped) = self.common.shell.element_for_surface(&surface) {
-                //TODO
-                //crate::shell::layout::floating::ResizeSurfaceGrab::ack_configure(window, configure)
             }
         }
     }

@@ -9,18 +9,23 @@ use crate::{
     shell::Shell,
     state::{BackendData, ClientState, Common, Data},
     utils::prelude::*,
+    wayland::{
+        handlers::screencopy::UserdataExt,
+        protocols::screencopy::{BufferParams, Session as ScreencopySession},
+    },
 };
 
 use anyhow::{Context, Result};
 use smithay::{
     backend::{
         allocator::{dmabuf::Dmabuf, gbm::GbmDevice, Format},
-        drm::{DrmDevice, DrmEvent, DrmEventTime, DrmNode, GbmBufferedSurface, NodeType},
+        drm::{DrmDevice, DrmEvent, DrmNode, GbmBufferedSurface, NodeType},
         egl::{EGLContext, EGLDevice, EGLDisplay},
         input::InputEvent,
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
             damage::DamageTrackedRenderer,
+            element::RenderElementStates,
             gles2::{Gles2Renderbuffer, Gles2Renderer},
             multigpu::{egl::EglGlesBackend, GpuManager},
             Bind,
@@ -61,7 +66,7 @@ mod socket;
 use session_fd::*;
 use socket::*;
 
-use super::render::GlMultiRenderer;
+use super::render::{CursorMode, GlMultiRenderer};
 
 pub struct KmsState {
     devices: HashMap<DrmNode, Device>,
@@ -89,7 +94,7 @@ pub struct Surface {
     damage_tracker: DamageTrackedRenderer,
     connector: connector::Handle,
     output: Output,
-    last_submit: Option<DrmEventTime>,
+    last_submit: Option<RenderElementStates>,
     refresh_rate: u32,
     vrr: bool,
     pending: bool,
@@ -123,12 +128,11 @@ pub fn init_backend(
             }
             data.state.process_input_event(event);
             for output in data.state.common.shell.outputs() {
-                if let Err(err) = data
-                    .state
-                    .backend
-                    .kms()
-                    .schedule_render(&data.state.common.event_loop_handle, output)
-                {
+                if let Err(err) = data.state.backend.kms().schedule_render(
+                    &data.state.common.event_loop_handle,
+                    output,
+                    None,
+                ) {
                     slog_scope::crit!(
                         "Error scheduling event loop for output {}: {:?}",
                         output.name(),
@@ -267,12 +271,16 @@ pub fn init_backend(
                     surface.pending = false;
                 }
                 for output in data.state.common.shell.outputs() {
-                    if let Err(err) = data
-                        .state
-                        .backend
-                        .kms()
-                        .schedule_render(&data.state.common.event_loop_handle, output)
-                    {
+                    let sessions = output.pending_buffers().collect::<Vec<_>>();
+                    if let Err(err) = data.state.backend.kms().schedule_render(
+                        &data.state.common.event_loop_handle,
+                        output,
+                        if !sessions.is_empty() {
+                            Some(sessions)
+                        } else {
+                            None
+                        },
+                    ) {
                         slog_scope::crit!(
                             "Error scheduling event loop for output {}: {:?}",
                             output.name(),
@@ -372,9 +380,12 @@ impl State {
                         if let Some(surface) = device.surfaces.get_mut(&crtc) {
                             match surface.surface.as_mut().map(|x| x.frame_submitted()) {
                                 Some(Ok(_)) => {
-                                    surface.last_submit = metadata.take().map(|data| data.time);
+                                    let _submit_time = metadata.take().map(|data| data.time);
                                     surface.pending = false;
-                                    data.state.common.send_frames(&surface.output);
+                                    data.state.common.send_frames(
+                                        &surface.output,
+                                        &surface.last_submit.take().unwrap(),
+                                    );
                                 }
                                 Some(Err(err)) => {
                                     slog_scope::warn!("Failed to submit frame: {}", err)
@@ -749,6 +760,7 @@ impl Surface {
         api: &mut GpuManager<EglGlesBackend<Gles2Renderer>>,
         target_node: &DrmNode,
         state: &mut Common,
+        screencopy: Option<&[(ScreencopySession, BufferParams)]>,
     ) -> Result<()> {
         if self.surface.is_none() {
             return Ok(());
@@ -766,18 +778,20 @@ impl Surface {
             .bind(buffer.clone())
             .with_context(|| "Failed to bind buffer")?;
 
-        match render::render_output(
+        match render::render_output::<_, Gles2Renderbuffer, _>(
             Some(&render_node),
             &mut renderer,
             &mut self.damage_tracker,
             age as usize,
             state,
             &self.output,
-            false,
+            CursorMode::All,
+            screencopy.map(|sessions| (buffer, sessions)),
             #[cfg(feature = "debug")]
             Some(&mut self.fps),
         ) {
-            Ok(_) => {
+            Ok((_damage, states)) => {
+                self.last_submit = Some(states);
                 surface
                     .queue_buffer()
                     .with_context(|| "Failed to submit buffer for display")?;
@@ -893,7 +907,16 @@ impl KmsState {
 
         shell.refresh_outputs();
         if recreated {
-            if let Err(err) = self.schedule_render(loop_handle, output) {
+            let sessions = output.pending_buffers().collect::<Vec<_>>();
+            if let Err(err) = self.schedule_render(
+                loop_handle,
+                output,
+                if !sessions.is_empty() {
+                    Some(sessions)
+                } else {
+                    None
+                },
+            ) {
                 slog_scope::crit!(
                     "Error scheduling event loop for output {}: {:?}",
                     output.name(),
@@ -956,6 +979,7 @@ impl KmsState {
         &mut self,
         loop_handle: &LoopHandle<'_, Data>,
         output: &Output,
+        mut screencopy_sessions: Option<Vec<(ScreencopySession, BufferParams)>>,
     ) -> Result<(), InsertError<Timer>> {
         if let Some((device, crtc, surface)) = self
             .devices
@@ -1001,7 +1025,13 @@ impl KmsState {
                                     &mut backend.api,
                                     &device.render_node,
                                     &mut data.state.common,
+                                    screencopy_sessions.as_deref(),
                                 ) {
+                                    if let Some(sessions) = screencopy_sessions.as_mut() {
+                                        for (session, params) in sessions.drain(..) {
+                                            data.state.common.still_pending(session, params);
+                                        }
+                                    }
                                     if backend.session.is_active() {
                                         slog_scope::error!("Error rendering: {}", err);
                                         return TimeoutAction::ToDuration(Duration::from_secs_f64(

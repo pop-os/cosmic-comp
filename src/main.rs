@@ -73,10 +73,13 @@ fn main() -> Result<()> {
 
         // do we need to trigger another render
         if data.state.common.dirty_flag.swap(false, Ordering::SeqCst) {
+            // TODO: Render workspace sessions
             for output in data.state.common.shell.outputs() {
-                data.state
-                    .backend
-                    .schedule_render(&data.state.common.event_loop_handle, output)
+                data.state.backend.schedule_render(
+                    &data.state.common.event_loop_handle,
+                    output,
+                    None,
+                )
             }
         }
 

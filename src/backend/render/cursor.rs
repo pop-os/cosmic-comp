@@ -172,8 +172,8 @@ pub fn draw_dnd_icon<R: Renderer + ImportAll>(
     )
 }
 
-struct CursorState {
-    cursor: Cursor,
+pub struct CursorState {
+    pub cursor: Cursor,
     current_image: RefCell<Option<Image>>,
     image_cache: RefCell<HashMap<(TypeId, usize), Vec<(Image, Box<dyn Any + 'static>)>>>,
 }
@@ -219,7 +219,7 @@ where
 
         if let CursorImageStatus::Surface(ref wl_surface) = cursor_status {
             return draw_surface_cursor(wl_surface, location.to_i32_round(), scale);
-        } else if draw_default {
+        } else if draw_default && CursorImageStatus::Default == cursor_status {
             let integer_scale = scale.x.max(scale.y).ceil() as u32;
 
             let seat_userdata = seat.user_data();

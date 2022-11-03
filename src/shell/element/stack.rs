@@ -1,4 +1,7 @@
-use crate::state::State;
+use crate::{
+    state::State, utils::prelude::SeatExt, wayland::handlers::screencopy::ScreencopySessions,
+};
+use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
 use smithay::{
     backend::{
         input::KeyState,
@@ -29,6 +32,9 @@ use std::{
 pub struct CosmicStack {
     windows: Arc<Mutex<Vec<Window>>>,
     active: Arc<AtomicUsize>,
+    last_location: Arc<Mutex<Option<(Point<f64, Logical>, Serial, u32)>>>,
+    previous_keyboard: Arc<AtomicUsize>,
+    previous_pointer: Arc<AtomicUsize>,
     pub(super) header: Arc<Mutex<Option<HeaderBar>>>,
 }
 
@@ -68,7 +74,9 @@ impl CosmicStack {
             .iter()
             .position(|w| w == window)
         {
-            self.active.store(val, Ordering::SeqCst)
+            let old = self.active.swap(val, Ordering::SeqCst);
+            self.previous_keyboard.store(old, Ordering::SeqCst);
+            self.previous_pointer.store(old, Ordering::SeqCst);
         }
     }
 
@@ -91,6 +99,69 @@ impl CosmicStack {
                 Kind::Xdg(xdg) => xdg.with_pending_state(|state| state.size = Some(surface_size)),
             };
         }
+    }
+
+    fn keyboard_leave_if_previous(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        serial: Serial,
+    ) -> usize {
+        let active = self.active.load(Ordering::SeqCst);
+        let previous = self.previous_keyboard.swap(active, Ordering::SeqCst);
+        if previous != active {
+            KeyboardTarget::leave(&self.windows.lock().unwrap()[previous], seat, data, serial);
+            // TODO: KeyboardTarget::enter(&self.windows.lock().unwrap()[active], seat, data, serial, seat.keys())
+        }
+        active
+    }
+
+    fn pointer_leave_if_previous(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        serial: Serial,
+        time: u32,
+        location: Point<f64, Logical>,
+    ) -> usize {
+        let active = self.active.load(Ordering::SeqCst);
+        let previous = self.previous_pointer.swap(active, Ordering::SeqCst);
+        if previous != active {
+            if let Some(sessions) = self.windows.lock().unwrap()[previous]
+                .user_data()
+                .get::<ScreencopySessions>()
+            {
+                for session in &*sessions.0.borrow() {
+                    session.cursor_leave(seat, InputType::Pointer)
+                }
+            }
+            PointerTarget::leave(
+                &self.windows.lock().unwrap()[previous],
+                seat,
+                data,
+                serial,
+                time,
+            );
+            if let Some(sessions) = self.windows.lock().unwrap()[active]
+                .user_data()
+                .get::<ScreencopySessions>()
+            {
+                for session in &*sessions.0.borrow() {
+                    session.cursor_enter(seat, InputType::Pointer)
+                }
+            }
+            PointerTarget::enter(
+                &self.windows.lock().unwrap()[active],
+                seat,
+                data,
+                &MotionEvent {
+                    location,
+                    serial,
+                    time,
+                },
+            );
+        }
+        active
     }
 }
 
@@ -158,6 +229,8 @@ impl KeyboardTarget<State> for CosmicStack {
         keys: Vec<KeysymHandle<'_>>,
         serial: Serial,
     ) {
+        let active = self.active.load(Ordering::SeqCst);
+        self.previous_keyboard.store(active, Ordering::SeqCst);
         KeyboardTarget::enter(
             &self.windows.lock().unwrap()[self.active.load(Ordering::SeqCst)],
             seat,
@@ -167,12 +240,8 @@ impl KeyboardTarget<State> for CosmicStack {
         )
     }
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial) {
-        KeyboardTarget::leave(
-            &self.windows.lock().unwrap()[self.active.load(Ordering::SeqCst)],
-            seat,
-            data,
-            serial,
-        )
+        let active = self.keyboard_leave_if_previous(seat, data, serial);
+        KeyboardTarget::leave(&self.windows.lock().unwrap()[active], seat, data, serial)
     }
     fn key(
         &self,
@@ -183,8 +252,9 @@ impl KeyboardTarget<State> for CosmicStack {
         serial: Serial,
         time: u32,
     ) {
+        let active = self.keyboard_leave_if_previous(seat, data, serial);
         KeyboardTarget::key(
-            &self.windows.lock().unwrap()[self.active.load(Ordering::SeqCst)],
+            &self.windows.lock().unwrap()[active],
             seat,
             data,
             key,
@@ -200,8 +270,9 @@ impl KeyboardTarget<State> for CosmicStack {
         modifiers: ModifiersState,
         serial: Serial,
     ) {
+        let active = self.keyboard_leave_if_previous(seat, data, serial);
         KeyboardTarget::modifiers(
-            &self.windows.lock().unwrap()[self.active.load(Ordering::SeqCst)],
+            &self.windows.lock().unwrap()[active],
             seat,
             data,
             modifiers,
@@ -212,6 +283,16 @@ impl KeyboardTarget<State> for CosmicStack {
 
 impl PointerTarget<State> for CosmicStack {
     fn enter(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
+        if let Some(sessions) = self.active().user_data().get::<ScreencopySessions>() {
+            for session in &*sessions.0.borrow() {
+                session.cursor_enter(seat, InputType::Pointer)
+            }
+        }
+
+        *self.last_location.lock().unwrap() = Some((event.location, event.serial, event.time));
+        let active = self.active.load(Ordering::SeqCst);
+        self.previous_pointer.store(active, Ordering::SeqCst);
+
         PointerTarget::enter(
             &self.windows.lock().unwrap()[self.active.load(Ordering::SeqCst)],
             seat,
@@ -220,14 +301,27 @@ impl PointerTarget<State> for CosmicStack {
         )
     }
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
-        PointerTarget::motion(
-            &self.windows.lock().unwrap()[self.active.load(Ordering::SeqCst)],
-            seat,
-            data,
-            event,
-        )
+        let active =
+            self.pointer_leave_if_previous(seat, data, event.serial, event.time, event.location);
+
+        if let Some(sessions) = self.active().user_data().get::<ScreencopySessions>() {
+            for session in &*sessions.0.borrow() {
+                let buffer_loc = (event.location.x, event.location.y); // we always screencast windows at 1x1 scale
+                if let Some((geo, hotspot)) =
+                    seat.cursor_geometry(buffer_loc, &data.common.start_time)
+                {
+                    session.cursor_info(seat, InputType::Pointer, geo, hotspot);
+                }
+            }
+        }
+
+        PointerTarget::motion(&self.windows.lock().unwrap()[active], seat, data, event)
     }
     fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
+        if let Some((location, _serial, _time)) = self.last_location.lock().unwrap().clone() {
+            self.pointer_leave_if_previous(seat, data, event.serial, event.time, location);
+        }
+
         PointerTarget::button(
             &self.windows.lock().unwrap()[self.active.load(Ordering::SeqCst)],
             seat,
@@ -236,6 +330,10 @@ impl PointerTarget<State> for CosmicStack {
         )
     }
     fn axis(&self, seat: &Seat<State>, data: &mut State, frame: AxisFrame) {
+        if let Some((location, serial, time)) = self.last_location.lock().unwrap().clone() {
+            self.pointer_leave_if_previous(seat, data, serial, time, location);
+        }
+
         PointerTarget::axis(
             &self.windows.lock().unwrap()[self.active.load(Ordering::SeqCst)],
             seat,
@@ -244,6 +342,15 @@ impl PointerTarget<State> for CosmicStack {
         )
     }
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
+        if let Some((location, serial, time)) = self.last_location.lock().unwrap().clone() {
+            self.pointer_leave_if_previous(seat, data, serial, time, location);
+        }
+        if let Some(sessions) = self.active().user_data().get::<ScreencopySessions>() {
+            for session in &*sessions.0.borrow() {
+                session.cursor_leave(seat, InputType::Pointer)
+            }
+        }
+
         PointerTarget::leave(
             &self.windows.lock().unwrap()[self.active.load(Ordering::SeqCst)],
             seat,

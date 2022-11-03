@@ -7,12 +7,18 @@ use crate::{
     shell::Shell,
     utils::prelude::*,
     wayland::protocols::{
-        drm::WlDrmState, output_configuration::OutputConfigurationState,
+        drm::WlDrmState,
+        output_configuration::OutputConfigurationState,
+        screencopy::{BufferParams, Session as ScreencopySession},
         workspace::WorkspaceClientState,
     },
 };
 use smithay::{
-    backend::drm::DrmNode,
+    backend::{
+        drm::DrmNode,
+        renderer::element::{default_primary_scanout_output_compare, RenderElementStates},
+    },
+    desktop::utils::{surface_primary_scanout_output, update_surface_primary_scanout_output},
     input::{Seat, SeatState},
     output::{Mode as OutputMode, Output, Scale},
     reexports::{
@@ -33,7 +39,7 @@ use std::{
     cell::RefCell,
     ffi::OsString,
     sync::{atomic::AtomicBool, Arc},
-    time::Instant,
+    time::{Duration, Instant},
 };
 #[cfg(feature = "debug")]
 use std::{collections::VecDeque, time::Duration};
@@ -185,14 +191,19 @@ impl BackendData {
         result
     }
 
-    pub fn schedule_render(&mut self, loop_handle: &LoopHandle<'_, Data>, output: &Output) {
+    pub fn schedule_render(
+        &mut self,
+        loop_handle: &LoopHandle<'_, Data>,
+        output: &Output,
+        screencopy: Option<Vec<(ScreencopySession, BufferParams)>>,
+    ) {
         match self {
-            BackendData::Winit(_) => {} // We cannot do this on the winit backend.
+            BackendData::Winit(ref mut state) => state.pending_screencopy(screencopy), // We cannot do this on the winit backend.
             // Winit has a very strict render-loop and skipping frames breaks atleast the wayland winit-backend.
             // Swapping with damage (which should be empty on these frames) is likely good enough anyway.
-            BackendData::X11(ref mut state) => state.schedule_render(output),
+            BackendData::X11(ref mut state) => state.schedule_render(output, screencopy),
             BackendData::Kms(ref mut state) => {
-                if let Err(err) = state.schedule_render(loop_handle, output) {
+                if let Err(err) = state.schedule_render(loop_handle, output, screencopy) {
                     slog_scope::crit!("Failed to schedule event, are we shutting down? {:?}", err);
                 }
             }
@@ -348,17 +359,53 @@ impl Common {
         self.last_active_seat.as_ref().expect("No seat?")
     }
 
-    pub fn send_frames(&self, output: &Output) {
-        let workspace = self.shell.active_space(output);
-        workspace.mapped().for_each(|mapped| {
-            if workspace.outputs_for_element(mapped).any(|o| &o == output) {
+    pub fn send_frames(&self, output: &Output, render_element_states: &RenderElementStates) {
+        let time = self.start_time.elapsed();
+        let throttle = Some(Duration::from_secs(1));
+
+        let active = self.shell.active_space(output);
+        active.mapped().for_each(|mapped| {
+            if active.outputs_for_element(mapped).any(|o| &o == output) {
                 let window = mapped.active_window();
-                window.send_frame(self.start_time.elapsed().as_millis() as u32)
+                window.with_surfaces(|surface, states| {
+                    update_surface_primary_scanout_output(
+                        surface,
+                        output,
+                        states,
+                        render_element_states,
+                        default_primary_scanout_output_compare,
+                    )
+                });
+                window.send_frame(output, time, throttle, surface_primary_scanout_output);
             }
         });
+
+        for space in self
+            .shell
+            .workspaces
+            .spaces()
+            .filter(|w| w.handle != active.handle)
+        {
+            space.mapped().for_each(|mapped| {
+                if space.outputs_for_element(mapped).any(|o| &o == output) {
+                    let window = mapped.active_window();
+                    window.send_frame(output, time, throttle, |_, _| None);
+                }
+            });
+        }
+
         let map = smithay::desktop::layer_map_for_output(output);
         for layer_surface in map.layers() {
-            layer_surface.send_frame(self.start_time.elapsed().as_millis() as u32)
+            layer_surface.with_surfaces(|surface, states| {
+                update_surface_primary_scanout_output(
+                    surface,
+                    output,
+                    states,
+                    render_element_states,
+                    default_primary_scanout_output_compare,
+                )
+            });
+            layer_surface.send_frame(output, time, throttle, surface_primary_scanout_output);
         }
     }
 }

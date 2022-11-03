@@ -61,4 +61,11 @@ debug = true
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/Smithay//smithay", rev = "0c7dbfa8" }
+#smithay = { git = "https://github.com/Smithay//smithay", rev = "5671502cd" }
+smithay = { path = "../smithay" }
+
+[patch.crates-io]
+wayland-server = { git = "https://github.com/Smithay/wayland-rs", rev = "13f6a9be" }
+wayland-backend = { git = "https://github.com/Smithay/wayland-rs", rev = "13f6a9be" }
+wayland-egl = { git = "https://github.com/Smithay/wayland-rs", rev = "13f6a9be" }
+wayland-sys = { git = "https://github.com/Smithay/wayland-rs", rev = "13f6a9be" }

@@ -189,11 +189,11 @@ impl FloatingLayout {
         &mut self,
         mapped: &CosmicMapped,
         seat: &Seat<State>,
-        serial: Serial,
+        _serial: Serial,
         start_data: PointerGrabStartData<State>,
         edges: ResizeEdge,
     ) -> Option<ResizeSurfaceGrab> {
-        if let Some(pointer) = seat.get_pointer() {
+        if seat.get_pointer().is_some() {
             let location = self.space.element_location(&mapped).unwrap();
             let size = mapped.geometry().size;
 
@@ -204,8 +204,6 @@ impl FloatingLayout {
                 location,
                 size,
             ))
-
-            //pointer.set_grab(state, grab, serial, Focus::Clear);
         } else {
             None
         }

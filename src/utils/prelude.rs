@@ -1,8 +1,18 @@
-use crate::input::{ActiveOutput, SeatId};
+use std::{cell::RefCell, sync::Mutex};
+
+use crate::{
+    backend::render::cursor::CursorState,
+    input::{ActiveOutput, SeatId},
+};
 use smithay::{
-    input::Seat,
+    desktop::utils::bbox_from_surface_tree,
+    input::{
+        pointer::{CursorImageAttributes, CursorImageStatus},
+        Seat,
+    },
     output::Output,
-    utils::{Logical, Rectangle, Transform},
+    utils::{Buffer, IsAlive, Logical, Point, Rectangle, Transform},
+    wayland::compositor::with_states,
 };
 
 pub use crate::shell::{Shell, Workspace};
@@ -34,6 +44,11 @@ pub trait SeatExt {
 
     fn active_output(&self) -> Output;
     fn set_active_output(&self, output: &Output);
+    fn cursor_geometry(
+        &self,
+        loc: impl Into<Point<f64, Buffer>>,
+        start_time: &std::time::Instant,
+    ) -> Option<(Rectangle<i32, Buffer>, Point<i32, Buffer>)>;
 }
 
 impl SeatExt for Seat<State> {
@@ -55,5 +70,64 @@ impl SeatExt for Seat<State> {
             .unwrap()
             .0
             .borrow_mut() = output.clone();
+    }
+
+    fn cursor_geometry(
+        &self,
+        loc: impl Into<Point<f64, Buffer>>,
+        start_time: &std::time::Instant,
+    ) -> Option<(Rectangle<i32, Buffer>, Point<i32, Buffer>)> {
+        let location = loc.into().to_i32_round();
+
+        let cursor_status = self
+            .user_data()
+            .get::<RefCell<CursorImageStatus>>()
+            .map(|cell| {
+                let mut cursor_status = cell.borrow_mut();
+                if let CursorImageStatus::Surface(ref surface) = *cursor_status {
+                    if !surface.alive() {
+                        *cursor_status = CursorImageStatus::Default;
+                    }
+                }
+                cursor_status.clone()
+            })
+            .unwrap_or(CursorImageStatus::Default);
+
+        match cursor_status {
+            CursorImageStatus::Surface(surface) => {
+                let hotspot = with_states(&surface, |states| {
+                    states
+                        .data_map
+                        .get::<Mutex<CursorImageAttributes>>()
+                        .unwrap()
+                        .lock()
+                        .unwrap()
+                        .hotspot
+                });
+                let geo = bbox_from_surface_tree(&surface, (location.x, location.y));
+                let buffer_geo = Rectangle::from_loc_and_size(
+                    (geo.loc.x, geo.loc.y),
+                    geo.size.to_buffer(1, Transform::Normal),
+                );
+                Some((buffer_geo, (hotspot.x, hotspot.y).into()))
+            }
+            CursorImageStatus::Default => {
+                let seat_userdata = self.user_data();
+                seat_userdata.insert_if_missing(CursorState::default);
+                let state = seat_userdata.get::<CursorState>().unwrap();
+                let frame = state
+                    .cursor
+                    .get_image(1, start_time.elapsed().as_millis() as u32);
+
+                Some((
+                    Rectangle::from_loc_and_size(
+                        location,
+                        (frame.width as i32, frame.height as i32),
+                    ),
+                    (frame.xhot as i32, frame.yhot as i32).into(),
+                ))
+            }
+            CursorImageStatus::Hidden => None,
+        }
     }
 }

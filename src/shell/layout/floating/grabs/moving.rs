@@ -13,13 +13,13 @@ use smithay::{
     desktop::space::SpaceElement,
     input::{
         pointer::{
-            AxisFrame, ButtonEvent, Focus, GrabStartData as PointerGrabStartData, MotionEvent,
+            AxisFrame, ButtonEvent, GrabStartData as PointerGrabStartData, MotionEvent,
             PointerGrab, PointerInnerHandle,
         },
         Seat,
     },
     output::Output,
-    utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial},
+    utils::{IsAlive, Logical, Point, Serial},
 };
 use std::cell::RefCell;
 

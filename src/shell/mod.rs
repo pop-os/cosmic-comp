@@ -276,7 +276,7 @@ impl WorkspaceMode {
         }
     }
 
-    pub fn active_num(&self, output: &Output) -> usize {
+    fn active_num(&self, output: &Output) -> usize {
         match self {
             WorkspaceMode::Global(set) => set.active,
             WorkspaceMode::OutputBound(sets) => {
@@ -691,7 +691,7 @@ impl Shell {
         }
     }
 
-    pub fn outputs_for_surface<'a>(
+    pub fn visible_outputs_for_surface<'a>(
         &'a self,
         surface: &'a WlSurface,
     ) -> impl Iterator<Item = Output> + 'a {
@@ -703,13 +703,54 @@ impl Shell {
             Some(output) => {
                 Box::new(std::iter::once(output.clone())) as Box<dyn Iterator<Item = Output>>
             }
-            None => Box::new(self.workspaces.spaces().flat_map(|w| {
+            None => Box::new(self.outputs().map(|o| self.active_space(o)).flat_map(|w| {
                 w.mapped()
                     .find(|e| e.has_surface(surface, WindowSurfaceType::ALL))
                     .into_iter()
                     .flat_map(|e| w.outputs_for_element(e))
             })),
         }
+    }
+
+    pub fn workspaces_for_surface(
+        &self,
+        surface: &WlSurface,
+    ) -> impl Iterator<Item = (WorkspaceHandle, Output)> {
+        match self.outputs.iter().find(|o| {
+            let map = layer_map_for_output(o);
+            map.layer_for_surface(surface, WindowSurfaceType::ALL)
+                .is_some()
+        }) {
+            Some(output) => self
+                .workspaces
+                .spaces()
+                .filter(move |workspace| {
+                    workspace
+                        .floating_layer
+                        .space
+                        .outputs()
+                        .any(|o| o == output)
+                })
+                .map(|w| (w.handle.clone(), output.clone()))
+                .collect::<Vec<_>>(),
+            None => self
+                .workspaces
+                .spaces()
+                .filter_map(|w| {
+                    if let Some(mapped) = w
+                        .mapped()
+                        .find(|e| e.has_surface(surface, WindowSurfaceType::ALL))
+                    {
+                        let outputs = w.outputs_for_element(mapped);
+                        Some(std::iter::repeat(w.handle.clone()).zip(outputs).fuse())
+                    } else {
+                        None
+                    }
+                })
+                .flatten()
+                .collect::<Vec<_>>(),
+        }
+        .into_iter()
     }
 
     pub fn element_for_surface(&self, surface: &WlSurface) -> Option<&CosmicMapped> {
@@ -728,6 +769,14 @@ impl Shell {
         self.workspaces
             .spaces_mut()
             .find(|workspace| workspace.mapped().any(|m| m == mapped))
+    }
+
+    pub fn space_for_handle(&self, handle: &WorkspaceHandle) -> Option<&Workspace> {
+        self.workspaces.spaces().find(|w| &w.handle == handle)
+    }
+
+    pub fn space_for_handle_mut(&mut self, handle: &WorkspaceHandle) -> Option<&mut Workspace> {
+        self.workspaces.spaces_mut().find(|w| &w.handle == handle)
     }
 
     pub fn outputs(&self) -> impl Iterator<Item = &Output> {

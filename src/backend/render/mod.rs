@@ -11,19 +11,28 @@ use crate::{
         layout::floating::SeatMoveGrabState, CosmicMappedRenderElement, WorkspaceRenderElement,
     },
     state::Common,
-    wayland::handlers::data_device::get_dnd_icon,
+    wayland::{
+        handlers::{data_device::get_dnd_icon, screencopy::render_to_buffer},
+        protocols::{
+            screencopy::{BufferParams, Session as ScreencopySession},
+            workspace::WorkspaceHandle,
+        },
+    },
 };
 
+use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::FailureReason;
 use smithay::{
     backend::{
+        allocator::dmabuf::Dmabuf,
         drm::DrmNode,
         renderer::{
             damage::{
                 DamageTrackedRenderer, DamageTrackedRendererError as RenderError, OutputNoMode,
             },
+            element::RenderElementStates,
             gles2::{Gles2Renderbuffer, Gles2Renderer},
             multigpu::{egl::EglGlesBackend, MultiFrame, MultiRenderer},
-            ImportAll, ImportMem, Renderer,
+            Bind, Blit, ExportMem, ImportAll, ImportMem, Offscreen, Renderer, TextureFilter,
         },
     },
     output::Output,
@@ -42,7 +51,7 @@ pub type GlMultiRenderer<'a> = MultiRenderer<
 >;
 pub type GlMultiFrame = MultiFrame<EglGlesBackend<Gles2Renderer>, EglGlesBackend<Gles2Renderer>>;
 
-static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
+pub static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
 
 smithay::render_elements! {
     pub CosmicElement<R> where R: ImportAll;
@@ -53,11 +62,18 @@ smithay::render_elements! {
     //EguiFrame=EguiFrame,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CursorMode {
+    None,
+    NotDefault,
+    All,
+}
+
 pub fn cursor_elements<E, R>(
     renderer: &mut R,
     state: &Common,
     output: &Output,
-    hardware_cursor: bool,
+    mode: CursorMode,
 ) -> Vec<E>
 where
     R: Renderer + ImportAll + ImportMem,
@@ -76,18 +92,20 @@ where
             .shell
             .map_global_to_space(pointer.current_location().to_i32_round(), output);
 
-        elements.extend(
-            cursor::draw_cursor(
-                renderer,
-                seat,
-                location,
-                scale.into(),
-                &state.start_time,
-                !hardware_cursor,
-            )
-            .into_iter()
-            .map(E::from),
-        );
+        if mode != CursorMode::None {
+            elements.extend(
+                cursor::draw_cursor(
+                    renderer,
+                    seat,
+                    location,
+                    scale.into(),
+                    &state.start_time,
+                    mode != CursorMode::NotDefault,
+                )
+                .into_iter()
+                .map(E::from),
+            );
+        }
 
         if let Some(wl_surface) = get_dnd_icon(seat) {
             elements.extend(
@@ -112,21 +130,30 @@ where
     elements
 }
 
-pub fn render_output<R>(
+pub fn render_output<R, Target, Source>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,
     damage_tracker: &mut DamageTrackedRenderer,
     age: usize,
     state: &mut Common,
     output: &Output,
-    hardware_cursor: bool,
+    cursor_mode: CursorMode,
+    screencopy: Option<(Source, &[(ScreencopySession, BufferParams)])>,
     #[cfg(feature = "debug")] mut fps: Option<&mut Fps>,
-) -> Result<Option<Vec<Rectangle<i32, Physical>>>, RenderError<R>>
+) -> Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), RenderError<R>>
 where
-    R: Renderer + ImportAll + ImportMem,
+    R: Renderer
+        + ImportAll
+        + ImportMem
+        + ExportMem
+        + Bind<Dmabuf>
+        + Offscreen<Target>
+        + Bind<Source>
+        + Blit<Source>,
     <R as Renderer>::TextureId: Clone + 'static,
+    Source: Clone,
 {
-    let idx = state.shell.workspaces.active_num(output);
+    let handle = state.shell.workspaces.active(output).handle;
     render_workspace(
         gpu,
         renderer,
@@ -134,24 +161,34 @@ where
         age,
         state,
         output,
-        idx,
-        hardware_cursor,
+        &handle,
+        cursor_mode,
+        screencopy,
     )
 }
 
-pub fn render_workspace<R>(
-    _gpu: Option<&DrmNode>,
+pub fn render_workspace<R, Target, Source>(
+    gpu: Option<&DrmNode>,
     renderer: &mut R,
     damage_tracker: &mut DamageTrackedRenderer,
     age: usize,
     state: &mut Common,
     output: &Output,
-    idx: usize,
-    hardware_cursor: bool,
+    handle: &WorkspaceHandle,
+    cursor_mode: CursorMode,
+    screencopy: Option<(Source, &[(ScreencopySession, BufferParams)])>,
     #[cfg(feature = "debug")] mut fps: Option<&mut Fps>,
-) -> Result<Option<Vec<Rectangle<i32, Physical>>>, RenderError<R>>
+) -> Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), RenderError<R>>
 where
-    R: Renderer + ImportAll + ImportMem,
+    R: Renderer
+        + ImportAll
+        + ImportMem
+        + ExportMem
+        + Bind<Dmabuf>
+        + Offscreen<Target>
+        + Bind<Source>
+        + Blit<Source>,
+    Source: Clone,
     <R as Renderer>::TextureId: Clone + 'static,
 {
     #[cfg(feature = "debug")]
@@ -159,14 +196,9 @@ where
         fps.start();
     }
 
-    let workspace = &state
-        .shell
-        .workspaces
-        .get(idx, output)
-        .ok_or(OutputNoMode)?;
+    let workspace = state.shell.space_for_handle(&handle).ok_or(OutputNoMode)?;
 
-    let mut elements: Vec<CosmicElement<R>> =
-        cursor_elements(renderer, state, output, hardware_cursor);
+    let mut elements: Vec<CosmicElement<R>> = cursor_elements(renderer, state, output, cursor_mode);
 
     #[cfg(feature = "debug")]
     {
@@ -217,6 +249,40 @@ where
     #[cfg(feature = "debug")]
     if let Some(ref mut fps) = fps {
         fps.end();
+    }
+
+    if let Some((source, buffers)) = screencopy {
+        if res.is_ok() {
+            for (session, params) in buffers {
+                match render_to_buffer(
+                    gpu.cloned(),
+                    renderer,
+                    &session,
+                    params,
+                    output.current_transform(),
+                    |_node, renderer, dtr, age| {
+                        let res = dtr.damage_output(age, &elements, slog_scope::logger())?;
+
+                        if let (Some(ref damage), _) = &res {
+                            for rect in damage {
+                                renderer
+                                    .blit_from(source.clone(), *rect, *rect, TextureFilter::Nearest)
+                                    .map_err(RenderError::Rendering)?;
+                            }
+                        }
+
+                        Ok(res)
+                    },
+                ) {
+                    Ok(true) => {} // success
+                    Ok(false) => state.still_pending(session.clone(), params.clone()),
+                    Err(err) => {
+                        slog_scope::warn!("Error rendering to screencopy session: {}", err);
+                        session.failed(FailureReason::Unspec);
+                    }
+                }
+            }
+        }
     }
 
     res

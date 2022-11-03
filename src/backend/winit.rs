@@ -6,11 +6,12 @@ use crate::{
     input::Devices,
     state::{BackendData, Common, Data},
     utils::prelude::*,
+    wayland::protocols::screencopy::{BufferParams, Session as ScreencopySession},
 };
 use anyhow::{anyhow, Context, Result};
 use smithay::{
     backend::{
-        renderer::{damage::DamageTrackedRenderer, ImportDma, ImportEgl},
+        renderer::{damage::DamageTrackedRenderer, gles2::Gles2Renderbuffer, ImportDma, ImportEgl},
         winit::{self, WinitEvent, WinitGraphicsBackend, WinitVirtualDevice},
     },
     desktop::layer_map_for_output,
@@ -26,11 +27,14 @@ use std::cell::RefCell;
 #[cfg(feature = "debug")]
 use crate::state::Fps;
 
+use super::render::CursorMode;
+
 pub struct WinitState {
     // The winit backend currently has no notion of multiple windows
     pub backend: WinitGraphicsBackend,
     output: Output,
     damage_tracker: DamageTrackedRenderer,
+    screencopy: Vec<(ScreencopySession, BufferParams)>,
     #[cfg(feature = "debug")]
     fps: Fps,
 }
@@ -42,24 +46,34 @@ impl WinitState {
             .with_context(|| "Failed to bind buffer")?;
         let age = self.backend.buffer_age().unwrap_or(0);
 
-        match render::render_output(
+        let surface = self.backend.egl_surface();
+        match render::render_output::<_, Gles2Renderbuffer, _>(
             None,
             self.backend.renderer(),
             &mut self.damage_tracker,
             age,
             state,
             &self.output,
-            true,
+            CursorMode::NotDefault,
+            if !self.screencopy.is_empty() {
+                Some((surface, &self.screencopy))
+            } else {
+                None
+            },
             #[cfg(feature = "debug")]
             Some(&mut self.fps),
         ) {
-            Ok(damage) => {
-                state.send_frames(&self.output);
+            Ok((damage, states)) => {
+                self.screencopy.clear();
                 self.backend
-                    .submit(damage.as_ref().map(|x| &**x))
+                    .submit(damage.as_deref())
                     .with_context(|| "Failed to submit buffer for display")?;
+                state.send_frames(&self.output, &states);
             }
             Err(err) => {
+                for (session, params) in self.screencopy.drain(..) {
+                    state.still_pending(session, params)
+                }
                 anyhow::bail!("Rendering failed: {}", err);
             }
         };
@@ -90,6 +104,12 @@ impl WinitState {
             Err(anyhow::anyhow!("Cannot set window size"))
         } else {
             Ok(())
+        }
+    }
+
+    pub fn pending_screencopy(&mut self, new: Option<Vec<(ScreencopySession, BufferParams)>>) {
+        if let Some(sessions) = new {
+            self.screencopy.extend(sessions);
         }
     }
 }
@@ -186,6 +206,7 @@ pub fn init_backend(
         backend,
         output: output.clone(),
         damage_tracker: DamageTrackedRenderer::from_output(&output),
+        screencopy: Vec::new(),
         #[cfg(feature = "debug")]
         fps: Fps::default(),
     });

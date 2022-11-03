@@ -1,14 +1,17 @@
 use crate::{
-    shell::{
-        element::CosmicWindow,
-        layout::{
-            floating::{FloatingLayout, MoveSurfaceGrab},
-            tiling::TilingLayout,
-        },
+    shell::layout::{
+        floating::{FloatingLayout, MoveSurfaceGrab},
+        tiling::TilingLayout,
     },
     state::State,
     utils::prelude::*,
-    wayland::protocols::workspace::WorkspaceHandle,
+    wayland::{
+        handlers::screencopy::DropableSession,
+        protocols::{
+            screencopy::{BufferParams, Session as ScreencopySession},
+            workspace::WorkspaceHandle,
+        },
+    },
 };
 
 use indexmap::IndexSet;
@@ -17,21 +20,18 @@ use smithay::{
         element::{surface::WaylandSurfaceRenderElement, AsRenderElements},
         ImportAll, Renderer,
     },
-    desktop::{
-        layer_map_for_output, space::SpaceElement, Kind, LayerSurface, Space, Window,
-        WindowSurfaceType,
-    },
+    desktop::{layer_map_for_output, space::SpaceElement, Kind, LayerSurface, Window},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
-    output::{Output, WeakOutput},
+    output::Output,
     reexports::{
         wayland_protocols::xdg::shell::server::xdg_toplevel::{self, ResizeEdge},
-        wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
+        wayland_server::protocol::wl_surface::WlSurface,
     },
     render_elements,
     utils::{IsAlive, Logical, Point, Rectangle, Scale, Serial},
     wayland::shell::wlr_layer::Layer,
 };
-use std::{collections::HashMap, time::Duration};
+use std::collections::HashMap;
 
 use super::{
     element::CosmicMapped,
@@ -48,6 +48,8 @@ pub struct Workspace {
     pub fullscreen: HashMap<Output, Window>,
     pub handle: WorkspaceHandle,
     pub focus_stack: FocusStacks,
+    pub pending_buffers: Vec<(ScreencopySession, BufferParams)>,
+    pub screencopy_sessions: Vec<DropableSession>,
 }
 
 #[derive(Debug, Default)]
@@ -62,6 +64,8 @@ impl Workspace {
             fullscreen: HashMap::new(),
             handle,
             focus_stack: FocusStacks::default(),
+            pending_buffers: Vec::new(),
+            screencopy_sessions: Vec::new(),
         }
     }
 
