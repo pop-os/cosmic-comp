@@ -20,7 +20,7 @@ use smithay::{
                 surface::WaylandSurfaceRenderElement, AsRenderElements, RenderElementStates,
             },
             gles2::{Gles2Renderbuffer, Gles2Renderer},
-            Bind, BufferType, ExportMem, Offscreen, Renderer,
+            Bind, BufferType, ExportMem, ImportAll, Offscreen, Renderer,
         },
     },
     desktop::Window,
@@ -37,7 +37,7 @@ use smithay::{
 };
 
 use crate::{
-    backend::render::{render_output, render_workspace, CursorMode, CLEAR_COLOR},
+    backend::render::{cursor, render_output, render_workspace, CursorMode, CLEAR_COLOR},
     state::{BackendData, ClientState, Common, State},
     utils::prelude::OutputExt,
     wayland::protocols::{
@@ -48,6 +48,8 @@ use crate::{
         workspace::WorkspaceHandle,
     },
 };
+
+use super::data_device::get_dnd_icon;
 
 pub type PendingScreencopyBuffers = RefCell<Vec<(Session, BufferParams)>>;
 
@@ -670,6 +672,12 @@ pub fn render_workspace_to_buffer(
     .map_err(|err| (FailureReason::Unspec, err.into()))
 }
 
+smithay::render_elements! {
+    pub WindowCaptureElement<R> where R: ImportAll;
+    WaylandElement=WaylandSurfaceRenderElement,
+    CursorElement=cursor::CursorRenderElement<R>,
+}
+
 pub fn render_window_to_buffer(
     state: &mut State,
     session: &Session,
@@ -706,12 +714,58 @@ pub fn render_window_to_buffer(
         Transform::Normal,
         |_node, renderer, dtr, age| {
             // TODO cursor elements!
-            let elements =
-                AsRenderElements::<Gles2Renderer>::render_elements::<WaylandSurfaceRenderElement>(
-                    window,
-                    (-geometry.loc.x, -geometry.loc.y).into(),
-                    Scale::from(1.0),
-                );
+            let mut elements = AsRenderElements::<Gles2Renderer>::render_elements::<
+                WindowCaptureElement<Gles2Renderer>,
+            >(
+                window,
+                (-geometry.loc.x, -geometry.loc.y).into(),
+                Scale::from(1.0),
+            );
+
+            for seat in state.common.seats() {
+                if let Some(location) = {
+                    // we need to find the mapped element in that case
+                    if let Some(mapped) = state
+                        .common
+                        .shell
+                        .element_for_surface(window.toplevel().wl_surface())
+                    {
+                        mapped.cursor_position(seat).and_then(|mut p| {
+                            p -= mapped.active_window_offset().loc.to_f64();
+                            if p.x < 0. || p.y < 0. {
+                                None
+                            } else {
+                                Some(p)
+                            }
+                        })
+                    } else {
+                        None
+                    }
+                } {
+                    if session.cursor_mode() == ScreencopyCursorMode::Embedded {
+                        elements.extend(
+                            cursor::draw_cursor(
+                                renderer,
+                                seat,
+                                location,
+                                1.0.into(),
+                                &state.common.start_time,
+                                true,
+                            )
+                            .into_iter()
+                            .map(WindowCaptureElement::from),
+                        );
+                    }
+
+                    if let Some(wl_surface) = get_dnd_icon(seat) {
+                        elements.extend(
+                            cursor::draw_dnd_icon(&wl_surface, location.to_i32_round(), 1.0)
+                                .into_iter()
+                                .map(WindowCaptureElement::from),
+                        );
+                    }
+                }
+            }
 
             dtr.render_output(renderer, age, &elements, CLEAR_COLOR, None)
         },

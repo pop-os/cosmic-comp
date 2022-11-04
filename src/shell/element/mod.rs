@@ -1,4 +1,4 @@
-use crate::state::State;
+use crate::{state::State, utils::prelude::SeatExt};
 use id_tree::NodeId;
 use smithay::{
     backend::{
@@ -25,6 +25,7 @@ use smithay::{
     },
 };
 use std::{
+    collections::HashMap,
     hash::Hash,
     sync::{Arc, Mutex},
 };
@@ -48,6 +49,7 @@ pub struct CosmicMapped {
     element: CosmicMappedInternal,
 
     // associated data
+    last_cursor_position: Arc<Mutex<HashMap<usize, Point<f64, Logical>>>>,
 
     //tiling
     pub(super) tiling_node_id: Arc<Mutex<Option<NodeId>>>,
@@ -106,6 +108,45 @@ impl CosmicMapped {
             CosmicMappedInternal::Window(win) => win.window.clone(),
             _ => unreachable!(),
         }
+    }
+
+    pub fn active_window_offset(&self) -> Rectangle<i32, Logical> {
+        match &self.element {
+            CosmicMappedInternal::Stack(stack) => {
+                let location = (
+                    0,
+                    stack
+                        .header
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .map_or(0, |header| header.height()),
+                );
+                let size = stack.active().geometry().size;
+                Rectangle::from_loc_and_size(location, size)
+            }
+            CosmicMappedInternal::Window(win) => {
+                let location = (
+                    0,
+                    win.header
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .map_or(0, |header| header.height()),
+                );
+                let size = win.window.geometry().size;
+                Rectangle::from_loc_and_size(location, size)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn cursor_position(&self, seat: &Seat<State>) -> Option<Point<f64, Logical>> {
+        self.last_cursor_position
+            .lock()
+            .unwrap()
+            .get(&seat.id())
+            .cloned()
     }
 
     pub fn set_active(&self, window: &Window) {
@@ -565,6 +606,10 @@ impl KeyboardTarget<State> for CosmicMapped {
 
 impl PointerTarget<State> for CosmicMapped {
     fn enter(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
+        self.last_cursor_position
+            .lock()
+            .unwrap()
+            .insert(seat.id(), event.location);
         match &self.element {
             CosmicMappedInternal::Stack(s) => PointerTarget::enter(s, seat, data, event),
             CosmicMappedInternal::Window(w) => PointerTarget::enter(w, seat, data, event),
@@ -572,6 +617,10 @@ impl PointerTarget<State> for CosmicMapped {
         }
     }
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
+        self.last_cursor_position
+            .lock()
+            .unwrap()
+            .insert(seat.id(), event.location);
         match &self.element {
             CosmicMappedInternal::Stack(s) => PointerTarget::motion(s, seat, data, event),
             CosmicMappedInternal::Window(w) => PointerTarget::motion(w, seat, data, event),
@@ -593,6 +642,7 @@ impl PointerTarget<State> for CosmicMapped {
         }
     }
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
+        self.last_cursor_position.lock().unwrap().remove(&seat.id());
         match &self.element {
             CosmicMappedInternal::Stack(s) => PointerTarget::leave(s, seat, data, serial, time),
             CosmicMappedInternal::Window(w) => PointerTarget::leave(w, seat, data, serial, time),
@@ -623,6 +673,7 @@ impl From<CosmicWindow> for CosmicMapped {
     fn from(w: CosmicWindow) -> Self {
         CosmicMapped {
             element: CosmicMappedInternal::Window(w),
+            last_cursor_position: Arc::new(Mutex::new(HashMap::new())),
             tiling_node_id: Arc::new(Mutex::new(None)),
             last_geometry: Arc::new(Mutex::new(None)),
             resize_state: Arc::new(Mutex::new(None)),
@@ -634,6 +685,7 @@ impl From<CosmicStack> for CosmicMapped {
     fn from(s: CosmicStack) -> Self {
         CosmicMapped {
             element: CosmicMappedInternal::Stack(s),
+            last_cursor_position: Arc::new(Mutex::new(HashMap::new())),
             tiling_node_id: Arc::new(Mutex::new(None)),
             last_geometry: Arc::new(Mutex::new(None)),
             resize_state: Arc::new(Mutex::new(None)),
