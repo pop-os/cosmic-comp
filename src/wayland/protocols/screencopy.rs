@@ -56,7 +56,7 @@ impl ScreencopyState {
     ) -> ScreencopyState
     where
         D: GlobalDispatch<ZcosmicScreencopyManagerV1, ScreencopyGlobalData>
-            + Dispatch<ZcosmicScreencopyManagerV1, ()>
+            + Dispatch<ZcosmicScreencopyManagerV1, Vec<WlCursorMode>>
             + Dispatch<ZcosmicScreencopySessionV1, SessionData>
             + ScreencopyHandler
             + WorkspaceHandler
@@ -508,7 +508,7 @@ pub trait ScreencopyHandler {
 impl<D> GlobalDispatch<ZcosmicScreencopyManagerV1, ScreencopyGlobalData, D> for ScreencopyState
 where
     D: GlobalDispatch<ZcosmicScreencopyManagerV1, ScreencopyGlobalData>
-        + Dispatch<ZcosmicScreencopyManagerV1, ()>
+        + Dispatch<ZcosmicScreencopyManagerV1, Vec<WlCursorMode>>
         + Dispatch<ZcosmicScreencopySessionV1, SessionData>
         + ScreencopyHandler
         + WorkspaceHandler
@@ -522,7 +522,7 @@ where
         global_data: &ScreencopyGlobalData,
         data_init: &mut DataInit<'_, D>,
     ) {
-        let global = data_init.init(resource, ());
+        let global = data_init.init(resource, global_data.cursor_modes.clone());
         for mode in &global_data.cursor_modes {
             global.supported_cursor_mode(*mode);
         }
@@ -533,15 +533,43 @@ where
     }
 }
 
+fn check_cursor(
+    cursor: WEnum<WlCursorMode>,
+    supported: &[WlCursorMode],
+    resource: &ZcosmicScreencopyManagerV1,
+) -> Option<WlCursorMode> {
+    match cursor.into_result() {
+        Ok(mode) => {
+            if !supported.contains(&mode) {
+                slog_scope::warn!("Client did send unsupported cursor mode: {:?}", mode);
+                resource.post_error(
+                    zcosmic_screencopy_manager_v1::Error::InvalidCursorMode,
+                    "Unsupported cursor mode",
+                );
+                return None;
+            }
+            Some(mode)
+        }
+        Err(err) => {
+            slog_scope::warn!("Client did send unknown cursor mode: {}", err);
+            resource.post_error(
+                zcosmic_screencopy_manager_v1::Error::InvalidCursorMode,
+                "Unknown cursor mode, wrong protocol version?",
+            );
+            None
+        }
+    }
+}
+
 fn init_session<D>(
     data_init: &mut DataInit<'_, D>,
     session: New<ZcosmicScreencopySessionV1>,
-    cursor: WEnum<WlCursorMode>,
+    cursor: WlCursorMode,
     _type: SessionType,
 ) -> Option<Session>
 where
     D: GlobalDispatch<ZcosmicScreencopyManagerV1, ScreencopyGlobalData>
-        + Dispatch<ZcosmicScreencopyManagerV1, ()>
+        + Dispatch<ZcosmicScreencopyManagerV1, Vec<WlCursorMode>>
         + Dispatch<ZcosmicScreencopySessionV1, SessionData>
         + ScreencopyHandler
         + WorkspaceHandler
@@ -552,9 +580,9 @@ where
             gone: false,
             pending_buffer: None,
             aux: AuxData::Normal {
-                cursor: match cursor.into_result() {
-                    Ok(WlCursorMode::Capture) => CursorMode::Captured(Vec::new()),
-                    Ok(WlCursorMode::Embedded) => CursorMode::Embedded,
+                cursor: match cursor {
+                    WlCursorMode::Capture => CursorMode::Captured(Vec::new()),
+                    WlCursorMode::Embedded => CursorMode::Embedded,
                     _ => CursorMode::None,
                 },
             },
@@ -564,14 +592,6 @@ where
     });
     let session = data_init.init(session, data.clone());
 
-    if let Err(err) = cursor.into_result() {
-        slog_scope::warn!("Client did send unknown cursor mode: {}", err);
-        session.post_error(
-            zcosmic_screencopy_session_v1::Error::InvalidCursorMode,
-            "Unknown cursor mode, wrong protocol version?",
-        );
-        return None;
-    };
     let session = Session {
         obj: SessionResource::Alive(session),
         data,
@@ -580,10 +600,10 @@ where
     Some(session)
 }
 
-impl<D> Dispatch<ZcosmicScreencopyManagerV1, (), D> for ScreencopyState
+impl<D> Dispatch<ZcosmicScreencopyManagerV1, Vec<WlCursorMode>, D> for ScreencopyState
 where
     D: GlobalDispatch<ZcosmicScreencopyManagerV1, ScreencopyGlobalData>
-        + Dispatch<ZcosmicScreencopyManagerV1, ()>
+        + Dispatch<ZcosmicScreencopyManagerV1, Vec<WlCursorMode>>
         + Dispatch<ZcosmicScreencopySessionV1, SessionData>
         + ScreencopyHandler
         + WorkspaceHandler
@@ -592,9 +612,9 @@ where
     fn request(
         state: &mut D,
         _client: &Client,
-        _resource: &ZcosmicScreencopyManagerV1,
+        resource: &ZcosmicScreencopyManagerV1,
         request: <ZcosmicScreencopyManagerV1 as smithay::reexports::wayland_server::Resource>::Request,
-        _data: &(),
+        data: &Vec<WlCursorMode>,
         _dhandle: &DisplayHandle,
         data_init: &mut DataInit<'_, D>,
     ) {
@@ -603,91 +623,23 @@ where
                 session,
                 output,
                 cursor,
-            } => match Output::from_resource(&output) {
-                Some(output) => {
-                    let session = match init_session(
-                        data_init,
-                        session,
-                        cursor,
-                        SessionType::Output(output.clone()),
-                    ) {
-                        Some(result) => result,
-                        None => {
-                            return;
-                        }
-                    };
-                    let formats = state.capture_output(output, session.clone());
-                    if !session.data.inner.lock().unwrap().gone {
-                        send_formats(&session.obj, formats);
-                    }
-                }
-                None => {
-                    let session =
-                        match init_session(data_init, session, cursor, SessionType::Unknown) {
-                            Some(result) => result,
-                            None => {
-                                return;
-                            }
-                        };
-                    session.failed(FailureReason::InvalidOutput);
-                    return;
-                }
-            },
-            zcosmic_screencopy_manager_v1::Request::CaptureToplevel {
-                session,
-                toplevel,
-                cursor,
-            } => match window_from_handle(toplevel) {
-                Some(window) => {
-                    let session = match init_session(
-                        data_init,
-                        session,
-                        cursor,
-                        SessionType::Window(window.clone()),
-                    ) {
-                        Some(result) => result,
-                        None => {
-                            return;
-                        }
-                    };
+            } => {
+                let Some(cursor) = check_cursor(cursor, &data, resource) else { return; };
 
-                    let formats = state.capture_toplevel(window, session.clone());
-                    if !session.data.inner.lock().unwrap().gone {
-                        send_formats(&session.obj, formats);
-                    }
-                }
-                None => {
-                    let session =
-                        match init_session(data_init, session, cursor, SessionType::Unknown) {
-                            Some(result) => result,
-                            None => {
-                                return;
-                            }
-                        };
-                    session.obj.failed(FailureReason::InvalidToplevel);
-                    return;
-                }
-            },
-            zcosmic_screencopy_manager_v1::Request::CaptureWorkspace {
-                session,
-                workspace,
-                output,
-                cursor,
-            } => match Output::from_resource(&output) {
-                Some(output) => match state.workspace_state().workspace_handle(&workspace) {
-                    Some(handle) => {
+                match Output::from_resource(&output) {
+                    Some(output) => {
                         let session = match init_session(
                             data_init,
                             session,
                             cursor,
-                            SessionType::Workspace(output.clone(), handle.clone()),
+                            SessionType::Output(output.clone()),
                         ) {
                             Some(result) => result,
                             None => {
                                 return;
                             }
                         };
-                        let formats = state.capture_workspace(handle, output, session.clone());
+                        let formats = state.capture_output(output, session.clone());
                         if !session.data.inner.lock().unwrap().gone {
                             send_formats(&session.obj, formats);
                         }
@@ -700,22 +652,106 @@ where
                                     return;
                                 }
                             };
-                        session.failed(FailureReason::InvalidWorkspace);
+                        session.failed(FailureReason::InvalidOutput);
                         return;
                     }
-                },
-                None => {
-                    let session =
-                        match init_session(data_init, session, cursor, SessionType::Unknown) {
+                }
+            }
+            zcosmic_screencopy_manager_v1::Request::CaptureToplevel {
+                session,
+                toplevel,
+                cursor,
+            } => {
+                let Some(cursor) = check_cursor(cursor, &data, resource) else { return; };
+
+                match window_from_handle(toplevel) {
+                    Some(window) => {
+                        let session = match init_session(
+                            data_init,
+                            session,
+                            cursor,
+                            SessionType::Window(window.clone()),
+                        ) {
                             Some(result) => result,
                             None => {
                                 return;
                             }
                         };
-                    session.failed(FailureReason::InvalidOutput);
-                    return;
+
+                        let formats = state.capture_toplevel(window, session.clone());
+                        if !session.data.inner.lock().unwrap().gone {
+                            send_formats(&session.obj, formats);
+                        }
+                    }
+                    None => {
+                        let session =
+                            match init_session(data_init, session, cursor, SessionType::Unknown) {
+                                Some(result) => result,
+                                None => {
+                                    return;
+                                }
+                            };
+                        session.obj.failed(FailureReason::InvalidToplevel);
+                        return;
+                    }
                 }
-            },
+            }
+            zcosmic_screencopy_manager_v1::Request::CaptureWorkspace {
+                session,
+                workspace,
+                output,
+                cursor,
+            } => {
+                let Some(cursor) = check_cursor(cursor, &data, resource) else { return; };
+
+                match Output::from_resource(&output) {
+                    Some(output) => match state.workspace_state().workspace_handle(&workspace) {
+                        Some(handle) => {
+                            let session = match init_session(
+                                data_init,
+                                session,
+                                cursor,
+                                SessionType::Workspace(output.clone(), handle.clone()),
+                            ) {
+                                Some(result) => result,
+                                None => {
+                                    return;
+                                }
+                            };
+                            let formats = state.capture_workspace(handle, output, session.clone());
+                            if !session.data.inner.lock().unwrap().gone {
+                                send_formats(&session.obj, formats);
+                            }
+                        }
+                        None => {
+                            let session = match init_session(
+                                data_init,
+                                session,
+                                cursor,
+                                SessionType::Unknown,
+                            ) {
+                                Some(result) => result,
+                                None => {
+                                    return;
+                                }
+                            };
+                            session.failed(FailureReason::InvalidWorkspace);
+                            return;
+                        }
+                    },
+                    None => {
+                        let session =
+                            match init_session(data_init, session, cursor, SessionType::Unknown) {
+                                Some(result) => result,
+                                None => {
+                                    return;
+                                }
+                            };
+                        session.failed(FailureReason::InvalidOutput);
+                        return;
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -724,7 +760,7 @@ where
 impl<D> Dispatch<ZcosmicScreencopySessionV1, SessionData, D> for ScreencopyState
 where
     D: GlobalDispatch<ZcosmicScreencopyManagerV1, ScreencopyGlobalData>
-        + Dispatch<ZcosmicScreencopyManagerV1, ()>
+        + Dispatch<ZcosmicScreencopyManagerV1, Vec<WlCursorMode>>
         + Dispatch<ZcosmicScreencopySessionV1, SessionData>
         + ScreencopyHandler
         + WorkspaceHandler
@@ -777,7 +813,7 @@ where
                     let session = match init_session(
                         data_init,
                         session,
-                        WEnum::Value(WlCursorMode::Capture),
+                        WlCursorMode::Capture,
                         SessionType::Unknown,
                     ) {
                         Some(result) => result,
@@ -900,7 +936,7 @@ macro_rules! delegate_screencopy {
             cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_manager_v1::ZcosmicScreencopyManagerV1: $crate::wayland::protocols::screencopy::ScreencopyGlobalData
         ] => $crate::wayland::protocols::screencopy::ScreencopyState);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_manager_v1::ZcosmicScreencopyManagerV1: ()
+            cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_manager_v1::ZcosmicScreencopyManagerV1: std::vec::Vec<cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_manager_v1::CursorMode>
         ] => $crate::wayland::protocols::screencopy::ScreencopyState);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
             cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::ZcosmicScreencopySessionV1: $crate::wayland::protocols::screencopy::SessionData
