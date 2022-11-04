@@ -14,7 +14,9 @@ use crate::{
     wayland::{
         handlers::{data_device::get_dnd_icon, screencopy::render_to_buffer},
         protocols::{
-            screencopy::{BufferParams, Session as ScreencopySession},
+            screencopy::{
+                BufferParams, CursorMode as ScreencopyCursorMode, Session as ScreencopySession,
+            },
             workspace::WorkspaceHandle,
         },
     },
@@ -26,7 +28,6 @@ use smithay::{
         allocator::dmabuf::Dmabuf,
         drm::DrmNode,
         renderer::{
-            buffer_dimensions,
             damage::{
                 DamageTrackedRenderer, DamageTrackedRendererError as RenderError, OutputNoMode,
             },
@@ -37,7 +38,7 @@ use smithay::{
         },
     },
     output::Output,
-    utils::{Physical, Rectangle, Transform},
+    utils::{Physical, Rectangle},
 };
 
 pub mod cursor;
@@ -176,7 +177,7 @@ pub fn render_workspace<R, Target, Source>(
     state: &mut Common,
     output: &Output,
     handle: &WorkspaceHandle,
-    cursor_mode: CursorMode,
+    mut cursor_mode: CursorMode,
     screencopy: Option<(Source, &[(ScreencopySession, BufferParams)])>,
     #[cfg(feature = "debug")] mut fps: Option<&mut Fps>,
 ) -> Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), RenderError<R>>
@@ -198,6 +199,21 @@ where
     }
 
     let workspace = state.shell.space_for_handle(&handle).ok_or(OutputNoMode)?;
+
+    let screencopy_contains_embedded = screencopy.as_ref().map_or(false, |(_, sessions)| {
+        sessions
+            .iter()
+            .any(|(s, _)| s.cursor_mode() == ScreencopyCursorMode::Embedded)
+    });
+    // cursor handling without a cursor_plane in this case is horrible.
+    // because what if some session disagree and/or the backend wants to render with a different mode?
+    // It seems we would need to render to an offscreen buffer in those cases (and do multiple renders, which messes with damage tracking).
+    // So for now, we just pick the worst mode (embedded), if any requires it.
+    //
+    // Once we move to a cursor_plane, the default framebuffer will never contain a cursor and we can just composite the cursor for each session separately on top (or not).
+    if screencopy_contains_embedded {
+        cursor_mode = CursorMode::All;
+    };
 
     let mut elements: Vec<CosmicElement<R>> = cursor_elements(renderer, state, output, cursor_mode);
 
@@ -255,13 +271,6 @@ where
     if let Some((source, buffers)) = screencopy {
         if res.is_ok() {
             for (session, params) in buffers {
-                let mode = output.current_mode().unwrap().size;
-                let buffer_size = buffer_dimensions(&params.buffer).unwrap();
-                if mode.to_logical(1).to_buffer(1, Transform::Normal) != buffer_size {
-                    session.failed(FailureReason::InvalidSize);
-                    continue;
-                }
-
                 match render_to_buffer(
                     gpu.cloned(),
                     renderer,
