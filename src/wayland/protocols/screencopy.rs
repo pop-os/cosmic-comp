@@ -566,7 +566,10 @@ where
 
     if let Err(err) = cursor.into_result() {
         slog_scope::warn!("Client did send unknown cursor mode: {}", err);
-        session.failed(FailureReason::UnknownInput);
+        session.post_error(
+            zcosmic_screencopy_session_v1::Error::InvalidCursorMode,
+            "Unknown cursor mode, wrong protocol version?",
+        );
         return None;
     };
     let session = Session {
@@ -661,7 +664,7 @@ where
                                 return;
                             }
                         };
-                    session.obj.failed(FailureReason::ToplevelDestroyed);
+                    session.obj.failed(FailureReason::InvalidToplevel);
                     return;
                 }
             },
@@ -697,7 +700,7 @@ where
                                     return;
                                 }
                             };
-                        session.failed(FailureReason::InvalidOutput);
+                        session.failed(FailureReason::InvalidWorkspace);
                         return;
                     }
                 },
@@ -782,7 +785,7 @@ where
                             return;
                         }
                     };
-                    session.failed(FailureReason::UnknownInput);
+                    session.failed(FailureReason::InvalidSeat);
                     return;
                 }
             },

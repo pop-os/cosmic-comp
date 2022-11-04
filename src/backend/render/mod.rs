@@ -26,6 +26,7 @@ use smithay::{
         allocator::dmabuf::Dmabuf,
         drm::DrmNode,
         renderer::{
+            buffer_dimensions,
             damage::{
                 DamageTrackedRenderer, DamageTrackedRendererError as RenderError, OutputNoMode,
             },
@@ -36,7 +37,7 @@ use smithay::{
         },
     },
     output::Output,
-    utils::{Physical, Rectangle},
+    utils::{Physical, Rectangle, Transform},
 };
 
 pub mod cursor;
@@ -254,6 +255,13 @@ where
     if let Some((source, buffers)) = screencopy {
         if res.is_ok() {
             for (session, params) in buffers {
+                let mode = output.current_mode().unwrap().size;
+                let buffer_size = buffer_dimensions(&params.buffer).unwrap();
+                if mode.to_logical(1).to_buffer(1, Transform::Normal) != buffer_size {
+                    session.failed(FailureReason::InvalidSize);
+                    continue;
+                }
+
                 match render_to_buffer(
                     gpu.cloned(),
                     renderer,

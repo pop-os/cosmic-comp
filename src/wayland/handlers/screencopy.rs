@@ -4,6 +4,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+use anyhow::anyhow;
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::{
     FailureReason, InputType,
 };
@@ -112,7 +113,7 @@ impl ScreencopyHandler for State {
             .unwrap()
             .0
             .borrow_mut()
-            .push(DropableSession(session, FailureReason::OutputDisabled));
+            .push(DropableSession(session, FailureReason::InvalidOutput));
 
         formats
     }
@@ -134,7 +135,7 @@ impl ScreencopyHandler for State {
         let workspace = match self.common.shell.space_for_handle_mut(&handle) {
             Some(workspace) => workspace,
             None => {
-                session.failed(FailureReason::Unspec);
+                session.failed(FailureReason::InvalidWorkspace);
                 return Vec::new();
             }
         };
@@ -145,7 +146,7 @@ impl ScreencopyHandler for State {
 
         workspace
             .screencopy_sessions
-            .push(DropableSession(session, FailureReason::InvalidOutput));
+            .push(DropableSession(session, FailureReason::InvalidWorkspace));
 
         formats
     }
@@ -217,7 +218,7 @@ impl ScreencopyHandler for State {
             .unwrap()
             .0
             .borrow_mut()
-            .push(DropableSession(session, FailureReason::ToplevelDestroyed));
+            .push(DropableSession(session, FailureReason::InvalidToplevel));
 
         formats
     }
@@ -250,7 +251,7 @@ impl ScreencopyHandler for State {
 
                 if buffer_size.to_physical(1) != mode {
                     slog_scope::warn!("Error during screencopy session: Buffer size doesn't match");
-                    session.failed(FailureReason::InvalidBuffer);
+                    session.failed(FailureReason::InvalidSize);
                     return;
                 }
             }
@@ -258,7 +259,7 @@ impl ScreencopyHandler for State {
                 let geometry = window.geometry();
                 if buffer_size != geometry.size {
                     slog_scope::warn!("Error during screencopy session: Buffer size doesn't match");
-                    session.failed(FailureReason::InvalidBuffer);
+                    session.failed(FailureReason::InvalidSize);
                     return;
                 }
             }
@@ -302,7 +303,7 @@ impl ScreencopyHandler for State {
                 SessionType::Workspace(_output, handle) => {
                     match self.common.shell.space_for_handle_mut(&handle) {
                         Some(workspace) => workspace.pending_buffers.push((session, params)),
-                        None => session.failed(FailureReason::OutputDisabled),
+                        None => session.failed(FailureReason::InvalidWorkspace),
                     };
                 }
                 SessionType::Window(window) => {
@@ -397,7 +398,7 @@ fn formats_for_output(
     let mode = match output.current_mode() {
         Some(mode) => mode.size.to_logical(1).to_buffer(1, Transform::Normal),
         None => {
-            return Err(FailureReason::OutputDisabled);
+            return Err(FailureReason::InvalidOutput);
         }
     };
 
@@ -557,6 +558,14 @@ pub fn render_output_to_buffer(
     params: BufferParams,
     output: &Output,
 ) -> Result<bool, (FailureReason, anyhow::Error)> {
+    let mode = output
+        .current_mode()
+        .map(|mode| mode.size.to_logical(1).to_buffer(1, Transform::Normal));
+    let buffer_size = buffer_dimensions(&params.buffer).unwrap();
+    if mode != Some(buffer_size) {
+        return Err((FailureReason::InvalidSize, anyhow!("Output changed mode")));
+    }
+
     let node = node_from_params(&params, &mut state.backend, Some(output));
     let mut _tmp_multirenderer = None;
     let renderer = match &mut state.backend {
@@ -608,6 +617,14 @@ pub fn render_workspace_to_buffer(
     output: &Output,
     handle: &WorkspaceHandle,
 ) -> Result<bool, (FailureReason, anyhow::Error)> {
+    let mode = output
+        .current_mode()
+        .map(|mode| mode.size.to_logical(1).to_buffer(1, Transform::Normal));
+    let buffer_size = buffer_dimensions(&params.buffer).unwrap();
+    if mode != Some(buffer_size) {
+        return Err((FailureReason::InvalidSize, anyhow!("Output changed mode")));
+    }
+
     let node = node_from_params(&params, &mut state.backend, Some(output));
     let mut _tmp_multirenderer = None;
     let renderer = match &mut state.backend {
@@ -660,6 +677,10 @@ pub fn render_window_to_buffer(
     window: &Window,
 ) -> Result<bool, (FailureReason, anyhow::Error)> {
     let geometry = window.geometry();
+    let buffer_size = buffer_dimensions(&params.buffer).unwrap();
+    if buffer_size != geometry.size.to_buffer(1, Transform::Normal) {
+        return Err((FailureReason::InvalidSize, anyhow!("Window changed size")));
+    }
 
     let node = node_from_params(&params, &mut state.backend, None);
     let mut _tmp_multirenderer = None;
