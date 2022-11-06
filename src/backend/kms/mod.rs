@@ -94,7 +94,6 @@ pub struct Surface {
     damage_tracker: DamageTrackedRenderer,
     connector: connector::Handle,
     output: Output,
-    last_submit: Option<RenderElementStates>,
     refresh_rate: u32,
     vrr: bool,
     pending: bool,
@@ -382,10 +381,6 @@ impl State {
                                 Some(Ok(_)) => {
                                     let _submit_time = metadata.take().map(|data| data.time);
                                     surface.pending = false;
-                                    data.state.common.send_frames(
-                                        &surface.output,
-                                        &surface.last_submit.take().unwrap(),
-                                    );
                                 }
                                 Some(Err(err)) => {
                                     slog_scope::warn!("Failed to submit frame: {}", err)
@@ -701,7 +696,6 @@ impl Device {
             connector: conn,
             vrr,
             refresh_rate,
-            last_submit: None,
             pending: false,
             render_timer_token: None,
             #[cfg(feature = "debug")]
@@ -791,7 +785,7 @@ impl Surface {
             Some(&mut self.fps),
         ) {
             Ok((_damage, states)) => {
-                self.last_submit = Some(states);
+                state.send_frames(&self.output, &states);
                 surface
                     .queue_buffer()
                     .with_context(|| "Failed to submit buffer for display")?;
@@ -801,6 +795,7 @@ impl Surface {
                 anyhow::bail!("Rendering failed: {}", err);
             }
         };
+
         Ok(())
     }
 }
