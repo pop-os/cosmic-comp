@@ -437,7 +437,7 @@ impl Workspace {
 
             // overlay and top layer surfaces
             let lower = {
-                let (upper, lower): (Vec<&LayerSurface>, Vec<&LayerSurface>) = layer_map
+                let (lower, upper): (Vec<&LayerSurface>, Vec<&LayerSurface>) = layer_map
                     .layers()
                     .rev()
                     .partition(|s| matches!(s.layer(), Layer::Background | Layer::Bottom));

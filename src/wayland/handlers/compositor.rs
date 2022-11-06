@@ -100,7 +100,7 @@ impl State {
         if !initial_configure_sent {
             // compute initial dimensions by mapping
             Shell::map_layer(self, &surface);
-            // this will also send a configure
+            surface.layer_surface().send_configure();
         }
         initial_configure_sent
     }
