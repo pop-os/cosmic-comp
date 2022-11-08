@@ -3,7 +3,7 @@
 use crate::utils::prelude::*;
 use smithay::{
     delegate_layer_shell,
-    desktop::{LayerSurface, PopupKind},
+    desktop::{layer_map_for_output, LayerSurface, PopupKind, WindowSurfaceType},
     output::Output,
     reexports::wayland_server::protocol::wl_output::WlOutput,
     wayland::shell::{
@@ -13,6 +13,8 @@ use smithay::{
         xdg::PopupSurface,
     },
 };
+
+use super::screencopy::PendingScreencopyBuffers;
 
 impl WlrLayerShellHandler for State {
     fn shell_state(&mut self) -> &mut WlrLayerShellState {
@@ -26,7 +28,6 @@ impl WlrLayerShellHandler for State {
         _layer: Layer,
         namespace: String,
     ) {
-        super::mark_dirty_on_drop(&self.common, surface.wl_surface());
         let seat = self.common.last_active_seat().clone();
         let output = wl_output
             .as_ref()
@@ -49,6 +50,42 @@ impl WlrLayerShellHandler for State {
                 .popups
                 .track_popup(PopupKind::from(popup))
                 .unwrap();
+        }
+    }
+
+    fn layer_destroyed(&mut self, surface: WlrLayerSurface) {
+        let maybe_output = self
+            .common
+            .shell
+            .outputs()
+            .find(|o| {
+                let map = layer_map_for_output(o);
+                map.layer_for_surface(surface.wl_surface(), WindowSurfaceType::TOPLEVEL)
+                    .is_some()
+            })
+            .cloned();
+
+        if let Some(output) = maybe_output {
+            let mut map = layer_map_for_output(&output);
+            let layer = map
+                .layer_for_surface(surface.wl_surface(), WindowSurfaceType::TOPLEVEL)
+                .unwrap()
+                .clone();
+            map.unmap_layer(&layer);
+
+            // collect screencopy sessions needing an update
+            let mut scheduled_sessions = self.schedule_workspace_sessions(surface.wl_surface());
+            if let Some(sessions) = output.user_data().get::<PendingScreencopyBuffers>() {
+                scheduled_sessions
+                    .get_or_insert_with(Vec::new)
+                    .extend(sessions.borrow_mut().drain(..));
+            }
+
+            self.backend.schedule_render(
+                &self.common.event_loop_handle,
+                &output,
+                scheduled_sessions,
+            );
         }
     }
 }

@@ -26,10 +26,10 @@ use smithay::{
     desktop::Window,
     output::Output,
     reexports::wayland_server::{
-        protocol::{wl_buffer::WlBuffer, wl_shm::Format as ShmFormat},
+        protocol::{wl_buffer::WlBuffer, wl_shm::Format as ShmFormat, wl_surface::WlSurface},
         Resource,
     },
-    utils::{Physical, Rectangle, Scale, Transform},
+    utils::{IsAlive, Physical, Rectangle, Scale, Transform},
     wayland::{
         dmabuf::get_dmabuf,
         shm::{with_buffer_contents, with_buffer_contents_mut},
@@ -866,6 +866,107 @@ impl UserdataExt for Window {
             .map(|pending| pending.borrow_mut().split_off(0).into_iter())
             .into_iter()
             .flatten()
+    }
+}
+
+impl State {
+    pub fn schedule_window_session(&mut self, surface: &WlSurface) {
+        if let Some(element) = self.common.shell.element_for_surface(surface).cloned() {
+            let active = element.active_window();
+            if active.toplevel().wl_surface() == surface {
+                for (session, params) in active.pending_buffers() {
+                    let window = active.clone();
+                    self.common.event_loop_handle.insert_idle(move |data| {
+                        if !session.alive() {
+                            return;
+                        }
+
+                        match render_window_to_buffer(
+                            &mut data.state,
+                            &session,
+                            params.clone(),
+                            &window,
+                        ) {
+                            // rendering yielded no damage, buffer is still pending
+                            Ok(false) => data.state.common.still_pending(session, params),
+                            Ok(true) => {} // success
+                            Err((reason, err)) => {
+                                slog_scope::warn!("Screencopy session failed: {}", err);
+                                session.failed(reason);
+                            }
+                        }
+                    });
+                }
+            }
+        }
+    }
+
+    pub fn schedule_workspace_sessions(
+        &mut self,
+        surface: &WlSurface,
+    ) -> Option<Vec<(Session, BufferParams)>> {
+        // here we store additional workspace_sessions, we should handle, when rendering the corresponding output anyway
+        let mut output_sessions: Option<Vec<(Session, BufferParams)>> = None;
+
+        // lets check which workspaces this surface belongs to
+        let active_spaces = self
+            .common
+            .shell
+            .outputs()
+            .map(|o| (o.clone(), self.common.shell.active_space(o).handle.clone()))
+            .collect::<Vec<_>>();
+        for (handle, output) in self.common.shell.workspaces_for_surface(surface) {
+            let workspace = self.common.shell.space_for_handle_mut(&handle).unwrap();
+            if !workspace.pending_buffers.is_empty() {
+                // TODO: replace with drain_filter....
+                let mut i = 0;
+                while i < workspace.pending_buffers.len() {
+                    if let SessionType::Workspace(o, w) =
+                        workspace.pending_buffers[i].0.session_type()
+                    {
+                        if active_spaces.contains(&(o.clone(), w)) {
+                            // surface is on an active workspace/output combo, add to workspace_sessions
+                            let (session, params) = workspace.pending_buffers.remove(i);
+                            output_sessions
+                                .get_or_insert_with(Vec::new)
+                                .push((session, params));
+                        } else if handle == w && output == o {
+                            // surface is visible on an offscreen workspace session, schedule a new render
+                            let (session, params) = workspace.pending_buffers.remove(i);
+                            let output = output.clone();
+                            self.common.event_loop_handle.insert_idle(move |data| {
+                                if !session.alive() {
+                                    return;
+                                }
+                                match render_workspace_to_buffer(
+                                    &mut data.state,
+                                    &session,
+                                    params.clone(),
+                                    &output,
+                                    &handle,
+                                ) {
+                                    Ok(false) => {
+                                        // rendering yielded no new damage, buffer still pending
+                                        data.state.common.still_pending(session, params);
+                                    }
+                                    Ok(true) => {}
+                                    Err((reason, err)) => {
+                                        slog_scope::warn!("Screencopy session failed: {}", err);
+                                        session.failed(reason);
+                                    }
+                                }
+                            });
+                        } else {
+                            i += 1;
+                        }
+                    } else {
+                        unreachable!();
+                    }
+                }
+            }
+        }
+
+        output_sessions
     }
 }
 

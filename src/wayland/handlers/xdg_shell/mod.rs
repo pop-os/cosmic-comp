@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::utils::prelude::*;
+use crate::{utils::prelude::*, wayland::protocols::screencopy::SessionType};
 use smithay::{
     delegate_xdg_shell,
     desktop::{
@@ -26,6 +26,8 @@ use smithay::{
 };
 use std::cell::Cell;
 
+use super::screencopy::PendingScreencopyBuffers;
+
 pub mod popup;
 
 pub type PopupGrabData = Cell<Option<PopupGrab<State>>>;
@@ -36,8 +38,6 @@ impl XdgShellHandler for State {
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
-        super::mark_dirty_on_drop(&self.common, surface.wl_surface());
-
         let seat = self.common.last_active_seat().clone();
         let window = Window::new(Kind::Xdg(surface));
         self.common.shell.toplevel_info_state.new_toplevel(&window);
@@ -46,8 +46,6 @@ impl XdgShellHandler for State {
     }
 
     fn new_popup(&mut self, surface: PopupSurface, positioner: PositionerState) {
-        super::mark_dirty_on_drop(&self.common, surface.wl_surface());
-
         surface.with_pending_state(|state| {
             state.geometry = positioner.get_geometry();
             state.positioner = positioner;
@@ -278,6 +276,45 @@ impl XdgShellHandler for State {
                     .unwrap();
                 workspace.unfullscreen_request(&window)
             }
+        }
+    }
+
+    fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
+        let outputs = self
+            .common
+            .shell
+            .visible_outputs_for_surface(surface.wl_surface())
+            .collect::<Vec<_>>();
+        for output in outputs.iter() {
+            self.common.shell.active_space_mut(output).refresh();
+        }
+
+        // screencopy
+        let mut scheduled_sessions = self.schedule_workspace_sessions(surface.wl_surface());
+        for output in outputs.into_iter() {
+            if let Some(sessions) = output.user_data().get::<PendingScreencopyBuffers>() {
+                scheduled_sessions
+                    .get_or_insert_with(Vec::new)
+                    .extend(sessions.borrow_mut().drain(..));
+            }
+            self.backend.schedule_render(
+                &self.common.event_loop_handle,
+                &output,
+                scheduled_sessions.as_ref().map(|sessions| {
+                    sessions
+                        .iter()
+                        .filter(|(s, _)| match s.session_type() {
+                            SessionType::Output(o) | SessionType::Workspace(o, _)
+                                if o == output =>
+                            {
+                                true
+                            }
+                            _ => false,
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>()
+                }),
+            );
         }
     }
 }

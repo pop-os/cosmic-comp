@@ -39,7 +39,6 @@ use smithay::{
 use std::{
     cell::RefCell,
     ffi::OsString,
-    sync::{atomic::AtomicBool, Arc},
     time::{Duration, Instant},
 };
 #[cfg(feature = "debug")]
@@ -75,7 +74,6 @@ pub struct Common {
 
     //pub output_conf: ConfigurationManager,
     pub shell: Shell,
-    pub dirty_flag: Arc<AtomicBool>,
 
     seats: Vec<Seat<State>>,
     last_active_seat: Option<Seat<State>>,
@@ -242,11 +240,6 @@ impl State {
 
         let shell = Shell::new(&config, dh);
 
-        #[cfg(not(feature = "debug"))]
-        let dirty_flag = Arc::new(AtomicBool::new(false));
-        #[cfg(feature = "debug")]
-        let dirty_flag = log.dirty_flag.clone();
-
         State {
             common: Common {
                 config,
@@ -256,7 +249,6 @@ impl State {
                 event_loop_signal: signal,
 
                 shell,
-                dirty_flag,
 
                 seats: Vec::new(),
                 last_active_seat: None,
