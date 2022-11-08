@@ -84,7 +84,10 @@ fn create_workspace(
     if active {
         state.add_workspace_state(&workspace_handle, WState::Active);
     }
-    init_workspace_handle(state, 0, &workspace_handle);
+    state.set_workspace_capabilities(
+        &workspace_handle,
+        [WorkspaceCapabilities::Activate].into_iter(),
+    );
     Workspace::new(workspace_handle)
 }
 
@@ -94,10 +97,24 @@ impl WorkspaceSet {
 
         let workspaces = match amount {
             WorkspaceAmount::Dynamic => {
-                vec![create_workspace(state, &group_handle, true)]
+                let workspace = create_workspace(state, &group_handle, true);
+                workspace_set_idx(state, 1, &workspace.handle);
+                state.set_workspace_capabilities(
+                    &workspace.handle,
+                    [WorkspaceCapabilities::Activate].into_iter(),
+                );
+                vec![workspace]
             }
             WorkspaceAmount::Static(len) => (0..len)
-                .map(|i| create_workspace(state, &group_handle, i == 0))
+                .map(|i| {
+                    let workspace = create_workspace(state, &group_handle, i == 0);
+                    workspace_set_idx(state, i + 1, &workspace.handle);
+                    state.set_workspace_capabilities(
+                        &workspace.handle,
+                        [WorkspaceCapabilities::Activate].into_iter(),
+                    );
+                    workspace
+                })
                 .collect(),
         };
 
@@ -138,9 +155,15 @@ impl WorkspaceSet {
         state: &mut WorkspaceState<State>,
         outputs: impl Iterator<Item = (&'a Output, Point<i32, Logical>)>,
     ) {
+        let mut state = state.update();
+
         // add empty at the end, if necessary
         if self.workspaces.last().unwrap().windows().next().is_some() {
-            let mut workspace = create_workspace(&mut state.update(), &self.group, false);
+            let mut workspace = create_workspace(&mut state, &self.group, false);
+            state.set_workspace_capabilities(
+                &workspace.handle,
+                [WorkspaceCapabilities::Activate].into_iter(),
+            );
             for (output, location) in outputs {
                 workspace.map_output(output, location);
             }
@@ -149,13 +172,12 @@ impl WorkspaceSet {
 
         let len = self.workspaces.len();
         let mut keep = vec![true; len];
-
         // remove empty workspaces in between, if they are not active
         for (i, workspace) in self.workspaces.iter().enumerate() {
             let has_windows = workspace.windows().next().is_some();
 
             if !has_windows && i != self.active && i != len - 1 {
-                state.update().remove_workspace(workspace.handle);
+                state.remove_workspace(workspace.handle);
                 keep[i] = false;
             }
         }
@@ -167,6 +189,12 @@ impl WorkspaceSet {
             .take(self.active + 1)
             .filter(|keep| !**keep)
             .count();
+
+        if keep.iter().any(|val| *val == false) {
+            for (i, workspace) in self.workspaces.iter().enumerate() {
+                workspace_set_idx(&mut state, i as u8 + 1, &workspace.handle);
+            }
+        }
     }
 
     fn ensure_static<'a>(
@@ -209,6 +237,15 @@ impl WorkspaceSet {
             let outputs = outputs.collect::<Vec<_>>();
             while amount > self.workspaces.len() {
                 let mut workspace = create_workspace(&mut state, &self.group, false);
+                workspace_set_idx(
+                    &mut state,
+                    self.workspaces.len() as u8 + 1,
+                    &workspace.handle,
+                );
+                state.set_workspace_capabilities(
+                    &workspace.handle,
+                    [WorkspaceCapabilities::Activate].into_iter(),
+                );
                 for &(output, location) in outputs.iter() {
                     workspace.map_output(output, location);
                 }
@@ -418,7 +455,11 @@ impl Shell {
                             state.remove_workspace(workspace.handle);
                             let workspace_handle =
                                 state.create_workspace(&workspace_group).unwrap();
-                            init_workspace_handle(
+                            state.set_workspace_capabilities(
+                                &workspace_handle,
+                                [WorkspaceCapabilities::Activate].into_iter(),
+                            );
+                            workspace_set_idx(
                                 &mut state,
                                 new_set.workspaces.len() as u8,
                                 &workspace_handle,
@@ -524,7 +565,11 @@ impl Shell {
                 for (i, (workspaces, active)) in mergers.into_iter().enumerate() {
                     // and then we can merge each vector into one and put that into our new set.
                     let workspace_handle = state.create_workspace(&new_set.group).unwrap();
-                    init_workspace_handle(&mut state, i as u8, &workspace_handle);
+                    state.set_workspace_capabilities(
+                        &workspace_handle,
+                        [WorkspaceCapabilities::Activate].into_iter(),
+                    );
+                    workspace_set_idx(&mut state, i as u8, &workspace_handle);
 
                     let mut new_workspace = Workspace::new(workspace_handle);
                     for output in self.outputs.iter() {
@@ -580,7 +625,11 @@ impl Shell {
                         // copy over everything and then remove other outputs to preserve state
                         let new_set = sets.get_mut(output).unwrap();
                         let new_workspace_handle = state.create_workspace(&new_set.group).unwrap();
-                        init_workspace_handle(&mut state, i as u8, &new_workspace_handle);
+                        state.set_workspace_capabilities(
+                            &new_workspace_handle,
+                            [WorkspaceCapabilities::Activate].into_iter(),
+                        );
+                        workspace_set_idx(&mut state, i as u8, &new_workspace_handle);
 
                         let mut old_tiling_layer = workspace.tiling_layer.clone();
                         let mut new_floating_layer = FloatingLayout::new();
@@ -994,12 +1043,11 @@ impl Shell {
     }
 }
 
-fn init_workspace_handle<'a>(
+fn workspace_set_idx<'a>(
     state: &mut WorkspaceUpdateGuard<'a, State>,
     idx: u8,
     handle: &WorkspaceHandle,
 ) {
-    state.set_workspace_capabilities(&handle, [WorkspaceCapabilities::Activate].into_iter());
     state.set_workspace_name(&handle, format!("{}", idx + 1));
     state.set_workspace_coordinates(&handle, [Some(idx as u32), None, None]);
 }
