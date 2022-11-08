@@ -267,7 +267,7 @@ impl TilingLayout {
     pub fn unmap_output(&mut self, output: &Output) {
         if let Some(src) = self.trees.remove(output) {
             // TODO: expects last remaining output
-            let (output, dst) = self.trees.iter_mut().next().unwrap();
+            let Some((output, dst)) = self.trees.iter_mut().next() else { return; };
             let orientation = match output.output.geometry().size {
                 x if x.w >= x.h => Orientation::Horizontal,
                 _ => Orientation::Vertical,
