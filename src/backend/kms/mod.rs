@@ -10,7 +10,7 @@ use crate::{
     state::{BackendData, ClientState, Common, Data},
     utils::prelude::*,
     wayland::{
-        handlers::screencopy::UserdataExt,
+        handlers::screencopy::{PendingScreencopyBuffers, UserdataExt},
         protocols::screencopy::{BufferParams, Session as ScreencopySession},
     },
 };
@@ -97,6 +97,7 @@ pub struct Surface {
     refresh_rate: u32,
     vrr: bool,
     pending: bool,
+    dirty: bool,
     render_timer_token: Option<RegistrationToken>,
     #[cfg(feature = "debug")]
     fps: Fps,
@@ -375,18 +376,44 @@ impl State {
         let dispatcher =
             Dispatcher::new(drm, move |event, metadata, data: &mut Data| match event {
                 DrmEvent::VBlank(crtc) => {
-                    if let Some(device) = data.state.backend.kms().devices.get_mut(&drm_node) {
-                        if let Some(surface) = device.surfaces.get_mut(&crtc) {
-                            match surface.surface.as_mut().map(|x| x.frame_submitted()) {
-                                Some(Ok(_)) => {
-                                    let _submit_time = metadata.take().map(|data| data.time);
-                                    surface.pending = false;
+                    let rescheduled_output =
+                        if let Some(device) = data.state.backend.kms().devices.get_mut(&drm_node) {
+                            if let Some(surface) = device.surfaces.get_mut(&crtc) {
+                                match surface.surface.as_mut().map(|x| x.frame_submitted()) {
+                                    Some(Ok(_)) => {
+                                        let _submit_time = metadata.take().map(|data| data.time);
+                                        surface.pending = false;
+                                        surface.dirty.then(|| surface.output.clone())
+                                    }
+                                    Some(Err(err)) => {
+                                        slog_scope::warn!("Failed to submit frame: {}", err);
+                                        None
+                                    }
+                                    _ => None, // got disabled
                                 }
-                                Some(Err(err)) => {
-                                    slog_scope::warn!("Failed to submit frame: {}", err)
-                                }
-                                None => {} // got disabled
-                            };
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+
+                    if let Some(output) = rescheduled_output {
+                        let mut scheduled_sessions =
+                            data.state.workspace_session_for_output(&output);
+                        if let Some(sessions) = output.user_data().get::<PendingScreencopyBuffers>()
+                        {
+                            scheduled_sessions
+                                .get_or_insert_with(Vec::new)
+                                .extend(sessions.borrow_mut().drain(..));
+                        }
+
+                        if let Err(err) = data.state.backend.kms().schedule_render(
+                            &data.state.common.event_loop_handle,
+                            &output,
+                            scheduled_sessions,
+                        ) {
+                            slog_scope::warn!("Failed to schedule render: {}", err);
                         }
                     }
                 }
@@ -697,6 +724,7 @@ impl Device {
             vrr,
             refresh_rate,
             pending: false,
+            dirty: false,
             render_timer_token: None,
             #[cfg(feature = "debug")]
             fps: Fps::default(),
@@ -986,6 +1014,7 @@ impl KmsState {
                 return Ok(());
             }
             if !surface.pending {
+                surface.dirty = false;
                 surface.pending = true;
                 /*
                 let instant = surface
@@ -1039,6 +1068,8 @@ impl KmsState {
                         TimeoutAction::Drop
                     },
                 )?);
+            } else {
+                surface.dirty = true;
             }
         }
         Ok(())

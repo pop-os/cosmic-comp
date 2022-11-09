@@ -901,6 +901,18 @@ impl State {
         }
     }
 
+    pub fn workspace_session_for_output(
+        &mut self,
+        output: &Output,
+    ) -> Option<Vec<(Session, BufferParams)>> {
+        let workspace = self.common.shell.active_space_mut(output);
+        if !workspace.pending_buffers.is_empty() {
+            Some(std::mem::take(&mut workspace.pending_buffers))
+        } else {
+            None
+        }
+    }
+
     pub fn schedule_workspace_sessions(
         &mut self,
         surface: &WlSurface,
