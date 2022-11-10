@@ -66,12 +66,14 @@ impl WlrLayerShellHandler for State {
             .cloned();
 
         if let Some(output) = maybe_output {
-            let mut map = layer_map_for_output(&output);
-            let layer = map
-                .layer_for_surface(surface.wl_surface(), WindowSurfaceType::TOPLEVEL)
-                .unwrap()
-                .clone();
-            map.unmap_layer(&layer);
+            {
+                let mut map = layer_map_for_output(&output);
+                let layer = map
+                    .layer_for_surface(surface.wl_surface(), WindowSurfaceType::TOPLEVEL)
+                    .unwrap()
+                    .clone();
+                map.unmap_layer(&layer);
+            }
 
             // collect screencopy sessions needing an update
             let mut scheduled_sessions = self.schedule_workspace_sessions(surface.wl_surface());
