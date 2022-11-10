@@ -49,7 +49,6 @@ pub struct Shell {
     pub popups: PopupManager,
     pub outputs: Vec<Output>,
     pub workspaces: WorkspaceMode,
-    pub workspace_amount: WorkspaceAmount,
     pub floating_default: bool,
     pub pending_windows: Vec<(Window, Seat<State>)>,
     pub pending_layers: Vec<(LayerSurface, Output, Seat<State>)>,
@@ -65,6 +64,7 @@ pub struct Shell {
 #[derive(Debug)]
 pub struct WorkspaceSet {
     active: usize,
+    amount: WorkspaceAmount,
     group: WorkspaceGroupHandle,
     workspaces: Vec<Workspace>,
 }
@@ -120,6 +120,7 @@ impl WorkspaceSet {
 
         WorkspaceSet {
             active: 0,
+            amount,
             group: group_handle,
             workspaces,
         }
@@ -136,12 +137,11 @@ impl WorkspaceSet {
 
     fn refresh<'a>(
         &mut self,
-        amount: WorkspaceAmount,
         state: &mut WorkspaceState<State>,
         toplevel_info: &mut ToplevelInfoState<State>,
         outputs: impl Iterator<Item = (&'a Output, Point<i32, Logical>)>,
     ) {
-        match amount {
+        match self.amount {
             WorkspaceAmount::Dynamic => self.ensure_last_empty(state, outputs),
             WorkspaceAmount::Static(len) => {
                 self.ensure_static(len as usize, state, toplevel_info, outputs)
@@ -257,7 +257,7 @@ impl WorkspaceSet {
 
 #[derive(Debug)]
 pub enum WorkspaceMode {
-    OutputBound(HashMap<Output, WorkspaceSet>),
+    OutputBound(HashMap<Output, WorkspaceSet>, WorkspaceAmount),
     Global(WorkspaceSet),
 }
 
@@ -271,14 +271,16 @@ impl WorkspaceMode {
             crate::config::WorkspaceMode::Global => {
                 WorkspaceMode::Global(WorkspaceSet::new(state, amount))
             }
-            crate::config::WorkspaceMode::OutputBound => WorkspaceMode::OutputBound(HashMap::new()),
+            crate::config::WorkspaceMode::OutputBound => {
+                WorkspaceMode::OutputBound(HashMap::new(), amount)
+            }
         }
     }
 
     pub fn get(&self, num: usize, output: &Output) -> Option<&Workspace> {
         match self {
             WorkspaceMode::Global(set) => set.workspaces.get(num),
-            WorkspaceMode::OutputBound(sets) => {
+            WorkspaceMode::OutputBound(sets, _) => {
                 sets.get(output).and_then(|set| set.workspaces.get(num))
             }
         }
@@ -287,7 +289,7 @@ impl WorkspaceMode {
     pub fn get_mut(&mut self, num: usize, output: &Output) -> Option<&mut Workspace> {
         match self {
             WorkspaceMode::Global(set) => set.workspaces.get_mut(num),
-            WorkspaceMode::OutputBound(sets) => sets
+            WorkspaceMode::OutputBound(sets, _) => sets
                 .get_mut(output)
                 .and_then(|set| set.workspaces.get_mut(num)),
         }
@@ -296,7 +298,7 @@ impl WorkspaceMode {
     pub fn active(&self, output: &Output) -> &Workspace {
         match self {
             WorkspaceMode::Global(set) => &set.workspaces[set.active],
-            WorkspaceMode::OutputBound(sets) => {
+            WorkspaceMode::OutputBound(sets, _) => {
                 let set = sets.get(output).unwrap();
                 &set.workspaces[set.active]
             }
@@ -306,17 +308,17 @@ impl WorkspaceMode {
     pub fn active_mut(&mut self, output: &Output) -> &mut Workspace {
         match self {
             WorkspaceMode::Global(set) => &mut set.workspaces[set.active],
-            WorkspaceMode::OutputBound(sets) => {
+            WorkspaceMode::OutputBound(sets, _) => {
                 let set = sets.get_mut(output).unwrap();
                 &mut set.workspaces[set.active]
             }
         }
     }
 
-    fn active_num(&self, output: &Output) -> usize {
+    pub fn active_num(&self, output: &Output) -> usize {
         match self {
             WorkspaceMode::Global(set) => set.active,
-            WorkspaceMode::OutputBound(sets) => {
+            WorkspaceMode::OutputBound(sets, _) => {
                 let set = sets.get(output).unwrap();
                 set.active
             }
@@ -328,7 +330,7 @@ impl WorkspaceMode {
             WorkspaceMode::Global(set) => {
                 Box::new(set.workspaces.iter()) as Box<dyn Iterator<Item = &Workspace>>
             }
-            WorkspaceMode::OutputBound(sets) => {
+            WorkspaceMode::OutputBound(sets, _) => {
                 Box::new(sets.values().flat_map(|set| set.workspaces.iter()))
             }
         }
@@ -339,7 +341,7 @@ impl WorkspaceMode {
             WorkspaceMode::Global(set) => {
                 Box::new(set.workspaces.iter()) as Box<dyn Iterator<Item = &Workspace>>
             }
-            WorkspaceMode::OutputBound(sets) => Box::new(
+            WorkspaceMode::OutputBound(sets, _) => Box::new(
                 sets.get(output)
                     .into_iter()
                     .flat_map(|set| set.workspaces.iter()),
@@ -352,7 +354,7 @@ impl WorkspaceMode {
             WorkspaceMode::Global(set) => {
                 Box::new(set.workspaces.iter_mut()) as Box<dyn Iterator<Item = &mut Workspace>>
             }
-            WorkspaceMode::OutputBound(sets) => {
+            WorkspaceMode::OutputBound(sets, _) => {
                 Box::new(sets.values_mut().flat_map(|set| set.workspaces.iter_mut()))
             }
         }
@@ -384,7 +386,6 @@ impl Shell {
             |_| true,
         );
 
-        let amount = config.static_conf.workspace_amount;
         let mode = WorkspaceMode::new(
             config.static_conf.workspace_mode,
             config.static_conf.workspace_amount,
@@ -396,7 +397,6 @@ impl Shell {
             popups: PopupManager::new(None),
             outputs: Vec::new(),
             workspaces: mode,
-            workspace_amount: amount,
             floating_default,
 
             pending_windows: Vec::new(),
@@ -415,13 +415,10 @@ impl Shell {
         let mut state = self.workspace_state.update();
 
         match &mut self.workspaces {
-            WorkspaceMode::OutputBound(sets) => {
+            WorkspaceMode::OutputBound(sets, amount) => {
                 // TODO: Restore previously assigned workspaces, if possible!
                 if !sets.contains_key(output) {
-                    sets.insert(
-                        output.clone(),
-                        WorkspaceSet::new(&mut state, self.workspace_amount),
-                    );
+                    sets.insert(output.clone(), WorkspaceSet::new(&mut state, *amount));
                 }
                 for workspace in &mut sets.get_mut(output).unwrap().workspaces {
                     workspace.map_output(output, (0, 0).into());
@@ -442,7 +439,7 @@ impl Shell {
         self.outputs.retain(|o| o != output);
 
         match &mut self.workspaces {
-            WorkspaceMode::OutputBound(sets) => {
+            WorkspaceMode::OutputBound(sets, _) => {
                 if let Some(set) = sets.remove(output) {
                     // TODO: Heuristic which output to move to.
                     // It is supposed to be the *most* internal, we just pick the first one for now
@@ -504,13 +501,14 @@ impl Shell {
         let mut state = self.workspace_state.update();
 
         match (&mut self.workspaces, mode) {
-            (dst @ WorkspaceMode::OutputBound(_), ConfigMode::Global) => {
+            (dst @ WorkspaceMode::OutputBound(_, _), ConfigMode::Global) => {
                 // rustc should really be able to infer that this doesn't need an if.
-                let sets = if let &mut WorkspaceMode::OutputBound(ref mut sets) = dst {
-                    sets
-                } else {
-                    unreachable!()
-                };
+                let (sets, amount) =
+                    if let &mut WorkspaceMode::OutputBound(ref mut sets, ref amount) = dst {
+                        (sets, *amount)
+                    } else {
+                        unreachable!()
+                    };
 
                 // in this case we have to merge our sets, preserving placing of windows as nicely as possible
                 let mut new_set = WorkspaceSet::new(&mut state, WorkspaceAmount::Static(0));
@@ -602,6 +600,7 @@ impl Shell {
                     state.remove_workspace_group(group);
                 }
 
+                new_set.amount = amount;
                 *dst = WorkspaceMode::Global(new_set);
             }
             (dst @ WorkspaceMode::Global(_), ConfigMode::OutputBound) => {
@@ -696,7 +695,10 @@ impl Shell {
                 }
                 state.remove_workspace_group(set.group);
 
-                *dst = WorkspaceMode::OutputBound(sets);
+                for new_set in sets.values_mut() {
+                    new_set.amount = set.amount;
+                }
+                *dst = WorkspaceMode::OutputBound(sets, set.amount);
             }
             _ => {}
         }
@@ -707,7 +709,7 @@ impl Shell {
 
     pub fn activate(&mut self, output: &Output, idx: usize) -> Option<MotionEvent> {
         match &mut self.workspaces {
-            WorkspaceMode::OutputBound(sets) => {
+            WorkspaceMode::OutputBound(sets, _) => {
                 if let Some(set) = sets.get_mut(output) {
                     set.activate(idx, &mut self.workspace_state.update());
                 }
@@ -722,7 +724,7 @@ impl Shell {
 
     pub fn active_space(&self, output: &Output) -> &Workspace {
         match &self.workspaces {
-            WorkspaceMode::OutputBound(sets) => {
+            WorkspaceMode::OutputBound(sets, _) => {
                 let set = sets.get(output).unwrap();
                 &set.workspaces[set.active]
             }
@@ -732,7 +734,7 @@ impl Shell {
 
     pub fn active_space_mut(&mut self, output: &Output) -> &mut Workspace {
         match &mut self.workspaces {
-            WorkspaceMode::OutputBound(sets) => {
+            WorkspaceMode::OutputBound(sets, _) => {
                 let set = sets.get_mut(output).unwrap();
                 &mut set.workspaces[set.active]
             }
@@ -852,7 +854,7 @@ impl Shell {
     ) -> Point<C, Logical> {
         match self.workspaces {
             WorkspaceMode::Global(_) => global_loc.into(),
-            WorkspaceMode::OutputBound(_) => {
+            WorkspaceMode::OutputBound(_, _) => {
                 let p = global_loc.into().to_f64() - output.current_location().to_f64();
                 (C::from_f64(p.x), C::from_f64(p.y)).into()
             }
@@ -866,7 +868,7 @@ impl Shell {
     ) -> Point<C, Logical> {
         match self.workspaces {
             WorkspaceMode::Global(_) => space_loc.into(),
-            WorkspaceMode::OutputBound(_) => {
+            WorkspaceMode::OutputBound(_, _) => {
                 let p = space_loc.into().to_f64() + output.current_location().to_f64();
                 (C::from_f64(p.x), C::from_f64(p.y)).into()
             }
@@ -877,10 +879,9 @@ impl Shell {
         self.popups.cleanup();
 
         match &mut self.workspaces {
-            WorkspaceMode::OutputBound(sets) => {
+            WorkspaceMode::OutputBound(sets, _) => {
                 for (output, set) in sets.iter_mut() {
                     set.refresh(
-                        self.workspace_amount,
                         &mut self.workspace_state,
                         &mut self.toplevel_info_state,
                         std::iter::once((output, (0, 0).into())),
@@ -888,7 +889,6 @@ impl Shell {
                 }
             }
             WorkspaceMode::Global(set) => set.refresh(
-                self.workspace_amount,
                 &mut self.workspace_state,
                 &mut self.toplevel_info_state,
                 self.outputs.iter().map(|o| (o, o.current_location())),
