@@ -461,7 +461,7 @@ impl Shell {
                             );
                             workspace_set_idx(
                                 &mut state,
-                                new_set.workspaces.len() as u8,
+                                new_set.workspaces.len() as u8 + 1,
                                 &workspace_handle,
                             );
                             workspace.handle = workspace_handle;
@@ -569,7 +569,7 @@ impl Shell {
                         &workspace_handle,
                         [WorkspaceCapabilities::Activate].into_iter(),
                     );
-                    workspace_set_idx(&mut state, i as u8, &workspace_handle);
+                    workspace_set_idx(&mut state, i as u8 + 1, &workspace_handle);
 
                     let mut new_workspace = Workspace::new(workspace_handle);
                     for output in self.outputs.iter() {
@@ -629,7 +629,7 @@ impl Shell {
                             &new_workspace_handle,
                             [WorkspaceCapabilities::Activate].into_iter(),
                         );
-                        workspace_set_idx(&mut state, i as u8, &new_workspace_handle);
+                        workspace_set_idx(&mut state, i as u8 + 1, &new_workspace_handle);
 
                         let mut old_tiling_layer = workspace.tiling_layer.clone();
                         let mut new_floating_layer = FloatingLayout::new();
@@ -1048,6 +1048,6 @@ fn workspace_set_idx<'a>(
     idx: u8,
     handle: &WorkspaceHandle,
 ) {
-    state.set_workspace_name(&handle, format!("{}", idx + 1));
+    state.set_workspace_name(&handle, format!("{}", idx));
     state.set_workspace_coordinates(&handle, [Some(idx as u32), None, None]);
 }
