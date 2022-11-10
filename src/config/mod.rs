@@ -691,7 +691,7 @@ pub enum KeyModifier {
     Ctrl,
     Alt,
     Shift,
-    Logo,
+    Super,
     CapsLock,
     NumLock,
 }
@@ -723,7 +723,7 @@ impl std::ops::AddAssign<KeyModifier> for KeyModifiers {
             KeyModifier::Ctrl => self.ctrl = true,
             KeyModifier::Alt => self.alt = true,
             KeyModifier::Shift => self.shift = true,
-            KeyModifier::Logo => self.logo = true,
+            KeyModifier::Super => self.logo = true,
             KeyModifier::CapsLock => self.caps_lock = true,
             KeyModifier::NumLock => self.num_lock = true,
         };
@@ -782,15 +782,30 @@ pub enum Action {
     Terminate,
     Debug,
     Close,
+
     Workspace(u8),
+    NextWorkspace,
+    PreviousWorkspace,
+    LastWorkspace,
     MoveToWorkspace(u8),
+    MoveToNextWorkspace,
+    MoveToPreviousWorkspace,
+    MoveToLastWorkspace,
+
+    NextOutput,
+    PreviousOutput,
+    MoveToNextOutput,
+    MoveToPreviousOutput,
+
     Focus(FocusDirection),
     Move(Direction),
+
     ToggleOrientation,
     Orientation(crate::shell::layout::Orientation),
+
     ToggleTiling,
     ToggleWindowFloating,
-    Fullscreen,
-    //Screenshot,
+
+    Maximize,
     Spawn(String),
 }

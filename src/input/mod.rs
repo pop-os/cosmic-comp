@@ -2,7 +2,14 @@
 
 use crate::{
     config::{Action, Config},
-    shell::{focus::target::PointerFocusTarget, layout::floating::SeatMoveGrabState, Workspace}, // shell::grabs::SeatMoveGrabState
+    shell::{
+        focus::{target::PointerFocusTarget, FocusDirection},
+        layout::{
+            floating::SeatMoveGrabState,
+            tiling::{Direction, FocusResult},
+        },
+        Workspace,
+    }, // shell::grabs::SeatMoveGrabState
     state::Common,
     utils::prelude::*,
     wayland::{handlers::screencopy::ScreencopySessions, protocols::screencopy::Session},
@@ -301,206 +308,7 @@ impl State {
                             )
                             .flatten()
                         {
-                            match action {
-                                Action::Terminate => {
-                                    self.common.should_stop = true;
-                                }
-                                #[cfg(feature = "debug")]
-                                Action::Debug => {
-                                    self.common.egui.active = !self.common.egui.active;
-                                }
-                                #[cfg(not(feature = "debug"))]
-                                Action::Debug => {
-                                    slog_scope::info!("Debug overlay not included in this version")
-                                }
-                                Action::Close => {
-                                    let current_output = seat.active_output();
-                                    let workspace =
-                                        self.common.shell.active_space_mut(&current_output);
-                                    if let Some(window) = workspace.focus_stack.get(seat).last() {
-                                        window.send_close();
-                                    }
-                                }
-                                Action::Workspace(key_num) => {
-                                    let current_output = seat.active_output();
-                                    let workspace = match key_num {
-                                        0 => 9,
-                                        x => x - 1,
-                                    };
-                                    if let Some(motion_event) = self
-                                        .common
-                                        .shell
-                                        .activate(&current_output, workspace as usize)
-                                    {
-                                        if let Some(ptr) = seat.get_pointer() {
-                                            ptr.motion(self, None, &motion_event);
-                                        }
-                                    }
-                                }
-                                Action::MoveToWorkspace(key_num) => {
-                                    let current_output = seat.active_output();
-                                    let workspace = match key_num {
-                                        0 => 9,
-                                        x => x - 1,
-                                    };
-                                    Shell::move_current_window(
-                                        self,
-                                        seat,
-                                        &current_output,
-                                        workspace as usize,
-                                    );
-                                }
-                                Action::Focus(focus) => {
-                                    let current_output = seat.active_output();
-                                    let workspace =
-                                        self.common.shell.active_space_mut(&current_output);
-                                    let focus_stack = workspace.focus_stack.get(seat);
-                                    if let Some(target) = workspace.tiling_layer.next_focus(
-                                        focus,
-                                        seat,
-                                        focus_stack.iter(),
-                                    ) {
-                                        std::mem::drop(focus_stack);
-                                        Common::set_focus(self, Some(&target), seat, None);
-                                    }
-                                }
-                                Action::Move(direction) => {
-                                    let current_output = seat.active_output();
-                                    let workspace =
-                                        self.common.shell.active_space_mut(&current_output);
-                                    if let Some(_move_further) =
-                                        workspace.tiling_layer.move_current_window(direction, seat)
-                                    {
-                                        // TODO moving across workspaces/displays
-                                    }
-                                }
-                                Action::Fullscreen => {
-                                    let current_output = seat.active_output();
-                                    let workspace =
-                                        self.common.shell.active_space_mut(&current_output);
-                                    let focus_stack = workspace.focus_stack.get(seat);
-                                    let focused_window = focus_stack.last();
-                                    if let Some(window) = focused_window.map(|f| f.active_window())
-                                    {
-                                        workspace.fullscreen_toggle(&window, &current_output);
-                                    }
-                                }
-                                Action::ToggleOrientation => {
-                                    let output = seat.active_output();
-                                    let workspace = self.common.shell.active_space_mut(&output);
-                                    let focus_stack = workspace.focus_stack.get(seat);
-                                    workspace.tiling_layer.update_orientation(
-                                        None,
-                                        &seat,
-                                        focus_stack.iter(),
-                                    );
-                                }
-                                Action::Orientation(orientation) => {
-                                    let output = seat.active_output();
-                                    let workspace = self.common.shell.active_space_mut(&output);
-                                    let focus_stack = workspace.focus_stack.get(seat);
-                                    workspace.tiling_layer.update_orientation(
-                                        Some(orientation),
-                                        &seat,
-                                        focus_stack.iter(),
-                                    );
-                                }
-                                Action::ToggleTiling => {
-                                    let output = seat.active_output();
-                                    let workspace = self.common.shell.active_space_mut(&output);
-                                    workspace.toggle_tiling(seat);
-                                }
-                                Action::ToggleWindowFloating => {
-                                    let output = seat.active_output();
-                                    let workspace = self.common.shell.active_space_mut(&output);
-                                    workspace.toggle_floating_window(seat);
-                                }
-                                Action::Spawn(command) => {
-                                    if let Err(err) = std::process::Command::new("/bin/sh")
-                                        .arg("-c")
-                                        .arg(command)
-                                        .env("WAYLAND_DISPLAY", &self.common.socket)
-                                        .env_remove("COSMIC_SESSION_SOCK")
-                                        .spawn()
-                                    {
-                                        slog_scope::warn!("Failed to spawn: {}", err);
-                                    }
-                                } /*
-                                  Action::Screenshot => {
-                                      let home = match std::env::var("HOME") {
-                                          Ok(home) => home,
-                                          Err(err) => {
-                                              slog_scope::error!(
-                                                  "$HOME is not set, can't save screenshots: {}",
-                                                  err
-                                              );
-                                              break;
-                                          }
-                                      };
-                                      let timestamp = match std::time::SystemTime::UNIX_EPOCH
-                                          .elapsed()
-                                      {
-                                          Ok(duration) => duration.as_secs(),
-                                          Err(err) => {
-                                              slog_scope::error!("Unable to get timestamp, can't save screenshots: {}", err);
-                                              break;
-                                          }
-                                      };
-                                      for output in self.common.shell.outputs.clone().into_iter() {
-                                          match self
-                                              .backend
-                                              .offscreen_for_output(&output, &mut self.common)
-                                          {
-                                              Ok((buffer, size)) => {
-                                                  let mut path = std::path::PathBuf::new();
-                                                  path.push(&home);
-                                                  path.push(format!(
-                                                      "{}_{}.png",
-                                                      output.name(),
-                                                      timestamp
-                                                  ));
-
-                                                  fn write_png(
-                                                      path: impl AsRef<std::path::Path>,
-                                                      data: Vec<u8>,
-                                                      size: Size<i32, Buffer>,
-                                                  ) -> anyhow::Result<()>
-                                                  {
-                                                      use std::{fs, io};
-
-                                                      let file = io::BufWriter::new(
-                                                          fs::File::create(&path)?,
-                                                      );
-                                                      let mut encoder = png::Encoder::new(
-                                                          file,
-                                                          size.w as u32,
-                                                          size.h as u32,
-                                                      );
-                                                      encoder.set_color(png::ColorType::Rgba);
-                                                      encoder.set_depth(png::BitDepth::Eight);
-                                                      let mut writer = encoder.write_header()?;
-                                                      writer.write_image_data(&data)?;
-                                                      Ok(())
-                                                  }
-
-                                                  if let Err(err) = write_png(&path, buffer, size) {
-                                                      slog_scope::error!(
-                                                          "Unable to save screenshot at {}: {}",
-                                                          path.display(),
-                                                          err
-                                                      );
-                                                  }
-                                              }
-                                              Err(err) => slog_scope::error!(
-                                                  "Could not save screenshot for output {}: {}",
-                                                  output.name(),
-                                                  err
-                                              ),
-                                          }
-                                      }
-                                  }
-                                  */
-                            }
+                            self.handle_action(action, seat)
                         }
                         break;
                     }
@@ -812,6 +620,316 @@ impl State {
                 }
             }
             _ => { /* TODO e.g. tablet or touch events */ }
+        }
+    }
+
+    fn handle_action(&mut self, action: Action, seat: &Seat<State>) {
+        match action {
+            Action::Terminate => {
+                self.common.should_stop = true;
+            }
+            #[cfg(feature = "debug")]
+            Action::Debug => {
+                self.common.egui.active = !self.common.egui.active;
+            }
+            #[cfg(not(feature = "debug"))]
+            Action::Debug => {
+                slog_scope::info!("Debug overlay not included in this version")
+            }
+            Action::Close => {
+                let current_output = seat.active_output();
+                let workspace = self.common.shell.active_space_mut(&current_output);
+                if let Some(window) = workspace.focus_stack.get(seat).last() {
+                    window.send_close();
+                }
+            }
+            Action::Workspace(key_num) => {
+                let current_output = seat.active_output();
+                let workspace = match key_num {
+                    0 => 9,
+                    x => x - 1,
+                };
+                if let Some(motion_event) = self
+                    .common
+                    .shell
+                    .activate(&current_output, workspace as usize)
+                {
+                    if let Some(ptr) = seat.get_pointer() {
+                        ptr.motion(self, None, &motion_event);
+                    }
+                }
+            }
+            Action::NextWorkspace => {
+                let current_output = seat.active_output();
+                let workspace = self
+                    .common
+                    .shell
+                    .workspaces
+                    .active_num(&current_output)
+                    .saturating_add(1);
+                // TODO: Possibly move to next output, if idx to large
+                if let Some(motion_event) = self.common.shell.activate(&current_output, workspace) {
+                    if let Some(ptr) = seat.get_pointer() {
+                        ptr.motion(self, None, &motion_event);
+                    }
+                }
+            }
+            Action::PreviousWorkspace => {
+                let current_output = seat.active_output();
+                let workspace = self
+                    .common
+                    .shell
+                    .workspaces
+                    .active_num(&current_output)
+                    .saturating_sub(1);
+                // TODO: Possibly move to prev output, if idx < 0
+                if let Some(motion_event) = self.common.shell.activate(&current_output, workspace) {
+                    if let Some(ptr) = seat.get_pointer() {
+                        ptr.motion(self, None, &motion_event);
+                    }
+                }
+            }
+            Action::LastWorkspace => {
+                let current_output = seat.active_output();
+                let workspace = self
+                    .common
+                    .shell
+                    .workspaces
+                    .len(&current_output)
+                    .saturating_sub(1);
+                if let Some(motion_event) = self.common.shell.activate(&current_output, workspace) {
+                    if let Some(ptr) = seat.get_pointer() {
+                        ptr.motion(self, None, &motion_event);
+                    }
+                }
+            }
+            Action::MoveToWorkspace(key_num) => {
+                let current_output = seat.active_output();
+                let workspace = match key_num {
+                    0 => 9,
+                    x => x - 1,
+                };
+                Shell::move_current_window(
+                    self,
+                    seat,
+                    &current_output,
+                    (&current_output, Some(workspace as usize)),
+                );
+            }
+            Action::MoveToNextWorkspace => {
+                let current_output = seat.active_output();
+                let workspace = self
+                    .common
+                    .shell
+                    .workspaces
+                    .active_num(&current_output)
+                    .saturating_add(1);
+                // TODO: Possibly move to next output, if idx too large
+                Shell::move_current_window(
+                    self,
+                    seat,
+                    &current_output,
+                    (&current_output, Some(workspace as usize)),
+                );
+            }
+            Action::MoveToPreviousWorkspace => {
+                let current_output = seat.active_output();
+                let workspace = self
+                    .common
+                    .shell
+                    .workspaces
+                    .active_num(&current_output)
+                    .saturating_sub(1);
+                // TODO: Possibly move to prev output, if idx < 0
+                Shell::move_current_window(
+                    self,
+                    seat,
+                    &current_output,
+                    (&current_output, Some(workspace as usize)),
+                );
+            }
+            Action::MoveToLastWorkspace => {
+                let current_output = seat.active_output();
+                let workspace = self
+                    .common
+                    .shell
+                    .workspaces
+                    .len(&current_output)
+                    .saturating_sub(1);
+                Shell::move_current_window(
+                    self,
+                    seat,
+                    &current_output,
+                    (&current_output, Some(workspace as usize)),
+                );
+            }
+            Action::NextOutput => {
+                let current_output = seat.active_output();
+                if let Some(next_output) = self
+                    .common
+                    .shell
+                    .outputs
+                    .iter()
+                    .skip_while(|o| *o != &current_output)
+                    .skip(1)
+                    .next()
+                    .cloned()
+                {
+                    let idx = self.common.shell.workspaces.active_num(&next_output);
+                    if let Some(motion_event) = self.common.shell.activate(&next_output, idx) {
+                        if let Some(ptr) = seat.get_pointer() {
+                            ptr.motion(self, None, &motion_event);
+                        }
+                    }
+                }
+            }
+            Action::PreviousOutput => {
+                let current_output = seat.active_output();
+                if let Some(prev_output) = self
+                    .common
+                    .shell
+                    .outputs
+                    .iter()
+                    .rev()
+                    .skip_while(|o| *o != &current_output)
+                    .skip(1)
+                    .next()
+                    .cloned()
+                {
+                    let idx = self.common.shell.workspaces.active_num(&prev_output);
+                    if let Some(motion_event) = self.common.shell.activate(&prev_output, idx) {
+                        if let Some(ptr) = seat.get_pointer() {
+                            ptr.motion(self, None, &motion_event);
+                        }
+                    }
+                }
+            }
+            Action::MoveToNextOutput => {
+                let current_output = seat.active_output();
+                if let Some(next_output) = self
+                    .common
+                    .shell
+                    .outputs
+                    .iter()
+                    .skip_while(|o| *o != &current_output)
+                    .skip(1)
+                    .next()
+                    .cloned()
+                {
+                    Shell::move_current_window(self, seat, &current_output, (&next_output, None));
+                }
+            }
+            Action::MoveToPreviousOutput => {
+                let current_output = seat.active_output();
+                if let Some(prev_output) = self
+                    .common
+                    .shell
+                    .outputs
+                    .iter()
+                    .rev()
+                    .skip_while(|o| *o != &current_output)
+                    .skip(1)
+                    .next()
+                    .cloned()
+                {
+                    Shell::move_current_window(self, seat, &current_output, (&prev_output, None));
+                }
+            }
+            Action::Focus(focus) => {
+                let current_output = seat.active_output();
+                let workspace = self.common.shell.active_space_mut(&current_output);
+                let focus_stack = workspace.focus_stack.get(seat);
+                match workspace
+                    .tiling_layer
+                    .next_focus(focus, seat, focus_stack.iter())
+                {
+                    FocusResult::None => {
+                        // TODO: Handle Workspace orientation
+                        match focus {
+                            FocusDirection::Left => {
+                                self.handle_action(Action::PreviousWorkspace, seat)
+                            }
+                            FocusDirection::Right => {
+                                self.handle_action(Action::NextWorkspace, seat)
+                            }
+                            FocusDirection::Up => self.handle_action(Action::PreviousOutput, seat),
+                            FocusDirection::Down => self.handle_action(Action::NextOutput, seat),
+                            _ => {}
+                        }
+                    }
+                    FocusResult::Handled => {}
+                    FocusResult::Some(target) => {
+                        std::mem::drop(focus_stack);
+                        Common::set_focus(self, Some(&target), seat, None);
+                    }
+                }
+            }
+            Action::Move(direction) => {
+                let current_output = seat.active_output();
+                let workspace = self.common.shell.active_space_mut(&current_output);
+                if let Some(_move_further) =
+                    workspace.tiling_layer.move_current_window(direction, seat)
+                {
+                    // TODO: Handle Workspace orientation
+                    // TODO: Being able to move Groups (move_further should be KeyboardFocusTarget instead)
+                    match direction {
+                        Direction::Left => {
+                            self.handle_action(Action::MoveToPreviousWorkspace, seat)
+                        }
+                        Direction::Right => self.handle_action(Action::MoveToNextWorkspace, seat),
+                        Direction::Up => self.handle_action(Action::MoveToPreviousOutput, seat),
+                        Direction::Down => self.handle_action(Action::MoveToNextOutput, seat),
+                    }
+                }
+            }
+            Action::Maximize => {
+                let current_output = seat.active_output();
+                let workspace = self.common.shell.active_space_mut(&current_output);
+                let focus_stack = workspace.focus_stack.get(seat);
+                let focused_window = focus_stack.last();
+                if let Some(window) = focused_window.map(|f| f.active_window()) {
+                    workspace.maximize_toggle(&window, &current_output);
+                }
+            }
+            Action::ToggleOrientation => {
+                let output = seat.active_output();
+                let workspace = self.common.shell.active_space_mut(&output);
+                let focus_stack = workspace.focus_stack.get(seat);
+                workspace
+                    .tiling_layer
+                    .update_orientation(None, &seat, focus_stack.iter());
+            }
+            Action::Orientation(orientation) => {
+                let output = seat.active_output();
+                let workspace = self.common.shell.active_space_mut(&output);
+                let focus_stack = workspace.focus_stack.get(seat);
+                workspace.tiling_layer.update_orientation(
+                    Some(orientation),
+                    &seat,
+                    focus_stack.iter(),
+                );
+            }
+            Action::ToggleTiling => {
+                let output = seat.active_output();
+                let workspace = self.common.shell.active_space_mut(&output);
+                workspace.toggle_tiling(seat);
+            }
+            Action::ToggleWindowFloating => {
+                let output = seat.active_output();
+                let workspace = self.common.shell.active_space_mut(&output);
+                workspace.toggle_floating_window(seat);
+            }
+            Action::Spawn(command) => {
+                if let Err(err) = std::process::Command::new("/bin/sh")
+                    .arg("-c")
+                    .arg(command)
+                    .env("WAYLAND_DISPLAY", &self.common.socket)
+                    .env_remove("COSMIC_SESSION_SOCK")
+                    .spawn()
+                {
+                    slog_scope::warn!("Failed to spawn: {}", err);
+                }
+            }
         }
     }
 

@@ -249,11 +249,11 @@ impl Workspace {
         }
     }
 
-    pub fn fullscreen_toggle(&mut self, window: &Window, output: &Output) {
+    pub fn maximize_toggle(&mut self, window: &Window, output: &Output) {
         if self.fullscreen.contains_key(output) {
-            self.unfullscreen_request(window)
+            self.unmaximize_request(window)
         } else {
-            self.fullscreen_request(window, output)
+            self.maximize_request(window, output)
         }
     }
 

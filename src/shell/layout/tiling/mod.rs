@@ -69,6 +69,13 @@ pub enum Direction {
     Down,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum FocusResult {
+    None,
+    Handled,
+    Some(KeyboardFocusTarget),
+}
+
 #[derive(Debug, Clone)]
 pub struct TilingLayout {
     gaps: (i32, i32),
@@ -660,7 +667,7 @@ impl TilingLayout {
         direction: FocusDirection,
         seat: &Seat<State>,
         focus_stack: impl Iterator<Item = &'a CosmicMapped> + 'a,
-    ) -> Option<KeyboardFocusTarget> {
+    ) -> FocusResult {
         let output = seat.active_output();
         let tree = self.trees.get_mut(&output).unwrap();
 
@@ -671,7 +678,7 @@ impl TilingLayout {
 
             // stacks may handle focus internally
             if last_window.handle_focus(direction) {
-                return None;
+                return FocusResult::Handled;
             }
 
             let mut node_id = last_node_id.clone();
@@ -682,7 +689,7 @@ impl TilingLayout {
                 assert!(group_data.is_group());
 
                 if direction == FocusDirection::Out {
-                    return Some(
+                    return FocusResult::Some(
                         WindowGroup {
                             node: group.clone(),
                             output: output.downgrade(),
@@ -787,7 +794,7 @@ impl TilingLayout {
                                     });
                             }
                             Data::Mapped { mapped, .. } => {
-                                return Some(mapped.clone().into());
+                                return FocusResult::Some(mapped.clone().into());
                             }
                         }
                     }
@@ -797,7 +804,7 @@ impl TilingLayout {
             }
         }
 
-        None
+        FocusResult::None
     }
 
     pub fn update_orientation<'a>(
