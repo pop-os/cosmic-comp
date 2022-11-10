@@ -1059,16 +1059,12 @@ impl TilingLayout {
             .map(|(output_data, tree)| (&output_data.output, tree))
         {
             if let Some(root) = tree.root_node_id() {
-                let mut stack = Vec::new();
-
-                let mut geo = Some(layer_map_for_output(&output).non_exclusive_zone());
-                // TODO saturate? minimum?
-                if let Some(mut geo) = geo.as_mut() {
-                    geo.loc.x += outer;
-                    geo.loc.y += outer;
-                    geo.size.w -= outer * 2;
-                    geo.size.h -= outer * 2;
-                }
+                let mut geo = layer_map_for_output(&output).non_exclusive_zone();
+                geo.loc.x += outer;
+                geo.loc.y += outer;
+                geo.size.w -= outer * 2;
+                geo.size.h -= outer * 2;
+                let mut stack = vec![geo];
 
                 for node_id in tree
                     .traverse_pre_order_ids(root)
@@ -1077,8 +1073,7 @@ impl TilingLayout {
                     .into_iter()
                 {
                     let node = tree.get_mut(&node_id).unwrap();
-                    let geo = stack.pop().unwrap_or(geo);
-                    if let Some(geo) = geo {
+                    if let Some(geo) = stack.pop() {
                         let data = node.data_mut();
                         data.update_geometry(geo);
                         match data {
@@ -1089,20 +1084,20 @@ impl TilingLayout {
                                     let mut previous: i32 = sizes.iter().sum();
                                     for size in sizes.iter().rev() {
                                         previous -= *size;
-                                        stack.push(Some(Rectangle::from_loc_and_size(
+                                        stack.push(Rectangle::from_loc_and_size(
                                             (geo.loc.x, geo.loc.y + previous),
                                             (geo.size.w, *size),
-                                        )));
+                                        ));
                                     }
                                 }
                                 Orientation::Vertical => {
                                     let mut previous: i32 = sizes.iter().sum();
                                     for size in sizes.iter().rev() {
                                         previous -= *size;
-                                        stack.push(Some(Rectangle::from_loc_and_size(
+                                        stack.push(Rectangle::from_loc_and_size(
                                             (geo.loc.x + previous, geo.loc.y),
                                             (*size, geo.size.h),
-                                        )));
+                                        ));
                                     }
                                 }
                             },
@@ -1116,9 +1111,6 @@ impl TilingLayout {
                                 }
                             }
                         }
-                    } else if node.data().is_group() {
-                        stack.push(None);
-                        stack.push(None);
                     }
                 }
             }
