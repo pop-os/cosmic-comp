@@ -458,7 +458,14 @@ impl TilingLayout {
 
         let mut child_id = node_id.clone();
         // Without a parent to start with, just return
-        let og_parent = tree.get(&node_id).unwrap().parent().cloned()?;
+        let Some(og_parent) = tree.get(&node_id).unwrap().parent().cloned() else {
+            let data = tree.get(&node_id).unwrap().data();
+            assert!(data.is_mapped(None));
+            return match data {
+                Data::Mapped { mapped, .. } => Some(mapped.clone()),
+                _ => unreachable!(),
+            };
+        };
         let og_idx = tree
             .children_ids(&og_parent)
             .unwrap()
