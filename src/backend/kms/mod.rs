@@ -25,7 +25,6 @@ use smithay::{
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
             damage::DamageTrackedRenderer,
-            element::RenderElementStates,
             gles2::{Gles2Renderbuffer, Gles2Renderer},
             multigpu::{egl::EglGlesBackend, GpuManager},
             Bind,
@@ -246,20 +245,13 @@ pub fn init_backend(
                         }
                     }
                 }
-                data.state.common.output_configuration_state.update();
 
                 data.state.common.config.read_outputs(
-                    data.state.common.output_configuration_state.outputs(),
+                    &mut data.state.common.output_configuration_state,
                     &mut data.state.backend,
                     &mut data.state.common.shell,
                     &data.state.common.event_loop_handle,
                 );
-                data.state.common.shell.refresh_outputs();
-                data.state
-                    .common
-                    .config
-                    .write_outputs(data.state.common.output_configuration_state.outputs());
-
                 for surface in data
                     .state
                     .backend
@@ -473,27 +465,12 @@ impl State {
         self.common
             .output_configuration_state
             .add_heads(wl_outputs.iter());
-        self.common.output_configuration_state.update();
-        for output in wl_outputs {
-            if let Err(err) = self.backend.kms().apply_config_for_output(
-                &output,
-                &mut self.common.shell,
-                false,
-                &self.common.event_loop_handle,
-            ) {
-                slog_scope::warn!("Failed to initialize output: {}", err);
-            }
-        }
         self.common.config.read_outputs(
-            self.common.output_configuration_state.outputs(),
+            &mut self.common.output_configuration_state,
             &mut self.backend,
             &mut self.common.shell,
             &self.common.event_loop_handle,
         );
-        self.common.shell.refresh_outputs();
-        self.common
-            .config
-            .write_outputs(self.common.output_configuration_state.outputs());
 
         Ok(())
     }
@@ -541,30 +518,15 @@ impl State {
         self.common
             .output_configuration_state
             .add_heads(outputs_added.iter());
-        for output in outputs_added {
-            if let Err(err) = self.backend.kms().apply_config_for_output(
-                &output,
-                &mut self.common.shell,
-                false,
-                &self.common.event_loop_handle,
-            ) {
-                slog_scope::warn!("Failed to initialize output: {}", err);
-            }
-        }
         for output in outputs_removed {
             self.common.shell.remove_output(&output);
         }
-        self.common.output_configuration_state.update();
         self.common.config.read_outputs(
-            self.common.output_configuration_state.outputs(),
+            &mut self.common.output_configuration_state,
             &mut self.backend,
             &mut self.common.shell,
             &self.common.event_loop_handle,
         );
-        self.common.shell.refresh_outputs();
-        self.common
-            .config
-            .write_outputs(self.common.output_configuration_state.outputs());
 
         Ok(())
     }
@@ -593,22 +555,19 @@ impl State {
         self.common
             .output_configuration_state
             .remove_heads(outputs_removed.iter());
-        self.common.output_configuration_state.update();
 
         if self.backend.kms().session.is_active() {
             for output in outputs_removed {
                 self.common.shell.remove_output(&output);
             }
             self.common.config.read_outputs(
-                self.common.output_configuration_state.outputs(),
+                &mut self.common.output_configuration_state,
                 &mut self.backend,
                 &mut self.common.shell,
                 &self.common.event_loop_handle,
             );
-            self.common.shell.refresh_outputs();
-            self.common
-                .config
-                .write_outputs(self.common.output_configuration_state.outputs());
+        } else {
+            self.common.output_configuration_state.update();
         }
 
         Ok(())
@@ -858,10 +817,11 @@ impl KmsState {
 
             if !output_config.enabled {
                 if !test_only {
+                    shell.remove_output(output);
                     if surface.surface.take().is_some() {
                         // just drop it
-                        shell.remove_output(output);
                         surface.pending = false;
+                        surface.dirty = false;
                     }
                 }
                 false
@@ -885,7 +845,7 @@ impl KmsState {
                     .ok_or(anyhow::anyhow!("Unknown mode"))?;
 
                 if !test_only {
-                    if let Some(gbm_surface) = surface.surface.as_mut() {
+                    let res = if let Some(gbm_surface) = surface.surface.as_mut() {
                         if output_config.vrr != surface.vrr {
                             surface.vrr = drm_helpers::set_vrr(
                                 drm,
@@ -917,9 +877,10 @@ impl KmsState {
                             )
                         })?;
                         surface.surface = Some(target);
-                        shell.add_output(output);
                         true
-                    }
+                    };
+                    shell.add_output(output);
+                    res
                 } else {
                     false
                 }

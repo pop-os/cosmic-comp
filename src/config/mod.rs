@@ -2,7 +2,8 @@
 
 use crate::{
     shell::{focus::FocusDirection, layout::tiling::Direction, Shell, WorkspaceAmount},
-    state::{BackendData, Data},
+    state::{BackendData, Data, State},
+    wayland::protocols::output_configuration::OutputConfigurationState,
 };
 use serde::{Deserialize, Serialize};
 pub use smithay::{
@@ -278,12 +279,12 @@ impl Config {
 
     pub fn read_outputs(
         &mut self,
-        outputs: impl Iterator<Item = impl std::borrow::Borrow<Output>>,
+        output_state: &mut OutputConfigurationState<State>,
         backend: &mut BackendData,
         shell: &mut Shell,
         loop_handle: &LoopHandle<'_, Data>,
     ) {
-        let outputs = outputs.map(|x| x.borrow().clone()).collect::<Vec<_>>();
+        let outputs = output_state.outputs().collect::<Vec<_>>();
         let mut infos = outputs
             .iter()
             .cloned()
@@ -307,6 +308,7 @@ impl Config {
             for (name, output_config) in infos.iter().map(|o| &o.connector).zip(configs.into_iter())
             {
                 let output = outputs.iter().find(|o| &o.name() == name).unwrap().clone();
+                let enabled = output_config.enabled;
                 *output
                     .user_data()
                     .get::<RefCell<OutputConfig>>()
@@ -322,6 +324,12 @@ impl Config {
                     );
                     reset = true;
                     break;
+                } else {
+                    if enabled {
+                        output_state.enable_head(&output);
+                    } else {
+                        output_state.disable_head(&output);
+                    }
                 }
             }
 
@@ -331,6 +339,7 @@ impl Config {
                     .into_iter()
                     .zip(known_good_configs.into_iter())
                 {
+                    let enabled = output_config.enabled;
                     *output
                         .user_data()
                         .get::<RefCell<OutputConfig>>()
@@ -344,9 +353,18 @@ impl Config {
                             output.name(),
                             err
                         );
+                    } else {
+                        if enabled {
+                            output_state.enable_head(&output);
+                        } else {
+                            output_state.disable_head(&output);
+                        }
                     }
                 }
             }
+
+            output_state.update();
+            self.write_outputs(output_state.outputs());
         }
     }
 

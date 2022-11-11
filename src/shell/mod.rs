@@ -421,6 +421,10 @@ impl Shell {
     }
 
     pub fn add_output(&mut self, output: &Output) {
+        if self.outputs.contains(output) {
+            return;
+        }
+
         self.outputs.push(output.clone());
         let mut state = self.workspace_state.update();
 
@@ -445,6 +449,10 @@ impl Shell {
     }
 
     pub fn remove_output(&mut self, output: &Output) {
+        if !self.outputs.contains(output) {
+            return;
+        }
+
         let mut state = self.workspace_state.update();
         self.outputs.retain(|o| o != output);
 

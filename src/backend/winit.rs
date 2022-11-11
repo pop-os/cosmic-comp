@@ -213,16 +213,13 @@ pub fn init_backend(
         .common
         .output_configuration_state
         .add_heads(std::iter::once(&output));
-    state.common.output_configuration_state.update();
     state.common.shell.add_output(&output);
     state.common.config.read_outputs(
-        std::iter::once(&output),
+        &mut state.common.output_configuration_state,
         &mut state.backend,
         &mut state.common.shell,
         &state.common.event_loop_handle,
     );
-    state.common.shell.refresh_outputs();
-    state.common.config.write_outputs(std::iter::once(&output));
 
     Ok(())
 }
