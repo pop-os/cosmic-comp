@@ -55,6 +55,12 @@ pub struct Workspace {
 #[derive(Debug, Default)]
 pub struct FocusStacks(HashMap<Seat<State>, IndexSet<CosmicMapped>>);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ManagedState {
+    Tiling,
+    Floating,
+}
+
 impl Workspace {
     pub fn new(handle: WorkspaceHandle) -> Workspace {
         Workspace {
@@ -98,6 +104,25 @@ impl Workspace {
         self.tiling_layer.unmap_output(output);
         self.floating_layer.unmap_output(output);
         self.refresh();
+    }
+
+    pub fn unmap(&mut self, mapped: &CosmicMapped) -> Option<ManagedState> {
+        let was_floating = self.floating_layer.unmap(&mapped);
+        let was_tiling = self.tiling_layer.unmap(&mapped).is_some();
+        if was_floating || was_tiling {
+            assert!(was_floating != was_tiling);
+        }
+        self.focus_stack
+            .0
+            .values_mut()
+            .for_each(|set| set.retain(|m| m != mapped));
+        if was_floating {
+            Some(ManagedState::Floating)
+        } else if was_tiling {
+            Some(ManagedState::Tiling)
+        } else {
+            None
+        }
     }
 
     pub fn element_for_surface(&self, surface: &WlSurface) -> Option<&CosmicMapped> {

@@ -1006,58 +1006,55 @@ impl Shell {
         let from_workspace = state.common.shell.workspaces.active_mut(from_output);
         let maybe_window = from_workspace.focus_stack.get(seat).last().cloned();
 
-        if let Some(mapped) = maybe_window {
-            let was_floating = from_workspace.floating_layer.unmap(&mapped);
-            let was_tiling = from_workspace.tiling_layer.unmap(&mapped);
-            assert!(was_floating != was_tiling);
+        let Some(mapped) = maybe_window else { return; };
+        let Some(window_state) = from_workspace.unmap(&mapped) else { return; };
 
-            for (toplevel, _) in mapped.windows() {
-                state
-                    .common
-                    .shell
-                    .toplevel_info_state
-                    .toplevel_leave_workspace(&toplevel, &from_workspace.handle);
-            }
-            let elements = from_workspace.mapped().cloned().collect::<Vec<_>>();
-            std::mem::drop(from_workspace);
-            for mapped in elements.into_iter() {
-                state.common.shell.update_reactive_popups(&mapped);
-            }
-
-            let to_workspace = state
+        for (toplevel, _) in mapped.windows() {
+            state
                 .common
                 .shell
-                .workspaces
-                .get_mut(to_idx, to_output)
-                .unwrap(); // checked above
-            let focus_stack = to_workspace.focus_stack.get(&seat);
-            if was_floating {
-                to_workspace.floating_layer.map(mapped.clone(), &seat, None);
-            } else {
-                to_workspace
-                    .tiling_layer
-                    .map(mapped.clone(), &seat, focus_stack.iter());
-            }
-            for (toplevel, _) in mapped.windows() {
-                state
-                    .common
-                    .shell
-                    .toplevel_info_state
-                    .toplevel_enter_workspace(&toplevel, &to_workspace.handle);
-            }
-
-            for mapped in to_workspace
-                .mapped()
-                .cloned()
-                .collect::<Vec<_>>()
-                .into_iter()
-            {
-                state.common.shell.update_reactive_popups(&mapped);
-            }
-
-            state.common.shell.activate(to_output, to_idx);
-            Common::set_focus(state, Some(&KeyboardFocusTarget::from(mapped)), &seat, None);
+                .toplevel_info_state
+                .toplevel_leave_workspace(&toplevel, &from_workspace.handle);
         }
+        let elements = from_workspace.mapped().cloned().collect::<Vec<_>>();
+        std::mem::drop(from_workspace);
+        for mapped in elements.into_iter() {
+            state.common.shell.update_reactive_popups(&mapped);
+        }
+
+        let to_workspace = state
+            .common
+            .shell
+            .workspaces
+            .get_mut(to_idx, to_output)
+            .unwrap(); // checked above
+        let focus_stack = to_workspace.focus_stack.get(&seat);
+        if window_state == ManagedState::Floating {
+            to_workspace.floating_layer.map(mapped.clone(), &seat, None);
+        } else {
+            to_workspace
+                .tiling_layer
+                .map(mapped.clone(), &seat, focus_stack.iter());
+        }
+        for (toplevel, _) in mapped.windows() {
+            state
+                .common
+                .shell
+                .toplevel_info_state
+                .toplevel_enter_workspace(&toplevel, &to_workspace.handle);
+        }
+
+        for mapped in to_workspace
+            .mapped()
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
+        {
+            state.common.shell.update_reactive_popups(&mapped);
+        }
+
+        state.common.shell.activate(to_output, to_idx);
+        Common::set_focus(state, Some(&KeyboardFocusTarget::from(mapped)), &seat, None);
     }
 
     pub fn update_reactive_popups(&self, mapped: &CosmicMapped) {

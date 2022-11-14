@@ -291,6 +291,7 @@ impl TilingLayout {
         focus_stack: impl Iterator<Item = &'a CosmicMapped> + 'a,
     ) {
         let output = seat.active_output();
+        window.output_enter(&output, window.bbox());
         self.map_internal(window, &output, Some(focus_stack));
         self.refresh();
     }
@@ -345,17 +346,27 @@ impl TilingLayout {
         *window.tiling_node_id.lock().unwrap() = Some(window_id);
     }
 
-    pub fn unmap(&mut self, window: &CosmicMapped) -> bool {
-        if self.unmap_window_internal(window) {
-            window.set_tiled(false);
-            self.refresh();
-            true
-        } else {
-            false
-        }
+    pub fn unmap(&mut self, window: &CosmicMapped) -> Option<Output> {
+        let output = {
+            let node_id = window.tiling_node_id.lock().unwrap().clone()?;
+            self.trees
+                .iter()
+                .find(|(_, tree)| {
+                    tree.get(&node_id)
+                        .map(|node| node.data().is_mapped(Some(window)))
+                        .unwrap_or(false)
+                })
+                .map(|(o, _)| o.output.clone())?
+        };
+
+        self.unmap_window_internal(window);
+        window.output_leave(&output);
+        window.set_tiled(false);
+        self.refresh();
+        Some(output)
     }
 
-    fn unmap_window_internal(&mut self, mapped: &CosmicMapped) -> bool {
+    fn unmap_window_internal(&mut self, mapped: &CosmicMapped) {
         if let Some(node_id) = mapped.tiling_node_id.lock().unwrap().as_ref() {
             if let Some(tree) = self.trees.values_mut().find(|tree| {
                 tree.get(node_id)
@@ -415,11 +426,8 @@ impl TilingLayout {
                     }
                     None => {} // root
                 }
-
-                return true;
             }
         }
-        false
     }
 
     pub fn output_for_element(&self, elem: &CosmicMapped) -> Option<&Output> {
