@@ -1243,7 +1243,8 @@ impl TilingLayout {
                 }
             })
             .flat_map(|(mapped, loc)| {
-                mapped.render_elements::<TilingRenderElement<R>>(
+                AsRenderElements::<R>::render_elements::<TilingRenderElement<R>>(
+                    mapped,
                     loc.to_physical_precise_round(output_scale)
                         - mapped
                             .geometry()

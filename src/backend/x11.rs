@@ -15,9 +15,8 @@ use smithay::{
         egl::{EGLContext, EGLDisplay},
         input::{Event, InputEvent},
         renderer::{
-            damage::DamageTrackedRenderer,
-            gles2::{Gles2Renderbuffer, Gles2Renderer},
-            Bind, ImportDma, ImportEgl,
+            damage::DamageTrackedRenderer, gles2::Gles2Renderbuffer, glow::GlowRenderer, Bind,
+            ImportDma, ImportEgl,
         },
         x11::{Window, WindowBuilder, X11Backend, X11Event, X11Handle, X11Input, X11Surface},
     },
@@ -26,6 +25,7 @@ use smithay::{
     reexports::{
         calloop::{ping, EventLoop, LoopHandle},
         gbm::{Device as GbmDevice, FdWrapper},
+        wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
         wayland_server::DisplayHandle,
     },
     utils::Transform,
@@ -41,7 +41,7 @@ use crate::state::Fps;
 pub struct X11State {
     allocator: Arc<Mutex<GbmDevice<FdWrapper>>>,
     _egl: EGLDisplay,
-    pub renderer: Gles2Renderer,
+    pub renderer: GlowRenderer,
     surfaces: Vec<Surface>,
     handle: X11Handle,
 }
@@ -194,22 +194,15 @@ pub struct Surface {
 }
 
 impl Surface {
-    pub fn render_output(
-        &mut self,
-        renderer: &mut Gles2Renderer,
-        state: &mut Common,
-    ) -> Result<()> {
+    pub fn render_output(&mut self, renderer: &mut GlowRenderer, state: &mut Common) -> Result<()> {
         let (buffer, age) = self
             .surface
             .buffer()
             .with_context(|| "Failed to allocate buffer")?;
-        renderer
-            .bind(buffer.clone())
-            .with_context(|| "Failed to bind buffer")?;
-
-        match render::render_output::<_, Gles2Renderbuffer, _>(
+        match render::render_output::<_, _, Gles2Renderbuffer, _>(
             None,
             renderer,
+            buffer.clone(),
             &mut self.damage_tracker,
             age as usize,
             state,
@@ -223,12 +216,25 @@ impl Surface {
             #[cfg(feature = "debug")]
             Some(&mut self.fps),
         ) {
-            Ok((_damage, states)) => {
+            Ok((damage, states)) => {
                 self.screencopy.clear();
                 self.surface
                     .submit()
                     .with_context(|| "Failed to submit buffer for display")?;
                 state.send_frames(&self.output, &states);
+                if damage.is_some() {
+                    let mut output_presentation_feedback =
+                        state.take_presentation_feedback(&self.output, &states);
+                    output_presentation_feedback.presented(
+                        state.clock.now(),
+                        self.output
+                            .current_mode()
+                            .map(|mode| mode.refresh as u32)
+                            .unwrap_or_default(),
+                        0,
+                        wp_presentation_feedback::Kind::Vsync,
+                    )
+                }
             }
             Err(err) => {
                 for (session, params) in self.screencopy.drain(..) {
@@ -265,7 +271,7 @@ pub fn init_backend(
     // Create the OpenGL context
     let context = EGLContext::new(&egl, None).with_context(|| "Failed to create EGL context")?;
     // Create a renderer
-    let mut renderer = unsafe { Gles2Renderer::new(context, None) }
+    let mut renderer = unsafe { GlowRenderer::new(context, None) }
         .with_context(|| "Failed to initialize renderer")?;
 
     init_egl_client_side(dh, state, &mut renderer)?;
@@ -383,11 +389,10 @@ pub fn init_backend(
     Ok(())
 }
 
-fn init_egl_client_side(
-    dh: &DisplayHandle,
-    state: &mut State,
-    renderer: &mut Gles2Renderer,
-) -> Result<()> {
+fn init_egl_client_side<R>(dh: &DisplayHandle, state: &mut State, renderer: &mut R) -> Result<()>
+where
+    R: ImportEgl + ImportDma,
+{
     let bind_result = renderer.bind_wl_display(dh);
     match bind_result {
         Ok(_) => {

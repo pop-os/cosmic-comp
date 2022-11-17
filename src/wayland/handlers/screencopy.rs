@@ -19,7 +19,8 @@ use smithay::{
             element::{
                 surface::WaylandSurfaceRenderElement, AsRenderElements, RenderElementStates,
             },
-            gles2::{Gles2Renderbuffer, Gles2Renderer},
+            gles2::Gles2Renderbuffer,
+            glow::GlowRenderer,
             Bind, BufferType, ExportMem, ImportAll, Offscreen, Renderer,
         },
     },
@@ -471,23 +472,6 @@ fn node_from_params(
     }
 }
 
-fn prepare_renderer<R, Target>(
-    renderer: &mut R,
-    buffer: &WlBuffer,
-) -> Result<(), <R as Renderer>::Error>
-where
-    R: Bind<Dmabuf> + Offscreen<Target>,
-{
-    if let Ok(dmabuf) = get_dmabuf(buffer) {
-        renderer.bind(dmabuf)?;
-    } else {
-        let size = buffer_dimensions(buffer).unwrap();
-        let render_buffer = renderer.create_buffer(size)?;
-        renderer.bind(render_buffer)?;
-    };
-    Ok(())
-}
-
 fn submit_buffer<R>(
     session: &Session,
     buffer: &WlBuffer,
@@ -537,7 +521,7 @@ where
     Ok(())
 }
 
-pub fn render_to_buffer<F, R, Target>(
+pub fn render_session<F, R>(
     node: Option<DrmNode>,
     renderer: &mut R,
     session: &Session,
@@ -546,9 +530,10 @@ pub fn render_to_buffer<F, R, Target>(
     render_fn: F,
 ) -> Result<bool, DamageTrackedRendererError<R>>
 where
-    R: Bind<Dmabuf> + Offscreen<Target> + ExportMem,
+    R: ExportMem,
     F: FnOnce(
         Option<&DrmNode>,
+        &WlBuffer,
         &mut R,
         &mut DamageTrackedRenderer,
         usize,
@@ -557,15 +542,19 @@ where
         DamageTrackedRendererError<R>,
     >,
 {
-    prepare_renderer(renderer, &params.buffer).map_err(DamageTrackedRendererError::Rendering)?;
-
     let mut dtr = session
         .user_data()
         .get::<SessionDTR>()
         .unwrap()
         .borrow_mut();
 
-    let res = render_fn(node.as_ref(), renderer, &mut *dtr, params.age as usize)?;
+    let res = render_fn(
+        node.as_ref(),
+        &params.buffer,
+        renderer,
+        &mut *dtr,
+        params.age as usize,
+    )?;
 
     if let (Some(damage), _) = res {
         submit_buffer(session, &params.buffer, renderer, transform, damage)
@@ -607,28 +596,50 @@ pub fn render_output_to_buffer(
     };
 
     let common = &mut state.common;
-    render_to_buffer::<_, _, Gles2Renderbuffer>(
+    render_session::<_, _>(
         node,
         renderer,
         session,
         &params,
         output.current_transform(),
-        |node, renderer, dtr, age| {
-            render_output::<_, Gles2Renderbuffer, Dmabuf>(
-                node,
-                renderer,
-                dtr,
-                age,
-                common,
-                &output,
-                match session.cursor_mode() {
-                    ScreencopyCursorMode::Embedded => CursorMode::All,
-                    ScreencopyCursorMode::Captured(_) | ScreencopyCursorMode::None => {
-                        CursorMode::None
-                    }
-                },
-                None,
-            )
+        |node, buffer, renderer, dtr, age| {
+            let cursor_mode = match session.cursor_mode() {
+                ScreencopyCursorMode::Embedded => CursorMode::All,
+                ScreencopyCursorMode::Captured(_) | ScreencopyCursorMode::None => CursorMode::None,
+            };
+
+            if let Ok(dmabuf) = get_dmabuf(buffer) {
+                render_output::<_, _, Gles2Renderbuffer, Dmabuf>(
+                    node,
+                    renderer,
+                    dmabuf,
+                    dtr,
+                    age,
+                    common,
+                    &output,
+                    cursor_mode,
+                    None,
+                    #[cfg(feature = "debug")]
+                    None,
+                )
+            } else {
+                let size = buffer_dimensions(buffer).unwrap();
+                let render_buffer = Offscreen::<Gles2Renderbuffer>::create_buffer(renderer, size)
+                    .map_err(DamageTrackedRendererError::Rendering)?;
+                render_output::<_, _, Gles2Renderbuffer, Dmabuf>(
+                    node,
+                    renderer,
+                    render_buffer,
+                    dtr,
+                    age,
+                    common,
+                    &output,
+                    cursor_mode,
+                    None,
+                    #[cfg(feature = "debug")]
+                    None,
+                )
+            }
         },
     )
     .map_err(|err| (FailureReason::Unspec, err.into()))
@@ -666,29 +677,51 @@ pub fn render_workspace_to_buffer(
     };
 
     let common = &mut state.common;
-    render_to_buffer::<_, _, Gles2Renderbuffer>(
+    render_session::<_, _>(
         node,
         renderer,
         session,
         &params,
         output.current_transform(),
-        |node, renderer, dtr, age| {
-            render_workspace::<_, Gles2Renderbuffer, Dmabuf>(
-                node,
-                renderer,
-                dtr,
-                age,
-                common,
-                &output,
-                handle,
-                match session.cursor_mode() {
-                    ScreencopyCursorMode::Embedded => CursorMode::All,
-                    ScreencopyCursorMode::Captured(_) | ScreencopyCursorMode::None => {
-                        CursorMode::None
-                    }
-                },
-                None,
-            )
+        |node, buffer, renderer, dtr, age| {
+            let cursor_mode = match session.cursor_mode() {
+                ScreencopyCursorMode::Embedded => CursorMode::All,
+                ScreencopyCursorMode::Captured(_) | ScreencopyCursorMode::None => CursorMode::None,
+            };
+            if let Ok(dmabuf) = get_dmabuf(buffer) {
+                render_workspace::<_, _, Gles2Renderbuffer, Dmabuf>(
+                    node,
+                    renderer,
+                    dmabuf,
+                    dtr,
+                    age,
+                    common,
+                    &output,
+                    handle,
+                    cursor_mode,
+                    None,
+                    #[cfg(feature = "debug")]
+                    None,
+                )
+            } else {
+                let size = buffer_dimensions(buffer).unwrap();
+                let render_buffer = Offscreen::<Gles2Renderbuffer>::create_buffer(renderer, size)
+                    .map_err(DamageTrackedRendererError::Rendering)?;
+                render_workspace::<_, _, Gles2Renderbuffer, Dmabuf>(
+                    node,
+                    renderer,
+                    render_buffer,
+                    dtr,
+                    age,
+                    common,
+                    &output,
+                    handle,
+                    cursor_mode,
+                    None,
+                    #[cfg(feature = "debug")]
+                    None,
+                )
+            }
         },
     )
     .map_err(|err| (FailureReason::Unspec, err.into()))
@@ -728,16 +761,16 @@ pub fn render_window_to_buffer(
         _ => unreachable!(),
     };
 
-    render_to_buffer::<_, _, Gles2Renderbuffer>(
+    render_session::<_, _>(
         node,
         renderer,
         session,
         &params,
         Transform::Normal,
-        |_node, renderer, dtr, age| {
+        |_node, buffer, renderer, dtr, age| {
             // TODO cursor elements!
-            let mut elements = AsRenderElements::<Gles2Renderer>::render_elements::<
-                WindowCaptureElement<Gles2Renderer>,
+            let mut elements = AsRenderElements::<GlowRenderer>::render_elements::<
+                WindowCaptureElement<GlowRenderer>,
             >(
                 window,
                 (-geometry.loc.x, -geometry.loc.y).into(),
@@ -771,7 +804,7 @@ pub fn render_window_to_buffer(
                                 seat,
                                 location,
                                 1.0.into(),
-                                &state.common.start_time,
+                                state.common.clock.now(),
                                 true,
                             )
                             .into_iter()
@@ -787,6 +820,19 @@ pub fn render_window_to_buffer(
                         );
                     }
                 }
+            }
+
+            if let Ok(dmabuf) = get_dmabuf(buffer) {
+                renderer
+                    .bind(dmabuf)
+                    .map_err(DamageTrackedRendererError::Rendering)?;
+            } else {
+                let size = buffer_dimensions(buffer).unwrap();
+                let render_buffer = Offscreen::<Gles2Renderbuffer>::create_buffer(renderer, size)
+                    .map_err(DamageTrackedRendererError::Rendering)?;
+                renderer
+                    .bind(render_buffer)
+                    .map_err(DamageTrackedRendererError::Rendering)?;
             }
 
             dtr.render_output(renderer, age, &elements, CLEAR_COLOR, None)

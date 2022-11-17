@@ -1,18 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #[cfg(feature = "debug")]
+use crate::{debug::fps_ui, state::Fps, utils::prelude::*};
 use crate::{
-    debug::{debug_ui, fps_ui, log_ui, EguiFrame},
-    state::Fps,
-    utils::prelude::*,
-};
-use crate::{
-    shell::{
-        layout::floating::SeatMoveGrabState, CosmicMappedRenderElement, WorkspaceRenderElement,
-    },
+    shell::{layout::floating::SeatMoveGrabState, CosmicMappedRenderElement},
     state::Common,
     wayland::{
-        handlers::{data_device::get_dnd_icon, screencopy::render_to_buffer},
+        handlers::{data_device::get_dnd_icon, screencopy::render_session},
         protocols::{
             screencopy::{
                 BufferParams, CursorMode as ScreencopyCursorMode, Session as ScreencopySession,
@@ -28,41 +22,37 @@ use smithay::{
         allocator::dmabuf::Dmabuf,
         drm::DrmNode,
         renderer::{
+            buffer_dimensions,
             damage::{
                 DamageTrackedRenderer, DamageTrackedRendererError as RenderError, OutputNoMode,
             },
-            element::RenderElementStates,
-            gles2::{Gles2Renderbuffer, Gles2Renderer},
+            element::{RenderElement, RenderElementStates},
+            gles2::{Gles2Error, Gles2Renderbuffer},
+            glow::GlowRenderer,
             multigpu::{egl::EglGlesBackend, MultiFrame, MultiRenderer},
             Bind, Blit, ExportMem, ImportAll, ImportMem, Offscreen, Renderer, TextureFilter,
         },
     },
     output::Output,
     utils::{Physical, Rectangle},
+    wayland::dmabuf::get_dmabuf,
 };
 
 pub mod cursor;
 use self::cursor::CursorRenderElement;
+pub mod element;
+use self::element::{AsGles2Frame, AsGlowRenderer, CosmicElement};
 
 pub type GlMultiRenderer<'a> = MultiRenderer<
     'a,
     'a,
-    EglGlesBackend<Gles2Renderer>,
-    EglGlesBackend<Gles2Renderer>,
+    EglGlesBackend<GlowRenderer>,
+    EglGlesBackend<GlowRenderer>,
     Gles2Renderbuffer,
 >;
-pub type GlMultiFrame = MultiFrame<EglGlesBackend<Gles2Renderer>, EglGlesBackend<Gles2Renderer>>;
+pub type GlMultiFrame = MultiFrame<EglGlesBackend<GlowRenderer>, EglGlesBackend<GlowRenderer>>;
 
 pub static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
-
-smithay::render_elements! {
-    pub CosmicElement<R> where R: ImportAll;
-    WorkspaceElement=WorkspaceRenderElement<R>,
-    CursorElement=CursorRenderElement<R>,
-    MoveGrabRenderElement=CosmicMappedRenderElement<R>,
-    //#[cfg(feature = "debug")]
-    //EguiFrame=EguiFrame,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CursorMode {
@@ -79,6 +69,7 @@ pub fn cursor_elements<E, R>(
 ) -> Vec<E>
 where
     R: Renderer + ImportAll + ImportMem,
+    <R as Renderer>::Frame: AsGles2Frame,
     <R as Renderer>::TextureId: Clone + 'static,
     E: From<CursorRenderElement<R>> + From<CosmicMappedRenderElement<R>>,
 {
@@ -101,7 +92,7 @@ where
                     seat,
                     location,
                     scale.into(),
-                    &state.start_time,
+                    state.clock.now(),
                     mode != CursorMode::NotDefault,
                 )
                 .into_iter()
@@ -132,16 +123,17 @@ where
     elements
 }
 
-pub fn render_output<R, Target, Source>(
+pub fn render_output<R, Target, OffTarget, Source>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,
+    target: Target,
     damage_tracker: &mut DamageTrackedRenderer,
     age: usize,
     state: &mut Common,
     output: &Output,
     cursor_mode: CursorMode,
     screencopy: Option<(Source, &[(ScreencopySession, BufferParams)])>,
-    #[cfg(feature = "debug")] mut fps: Option<&mut Fps>,
+    #[cfg(feature = "debug")] fps: Option<&mut Fps>,
 ) -> Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), RenderError<R>>
 where
     R: Renderer
@@ -149,16 +141,21 @@ where
         + ImportMem
         + ExportMem
         + Bind<Dmabuf>
-        + Offscreen<Target>
-        + Bind<Source>
-        + Blit<Source>,
+        + Bind<Target>
+        + Offscreen<OffTarget>
+        + Blit<Source>
+        + AsGlowRenderer,
+    <R as Renderer>::Frame: AsGles2Frame,
     <R as Renderer>::TextureId: Clone + 'static,
+    <R as Renderer>::Error: From<Gles2Error>,
+    CosmicElement<R>: RenderElement<R>,
     Source: Clone,
 {
     let handle = state.shell.workspaces.active(output).handle;
     render_workspace(
         gpu,
         renderer,
+        target,
         damage_tracker,
         age,
         state,
@@ -166,12 +163,15 @@ where
         &handle,
         cursor_mode,
         screencopy,
+        #[cfg(feature = "debug")]
+        fps,
     )
 }
 
-pub fn render_workspace<R, Target, Source>(
+pub fn render_workspace<R, Target, OffTarget, Source>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,
+    target: Target,
     damage_tracker: &mut DamageTrackedRenderer,
     age: usize,
     state: &mut Common,
@@ -187,11 +187,15 @@ where
         + ImportMem
         + ExportMem
         + Bind<Dmabuf>
-        + Offscreen<Target>
-        + Bind<Source>
-        + Blit<Source>,
-    Source: Clone,
+        + Bind<Target>
+        + Offscreen<OffTarget>
+        + Blit<Source>
+        + AsGlowRenderer,
+    <R as Renderer>::Frame: AsGles2Frame,
     <R as Renderer>::TextureId: Clone + 'static,
+    <R as Renderer>::Error: From<Gles2Error>,
+    CosmicElement<R>: RenderElement<R>,
+    Source: Clone,
 {
     #[cfg(feature = "debug")]
     if let Some(ref mut fps) = fps {
@@ -219,68 +223,67 @@ where
 
     #[cfg(feature = "debug")]
     {
-        // TODO add debug elements
-        let workspace = &state.shell.spaces[space_idx];
-        let output_geo = workspace
-            .space
-            .output_geometry(output)
-            .unwrap_or(Rectangle::from_loc_and_size((0, 0), (0, 0)));
+        let output_geo = output.geometry();
         let scale = output.current_scale().fractional_scale();
 
-        if let Some(fps) = fps {
+        if let Some(fps) = fps.as_mut() {
             let fps_overlay = fps_ui(
-                _gpu,
+                gpu,
                 state,
+                renderer.glow_renderer_mut(),
                 fps,
-                output_geo.to_f64().to_physical(scale),
+                Rectangle::from_loc_and_size(
+                    (0, 0),
+                    (output_geo.size.w.min(400), output_geo.size.h.min(800)),
+                ),
                 scale,
-            );
-            custom_elements.push(fps_overlay.into());
-        }
-
-        let area = Rectangle::<f64, smithay::utils::Logical>::from_loc_and_size(
-            state
-                .shell
-                .space_relative_output_geometry((0.0f64, 0.0f64), output),
-            state.shell.global_space().to_f64().size,
-        )
-        .to_physical(scale);
-        if let Some(log_ui) = log_ui(state, area, scale, output_geo.size.w as f32 * 0.6) {
-            custom_elements.push(log_ui.into());
-        }
-        if let Some(debug_overlay) = debug_ui(state, area, scale) {
-            custom_elements.push(debug_overlay.into());
+            )
+            .map_err(<R as Renderer>::Error::from)
+            .map_err(RenderError::Rendering)?;
+            elements.push(fps_overlay.into());
         }
     }
 
     elements.extend(
         workspace
-            .render_output(output)
+            .render_output::<R>(output)
             .map_err(|_| OutputNoMode)?
             .into_iter()
             .map(Into::into),
     );
 
+    renderer.bind(target).map_err(RenderError::Rendering)?;
     let res = damage_tracker.render_output(renderer, age, &elements, CLEAR_COLOR, None);
 
     #[cfg(feature = "debug")]
-    if let Some(ref mut fps) = fps {
+    if let Some(fps) = fps.as_mut() {
         fps.end();
     }
 
     if let Some((source, buffers)) = screencopy {
         if res.is_ok() {
             for (session, params) in buffers {
-                match render_to_buffer(
+                match render_session(
                     gpu.cloned(),
                     renderer,
                     &session,
                     params,
                     output.current_transform(),
-                    |_node, renderer, dtr, age| {
+                    |_node, buffer, renderer, dtr, age| {
                         let res = dtr.damage_output(age, &elements, slog_scope::logger())?;
 
                         if let (Some(ref damage), _) = &res {
+                            if let Ok(dmabuf) = get_dmabuf(buffer) {
+                                renderer.bind(dmabuf).map_err(RenderError::Rendering)?;
+                            } else {
+                                let size = buffer_dimensions(buffer).unwrap();
+                                let render_buffer = renderer
+                                    .create_buffer(size)
+                                    .map_err(RenderError::Rendering)?;
+                                renderer
+                                    .bind(render_buffer)
+                                    .map_err(RenderError::Rendering)?;
+                            }
                             for rect in damage {
                                 renderer
                                     .blit_from(source.clone(), *rect, *rect, TextureFilter::Nearest)

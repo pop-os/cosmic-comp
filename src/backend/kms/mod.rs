@@ -19,19 +19,20 @@ use anyhow::{Context, Result};
 use smithay::{
     backend::{
         allocator::{dmabuf::Dmabuf, gbm::GbmDevice, Format},
-        drm::{DrmDevice, DrmEvent, DrmNode, GbmBufferedSurface, NodeType},
+        drm::{DrmDevice, DrmEvent, DrmEventTime, DrmNode, GbmBufferedSurface, NodeType},
         egl::{EGLContext, EGLDevice, EGLDisplay},
         input::InputEvent,
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
             damage::DamageTrackedRenderer,
-            gles2::{Gles2Renderbuffer, Gles2Renderer},
+            gles2::Gles2Renderbuffer,
+            glow::GlowRenderer,
             multigpu::{egl::EglGlesBackend, GpuManager},
-            Bind,
         },
         session::{auto::AutoSession, Session, Signal},
         udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
     },
+    desktop::utils::OutputPresentationFeedback,
     output::{Mode as OutputMode, Output, PhysicalProperties, Subpixel},
     reexports::{
         calloop::{
@@ -41,6 +42,7 @@ use smithay::{
         drm::control::{connector, crtc, Device as ControlDevice, ModeTypeFlags},
         input::Libinput,
         nix::{fcntl::OFlag, sys::stat::dev_t},
+        wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
         wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle, Resource},
     },
     utils::{
@@ -69,7 +71,7 @@ use super::render::{CursorMode, GlMultiRenderer};
 
 pub struct KmsState {
     devices: HashMap<DrmNode, Device>,
-    pub api: GpuManager<EglGlesBackend<Gles2Renderer>>,
+    pub api: GpuManager<EglGlesBackend<GlowRenderer>>,
     pub primary: DrmNode,
     session: AutoSession,
     signaler: Signaler<Signal>,
@@ -89,7 +91,13 @@ pub struct Device {
 }
 
 pub struct Surface {
-    surface: Option<GbmBufferedSurface<Rc<RefCell<GbmDevice<SessionFd>>>, SessionFd>>,
+    surface: Option<
+        GbmBufferedSurface<
+            Rc<RefCell<GbmDevice<SessionFd>>>,
+            SessionFd,
+            Option<OutputPresentationFeedback>,
+        >,
+    >,
     damage_tracker: DamageTrackedRenderer,
     connector: connector::Handle,
     output: Output,
@@ -131,6 +139,7 @@ pub fn init_backend(
                     &data.state.common.event_loop_handle,
                     output,
                     None,
+                    None,
                 ) {
                     slog_scope::crit!(
                         "Error scheduling event loop for output {}: {:?}",
@@ -148,7 +157,7 @@ pub fn init_backend(
         .map_err(|err| err.error)
         .context("Failed to initialize session event source")?;
 
-    let api = GpuManager::new(EglGlesBackend::<Gles2Renderer>::default(), None)
+    let api = GpuManager::new(EglGlesBackend::<GlowRenderer>::default(), None)
         .context("Failed to initialize renderers")?;
 
     // TODO get this info from system76-power, if available and setup a watcher
@@ -267,6 +276,7 @@ pub fn init_backend(
                     if let Err(err) = data.state.backend.kms().schedule_render(
                         &data.state.common.event_loop_handle,
                         output,
+                        None,
                         if !sessions.is_empty() {
                             Some(sessions)
                         } else {
@@ -372,8 +382,44 @@ impl State {
                         if let Some(device) = data.state.backend.kms().devices.get_mut(&drm_node) {
                             if let Some(surface) = device.surfaces.get_mut(&crtc) {
                                 match surface.surface.as_mut().map(|x| x.frame_submitted()) {
-                                    Some(Ok(_)) => {
-                                        let _submit_time = metadata.take().map(|data| data.time);
+                                    Some(Ok(feedback)) => {
+                                        if let Some(mut feedback) = feedback.flatten() {
+                                            let submit_time =
+                                                match metadata.take().map(|data| data.time) {
+                                                    Some(DrmEventTime::Monotonic(tp)) => Some(tp),
+                                                    _ => None,
+                                                };
+                                            let seq = metadata
+                                                .as_ref()
+                                                .map(|metadata| metadata.sequence)
+                                                .unwrap_or(0);
+
+                                            let (clock, flags) = if let Some(tp) = submit_time {
+                                                (
+                                                tp.into(),
+                                                wp_presentation_feedback::Kind::Vsync
+                                                    | wp_presentation_feedback::Kind::HwClock
+                                                    | wp_presentation_feedback::Kind::HwCompletion,
+                                            )
+                                            } else {
+                                                (
+                                                    data.state.common.clock.now(),
+                                                    wp_presentation_feedback::Kind::Vsync,
+                                                )
+                                            };
+
+                                            feedback.presented(
+                                                clock,
+                                                surface
+                                                    .output
+                                                    .current_mode()
+                                                    .map(|mode| mode.refresh as u32)
+                                                    .unwrap_or_default(),
+                                                seq as u64,
+                                                flags,
+                                            );
+                                        }
+
                                         surface.pending = false;
                                         surface.dirty.then(|| surface.output.clone())
                                     }
@@ -400,9 +446,19 @@ impl State {
                                 .extend(sessions.borrow_mut().drain(..));
                         }
 
+                        let output_refresh = match output.current_mode() {
+                            Some(mode) => mode.refresh,
+                            None => return,
+                        };
+                        // TODO: Record rendering times and use sliding window to estimate duration for next render
+                        let repaint_delay = Duration::from_secs_f64(
+                            ((1000.0 / output_refresh as f64) * 0.6).max(0.003), // for now we assume we need at least 3ms
+                        );
+
                         if let Err(err) = data.state.backend.kms().schedule_render(
                             &data.state.common.event_loop_handle,
                             &output,
+                            Some(repaint_delay),
                             scheduled_sessions,
                         ) {
                             slog_scope::warn!("Failed to schedule render: {}", err);
@@ -738,7 +794,7 @@ impl Surface {
     pub fn render_output(
         &mut self,
         dh: &DisplayHandle,
-        api: &mut GpuManager<EglGlesBackend<Gles2Renderer>>,
+        api: &mut GpuManager<EglGlesBackend<GlowRenderer>>,
         target_node: &DrmNode,
         state: &mut Common,
         screencopy: Option<&[(ScreencopySession, BufferParams)]>,
@@ -755,13 +811,10 @@ impl Surface {
             .next_buffer()
             .with_context(|| "Failed to allocate buffer")?;
 
-        renderer
-            .bind(buffer.clone())
-            .with_context(|| "Failed to bind buffer")?;
-
-        match render::render_output::<_, Gles2Renderbuffer, _>(
+        match render::render_output::<GlMultiRenderer, _, Gles2Renderbuffer, _>(
             Some(&render_node),
             &mut renderer,
+            buffer.clone(),
             &mut self.damage_tracker,
             age as usize,
             state,
@@ -771,10 +824,15 @@ impl Surface {
             #[cfg(feature = "debug")]
             Some(&mut self.fps),
         ) {
-            Ok((_damage, states)) => {
+            Ok((damage, states)) => {
+                let feedback = if damage.is_some() {
+                    Some(state.take_presentation_feedback(&self.output, &states))
+                } else {
+                    None
+                };
                 state.send_frames(&self.output, &states);
                 surface
-                    .queue_buffer()
+                    .queue_buffer(feedback)
                     .with_context(|| "Failed to submit buffer for display")?;
             }
             Err(err) => {
@@ -895,6 +953,7 @@ impl KmsState {
             if let Err(err) = self.schedule_render(
                 loop_handle,
                 output,
+                None,
                 if !sessions.is_empty() {
                     Some(sessions)
                 } else {
@@ -963,6 +1022,7 @@ impl KmsState {
         &mut self,
         loop_handle: &LoopHandle<'_, Data>,
         output: &Output,
+        delay: Option<Duration>,
         mut screencopy_sessions: Option<Vec<(ScreencopySession, BufferParams)>>,
     ) -> Result<(), InsertError<Timer>> {
         if let Some((device, crtc, surface)) = self
@@ -977,19 +1037,6 @@ impl KmsState {
             if !surface.pending {
                 surface.dirty = false;
                 surface.pending = true;
-                /*
-                let instant = surface
-                    .last_submit
-                    .as_ref()
-                    .and_then(|x| match x {
-                        DrmEventTime::Monotonic(instant) => Some(instant),
-                        DrmEventTime::Realtime(_) => None,
-                    })
-                    .map(|i| {
-                        *i + Duration::from_secs_f64(1.0 / surface.refresh_rate as f64)
-                            - Duration::from_millis(20) // render budget
-                    });
-                */
 
                 let device = *device;
                 let crtc = *crtc;
@@ -997,10 +1044,11 @@ impl KmsState {
                     loop_handle.remove(token);
                 }
                 surface.render_timer_token = Some(loop_handle.insert_source(
-                    //if surface.vrr || instant.is_none() {
-                    Timer::immediate(), /*} else {
-                                            Timer::from_deadline(instant.unwrap())
-                                        }*/
+                    if surface.vrr || delay.is_none() {
+                        Timer::immediate()
+                    } else {
+                        Timer::from_duration(delay.unwrap())
+                    },
                     move |_time, _, data| {
                         let backend = data.state.backend.kms();
                         if let Some(device) = backend.devices.get_mut(&device) {
@@ -1020,7 +1068,7 @@ impl KmsState {
                                     if backend.session.is_active() {
                                         slog_scope::error!("Error rendering: {}", err);
                                         return TimeoutAction::ToDuration(Duration::from_secs_f64(
-                                            1.0 / surface.refresh_rate as f64,
+                                            (1000.0 / surface.refresh_rate as f64) - 0.003,
                                         ));
                                     }
                                 }

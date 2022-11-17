@@ -51,7 +51,8 @@ impl MoveGrabState {
         }
 
         let scale = output.current_scale().fractional_scale().into();
-        self.window.render_elements::<I>(
+        AsRenderElements::<R>::render_elements::<I>(
+            &self.window,
             (location.to_i32_round() - output.geometry().loc - self.window.geometry().loc)
                 .to_physical_precise_round(scale),
             scale,

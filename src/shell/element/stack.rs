@@ -308,7 +308,7 @@ impl PointerTarget<State> for CosmicStack {
             for session in &*sessions.0.borrow() {
                 let buffer_loc = (event.location.x, event.location.y); // we always screencast windows at 1x1 scale
                 if let Some((geo, hotspot)) =
-                    seat.cursor_geometry(buffer_loc, &data.common.start_time)
+                    seat.cursor_geometry(buffer_loc, data.common.clock.now())
                 {
                     session.cursor_info(seat, InputType::Pointer, geo, hotspot);
                 }

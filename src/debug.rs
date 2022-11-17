@@ -2,20 +2,27 @@
 
 use crate::state::{Common, Fps};
 use smithay::{
-    backend::drm::DrmNode,
+    backend::{
+        drm::DrmNode,
+        renderer::{
+            element::texture::TextureRenderElement,
+            gles2::{Gles2Error, Gles2Texture},
+            glow::GlowRenderer,
+        },
+    },
     desktop::layer_map_for_output,
     reexports::wayland_server::Resource,
-    utils::{IsAlive, Physical, Rectangle},
+    utils::{IsAlive, Logical, Rectangle},
 };
-pub use smithay_egui::EguiFrame;
 
 pub fn fps_ui(
     gpu: Option<&DrmNode>,
     state: &Common,
+    renderer: &mut GlowRenderer,
     fps: &mut Fps,
-    area: Rectangle<f64, Physical>,
+    area: Rectangle<i32, Logical>,
     scale: f64,
-) -> EguiFrame {
+) -> Result<TextureRenderElement<Gles2Texture>, Gles2Error> {
     use egui::widgets::plot::{Bar, BarChart, HLine, Legend, Plot};
 
     let (max, min, avg, avg_fps) = (
@@ -24,25 +31,27 @@ pub fn fps_ui(
         fps.avg_frametime().as_secs_f64(),
         fps.avg_fps(),
     );
+    let amount = dbg!(avg_fps.round() as usize * 2);
     let bars = fps
         .frames
         .iter()
         .rev()
-        .take(30)
+        .take(amount)
         .rev()
         .enumerate()
         .map(|(i, (_, d))| {
             let value = d.as_secs_f64();
             let transformed = ((value - min) / (max - min) * 255.0).round() as u8;
+
             Bar::new(i as f64, transformed as f64).fill(egui::Color32::from_rgb(
                 transformed,
                 255 - transformed,
                 0,
             ))
         })
-        .collect();
+        .collect::<Vec<_>>();
 
-    fps.state.run(
+    fps.state.render(
         |ctx| {
             egui::Area::new("main")
                 .anchor(egui::Align2::LEFT_TOP, (10.0, 10.0))
@@ -51,14 +60,14 @@ pub fn fps_ui(
                         "cosmic-comp version {}",
                         std::env!("CARGO_PKG_VERSION")
                     ));
-                    if let Some(hash) = std::option_env!("GIT_HASH").and_then(|x| x.get(0..8)) {
+                    if let Some(hash) = std::option_env!("GIT_HASH").and_then(|x| x.get(0..10)) {
                         ui.label(hash);
                     }
 
                     if !state.egui.active {
-                        ui.label("Press Mod+Escape for debug menu");
+                        ui.label("Press Super+Escape for debug menu");
                     } else {
-                        ui.set_max_width(label_res.rect.min.x + label_res.rect.width());
+                        ui.set_max_width(400.0);
                         ui.separator();
 
                         if let Some(gpu) = gpu {
@@ -73,31 +82,34 @@ pub fn fps_ui(
 
                         Plot::new("FPS")
                             .legend(Legend::default())
-                            .view_aspect(33.0)
+                            .view_aspect(50.0)
                             .include_x(0.0)
-                            .include_x(30.0)
+                            .include_x(amount as f64)
                             .include_y(0.0)
-                            .include_y(300.0)
+                            .include_y(300)
                             .show_x(false)
                             .show(ui, |plot_ui| {
                                 plot_ui.bar_chart(fps_chart);
+                                /*
                                 plot_ui.hline(
                                     HLine::new(avg)
                                         .highlight(true)
                                         .color(egui::Color32::LIGHT_BLUE),
                                 );
+                                */
                             });
                     }
                 });
         },
+        renderer,
         area,
         scale,
-        1.0,
-        &state.start_time,
-        fps.modifiers.clone(),
+        0.8,
+        state.clock.now().into(),
     )
 }
 
+/*
 pub fn debug_ui(
     state: &mut Common,
     area: Rectangle<f64, Physical>,
@@ -296,132 +308,4 @@ pub fn debug_ui(
         state.egui.modifiers.clone(),
     ))
 }
-
-pub fn log_ui(
-    state: &mut Common,
-    area: Rectangle<f64, Physical>,
-    scale: f64,
-    default_width: f32,
-) -> Option<EguiFrame> {
-    if !state.egui.active {
-        return None;
-    }
-
-    Some(state.egui.log_state.run(
-        |ctx| {
-            egui::SidePanel::right("Log")
-                .frame(egui::Frame {
-                    inner_margin: egui::Vec2::new(10.0, 10.0).into(),
-                    outer_margin: egui::Vec2::new(0.0, 0.0).into(),
-                    rounding: 5.0.into(),
-                    shadow: egui::epaint::Shadow {
-                        extrusion: 0.0,
-                        color: egui::Color32::TRANSPARENT,
-                    },
-                    fill: egui::Color32::from_black_alpha(100),
-                    stroke: egui::Stroke::none(),
-                })
-                .default_width(default_width)
-                .show(ctx, |ui| {
-                    egui::ScrollArea::vertical()
-                        .always_show_scroll(true)
-                        .stick_to_bottom()
-                        .show(ui, |ui| {
-                            for (_i, record) in state
-                                .log
-                                .debug_buffer
-                                .lock()
-                                .unwrap()
-                                .iter()
-                                .rev()
-                                .enumerate()
-                            {
-                                let mut message = egui::text::LayoutJob::single_section(
-                                    record.level.as_short_str().to_string(),
-                                    egui::TextFormat::simple(
-                                        egui::FontId::monospace(16.0),
-                                        match record.level {
-                                            slog::Level::Critical => egui::Color32::RED,
-                                            slog::Level::Error => egui::Color32::LIGHT_RED,
-                                            slog::Level::Warning => egui::Color32::LIGHT_YELLOW,
-                                            slog::Level::Info => egui::Color32::LIGHT_BLUE,
-                                            slog::Level::Debug => egui::Color32::LIGHT_GREEN,
-                                            slog::Level::Trace => egui::Color32::GRAY,
-                                        },
-                                    ),
-                                );
-                                message.append(
-                                    &record.message,
-                                    6.0,
-                                    egui::TextFormat::simple(
-                                        egui::FontId::default(),
-                                        egui::Color32::WHITE,
-                                    ),
-                                );
-                                ui.vertical(|ui| {
-                                    ui.add(egui::Label::new(message));
-                                    ui.add_space(4.0);
-                                    for (k, v) in &record.kv {
-                                        ui.horizontal(|ui| {
-                                            ui.add(
-                                                egui::Label::new(egui::RichText::new(k).code())
-                                                    .sense(egui::Sense::click()),
-                                            )
-                                            .on_hover_cursor(egui::CursorIcon::PointingHand);
-                                            render_value(ui, v);
-                                        });
-                                    }
-                                });
-                            }
-                        })
-                });
-        },
-        area,
-        scale,
-        state.egui.alpha,
-        &state.start_time,
-        state.egui.modifiers.clone(),
-    ))
-}
-
-fn render_value(ui: &mut egui::Ui, value: &serde_json::Value) {
-    use serde_json::Value::*;
-
-    match value {
-        Null => {
-            ui.label(egui::RichText::new("null").code());
-        }
-        Bool(val) => {
-            ui.label(egui::RichText::new(format!("{}", val)).code());
-        }
-        Number(val) => {
-            ui.label(egui::RichText::new(format!("{}", val)).code());
-        }
-        String(val) => {
-            ui.label(val);
-        }
-        Array(list) => {
-            ui.vertical(|ui| {
-                ui.label("[");
-                for val in list {
-                    ui.horizontal(|ui| {
-                        ui.add_space(4.0);
-                        render_value(ui, val);
-                    });
-                }
-                ui.label("]");
-            });
-        }
-        Object(map) => {
-            ui.vertical(|ui| {
-                for (k, val) in map {
-                    ui.horizontal(|ui| {
-                        ui.add_space(4.0);
-                        ui.add(egui::Label::new(egui::RichText::new(k).code()));
-                        render_value(ui, val);
-                    });
-                }
-            });
-        }
-    };
-}
+*/

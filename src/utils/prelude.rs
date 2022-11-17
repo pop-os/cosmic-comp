@@ -1,4 +1,4 @@
-use std::{cell::RefCell, sync::Mutex};
+use std::{cell::RefCell, sync::Mutex, time::Duration};
 
 use crate::{
     backend::render::cursor::CursorState,
@@ -11,7 +11,7 @@ use smithay::{
         Seat,
     },
     output::Output,
-    utils::{Buffer, IsAlive, Logical, Point, Rectangle, Transform},
+    utils::{Buffer, IsAlive, Logical, Monotonic, Point, Rectangle, Time, Transform},
     wayland::compositor::with_states,
 };
 
@@ -47,7 +47,7 @@ pub trait SeatExt {
     fn cursor_geometry(
         &self,
         loc: impl Into<Point<f64, Buffer>>,
-        start_time: &std::time::Instant,
+        time: Time<Monotonic>,
     ) -> Option<(Rectangle<i32, Buffer>, Point<i32, Buffer>)>;
 }
 
@@ -75,7 +75,7 @@ impl SeatExt for Seat<State> {
     fn cursor_geometry(
         &self,
         loc: impl Into<Point<f64, Buffer>>,
-        start_time: &std::time::Instant,
+        time: Time<Monotonic>,
     ) -> Option<(Rectangle<i32, Buffer>, Point<i32, Buffer>)> {
         let location = loc.into().to_i32_round();
 
@@ -117,7 +117,7 @@ impl SeatExt for Seat<State> {
                 let state = seat_userdata.get::<CursorState>().unwrap();
                 let frame = state
                     .cursor
-                    .get_image(1, start_time.elapsed().as_millis() as u32);
+                    .get_image(1, Into::<Duration>::into(time).as_millis() as u32);
 
                 Some((
                     Rectangle::from_loc_and_size(

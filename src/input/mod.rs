@@ -17,8 +17,8 @@ use crate::{
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
 use smithay::{
     backend::input::{
-        AbsolutePositionEvent, Axis, AxisSource, Device, DeviceCapability, InputBackend,
-        InputEvent, KeyState, PointerAxisEvent,
+        Axis, AxisSource, Device, DeviceCapability, InputBackend, InputEvent, KeyState,
+        PointerAxisEvent,
     },
     desktop::{layer_map_for_output, WindowSurfaceType},
     input::{
@@ -166,7 +166,6 @@ impl State {
                 #[cfg(feature = "debug")]
                 {
                     self.common.egui.debug_state.handle_device_added(&device);
-                    self.common.egui.log_state.handle_device_added(&device);
                 }
             }
             InputEvent::DeviceRemoved { device } => {
@@ -185,8 +184,7 @@ impl State {
                 }
                 #[cfg(feature = "debug")]
                 {
-                    self.common.egui.debug_state.handle_device_added(&device);
-                    self.common.egui.log_state.handle_device_added(&device);
+                    self.common.egui.debug_state.handle_device_removed(&device);
                 }
             }
             InputEvent::Keyboard { event, .. } => {
@@ -234,24 +232,11 @@ impl State {
                                     }
                                     #[cfg(feature = "debug")]
                                     {
-                                        if data.common.seats.iter().position(|x| x == seat).unwrap()
-                                            == 0
+                                        if data.common.seats().position(|x| x == seat).unwrap() == 0
                                             && data.common.egui.active
                                         {
                                             if data.common.egui.debug_state.wants_keyboard() {
                                                 data.common.egui.debug_state.handle_keyboard(
-                                                    &handle,
-                                                    state == KeyState::Pressed,
-                                                    modifiers.clone(),
-                                                );
-                                                userdata
-                                                    .get::<SupressedKeys>()
-                                                    .unwrap()
-                                                    .add(&handle);
-                                                return FilterResult::Intercept(None);
-                                            }
-                                            if data.common.egui.log_state.wants_keyboard() {
-                                                data.common.egui.log_state.handle_keyboard(
                                                     &handle,
                                                     state == KeyState::Pressed,
                                                     modifiers.clone(),
@@ -372,7 +357,7 @@ impl State {
                                     output.current_transform(),
                                     &output.geometry().size.to_f64(),
                                 ),
-                                &self.common.start_time,
+                                self.common.clock.now(),
                             ) {
                                 session.cursor_info(seat, InputType::Pointer, geometry, offset);
                             }
@@ -388,14 +373,10 @@ impl State {
                         );
 
                         #[cfg(feature = "debug")]
-                        if self.common.seats.iter().position(|x| x == seat).unwrap() == 0 {
+                        if self.common.seats().position(|x| x == seat).unwrap() == 0 {
                             self.common
                                 .egui
                                 .debug_state
-                                .handle_pointer_motion(position.to_i32_round());
-                            self.common
-                                .egui
-                                .log_state
                                 .handle_pointer_motion(position.to_i32_round());
                         }
                         break;
@@ -410,8 +391,11 @@ impl State {
                     if devices.has_device(&device) {
                         let output = seat.active_output();
                         let geometry = output.geometry();
-                        let position =
-                            geometry.loc.to_f64() + event.position_transformed(geometry.size);
+                        let position = geometry.loc.to_f64()
+                            + smithay::backend::input::AbsolutePositionEvent::position_transformed(
+                                &event,
+                                geometry.size,
+                            );
                         let relative_pos = self.common.shell.map_global_to_space(position, &output);
                         let workspace = self.common.shell.active_space_mut(&output);
                         let serial = SERIAL_COUNTER.next_serial();
@@ -433,14 +417,10 @@ impl State {
                         );
 
                         #[cfg(feature = "debug")]
-                        if self.common.seats.iter().position(|x| x == seat).unwrap() == 0 {
+                        if self.common.seats().position(|x| x == seat).unwrap() == 0 {
                             self.common
                                 .egui
                                 .debug_state
-                                .handle_pointer_motion(position.to_i32_round());
-                            self.common
-                                .egui
-                                .log_state
                                 .handle_pointer_motion(position.to_i32_round());
                         }
                         break;
@@ -456,7 +436,7 @@ impl State {
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
                         #[cfg(feature = "debug")]
-                        if self.common.seats.iter().position(|x| x == seat).unwrap() == 0
+                        if self.common.seats().position(|x| x == seat).unwrap() == 0
                             && self.common.egui.active
                         {
                             if self.common.egui.debug_state.wants_pointer() {
@@ -464,17 +444,6 @@ impl State {
                                     self.common.egui.debug_state.handle_pointer_button(
                                         button,
                                         event.state() == ButtonState::Pressed,
-                                        self.common.egui.modifiers.clone(),
-                                    );
-                                }
-                                break;
-                            }
-                            if self.common.egui.log_state.wants_pointer() {
-                                if let Some(button) = event.button() {
-                                    self.common.egui.log_state.handle_pointer_button(
-                                        button,
-                                        event.state() == ButtonState::Pressed,
-                                        self.common.egui.modifiers.clone(),
                                     );
                                 }
                                 break;
@@ -575,24 +544,11 @@ impl State {
                 let device = event.device();
                 for seat in self.common.seats().cloned().collect::<Vec<_>>().iter() {
                     #[cfg(feature = "debug")]
-                    if self.common.seats.iter().position(|x| x == seat).unwrap() == 0
+                    if self.common.seats().position(|x| x == seat).unwrap() == 0
                         && self.common.egui.active
                     {
                         if self.common.egui.debug_state.wants_pointer() {
                             self.common.egui.debug_state.handle_pointer_axis(
-                                event
-                                    .amount_discrete(Axis::Horizontal)
-                                    .or_else(|| event.amount(Axis::Horizontal).map(|x| x * 3.0))
-                                    .unwrap_or(0.0),
-                                event
-                                    .amount_discrete(Axis::Vertical)
-                                    .or_else(|| event.amount(Axis::Vertical).map(|x| x * 3.0))
-                                    .unwrap_or(0.0),
-                            );
-                            break;
-                        }
-                        if self.common.egui.log_state.wants_pointer() {
-                            self.common.egui.log_state.handle_pointer_axis(
                                 event
                                     .amount_discrete(Axis::Horizontal)
                                     .or_else(|| event.amount(Axis::Horizontal).map(|x| x * 3.0))

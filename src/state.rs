@@ -19,7 +19,10 @@ use smithay::{
         drm::DrmNode,
         renderer::element::{default_primary_scanout_output_compare, RenderElementStates},
     },
-    desktop::utils::{surface_primary_scanout_output, update_surface_primary_scanout_output},
+    desktop::utils::{
+        surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
+        update_surface_primary_scanout_output, OutputPresentationFeedback,
+    },
     input::{Seat, SeatState},
     output::{Mode as OutputMode, Output, Scale},
     reexports::{
@@ -30,20 +33,18 @@ use smithay::{
             Display, DisplayHandle,
         },
     },
+    utils::{Clock, Monotonic, Rectangle},
     wayland::{
         compositor::CompositorState, data_device::DataDeviceState, dmabuf::DmabufState,
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState, output::OutputManagerState,
-        primary_selection::PrimarySelectionState, shm::ShmState, viewporter::ViewporterState,
+        presentation::PresentationState, primary_selection::PrimarySelectionState, shm::ShmState,
+        viewporter::ViewporterState,
     },
 };
 
-use std::{
-    cell::RefCell,
-    ffi::OsString,
-    time::{Duration, Instant},
-};
+use std::{cell::RefCell, ffi::OsString, time::Duration};
 #[cfg(feature = "debug")]
-use std::{collections::VecDeque, time::Duration};
+use std::{collections::VecDeque, time::Instant};
 
 pub struct ClientState {
     pub workspace_client_state: WorkspaceClientState,
@@ -79,7 +80,7 @@ pub struct Common {
     seats: Vec<Seat<State>>,
     last_active_seat: Option<Seat<State>>,
 
-    pub start_time: Instant,
+    pub clock: Clock<Monotonic>,
     pub should_stop: bool,
 
     pub log: LogState,
@@ -93,6 +94,7 @@ pub struct Common {
     pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
     pub output_state: OutputManagerState,
     pub output_configuration_state: OutputConfigurationState<State>,
+    pub presentation_state: PresentationState,
     pub primary_selection_state: PrimarySelectionState,
     pub screencopy_state: ScreencopyState,
     pub seat_state: SeatState<State>,
@@ -104,8 +106,6 @@ pub struct Common {
 #[cfg(feature = "debug")]
 pub struct Egui {
     pub debug_state: smithay_egui::EguiState,
-    pub log_state: smithay_egui::EguiState,
-    pub modifiers: smithay::wayland::seat::ModifiersState,
     pub active: bool,
     pub alpha: f32,
 }
@@ -113,9 +113,17 @@ pub struct Egui {
 #[cfg(feature = "debug")]
 pub struct Fps {
     pub state: smithay_egui::EguiState,
-    pub modifiers: smithay::wayland::seat::ModifiersState,
     pub frames: VecDeque<(Instant, Duration)>,
     pub start: Instant,
+}
+
+#[cfg(feature = "debug")]
+pub struct Frame {
+    start: Instant,
+    duration_elements: Duration,
+    duration_render: Duration,
+    duration_screencopy: Duration,
+    duration_displayed: Duration,
 }
 
 pub enum BackendData {
@@ -204,7 +212,7 @@ impl BackendData {
             // Swapping with damage (which should be empty on these frames) is likely good enough anyway.
             BackendData::X11(ref mut state) => state.schedule_render(output, screencopy),
             BackendData::Kms(ref mut state) => {
-                if let Err(err) = state.schedule_render(loop_handle, output, screencopy) {
+                if let Err(err) = state.schedule_render(loop_handle, output, None, screencopy) {
                     slog_scope::crit!("Failed to schedule event, are we shutting down? {:?}", err);
                 }
             }
@@ -221,6 +229,7 @@ impl State {
         signal: LoopSignal,
         log: LogState,
     ) -> State {
+        let clock = Clock::new().expect("Failed to initialize clock");
         let config = Config::load();
         let compositor_state = CompositorState::new::<Self, _>(dh, None);
         let data_device_state = DataDeviceState::new::<Self, _>(dh, None);
@@ -228,6 +237,7 @@ impl State {
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<Self>(dh);
         let output_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
         let output_configuration_state = OutputConfigurationState::new(dh, |_| true);
+        let presentation_state = PresentationState::new::<Self>(dh, clock.id() as u32);
         let primary_selection_state = PrimarySelectionState::new::<Self, _>(dh, None);
         let screencopy_state = ScreencopyState::new::<Self, _, _>(
             dh,
@@ -258,20 +268,16 @@ impl State {
                 seats: Vec::new(),
                 last_active_seat: None,
 
-                start_time: Instant::now(),
+                clock,
                 should_stop: false,
 
                 log,
                 #[cfg(feature = "debug")]
                 egui: Egui {
-                    debug_state: smithay_egui::EguiState::new(smithay_egui::EguiMode::Continuous),
-                    log_state: {
-                        let mut state =
-                            smithay_egui::EguiState::new(smithay_egui::EguiMode::Continuous);
-                        state.set_zindex(0);
-                        state
-                    },
-                    modifiers: Default::default(),
+                    debug_state: smithay_egui::EguiState::new(Rectangle::from_loc_and_size(
+                        (0, 0),
+                        (400, 800),
+                    )),
                     active: false,
                     alpha: 1.0,
                 },
@@ -285,6 +291,7 @@ impl State {
                 keyboard_shortcuts_inhibit_state,
                 output_state,
                 output_configuration_state,
+                presentation_state,
                 primary_selection_state,
                 viewporter_state,
                 wl_drm_state,
@@ -365,7 +372,7 @@ impl Common {
     }
 
     pub fn send_frames(&self, output: &Output, render_element_states: &RenderElementStates) {
-        let time = self.start_time.elapsed();
+        let time = self.clock.now();
         let throttle = Some(Duration::from_secs(1));
 
         let active = self.shell.active_space(output);
@@ -413,11 +420,43 @@ impl Common {
             layer_surface.send_frame(output, time, throttle, surface_primary_scanout_output);
         }
     }
+
+    pub fn take_presentation_feedback(
+        &self,
+        output: &Output,
+        render_element_states: &RenderElementStates,
+    ) -> OutputPresentationFeedback {
+        let mut output_presentation_feedback = OutputPresentationFeedback::new(output);
+
+        let active = self.shell.active_space(output);
+        active.mapped().for_each(|mapped| {
+            mapped.active_window().take_presentation_feedback(
+                &mut output_presentation_feedback,
+                surface_primary_scanout_output,
+                |surface, _| {
+                    surface_presentation_feedback_flags_from_states(surface, render_element_states)
+                },
+            );
+        });
+
+        let map = smithay::desktop::layer_map_for_output(output);
+        for layer_surface in map.layers() {
+            layer_surface.take_presentation_feedback(
+                &mut output_presentation_feedback,
+                surface_primary_scanout_output,
+                |surface, _| {
+                    surface_presentation_feedback_flags_from_states(surface, render_element_states)
+                },
+            );
+        }
+
+        output_presentation_feedback
+    }
 }
 
 #[cfg(feature = "debug")]
 impl Fps {
-    const WINDOW_SIZE: usize = 100;
+    const WINDOW_SIZE: usize = 1000;
 
     pub fn start(&mut self) {
         self.start = Instant::now();
@@ -478,14 +517,13 @@ impl Default for Fps {
     fn default() -> Fps {
         Fps {
             state: {
-                let mut state = smithay_egui::EguiState::new(smithay_egui::EguiMode::Continuous);
+                let state =
+                    smithay_egui::EguiState::new(Rectangle::from_loc_and_size((0, 0), (400, 800)));
                 let mut visuals: egui::style::Visuals = Default::default();
                 visuals.window_shadow.extrusion = 0.0;
                 state.context().set_visuals(visuals);
-                state.set_zindex(110); // always render on top
                 state
             },
-            modifiers: Default::default(),
             frames: VecDeque::with_capacity(Fps::WINDOW_SIZE + 1),
             start: Instant::now(),
         }

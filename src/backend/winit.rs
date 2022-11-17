@@ -11,13 +11,17 @@ use crate::{
 use anyhow::{anyhow, Context, Result};
 use smithay::{
     backend::{
-        renderer::{damage::DamageTrackedRenderer, gles2::Gles2Renderbuffer, ImportDma, ImportEgl},
+        renderer::{
+            damage::DamageTrackedRenderer, gles2::Gles2Renderbuffer, glow::GlowRenderer, ImportDma,
+            ImportEgl,
+        },
         winit::{self, WinitEvent, WinitGraphicsBackend, WinitVirtualDevice},
     },
     desktop::layer_map_for_output,
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
         calloop::{ping, EventLoop},
+        wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
         wayland_server::DisplayHandle,
     },
     utils::Transform,
@@ -31,7 +35,7 @@ use super::render::CursorMode;
 
 pub struct WinitState {
     // The winit backend currently has no notion of multiple windows
-    pub backend: WinitGraphicsBackend,
+    pub backend: WinitGraphicsBackend<GlowRenderer>,
     output: Output,
     damage_tracker: DamageTrackedRenderer,
     screencopy: Vec<(ScreencopySession, BufferParams)>,
@@ -47,9 +51,10 @@ impl WinitState {
         let age = self.backend.buffer_age().unwrap_or(0);
 
         let surface = self.backend.egl_surface();
-        match render::render_output::<_, Gles2Renderbuffer, _>(
+        match render::render_output::<_, _, Gles2Renderbuffer, _>(
             None,
             self.backend.renderer(),
+            surface.clone(),
             &mut self.damage_tracker,
             age,
             state,
@@ -69,6 +74,19 @@ impl WinitState {
                     .submit(damage.as_deref())
                     .with_context(|| "Failed to submit buffer for display")?;
                 state.send_frames(&self.output, &states);
+                if damage.is_some() {
+                    let mut output_presentation_feedback =
+                        state.take_presentation_feedback(&self.output, &states);
+                    output_presentation_feedback.presented(
+                        state.clock.now(),
+                        self.output
+                            .current_mode()
+                            .map(|mode| mode.refresh as u32)
+                            .unwrap_or_default(),
+                        0,
+                        wp_presentation_feedback::Kind::Vsync,
+                    )
+                }
             }
             Err(err) => {
                 for (session, params) in self.screencopy.drain(..) {
@@ -227,7 +245,7 @@ pub fn init_backend(
 fn init_egl_client_side(
     dh: &DisplayHandle,
     state: &mut State,
-    renderer: &mut WinitGraphicsBackend,
+    renderer: &mut WinitGraphicsBackend<GlowRenderer>,
 ) -> Result<()> {
     let bind_result = renderer.renderer().bind_wl_display(dh);
     match bind_result {

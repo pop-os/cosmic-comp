@@ -16,7 +16,7 @@ slog-stdlog = "4.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sendfd = "0.4.1"
-egui = { version = "0.18.1", optional = true }
+egui = { version = "0.19.0", optional = true }
 edid-rs = { version = "0.1" }
 png = "0.17.5"
 lazy_static = "1.4.0"
@@ -36,19 +36,18 @@ cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", branch 
 [dependencies.smithay]
 version = "0.3"
 git = "https://github.com/Smithay/smithay.git"
-rev = "606d2d5c"
+rev = "b297c93edc"
 default-features = false
-features = ["backend_drm", "backend_gbm", "backend_egl", "backend_libinput", "backend_session_libseat", "backend_udev", "backend_winit", "backend_x11", "desktop", "use_system_lib", "renderer_gl", "renderer_multi", "wayland_frontend", "slog-stdlog"]
+features = ["backend_drm", "backend_gbm", "backend_egl", "backend_libinput", "backend_session_libseat", "backend_udev", "backend_winit", "backend_x11", "desktop", "use_system_lib", "renderer_glow", "renderer_multi", "wayland_frontend", "slog-stdlog"]
 
 [dependencies.smithay-egui]
 git = "https://github.com/Smithay/smithay-egui.git"
-rev = "939febaf"
+rev = "7334d0c53"
 optional = true
 
 [features]
-default = []
+default = ["debug"]
 debug = ["egui", "smithay-egui"]
-experimental = []
 
 [profile.dev]
 lto = "thin"
@@ -61,4 +60,4 @@ debug = true
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/Smithay//smithay", rev = "b0ec5090df" }
+smithay = { git = "https://github.com/pop-os/smithay", rev = "c8aaa059e8" }
