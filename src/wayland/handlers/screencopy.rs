@@ -180,12 +180,12 @@ impl ScreencopyHandler for State {
 
         let mut formats = vec![
             BufferInfo::Shm {
-                format: ShmFormat::Argb8888,
+                format: ShmFormat::Abgr8888,
                 size,
                 stride: size.w as u32 * 4,
             },
             BufferInfo::Shm {
-                format: ShmFormat::Xrgb8888,
+                format: ShmFormat::Xbgr8888,
                 size,
                 stride: size.w as u32 * 4,
             },
@@ -279,7 +279,7 @@ impl ScreencopyHandler for State {
 
         if let Some(BufferType::Shm) = buffer_type(&params.buffer) {
             if with_buffer_contents(&params.buffer, |_, info| {
-                info.format != ShmFormat::Argb8888 && info.format != ShmFormat::Xrgb8888
+                info.format != ShmFormat::Abgr8888 && info.format != ShmFormat::Xbgr8888
             })
             .unwrap()
             {
@@ -418,12 +418,12 @@ fn formats_for_output(
 
     let mut formats = vec![
         BufferInfo::Shm {
-            format: ShmFormat::Argb8888,
+            format: ShmFormat::Abgr8888,
             size: mode,
             stride: mode.w as u32 * 4,
         },
         BufferInfo::Shm {
-            format: ShmFormat::Xrgb8888,
+            format: ShmFormat::Xbgr8888,
             size: mode,
             stride: mode.w as u32 * 4,
         },
@@ -500,11 +500,33 @@ where
 {
     if matches!(buffer_type(buffer), Some(BufferType::Shm)) {
         let buffer_size = buffer_dimensions(buffer).unwrap();
-        with_buffer_contents_mut(buffer, |data, _info| {
+        with_buffer_contents_mut(buffer, |slice, data| {
+            let offset = data.offset as i32;
+            let width = data.width as i32;
+            let height = data.height as i32;
+            let stride = data.stride as i32;
+
+            // number of bytes per pixel
+            // TODO: compute from data.format
+            let pixelsize = 4i32;
+
+            // ensure consistency, the SHM handler of smithay should ensure this
+            assert!((offset + (height - 1) * stride + width * pixelsize) as usize <= slice.len());
+
             let mapping =
                 renderer.copy_framebuffer(Rectangle::from_loc_and_size((0, 0), buffer_size))?;
             let gl_data = renderer.map_texture(&mapping)?;
-            data.copy_from_slice(gl_data);
+            assert!((width * height * pixelsize) as usize <= gl_data.len());
+
+            for i in 0..height {
+                unsafe {
+                    std::ptr::copy_nonoverlapping::<u8>(
+                        gl_data.as_ptr().offset((width * pixelsize * i) as isize),
+                        slice.as_mut_ptr().offset((offset + stride * i) as isize),
+                        (width * pixelsize) as usize,
+                    );
+                }
+            }
             Ok(())
         })
         .unwrap()?;

@@ -26,6 +26,7 @@ use smithay::{
         calloop::{LoopHandle, LoopSignal},
         wayland_server::{
             backend::{ClientData, ClientId, DisconnectReason},
+            protocol::wl_shm,
             Display, DisplayHandle,
         },
     },
@@ -233,7 +234,11 @@ impl State {
             vec![CursorMode::Embedded, CursorMode::Hidden],
             |_| true,
         ); // TODO: privileged
-        let shm_state = ShmState::new::<Self, _>(dh, vec![], None);
+        let shm_state = ShmState::new::<Self, _>(
+            dh,
+            vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888],
+            None,
+        );
         let seat_state = SeatState::<Self>::new();
         let viewporter_state = ViewporterState::new::<Self, _>(dh, None);
         let wl_drm_state = WlDrmState;
