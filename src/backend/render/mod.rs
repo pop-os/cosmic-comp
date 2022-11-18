@@ -252,12 +252,17 @@ where
             .map(Into::into),
     );
 
+    #[cfg(feature = "debug")]
+    if let Some(fps) = fps.as_mut() {
+        fps.elements();
+    }
+
     renderer.bind(target).map_err(RenderError::Rendering)?;
     let res = damage_tracker.render_output(renderer, age, &elements, CLEAR_COLOR, None);
 
     #[cfg(feature = "debug")]
     if let Some(fps) = fps.as_mut() {
-        fps.end();
+        fps.render();
     }
 
     if let Some((source, buffers)) = screencopy {
@@ -302,6 +307,10 @@ where
                     }
                 }
             }
+        }
+        #[cfg(feature = "debug")]
+        if let Some(fps) = fps.as_mut() {
+            fps.screencopy();
         }
     }
 

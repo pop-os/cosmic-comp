@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::state::{Common, Fps};
+use egui::Color32;
 use smithay::{
     backend::{
         drm::DrmNode,
@@ -14,6 +15,11 @@ use smithay::{
     reexports::wayland_server::Resource,
     utils::{IsAlive, Logical, Rectangle},
 };
+
+pub const ELEMENTS_COLOR: Color32 = Color32::from_rgb(70, 198, 115);
+pub const RENDER_COLOR: Color32 = Color32::from_rgb(29, 114, 58);
+pub const SCREENCOPY_COLOR: Color32 = Color32::from_rgb(253, 178, 39);
+pub const DISPLAY_COLOR: Color32 = Color32::from_rgb(41, 184, 209);
 
 pub fn fps_ui(
     gpu: Option<&DrmNode>,
@@ -31,43 +37,70 @@ pub fn fps_ui(
         fps.avg_frametime().as_secs_f64(),
         fps.avg_fps(),
     );
+    let (max_disp, min_disp) = (
+        fps.max_time_to_display().as_secs_f64(),
+        fps.min_time_to_display().as_secs_f64(),
+    );
+
     let amount = dbg!(avg_fps.round() as usize * 2);
-    let bars = fps
+    let ((bars_elements, bars_render), (bars_screencopy, bars_displayed)): (
+        (Vec<Bar>, Vec<Bar>),
+        (Vec<Bar>, Vec<Bar>),
+    ) = fps
         .frames
         .iter()
         .rev()
         .take(amount)
         .rev()
         .enumerate()
-        .map(|(i, (_, d))| {
-            let value = d.as_secs_f64();
-            let transformed = ((value - min) / (max - min) * 255.0).round() as u8;
+        .map(|(i, frame)| {
+            let elements_val = frame.duration_elements.as_secs_f64();
+            let render_val = frame.duration_render.as_secs_f64();
+            let screencopy_val = frame
+                .duration_screencopy
+                .as_ref()
+                .map(|val| val.as_secs_f64())
+                .unwrap_or(0.0);
+            let displayed_val = frame.duration_displayed.as_secs_f64();
 
-            Bar::new(i as f64, transformed as f64).fill(egui::Color32::from_rgb(
-                transformed,
-                255 - transformed,
-                0,
-            ))
+            let transformed_elements =
+                ((elements_val - min_disp) / (max_disp - min_disp) * 255.0).round() as u8;
+            let transformed_render =
+                ((render_val - min_disp) / (max_disp - min_disp) * 255.0).round() as u8;
+            let transformed_screencopy =
+                ((screencopy_val - min_disp) / (max_disp - min_disp) * 255.0).round() as u8;
+            let transformed_displayed =
+                ((displayed_val - min_disp) / (max_disp - min_disp) * 255.0).round() as u8;
+            (
+                (
+                    Bar::new(i as f64, transformed_elements as f64).fill(ELEMENTS_COLOR),
+                    Bar::new(i as f64, transformed_render as f64).fill(RENDER_COLOR),
+                ),
+                (
+                    Bar::new(i as f64, transformed_screencopy as f64).fill(SCREENCOPY_COLOR),
+                    Bar::new(i as f64, transformed_displayed as f64).fill(DISPLAY_COLOR),
+                ),
+            )
         })
-        .collect::<Vec<_>>();
+        .unzip();
 
     fps.state.render(
         |ctx| {
             egui::Area::new("main")
                 .anchor(egui::Align2::LEFT_TOP, (10.0, 10.0))
                 .show(ctx, |ui| {
-                    let label_res = ui.label(format!(
+                    ui.label(format!(
                         "cosmic-comp version {}",
                         std::env!("CARGO_PKG_VERSION")
                     ));
                     if let Some(hash) = std::option_env!("GIT_HASH").and_then(|x| x.get(0..10)) {
-                        ui.label(hash);
+                        ui.label(format!(" :{hash}"));
                     }
 
                     if !state.egui.active {
                         ui.label("Press Super+Escape for debug menu");
                     } else {
-                        ui.set_max_width(400.0);
+                        ui.set_max_width(300.0);
                         ui.separator();
 
                         if let Some(gpu) = gpu {
@@ -78,7 +111,16 @@ pub fn fps_ui(
                         ui.label(egui::RichText::new(format!("avg: {:>7.6}", avg)).code());
                         ui.label(egui::RichText::new(format!("min: {:>7.6}", min)).code());
                         ui.label(egui::RichText::new(format!("max: {:>7.6}", max)).code());
-                        let fps_chart = BarChart::new(bars).vertical();
+                        let elements_chart = BarChart::new(bars_elements).vertical();
+                        let render_chart = BarChart::new(bars_render)
+                            .stack_on(&[&elements_chart])
+                            .vertical();
+                        let screencopy_chart = BarChart::new(bars_screencopy)
+                            .stack_on(&[&elements_chart, &render_chart])
+                            .vertical();
+                        let display_chart = BarChart::new(bars_displayed)
+                            .stack_on(&[&elements_chart, &render_chart, &screencopy_chart])
+                            .vertical();
 
                         Plot::new("FPS")
                             .legend(Legend::default())
@@ -89,14 +131,10 @@ pub fn fps_ui(
                             .include_y(300)
                             .show_x(false)
                             .show(ui, |plot_ui| {
-                                plot_ui.bar_chart(fps_chart);
-                                /*
-                                plot_ui.hline(
-                                    HLine::new(avg)
-                                        .highlight(true)
-                                        .color(egui::Color32::LIGHT_BLUE),
-                                );
-                                */
+                                plot_ui.bar_chart(elements_chart);
+                                plot_ui.bar_chart(render_chart);
+                                plot_ui.bar_chart(screencopy_chart);
+                                plot_ui.bar_chart(display_chart);
                             });
                     }
                 });

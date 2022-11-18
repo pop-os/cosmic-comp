@@ -381,6 +381,9 @@ impl State {
                     let rescheduled_output =
                         if let Some(device) = data.state.backend.kms().devices.get_mut(&drm_node) {
                             if let Some(surface) = device.surfaces.get_mut(&crtc) {
+                                #[cfg(feature = "debug")]
+                                surface.fps.displayed();
+
                                 match surface.surface.as_mut().map(|x| x.frame_submitted()) {
                                     Some(Ok(feedback)) => {
                                         if let Some(mut feedback) = feedback.flatten() {
