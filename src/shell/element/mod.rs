@@ -236,7 +236,10 @@ impl CosmicMapped {
         };
 
         match window.toplevel() {
-            Kind::Xdg(xdg) => xdg.current_state().states.contains(XdgState::Resizing),
+            Kind::Xdg(xdg) => {
+                xdg.current_state().states.contains(XdgState::Resizing)
+                    || xdg.with_pending_state(|states| states.states.contains(XdgState::Resizing))
+            }
             // Kind::X11?
         }
     }
@@ -309,8 +312,10 @@ impl CosmicMapped {
         };
 
         match window.toplevel() {
-            Kind::Xdg(xdg) => xdg.current_state().states.contains(XdgState::Fullscreen),
-            // Kind::X11?
+            Kind::Xdg(xdg) => {
+                xdg.current_state().states.contains(XdgState::Fullscreen)
+                    || xdg.with_pending_state(|states| states.states.contains(XdgState::Fullscreen))
+            } // Kind::X11?
         }
     }
 
@@ -343,8 +348,10 @@ impl CosmicMapped {
         };
 
         match window.toplevel() {
-            Kind::Xdg(xdg) => xdg.current_state().states.contains(XdgState::Maximized),
-            // Kind::X11?
+            Kind::Xdg(xdg) => {
+                xdg.current_state().states.contains(XdgState::Maximized)
+                    || xdg.with_pending_state(|states| states.states.contains(XdgState::Maximized))
+            } // Kind::X11?
         }
     }
 
@@ -377,7 +384,10 @@ impl CosmicMapped {
         };
 
         match window.toplevel() {
-            Kind::Xdg(xdg) => xdg.current_state().states.contains(XdgState::Activated),
+            Kind::Xdg(xdg) => {
+                xdg.current_state().states.contains(XdgState::Activated)
+                    || xdg.with_pending_state(|states| states.states.contains(XdgState::Activated))
+            }
             // Kind::X11?
         }
     }
