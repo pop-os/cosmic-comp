@@ -42,7 +42,7 @@ pub fn fps_ui(
         fps.min_time_to_display().as_secs_f64(),
     );
 
-    let amount = dbg!(avg_fps.round() as usize * 2);
+    let amount = avg_fps.round() as usize * 2;
     let ((bars_elements, bars_render), (bars_screencopy, bars_displayed)): (
         (Vec<Bar>, Vec<Bar>),
         (Vec<Bar>, Vec<Bar>),
