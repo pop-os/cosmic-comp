@@ -504,22 +504,32 @@ impl State {
         let outputs = device.enumerate_surfaces()?.added; // There are no removed outputs on newly added devices
         let mut wl_outputs = Vec::new();
         let mut w = self.common.shell.global_space().size.w;
-        for (crtc, conn) in outputs {
-            match device.setup_surface(crtc, conn, (w, 0)) {
-                Ok(output) => {
-                    w += output
-                        .user_data()
-                        .get::<RefCell<OutputConfig>>()
-                        .unwrap()
-                        .borrow()
-                        .mode_size()
-                        .w;
-                    wl_outputs.push(output);
-                }
-                Err(err) => slog_scope::warn!("Failed to initialize output: {}", err),
-            };
+        {
+            let backend = self.backend.kms();
+            for (crtc, conn) in outputs {
+                let mut renderer = match backend.api.renderer(&render_node, &render_node) {
+                    Ok(renderer) => renderer,
+                    Err(err) => {
+                        slog_scope::warn!("Failed to initialize output: {}", err);
+                        continue;
+                    }
+                };
+                match device.setup_surface(crtc, conn, (w, 0), &mut renderer) {
+                    Ok(output) => {
+                        w += output
+                            .user_data()
+                            .get::<RefCell<OutputConfig>>()
+                            .unwrap()
+                            .borrow()
+                            .mode_size()
+                            .w;
+                        wl_outputs.push(output);
+                    }
+                    Err(err) => slog_scope::warn!("Failed to initialize output: {}", err),
+                };
+            }
+            backend.devices.insert(drm_node, device);
         }
-        self.backend.kms().devices.insert(drm_node, device);
 
         self.common
             .output_configuration_state
@@ -542,32 +552,45 @@ impl State {
         let drm_node = DrmNode::from_dev_id(dev)?;
         let mut outputs_removed = Vec::new();
         let mut outputs_added = Vec::new();
-        if let Some(device) = self.backend.kms().devices.get_mut(&drm_node) {
-            let changes = device.enumerate_surfaces()?;
-            let mut w = self.common.shell.global_space().size.w;
-            for crtc in changes.removed {
-                if let Some(surface) = device.surfaces.remove(&crtc) {
-                    if let Some(token) = surface.render_timer_token {
-                        self.common.event_loop_handle.remove(token);
+        {
+            let backend = self.backend.kms();
+            if let Some(device) = backend.devices.get_mut(&drm_node) {
+                let changes = device.enumerate_surfaces()?;
+                let mut w = self.common.shell.global_space().size.w;
+                for crtc in changes.removed {
+                    if let Some(surface) = device.surfaces.remove(&crtc) {
+                        if let Some(token) = surface.render_timer_token {
+                            self.common.event_loop_handle.remove(token);
+                        }
+                        w -= surface.output.current_mode().map(|m| m.size.w).unwrap_or(0);
+                        outputs_removed.push(surface.output.clone());
                     }
-                    w -= surface.output.current_mode().map(|m| m.size.w).unwrap_or(0);
-                    outputs_removed.push(surface.output.clone());
                 }
-            }
-            for (crtc, conn) in changes.added {
-                match device.setup_surface(crtc, conn, (w, 0)) {
-                    Ok(output) => {
-                        w += output
-                            .user_data()
-                            .get::<RefCell<OutputConfig>>()
-                            .unwrap()
-                            .borrow()
-                            .mode_size()
-                            .w;
-                        outputs_added.push(output);
-                    }
-                    Err(err) => slog_scope::warn!("Failed to initialize output: {}", err),
-                };
+                for (crtc, conn) in changes.added {
+                    let mut renderer = match backend
+                        .api
+                        .renderer(&device.render_node, &device.render_node)
+                    {
+                        Ok(renderer) => renderer,
+                        Err(err) => {
+                            slog_scope::warn!("Failed to initialize output: {}", err);
+                            continue;
+                        }
+                    };
+                    match device.setup_surface(crtc, conn, (w, 0), &mut renderer) {
+                        Ok(output) => {
+                            w += output
+                                .user_data()
+                                .get::<RefCell<OutputConfig>>()
+                                .unwrap()
+                                .borrow()
+                                .mode_size()
+                                .w;
+                            outputs_added.push(output);
+                        }
+                        Err(err) => slog_scope::warn!("Failed to initialize output: {}", err),
+                    };
+                }
             }
         }
 
@@ -671,6 +694,7 @@ impl Device {
         crtc: crtc::Handle,
         conn: connector::Handle,
         position: (i32, i32),
+        renderer: &mut GlMultiRenderer<'_>,
     ) -> Result<Output> {
         let drm = &mut *self.drm.as_source_mut();
         let crtc_info = drm.get_crtc(crtc)?;
@@ -745,7 +769,7 @@ impl Device {
             dirty: false,
             render_timer_token: None,
             #[cfg(feature = "debug")]
-            fps: Fps::default(),
+            fps: Fps::new(renderer.as_mut()),
         };
         self.surfaces.insert(crtc, data);
 

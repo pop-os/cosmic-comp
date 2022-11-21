@@ -42,7 +42,9 @@ features = ["backend_drm", "backend_gbm", "backend_egl", "backend_libinput", "ba
 
 [dependencies.smithay-egui]
 git = "https://github.com/Smithay/smithay-egui.git"
-rev = "7334d0c53"
+#rev = "ee25d401ac"
+branch = "feature/image"
+features = ["svg"]
 optional = true
 
 [features]

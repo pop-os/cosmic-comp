@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::collections::HashMap;
+
 use crate::state::{Common, Fps};
-use egui::Color32;
+use egui::{Color32, Vec2};
 use smithay::{
     backend::{
         drm::DrmNode,
@@ -29,7 +31,7 @@ pub fn fps_ui(
     area: Rectangle<i32, Logical>,
     scale: f64,
 ) -> Result<TextureRenderElement<Gles2Texture>, Gles2Error> {
-    use egui::widgets::plot::{Bar, BarChart, HLine, Legend, Plot};
+    use egui::widgets::plot::{Bar, BarChart, Legend, Plot};
 
     let (max, min, avg, avg_fps) = (
         fps.max_frametime().as_secs_f64(),
@@ -84,6 +86,33 @@ pub fn fps_ui(
         })
         .unzip();
 
+    let vendors = HashMap::from([
+        (
+            "0x10de",
+            fps.state
+                .with_image(renderer, "nvidia", |image, ctx| {
+                    (image.texture_id(ctx), image.size_vec2())
+                })
+                .expect("Logo images not loaded?"),
+        ),
+        (
+            "0x1002",
+            fps.state
+                .with_image(renderer, "amd", |image, ctx| {
+                    (image.texture_id(ctx), image.size_vec2())
+                })
+                .expect("Logo images not loaded?"),
+        ),
+        (
+            "0x8086",
+            fps.state
+                .with_image(renderer, "intel", |image, ctx| {
+                    (image.texture_id(ctx), image.size_vec2())
+                })
+                .expect("Logo images not loaded?"),
+        ),
+    ]);
+
     fps.state.render(
         |ctx| {
             egui::Area::new("main")
@@ -104,7 +133,22 @@ pub fn fps_ui(
                         ui.separator();
 
                         if let Some(gpu) = gpu {
-                            ui.label(egui::RichText::new(format!("renderD{}", gpu.minor())).code());
+                            ui.horizontal(|ui| {
+                                let resp = ui.label(
+                                    egui::RichText::new(format!("renderD{}", gpu.minor())).code(),
+                                );
+                                if let Ok(vendor) = std::fs::read_to_string(format!(
+                                    "/sys/class/drm/renderD{}/device/vendor",
+                                    gpu.minor()
+                                )) {
+                                    if let Some((texture_id, mut size)) = vendors.get(vendor.trim())
+                                    {
+                                        let factor = resp.rect.height() / size.y;
+                                        size = Vec2::from([size.x * factor, resp.rect.height()]);
+                                        ui.image(*texture_id, size);
+                                    }
+                                }
+                            });
                         }
                         ui.label(egui::RichText::new(format!("FPS: {:>7.3}", avg_fps)).heading());
                         ui.label("Frame Times:");

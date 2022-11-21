@@ -221,13 +221,16 @@ pub fn init_backend(
         .map_err(|_| anyhow::anyhow!("Failed to init eventloop timer for winit"))?;
     event_ping.ping();
 
+    #[cfg(feature = "debug")]
+    let fps = Fps::new(backend.renderer());
+
     state.backend = BackendData::Winit(WinitState {
         backend,
         output: output.clone(),
         damage_tracker: DamageTrackedRenderer::from_output(&output),
         screencopy: Vec::new(),
         #[cfg(feature = "debug")]
-        fps: Fps::default(),
+        fps,
     });
     state
         .common

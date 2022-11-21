@@ -126,7 +126,7 @@ impl X11State {
             pending: true,
             screencopy: Vec::new(),
             #[cfg(feature = "debug")]
-            fps: Fps::default(),
+            fps: Fps::new(&mut self.renderer),
         });
 
         // schedule first render

@@ -237,6 +237,7 @@ where
     }
 }
 
+#[cfg(feature = "debug")]
 impl<R> From<TextureRenderElement<Gles2Texture>> for CosmicElement<R>
 where
     R: Renderer + ImportAll + AsGlowRenderer,

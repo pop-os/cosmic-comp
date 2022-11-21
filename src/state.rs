@@ -14,6 +14,8 @@ use crate::{
     },
 };
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_manager_v1::CursorMode;
+#[cfg(feature = "debug")]
+use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::{
     backend::{
         drm::DrmNode,
@@ -465,6 +467,7 @@ pub struct Frame {
     pub duration_displayed: Duration,
 }
 
+#[cfg(feature = "debug")]
 impl Frame {
     fn frame_time(&self) -> Duration {
         self.duration_elements
@@ -480,6 +483,7 @@ impl Frame {
     }
 }
 
+#[cfg(feature = "debug")]
 impl From<PendingFrame> for Frame {
     fn from(pending: PendingFrame) -> Self {
         Frame {
@@ -541,7 +545,7 @@ impl Fps {
             );
 
             self.frames.push_back(frame.into());
-            if self.frames.len() > Fps::WINDOW_SIZE {
+            while self.frames.len() > Fps::WINDOW_SIZE {
                 self.frames.pop_front();
             }
         }
@@ -601,18 +605,34 @@ impl Fps {
     }
 }
 
+static INTEL_LOGO: &'static [u8] = include_bytes!("../resources/icons/intel.svg");
+static AMD_LOGO: &'static [u8] = include_bytes!("../resources/icons/amd.svg");
+static NVIDIA_LOGO: &'static [u8] = include_bytes!("../resources/icons/nvidia.svg");
+
 #[cfg(feature = "debug")]
-impl Default for Fps {
-    fn default() -> Fps {
+impl Fps {
+    pub fn new(renderer: &mut GlowRenderer) -> Fps {
+        let state = {
+            let state =
+                smithay_egui::EguiState::new(Rectangle::from_loc_and_size((0, 0), (400, 800)));
+            let mut visuals: egui::style::Visuals = Default::default();
+            visuals.window_shadow.extrusion = 0.0;
+            state.context().set_visuals(visuals);
+            state
+        };
+
+        state
+            .load_svg(renderer, String::from("intel"), INTEL_LOGO)
+            .unwrap();
+        state
+            .load_svg(renderer, String::from("amd"), AMD_LOGO)
+            .unwrap();
+        state
+            .load_svg(renderer, String::from("nvidia"), NVIDIA_LOGO)
+            .unwrap();
+
         Fps {
-            state: {
-                let state =
-                    smithay_egui::EguiState::new(Rectangle::from_loc_and_size((0, 0), (400, 800)));
-                let mut visuals: egui::style::Visuals = Default::default();
-                visuals.window_shadow.extrusion = 0.0;
-                state.context().set_visuals(visuals);
-                state
-            },
+            state,
             pending_frame: None,
             frames: VecDeque::with_capacity(Fps::WINDOW_SIZE + 1),
         }
