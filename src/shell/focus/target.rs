@@ -88,9 +88,7 @@ impl PointerTarget<State> for PointerFocusTarget {
         match self {
             PointerFocusTarget::Element(w) => PointerTarget::enter(w, seat, data, event),
             PointerFocusTarget::Fullscreen(w) => PointerTarget::enter(w, seat, data, event),
-            PointerFocusTarget::LayerSurface(l) => {
-                PointerTarget::enter(l.wl_surface(), seat, data, event)
-            }
+            PointerFocusTarget::LayerSurface(l) => PointerTarget::enter(l, seat, data, event),
             PointerFocusTarget::Popup(p) => PointerTarget::enter(p.wl_surface(), seat, data, event),
         }
     }
@@ -98,9 +96,7 @@ impl PointerTarget<State> for PointerFocusTarget {
         match self {
             PointerFocusTarget::Element(w) => PointerTarget::motion(w, seat, data, event),
             PointerFocusTarget::Fullscreen(w) => PointerTarget::motion(w, seat, data, event),
-            PointerFocusTarget::LayerSurface(l) => {
-                PointerTarget::motion(l.wl_surface(), seat, data, event)
-            }
+            PointerFocusTarget::LayerSurface(l) => PointerTarget::motion(l, seat, data, event),
             PointerFocusTarget::Popup(p) => {
                 PointerTarget::motion(p.wl_surface(), seat, data, event)
             }
@@ -110,9 +106,7 @@ impl PointerTarget<State> for PointerFocusTarget {
         match self {
             PointerFocusTarget::Element(w) => PointerTarget::button(w, seat, data, event),
             PointerFocusTarget::Fullscreen(w) => PointerTarget::button(w, seat, data, event),
-            PointerFocusTarget::LayerSurface(l) => {
-                PointerTarget::button(l.wl_surface(), seat, data, event)
-            }
+            PointerFocusTarget::LayerSurface(l) => PointerTarget::button(l, seat, data, event),
             PointerFocusTarget::Popup(p) => {
                 PointerTarget::button(p.wl_surface(), seat, data, event)
             }
@@ -122,9 +116,7 @@ impl PointerTarget<State> for PointerFocusTarget {
         match self {
             PointerFocusTarget::Element(w) => PointerTarget::axis(w, seat, data, frame),
             PointerFocusTarget::Fullscreen(w) => PointerTarget::axis(w, seat, data, frame),
-            PointerFocusTarget::LayerSurface(l) => {
-                PointerTarget::axis(l.wl_surface(), seat, data, frame)
-            }
+            PointerFocusTarget::LayerSurface(l) => PointerTarget::axis(l, seat, data, frame),
             PointerFocusTarget::Popup(p) => PointerTarget::axis(p.wl_surface(), seat, data, frame),
         }
     }
@@ -133,7 +125,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::Element(w) => PointerTarget::leave(w, seat, data, serial, time),
             PointerFocusTarget::Fullscreen(w) => PointerTarget::leave(w, seat, data, serial, time),
             PointerFocusTarget::LayerSurface(l) => {
-                PointerTarget::leave(l.wl_surface(), seat, data, serial, time)
+                PointerTarget::leave(l, seat, data, serial, time)
             }
             PointerFocusTarget::Popup(p) => {
                 PointerTarget::leave(p.wl_surface(), seat, data, serial, time)
@@ -157,7 +149,7 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
             }
             KeyboardFocusTarget::Group(_) => {}
             KeyboardFocusTarget::LayerSurface(l) => {
-                KeyboardTarget::enter(l.wl_surface(), seat, data, keys, serial)
+                KeyboardTarget::enter(l, seat, data, keys, serial)
             }
             KeyboardFocusTarget::Popup(p) => {
                 KeyboardTarget::enter(p.wl_surface(), seat, data, keys, serial)
@@ -169,9 +161,7 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
             KeyboardFocusTarget::Element(w) => KeyboardTarget::leave(w, seat, data, serial),
             KeyboardFocusTarget::Fullscreen(w) => KeyboardTarget::leave(w, seat, data, serial),
             KeyboardFocusTarget::Group(_) => {}
-            KeyboardFocusTarget::LayerSurface(l) => {
-                KeyboardTarget::leave(l.wl_surface(), seat, data, serial)
-            }
+            KeyboardFocusTarget::LayerSurface(l) => KeyboardTarget::leave(l, seat, data, serial),
             KeyboardFocusTarget::Popup(p) => {
                 KeyboardTarget::leave(p.wl_surface(), seat, data, serial)
             }
@@ -195,7 +185,7 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
             }
             KeyboardFocusTarget::Group(_) => {}
             KeyboardFocusTarget::LayerSurface(l) => {
-                KeyboardTarget::key(l.wl_surface(), seat, data, key, state, serial, time)
+                KeyboardTarget::key(l, seat, data, key, state, serial, time)
             }
             KeyboardFocusTarget::Popup(p) => {
                 KeyboardTarget::key(p.wl_surface(), seat, data, key, state, serial, time)
@@ -218,7 +208,7 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
             }
             KeyboardFocusTarget::Group(_) => {}
             KeyboardFocusTarget::LayerSurface(l) => {
-                KeyboardTarget::modifiers(l.wl_surface(), seat, data, modifiers, serial)
+                KeyboardTarget::modifiers(l, seat, data, modifiers, serial)
             }
             KeyboardFocusTarget::Popup(p) => {
                 KeyboardTarget::modifiers(p.wl_surface(), seat, data, modifiers, serial)
