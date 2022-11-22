@@ -66,7 +66,8 @@ pub struct WorkspaceSet {
     active: usize,
     amount: WorkspaceAmount,
     group: WorkspaceGroupHandle,
-    workspaces: Vec<Workspace>,
+    idx: usize,
+    pub(crate) workspaces: Vec<Workspace>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -92,13 +93,17 @@ fn create_workspace(
 }
 
 impl WorkspaceSet {
-    fn new(state: &mut WorkspaceUpdateGuard<'_, State>, amount: WorkspaceAmount) -> WorkspaceSet {
+    fn new(
+        state: &mut WorkspaceUpdateGuard<'_, State>,
+        amount: WorkspaceAmount,
+        idx: usize,
+    ) -> WorkspaceSet {
         let group_handle = state.create_workspace_group();
 
         let workspaces = match amount {
             WorkspaceAmount::Dynamic => {
                 let workspace = create_workspace(state, &group_handle, true);
-                workspace_set_idx(state, 1, &workspace.handle);
+                workspace_set_idx(state, 1, idx, &workspace.handle);
                 state.set_workspace_capabilities(
                     &workspace.handle,
                     [WorkspaceCapabilities::Activate].into_iter(),
@@ -108,7 +113,7 @@ impl WorkspaceSet {
             WorkspaceAmount::Static(len) => (0..len)
                 .map(|i| {
                     let workspace = create_workspace(state, &group_handle, i == 0);
-                    workspace_set_idx(state, i + 1, &workspace.handle);
+                    workspace_set_idx(state, i + 1, idx, &workspace.handle);
                     state.set_workspace_capabilities(
                         &workspace.handle,
                         [WorkspaceCapabilities::Activate].into_iter(),
@@ -122,6 +127,7 @@ impl WorkspaceSet {
             active: 0,
             amount,
             group: group_handle,
+            idx,
             workspaces,
         }
     }
@@ -192,7 +198,7 @@ impl WorkspaceSet {
 
         if keep.iter().any(|val| *val == false) {
             for (i, workspace) in self.workspaces.iter().enumerate() {
-                workspace_set_idx(&mut state, i as u8 + 1, &workspace.handle);
+                workspace_set_idx(&mut state, i as u8 + 1, self.idx, &workspace.handle);
             }
         }
     }
@@ -240,6 +246,7 @@ impl WorkspaceSet {
                 workspace_set_idx(
                     &mut state,
                     self.workspaces.len() as u8 + 1,
+                    self.idx,
                     &workspace.handle,
                 );
                 state.set_workspace_capabilities(
@@ -251,6 +258,13 @@ impl WorkspaceSet {
                 }
                 self.workspaces.push(workspace);
             }
+        }
+    }
+
+    fn update_idx(&mut self, state: &mut WorkspaceUpdateGuard<'_, State>, idx: usize) {
+        self.idx = idx;
+        for (i, workspace) in self.workspaces.iter().enumerate() {
+            workspace_set_idx(state, i as u8, idx, &workspace.handle);
         }
     }
 }
@@ -269,7 +283,7 @@ impl WorkspaceMode {
     ) -> WorkspaceMode {
         match config {
             crate::config::WorkspaceMode::Global => {
-                WorkspaceMode::Global(WorkspaceSet::new(state, amount))
+                WorkspaceMode::Global(WorkspaceSet::new(state, amount, 0))
             }
             crate::config::WorkspaceMode::OutputBound => {
                 WorkspaceMode::OutputBound(HashMap::new(), amount)
@@ -432,7 +446,10 @@ impl Shell {
             WorkspaceMode::OutputBound(sets, amount) => {
                 // TODO: Restore previously assigned workspaces, if possible!
                 if !sets.contains_key(output) {
-                    sets.insert(output.clone(), WorkspaceSet::new(&mut state, *amount));
+                    sets.insert(
+                        output.clone(),
+                        WorkspaceSet::new(&mut state, *amount, sets.len()),
+                    );
                 }
                 for workspace in &mut sets.get_mut(output).unwrap().workspaces {
                     workspace.map_output(output, (0, 0).into());
@@ -482,11 +499,6 @@ impl Shell {
                                 &workspace_handle,
                                 [WorkspaceCapabilities::Activate].into_iter(),
                             );
-                            workspace_set_idx(
-                                &mut state,
-                                new_set.workspaces.len() as u8 + 1,
-                                &workspace_handle,
-                            );
                             workspace.handle = workspace_handle;
 
                             // update mapping
@@ -497,11 +509,14 @@ impl Shell {
                             new_set.workspaces.push(workspace);
                         }
                         state.remove_workspace_group(set.group);
-                        std::mem::drop(state);
-                        self.refresh(); // cleans up excess of workspaces and empty workspaces
                     }
                     // if there is no output, we are going to quit anyway, just drop the workspace set
                 }
+                for (i, set) in sets.values_mut().enumerate() {
+                    set.update_idx(&mut state, i);
+                }
+                std::mem::drop(state);
+                self.refresh(); // cleans up excess of workspaces and empty workspaces
             }
             WorkspaceMode::Global(set) => {
                 state.remove_group_output(&set.group, output);
@@ -537,7 +552,7 @@ impl Shell {
                     };
 
                 // in this case we have to merge our sets, preserving placing of windows as nicely as possible
-                let mut new_set = WorkspaceSet::new(&mut state, WorkspaceAmount::Static(0));
+                let mut new_set = WorkspaceSet::new(&mut state, WorkspaceAmount::Static(0), 0);
 
                 // lets construct an iterator of all the pairs of workspaces we have to merge
                 // we first split of the part of the workspaces that contain the currently active one
@@ -593,7 +608,7 @@ impl Shell {
                         &workspace_handle,
                         [WorkspaceCapabilities::Activate].into_iter(),
                     );
-                    workspace_set_idx(&mut state, i as u8 + 1, &workspace_handle);
+                    workspace_set_idx(&mut state, i as u8 + 1, 0, &workspace_handle);
 
                     let mut new_workspace = Workspace::new(workspace_handle);
                     for output in self.outputs.iter() {
@@ -639,14 +654,14 @@ impl Shell {
 
                 // split workspaces apart, preserving window positions relative to their outputs
                 let mut sets = HashMap::new();
-                for output in &self.outputs {
+                for (i, output) in self.outputs.iter().enumerate() {
                     sets.insert(
                         output.clone(),
-                        WorkspaceSet::new(&mut state, WorkspaceAmount::Static(0)),
+                        WorkspaceSet::new(&mut state, WorkspaceAmount::Static(0), i),
                     );
                 }
                 for (i, workspace) in set.workspaces.drain(..).enumerate() {
-                    for output in &self.outputs {
+                    for (idx, output) in self.outputs.iter().enumerate() {
                         // copy over everything and then remove other outputs to preserve state
                         let new_set = sets.get_mut(output).unwrap();
                         let new_workspace_handle = state.create_workspace(&new_set.group).unwrap();
@@ -654,7 +669,7 @@ impl Shell {
                             &new_workspace_handle,
                             [WorkspaceCapabilities::Activate].into_iter(),
                         );
-                        workspace_set_idx(&mut state, i as u8 + 1, &new_workspace_handle);
+                        workspace_set_idx(&mut state, i as u8 + 1, idx, &new_workspace_handle);
 
                         let mut old_tiling_layer = workspace.tiling_layer.clone();
                         let mut new_floating_layer = FloatingLayout::new();
@@ -1086,8 +1101,9 @@ impl Shell {
 fn workspace_set_idx<'a>(
     state: &mut WorkspaceUpdateGuard<'a, State>,
     idx: u8,
+    output_pos: usize,
     handle: &WorkspaceHandle,
 ) {
     state.set_workspace_name(&handle, format!("{}", idx));
-    state.set_workspace_coordinates(&handle, [Some(idx as u32), None, None]);
+    state.set_workspace_coordinates(&handle, [Some(idx as u32), Some(output_pos as u32), None]);
 }
