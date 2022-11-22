@@ -252,14 +252,7 @@ impl State {
 
                 log,
                 #[cfg(feature = "debug")]
-                egui: Egui {
-                    debug_state: smithay_egui::EguiState::new(Rectangle::from_loc_and_size(
-                        (0, 0),
-                        (400, 800),
-                    )),
-                    active: false,
-                    alpha: 1.0,
-                },
+                egui: Egui { active: false },
 
                 compositor_state,
                 data_device_state,
@@ -435,9 +428,7 @@ impl Common {
 
 #[cfg(feature = "debug")]
 pub struct Egui {
-    pub debug_state: smithay_egui::EguiState,
     pub active: bool,
-    pub alpha: f32,
 }
 
 #[cfg(feature = "debug")]

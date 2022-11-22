@@ -163,10 +163,6 @@ impl State {
                         _ => {}
                     }
                 }
-                #[cfg(feature = "debug")]
-                {
-                    self.common.egui.debug_state.handle_device_added(&device);
-                }
             }
             InputEvent::DeviceRemoved { device } => {
                 for seat in &mut self.common.seats() {
@@ -181,10 +177,6 @@ impl State {
                         }
                         break;
                     }
-                }
-                #[cfg(feature = "debug")]
-                {
-                    self.common.egui.debug_state.handle_device_removed(&device);
                 }
             }
             InputEvent::Keyboard { event, .. } => {
@@ -229,25 +221,6 @@ impl State {
                                         && userdata.get::<SupressedKeys>().unwrap().filter(&handle)
                                     {
                                         return FilterResult::Intercept(None);
-                                    }
-                                    #[cfg(feature = "debug")]
-                                    {
-                                        if data.common.seats().position(|x| x == seat).unwrap() == 0
-                                            && data.common.egui.active
-                                        {
-                                            if data.common.egui.debug_state.wants_keyboard() {
-                                                data.common.egui.debug_state.handle_keyboard(
-                                                    &handle,
-                                                    state == KeyState::Pressed,
-                                                    modifiers.clone(),
-                                                );
-                                                userdata
-                                                    .get::<SupressedKeys>()
-                                                    .unwrap()
-                                                    .add(&handle);
-                                                return FilterResult::Intercept(None);
-                                            }
-                                        }
                                     }
 
                                     if state == KeyState::Pressed
@@ -371,14 +344,6 @@ impl State {
                                 time: event.time(),
                             },
                         );
-
-                        #[cfg(feature = "debug")]
-                        if self.common.seats().position(|x| x == seat).unwrap() == 0 {
-                            self.common
-                                .egui
-                                .debug_state
-                                .handle_pointer_motion(position.to_i32_round());
-                        }
                         break;
                     }
                 }
@@ -416,13 +381,6 @@ impl State {
                             },
                         );
 
-                        #[cfg(feature = "debug")]
-                        if self.common.seats().position(|x| x == seat).unwrap() == 0 {
-                            self.common
-                                .egui
-                                .debug_state
-                                .handle_pointer_motion(position.to_i32_round());
-                        }
                         break;
                     }
                 }
@@ -435,21 +393,6 @@ impl State {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
-                        #[cfg(feature = "debug")]
-                        if self.common.seats().position(|x| x == seat).unwrap() == 0
-                            && self.common.egui.active
-                        {
-                            if self.common.egui.debug_state.wants_pointer() {
-                                if let Some(button) = event.button() {
-                                    self.common.egui.debug_state.handle_pointer_button(
-                                        button,
-                                        event.state() == ButtonState::Pressed,
-                                    );
-                                }
-                                break;
-                            }
-                        }
-
                         let serial = SERIAL_COUNTER.next_serial();
                         let button = event.button_code();
                         if event.state() == ButtonState::Pressed {
@@ -543,25 +486,6 @@ impl State {
             InputEvent::PointerAxis { event, .. } => {
                 let device = event.device();
                 for seat in self.common.seats().cloned().collect::<Vec<_>>().iter() {
-                    #[cfg(feature = "debug")]
-                    if self.common.seats().position(|x| x == seat).unwrap() == 0
-                        && self.common.egui.active
-                    {
-                        if self.common.egui.debug_state.wants_pointer() {
-                            self.common.egui.debug_state.handle_pointer_axis(
-                                event
-                                    .amount_discrete(Axis::Horizontal)
-                                    .or_else(|| event.amount(Axis::Horizontal).map(|x| x * 3.0))
-                                    .unwrap_or(0.0),
-                                event
-                                    .amount_discrete(Axis::Vertical)
-                                    .or_else(|| event.amount(Axis::Vertical).map(|x| x * 3.0))
-                                    .unwrap_or(0.0),
-                            );
-                            break;
-                        }
-                    }
-
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
