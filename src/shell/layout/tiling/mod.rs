@@ -1251,14 +1251,28 @@ impl TilingLayout {
         }
 
         Ok(self
-            .mapped()
-            .flat_map(|(o, mapped, loc)| {
-                if o == output {
-                    Some((mapped, loc))
-                } else {
-                    None
+            .trees
+            .iter()
+            .flat_map(|(output_data, tree)| {
+                if &output_data.output != output {
+                    return None;
                 }
+                let root = tree.root_node_id()?;
+                Some(
+                    tree.traverse_pre_order(root)
+                        .unwrap()
+                        .filter(|node| node.data().is_mapped(None))
+                        .map(|node| match node.data() {
+                            Data::Mapped {
+                                mapped,
+                                last_geometry,
+                                ..
+                            } => (mapped, last_geometry.loc),
+                            _ => unreachable!(),
+                        }),
+                )
             })
+            .flatten()
             .flat_map(|(mapped, loc)| {
                 AsRenderElements::<R>::render_elements::<CosmicMappedRenderElement<R>>(
                     mapped,

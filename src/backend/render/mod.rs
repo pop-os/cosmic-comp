@@ -82,9 +82,7 @@ where
             Some(ptr) => ptr,
             None => continue,
         };
-        let location = state
-            .shell
-            .map_global_to_space(pointer.current_location().to_i32_round(), output);
+        let location = pointer.current_location() - output.current_location().to_f64();
 
         if mode != CursorMode::None {
             elements.extend(

@@ -903,20 +903,6 @@ impl Shell {
         }
     }
 
-    pub fn map_space_to_global<C: smithay::utils::Coordinate>(
-        &self,
-        space_loc: impl Into<Point<C, Logical>>,
-        output: &Output,
-    ) -> Point<C, Logical> {
-        match self.workspaces {
-            WorkspaceMode::Global(_) => space_loc.into(),
-            WorkspaceMode::OutputBound(_, _) => {
-                let p = space_loc.into().to_f64() + output.current_location().to_f64();
-                (C::from_f64(p.x), C::from_f64(p.y)).into()
-            }
-        }
-    }
-
     pub fn refresh(&mut self) {
         self.popups.cleanup();
 
