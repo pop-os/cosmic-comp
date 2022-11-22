@@ -619,7 +619,6 @@ pub fn render_output_to_buffer(
                     &output,
                     cursor_mode,
                     None,
-                    #[cfg(feature = "debug")]
                     None,
                 )
             } else {
@@ -636,7 +635,6 @@ pub fn render_output_to_buffer(
                     &output,
                     cursor_mode,
                     None,
-                    #[cfg(feature = "debug")]
                     None,
                 )
             }
@@ -700,7 +698,6 @@ pub fn render_workspace_to_buffer(
                     handle,
                     cursor_mode,
                     None,
-                    #[cfg(feature = "debug")]
                     None,
                 )
             } else {
@@ -718,7 +715,6 @@ pub fn render_workspace_to_buffer(
                     handle,
                     cursor_mode,
                     None,
-                    #[cfg(feature = "debug")]
                     None,
                 )
             }

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #[cfg(feature = "debug")]
-use crate::{debug::fps_ui, state::Fps, utils::prelude::*};
+use crate::{debug::fps_ui, utils::prelude::*};
 use crate::{
     shell::{layout::floating::SeatMoveGrabState, CosmicMappedRenderElement},
-    state::Common,
+    state::{Common, Fps},
     wayland::{
         handlers::{data_device::get_dnd_icon, screencopy::render_session},
         protocols::{
@@ -134,7 +134,7 @@ pub fn render_output<R, Target, OffTarget, Source>(
     output: &Output,
     cursor_mode: CursorMode,
     screencopy: Option<(Source, &[(ScreencopySession, BufferParams)])>,
-    #[cfg(feature = "debug")] fps: Option<&mut Fps>,
+    fps: Option<&mut Fps>,
 ) -> Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), RenderError<R>>
 where
     R: Renderer
@@ -165,7 +165,6 @@ where
         &handle,
         cursor_mode,
         screencopy,
-        #[cfg(feature = "debug")]
         fps,
     )
 }
@@ -181,7 +180,7 @@ pub fn render_workspace<R, Target, OffTarget, Source>(
     handle: &WorkspaceHandle,
     mut cursor_mode: CursorMode,
     screencopy: Option<(Source, &[(ScreencopySession, BufferParams)])>,
-    #[cfg(feature = "debug")] mut fps: Option<&mut Fps>,
+    mut fps: Option<&mut Fps>,
 ) -> Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), RenderError<R>>
 where
     R: Renderer
@@ -200,7 +199,6 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
     Source: Clone,
 {
-    #[cfg(feature = "debug")]
     if let Some(ref mut fps) = fps {
         fps.start();
     }
@@ -255,7 +253,6 @@ where
             .map(Into::into),
     );
 
-    #[cfg(feature = "debug")]
     if let Some(fps) = fps.as_mut() {
         fps.elements();
     }
@@ -263,7 +260,6 @@ where
     renderer.bind(target).map_err(RenderError::Rendering)?;
     let res = damage_tracker.render_output(renderer, age, &elements, CLEAR_COLOR, None);
 
-    #[cfg(feature = "debug")]
     if let Some(fps) = fps.as_mut() {
         fps.render();
     }
@@ -311,7 +307,6 @@ where
                 }
             }
         }
-        #[cfg(feature = "debug")]
         if let Some(fps) = fps.as_mut() {
             fps.screencopy();
         }

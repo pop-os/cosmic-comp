@@ -14,12 +14,13 @@ use crate::{
     },
 };
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_manager_v1::CursorMode;
-#[cfg(feature = "debug")]
-use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::{
     backend::{
         drm::DrmNode,
-        renderer::element::{default_primary_scanout_output_compare, RenderElementStates},
+        renderer::{
+            element::{default_primary_scanout_output_compare, RenderElementStates},
+            glow::GlowRenderer,
+        },
     },
     desktop::utils::{
         surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
@@ -35,7 +36,7 @@ use smithay::{
             Display, DisplayHandle,
         },
     },
-    utils::{Clock, Monotonic, Rectangle},
+    utils::{Clock, Monotonic},
     wayland::{
         compositor::CompositorState, data_device::DataDeviceState, dmabuf::DmabufState,
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState, output::OutputManagerState,
@@ -45,7 +46,6 @@ use smithay::{
 };
 
 use std::{cell::RefCell, ffi::OsString, time::Duration};
-#[cfg(feature = "debug")]
 use std::{collections::VecDeque, time::Instant};
 
 pub struct ClientState {
@@ -432,14 +432,13 @@ pub struct Egui {
     pub active: bool,
 }
 
-#[cfg(feature = "debug")]
 pub struct Fps {
+    #[cfg(feature = "debug")]
     pub state: smithay_egui::EguiState,
     pending_frame: Option<PendingFrame>,
     pub frames: VecDeque<Frame>,
 }
 
-#[cfg(feature = "debug")]
 #[derive(Debug)]
 struct PendingFrame {
     start: Instant,
@@ -449,7 +448,6 @@ struct PendingFrame {
     duration_displayed: Option<Duration>,
 }
 
-#[cfg(feature = "debug")]
 #[derive(Debug)]
 pub struct Frame {
     pub start: Instant,
@@ -459,8 +457,11 @@ pub struct Frame {
     pub duration_displayed: Duration,
 }
 
-#[cfg(feature = "debug")]
 impl Frame {
+    fn render_time(&self) -> Duration {
+        self.duration_elements + self.duration_render
+    }
+
     fn frame_time(&self) -> Duration {
         self.duration_elements
             + self.duration_render
@@ -475,7 +476,6 @@ impl Frame {
     }
 }
 
-#[cfg(feature = "debug")]
 impl From<PendingFrame> for Frame {
     fn from(pending: PendingFrame) -> Self {
         Frame {
@@ -488,7 +488,6 @@ impl From<PendingFrame> for Frame {
     }
 }
 
-#[cfg(feature = "debug")]
 impl Fps {
     const WINDOW_SIZE: usize = 360;
 
@@ -582,6 +581,15 @@ impl Fps {
         self.frames.iter().map(|f| f.frame_time()).sum::<Duration>() / (self.frames.len() as u32)
     }
 
+    pub fn avg_rendertime(&self, window: usize) -> Duration {
+        self.frames
+            .iter()
+            .take(window)
+            .map(|f| f.render_time())
+            .sum::<Duration>()
+            / window as u32
+    }
+
     pub fn avg_fps(&self) -> f64 {
         if self.frames.is_empty() {
             return 0.0;
@@ -597,33 +605,38 @@ impl Fps {
     }
 }
 
+#[cfg(feature = "debug")]
 static INTEL_LOGO: &'static [u8] = include_bytes!("../resources/icons/intel.svg");
+#[cfg(feature = "debug")]
 static AMD_LOGO: &'static [u8] = include_bytes!("../resources/icons/amd.svg");
+#[cfg(feature = "debug")]
 static NVIDIA_LOGO: &'static [u8] = include_bytes!("../resources/icons/nvidia.svg");
 
-#[cfg(feature = "debug")]
 impl Fps {
-    pub fn new(renderer: &mut GlowRenderer) -> Fps {
+    pub fn new(_renderer: &mut GlowRenderer) -> Fps {
+        #[cfg(feature = "debug")]
         let state = {
-            let state =
-                smithay_egui::EguiState::new(Rectangle::from_loc_and_size((0, 0), (400, 800)));
+            let state = smithay_egui::EguiState::new(smithay::utils::Rectangle::from_loc_and_size(
+                (0, 0),
+                (400, 800),
+            ));
             let mut visuals: egui::style::Visuals = Default::default();
             visuals.window_shadow.extrusion = 0.0;
             state.context().set_visuals(visuals);
             state
+                .load_svg(_renderer, String::from("intel"), INTEL_LOGO)
+                .unwrap();
+            state
+                .load_svg(_renderer, String::from("amd"), AMD_LOGO)
+                .unwrap();
+            state
+                .load_svg(_renderer, String::from("nvidia"), NVIDIA_LOGO)
+                .unwrap();
+            state
         };
 
-        state
-            .load_svg(renderer, String::from("intel"), INTEL_LOGO)
-            .unwrap();
-        state
-            .load_svg(renderer, String::from("amd"), AMD_LOGO)
-            .unwrap();
-        state
-            .load_svg(renderer, String::from("nvidia"), NVIDIA_LOGO)
-            .unwrap();
-
         Fps {
+            #[cfg(feature = "debug")]
             state,
             pending_frame: None,
             frames: VecDeque::with_capacity(Fps::WINDOW_SIZE + 1),
@@ -631,7 +644,6 @@ impl Fps {
     }
 }
 
-#[cfg(feature = "debug")]
 pub fn avg_fps<'a>(iter: impl Iterator<Item = &'a Duration>) -> f64 {
     let sum_secs = iter.map(|d| d.as_secs_f64()).sum::<f64>();
     1.0 / (sum_secs / Fps::WINDOW_SIZE as f64)

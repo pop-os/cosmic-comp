@@ -65,6 +65,8 @@ impl WinitState {
             } else {
                 None
             },
+            #[cfg(not(feature = "debug"))]
+            None,
             #[cfg(feature = "debug")]
             Some(&mut self.fps),
         ) {

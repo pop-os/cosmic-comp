@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-#[cfg(feature = "debug")]
-use crate::state::Fps;
-
 use crate::{
     backend::render,
     config::OutputConfig,
     shell::Shell,
-    state::{BackendData, ClientState, Common, Data},
+    state::{BackendData, ClientState, Common, Data, Fps},
     utils::prelude::*,
     wayland::{
         handlers::screencopy::{PendingScreencopyBuffers, UserdataExt},
@@ -69,6 +66,8 @@ use session_fd::*;
 use socket::*;
 
 use super::render::{CursorMode, GlMultiRenderer};
+// for now we assume we need at least 3ms
+const MIN_RENDER_TIME: Duration = Duration::from_millis(3);
 
 pub struct KmsState {
     devices: HashMap<DrmNode, Device>,
@@ -107,7 +106,6 @@ pub struct Surface {
     pending: bool,
     dirty: bool,
     render_timer_token: Option<RegistrationToken>,
-    #[cfg(feature = "debug")]
     fps: Fps,
 }
 
@@ -381,7 +379,7 @@ impl State {
         let dispatcher =
             Dispatcher::new(drm, move |event, metadata, data: &mut Data| match event {
                 DrmEvent::VBlank(crtc) => {
-                    let rescheduled_output =
+                    let rescheduled =
                         if let Some(device) = data.state.backend.kms().devices.get_mut(&drm_node) {
                             if let Some(surface) = device.surfaces.get_mut(&crtc) {
                                 #[cfg(feature = "debug")]
@@ -427,7 +425,9 @@ impl State {
                                         }
 
                                         surface.pending = false;
-                                        surface.dirty.then(|| surface.output.clone())
+                                        surface.dirty.then(|| {
+                                            (surface.output.clone(), surface.fps.avg_rendertime(5))
+                                        })
                                     }
                                     Some(Err(err)) => {
                                         slog_scope::warn!("Failed to submit frame: {}", err);
@@ -442,7 +442,7 @@ impl State {
                             None
                         };
 
-                    if let Some(output) = rescheduled_output {
+                    if let Some((output, avg_rendertime)) = rescheduled {
                         let mut scheduled_sessions =
                             data.state.workspace_session_for_output(&output);
                         if let Some(sessions) = output.user_data().get::<PendingScreencopyBuffers>()
@@ -452,15 +452,7 @@ impl State {
                                 .extend(sessions.borrow_mut().drain(..));
                         }
 
-                        let output_refresh = match output.current_mode() {
-                            Some(mode) => mode.refresh,
-                            None => return,
-                        };
-                        // TODO: Record rendering times and use sliding window to estimate duration for next render
-                        let repaint_delay = Duration::from_secs_f64(
-                            ((1000.0 / output_refresh as f64) * 0.6).max(0.003), // for now we assume we need at least 3ms
-                        );
-
+                        let repaint_delay = std::cmp::max(avg_rendertime, MIN_RENDER_TIME);
                         if let Err(err) = data.state.backend.kms().schedule_render(
                             &data.state.common.event_loop_handle,
                             &output,
@@ -781,7 +773,6 @@ impl Device {
             pending: false,
             dirty: false,
             render_timer_token: None,
-            #[cfg(feature = "debug")]
             fps: Fps::new(renderer.as_mut()),
         };
         self.surfaces.insert(crtc, data);
@@ -861,7 +852,6 @@ impl Surface {
             &self.output,
             CursorMode::All,
             screencopy.map(|sessions| (buffer, sessions)),
-            #[cfg(feature = "debug")]
             Some(&mut self.fps),
         ) {
             Ok((damage, states)) => {
