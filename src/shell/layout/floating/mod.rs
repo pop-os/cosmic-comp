@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use smithay::{
-    backend::renderer::{ImportAll, Renderer},
+    backend::renderer::{element::RenderElement, ImportAll, Renderer},
     desktop::{layer_map_for_output, space::SpaceElement, Space, Window},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
-    render_elements,
     utils::{Logical, Point, Rectangle, Serial},
 };
 use std::collections::HashMap;
 
 use crate::{
+    backend::render::element::{AsGles2Frame, AsGlowRenderer},
     shell::{
         element::{CosmicMapped, CosmicMappedRenderElement},
         grabs::ResizeEdge,
@@ -295,23 +295,17 @@ impl FloatingLayout {
     pub fn render_output<R>(
         &self,
         output: &Output,
-    ) -> Result<Vec<FloatingRenderElement<R>>, OutputNotMapped>
+    ) -> Result<Vec<CosmicMappedRenderElement<R>>, OutputNotMapped>
     where
-        R: Renderer + ImportAll,
+        R: Renderer + ImportAll + AsGlowRenderer,
         <R as Renderer>::TextureId: 'static,
+        <R as Renderer>::Frame: AsGles2Frame,
+        CosmicMappedRenderElement<R>: RenderElement<R>,
     {
         let output_scale = output.current_scale().fractional_scale();
         let output_geo = self.space.output_geometry(output).ok_or(OutputNotMapped)?;
         Ok(self
             .space
-            .render_elements_for_region::<R, _>(&output_geo, output_scale)
-            .into_iter()
-            .map(FloatingRenderElement::from)
-            .collect())
+            .render_elements_for_region::<R, _>(&output_geo, output_scale))
     }
-}
-
-render_elements! {
-    pub FloatingRenderElement<R> where R: ImportAll;
-    Window=CosmicMappedRenderElement<R>,
 }

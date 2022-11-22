@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
+    backend::render::element::{AsGles2Frame, AsGlowRenderer},
     shell::{
         element::{CosmicMapped, CosmicMappedRenderElement},
         focus::target::{KeyboardFocusTarget, PointerFocusTarget},
@@ -9,7 +10,10 @@ use crate::{
 };
 
 use smithay::{
-    backend::renderer::{element::AsRenderElements, ImportAll, Renderer},
+    backend::renderer::{
+        element::{AsRenderElements, RenderElement},
+        ImportAll, Renderer,
+    },
     desktop::space::SpaceElement,
     input::{
         pointer::{
@@ -35,8 +39,10 @@ pub struct MoveGrabState {
 impl MoveGrabState {
     pub fn render<I, R>(&self, seat: &Seat<State>, output: &Output) -> Vec<I>
     where
-        R: Renderer + ImportAll,
+        R: Renderer + ImportAll + AsGlowRenderer,
         <R as Renderer>::TextureId: 'static,
+        <R as Renderer>::Frame: AsGles2Frame,
+        CosmicMappedRenderElement<R>: RenderElement<R>,
         I: From<CosmicMappedRenderElement<R>>,
     {
         let cursor_at = seat.get_pointer().unwrap().current_location();

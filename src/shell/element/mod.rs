@@ -1,9 +1,25 @@
-use crate::{state::State, utils::prelude::SeatExt};
+use crate::{
+    backend::render::{
+        element::{AsGles2Frame, AsGlowRenderer, CosmicElement},
+        GlMultiRenderer,
+    },
+    state::State,
+    utils::prelude::SeatExt,
+};
 use id_tree::NodeId;
 use smithay::{
     backend::{
         input::KeyState,
-        renderer::{element::AsRenderElements, ImportAll, Renderer},
+        renderer::{
+            element::{
+                texture::TextureRenderElement, AsRenderElements, Element, RenderElement,
+                UnderlyingStorage,
+            },
+            gles2::Gles2Texture,
+            glow::GlowRenderer,
+            multigpu::Error as MultiError,
+            ImportAll, Renderer,
+        },
     },
     desktop::{space::SpaceElement, Kind, PopupManager, Window, WindowSurfaceType},
     input::{
@@ -16,7 +32,7 @@ use smithay::{
         wayland_protocols::xdg::shell::server::xdg_toplevel::State as XdgState,
         wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface},
     },
-    render_elements, space_elements,
+    space_elements,
     utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size},
     wayland::{
         compositor::{with_states, with_surface_tree_downward, TraversalAction},
@@ -26,6 +42,7 @@ use smithay::{
 };
 use std::{
     collections::HashMap,
+    fmt,
     hash::Hash,
     sync::{Arc, Mutex},
 };
@@ -34,6 +51,11 @@ pub mod stack;
 pub use self::stack::CosmicStack;
 pub mod window;
 pub use self::window::CosmicWindow;
+
+#[cfg(feature = "debug")]
+use smithay::wayland::shell::xdg::XdgToplevelSurfaceData;
+#[cfg(feature = "debug")]
+use smithay_egui::EguiState;
 
 use super::{focus::FocusDirection, layout::floating::ResizeState};
 
@@ -44,7 +66,7 @@ space_elements! {
     Stack=CosmicStack,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CosmicMapped {
     element: CosmicMappedInternal,
 
@@ -56,6 +78,20 @@ pub struct CosmicMapped {
     //floating
     pub(super) last_geometry: Arc<Mutex<Option<Rectangle<i32, Logical>>>>,
     pub(super) resize_state: Arc<Mutex<Option<ResizeState>>>,
+
+    #[cfg(feature = "debug")]
+    debug: Arc<Mutex<smithay_egui::EguiState>>,
+}
+
+impl fmt::Debug for CosmicMapped {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CosmicMapped")
+            .field("element", &self.element)
+            .field("last_cursor_position", &self.last_cursor_position)
+            .field("tiling_node_id", &self.tiling_node_id)
+            .field("resize_state", &self.resize_state)
+            .finish()
+    }
 }
 
 impl PartialEq for CosmicMapped {
@@ -239,8 +275,7 @@ impl CosmicMapped {
             Kind::Xdg(xdg) => {
                 xdg.current_state().states.contains(XdgState::Resizing)
                     || xdg.with_pending_state(|states| states.states.contains(XdgState::Resizing))
-            }
-            // Kind::X11?
+            } // Kind::X11?
         }
     }
 
@@ -387,8 +422,7 @@ impl CosmicMapped {
             Kind::Xdg(xdg) => {
                 xdg.current_state().states.contains(XdgState::Activated)
                     || xdg.with_pending_state(|states| states.states.contains(XdgState::Activated))
-            }
-            // Kind::X11?
+            } // Kind::X11?
         }
     }
 
@@ -687,6 +721,10 @@ impl From<CosmicWindow> for CosmicMapped {
             tiling_node_id: Arc::new(Mutex::new(None)),
             last_geometry: Arc::new(Mutex::new(None)),
             resize_state: Arc::new(Mutex::new(None)),
+            #[cfg(feature = "debug")]
+            debug: Arc::new(Mutex::new(smithay_egui::EguiState::new(
+                Rectangle::from_loc_and_size((10, 10), (100, 100)),
+            ))),
         }
     }
 }
@@ -699,20 +737,235 @@ impl From<CosmicStack> for CosmicMapped {
             tiling_node_id: Arc::new(Mutex::new(None)),
             last_geometry: Arc::new(Mutex::new(None)),
             resize_state: Arc::new(Mutex::new(None)),
+            #[cfg(feature = "debug")]
+            debug: Arc::new(Mutex::new(smithay_egui::EguiState::new(
+                Rectangle::from_loc_and_size((10, 10), (100, 100)),
+            ))),
         }
     }
 }
 
-render_elements! {
-    pub CosmicMappedRenderElement<R> where R: ImportAll;
-    Stack=self::stack::CosmicStackRenderElement<R>,
-    Window=self::window::CosmicWindowRenderElement<R>,
+pub enum CosmicMappedRenderElement<R>
+where
+    R: AsGlowRenderer + Renderer + ImportAll,
+    <R as Renderer>::TextureId: 'static,
+    <R as Renderer>::Frame: AsGles2Frame,
+{
+    Stack(self::stack::CosmicStackRenderElement<R>),
+    Window(self::window::CosmicWindowRenderElement<R>),
+    #[cfg(feature = "debug")]
+    Egui(TextureRenderElement<Gles2Texture>),
+}
+
+impl<R> Element for CosmicMappedRenderElement<R>
+where
+    R: AsGlowRenderer + Renderer + ImportAll,
+    <R as Renderer>::TextureId: 'static,
+    <R as Renderer>::Frame: AsGles2Frame,
+{
+    fn id(&self) -> &smithay::backend::renderer::element::Id {
+        match self {
+            CosmicMappedRenderElement::Stack(elem) => elem.id(),
+            CosmicMappedRenderElement::Window(elem) => elem.id(),
+            #[cfg(feature = "debug")]
+            CosmicMappedRenderElement::Egui(elem) => elem.id(),
+        }
+    }
+
+    fn current_commit(&self) -> smithay::backend::renderer::utils::CommitCounter {
+        match self {
+            CosmicMappedRenderElement::Stack(elem) => elem.current_commit(),
+            CosmicMappedRenderElement::Window(elem) => elem.current_commit(),
+            #[cfg(feature = "debug")]
+            CosmicMappedRenderElement::Egui(elem) => elem.current_commit(),
+        }
+    }
+
+    fn src(&self) -> Rectangle<f64, smithay::utils::Buffer> {
+        match self {
+            CosmicMappedRenderElement::Stack(elem) => elem.src(),
+            CosmicMappedRenderElement::Window(elem) => elem.src(),
+            #[cfg(feature = "debug")]
+            CosmicMappedRenderElement::Egui(elem) => elem.src(),
+        }
+    }
+
+    fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
+        match self {
+            CosmicMappedRenderElement::Stack(elem) => elem.geometry(scale),
+            CosmicMappedRenderElement::Window(elem) => elem.geometry(scale),
+            #[cfg(feature = "debug")]
+            CosmicMappedRenderElement::Egui(elem) => elem.geometry(scale),
+        }
+    }
+
+    fn location(&self, scale: Scale<f64>) -> Point<i32, Physical> {
+        match self {
+            CosmicMappedRenderElement::Stack(elem) => elem.location(scale),
+            CosmicMappedRenderElement::Window(elem) => elem.location(scale),
+            #[cfg(feature = "debug")]
+            CosmicMappedRenderElement::Egui(elem) => elem.location(scale),
+        }
+    }
+
+    fn transform(&self) -> smithay::utils::Transform {
+        match self {
+            CosmicMappedRenderElement::Stack(elem) => elem.transform(),
+            CosmicMappedRenderElement::Window(elem) => elem.transform(),
+            #[cfg(feature = "debug")]
+            CosmicMappedRenderElement::Egui(elem) => elem.transform(),
+        }
+    }
+
+    fn damage_since(
+        &self,
+        scale: Scale<f64>,
+        commit: Option<smithay::backend::renderer::utils::CommitCounter>,
+    ) -> Vec<Rectangle<i32, Physical>> {
+        match self {
+            CosmicMappedRenderElement::Stack(elem) => elem.damage_since(scale, commit),
+            CosmicMappedRenderElement::Window(elem) => elem.damage_since(scale, commit),
+            #[cfg(feature = "debug")]
+            CosmicMappedRenderElement::Egui(elem) => elem.damage_since(scale, commit),
+        }
+    }
+
+    fn opaque_regions(&self, scale: Scale<f64>) -> Vec<Rectangle<i32, Physical>> {
+        match self {
+            CosmicMappedRenderElement::Stack(elem) => elem.opaque_regions(scale),
+            CosmicMappedRenderElement::Window(elem) => elem.opaque_regions(scale),
+            #[cfg(feature = "debug")]
+            CosmicMappedRenderElement::Egui(elem) => elem.opaque_regions(scale),
+        }
+    }
+}
+
+impl RenderElement<GlowRenderer> for CosmicMappedRenderElement<GlowRenderer> {
+    fn draw(
+        &self,
+        renderer: &mut GlowRenderer,
+        frame: &mut <GlowRenderer as Renderer>::Frame,
+        location: Point<i32, Physical>,
+        scale: Scale<f64>,
+        damage: &[Rectangle<i32, Physical>],
+        log: &slog::Logger,
+    ) -> Result<(), <GlowRenderer as Renderer>::Error> {
+        match self {
+            CosmicMappedRenderElement::Stack(elem) => {
+                elem.draw(renderer, frame, location, scale, damage, log)
+            }
+            CosmicMappedRenderElement::Window(elem) => {
+                elem.draw(renderer, frame, location, scale, damage, log)
+            }
+            #[cfg(feature = "debug")]
+            CosmicMappedRenderElement::Egui(elem) => {
+                elem.draw(renderer, frame, location, scale, damage, log)
+            }
+        }
+    }
+
+    fn underlying_storage(
+        &self,
+        renderer: &GlowRenderer,
+    ) -> Option<UnderlyingStorage<'_, GlowRenderer>> {
+        match self {
+            CosmicMappedRenderElement::Stack(elem) => elem.underlying_storage(renderer),
+            CosmicMappedRenderElement::Window(elem) => elem.underlying_storage(renderer),
+            #[cfg(feature = "debug")]
+            CosmicMappedRenderElement::Egui(elem) => elem.underlying_storage(renderer),
+        }
+    }
+}
+
+impl<'a> RenderElement<GlMultiRenderer<'a>> for CosmicMappedRenderElement<GlMultiRenderer<'a>> {
+    fn draw(
+        &self,
+        renderer: &mut GlMultiRenderer<'a>,
+        frame: &mut <GlMultiRenderer<'a> as Renderer>::Frame,
+        location: Point<i32, Physical>,
+        scale: Scale<f64>,
+        damage: &[Rectangle<i32, Physical>],
+        log: &slog::Logger,
+    ) -> Result<(), <GlMultiRenderer<'_> as Renderer>::Error> {
+        match self {
+            CosmicMappedRenderElement::Stack(elem) => {
+                elem.draw(renderer, frame, location, scale, damage, log)
+            }
+            CosmicMappedRenderElement::Window(elem) => {
+                elem.draw(renderer, frame, location, scale, damage, log)
+            }
+            #[cfg(feature = "debug")]
+            CosmicMappedRenderElement::Egui(elem) => {
+                let glow_renderer = renderer.glow_renderer_mut();
+                let gles2_frame = frame.gles2_frame_mut();
+                elem.draw(glow_renderer, gles2_frame, location, scale, damage, log)
+                    .map_err(|err| MultiError::Render(err))
+            }
+        }
+    }
+
+    fn underlying_storage(
+        &self,
+        renderer: &GlMultiRenderer<'a>,
+    ) -> Option<UnderlyingStorage<'_, GlMultiRenderer<'a>>> {
+        match self {
+            CosmicMappedRenderElement::Stack(elem) => elem.underlying_storage(renderer),
+            CosmicMappedRenderElement::Window(elem) => elem.underlying_storage(renderer),
+            #[cfg(feature = "debug")]
+            CosmicMappedRenderElement::Egui(elem) => {
+                let glow_renderer = renderer.glow_renderer();
+                match elem.underlying_storage(glow_renderer) {
+                    Some(UnderlyingStorage::Wayland(buffer)) => {
+                        Some(UnderlyingStorage::Wayland(buffer))
+                    }
+                    _ => None,
+                }
+            }
+        }
+    }
+}
+
+impl<R> From<stack::CosmicStackRenderElement<R>> for CosmicMappedRenderElement<R>
+where
+    R: Renderer + ImportAll + AsGlowRenderer,
+    <R as Renderer>::TextureId: 'static,
+    <R as Renderer>::Frame: AsGles2Frame,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+{
+    fn from(elem: stack::CosmicStackRenderElement<R>) -> Self {
+        CosmicMappedRenderElement::Stack(elem)
+    }
+}
+impl<R> From<window::CosmicWindowRenderElement<R>> for CosmicMappedRenderElement<R>
+where
+    R: Renderer + ImportAll + AsGlowRenderer,
+    <R as Renderer>::TextureId: 'static,
+    <R as Renderer>::Frame: AsGles2Frame,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+{
+    fn from(elem: window::CosmicWindowRenderElement<R>) -> Self {
+        CosmicMappedRenderElement::Window(elem)
+    }
+}
+#[cfg(feature = "debug")]
+impl<R> From<TextureRenderElement<Gles2Texture>> for CosmicMappedRenderElement<R>
+where
+    R: Renderer + ImportAll + AsGlowRenderer,
+    <R as Renderer>::TextureId: 'static,
+    <R as Renderer>::Frame: AsGles2Frame,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+{
+    fn from(elem: TextureRenderElement<Gles2Texture>) -> Self {
+        CosmicMappedRenderElement::Egui(elem)
+    }
 }
 
 impl<R> AsRenderElements<R> for CosmicMapped
 where
-    R: Renderer + ImportAll,
+    R: Renderer + ImportAll + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
+    <R as Renderer>::Frame: AsGles2Frame,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     type RenderElement = CosmicMappedRenderElement<R>;
     fn render_elements<C: From<Self::RenderElement>>(
@@ -720,7 +973,7 @@ where
         location: Point<i32, Physical>,
         scale: Scale<f64>,
     ) -> Vec<C> {
-        match &self.element {
+        let mut elements = match &self.element {
             CosmicMappedInternal::Stack(s) => AsRenderElements::<R>::render_elements::<
                 CosmicMappedRenderElement<R>,
             >(s, location, scale),
@@ -728,9 +981,121 @@ where
                 CosmicMappedRenderElement<R>,
             >(w, location, scale),
             _ => Vec::new(),
+        };
+
+        /*
+        #[cfg(feature = "debug")]
+        if !elements.is_empty() {
+            let window = self.active_window();
+            let (app_id, title, min_size, max_size, size, states) = with_states(&window.kind().wl_surface(), |states| {
+                let attributes = states
+                    .data_map
+                    .get::<XdgToplevelSurfaceData>()
+                    .unwrap()
+                    .lock()
+                    .unwrap();
+                (attributes.app_id.clone(), attributes.title.clone(), attributes.min_size.clone(), attributes.max_size.clone(), attributes.current.size.clone(), attributes.current.states.clone())
+            });
+
+            let win_geo = self.geometry().size;
+            let area = {
+                let size = win_size.clamp((10, 10), (100, 100))};
+                let offset = (win_size - (100, 100).into())
+                    .to_point()
+                    .constain(Rectangle::from_loc_and_size((0, 0), (10, 10)));
+                Rectangle::from_loc_and_size(offset, size)
+            };
+
+            match self.debug.lock().unwrap().render(
+                |ui| {
+                    egui::Frame::none()
+                        .fill(Color32::DARK_GRAY)
+                        .rounding(0.25)
+                        .show(ui, |ui| {
+                            ui.heading(title.as_deref().unwrap_or("<None>"));
+                            ui.label(app_id.as_deref().unwrap_or("<None>"));
+                            ui.horizontal(|ui| {
+                                ui.label("States: ");
+                                if states.contains(XdgState::Maximized) {
+                                    ui.label("🗖");
+                                }
+                                if states.contains(XdgState::Fullscreen) {
+                                    ui.label("⬜")
+                                }
+                                if states.contains(XdgState::Activated) {
+                                    ui.label("🖱")
+                                }
+                                if states.contains(XdgState::Resizing) {
+                                    ui.label("↔")
+                                }
+                                if states.contains(XdgState::TiledLeft) {
+                                    ui.label("⏴")
+                                }
+                                if states.contains(XdgState::TiledRight) {
+                                    ui.label("⏵")
+                                }
+                                if states.contains(XdgState::TiledTop) {
+                                    ui.label("⏶")
+                                }
+                                if states.contains(XdgState::TiledBottom) {
+                                    ui.label("⏷")
+                                }
+                            });
+
+                            let plot = Plot::new("Sizes")
+                                .legend(Legend::default().position(Corner::RightBottom))
+                                .show_x(false)
+                                .show_y(false)
+                                .data_aspect(0.1);
+                            plot.show(ui, |plot_ui| {
+                                let center = ((max_size.w + 20) / 2, (max_size.h + 20) / 2);
+                                let max_size_rect = Polygon::new(PlotPoints::new(vec![
+                                    (10, 10),
+                                    (max_size.w + 10, 10),
+                                    (max_size.w + 10, max_size.h + 10),
+                                    (10, max_size.h + 10),
+                                    (10, 10),
+                                ]));
+                                plot_ui.polygon(max_size_rect.name(format!("{}", max_size)));
+
+                                if let Some(size) = size {
+                                    let size_rect = Polygon::new(PlotPoints::new(vec![
+                                        (center.0 - size.w / 2, center.1 - size.h / 2),
+                                        (center.0 + size.w / 2, center.1 - size.w / 2),
+                                        (center.0 + size.w / 2, center.1 + size.w / 2),
+                                        (center.0 - size.w / 2, center.1 + size.w / 2),
+                                        (center.0 - size.w / 2, center.1 - size.w / 2),
+                                    ]));
+                                    plot_ui.polygon(size_rect.name(format!("{}", size)));
+                                }
+
+                                let min_size_rect = Polygon::new(PlotPoints::new(vec![
+                                    (center.0 - min_size.w / 2, center.1 - min_size.h / 2),
+                                    (center.0 + min_size.w / 2, center.1 - min_size.w / 2),
+                                    (center.0 + min_size.w / 2, center.1 + min_size.w / 2),
+                                    (center.0 - min_size.w / 2, center.1 + min_size.w / 2),
+                                    (center.0 - min_size.w / 2, center.1 - min_size.w / 2),
+                                ]));
+                                plot_ui.polygon(min_size_rect.name(format!("{}", min_size)));
+                            })
+                        });
+                },
+                renderer,
+                area,
+                scale,
+                if self.last_cursor_position.lock().unwrap().values().any(|p| area.contains(p.to_i32_round())) {
+                    0.4
+                } else {
+                    1.0
+                },
+                start_time,
+            ) {
+                Ok(element) => elements.push(element),
+                Err(err) => slog_scope::debug!("Error rendering debug overlay: {}", err),
+            };
         }
-        .into_iter()
-        .map(C::from)
-        .collect()
+        */
+
+        elements.into_iter().map(C::from).collect()
     }
 }

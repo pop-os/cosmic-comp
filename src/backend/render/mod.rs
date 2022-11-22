@@ -68,9 +68,10 @@ pub fn cursor_elements<E, R>(
     mode: CursorMode,
 ) -> Vec<E>
 where
-    R: Renderer + ImportAll + ImportMem,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::Frame: AsGles2Frame,
     <R as Renderer>::TextureId: Clone + 'static,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
     E: From<CursorRenderElement<R>> + From<CosmicMappedRenderElement<R>>,
 {
     let scale = output.current_scale().fractional_scale();
@@ -149,6 +150,7 @@ where
     <R as Renderer>::TextureId: Clone + 'static,
     <R as Renderer>::Error: From<Gles2Error>,
     CosmicElement<R>: RenderElement<R>,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
     Source: Clone,
 {
     let handle = state.shell.workspaces.active(output).handle;
@@ -195,6 +197,7 @@ where
     <R as Renderer>::TextureId: Clone + 'static,
     <R as Renderer>::Error: From<Gles2Error>,
     CosmicElement<R>: RenderElement<R>,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
     Source: Clone,
 {
     #[cfg(feature = "debug")]

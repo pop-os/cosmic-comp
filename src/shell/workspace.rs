@@ -1,4 +1,5 @@
 use crate::{
+    backend::render::element::{AsGles2Frame, AsGlowRenderer},
     shell::layout::{
         floating::{FloatingLayout, MoveSurfaceGrab},
         tiling::TilingLayout,
@@ -17,7 +18,7 @@ use crate::{
 use indexmap::IndexSet;
 use smithay::{
     backend::renderer::{
-        element::{surface::WaylandSurfaceRenderElement, AsRenderElements},
+        element::{surface::WaylandSurfaceRenderElement, AsRenderElements, Element, RenderElement},
         ImportAll, Renderer,
     },
     desktop::{layer_map_for_output, space::SpaceElement, Kind, LayerSurface, Window},
@@ -27,7 +28,6 @@ use smithay::{
         wayland_protocols::xdg::shell::server::xdg_toplevel::{self, ResizeEdge},
         wayland_server::protocol::wl_surface::WlSurface,
     },
-    render_elements,
     utils::{IsAlive, Logical, Point, Rectangle, Scale, Serial},
     wayland::shell::wlr_layer::Layer,
 };
@@ -37,7 +37,7 @@ use super::{
     element::CosmicMapped,
     focus::{FocusStack, FocusStackMut},
     grabs::ResizeGrab,
-    layout::{floating::FloatingRenderElement, tiling::TilingRenderElement},
+    CosmicMappedRenderElement,
 };
 
 #[derive(Debug)]
@@ -422,8 +422,10 @@ impl Workspace {
         output: &Output,
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
     where
-        R: Renderer + ImportAll,
+        R: Renderer + ImportAll + AsGlowRenderer,
         <R as Renderer>::TextureId: 'static,
+        <R as Renderer>::Frame: AsGles2Frame,
+        CosmicMappedRenderElement<R>: RenderElement<R>,
     {
         let mut render_elements = Vec::new();
 
@@ -540,9 +542,140 @@ impl FocusStacks {
 
 pub struct OutputNotMapped;
 
-render_elements! {
-    pub WorkspaceRenderElement<R> where R: ImportAll;
-    Wayland=WaylandSurfaceRenderElement,
-    Floating=FloatingRenderElement<R>,
-    Tiling=TilingRenderElement<R>,
+pub enum WorkspaceRenderElement<R>
+where
+    R: Renderer + ImportAll + AsGlowRenderer,
+    <R as Renderer>::TextureId: 'static,
+    <R as Renderer>::Frame: AsGles2Frame,
+{
+    Wayland(WaylandSurfaceRenderElement),
+    Window(CosmicMappedRenderElement<R>),
+}
+
+impl<R> Element for WorkspaceRenderElement<R>
+where
+    R: Renderer + ImportAll + AsGlowRenderer,
+    <R as Renderer>::TextureId: 'static,
+    <R as Renderer>::Frame: AsGles2Frame,
+{
+    fn id(&self) -> &smithay::backend::renderer::element::Id {
+        match self {
+            WorkspaceRenderElement::Wayland(elem) => elem.id(),
+            WorkspaceRenderElement::Window(elem) => elem.id(),
+        }
+    }
+
+    fn current_commit(&self) -> smithay::backend::renderer::utils::CommitCounter {
+        match self {
+            WorkspaceRenderElement::Wayland(elem) => elem.current_commit(),
+            WorkspaceRenderElement::Window(elem) => elem.current_commit(),
+        }
+    }
+
+    fn src(&self) -> Rectangle<f64, smithay::utils::Buffer> {
+        match self {
+            WorkspaceRenderElement::Wayland(elem) => elem.src(),
+            WorkspaceRenderElement::Window(elem) => elem.src(),
+        }
+    }
+
+    fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, smithay::utils::Physical> {
+        match self {
+            WorkspaceRenderElement::Wayland(elem) => elem.geometry(scale),
+            WorkspaceRenderElement::Window(elem) => elem.geometry(scale),
+        }
+    }
+
+    fn location(&self, scale: Scale<f64>) -> Point<i32, smithay::utils::Physical> {
+        match self {
+            WorkspaceRenderElement::Wayland(elem) => elem.location(scale),
+            WorkspaceRenderElement::Window(elem) => elem.location(scale),
+        }
+    }
+
+    fn transform(&self) -> smithay::utils::Transform {
+        match self {
+            WorkspaceRenderElement::Wayland(elem) => elem.transform(),
+            WorkspaceRenderElement::Window(elem) => elem.transform(),
+        }
+    }
+
+    fn damage_since(
+        &self,
+        scale: Scale<f64>,
+        commit: Option<smithay::backend::renderer::utils::CommitCounter>,
+    ) -> Vec<Rectangle<i32, smithay::utils::Physical>> {
+        match self {
+            WorkspaceRenderElement::Wayland(elem) => elem.damage_since(scale, commit),
+            WorkspaceRenderElement::Window(elem) => elem.damage_since(scale, commit),
+        }
+    }
+
+    fn opaque_regions(&self, scale: Scale<f64>) -> Vec<Rectangle<i32, smithay::utils::Physical>> {
+        match self {
+            WorkspaceRenderElement::Wayland(elem) => elem.opaque_regions(scale),
+            WorkspaceRenderElement::Window(elem) => elem.opaque_regions(scale),
+        }
+    }
+}
+
+impl<R> RenderElement<R> for WorkspaceRenderElement<R>
+where
+    R: Renderer + ImportAll + AsGlowRenderer,
+    <R as Renderer>::TextureId: 'static,
+    <R as Renderer>::Frame: AsGles2Frame,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+{
+    fn draw(
+        &self,
+        renderer: &mut R,
+        frame: &mut <R as Renderer>::Frame,
+        location: Point<i32, smithay::utils::Physical>,
+        scale: Scale<f64>,
+        damage: &[Rectangle<i32, smithay::utils::Physical>],
+        log: &slog::Logger,
+    ) -> Result<(), <R as Renderer>::Error> {
+        match self {
+            WorkspaceRenderElement::Wayland(elem) => {
+                elem.draw(renderer, frame, location, scale, damage, log)
+            }
+            WorkspaceRenderElement::Window(elem) => {
+                elem.draw(renderer, frame, location, scale, damage, log)
+            }
+        }
+    }
+
+    fn underlying_storage(
+        &self,
+        renderer: &R,
+    ) -> Option<smithay::backend::renderer::element::UnderlyingStorage<'_, R>> {
+        match self {
+            WorkspaceRenderElement::Wayland(elem) => elem.underlying_storage(renderer),
+            WorkspaceRenderElement::Window(elem) => elem.underlying_storage(renderer),
+        }
+    }
+}
+
+impl<R> From<WaylandSurfaceRenderElement> for WorkspaceRenderElement<R>
+where
+    R: Renderer + ImportAll + AsGlowRenderer,
+    <R as Renderer>::TextureId: 'static,
+    <R as Renderer>::Frame: AsGles2Frame,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+{
+    fn from(elem: WaylandSurfaceRenderElement) -> Self {
+        WorkspaceRenderElement::Wayland(elem)
+    }
+}
+
+impl<R> From<CosmicMappedRenderElement<R>> for WorkspaceRenderElement<R>
+where
+    R: Renderer + ImportAll + AsGlowRenderer,
+    <R as Renderer>::TextureId: 'static,
+    <R as Renderer>::Frame: AsGles2Frame,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+{
+    fn from(elem: CosmicMappedRenderElement<R>) -> Self {
+        WorkspaceRenderElement::Window(elem)
+    }
 }

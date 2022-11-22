@@ -18,6 +18,7 @@ where
     R: AsGlowRenderer + Renderer + ImportAll,
     <R as Renderer>::TextureId: 'static,
     <R as Renderer>::Frame: AsGles2Frame,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     Workspace(WorkspaceRenderElement<R>),
     Cursor(CursorRenderElement<R>),
@@ -31,6 +32,7 @@ where
     R: AsGlowRenderer + Renderer + ImportAll,
     <R as Renderer>::TextureId: 'static,
     <R as Renderer>::Frame: AsGles2Frame,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn id(&self) -> &smithay::backend::renderer::element::Id {
         match self {
@@ -209,6 +211,7 @@ where
     R: Renderer + ImportAll + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
     <R as Renderer>::Frame: AsGles2Frame,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: WorkspaceRenderElement<R>) -> Self {
         Self::Workspace(elem)
@@ -220,6 +223,7 @@ where
     R: Renderer + ImportAll + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
     <R as Renderer>::Frame: AsGles2Frame,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: CursorRenderElement<R>) -> Self {
         Self::Cursor(elem)
@@ -231,6 +235,7 @@ where
     R: Renderer + ImportAll + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
     <R as Renderer>::Frame: AsGles2Frame,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: CosmicMappedRenderElement<R>) -> Self {
         Self::MoveGrab(elem)
@@ -243,6 +248,7 @@ where
     R: Renderer + ImportAll + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
     <R as Renderer>::Frame: AsGles2Frame,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: TextureRenderElement<Gles2Texture>) -> Self {
         Self::Egui(elem)

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
+    backend::render::element::{AsGles2Frame, AsGlowRenderer},
     shell::{
         element::{CosmicMapped, CosmicMappedRenderElement},
         focus::{
@@ -17,11 +18,13 @@ use crate::{
 
 use id_tree::{InsertBehavior, MoveBehavior, Node, NodeId, NodeIdError, RemoveBehavior, Tree};
 use smithay::{
-    backend::renderer::{element::AsRenderElements, ImportAll, Renderer},
+    backend::renderer::{
+        element::{AsRenderElements, RenderElement},
+        ImportAll, Renderer,
+    },
     desktop::{layer_map_for_output, space::SpaceElement, PopupKind, Window},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
-    render_elements,
     utils::{IsAlive, Logical, Point, Rectangle, Scale, Serial},
 };
 use std::{borrow::Borrow, collections::HashMap, hash::Hash, sync::Arc};
@@ -1222,10 +1225,12 @@ impl TilingLayout {
     pub fn render_output<R>(
         &self,
         output: &Output,
-    ) -> Result<Vec<TilingRenderElement<R>>, OutputNotMapped>
+    ) -> Result<Vec<CosmicMappedRenderElement<R>>, OutputNotMapped>
     where
-        R: Renderer + ImportAll,
+        R: Renderer + ImportAll + AsGlowRenderer,
         <R as Renderer>::TextureId: 'static,
+        <R as Renderer>::Frame: AsGles2Frame,
+        CosmicMappedRenderElement<R>: RenderElement<R>,
     {
         let output_scale = output.current_scale().fractional_scale();
 
@@ -1243,7 +1248,7 @@ impl TilingLayout {
                 }
             })
             .flat_map(|(mapped, loc)| {
-                AsRenderElements::<R>::render_elements::<TilingRenderElement<R>>(
+                AsRenderElements::<R>::render_elements::<CosmicMappedRenderElement<R>>(
                     mapped,
                     loc.to_physical_precise_round(output_scale)
                         - mapped
@@ -1255,9 +1260,4 @@ impl TilingLayout {
             })
             .collect::<Vec<_>>())
     }
-}
-
-render_elements! {
-    pub TilingRenderElement<R> where R: ImportAll;
-    Window=CosmicMappedRenderElement<R>,
 }
