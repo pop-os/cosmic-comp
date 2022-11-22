@@ -167,6 +167,10 @@ impl Common {
         let seats = state.common.seats().cloned().collect::<Vec<_>>();
         for seat in seats {
             let output = seat.active_output();
+            if !state.common.shell.outputs.contains(&output) {
+                seat.set_active_output(&state.common.shell.outputs[0]);
+                continue;
+            }
             let last_known_focus = ActiveFocus::get(&seat);
 
             if let Some(target) = last_known_focus {

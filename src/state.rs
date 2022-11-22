@@ -141,11 +141,12 @@ impl BackendData {
         output: &Output,
         test_only: bool,
         shell: &mut Shell,
+        seats: impl Iterator<Item = Seat<State>>,
         loop_handle: &LoopHandle<'_, Data>,
     ) -> Result<(), anyhow::Error> {
         let result = match self {
             BackendData::Kms(ref mut state) => {
-                state.apply_config_for_output(output, shell, test_only, loop_handle)
+                state.apply_config_for_output(output, seats, shell, test_only, loop_handle)
             }
             BackendData::Winit(ref mut state) => state.apply_config_for_output(output, test_only),
             BackendData::X11(ref mut state) => state.apply_config_for_output(output, test_only),

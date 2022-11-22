@@ -6,6 +6,7 @@ use crate::{
     wayland::protocols::output_configuration::OutputConfigurationState,
 };
 use serde::{Deserialize, Serialize};
+use smithay::input::Seat;
 pub use smithay::{
     backend::input::KeyState,
     input::keyboard::{keysyms as KeySyms, Keysym, ModifiersState},
@@ -282,8 +283,10 @@ impl Config {
         output_state: &mut OutputConfigurationState<State>,
         backend: &mut BackendData,
         shell: &mut Shell,
+        seats: impl Iterator<Item = Seat<State>>,
         loop_handle: &LoopHandle<'_, Data>,
     ) {
+        let seats = seats.collect::<Vec<_>>();
         let outputs = output_state.outputs().collect::<Vec<_>>();
         let mut infos = outputs
             .iter()
@@ -314,9 +317,13 @@ impl Config {
                     .get::<RefCell<OutputConfig>>()
                     .unwrap()
                     .borrow_mut() = output_config;
-                if let Err(err) =
-                    backend.apply_config_for_output(&output, false, shell, loop_handle)
-                {
+                if let Err(err) = backend.apply_config_for_output(
+                    &output,
+                    false,
+                    shell,
+                    seats.iter().cloned(),
+                    loop_handle,
+                ) {
                     slog_scope::warn!(
                         "Failed to set new config for output {}: {}",
                         output.name(),
@@ -345,9 +352,13 @@ impl Config {
                         .get::<RefCell<OutputConfig>>()
                         .unwrap()
                         .borrow_mut() = output_config;
-                    if let Err(err) =
-                        backend.apply_config_for_output(&output, false, shell, loop_handle)
-                    {
+                    if let Err(err) = backend.apply_config_for_output(
+                        &output,
+                        false,
+                        shell,
+                        seats.iter().cloned(),
+                        loop_handle,
+                    ) {
                         slog_scope::error!(
                             "Failed to reset config for output {}: {}",
                             output.name(),

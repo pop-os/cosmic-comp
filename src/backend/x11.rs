@@ -296,16 +296,18 @@ pub fn init_backend(
         .output_configuration_state
         .add_heads(std::iter::once(&output));
     state.common.shell.add_output(&output);
+    let seats = state.common.seats().cloned().collect::<Vec<_>>();
     state.common.config.read_outputs(
         &mut state.common.output_configuration_state,
         &mut state.backend,
         &mut state.common.shell,
+        seats.iter().cloned(),
         &state.common.event_loop_handle,
     );
 
     event_loop
         .handle()
-        .insert_source(backend, |event, _, data| match event {
+        .insert_source(backend, move |event, _, data| match event {
             X11Event::CloseRequested { window_id } => {
                 // TODO: drain_filter
                 let mut outputs_removed = Vec::new();
@@ -326,7 +328,10 @@ pub fn init_backend(
                     .surfaces
                     .retain(|s| s.window.id() != window_id);
                 for output in outputs_removed.into_iter() {
-                    data.state.common.shell.remove_output(&output);
+                    data.state
+                        .common
+                        .shell
+                        .remove_output(&output, seats.iter().cloned());
                 }
             }
             X11Event::Resized {

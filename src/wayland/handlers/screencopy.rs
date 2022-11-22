@@ -1018,6 +1018,9 @@ impl State {
                                 if !session.alive() {
                                     return;
                                 }
+                                if !data.state.common.shell.outputs.contains(&output) {
+                                    return;
+                                }
                                 match render_workspace_to_buffer(
                                     &mut data.state,
                                     &session,

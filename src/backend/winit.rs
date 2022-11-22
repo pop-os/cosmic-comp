@@ -211,7 +211,11 @@ pub fn init_backend(
                 }
                 Err(winit::WinitError::WindowClosed) => {
                     let output = data.state.backend.winit().output.clone();
-                    data.state.common.shell.remove_output(&output);
+                    let seats = data.state.common.seats().cloned().collect::<Vec<_>>();
+                    data.state
+                        .common
+                        .shell
+                        .remove_output(&output, seats.into_iter());
                     if let Some(token) = token.take() {
                         event_loop_handle.remove(token);
                     }
@@ -237,10 +241,12 @@ pub fn init_backend(
         .output_configuration_state
         .add_heads(std::iter::once(&output));
     state.common.shell.add_output(&output);
+    let seats = state.common.seats().cloned().collect::<Vec<_>>();
     state.common.config.read_outputs(
         &mut state.common.output_configuration_state,
         &mut state.backend,
         &mut state.common.shell,
+        seats.iter().cloned(),
         &state.common.event_loop_handle,
     );
 

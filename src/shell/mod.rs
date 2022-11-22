@@ -448,7 +448,15 @@ impl Shell {
         }
     }
 
-    pub fn remove_output(&mut self, output: &Output) {
+    pub fn remove_output(&mut self, output: &Output, seats: impl Iterator<Item = Seat<State>>) {
+        if let Some(first_output) = self.outputs.get(0) {
+            for seat in seats {
+                if &seat.active_output() == output {
+                    seat.set_active_output(first_output);
+                }
+            }
+        }
+
         if !self.outputs.contains(output) {
             return;
         }

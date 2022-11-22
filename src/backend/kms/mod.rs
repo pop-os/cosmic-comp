@@ -33,6 +33,7 @@ use smithay::{
         udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
     },
     desktop::utils::OutputPresentationFeedback,
+    input::Seat,
     output::{Mode as OutputMode, Output, PhysicalProperties, Subpixel},
     reexports::{
         calloop::{
@@ -255,10 +256,12 @@ pub fn init_backend(
                     }
                 }
 
+                let seats = data.state.common.seats().cloned().collect::<Vec<_>>();
                 data.state.common.config.read_outputs(
                     &mut data.state.common.output_configuration_state,
                     &mut data.state.backend,
                     &mut data.state.common.shell,
+                    seats.into_iter(),
                     &data.state.common.event_loop_handle,
                 );
                 for surface in data
@@ -534,10 +537,12 @@ impl State {
         self.common
             .output_configuration_state
             .add_heads(wl_outputs.iter());
+        let seats = self.common.seats().cloned().collect::<Vec<_>>();
         self.common.config.read_outputs(
             &mut self.common.output_configuration_state,
             &mut self.backend,
             &mut self.common.shell,
+            seats.into_iter(),
             &self.common.event_loop_handle,
         );
 
@@ -600,13 +605,17 @@ impl State {
         self.common
             .output_configuration_state
             .add_heads(outputs_added.iter());
+        let seats = self.common.seats().cloned().collect::<Vec<_>>();
         for output in outputs_removed {
-            self.common.shell.remove_output(&output);
+            self.common
+                .shell
+                .remove_output(&output, seats.iter().cloned());
         }
         self.common.config.read_outputs(
             &mut self.common.output_configuration_state,
             &mut self.backend,
             &mut self.common.shell,
+            seats.into_iter(),
             &self.common.event_loop_handle,
         );
 
@@ -638,14 +647,18 @@ impl State {
             .output_configuration_state
             .remove_heads(outputs_removed.iter());
 
+        let seats = self.common.seats().cloned().collect::<Vec<_>>();
         if self.backend.kms().session.is_active() {
             for output in outputs_removed {
-                self.common.shell.remove_output(&output);
+                self.common
+                    .shell
+                    .remove_output(&output, seats.iter().cloned());
             }
             self.common.config.read_outputs(
                 &mut self.common.output_configuration_state,
                 &mut self.backend,
                 &mut self.common.shell,
+                seats.into_iter(),
                 &self.common.event_loop_handle,
             );
         } else {
@@ -880,6 +893,7 @@ impl KmsState {
     pub fn apply_config_for_output(
         &mut self,
         output: &Output,
+        seats: impl Iterator<Item = Seat<State>>,
         shell: &mut Shell,
         test_only: bool,
         loop_handle: &LoopHandle<'_, Data>,
@@ -902,7 +916,7 @@ impl KmsState {
 
             if !output_config.enabled {
                 if !test_only {
-                    shell.remove_output(output);
+                    shell.remove_output(output, seats);
                     if surface.surface.take().is_some() {
                         // just drop it
                         surface.pending = false;
