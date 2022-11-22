@@ -1855,7 +1855,7 @@ dependencies = [
 [[package]]
 name = "smithay-egui"
 version = "0.1.0"
-source = "git+https://github.com/Smithay/smithay-egui.git?branch=feature/image#9fcb589d5c99ac8143f0a967504cdbf691d6cea4"
+source = "git+https://github.com/Smithay/smithay-egui.git?rev=9fe1fa5e01#9fe1fa5e01dc39c145f036564e971a50f84864ff"
 dependencies = [
  "cgmath",
  "egui",
