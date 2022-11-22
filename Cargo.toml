@@ -30,8 +30,8 @@ xdg = "^2.1"
 ron = "0.7"
 atomic_float = "0.1"
 libsystemd = "0.5"
-wayland-backend = "=0.1.0-beta.12"
-wayland-scanner = "=0.30.0-beta.12"
+wayland-backend = "=0.1.0-beta.10"
+wayland-scanner = "=0.30.0-beta.10"
 cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", branch = "main", default-features = false, features = ["server"] }
 
 [dependencies.smithay]
@@ -62,4 +62,4 @@ debug = true
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/Smithay//smithay", rev = "30e0584c" }
+smithay = { git = "https://github.com/Smithay//smithay", rev = "625cbca5" }
