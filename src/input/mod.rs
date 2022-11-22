@@ -28,7 +28,7 @@ use smithay::{
     },
     output::Output,
     reexports::wayland_server::DisplayHandle,
-    utils::{Logical, Point, Rectangle, SERIAL_COUNTER},
+    utils::{Logical, Point, Rectangle, Serial, SERIAL_COUNTER},
     wayland::{
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat, seat::WaylandFocus,
         shell::wlr_layer::Layer as WlrLayer,
@@ -266,7 +266,7 @@ impl State {
                             )
                             .flatten()
                         {
-                            self.handle_action(action, seat)
+                            self.handle_action(action, seat, serial, time)
                         }
                         break;
                     }
@@ -527,7 +527,7 @@ impl State {
         }
     }
 
-    fn handle_action(&mut self, action: Action, seat: &Seat<State>) {
+    fn handle_action(&mut self, action: Action, seat: &Seat<State>, serial: Serial, time: u32) {
         match action {
             Action::Terminate => {
                 self.common.should_stop = true;
@@ -553,15 +553,10 @@ impl State {
                     0 => 9,
                     x => x - 1,
                 };
-                if let Some(motion_event) = self
+                let _ = self
                     .common
                     .shell
-                    .activate(&current_output, workspace as usize)
-                {
-                    if let Some(ptr) = seat.get_pointer() {
-                        ptr.motion(self, None, &motion_event);
-                    }
-                }
+                    .activate(&current_output, workspace as usize);
             }
             Action::NextWorkspace => {
                 let current_output = seat.active_output();
@@ -572,11 +567,7 @@ impl State {
                     .active_num(&current_output)
                     .saturating_add(1);
                 // TODO: Possibly move to next output, if idx to large
-                if let Some(motion_event) = self.common.shell.activate(&current_output, workspace) {
-                    if let Some(ptr) = seat.get_pointer() {
-                        ptr.motion(self, None, &motion_event);
-                    }
-                }
+                let _ = self.common.shell.activate(&current_output, workspace);
             }
             Action::PreviousWorkspace => {
                 let current_output = seat.active_output();
@@ -587,11 +578,7 @@ impl State {
                     .active_num(&current_output)
                     .saturating_sub(1);
                 // TODO: Possibly move to prev output, if idx < 0
-                if let Some(motion_event) = self.common.shell.activate(&current_output, workspace) {
-                    if let Some(ptr) = seat.get_pointer() {
-                        ptr.motion(self, None, &motion_event);
-                    }
-                }
+                let _ = self.common.shell.activate(&current_output, workspace);
             }
             Action::LastWorkspace => {
                 let current_output = seat.active_output();
@@ -601,11 +588,7 @@ impl State {
                     .workspaces
                     .len(&current_output)
                     .saturating_sub(1);
-                if let Some(motion_event) = self.common.shell.activate(&current_output, workspace) {
-                    if let Some(ptr) = seat.get_pointer() {
-                        ptr.motion(self, None, &motion_event);
-                    }
-                }
+                let _ = self.common.shell.activate(&current_output, workspace);
             }
             Action::MoveToWorkspace(key_num) => {
                 let current_output = seat.active_output();
@@ -680,9 +663,18 @@ impl State {
                     .cloned()
                 {
                     let idx = self.common.shell.workspaces.active_num(&next_output);
-                    if let Some(motion_event) = self.common.shell.activate(&next_output, idx) {
+                    if let Some(new_pos) = self.common.shell.activate(&next_output, idx) {
+                        seat.set_active_output(&next_output);
                         if let Some(ptr) = seat.get_pointer() {
-                            ptr.motion(self, None, &motion_event);
+                            ptr.motion(
+                                self,
+                                None,
+                                &MotionEvent {
+                                    location: new_pos.to_f64(),
+                                    serial,
+                                    time,
+                                },
+                            );
                         }
                     }
                 }
@@ -701,9 +693,19 @@ impl State {
                     .cloned()
                 {
                     let idx = self.common.shell.workspaces.active_num(&prev_output);
-                    if let Some(motion_event) = self.common.shell.activate(&prev_output, idx) {
+                    seat.set_active_output(&prev_output);
+                    if let Some(new_pos) = self.common.shell.activate(&prev_output, idx) {
+                        seat.set_active_output(&prev_output);
                         if let Some(ptr) = seat.get_pointer() {
-                            ptr.motion(self, None, &motion_event);
+                            ptr.motion(
+                                self,
+                                None,
+                                &MotionEvent {
+                                    location: new_pos.to_f64(),
+                                    serial,
+                                    time,
+                                },
+                            );
                         }
                     }
                 }
@@ -720,7 +722,24 @@ impl State {
                     .next()
                     .cloned()
                 {
-                    Shell::move_current_window(self, seat, &current_output, (&next_output, None));
+                    if let Some(new_pos) = Shell::move_current_window(
+                        self,
+                        seat,
+                        &current_output,
+                        (&next_output, None),
+                    ) {
+                        if let Some(ptr) = seat.get_pointer() {
+                            ptr.motion(
+                                self,
+                                None,
+                                &MotionEvent {
+                                    location: new_pos.to_f64(),
+                                    serial,
+                                    time,
+                                },
+                            );
+                        }
+                    }
                 }
             }
             Action::MoveToPreviousOutput => {
@@ -736,7 +755,24 @@ impl State {
                     .next()
                     .cloned()
                 {
-                    Shell::move_current_window(self, seat, &current_output, (&prev_output, None));
+                    if let Some(new_pos) = Shell::move_current_window(
+                        self,
+                        seat,
+                        &current_output,
+                        (&prev_output, None),
+                    ) {
+                        if let Some(ptr) = seat.get_pointer() {
+                            ptr.motion(
+                                self,
+                                None,
+                                &MotionEvent {
+                                    location: new_pos.to_f64(),
+                                    serial,
+                                    time,
+                                },
+                            );
+                        }
+                    }
                 }
             }
             Action::Focus(focus) => {
@@ -751,13 +787,17 @@ impl State {
                         // TODO: Handle Workspace orientation
                         match focus {
                             FocusDirection::Left => {
-                                self.handle_action(Action::PreviousWorkspace, seat)
+                                self.handle_action(Action::PreviousWorkspace, seat, serial, time)
                             }
                             FocusDirection::Right => {
-                                self.handle_action(Action::NextWorkspace, seat)
+                                self.handle_action(Action::NextWorkspace, seat, serial, time)
                             }
-                            FocusDirection::Up => self.handle_action(Action::PreviousOutput, seat),
-                            FocusDirection::Down => self.handle_action(Action::NextOutput, seat),
+                            FocusDirection::Up => {
+                                self.handle_action(Action::PreviousOutput, seat, serial, time)
+                            }
+                            FocusDirection::Down => {
+                                self.handle_action(Action::NextOutput, seat, serial, time)
+                            }
                             _ => {}
                         }
                     }
@@ -778,11 +818,17 @@ impl State {
                     // TODO: Being able to move Groups (move_further should be KeyboardFocusTarget instead)
                     match direction {
                         Direction::Left => {
-                            self.handle_action(Action::MoveToPreviousWorkspace, seat)
+                            self.handle_action(Action::MoveToPreviousWorkspace, seat, serial, time)
                         }
-                        Direction::Right => self.handle_action(Action::MoveToNextWorkspace, seat),
-                        Direction::Up => self.handle_action(Action::MoveToPreviousOutput, seat),
-                        Direction::Down => self.handle_action(Action::MoveToNextOutput, seat),
+                        Direction::Right => {
+                            self.handle_action(Action::MoveToNextWorkspace, seat, serial, time)
+                        }
+                        Direction::Up => {
+                            self.handle_action(Action::MoveToPreviousOutput, seat, serial, time)
+                        }
+                        Direction::Down => {
+                            self.handle_action(Action::MoveToNextOutput, seat, serial, time)
+                        }
                     }
                 }
             }

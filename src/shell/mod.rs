@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State as WState;
 use smithay::{
     desktop::{layer_map_for_output, LayerSurface, PopupManager, Window, WindowSurfaceType},
-    input::{pointer::MotionEvent, Seat},
+    input::Seat,
     output::Output,
     reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
     utils::{Logical, Point, Rectangle},
@@ -733,7 +733,7 @@ impl Shell {
         self.refresh(); // get rid of empty workspaces and enforce potential maximum
     }
 
-    pub fn activate(&mut self, output: &Output, idx: usize) -> Option<MotionEvent> {
+    pub fn activate(&mut self, output: &Output, idx: usize) -> Option<Point<i32, Logical>> {
         match &mut self.workspaces {
             WorkspaceMode::OutputBound(sets, _) => {
                 if let Some(set) = sets.get_mut(output) {
@@ -745,7 +745,8 @@ impl Shell {
             }
         }
 
-        None
+        let output_geo = output.geometry();
+        Some(output_geo.loc + Point::from((output_geo.size.w / 2, output_geo.size.h / 2)))
     }
 
     pub fn active_space(&self, output: &Output) -> &Workspace {
@@ -1001,21 +1002,21 @@ impl Shell {
         seat: &Seat<State>,
         from_output: &Output,
         to: (&Output, Option<usize>),
-    ) {
+    ) -> Option<Point<i32, Logical>> {
         let (to_output, to_idx) = to;
         let to_idx = to_idx.unwrap_or(state.common.shell.workspaces.active_num(to_output));
 
         if from_output == to_output
             && to_idx == state.common.shell.workspaces.active_num(from_output)
         {
-            return;
+            return None;
         }
 
         let from_workspace = state.common.shell.workspaces.active_mut(from_output);
         let maybe_window = from_workspace.focus_stack.get(seat).last().cloned();
 
-        let Some(mapped) = maybe_window else { return; };
-        let Some(window_state) = from_workspace.unmap(&mapped) else { return; };
+        let Some(mapped) = maybe_window else { return None; };
+        let Some(window_state) = from_workspace.unmap(&mapped) else { return None; };
 
         for (toplevel, _) in mapped.windows() {
             state
@@ -1029,6 +1030,9 @@ impl Shell {
         for mapped in elements.into_iter() {
             state.common.shell.update_reactive_popups(&mapped);
         }
+
+        seat.set_active_output(&to_output);
+        let new_pos = state.common.shell.activate(to_output, to_idx);
 
         let to_workspace = state
             .common
@@ -1051,7 +1055,6 @@ impl Shell {
                 .toplevel_info_state
                 .toplevel_enter_workspace(&toplevel, &to_workspace.handle);
         }
-
         for mapped in to_workspace
             .mapped()
             .cloned()
@@ -1061,8 +1064,8 @@ impl Shell {
             state.common.shell.update_reactive_popups(&mapped);
         }
 
-        state.common.shell.activate(to_output, to_idx);
         Common::set_focus(state, Some(&KeyboardFocusTarget::from(mapped)), &seat, None);
+        new_pos
     }
 
     pub fn update_reactive_popups(&self, mapped: &CosmicMapped) {
