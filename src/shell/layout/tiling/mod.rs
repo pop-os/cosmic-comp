@@ -279,8 +279,8 @@ impl TilingLayout {
             // TODO: expects last remaining output
             let Some((output, dst)) = self.trees.iter_mut().next() else { return; };
             let orientation = match output.output.geometry().size {
-                x if x.w >= x.h => Orientation::Horizontal,
-                _ => Orientation::Vertical,
+                x if x.w >= x.h => Orientation::Vertical,
+                _ => Orientation::Horizontal,
             };
             TilingLayout::merge_trees(src, dst, orientation);
             self.refresh()
@@ -1187,8 +1187,8 @@ impl TilingLayout {
         for (output_data, src) in other.trees {
             let mut dst = self.trees.entry(output_data.clone()).or_default();
             let orientation = match output_data.output.geometry().size {
-                x if x.w >= x.h => Orientation::Horizontal,
-                _ => Orientation::Vertical,
+                x if x.w >= x.h => Orientation::Vertical,
+                _ => Orientation::Horizontal,
             };
             TilingLayout::merge_trees(src, &mut dst, orientation);
         }
@@ -1196,17 +1196,24 @@ impl TilingLayout {
     }
 
     fn merge_trees(src: Tree<Data>, dst: &mut Tree<Data>, orientation: Orientation) {
-        if let Some(root_id) = src.root_node_id() {
+        if let Some(dst_root_id) = dst.root_node_id().cloned() {
             let mut stack = Vec::new();
 
-            let root_node = src.get(root_id).unwrap();
-            let new_node = Node::new(root_node.data().clone());
-            let new_id = dst.insert(new_node, InsertBehavior::AsRoot).unwrap();
-            if let Some(root) = dst.root_node_id().cloned() {
-                TilingLayout::new_group(dst, &root, &new_id, orientation).unwrap();
+            if let Some(src_root_id) = src.root_node_id() {
+                let root_node = src.get(src_root_id).unwrap();
+                let new_node = Node::new(root_node.data().clone());
+                let new_id = dst
+                    .insert(new_node, InsertBehavior::UnderNode(&dst_root_id))
+                    .unwrap();
+                if let &mut Data::Mapped { ref mut mapped, .. } =
+                    dst.get_mut(&new_id).unwrap().data_mut()
+                {
+                    *mapped.tiling_node_id.lock().unwrap() = Some(new_id.clone());
+                }
+                TilingLayout::new_group(dst, &dst_root_id, &new_id, orientation).unwrap();
+                stack.push((src_root_id.clone(), new_id));
             }
 
-            stack.push((root_id.clone(), new_id));
             while let Some((src_id, dst_id)) = stack.pop() {
                 for child_id in src.children_ids(&src_id).unwrap() {
                     let src_node = src.get(&child_id).unwrap();
@@ -1214,6 +1221,11 @@ impl TilingLayout {
                     let new_child_id = dst
                         .insert(new_node, InsertBehavior::UnderNode(&dst_id))
                         .unwrap();
+                    if let &mut Data::Mapped { ref mut mapped, .. } =
+                        dst.get_mut(&new_child_id).unwrap().data_mut()
+                    {
+                        *mapped.tiling_node_id.lock().unwrap() = Some(new_child_id.clone());
+                    }
                     stack.push((child_id.clone(), new_child_id));
                 }
             }
