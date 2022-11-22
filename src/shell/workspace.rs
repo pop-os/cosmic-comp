@@ -354,7 +354,6 @@ impl Workspace {
                 seat,
                 pos,
                 initial_window_location,
-                output.geometry().loc,
             ))
         } else {
             None // TODO
