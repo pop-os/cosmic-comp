@@ -1,24 +1,18 @@
 use crate::{
-    shell::{OutputBoundState, Shell, Workspace, WorkspaceMode},
+    shell::{element::CosmicMapped, Shell, Workspace},
     state::Common,
     utils::prelude::*,
     wayland::handlers::xdg_shell::PopupGrabData,
 };
 use indexmap::IndexSet;
 use smithay::{
-    desktop::{layer_map_for_output, PopupUngrabStrategy, Window, WindowSurfaceType},
+    desktop::{layer_map_for_output, PopupUngrabStrategy},
     input::Seat,
-    reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{IsAlive, Serial, SERIAL_COUNTER},
-    wayland::{
-        compositor::get_role,
-        shell::{wlr_layer::LAYER_SURFACE_ROLE, xdg::XDG_TOPLEVEL_ROLE},
-    },
 };
-use std::{
-    cell::{Ref, RefCell, RefMut},
-    collections::HashMap,
-};
+use std::cell::RefCell;
+
+use self::target::{KeyboardFocusTarget, WindowGroup};
 
 pub mod target;
 
@@ -32,80 +26,59 @@ pub enum FocusDirection {
     Out,
 }
 
-pub struct FocusStack<'a>(Ref<'a, IndexSet<Window>>);
-pub struct FocusStackMut<'a>(RefMut<'a, IndexSet<Window>>);
+pub struct FocusStack<'a>(pub(super) Option<&'a IndexSet<CosmicMapped>>);
+pub struct FocusStackMut<'a>(pub(super) &'a mut IndexSet<CosmicMapped>);
 
 impl<'a> FocusStack<'a> {
-    pub fn last(&self) -> Option<Window> {
-        self.0.iter().rev().find(|w| w.toplevel().alive()).cloned()
+    pub fn last(&self) -> Option<&CosmicMapped> {
+        self.0
+            .as_ref()
+            .and_then(|set| set.iter().rev().find(|w| w.alive()))
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &'_ Window> {
-        self.0.iter().rev().filter(|w| w.toplevel().alive())
+    pub fn iter(&self) -> impl Iterator<Item = &'_ CosmicMapped> {
+        self.0
+            .iter()
+            .flat_map(|set| set.iter().rev().filter(|w| w.alive()))
     }
 }
 
 impl<'a> FocusStackMut<'a> {
-    pub fn append(&mut self, window: &Window) {
-        self.0.retain(|w| w.toplevel().alive());
+    pub fn append(&mut self, window: &CosmicMapped) {
+        self.0.retain(|w| w.alive());
         self.0.shift_remove(window);
         self.0.insert(window.clone());
     }
 
-    pub fn last(&self) -> Option<Window> {
-        self.0.iter().rev().find(|w| w.toplevel().alive()).cloned()
+    pub fn last(&self) -> Option<&CosmicMapped> {
+        self.0.iter().rev().find(|w| w.alive())
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &'_ Window> {
-        self.0.iter().rev().filter(|w| w.toplevel().alive())
-    }
-}
-
-type FocusStackData = RefCell<(HashMap<u8, IndexSet<Window>>, IndexSet<Window>)>;
-
-impl Workspace {
-    pub fn focus_stack<'a, 'b>(&'b self, seat: &'a Seat<State>) -> FocusStack<'a> {
-        seat.user_data()
-            .insert_if_missing(|| FocusStackData::new((HashMap::new(), IndexSet::new())));
-        let idx = self.idx;
-        FocusStack(Ref::map(
-            seat.user_data().get::<FocusStackData>().unwrap().borrow(),
-            |map| map.0.get(&idx).unwrap_or(&map.1), //TODO: workaround until Ref::filter_map goes stable
-        ))
-    }
-
-    pub fn focus_stack_mut<'a, 'b>(&'b self, seat: &'a Seat<State>) -> FocusStackMut<'a> {
-        seat.user_data()
-            .insert_if_missing(|| FocusStackData::new((HashMap::new(), IndexSet::new())));
-        let idx = self.idx;
-        FocusStackMut(RefMut::map(
-            seat.user_data()
-                .get::<FocusStackData>()
-                .unwrap()
-                .borrow_mut(),
-            |map| map.0.entry(idx).or_insert_with(|| IndexSet::new()),
-        ))
+    pub fn iter(&self) -> impl Iterator<Item = &'_ CosmicMapped> {
+        self.0.iter().rev().filter(|w| w.alive())
     }
 }
 
-pub struct ActiveFocus(RefCell<Option<WlSurface>>);
+impl Workspace {}
+
+pub struct ActiveFocus(RefCell<Option<KeyboardFocusTarget>>);
 
 impl ActiveFocus {
-    fn set(seat: &Seat<State>, surface: Option<WlSurface>) {
+    fn set(seat: &Seat<State>, target: Option<KeyboardFocusTarget>) {
         if !seat
             .user_data()
-            .insert_if_missing(|| ActiveFocus(RefCell::new(surface.clone())))
+            .insert_if_missing(|| ActiveFocus(RefCell::new(target.clone())))
         {
             *seat
                 .user_data()
                 .get::<ActiveFocus>()
                 .unwrap()
                 .0
-                .borrow_mut() = surface;
+                .borrow_mut() = target;
         }
     }
 
-    fn get(seat: &Seat<State>) -> Option<WlSurface> {
+    fn get(seat: &Seat<State>) -> Option<KeyboardFocusTarget> {
         seat.user_data()
             .get::<ActiveFocus>()
             .and_then(|a| a.0.borrow().clone())
@@ -115,30 +88,25 @@ impl ActiveFocus {
 impl Shell {
     pub fn set_focus<'a>(
         state: &mut State,
-        surface: Option<&WlSurface>,
+        target: Option<&KeyboardFocusTarget>,
         active_seat: &Seat<State>,
         serial: Option<Serial>,
     ) {
         // update FocusStack and notify layouts about new focus (if any window)
-        if let Some(surface) = surface {
-            if let Some(workspace) = state.common.shell.space_for_window_mut(surface) {
-                if let Some(window) = workspace
-                    .space
-                    .window_for_surface(surface, WindowSurfaceType::ALL)
-                {
-                    let mut focus_stack = workspace.focus_stack_mut(active_seat);
-                    if Some(window) != focus_stack.last().as_ref() {
-                        slog_scope::debug!("Focusing window: {:?}", window);
-                        focus_stack.append(window);
-                        // also remove popup grabs, if we are switching focus
-                        if let Some(mut popup_grab) = active_seat
-                            .user_data()
-                            .get::<PopupGrabData>()
-                            .and_then(|x| x.take())
-                        {
-                            if !popup_grab.has_ended() {
-                                popup_grab.ungrab(PopupUngrabStrategy::All);
-                            }
+        if let Some(KeyboardFocusTarget::Element(mapped)) = target {
+            if let Some(workspace) = state.common.shell.space_for_mut(mapped) {
+                let mut focus_stack = workspace.focus_stack.get_mut(active_seat);
+                if Some(mapped) != focus_stack.last() {
+                    slog_scope::debug!("Focusing window: {:?}", mapped);
+                    focus_stack.append(mapped);
+                    // also remove popup grabs, if we are switching focus
+                    if let Some(mut popup_grab) = active_seat
+                        .user_data()
+                        .get::<PopupGrabData>()
+                        .and_then(|x| x.take())
+                    {
+                        if !popup_grab.has_ended() {
+                            popup_grab.ungrab(PopupUngrabStrategy::All);
                         }
                     }
                 }
@@ -147,10 +115,10 @@ impl Shell {
 
         // update keyboard focus
         if let Some(keyboard) = active_seat.get_keyboard() {
-            ActiveFocus::set(active_seat, surface.cloned());
+            ActiveFocus::set(active_seat, target.cloned());
             keyboard.set_focus(
                 state,
-                surface.cloned(),
+                target.cloned(),
                 serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
             );
         }
@@ -160,30 +128,23 @@ impl Shell {
         // update activate status
         let focused_windows = seats
             .flat_map(|seat| {
-                self.outputs
-                    .iter()
-                    .flat_map(|o| self.active_space(o).focus_stack(seat).last().clone())
+                self.outputs.iter().flat_map(|o| {
+                    let space = self.active_space(o);
+                    let stack = space.focus_stack.get(seat);
+                    stack.last().cloned()
+                })
             })
             .collect::<Vec<_>>();
 
         for output in self.outputs.iter() {
-            let workspace = match &self.workspace_mode {
-                WorkspaceMode::OutputBound => {
-                    let active = output
-                        .user_data()
-                        .get::<OutputBoundState>()
-                        .unwrap()
-                        .active
-                        .get();
-                    &mut self.spaces[active]
-                }
-                WorkspaceMode::Global { active, .. } => &mut self.spaces[*active],
-            };
+            let workspace = self.workspaces.active_mut(output);
             for focused in focused_windows.iter() {
-                workspace.space.raise_window(focused, true);
+                if workspace.floating_layer.mapped().any(|m| m == focused) {
+                    workspace.floating_layer.space.raise_element(focused, true);
+                }
             }
-            for window in workspace.space.windows() {
-                window.set_activated(focused_windows.contains(window));
+            for window in workspace.mapped() {
+                window.set_activated(focused_windows.contains(&window));
                 window.configure();
             }
         }
@@ -193,55 +154,54 @@ impl Shell {
 impl Common {
     pub fn set_focus(
         state: &mut State,
-        surface: Option<&WlSurface>,
+        target: Option<&KeyboardFocusTarget>,
         active_seat: &Seat<State>,
         serial: Option<Serial>,
     ) {
-        Shell::set_focus(state, surface, active_seat, serial);
-        state.common.shell.update_active(state.common.seats.iter());
+        Shell::set_focus(state, target, active_seat, serial);
+        let seats = state.common.seats().cloned().collect::<Vec<_>>();
+        state.common.shell.update_active(seats.iter());
     }
 
     pub fn refresh_focus(state: &mut State) {
-        let seats = state.common.seats.clone();
+        let seats = state.common.seats().cloned().collect::<Vec<_>>();
         for seat in seats {
-            let output = active_output(&seat, &state.common);
+            let output = seat.active_output();
+            if !state.common.shell.outputs.contains(&output) {
+                seat.set_active_output(&state.common.shell.outputs[0]);
+                continue;
+            }
             let last_known_focus = ActiveFocus::get(&seat);
 
-            if let Some(surface) = last_known_focus {
-                if surface.alive() {
-                    let is_toplevel = matches!(get_role(&surface), Some(XDG_TOPLEVEL_ROLE));
-                    let is_layer = matches!(get_role(&surface), Some(LAYER_SURFACE_ROLE));
-
-                    if let Some(popup) = state.common.shell.popups.find_popup(&surface) {
-                        if popup.alive() {
-                            continue;
-                        }
-                    } else if is_layer {
-                        if layer_map_for_output(&output)
-                            .layer_for_surface(&surface, WindowSurfaceType::ALL)
-                            .is_some()
-                        {
-                            continue; // Focus is valid
-                        }
-                    } else if is_toplevel {
-                        let workspace = state.common.shell.active_space(&output);
-                        if let Some(window) = workspace
-                            .space
-                            .window_for_surface(&surface, WindowSurfaceType::ALL)
-                        {
-                            let focus_stack = workspace.focus_stack(&seat);
-                            if !focus_stack.last().map(|w| &w != window).unwrap_or(true) {
+            if let Some(target) = last_known_focus {
+                if target.alive() {
+                    match target {
+                        KeyboardFocusTarget::Element(mapped) => {
+                            let workspace = state.common.shell.active_space(&output);
+                            let focus_stack = workspace.focus_stack.get(&seat);
+                            if focus_stack.last().map(|m| m == &mapped).unwrap_or(false) {
                                 continue; // Focus is valid
                             } else {
                                 slog_scope::debug!("Wrong Window, focus fixup");
                             }
-                        } else {
-                            slog_scope::debug!("Different workspaces Window, focus fixup");
                         }
-                    } else {
-                        // unknown surface type, fixup
-                        slog_scope::debug!("Surface unmapped, focus fixup");
-                    }
+                        KeyboardFocusTarget::LayerSurface(layer) => {
+                            if layer_map_for_output(&output).layers().any(|l| l == &layer) {
+                                continue; // Focus is valid
+                            }
+                        }
+                        KeyboardFocusTarget::Group(WindowGroup {
+                            output: weak_output,
+                            ..
+                        }) => {
+                            if weak_output == output {
+                                continue; // Focus is valid,
+                            }
+                        }
+                        KeyboardFocusTarget::Popup(_) | KeyboardFocusTarget::Fullscreen(_) => {
+                            continue;
+                        } // Focus is valid
+                    };
                 } else {
                     slog_scope::debug!("Surface dead, focus fixup");
                 }
@@ -263,21 +223,24 @@ impl Common {
                 }
 
                 // update keyboard focus
-                let surface = state
+                let target = state
                     .common
                     .shell
                     .active_space(&output)
-                    .focus_stack(&seat)
+                    .focus_stack
+                    .get(&seat)
                     .last()
-                    .map(|w| w.toplevel().wl_surface().clone());
+                    .cloned()
+                    .map(KeyboardFocusTarget::from);
                 if let Some(keyboard) = seat.get_keyboard() {
-                    slog_scope::info!("restoring focus to: {:?}", surface.as_ref());
-                    keyboard.set_focus(state, surface.clone(), SERIAL_COUNTER.next_serial());
-                    ActiveFocus::set(&seat, surface);
+                    slog_scope::info!("restoring focus to: {:?}", target.as_ref());
+                    keyboard.set_focus(state, target.clone(), SERIAL_COUNTER.next_serial());
+                    ActiveFocus::set(&seat, target);
                 }
             }
         }
 
-        state.common.shell.update_active(state.common.seats.iter())
+        let seats = state.common.seats().cloned().collect::<Vec<_>>();
+        state.common.shell.update_active(seats.iter())
     }
 }

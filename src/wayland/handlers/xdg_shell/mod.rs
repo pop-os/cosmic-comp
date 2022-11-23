@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::utils::prelude::*;
+use crate::{utils::prelude::*, wayland::protocols::screencopy::SessionType};
 use smithay::{
     delegate_xdg_shell,
     desktop::{
         find_popup_root_surface, Kind, PopupGrab, PopupKeyboardGrab, PopupKind, PopupPointerGrab,
-        PopupUngrabStrategy, Window, WindowSurfaceType,
+        PopupUngrabStrategy, Window,
     },
     input::{
         pointer::{Focus, GrabStartData as PointerGrabStartData},
@@ -17,11 +17,16 @@ use smithay::{
         wayland_server::protocol::{wl_output::WlOutput, wl_seat::WlSeat, wl_surface::WlSurface},
     },
     utils::Serial,
-    wayland::shell::xdg::{
-        Configure, PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
+    wayland::{
+        seat::WaylandFocus,
+        shell::xdg::{
+            PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
+        },
     },
 };
 use std::cell::Cell;
+
+use super::screencopy::PendingScreencopyBuffers;
 
 pub mod popup;
 
@@ -33,21 +38,14 @@ impl XdgShellHandler for State {
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
-        super::mark_dirty_on_drop(&self.common, surface.wl_surface());
-
-        let seat = &self.common.last_active_seat;
+        let seat = self.common.last_active_seat().clone();
         let window = Window::new(Kind::Xdg(surface));
         self.common.shell.toplevel_info_state.new_toplevel(&window);
-        self.common
-            .shell
-            .pending_windows
-            .push((window, seat.clone()));
+        self.common.shell.pending_windows.push((window, seat));
         // We will position the window after the first commit, when we know its size hints
     }
 
     fn new_popup(&mut self, surface: PopupSurface, positioner: PositionerState) {
-        super::mark_dirty_on_drop(&self.common, surface.wl_surface());
-
         surface.with_pending_state(|state| {
             state.geometry = positioner.get_geometry();
             state.positioner = positioner;
@@ -67,35 +65,19 @@ impl XdgShellHandler for State {
         }
     }
 
-    fn ack_configure(&mut self, surface: WlSurface, configure: Configure) {
-        if let Configure::Toplevel(configure) = configure {
-            // If we would re-position the window inside the grab we would get a weird jittery animation.
-            // We only want to resize once the client has acknoledged & commited the new size,
-            // so we need to carefully track the state through different handlers.
-            if let Some(window) =
-                self.common
-                    .shell
-                    .space_for_window(&surface)
-                    .and_then(|workspace| {
-                        workspace
-                            .space
-                            .window_for_surface(&surface, WindowSurfaceType::TOPLEVEL)
-                    })
-            {
-                crate::shell::layout::floating::ResizeSurfaceGrab::ack_configure(window, configure)
-            }
-        }
-    }
-
     fn grab(&mut self, surface: PopupSurface, seat: WlSeat, serial: Serial) {
         let seat = Seat::from_resource(&seat).unwrap();
         let kind = PopupKind::Xdg(surface);
-        if let Ok(root) = find_popup_root_surface(&kind) {
+        if let Some(root) = find_popup_root_surface(&kind)
+            .ok()
+            .and_then(|root| self.common.shell.element_for_surface(&root))
+        {
+            let target = root.clone().into();
             let ret = self
                 .common
                 .shell
                 .popups
-                .grab_popup(root, kind, &seat, serial);
+                .grab_popup(target, kind, &seat, serial);
 
             if let Ok(mut grab) = ret {
                 if let Some(keyboard) = seat.get_keyboard() {
@@ -157,18 +139,36 @@ impl XdgShellHandler for State {
     fn move_request(&mut self, surface: ToplevelSurface, seat: WlSeat, serial: Serial) {
         let seat = Seat::from_resource(&seat).unwrap();
         if let Some(start_data) = check_grab_preconditions(&seat, surface.wl_surface(), serial) {
-            let workspace = self
+            if let Some(mapped) = self
                 .common
                 .shell
-                .space_for_window_mut(surface.wl_surface())
-                .unwrap();
-            let window = workspace
-                .space
-                .window_for_surface(surface.wl_surface(), WindowSurfaceType::TOPLEVEL)
-                .unwrap()
-                .clone();
-
-            Shell::move_request(self, &window, &seat, serial, start_data);
+                .element_for_surface(surface.wl_surface())
+                .cloned()
+            {
+                if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
+                    let output = seat.active_output();
+                    let (window, _) = mapped
+                        .windows()
+                        .find(|(w, _)| matches!(w.toplevel(), Kind::Xdg(s) if s == &surface))
+                        .unwrap();
+                    if let Some(grab) =
+                        workspace.move_request(&window, &seat, &output, serial, start_data)
+                    {
+                        let handle = workspace.handle;
+                        self.common
+                            .shell
+                            .toplevel_info_state
+                            .toplevel_leave_workspace(&window, &handle);
+                        self.common
+                            .shell
+                            .toplevel_info_state
+                            .toplevel_leave_output(&window, &output);
+                        seat.get_pointer()
+                            .unwrap()
+                            .set_grab(self, grab, serial, Focus::Clear);
+                    }
+                }
+            }
         }
     }
 
@@ -181,35 +181,59 @@ impl XdgShellHandler for State {
     ) {
         let seat = Seat::from_resource(&seat).unwrap();
         if let Some(start_data) = check_grab_preconditions(&seat, surface.wl_surface(), serial) {
-            Workspace::resize_request(self, surface.wl_surface(), &seat, serial, start_data, edges);
+            if let Some(mapped) = self
+                .common
+                .shell
+                .element_for_surface(surface.wl_surface())
+                .cloned()
+            {
+                if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
+                    if let Some(grab) =
+                        workspace.resize_request(&mapped, &seat, serial, start_data, edges)
+                    {
+                        seat.get_pointer()
+                            .unwrap()
+                            .set_grab(self, grab, serial, Focus::Clear);
+                    }
+                }
+            }
         }
     }
 
     fn maximize_request(&mut self, surface: ToplevelSurface) {
-        let surface = surface.wl_surface();
-        let seat = &self.common.last_active_seat;
-        let output = active_output(seat, &self.common);
+        let seat = self.common.last_active_seat();
+        let output = seat.active_output();
 
-        if let Some(workspace) = self.common.shell.space_for_window_mut(surface) {
-            let window = workspace
-                .space
-                .window_for_surface(surface, WindowSurfaceType::TOPLEVEL)
-                .unwrap()
-                .clone();
-            workspace.maximize_request(&window, &output)
+        if let Some(mapped) = self
+            .common
+            .shell
+            .element_for_surface(surface.wl_surface())
+            .cloned()
+        {
+            if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
+                let (window, _) = mapped
+                    .windows()
+                    .find(|(w, _)| matches!(w.toplevel(), Kind::Xdg(s) if s == &surface))
+                    .unwrap();
+                workspace.maximize_request(&window, &output)
+            }
         }
     }
 
     fn unmaximize_request(&mut self, surface: ToplevelSurface) {
-        let surface = surface.wl_surface();
-
-        if let Some(workspace) = self.common.shell.space_for_window_mut(surface) {
-            let window = workspace
-                .space
-                .window_for_surface(surface, WindowSurfaceType::TOPLEVEL)
-                .unwrap()
-                .clone();
-            workspace.unmaximize_request(&window)
+        if let Some(mapped) = self
+            .common
+            .shell
+            .element_for_surface(surface.wl_surface())
+            .cloned()
+        {
+            if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
+                let (window, _) = mapped
+                    .windows()
+                    .find(|(w, _)| matches!(w.toplevel(), Kind::Xdg(s) if s == &surface))
+                    .unwrap();
+                workspace.unmaximize_request(&window)
+            }
         }
     }
 
@@ -218,30 +242,79 @@ impl XdgShellHandler for State {
             .as_ref()
             .and_then(Output::from_resource)
             .unwrap_or_else(|| {
-                let seat = &self.common.last_active_seat;
-                active_output(seat, &self.common)
+                let seat = self.common.last_active_seat();
+                seat.active_output()
             });
 
-        let surface = surface.wl_surface();
-        if let Some(workspace) = self.common.shell.space_for_window_mut(surface) {
-            let window = workspace
-                .space
-                .window_for_surface(surface, WindowSurfaceType::TOPLEVEL)
-                .unwrap()
-                .clone();
-            workspace.fullscreen_request(&window, &output)
+        if let Some(mapped) = self
+            .common
+            .shell
+            .element_for_surface(surface.wl_surface())
+            .cloned()
+        {
+            if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
+                let (window, _) = mapped
+                    .windows()
+                    .find(|(w, _)| matches!(w.toplevel(), Kind::Xdg(s) if s == &surface))
+                    .unwrap();
+                workspace.fullscreen_request(&window, &output)
+            }
         }
     }
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
-        let surface = surface.wl_surface();
-        if let Some(workspace) = self.common.shell.space_for_window_mut(surface) {
-            let window = workspace
-                .space
-                .window_for_surface(surface, WindowSurfaceType::TOPLEVEL)
-                .unwrap()
-                .clone();
-            workspace.unfullscreen_request(&window)
+        if let Some(mapped) = self
+            .common
+            .shell
+            .element_for_surface(surface.wl_surface())
+            .cloned()
+        {
+            if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
+                let (window, _) = mapped
+                    .windows()
+                    .find(|(w, _)| matches!(w.toplevel(), Kind::Xdg(s) if s == &surface))
+                    .unwrap();
+                workspace.unfullscreen_request(&window)
+            }
+        }
+    }
+
+    fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
+        let outputs = self
+            .common
+            .shell
+            .visible_outputs_for_surface(surface.wl_surface())
+            .collect::<Vec<_>>();
+        for output in outputs.iter() {
+            self.common.shell.active_space_mut(output).refresh();
+        }
+
+        // screencopy
+        let mut scheduled_sessions = self.schedule_workspace_sessions(surface.wl_surface());
+        for output in outputs.into_iter() {
+            if let Some(sessions) = output.user_data().get::<PendingScreencopyBuffers>() {
+                scheduled_sessions
+                    .get_or_insert_with(Vec::new)
+                    .extend(sessions.borrow_mut().drain(..));
+            }
+            self.backend.schedule_render(
+                &self.common.event_loop_handle,
+                &output,
+                scheduled_sessions.as_ref().map(|sessions| {
+                    sessions
+                        .iter()
+                        .filter(|(s, _)| match s.session_type() {
+                            SessionType::Output(o) | SessionType::Workspace(o, _)
+                                if o == output =>
+                            {
+                                true
+                            }
+                            _ => false,
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>()
+                }),
+            );
         }
     }
 }
@@ -270,7 +343,6 @@ fn check_grab_preconditions(
             .as_ref()
             .unwrap()
             .0
-            .id()
             .same_client_as(&surface.id())
     {
         return None;

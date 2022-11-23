@@ -9,11 +9,7 @@ use smithay::{
 };
 
 use anyhow::{Context, Result};
-use std::{
-    ffi::OsString,
-    os::unix::prelude::AsRawFd,
-    sync::{atomic::Ordering, Arc},
-};
+use std::{ffi::OsString, os::unix::prelude::AsRawFd, sync::Arc};
 
 pub mod backend;
 pub mod config;
@@ -68,17 +64,8 @@ fn main() -> Result<()> {
         }
 
         // trigger routines
-        data.state.common.shell.refresh(&data.display.handle());
+        data.state.common.shell.refresh();
         state::Common::refresh_focus(&mut data.state);
-
-        // do we need to trigger another render
-        if data.state.common.dirty_flag.swap(false, Ordering::SeqCst) {
-            for output in data.state.common.shell.outputs() {
-                data.state
-                    .backend
-                    .schedule_render(&data.state.common.event_loop_handle, output)
-            }
-        }
 
         // send out events
         let _ = data.display.flush_clients();

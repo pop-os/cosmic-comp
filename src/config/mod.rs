@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    shell::{focus::FocusDirection, Shell},
-    state::{BackendData, Data},
+    shell::{focus::FocusDirection, layout::tiling::Direction, Shell, WorkspaceAmount},
+    state::{BackendData, Data, State},
+    wayland::protocols::output_configuration::OutputConfigurationState,
 };
 use serde::{Deserialize, Serialize};
+use smithay::input::Seat;
 pub use smithay::{
     backend::input::KeyState,
     input::keyboard::{keysyms as KeySyms, Keysym, ModifiersState},
@@ -32,6 +34,7 @@ pub struct Config {
 pub struct StaticConfig {
     pub key_bindings: HashMap<KeyPattern, Action>,
     pub workspace_mode: WorkspaceMode,
+    pub workspace_amount: WorkspaceAmount,
     pub floating_default: bool,
 }
 
@@ -215,6 +218,7 @@ impl Config {
         StaticConfig {
             key_bindings: HashMap::new(),
             workspace_mode: WorkspaceMode::Global,
+            workspace_amount: WorkspaceAmount::Dynamic,
             floating_default: false,
         }
     }
@@ -276,12 +280,14 @@ impl Config {
 
     pub fn read_outputs(
         &mut self,
-        outputs: impl Iterator<Item = impl std::borrow::Borrow<Output>>,
+        output_state: &mut OutputConfigurationState<State>,
         backend: &mut BackendData,
         shell: &mut Shell,
+        seats: impl Iterator<Item = Seat<State>>,
         loop_handle: &LoopHandle<'_, Data>,
     ) {
-        let outputs = outputs.map(|x| x.borrow().clone()).collect::<Vec<_>>();
+        let seats = seats.collect::<Vec<_>>();
+        let outputs = output_state.outputs().collect::<Vec<_>>();
         let mut infos = outputs
             .iter()
             .cloned()
@@ -305,14 +311,19 @@ impl Config {
             for (name, output_config) in infos.iter().map(|o| &o.connector).zip(configs.into_iter())
             {
                 let output = outputs.iter().find(|o| &o.name() == name).unwrap().clone();
+                let enabled = output_config.enabled;
                 *output
                     .user_data()
                     .get::<RefCell<OutputConfig>>()
                     .unwrap()
                     .borrow_mut() = output_config;
-                if let Err(err) =
-                    backend.apply_config_for_output(&output, false, shell, loop_handle)
-                {
+                if let Err(err) = backend.apply_config_for_output(
+                    &output,
+                    false,
+                    shell,
+                    seats.iter().cloned(),
+                    loop_handle,
+                ) {
                     slog_scope::warn!(
                         "Failed to set new config for output {}: {}",
                         output.name(),
@@ -320,6 +331,12 @@ impl Config {
                     );
                     reset = true;
                     break;
+                } else {
+                    if enabled {
+                        output_state.enable_head(&output);
+                    } else {
+                        output_state.disable_head(&output);
+                    }
                 }
             }
 
@@ -329,22 +346,36 @@ impl Config {
                     .into_iter()
                     .zip(known_good_configs.into_iter())
                 {
+                    let enabled = output_config.enabled;
                     *output
                         .user_data()
                         .get::<RefCell<OutputConfig>>()
                         .unwrap()
                         .borrow_mut() = output_config;
-                    if let Err(err) =
-                        backend.apply_config_for_output(&output, false, shell, loop_handle)
-                    {
+                    if let Err(err) = backend.apply_config_for_output(
+                        &output,
+                        false,
+                        shell,
+                        seats.iter().cloned(),
+                        loop_handle,
+                    ) {
                         slog_scope::error!(
                             "Failed to reset config for output {}: {}",
                             output.name(),
                             err
                         );
+                    } else {
+                        if enabled {
+                            output_state.enable_head(&output);
+                        } else {
+                            output_state.disable_head(&output);
+                        }
                     }
                 }
             }
+
+            output_state.update();
+            self.write_outputs(output_state.outputs());
         }
     }
 
@@ -689,7 +720,7 @@ pub enum KeyModifier {
     Ctrl,
     Alt,
     Shift,
-    Logo,
+    Super,
     CapsLock,
     NumLock,
 }
@@ -721,7 +752,7 @@ impl std::ops::AddAssign<KeyModifier> for KeyModifiers {
             KeyModifier::Ctrl => self.ctrl = true,
             KeyModifier::Alt => self.alt = true,
             KeyModifier::Shift => self.shift = true,
-            KeyModifier::Logo => self.logo = true,
+            KeyModifier::Super => self.logo = true,
             KeyModifier::CapsLock => self.caps_lock = true,
             KeyModifier::NumLock => self.num_lock = true,
         };
@@ -780,13 +811,30 @@ pub enum Action {
     Terminate,
     Debug,
     Close,
+
     Workspace(u8),
+    NextWorkspace,
+    PreviousWorkspace,
+    LastWorkspace,
     MoveToWorkspace(u8),
+    MoveToNextWorkspace,
+    MoveToPreviousWorkspace,
+    MoveToLastWorkspace,
+
+    NextOutput,
+    PreviousOutput,
+    MoveToNextOutput,
+    MoveToPreviousOutput,
+
     Focus(FocusDirection),
+    Move(Direction),
+
+    ToggleOrientation,
     Orientation(crate::shell::layout::Orientation),
+
     ToggleTiling,
     ToggleWindowFloating,
-    Fullscreen,
-    Screenshot,
+
+    Maximize,
     Spawn(String),
 }

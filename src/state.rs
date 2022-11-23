@@ -7,37 +7,46 @@ use crate::{
     shell::Shell,
     utils::prelude::*,
     wayland::protocols::{
-        drm::WlDrmState, export_dmabuf::ExportDmabufState,
-        output_configuration::OutputConfigurationState, workspace::WorkspaceClientState,
+        drm::WlDrmState,
+        output_configuration::OutputConfigurationState,
+        screencopy::{BufferParams, ScreencopyState, Session as ScreencopySession},
+        workspace::WorkspaceClientState,
     },
 };
+use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_manager_v1::CursorMode;
 use smithay::{
-    backend::drm::DrmNode,
+    backend::{
+        drm::DrmNode,
+        renderer::{
+            element::{default_primary_scanout_output_compare, RenderElementStates},
+            glow::GlowRenderer,
+        },
+    },
+    desktop::utils::{
+        surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
+        update_surface_primary_scanout_output, OutputPresentationFeedback,
+    },
     input::{Seat, SeatState},
     output::{Mode as OutputMode, Output, Scale},
     reexports::{
         calloop::{LoopHandle, LoopSignal},
         wayland_server::{
             backend::{ClientData, ClientId, DisconnectReason},
+            protocol::wl_shm,
             Display, DisplayHandle,
         },
     },
-    utils::{Buffer, Size},
+    utils::{Clock, Monotonic},
     wayland::{
         compositor::CompositorState, data_device::DataDeviceState, dmabuf::DmabufState,
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState, output::OutputManagerState,
-        primary_selection::PrimarySelectionState, shm::ShmState, viewporter::ViewporterState,
+        presentation::PresentationState, primary_selection::PrimarySelectionState, shm::ShmState,
+        viewporter::ViewporterState,
     },
 };
 
-use std::{
-    cell::RefCell,
-    ffi::OsString,
-    sync::{atomic::AtomicBool, Arc},
-    time::Instant,
-};
-#[cfg(feature = "debug")]
-use std::{collections::VecDeque, time::Duration};
+use std::{cell::RefCell, ffi::OsString, time::Duration};
+use std::{collections::VecDeque, time::Instant};
 
 pub struct ClientState {
     pub workspace_client_state: WorkspaceClientState,
@@ -69,12 +78,11 @@ pub struct Common {
 
     //pub output_conf: ConfigurationManager,
     pub shell: Shell,
-    pub dirty_flag: Arc<AtomicBool>,
 
-    pub seats: Vec<Seat<State>>,
-    pub last_active_seat: Seat<State>,
+    seats: Vec<Seat<State>>,
+    last_active_seat: Option<Seat<State>>,
 
-    pub start_time: Instant,
+    pub clock: Clock<Monotonic>,
     pub should_stop: bool,
 
     pub log: LogState,
@@ -85,32 +93,16 @@ pub struct Common {
     pub compositor_state: CompositorState,
     pub data_device_state: DataDeviceState,
     pub dmabuf_state: DmabufState,
-    pub export_dmabuf_state: ExportDmabufState,
     pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
     pub output_state: OutputManagerState,
     pub output_configuration_state: OutputConfigurationState<State>,
+    pub presentation_state: PresentationState,
     pub primary_selection_state: PrimarySelectionState,
+    pub screencopy_state: ScreencopyState,
     pub seat_state: SeatState<State>,
     pub shm_state: ShmState,
     pub wl_drm_state: WlDrmState,
     pub viewporter_state: ViewporterState,
-}
-
-#[cfg(feature = "debug")]
-pub struct Egui {
-    pub debug_state: smithay_egui::EguiState,
-    pub log_state: smithay_egui::EguiState,
-    pub modifiers: smithay::wayland::seat::ModifiersState,
-    pub active: bool,
-    pub alpha: f32,
-}
-
-#[cfg(feature = "debug")]
-pub struct Fps {
-    pub state: smithay_egui::EguiState,
-    pub modifiers: smithay::wayland::seat::ModifiersState,
-    pub frames: VecDeque<(Instant, Duration)>,
-    pub start: Instant,
 }
 
 pub enum BackendData {
@@ -149,11 +141,12 @@ impl BackendData {
         output: &Output,
         test_only: bool,
         shell: &mut Shell,
+        seats: impl Iterator<Item = Seat<State>>,
         loop_handle: &LoopHandle<'_, Data>,
     ) -> Result<(), anyhow::Error> {
         let result = match self {
             BackendData::Kms(ref mut state) => {
-                state.apply_config_for_output(output, shell, test_only, loop_handle)
+                state.apply_config_for_output(output, seats, shell, test_only, loop_handle)
             }
             BackendData::Winit(ref mut state) => state.apply_config_for_output(output, test_only),
             BackendData::X11(ref mut state) => state.apply_config_for_output(output, test_only),
@@ -187,100 +180,23 @@ impl BackendData {
         result
     }
 
-    pub fn schedule_render(&mut self, loop_handle: &LoopHandle<'_, Data>, output: &Output) {
+    pub fn schedule_render(
+        &mut self,
+        loop_handle: &LoopHandle<'_, Data>,
+        output: &Output,
+        screencopy: Option<Vec<(ScreencopySession, BufferParams)>>,
+    ) {
         match self {
-            BackendData::Winit(_) => {} // We cannot do this on the winit backend.
+            BackendData::Winit(ref mut state) => state.pending_screencopy(screencopy), // We cannot do this on the winit backend.
             // Winit has a very strict render-loop and skipping frames breaks atleast the wayland winit-backend.
             // Swapping with damage (which should be empty on these frames) is likely good enough anyway.
-            BackendData::X11(ref mut state) => state.schedule_render(output),
+            BackendData::X11(ref mut state) => state.schedule_render(output, screencopy),
             BackendData::Kms(ref mut state) => {
-                if let Err(err) = state.schedule_render(loop_handle, output) {
+                if let Err(err) = state.schedule_render(loop_handle, output, None, screencopy) {
                     slog_scope::crit!("Failed to schedule event, are we shutting down? {:?}", err);
                 }
             }
             _ => unreachable!("No backend was initialized"),
-        }
-    }
-
-    pub fn offscreen_for_output(
-        &mut self,
-        output: &Output,
-        state: &mut Common,
-    ) -> anyhow::Result<(Vec<u8>, Size<i32, Buffer>)> {
-        use crate::backend::render::{render_output, AsGles2Renderer, CustomElem};
-        use anyhow::Context;
-        use smithay::backend::renderer::{ImportAll, Renderer};
-        use smithay::desktop::space::RenderElement;
-        use smithay::{
-            backend::{
-                drm::NodeType,
-                renderer::{gles2::Gles2Renderbuffer, Bind, ExportMem, Offscreen},
-            },
-            utils::Rectangle,
-        };
-
-        fn capture<E, T, R>(
-            gpu: Option<DrmNode>,
-            renderer: &mut R,
-            output: &Output,
-            state: &mut Common,
-        ) -> anyhow::Result<(Vec<u8>, Size<i32, Buffer>)>
-        where
-            E: std::error::Error + Send + Sync + 'static,
-            T: Clone + 'static,
-            R: Renderer<Error = E, TextureId = T>
-                + ImportAll
-                + AsGles2Renderer
-                + Offscreen<Gles2Renderbuffer>
-                + Bind<Gles2Renderbuffer>
-                + ExportMem,
-            CustomElem: RenderElement<R>,
-        {
-            let size = output
-                .geometry()
-                .size
-                .to_f64()
-                .to_buffer(
-                    output.current_scale().fractional_scale(),
-                    output.current_transform().into(),
-                )
-                .to_i32_round();
-            let buffer = Offscreen::<Gles2Renderbuffer>::create_buffer(renderer, size)?;
-            renderer.bind(buffer)?;
-            render_output(
-                gpu.as_ref(),
-                renderer,
-                0,
-                state,
-                output,
-                false,
-                #[cfg(feature = "debug")]
-                None,
-            )
-            .map_err(|err| anyhow::anyhow!("Failed to render output: {:?}", err))?; // lifetime issue, grrr
-            let mapping = renderer.copy_framebuffer(Rectangle::from_loc_and_size((0, 0), size))?;
-            let data = Vec::from(renderer.map_texture(&mapping)?);
-
-            Ok((data, size))
-        }
-
-        match self {
-            BackendData::Winit(winit) => capture(None, winit.backend.renderer(), output, state),
-            BackendData::X11(x11) => capture(None, &mut x11.renderer, output, state),
-            BackendData::Kms(kms) => {
-                let node = kms
-                    .target_node_for_output(output)
-                    .unwrap_or(kms.primary)
-                    .node_with_type(NodeType::Render)
-                    .with_context(|| "Unable to find node")??;
-                capture(
-                    Some(node),
-                    &mut kms.api.renderer::<Gles2Renderbuffer>(&node, &node)?,
-                    output,
-                    state,
-                )
-            }
-            BackendData::Unset => unreachable!(),
         }
     }
 }
@@ -293,31 +209,31 @@ impl State {
         signal: LoopSignal,
         log: LogState,
     ) -> State {
+        let clock = Clock::new().expect("Failed to initialize clock");
         let config = Config::load();
         let compositor_state = CompositorState::new::<Self, _>(dh, None);
         let data_device_state = DataDeviceState::new::<Self, _>(dh, None);
         let dmabuf_state = DmabufState::new();
-        let export_dmabuf_state = ExportDmabufState::new::<Self, _>(
-            dh,
-            //|client| client.get_data::<ClientState>().unwrap().privileged,
-            |_| true,
-        );
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<Self>(dh);
         let output_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
         let output_configuration_state = OutputConfigurationState::new(dh, |_| true);
+        let presentation_state = PresentationState::new::<Self>(dh, clock.id() as u32);
         let primary_selection_state = PrimarySelectionState::new::<Self, _>(dh, None);
-        let shm_state = ShmState::new::<Self, _>(dh, vec![], None);
-        let mut seat_state = SeatState::<Self>::new();
+        let screencopy_state = ScreencopyState::new::<Self, _, _>(
+            dh,
+            vec![CursorMode::Embedded, CursorMode::Hidden],
+            |_| true,
+        ); // TODO: privileged
+        let shm_state = ShmState::new::<Self, _>(
+            dh,
+            vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888],
+            None,
+        );
+        let seat_state = SeatState::<Self>::new();
         let viewporter_state = ViewporterState::new::<Self, _>(dh, None);
         let wl_drm_state = WlDrmState;
 
         let shell = Shell::new(&config, dh);
-        let initial_seat = crate::input::add_seat(dh, &mut seat_state, &config, "seat-0".into());
-
-        #[cfg(not(feature = "debug"))]
-        let dirty_flag = Arc::new(AtomicBool::new(false));
-        #[cfg(feature = "debug")]
-        let dirty_flag = log.dirty_flag.clone();
 
         State {
             common: Common {
@@ -328,38 +244,27 @@ impl State {
                 event_loop_signal: signal,
 
                 shell,
-                dirty_flag,
 
-                seats: vec![initial_seat.clone()],
-                last_active_seat: initial_seat,
+                seats: Vec::new(),
+                last_active_seat: None,
 
-                start_time: Instant::now(),
+                clock,
                 should_stop: false,
 
                 log,
                 #[cfg(feature = "debug")]
-                egui: Egui {
-                    debug_state: smithay_egui::EguiState::new(smithay_egui::EguiMode::Continuous),
-                    log_state: {
-                        let mut state =
-                            smithay_egui::EguiState::new(smithay_egui::EguiMode::Continuous);
-                        state.set_zindex(0);
-                        state
-                    },
-                    modifiers: Default::default(),
-                    active: false,
-                    alpha: 1.0,
-                },
+                egui: Egui { active: false },
 
                 compositor_state,
                 data_device_state,
                 dmabuf_state,
-                export_dmabuf_state,
+                screencopy_state,
                 shm_state,
                 seat_state,
                 keyboard_shortcuts_inhibit_state,
                 output_state,
                 output_configuration_state,
+                presentation_state,
                 primary_selection_state,
                 viewporter_state,
                 wl_drm_state,
@@ -376,10 +281,9 @@ impl State {
                     match std::env::var("COSMIC_RENDER_AUTO_ASSIGN").map(|val| val.to_lowercase()) {
                         Ok(val) if val == "y" || val == "yes" || val == "true" => Some(
                             kms_state
-                                .target_node_for_output(&active_output(
-                                    &self.common.last_active_seat,
-                                    &self.common,
-                                ))
+                                .target_node_for_output(
+                                    &self.common.last_active_seat().active_output(),
+                                )
                                 .unwrap_or(kms_state.primary),
                         ),
                         _ => Some(kms_state.primary),
@@ -415,49 +319,275 @@ impl State {
     }
 }
 
-#[cfg(feature = "debug")]
-impl Fps {
-    const WINDOW_SIZE: usize = 100;
-
-    pub fn start(&mut self) {
-        self.start = Instant::now();
+impl Common {
+    pub fn add_seat(&mut self, seat: Seat<State>) {
+        if self.seats.is_empty() {
+            self.last_active_seat = Some(seat.clone());
+        }
+        self.seats.push(seat);
     }
 
-    pub fn end(&mut self) {
-        let frame_time = Instant::now().duration_since(self.start);
-
-        self.frames.push_back((self.start, frame_time));
-        if self.frames.len() > Fps::WINDOW_SIZE {
-            self.frames.pop_front();
+    pub fn remove_seat(&mut self, seat: &Seat<State>) {
+        self.seats.retain(|s| s != seat);
+        if self.seats.is_empty() {
+            self.last_active_seat = None;
+        } else if self.last_active_seat() == seat {
+            self.last_active_seat = Some(self.seats[0].clone());
         }
     }
 
-    pub fn max_frametime(&self) -> &Duration {
-        self.frames
-            .iter()
-            .map(|(_, f)| f)
-            .max()
-            .unwrap_or(&Duration::ZERO)
+    pub fn seats(&self) -> impl Iterator<Item = &Seat<State>> {
+        self.seats.iter()
     }
 
-    pub fn min_frametime(&self) -> &Duration {
+    pub fn last_active_seat(&self) -> &Seat<State> {
+        self.last_active_seat.as_ref().expect("No seat?")
+    }
+
+    pub fn send_frames(&self, output: &Output, render_element_states: &RenderElementStates) {
+        let time = self.clock.now();
+        let throttle = Some(Duration::from_secs(1));
+
+        let active = self.shell.active_space(output);
+        active.mapped().for_each(|mapped| {
+            if active.outputs_for_element(mapped).any(|o| &o == output) {
+                let window = mapped.active_window();
+                window.with_surfaces(|surface, states| {
+                    update_surface_primary_scanout_output(
+                        surface,
+                        output,
+                        states,
+                        render_element_states,
+                        default_primary_scanout_output_compare,
+                    )
+                });
+                window.send_frame(output, time, throttle, surface_primary_scanout_output);
+            }
+        });
+
+        for space in self
+            .shell
+            .workspaces
+            .spaces()
+            .filter(|w| w.handle != active.handle)
+        {
+            space.mapped().for_each(|mapped| {
+                if space.outputs_for_element(mapped).any(|o| &o == output) {
+                    let window = mapped.active_window();
+                    window.send_frame(output, time, throttle, |_, _| None);
+                }
+            });
+        }
+
+        let map = smithay::desktop::layer_map_for_output(output);
+        for layer_surface in map.layers() {
+            layer_surface.with_surfaces(|surface, states| {
+                update_surface_primary_scanout_output(
+                    surface,
+                    output,
+                    states,
+                    render_element_states,
+                    default_primary_scanout_output_compare,
+                )
+            });
+            layer_surface.send_frame(output, time, throttle, surface_primary_scanout_output);
+        }
+    }
+
+    pub fn take_presentation_feedback(
+        &self,
+        output: &Output,
+        render_element_states: &RenderElementStates,
+    ) -> OutputPresentationFeedback {
+        let mut output_presentation_feedback = OutputPresentationFeedback::new(output);
+
+        let active = self.shell.active_space(output);
+        active.mapped().for_each(|mapped| {
+            mapped.active_window().take_presentation_feedback(
+                &mut output_presentation_feedback,
+                surface_primary_scanout_output,
+                |surface, _| {
+                    surface_presentation_feedback_flags_from_states(surface, render_element_states)
+                },
+            );
+        });
+
+        let map = smithay::desktop::layer_map_for_output(output);
+        for layer_surface in map.layers() {
+            layer_surface.take_presentation_feedback(
+                &mut output_presentation_feedback,
+                surface_primary_scanout_output,
+                |surface, _| {
+                    surface_presentation_feedback_flags_from_states(surface, render_element_states)
+                },
+            );
+        }
+
+        output_presentation_feedback
+    }
+}
+
+#[cfg(feature = "debug")]
+pub struct Egui {
+    pub active: bool,
+}
+
+pub struct Fps {
+    #[cfg(feature = "debug")]
+    pub state: smithay_egui::EguiState,
+    pending_frame: Option<PendingFrame>,
+    pub frames: VecDeque<Frame>,
+}
+
+#[derive(Debug)]
+struct PendingFrame {
+    start: Instant,
+    duration_elements: Option<Duration>,
+    duration_render: Option<Duration>,
+    duration_screencopy: Option<Duration>,
+    duration_displayed: Option<Duration>,
+}
+
+#[derive(Debug)]
+pub struct Frame {
+    pub start: Instant,
+    pub duration_elements: Duration,
+    pub duration_render: Duration,
+    pub duration_screencopy: Option<Duration>,
+    pub duration_displayed: Duration,
+}
+
+impl Frame {
+    fn render_time(&self) -> Duration {
+        self.duration_elements + self.duration_render
+    }
+
+    fn frame_time(&self) -> Duration {
+        self.duration_elements
+            + self.duration_render
+            + self.duration_screencopy.clone().unwrap_or(Duration::ZERO)
+    }
+
+    fn time_to_display(&self) -> Duration {
+        self.duration_elements
+            + self.duration_render
+            + self.duration_screencopy.clone().unwrap_or(Duration::ZERO)
+            + self.duration_displayed
+    }
+}
+
+impl From<PendingFrame> for Frame {
+    fn from(pending: PendingFrame) -> Self {
+        Frame {
+            start: pending.start,
+            duration_elements: pending.duration_elements.unwrap_or(Duration::ZERO),
+            duration_render: pending.duration_render.unwrap_or(Duration::ZERO),
+            duration_screencopy: pending.duration_screencopy,
+            duration_displayed: pending.duration_displayed.unwrap_or(Duration::ZERO),
+        }
+    }
+}
+
+impl Fps {
+    const WINDOW_SIZE: usize = 360;
+
+    pub fn start(&mut self) {
+        self.pending_frame = Some(PendingFrame {
+            start: Instant::now(),
+            duration_elements: None,
+            duration_render: None,
+            duration_screencopy: None,
+            duration_displayed: None,
+        });
+    }
+
+    pub fn elements(&mut self) {
+        if let Some(frame) = self.pending_frame.as_mut() {
+            frame.duration_elements = Some(Instant::now().duration_since(frame.start));
+        }
+    }
+
+    pub fn render(&mut self) {
+        if let Some(frame) = self.pending_frame.as_mut() {
+            frame.duration_render = Some(
+                Instant::now().duration_since(frame.start)
+                    - frame.duration_elements.clone().unwrap_or(Duration::ZERO),
+            );
+        }
+    }
+
+    pub fn screencopy(&mut self) {
+        if let Some(frame) = self.pending_frame.as_mut() {
+            frame.duration_screencopy = Some(
+                Instant::now().duration_since(frame.start)
+                    - frame.duration_elements.clone().unwrap_or(Duration::ZERO)
+                    - frame.duration_render.clone().unwrap_or(Duration::ZERO),
+            );
+        }
+    }
+
+    pub fn displayed(&mut self) {
+        if let Some(mut frame) = self.pending_frame.take() {
+            frame.duration_displayed = Some(
+                Instant::now().duration_since(frame.start)
+                    - frame.duration_elements.clone().unwrap_or(Duration::ZERO)
+                    - frame.duration_render.clone().unwrap_or(Duration::ZERO)
+                    - frame.duration_screencopy.clone().unwrap_or(Duration::ZERO),
+            );
+
+            self.frames.push_back(frame.into());
+            while self.frames.len() > Fps::WINDOW_SIZE {
+                self.frames.pop_front();
+            }
+        }
+    }
+
+    pub fn max_frametime(&self) -> Duration {
         self.frames
             .iter()
-            .map(|(_, f)| f)
+            .map(|f| f.frame_time())
+            .max()
+            .unwrap_or(Duration::ZERO)
+    }
+
+    pub fn min_frametime(&self) -> Duration {
+        self.frames
+            .iter()
+            .map(|f| f.frame_time())
             .min()
-            .unwrap_or(&Duration::ZERO)
+            .unwrap_or(Duration::ZERO)
+    }
+
+    pub fn max_time_to_display(&self) -> Duration {
+        self.frames
+            .iter()
+            .map(|f| f.time_to_display())
+            .max()
+            .unwrap_or(Duration::ZERO)
+    }
+
+    pub fn min_time_to_display(&self) -> Duration {
+        self.frames
+            .iter()
+            .map(|f| f.time_to_display())
+            .min()
+            .unwrap_or(Duration::ZERO)
     }
 
     pub fn avg_frametime(&self) -> Duration {
         if self.frames.is_empty() {
             return Duration::ZERO;
         }
+        self.frames.iter().map(|f| f.frame_time()).sum::<Duration>() / (self.frames.len() as u32)
+    }
+
+    pub fn avg_rendertime(&self, window: usize) -> Duration {
         self.frames
             .iter()
-            .map(|(_, f)| f)
-            .cloned()
+            .take(window)
+            .map(|f| f.render_time())
             .sum::<Duration>()
-            / (self.frames.len() as u32)
+            / window as u32
     }
 
     pub fn avg_fps(&self) -> f64 {
@@ -465,7 +595,9 @@ impl Fps {
             return 0.0;
         }
         let secs = match (self.frames.front(), self.frames.back()) {
-            (Some((start, _)), Some((end, dur))) => end.duration_since(*start) + *dur,
+            (Some(Frame { start, .. }), Some(end_frame)) => {
+                end_frame.start.duration_since(*start) + end_frame.frame_time()
+            }
             _ => Duration::ZERO,
         }
         .as_secs_f64();
@@ -474,25 +606,44 @@ impl Fps {
 }
 
 #[cfg(feature = "debug")]
-impl Default for Fps {
-    fn default() -> Fps {
+static INTEL_LOGO: &'static [u8] = include_bytes!("../resources/icons/intel.svg");
+#[cfg(feature = "debug")]
+static AMD_LOGO: &'static [u8] = include_bytes!("../resources/icons/amd.svg");
+#[cfg(feature = "debug")]
+static NVIDIA_LOGO: &'static [u8] = include_bytes!("../resources/icons/nvidia.svg");
+
+impl Fps {
+    pub fn new(_renderer: &mut GlowRenderer) -> Fps {
+        #[cfg(feature = "debug")]
+        let state = {
+            let state = smithay_egui::EguiState::new(smithay::utils::Rectangle::from_loc_and_size(
+                (0, 0),
+                (400, 800),
+            ));
+            let mut visuals: egui::style::Visuals = Default::default();
+            visuals.window_shadow.extrusion = 0.0;
+            state.context().set_visuals(visuals);
+            state
+                .load_svg(_renderer, String::from("intel"), INTEL_LOGO)
+                .unwrap();
+            state
+                .load_svg(_renderer, String::from("amd"), AMD_LOGO)
+                .unwrap();
+            state
+                .load_svg(_renderer, String::from("nvidia"), NVIDIA_LOGO)
+                .unwrap();
+            state
+        };
+
         Fps {
-            state: {
-                let mut state = smithay_egui::EguiState::new(smithay_egui::EguiMode::Continuous);
-                let mut visuals: egui::style::Visuals = Default::default();
-                visuals.window_shadow.extrusion = 0.0;
-                state.context().set_visuals(visuals);
-                state.set_zindex(110); // always render on top
-                state
-            },
-            modifiers: Default::default(),
+            #[cfg(feature = "debug")]
+            state,
+            pending_frame: None,
             frames: VecDeque::with_capacity(Fps::WINDOW_SIZE + 1),
-            start: Instant::now(),
         }
     }
 }
 
-#[cfg(feature = "debug")]
 pub fn avg_fps<'a>(iter: impl Iterator<Item = &'a Duration>) -> f64 {
     let sum_secs = iter.map(|d| d.as_secs_f64()).sum::<f64>();
     1.0 / (sum_secs / Fps::WINDOW_SIZE as f64)

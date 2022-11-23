@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use smithay::{
-    output::{Mode, Output, OutputData},
+    output::{Mode, Output},
     reexports::{
         wayland_protocols_wlr::output_management::v1::server::{
             zwlr_output_configuration_head_v1::{self, ZwlrOutputConfigurationHeadV1},
@@ -17,6 +17,7 @@ use smithay::{
         },
     },
     utils::{Logical, Physical, Point, Size, Transform},
+    wayland::output::WlOutputData,
 };
 use std::{
     convert::{TryFrom, TryInto},
@@ -498,7 +499,7 @@ where
 impl<D> OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
-        + GlobalDispatch<WlOutput, OutputData>
+        + GlobalDispatch<WlOutput, WlOutputData>
         + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>
         + Dispatch<ZwlrOutputHeadV1, Output>
         + Dispatch<ZwlrOutputModeV1, Mode>

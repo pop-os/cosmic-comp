@@ -2,26 +2,35 @@
 
 use crate::{
     config::{Action, Config},
-    shell::{grabs::SeatMoveGrabState, Workspace},
+    shell::{
+        focus::{target::PointerFocusTarget, FocusDirection},
+        layout::{
+            floating::SeatMoveGrabState,
+            tiling::{Direction, FocusResult},
+        },
+        Workspace,
+    }, // shell::grabs::SeatMoveGrabState
     state::Common,
     utils::prelude::*,
+    wayland::{handlers::screencopy::ScreencopySessions, protocols::screencopy::Session},
 };
+use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
 use smithay::{
     backend::input::{
-        AbsolutePositionEvent, Axis, AxisSource, Device, DeviceCapability, InputBackend,
-        InputEvent, KeyState, PointerAxisEvent,
+        Axis, AxisSource, Device, DeviceCapability, InputBackend, InputEvent, KeyState,
+        PointerAxisEvent,
     },
-    desktop::{layer_map_for_output, Kind, WindowSurfaceType},
+    desktop::{layer_map_for_output, WindowSurfaceType},
     input::{
         keyboard::{keysyms, FilterResult, KeysymHandle, XkbConfig},
         pointer::{AxisFrame, ButtonEvent, CursorImageStatus, MotionEvent},
         Seat, SeatState,
     },
     output::Output,
-    reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
-    utils::{Buffer, Logical, Point, Rectangle, Size, SERIAL_COUNTER},
+    reexports::wayland_server::DisplayHandle,
+    utils::{Logical, Point, Rectangle, Serial, SERIAL_COUNTER},
     wayland::{
-        keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
+        keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat, seat::WaylandFocus,
         shell::wlr_layer::Layer as WlrLayer,
     },
 };
@@ -103,6 +112,7 @@ impl Devices {
 pub fn add_seat(
     dh: &DisplayHandle,
     seat_state: &mut SeatState<State>,
+    output: &Output,
     config: &Config,
     name: String,
 ) -> Seat<State> {
@@ -112,6 +122,7 @@ pub fn add_seat(
     userdata.insert_if_missing(Devices::default);
     userdata.insert_if_missing(SupressedKeys::default);
     userdata.insert_if_missing(SeatMoveGrabState::default);
+    userdata.insert_if_missing(|| ActiveOutput(RefCell::new(output.clone())));
     userdata.insert_if_missing(|| RefCell::new(CursorImageStatus::Default));
 
     // A lot of clients bind keyboard and pointer unconditionally once on launch..
@@ -143,7 +154,7 @@ impl State {
 
         match event {
             InputEvent::DeviceAdded { device } => {
-                let seat = &mut self.common.last_active_seat;
+                let seat = &mut self.common.last_active_seat();
                 let userdata = seat.user_data();
                 let devices = userdata.get::<Devices>().unwrap();
                 for cap in devices.add_device(&device) {
@@ -152,14 +163,9 @@ impl State {
                         _ => {}
                     }
                 }
-                #[cfg(feature = "debug")]
-                {
-                    self.common.egui.debug_state.handle_device_added(&device);
-                    self.common.egui.log_state.handle_device_added(&device);
-                }
             }
             InputEvent::DeviceRemoved { device } => {
-                for seat in &mut self.common.seats {
+                for seat in &mut self.common.seats() {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
@@ -172,26 +178,22 @@ impl State {
                         break;
                     }
                 }
-                #[cfg(feature = "debug")]
-                {
-                    self.common.egui.debug_state.handle_device_added(&device);
-                    self.common.egui.log_state.handle_device_added(&device);
-                }
             }
             InputEvent::Keyboard { event, .. } => {
                 use smithay::backend::input::KeyboardKeyEvent;
 
                 let device = event.device();
-                for seat in self.common.seats.clone().iter() {
-                    let current_output = active_output(seat, &self.common);
+                for seat in self.common.seats().cloned().collect::<Vec<_>>().iter() {
+                    let current_output = seat.active_output();
                     let workspace = self.common.shell.active_space_mut(&current_output);
                     let shortcuts_inhibited = workspace
-                        .focus_stack(seat)
+                        .focus_stack
+                        .get(seat)
                         .last()
                         .and_then(|window| {
-                            seat.keyboard_shortcuts_inhibitor_for_surface(
-                                &window.toplevel().wl_surface(),
-                            )
+                            window.wl_surface().and_then(|surface| {
+                                seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
+                            })
                         })
                         .map(|inhibitor| inhibitor.is_active())
                         .unwrap_or(false);
@@ -219,38 +221,6 @@ impl State {
                                         && userdata.get::<SupressedKeys>().unwrap().filter(&handle)
                                     {
                                         return FilterResult::Intercept(None);
-                                    }
-                                    #[cfg(feature = "debug")]
-                                    {
-                                        if data.common.seats.iter().position(|x| x == seat).unwrap()
-                                            == 0
-                                            && data.common.egui.active
-                                        {
-                                            if data.common.egui.debug_state.wants_keyboard() {
-                                                data.common.egui.debug_state.handle_keyboard(
-                                                    &handle,
-                                                    state == KeyState::Pressed,
-                                                    modifiers.clone(),
-                                                );
-                                                userdata
-                                                    .get::<SupressedKeys>()
-                                                    .unwrap()
-                                                    .add(&handle);
-                                                return FilterResult::Intercept(None);
-                                            }
-                                            if data.common.egui.log_state.wants_keyboard() {
-                                                data.common.egui.log_state.handle_keyboard(
-                                                    &handle,
-                                                    state == KeyState::Pressed,
-                                                    modifiers.clone(),
-                                                );
-                                                userdata
-                                                    .get::<SupressedKeys>()
-                                                    .unwrap()
-                                                    .add(&handle);
-                                                return FilterResult::Intercept(None);
-                                            }
-                                        }
                                     }
 
                                     if state == KeyState::Pressed
@@ -296,192 +266,7 @@ impl State {
                             )
                             .flatten()
                         {
-                            match action {
-                                Action::Terminate => {
-                                    self.common.should_stop = true;
-                                }
-                                #[cfg(feature = "debug")]
-                                Action::Debug => {
-                                    self.common.egui.active = !self.common.egui.active;
-                                }
-                                #[cfg(not(feature = "debug"))]
-                                Action::Debug => {
-                                    slog_scope::info!("Debug overlay not included in this version")
-                                }
-                                Action::Close => {
-                                    let current_output = active_output(seat, &self.common);
-                                    let workspace =
-                                        self.common.shell.active_space_mut(&current_output);
-                                    if let Some(window) = workspace.focus_stack(seat).last() {
-                                        #[allow(irrefutable_let_patterns)]
-                                        if let Kind::Xdg(xdg) = &window.toplevel() {
-                                            xdg.send_close();
-                                        }
-                                    }
-                                }
-                                Action::Workspace(key_num) => {
-                                    let current_output = active_output(seat, &self.common);
-                                    let workspace = match key_num {
-                                        0 => 9,
-                                        x => x - 1,
-                                    };
-                                    if let Some(motion_event) = self.common.shell.activate(
-                                        seat,
-                                        &current_output,
-                                        workspace as usize,
-                                    ) {
-                                        if let Some(ptr) = seat.get_pointer() {
-                                            ptr.motion(self, None, &motion_event);
-                                        }
-                                    }
-                                }
-                                Action::MoveToWorkspace(key_num) => {
-                                    let current_output = active_output(seat, &self.common);
-                                    let workspace = match key_num {
-                                        0 => 9,
-                                        x => x - 1,
-                                    };
-                                    self.common.shell.move_current_window(
-                                        seat,
-                                        &current_output,
-                                        workspace as usize,
-                                    );
-                                }
-                                Action::Focus(focus) => {
-                                    let current_output = active_output(seat, &self.common);
-                                    let workspace =
-                                        self.common.shell.active_space_mut(&current_output);
-                                    let focus_stack = workspace.focus_stack(seat);
-                                    if let Some(window) = workspace.tiling_layer.move_focus(
-                                        focus,
-                                        seat,
-                                        &mut workspace.space,
-                                        focus_stack.iter(),
-                                    ) {
-                                        std::mem::drop(focus_stack);
-                                        Common::set_focus(
-                                            self,
-                                            Some(window.toplevel().wl_surface()),
-                                            seat,
-                                            None,
-                                        );
-                                    }
-                                }
-                                Action::Fullscreen => {
-                                    let current_output = active_output(seat, &self.common);
-                                    let workspace =
-                                        self.common.shell.active_space_mut(&current_output);
-                                    let focused_window = workspace.focus_stack(seat).last();
-                                    if let Some(window) = focused_window {
-                                        workspace.fullscreen_toggle(&window, &current_output);
-                                    }
-                                }
-                                Action::Orientation(orientation) => {
-                                    let output = active_output(seat, &self.common);
-                                    let workspace = self.common.shell.active_space_mut(&output);
-                                    let focus_stack = workspace.focus_stack(seat);
-                                    workspace.tiling_layer.update_orientation(
-                                        orientation,
-                                        &seat,
-                                        &mut workspace.space,
-                                        focus_stack.iter(),
-                                    );
-                                }
-                                Action::ToggleTiling => {
-                                    let output = active_output(seat, &self.common);
-                                    let workspace = self.common.shell.active_space_mut(&output);
-                                    workspace.toggle_tiling(seat);
-                                }
-                                Action::ToggleWindowFloating => {
-                                    let output = active_output(seat, &self.common);
-                                    let workspace = self.common.shell.active_space_mut(&output);
-                                    workspace.toggle_floating_window(seat);
-                                }
-                                Action::Spawn(command) => {
-                                    if let Err(err) = std::process::Command::new("/bin/sh")
-                                        .arg("-c")
-                                        .arg(command)
-                                        .env("WAYLAND_DISPLAY", &self.common.socket)
-                                        .env_remove("COSMIC_SESSION_SOCK")
-                                        .spawn()
-                                    {
-                                        slog_scope::warn!("Failed to spawn: {}", err);
-                                    }
-                                }
-                                Action::Screenshot => {
-                                    let home = match std::env::var("HOME") {
-                                        Ok(home) => home,
-                                        Err(err) => {
-                                            slog_scope::error!(
-                                                "$HOME is not set, can't save screenshots: {}",
-                                                err
-                                            );
-                                            break;
-                                        }
-                                    };
-                                    let timestamp = match std::time::SystemTime::UNIX_EPOCH
-                                        .elapsed()
-                                    {
-                                        Ok(duration) => duration.as_secs(),
-                                        Err(err) => {
-                                            slog_scope::error!("Unable to get timestamp, can't save screenshots: {}", err);
-                                            break;
-                                        }
-                                    };
-                                    for output in self.common.shell.outputs.clone().into_iter() {
-                                        match self
-                                            .backend
-                                            .offscreen_for_output(&output, &mut self.common)
-                                        {
-                                            Ok((buffer, size)) => {
-                                                let mut path = std::path::PathBuf::new();
-                                                path.push(&home);
-                                                path.push(format!(
-                                                    "{}_{}.png",
-                                                    output.name(),
-                                                    timestamp
-                                                ));
-
-                                                fn write_png(
-                                                    path: impl AsRef<std::path::Path>,
-                                                    data: Vec<u8>,
-                                                    size: Size<i32, Buffer>,
-                                                ) -> anyhow::Result<()>
-                                                {
-                                                    use std::{fs, io};
-
-                                                    let file = io::BufWriter::new(
-                                                        fs::File::create(&path)?,
-                                                    );
-                                                    let mut encoder = png::Encoder::new(
-                                                        file,
-                                                        size.w as u32,
-                                                        size.h as u32,
-                                                    );
-                                                    encoder.set_color(png::ColorType::Rgba);
-                                                    encoder.set_depth(png::BitDepth::Eight);
-                                                    let mut writer = encoder.write_header()?;
-                                                    writer.write_image_data(&data)?;
-                                                    Ok(())
-                                                }
-
-                                                if let Err(err) = write_png(&path, buffer, size) {
-                                                    slog_scope::error!(
-                                                        "Unable to save screenshot at {}: {}",
-                                                        path.display(),
-                                                        err
-                                                    );
-                                                }
-                                            }
-                                            Err(err) => slog_scope::error!(
-                                                "Could not save screenshot for output {}: {}",
-                                                output.name(),
-                                                err
-                                            ),
-                                        }
-                                    }
-                                }
-                            }
+                            self.handle_action(action, seat, serial, time)
                         }
                         break;
                     }
@@ -491,11 +276,11 @@ impl State {
                 use smithay::backend::input::PointerMotionEvent;
 
                 let device = event.device();
-                for seat in self.common.seats.clone().iter() {
+                for seat in self.common.seats().cloned().collect::<Vec<_>>().iter() {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
-                        let current_output = active_output(seat, &self.common);
+                        let current_output = seat.active_output();
 
                         let mut position = seat.get_pointer().unwrap().current_location();
                         position += event.delta();
@@ -508,7 +293,15 @@ impl State {
                             .cloned()
                             .unwrap_or(current_output.clone());
                         if output != current_output {
-                            set_active_output(seat, &output);
+                            for session in sessions_for_output(&self.common, &current_output) {
+                                session.cursor_leave(seat, InputType::Pointer);
+                            }
+
+                            for session in sessions_for_output(&self.common, &output) {
+                                session.cursor_enter(seat, InputType::Pointer);
+                            }
+
+                            seat.set_active_output(&output);
                         }
                         let output_geometry = output.geometry();
 
@@ -520,10 +313,7 @@ impl State {
                             .min((output_geometry.loc.y + output_geometry.size.h) as f64);
 
                         let serial = SERIAL_COUNTER.next_serial();
-                        let relative_pos = self
-                            .common
-                            .shell
-                            .space_relative_output_geometry(position, &output);
+                        let relative_pos = self.common.shell.map_global_to_space(position, &output);
                         let workspace = self.common.shell.active_space_mut(&output);
                         let under = State::surface_under(
                             position,
@@ -532,6 +322,19 @@ impl State {
                             output_geometry,
                             &workspace,
                         );
+
+                        for session in sessions_for_output(&self.common, &output) {
+                            if let Some((geometry, offset)) = seat.cursor_geometry(
+                                position.to_buffer(
+                                    output.current_scale().fractional_scale(),
+                                    output.current_transform(),
+                                    &output.geometry().size.to_f64(),
+                                ),
+                                self.common.clock.now(),
+                            ) {
+                                session.cursor_info(seat, InputType::Pointer, geometry, offset);
+                            }
+                        }
                         seat.get_pointer().unwrap().motion(
                             self,
                             under,
@@ -541,36 +344,24 @@ impl State {
                                 time: event.time(),
                             },
                         );
-
-                        #[cfg(feature = "debug")]
-                        if self.common.seats.iter().position(|x| x == seat).unwrap() == 0 {
-                            self.common
-                                .egui
-                                .debug_state
-                                .handle_pointer_motion(position.to_i32_round());
-                            self.common
-                                .egui
-                                .log_state
-                                .handle_pointer_motion(position.to_i32_round());
-                        }
                         break;
                     }
                 }
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
                 let device = event.device();
-                for seat in self.common.seats.clone().iter() {
+                for seat in self.common.seats().cloned().collect::<Vec<_>>().iter() {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
-                        let output = active_output(seat, &self.common);
+                        let output = seat.active_output();
                         let geometry = output.geometry();
-                        let position =
-                            geometry.loc.to_f64() + event.position_transformed(geometry.size);
-                        let relative_pos = self
-                            .common
-                            .shell
-                            .space_relative_output_geometry(position, &output);
+                        let position = geometry.loc.to_f64()
+                            + smithay::backend::input::AbsolutePositionEvent::position_transformed(
+                                &event,
+                                geometry.size,
+                            );
+                        let relative_pos = self.common.shell.map_global_to_space(position, &output);
                         let workspace = self.common.shell.active_space_mut(&output);
                         let serial = SERIAL_COUNTER.next_serial();
                         let under = State::surface_under(
@@ -590,17 +381,6 @@ impl State {
                             },
                         );
 
-                        #[cfg(feature = "debug")]
-                        if self.common.seats.iter().position(|x| x == seat).unwrap() == 0 {
-                            self.common
-                                .egui
-                                .debug_state
-                                .handle_pointer_motion(position.to_i32_round());
-                            self.common
-                                .egui
-                                .log_state
-                                .handle_pointer_motion(position.to_i32_round());
-                        }
                         break;
                     }
                 }
@@ -609,36 +389,10 @@ impl State {
                 use smithay::backend::input::{ButtonState, PointerButtonEvent};
 
                 let device = event.device();
-                for seat in self.common.seats.clone().iter() {
+                for seat in self.common.seats().cloned().collect::<Vec<_>>().iter() {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
-                        #[cfg(feature = "debug")]
-                        if self.common.seats.iter().position(|x| x == seat).unwrap() == 0
-                            && self.common.egui.active
-                        {
-                            if self.common.egui.debug_state.wants_pointer() {
-                                if let Some(button) = event.button() {
-                                    self.common.egui.debug_state.handle_pointer_button(
-                                        button,
-                                        event.state() == ButtonState::Pressed,
-                                        self.common.egui.modifiers.clone(),
-                                    );
-                                }
-                                break;
-                            }
-                            if self.common.egui.log_state.wants_pointer() {
-                                if let Some(button) = event.button() {
-                                    self.common.egui.log_state.handle_pointer_button(
-                                        button,
-                                        event.state() == ButtonState::Pressed,
-                                        self.common.egui.modifiers.clone(),
-                                    );
-                                }
-                                break;
-                            }
-                        }
-
                         let serial = SERIAL_COUNTER.next_serial();
                         let button = event.button_code();
                         if event.state() == ButtonState::Pressed {
@@ -649,13 +403,10 @@ impl State {
                             if !seat.get_pointer().unwrap().is_grabbed()
                                 && !seat.get_keyboard().map(|k| k.is_grabbed()).unwrap_or(false)
                             {
-                                let output = active_output(seat, &self.common);
+                                let output = seat.active_output();
                                 let pos = seat.get_pointer().unwrap().current_location();
-                                let output_geo = output.geometry();
-                                let relative_pos = self
-                                    .common
-                                    .shell
-                                    .space_relative_output_geometry(pos, &output);
+                                let relative_pos =
+                                    self.common.shell.map_global_to_space(pos, &output);
                                 let workspace = self.common.shell.active_space_mut(&output);
                                 let layers = layer_map_for_output(&output);
                                 let mut under = None;
@@ -664,60 +415,54 @@ impl State {
                                     if let Some(layer) =
                                         layers.layer_under(WlrLayer::Overlay, relative_pos)
                                     {
-                                        if layer.can_receive_keyboard_focus() {
-                                            let layer_loc =
-                                                layers.layer_geometry(layer).unwrap().loc;
-                                            under = layer
+                                        let layer_loc = layers.layer_geometry(layer).unwrap().loc;
+                                        if layer.can_receive_keyboard_focus()
+                                            && layer
                                                 .surface_under(
-                                                    pos - output_geo.loc.to_f64()
-                                                        - layer_loc.to_f64(),
+                                                    relative_pos - layer_loc.to_f64(),
                                                     WindowSurfaceType::ALL,
                                                 )
-                                                .map(|(_, _)| layer.wl_surface().clone());
+                                                .is_some()
+                                        {
+                                            under = Some(layer.clone().into());
                                         }
                                     } else {
-                                        under = window
-                                            .surface_under(
-                                                pos - output_geo.loc.to_f64(),
-                                                WindowSurfaceType::ALL,
-                                            )
-                                            .map(|(_, _)| window.toplevel().wl_surface().clone());
+                                        under = Some(window.clone().into());
                                     }
                                 } else {
                                     if let Some(layer) = layers
                                         .layer_under(WlrLayer::Overlay, relative_pos)
                                         .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos))
                                     {
-                                        if layer.can_receive_keyboard_focus() {
-                                            let layer_loc =
-                                                layers.layer_geometry(layer).unwrap().loc;
-                                            under = layer
+                                        let layer_loc = layers.layer_geometry(layer).unwrap().loc;
+                                        if layer.can_receive_keyboard_focus()
+                                            && layer
                                                 .surface_under(
-                                                    pos - output_geo.loc.to_f64()
-                                                        - layer_loc.to_f64(),
+                                                    relative_pos - layer_loc.to_f64(),
                                                     WindowSurfaceType::ALL,
                                                 )
-                                                .map(|(_, _)| layer.wl_surface().clone());
+                                                .is_some()
+                                        {
+                                            under = Some(layer.clone().into());
                                         }
-                                    } else if let Some((window, _, _)) = workspace
-                                        .space
-                                        .surface_under(relative_pos, WindowSurfaceType::ALL)
+                                    } else if let Some((window, _)) =
+                                        workspace.element_under(relative_pos)
                                     {
-                                        under = Some(window.toplevel().wl_surface().clone());
+                                        under = Some(window.clone().into());
                                     } else if let Some(layer) = layers
                                         .layer_under(WlrLayer::Bottom, pos)
                                         .or_else(|| layers.layer_under(WlrLayer::Background, pos))
                                     {
-                                        if layer.can_receive_keyboard_focus() {
-                                            let layer_loc =
-                                                layers.layer_geometry(layer).unwrap().loc;
-                                            under = layer
+                                        let layer_loc = layers.layer_geometry(layer).unwrap().loc;
+                                        if layer.can_receive_keyboard_focus()
+                                            && layer
                                                 .surface_under(
-                                                    pos - output_geo.loc.to_f64()
-                                                        - layer_loc.to_f64(),
+                                                    relative_pos - layer_loc.to_f64(),
                                                     WindowSurfaceType::ALL,
                                                 )
-                                                .map(|(_, _)| layer.wl_surface().clone());
+                                                .is_some()
+                                        {
+                                            under = Some(layer.clone().into());
                                         }
                                     };
                                 }
@@ -740,39 +485,7 @@ impl State {
             }
             InputEvent::PointerAxis { event, .. } => {
                 let device = event.device();
-                for seat in self.common.seats.clone().iter() {
-                    #[cfg(feature = "debug")]
-                    if self.common.seats.iter().position(|x| x == seat).unwrap() == 0
-                        && self.common.egui.active
-                    {
-                        if self.common.egui.debug_state.wants_pointer() {
-                            self.common.egui.debug_state.handle_pointer_axis(
-                                event
-                                    .amount_discrete(Axis::Horizontal)
-                                    .or_else(|| event.amount(Axis::Horizontal).map(|x| x * 3.0))
-                                    .unwrap_or(0.0),
-                                event
-                                    .amount_discrete(Axis::Vertical)
-                                    .or_else(|| event.amount(Axis::Vertical).map(|x| x * 3.0))
-                                    .unwrap_or(0.0),
-                            );
-                            break;
-                        }
-                        if self.common.egui.log_state.wants_pointer() {
-                            self.common.egui.log_state.handle_pointer_axis(
-                                event
-                                    .amount_discrete(Axis::Horizontal)
-                                    .or_else(|| event.amount(Axis::Horizontal).map(|x| x * 3.0))
-                                    .unwrap_or(0.0),
-                                event
-                                    .amount_discrete(Axis::Vertical)
-                                    .or_else(|| event.amount(Axis::Vertical).map(|x| x * 3.0))
-                                    .unwrap_or(0.0),
-                            );
-                            break;
-                        }
-                    }
-
+                for seat in self.common.seats().cloned().collect::<Vec<_>>().iter() {
                     let userdata = seat.user_data();
                     let devices = userdata.get::<Devices>().unwrap();
                     if devices.has_device(&device) {
@@ -814,62 +527,453 @@ impl State {
         }
     }
 
+    fn handle_action(&mut self, action: Action, seat: &Seat<State>, serial: Serial, time: u32) {
+        match action {
+            Action::Terminate => {
+                self.common.should_stop = true;
+            }
+            #[cfg(feature = "debug")]
+            Action::Debug => {
+                self.common.egui.active = !self.common.egui.active;
+            }
+            #[cfg(not(feature = "debug"))]
+            Action::Debug => {
+                slog_scope::info!("Debug overlay not included in this version")
+            }
+            Action::Close => {
+                let current_output = seat.active_output();
+                let workspace = self.common.shell.active_space_mut(&current_output);
+                if let Some(window) = workspace.focus_stack.get(seat).last() {
+                    window.send_close();
+                }
+            }
+            Action::Workspace(key_num) => {
+                let current_output = seat.active_output();
+                let workspace = match key_num {
+                    0 => 9,
+                    x => x - 1,
+                };
+                let _ = self
+                    .common
+                    .shell
+                    .activate(&current_output, workspace as usize);
+            }
+            Action::NextWorkspace => {
+                let current_output = seat.active_output();
+                let workspace = self
+                    .common
+                    .shell
+                    .workspaces
+                    .active_num(&current_output)
+                    .saturating_add(1);
+                // TODO: Possibly move to next output, if idx to large
+                let _ = self.common.shell.activate(&current_output, workspace);
+            }
+            Action::PreviousWorkspace => {
+                let current_output = seat.active_output();
+                let workspace = self
+                    .common
+                    .shell
+                    .workspaces
+                    .active_num(&current_output)
+                    .saturating_sub(1);
+                // TODO: Possibly move to prev output, if idx < 0
+                let _ = self.common.shell.activate(&current_output, workspace);
+            }
+            Action::LastWorkspace => {
+                let current_output = seat.active_output();
+                let workspace = self
+                    .common
+                    .shell
+                    .workspaces
+                    .len(&current_output)
+                    .saturating_sub(1);
+                let _ = self.common.shell.activate(&current_output, workspace);
+            }
+            Action::MoveToWorkspace(key_num) => {
+                let current_output = seat.active_output();
+                let workspace = match key_num {
+                    0 => 9,
+                    x => x - 1,
+                };
+                Shell::move_current_window(
+                    self,
+                    seat,
+                    &current_output,
+                    (&current_output, Some(workspace as usize)),
+                );
+            }
+            Action::MoveToNextWorkspace => {
+                let current_output = seat.active_output();
+                let workspace = self
+                    .common
+                    .shell
+                    .workspaces
+                    .active_num(&current_output)
+                    .saturating_add(1);
+                // TODO: Possibly move to next output, if idx too large
+                Shell::move_current_window(
+                    self,
+                    seat,
+                    &current_output,
+                    (&current_output, Some(workspace as usize)),
+                );
+            }
+            Action::MoveToPreviousWorkspace => {
+                let current_output = seat.active_output();
+                let workspace = self
+                    .common
+                    .shell
+                    .workspaces
+                    .active_num(&current_output)
+                    .saturating_sub(1);
+                // TODO: Possibly move to prev output, if idx < 0
+                Shell::move_current_window(
+                    self,
+                    seat,
+                    &current_output,
+                    (&current_output, Some(workspace as usize)),
+                );
+            }
+            Action::MoveToLastWorkspace => {
+                let current_output = seat.active_output();
+                let workspace = self
+                    .common
+                    .shell
+                    .workspaces
+                    .len(&current_output)
+                    .saturating_sub(1);
+                Shell::move_current_window(
+                    self,
+                    seat,
+                    &current_output,
+                    (&current_output, Some(workspace as usize)),
+                );
+            }
+            Action::NextOutput => {
+                let current_output = seat.active_output();
+                if let Some(next_output) = self
+                    .common
+                    .shell
+                    .outputs
+                    .iter()
+                    .skip_while(|o| *o != &current_output)
+                    .skip(1)
+                    .next()
+                    .cloned()
+                {
+                    let idx = self.common.shell.workspaces.active_num(&next_output);
+                    if let Some(new_pos) = self.common.shell.activate(&next_output, idx) {
+                        seat.set_active_output(&next_output);
+                        if let Some(ptr) = seat.get_pointer() {
+                            ptr.motion(
+                                self,
+                                None,
+                                &MotionEvent {
+                                    location: new_pos.to_f64(),
+                                    serial,
+                                    time,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+            Action::PreviousOutput => {
+                let current_output = seat.active_output();
+                if let Some(prev_output) = self
+                    .common
+                    .shell
+                    .outputs
+                    .iter()
+                    .rev()
+                    .skip_while(|o| *o != &current_output)
+                    .skip(1)
+                    .next()
+                    .cloned()
+                {
+                    let idx = self.common.shell.workspaces.active_num(&prev_output);
+                    if let Some(new_pos) = self.common.shell.activate(&prev_output, idx) {
+                        seat.set_active_output(&prev_output);
+                        if let Some(ptr) = seat.get_pointer() {
+                            ptr.motion(
+                                self,
+                                None,
+                                &MotionEvent {
+                                    location: new_pos.to_f64(),
+                                    serial,
+                                    time,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+            Action::MoveToNextOutput => {
+                let current_output = seat.active_output();
+                if let Some(next_output) = self
+                    .common
+                    .shell
+                    .outputs
+                    .iter()
+                    .skip_while(|o| *o != &current_output)
+                    .skip(1)
+                    .next()
+                    .cloned()
+                {
+                    if let Some(new_pos) = Shell::move_current_window(
+                        self,
+                        seat,
+                        &current_output,
+                        (&next_output, None),
+                    ) {
+                        if let Some(ptr) = seat.get_pointer() {
+                            ptr.motion(
+                                self,
+                                None,
+                                &MotionEvent {
+                                    location: new_pos.to_f64(),
+                                    serial,
+                                    time,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+            Action::MoveToPreviousOutput => {
+                let current_output = seat.active_output();
+                if let Some(prev_output) = self
+                    .common
+                    .shell
+                    .outputs
+                    .iter()
+                    .rev()
+                    .skip_while(|o| *o != &current_output)
+                    .skip(1)
+                    .next()
+                    .cloned()
+                {
+                    if let Some(new_pos) = Shell::move_current_window(
+                        self,
+                        seat,
+                        &current_output,
+                        (&prev_output, None),
+                    ) {
+                        if let Some(ptr) = seat.get_pointer() {
+                            ptr.motion(
+                                self,
+                                None,
+                                &MotionEvent {
+                                    location: new_pos.to_f64(),
+                                    serial,
+                                    time,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+            Action::Focus(focus) => {
+                let current_output = seat.active_output();
+                let workspace = self.common.shell.active_space_mut(&current_output);
+                let focus_stack = workspace.focus_stack.get(seat);
+                match workspace
+                    .tiling_layer
+                    .next_focus(focus, seat, focus_stack.iter())
+                {
+                    FocusResult::None => {
+                        // TODO: Handle Workspace orientation
+                        match focus {
+                            FocusDirection::Left => {
+                                self.handle_action(Action::PreviousWorkspace, seat, serial, time)
+                            }
+                            FocusDirection::Right => {
+                                self.handle_action(Action::NextWorkspace, seat, serial, time)
+                            }
+                            FocusDirection::Up => {
+                                self.handle_action(Action::PreviousOutput, seat, serial, time)
+                            }
+                            FocusDirection::Down => {
+                                self.handle_action(Action::NextOutput, seat, serial, time)
+                            }
+                            _ => {}
+                        }
+                    }
+                    FocusResult::Handled => {}
+                    FocusResult::Some(target) => {
+                        std::mem::drop(focus_stack);
+                        Common::set_focus(self, Some(&target), seat, None);
+                    }
+                }
+            }
+            Action::Move(direction) => {
+                let current_output = seat.active_output();
+                let workspace = self.common.shell.active_space_mut(&current_output);
+                if let Some(_move_further) =
+                    workspace.tiling_layer.move_current_window(direction, seat)
+                {
+                    // TODO: Handle Workspace orientation
+                    // TODO: Being able to move Groups (move_further should be KeyboardFocusTarget instead)
+                    match direction {
+                        Direction::Left => {
+                            self.handle_action(Action::MoveToPreviousWorkspace, seat, serial, time)
+                        }
+                        Direction::Right => {
+                            self.handle_action(Action::MoveToNextWorkspace, seat, serial, time)
+                        }
+                        Direction::Up => {
+                            self.handle_action(Action::MoveToPreviousOutput, seat, serial, time)
+                        }
+                        Direction::Down => {
+                            self.handle_action(Action::MoveToNextOutput, seat, serial, time)
+                        }
+                    }
+                }
+            }
+            Action::Maximize => {
+                let current_output = seat.active_output();
+                let workspace = self.common.shell.active_space_mut(&current_output);
+                let focus_stack = workspace.focus_stack.get(seat);
+                let focused_window = focus_stack.last();
+                if let Some(window) = focused_window.map(|f| f.active_window()) {
+                    workspace.maximize_toggle(&window, &current_output);
+                }
+            }
+            Action::ToggleOrientation => {
+                let output = seat.active_output();
+                let workspace = self.common.shell.active_space_mut(&output);
+                let focus_stack = workspace.focus_stack.get(seat);
+                workspace
+                    .tiling_layer
+                    .update_orientation(None, &seat, focus_stack.iter());
+            }
+            Action::Orientation(orientation) => {
+                let output = seat.active_output();
+                let workspace = self.common.shell.active_space_mut(&output);
+                let focus_stack = workspace.focus_stack.get(seat);
+                workspace.tiling_layer.update_orientation(
+                    Some(orientation),
+                    &seat,
+                    focus_stack.iter(),
+                );
+            }
+            Action::ToggleTiling => {
+                let output = seat.active_output();
+                let workspace = self.common.shell.active_space_mut(&output);
+                workspace.toggle_tiling(seat);
+            }
+            Action::ToggleWindowFloating => {
+                let output = seat.active_output();
+                let workspace = self.common.shell.active_space_mut(&output);
+                workspace.toggle_floating_window(seat);
+            }
+            Action::Spawn(command) => {
+                if let Err(err) = std::process::Command::new("/bin/sh")
+                    .arg("-c")
+                    .arg(command)
+                    .env("WAYLAND_DISPLAY", &self.common.socket)
+                    .env_remove("COSMIC_SESSION_SOCK")
+                    .spawn()
+                {
+                    slog_scope::warn!("Failed to spawn: {}", err);
+                }
+            }
+        }
+    }
+
     pub fn surface_under(
         global_pos: Point<f64, Logical>,
         relative_pos: Point<f64, Logical>,
         output: &Output,
         output_geo: Rectangle<i32, Logical>,
         workspace: &Workspace,
-    ) -> Option<(WlSurface, Point<i32, Logical>)> {
+    ) -> Option<(PointerFocusTarget, Point<i32, Logical>)> {
         let layers = layer_map_for_output(output);
         if let Some(window) = workspace.get_fullscreen(output) {
-            if let Some(layer) = layers
-                .layer_under(WlrLayer::Overlay, relative_pos)
-                .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos))
-            {
+            if let Some(layer) = layers.layer_under(WlrLayer::Overlay, relative_pos) {
                 let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                layer
-                    .surface_under(
-                        global_pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
-                        WindowSurfaceType::ALL,
-                    )
-                    .map(|(s, loc)| (s, loc + layer_loc + output_geo.loc))
-            } else {
-                window
-                    .surface_under(global_pos - output_geo.loc.to_f64(), WindowSurfaceType::ALL)
-                    .map(|(s, loc)| (s, loc + output_geo.loc))
+                if layer
+                    .surface_under(relative_pos - layer_loc.to_f64(), WindowSurfaceType::ALL)
+                    .is_some()
+                {
+                    return Some((layer.clone().into(), output_geo.loc + layer_loc));
+                }
             }
+            Some((window.clone().into(), output_geo.loc))
         } else {
             if let Some(layer) = layers
                 .layer_under(WlrLayer::Overlay, relative_pos)
                 .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos))
             {
                 let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                layer
-                    .surface_under(
-                        global_pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
-                        WindowSurfaceType::ALL,
-                    )
-                    .map(|(s, loc)| (s, loc + layer_loc + output_geo.loc))
-            } else if let Some((_, surface, loc)) = workspace
-                .space
-                .surface_under(relative_pos, WindowSurfaceType::ALL)
-            {
-                Some((surface, loc + (global_pos - relative_pos).to_i32_round()))
-            } else if let Some(layer) = layers
+                if layer
+                    .surface_under(relative_pos - layer_loc.to_f64(), WindowSurfaceType::ALL)
+                    .is_some()
+                {
+                    return Some((layer.clone().into(), output_geo.loc + layer_loc));
+                }
+            }
+            if let Some((mapped, loc)) = workspace.element_under(relative_pos) {
+                return Some((
+                    mapped.clone().into(),
+                    loc + (global_pos - relative_pos).to_i32_round(),
+                ));
+            }
+            if let Some(layer) = layers
                 .layer_under(WlrLayer::Bottom, relative_pos)
                 .or_else(|| layers.layer_under(WlrLayer::Background, relative_pos))
             {
                 let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                layer
-                    .surface_under(
-                        global_pos - output_geo.loc.to_f64() - layer_loc.to_f64(),
-                        WindowSurfaceType::ALL,
-                    )
-                    .map(|(s, loc)| (s, loc + layer_loc + output_geo.loc))
-            } else {
-                None
+                if layer
+                    .surface_under(relative_pos - layer_loc.to_f64(), WindowSurfaceType::ALL)
+                    .is_some()
+                {
+                    return Some((layer.clone().into(), output_geo.loc + layer_loc));
+                }
             }
+            None
         }
     }
+}
+
+fn sessions_for_output(state: &Common, output: &Output) -> impl Iterator<Item = Session> {
+    let workspace = state.shell.active_space(&output);
+    let maybe_fullscreen = workspace.get_fullscreen(&output);
+    workspace
+        .screencopy_sessions
+        .iter()
+        .map(|s| (&**s).clone())
+        .chain(
+            maybe_fullscreen
+                .and_then(|w| w.user_data().get::<ScreencopySessions>())
+                .map(|sessions| {
+                    sessions
+                        .0
+                        .borrow()
+                        .iter()
+                        .map(|s| (&**s).clone())
+                        .collect::<Vec<_>>()
+                })
+                .into_iter()
+                .flatten(),
+        )
+        .chain(
+            output
+                .user_data()
+                .get::<ScreencopySessions>()
+                .map(|sessions| {
+                    sessions
+                        .0
+                        .borrow()
+                        .iter()
+                        .map(|s| (&**s).clone())
+                        .collect::<Vec<_>>()
+                })
+                .into_iter()
+                .into_iter()
+                .flatten(),
+        )
+        .collect::<Vec<_>>()
+        .into_iter()
 }

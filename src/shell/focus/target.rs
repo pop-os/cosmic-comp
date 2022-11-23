@@ -1,5 +1,8 @@
-use crate::utils::prelude::*;
-pub use smithay::{
+use std::sync::Weak;
+
+use crate::{shell::element::CosmicMapped, utils::prelude::*};
+use id_tree::NodeId;
+use smithay::{
     backend::input::KeyState,
     desktop::{LayerSurface, PopupKind, Window},
     input::{
@@ -7,83 +10,131 @@ pub use smithay::{
         pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget},
         Seat,
     },
+    output::WeakOutput,
     reexports::wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface, Resource},
     utils::{IsAlive, Serial},
     wayland::seat::WaylandFocus,
 };
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum FocusTarget {
-    Window(Window),
+pub enum PointerFocusTarget {
+    Element(CosmicMapped),
+    Fullscreen(Window),
     LayerSurface(LayerSurface),
     Popup(PopupKind),
 }
 
-impl IsAlive for FocusTarget {
-    fn alive(&self) -> bool {
-        match self {
-            FocusTarget::Window(w) => w.alive(),
-            FocusTarget::LayerSurface(l) => l.alive(),
-            FocusTarget::Popup(p) => p.alive(),
+#[derive(Debug, Clone, PartialEq)]
+pub enum KeyboardFocusTarget {
+    Element(CosmicMapped),
+    Fullscreen(Window),
+    Group(WindowGroup),
+    LayerSurface(LayerSurface),
+    Popup(PopupKind),
+}
+
+impl From<KeyboardFocusTarget> for PointerFocusTarget {
+    fn from(target: KeyboardFocusTarget) -> Self {
+        match target {
+            KeyboardFocusTarget::Element(elem) => PointerFocusTarget::Element(elem),
+            KeyboardFocusTarget::Fullscreen(elem) => PointerFocusTarget::Fullscreen(elem),
+            KeyboardFocusTarget::LayerSurface(layer) => PointerFocusTarget::LayerSurface(layer),
+            KeyboardFocusTarget::Popup(popup) => PointerFocusTarget::Popup(popup),
+            _ => unreachable!("A window grab cannot start a popup grab"),
         }
     }
 }
 
-impl PointerTarget<State> for FocusTarget {
+#[derive(Debug, Clone)]
+pub struct WindowGroup {
+    pub(in crate::shell) node: NodeId,
+    pub(in crate::shell) output: WeakOutput,
+    pub(in crate::shell) alive: Weak<()>,
+}
+
+impl PartialEq for WindowGroup {
+    fn eq(&self, other: &Self) -> bool {
+        self.node == other.node
+            && self.output == other.output
+            && Weak::ptr_eq(&self.alive, &other.alive)
+    }
+}
+
+impl IsAlive for PointerFocusTarget {
+    fn alive(&self) -> bool {
+        match self {
+            PointerFocusTarget::Element(e) => e.alive(),
+            PointerFocusTarget::Fullscreen(f) => f.alive(),
+            PointerFocusTarget::LayerSurface(l) => l.alive(),
+            PointerFocusTarget::Popup(p) => p.alive(),
+        }
+    }
+}
+
+impl IsAlive for KeyboardFocusTarget {
+    fn alive(&self) -> bool {
+        match self {
+            KeyboardFocusTarget::Element(e) => e.alive(),
+            KeyboardFocusTarget::Fullscreen(f) => f.alive(),
+            KeyboardFocusTarget::Group(g) => g.alive.upgrade().is_some(),
+            KeyboardFocusTarget::LayerSurface(l) => l.alive(),
+            KeyboardFocusTarget::Popup(p) => p.alive(),
+        }
+    }
+}
+
+impl PointerTarget<State> for PointerFocusTarget {
     fn enter(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
         match self {
-            FocusTarget::Window(w) => {
-                PointerTarget::enter(w.toplevel().wl_surface(), seat, data, event)
-            }
-            FocusTarget::LayerSurface(l) => PointerTarget::enter(l.wl_surface(), seat, data, event),
-            FocusTarget::Popup(p) => PointerTarget::enter(p.wl_surface(), seat, data, event),
+            PointerFocusTarget::Element(w) => PointerTarget::enter(w, seat, data, event),
+            PointerFocusTarget::Fullscreen(w) => PointerTarget::enter(w, seat, data, event),
+            PointerFocusTarget::LayerSurface(l) => PointerTarget::enter(l, seat, data, event),
+            PointerFocusTarget::Popup(p) => PointerTarget::enter(p.wl_surface(), seat, data, event),
         }
     }
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
         match self {
-            FocusTarget::Window(w) => {
-                PointerTarget::motion(w.toplevel().wl_surface(), seat, data, event)
+            PointerFocusTarget::Element(w) => PointerTarget::motion(w, seat, data, event),
+            PointerFocusTarget::Fullscreen(w) => PointerTarget::motion(w, seat, data, event),
+            PointerFocusTarget::LayerSurface(l) => PointerTarget::motion(l, seat, data, event),
+            PointerFocusTarget::Popup(p) => {
+                PointerTarget::motion(p.wl_surface(), seat, data, event)
             }
-            FocusTarget::LayerSurface(l) => {
-                PointerTarget::motion(l.wl_surface(), seat, data, event)
-            }
-            FocusTarget::Popup(p) => PointerTarget::motion(p.wl_surface(), seat, data, event),
         }
     }
     fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
         match self {
-            FocusTarget::Window(w) => {
-                PointerTarget::button(w.toplevel().wl_surface(), seat, data, event)
+            PointerFocusTarget::Element(w) => PointerTarget::button(w, seat, data, event),
+            PointerFocusTarget::Fullscreen(w) => PointerTarget::button(w, seat, data, event),
+            PointerFocusTarget::LayerSurface(l) => PointerTarget::button(l, seat, data, event),
+            PointerFocusTarget::Popup(p) => {
+                PointerTarget::button(p.wl_surface(), seat, data, event)
             }
-            FocusTarget::LayerSurface(l) => {
-                PointerTarget::button(l.wl_surface(), seat, data, event)
-            }
-            FocusTarget::Popup(p) => PointerTarget::button(p.wl_surface(), seat, data, event),
         }
     }
     fn axis(&self, seat: &Seat<State>, data: &mut State, frame: AxisFrame) {
         match self {
-            FocusTarget::Window(w) => {
-                PointerTarget::axis(w.toplevel().wl_surface(), seat, data, frame)
-            }
-            FocusTarget::LayerSurface(l) => PointerTarget::axis(l.wl_surface(), seat, data, frame),
-            FocusTarget::Popup(p) => PointerTarget::axis(p.wl_surface(), seat, data, frame),
+            PointerFocusTarget::Element(w) => PointerTarget::axis(w, seat, data, frame),
+            PointerFocusTarget::Fullscreen(w) => PointerTarget::axis(w, seat, data, frame),
+            PointerFocusTarget::LayerSurface(l) => PointerTarget::axis(l, seat, data, frame),
+            PointerFocusTarget::Popup(p) => PointerTarget::axis(p.wl_surface(), seat, data, frame),
         }
     }
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
         match self {
-            FocusTarget::Window(w) => {
-                PointerTarget::leave(w.toplevel().wl_surface(), seat, data, serial, time)
+            PointerFocusTarget::Element(w) => PointerTarget::leave(w, seat, data, serial, time),
+            PointerFocusTarget::Fullscreen(w) => PointerTarget::leave(w, seat, data, serial, time),
+            PointerFocusTarget::LayerSurface(l) => {
+                PointerTarget::leave(l, seat, data, serial, time)
             }
-            FocusTarget::LayerSurface(l) => {
-                PointerTarget::leave(l.wl_surface(), seat, data, serial, time)
+            PointerFocusTarget::Popup(p) => {
+                PointerTarget::leave(p.wl_surface(), seat, data, serial, time)
             }
-            FocusTarget::Popup(p) => PointerTarget::leave(p.wl_surface(), seat, data, serial, time),
         }
     }
 }
 
-impl KeyboardTarget<State> for FocusTarget {
+impl KeyboardTarget<State> for KeyboardFocusTarget {
     fn enter(
         &self,
         seat: &Seat<State>,
@@ -92,26 +143,28 @@ impl KeyboardTarget<State> for FocusTarget {
         serial: Serial,
     ) {
         match self {
-            FocusTarget::Window(w) => {
-                KeyboardTarget::enter(w.toplevel().wl_surface(), seat, data, keys, serial)
+            KeyboardFocusTarget::Element(w) => KeyboardTarget::enter(w, seat, data, keys, serial),
+            KeyboardFocusTarget::Fullscreen(w) => {
+                KeyboardTarget::enter(w, seat, data, keys, serial)
             }
-            FocusTarget::LayerSurface(l) => {
-                KeyboardTarget::enter(l.wl_surface(), seat, data, keys, serial)
+            KeyboardFocusTarget::Group(_) => {}
+            KeyboardFocusTarget::LayerSurface(l) => {
+                KeyboardTarget::enter(l, seat, data, keys, serial)
             }
-            FocusTarget::Popup(p) => {
+            KeyboardFocusTarget::Popup(p) => {
                 KeyboardTarget::enter(p.wl_surface(), seat, data, keys, serial)
             }
         }
     }
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial) {
         match self {
-            FocusTarget::Window(w) => {
-                KeyboardTarget::leave(w.toplevel().wl_surface(), seat, data, serial)
+            KeyboardFocusTarget::Element(w) => KeyboardTarget::leave(w, seat, data, serial),
+            KeyboardFocusTarget::Fullscreen(w) => KeyboardTarget::leave(w, seat, data, serial),
+            KeyboardFocusTarget::Group(_) => {}
+            KeyboardFocusTarget::LayerSurface(l) => KeyboardTarget::leave(l, seat, data, serial),
+            KeyboardFocusTarget::Popup(p) => {
+                KeyboardTarget::leave(p.wl_surface(), seat, data, serial)
             }
-            FocusTarget::LayerSurface(l) => {
-                KeyboardTarget::leave(l.wl_surface(), seat, data, serial)
-            }
-            FocusTarget::Popup(p) => KeyboardTarget::leave(p.wl_surface(), seat, data, serial),
         }
     }
     fn key(
@@ -124,19 +177,17 @@ impl KeyboardTarget<State> for FocusTarget {
         time: u32,
     ) {
         match self {
-            FocusTarget::Window(w) => KeyboardTarget::key(
-                w.toplevel().wl_surface(),
-                seat,
-                data,
-                key,
-                state,
-                serial,
-                time,
-            ),
-            FocusTarget::LayerSurface(l) => {
-                KeyboardTarget::key(l.wl_surface(), seat, data, key, state, serial, time)
+            KeyboardFocusTarget::Element(w) => {
+                KeyboardTarget::key(w, seat, data, key, state, serial, time)
             }
-            FocusTarget::Popup(p) => {
+            KeyboardFocusTarget::Fullscreen(w) => {
+                KeyboardTarget::key(w, seat, data, key, state, serial, time)
+            }
+            KeyboardFocusTarget::Group(_) => {}
+            KeyboardFocusTarget::LayerSurface(l) => {
+                KeyboardTarget::key(l, seat, data, key, state, serial, time)
+            }
+            KeyboardFocusTarget::Popup(p) => {
                 KeyboardTarget::key(p.wl_surface(), seat, data, key, state, serial, time)
             }
         }
@@ -149,50 +200,113 @@ impl KeyboardTarget<State> for FocusTarget {
         serial: Serial,
     ) {
         match self {
-            FocusTarget::Window(w) => {
-                KeyboardTarget::modifiers(w.toplevel().wl_surface(), seat, data, modifiers, serial)
+            KeyboardFocusTarget::Element(w) => {
+                KeyboardTarget::modifiers(w, seat, data, modifiers, serial)
             }
-            FocusTarget::LayerSurface(l) => {
-                KeyboardTarget::modifiers(l.wl_surface(), seat, data, modifiers, serial)
+            KeyboardFocusTarget::Fullscreen(w) => {
+                KeyboardTarget::modifiers(w, seat, data, modifiers, serial)
             }
-            FocusTarget::Popup(p) => {
+            KeyboardFocusTarget::Group(_) => {}
+            KeyboardFocusTarget::LayerSurface(l) => {
+                KeyboardTarget::modifiers(l, seat, data, modifiers, serial)
+            }
+            KeyboardFocusTarget::Popup(p) => {
                 KeyboardTarget::modifiers(p.wl_surface(), seat, data, modifiers, serial)
             }
         }
     }
 }
 
-impl WaylandFocus for FocusTarget {
-    fn wl_surface(&self) -> Option<&WlSurface> {
-        Some(match self {
-            FocusTarget::Window(w) => w.toplevel().wl_surface(),
-            FocusTarget::LayerSurface(l) => l.wl_surface(),
-            FocusTarget::Popup(p) => p.wl_surface(),
-        })
+impl WaylandFocus for KeyboardFocusTarget {
+    fn wl_surface(&self) -> Option<WlSurface> {
+        match self {
+            KeyboardFocusTarget::Element(w) => WaylandFocus::wl_surface(w),
+            KeyboardFocusTarget::Fullscreen(w) => WaylandFocus::wl_surface(w),
+            KeyboardFocusTarget::Group(_) => None,
+            KeyboardFocusTarget::LayerSurface(l) => Some(l.wl_surface().clone()),
+            KeyboardFocusTarget::Popup(p) => Some(p.wl_surface().clone()),
+        }
     }
     fn same_client_as(&self, object_id: &ObjectId) -> bool {
         match self {
-            FocusTarget::Window(w) => w.toplevel().wl_surface().id().same_client_as(object_id),
-            FocusTarget::LayerSurface(l) => l.wl_surface().id().same_client_as(object_id),
-            FocusTarget::Popup(p) => p.wl_surface().id().same_client_as(object_id),
+            KeyboardFocusTarget::Element(w) => WaylandFocus::same_client_as(w, object_id),
+            KeyboardFocusTarget::Fullscreen(w) => WaylandFocus::same_client_as(w, object_id),
+            KeyboardFocusTarget::Group(_) => false,
+            KeyboardFocusTarget::LayerSurface(l) => l.wl_surface().id().same_client_as(object_id),
+            KeyboardFocusTarget::Popup(p) => p.wl_surface().id().same_client_as(object_id),
         }
     }
 }
 
-impl From<Window> for FocusTarget {
+impl WaylandFocus for PointerFocusTarget {
+    fn wl_surface(&self) -> Option<WlSurface> {
+        Some(match self {
+            PointerFocusTarget::Element(w) => WaylandFocus::wl_surface(w)?,
+            PointerFocusTarget::Fullscreen(w) => WaylandFocus::wl_surface(w)?,
+            PointerFocusTarget::LayerSurface(l) => l.wl_surface().clone(),
+            PointerFocusTarget::Popup(p) => p.wl_surface().clone(),
+        })
+    }
+    fn same_client_as(&self, object_id: &ObjectId) -> bool {
+        match self {
+            PointerFocusTarget::Element(w) => WaylandFocus::same_client_as(w, object_id),
+            PointerFocusTarget::Fullscreen(w) => WaylandFocus::same_client_as(w, object_id),
+            PointerFocusTarget::LayerSurface(l) => l.wl_surface().id().same_client_as(object_id),
+            PointerFocusTarget::Popup(p) => p.wl_surface().id().same_client_as(object_id),
+        }
+    }
+}
+
+impl From<CosmicMapped> for PointerFocusTarget {
+    fn from(w: CosmicMapped) -> Self {
+        PointerFocusTarget::Element(w)
+    }
+}
+
+impl From<Window> for PointerFocusTarget {
     fn from(w: Window) -> Self {
-        FocusTarget::Window(w)
+        PointerFocusTarget::Fullscreen(w)
     }
 }
 
-impl From<LayerSurface> for FocusTarget {
+impl From<LayerSurface> for PointerFocusTarget {
     fn from(l: LayerSurface) -> Self {
-        FocusTarget::LayerSurface(l)
+        PointerFocusTarget::LayerSurface(l)
     }
 }
 
-impl From<PopupKind> for FocusTarget {
+impl From<PopupKind> for PointerFocusTarget {
     fn from(p: PopupKind) -> Self {
-        FocusTarget::Popup(p)
+        PointerFocusTarget::Popup(p)
+    }
+}
+
+impl From<CosmicMapped> for KeyboardFocusTarget {
+    fn from(w: CosmicMapped) -> Self {
+        KeyboardFocusTarget::Element(w)
+    }
+}
+
+impl From<Window> for KeyboardFocusTarget {
+    fn from(w: Window) -> Self {
+        KeyboardFocusTarget::Fullscreen(w)
+    }
+}
+
+impl From<WindowGroup> for KeyboardFocusTarget {
+    fn from(w: WindowGroup) -> Self {
+        KeyboardFocusTarget::Group(w)
+    }
+}
+
+impl From<LayerSurface> for KeyboardFocusTarget {
+    fn from(l: LayerSurface) -> Self {
+        KeyboardFocusTarget::LayerSurface(l)
+    }
+}
+
+impl From<PopupKind> for KeyboardFocusTarget {
+    fn from(p: PopupKind) -> Self {
+        KeyboardFocusTarget::Popup(p)
     }
 }

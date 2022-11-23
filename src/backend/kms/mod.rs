@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-#[cfg(feature = "debug")]
-use crate::state::Fps;
-
 use crate::{
     backend::render,
     config::OutputConfig,
     shell::Shell,
-    state::{BackendData, ClientState, Common, Data},
+    state::{BackendData, ClientState, Common, Data, Fps},
     utils::prelude::*,
+    wayland::{
+        handlers::screencopy::{PendingScreencopyBuffers, UserdataExt},
+        protocols::screencopy::{BufferParams, Session as ScreencopySession},
+    },
 };
 
 use anyhow::{Context, Result};
@@ -20,13 +21,16 @@ use smithay::{
         input::InputEvent,
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
+            damage::DamageTrackedRenderer,
             gles2::Gles2Renderbuffer,
+            glow::GlowRenderer,
             multigpu::{egl::EglGlesBackend, GpuManager},
-            Bind,
         },
         session::{auto::AutoSession, Session, Signal},
         udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
     },
+    desktop::utils::OutputPresentationFeedback,
+    input::Seat,
     output::{Mode as OutputMode, Output, PhysicalProperties, Subpixel},
     reexports::{
         calloop::{
@@ -36,6 +40,7 @@ use smithay::{
         drm::control::{connector, crtc, Device as ControlDevice, ModeTypeFlags},
         input::Libinput,
         nix::{fcntl::OFlag, sys::stat::dev_t},
+        wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
         wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle, Resource},
     },
     utils::{
@@ -51,7 +56,7 @@ use std::{
     os::unix::io::{FromRawFd, OwnedFd},
     path::PathBuf,
     rc::Rc,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 mod drm_helpers;
@@ -60,9 +65,13 @@ mod socket;
 use session_fd::*;
 use socket::*;
 
+use super::render::{CursorMode, GlMultiRenderer};
+// for now we assume we need at least 3ms
+const MIN_RENDER_TIME: Duration = Duration::from_millis(3);
+
 pub struct KmsState {
     devices: HashMap<DrmNode, Device>,
-    pub api: GpuManager<EglGlesBackend>,
+    pub api: GpuManager<EglGlesBackend<GlowRenderer>>,
     pub primary: DrmNode,
     session: AutoSession,
     signaler: Signaler<Signal>,
@@ -82,16 +91,21 @@ pub struct Device {
 }
 
 pub struct Surface {
-    surface: Option<GbmBufferedSurface<Rc<RefCell<GbmDevice<SessionFd>>>, SessionFd>>,
+    surface: Option<
+        GbmBufferedSurface<
+            Rc<RefCell<GbmDevice<SessionFd>>>,
+            SessionFd,
+            Option<OutputPresentationFeedback>,
+        >,
+    >,
+    damage_tracker: DamageTrackedRenderer,
     connector: connector::Handle,
     output: Output,
-    last_render: Option<(Dmabuf, Instant)>,
-    last_submit: Option<DrmEventTime>,
     refresh_rate: u32,
     vrr: bool,
     pending: bool,
+    dirty: bool,
     render_timer_token: Option<RegistrationToken>,
-    #[cfg(feature = "debug")]
     fps: Fps,
 }
 
@@ -120,12 +134,12 @@ pub fn init_backend(
             }
             data.state.process_input_event(event);
             for output in data.state.common.shell.outputs() {
-                if let Err(err) = data
-                    .state
-                    .backend
-                    .kms()
-                    .schedule_render(&data.state.common.event_loop_handle, output)
-                {
+                if let Err(err) = data.state.backend.kms().schedule_render(
+                    &data.state.common.event_loop_handle,
+                    output,
+                    None,
+                    None,
+                ) {
                     slog_scope::crit!(
                         "Error scheduling event loop for output {}: {:?}",
                         output.name(),
@@ -142,7 +156,8 @@ pub fn init_backend(
         .map_err(|err| err.error)
         .context("Failed to initialize session event source")?;
 
-    let api = GpuManager::new(EglGlesBackend, None).context("Failed to initialize renderers")?;
+    let api = GpuManager::new(EglGlesBackend::<GlowRenderer>::default(), None)
+        .context("Failed to initialize renderers")?;
 
     // TODO get this info from system76-power, if available and setup a watcher
     let primary = if let Some(path) = std::env::var("COSMIC_RENDER_DEVICE")
@@ -238,20 +253,15 @@ pub fn init_backend(
                         }
                     }
                 }
-                data.state.common.output_configuration_state.update();
 
+                let seats = data.state.common.seats().cloned().collect::<Vec<_>>();
                 data.state.common.config.read_outputs(
-                    data.state.common.output_configuration_state.outputs(),
+                    &mut data.state.common.output_configuration_state,
                     &mut data.state.backend,
                     &mut data.state.common.shell,
+                    seats.into_iter(),
                     &data.state.common.event_loop_handle,
                 );
-                data.state.common.shell.refresh_outputs();
-                data.state
-                    .common
-                    .config
-                    .write_outputs(data.state.common.output_configuration_state.outputs());
-
                 for surface in data
                     .state
                     .backend
@@ -263,12 +273,17 @@ pub fn init_backend(
                     surface.pending = false;
                 }
                 for output in data.state.common.shell.outputs() {
-                    if let Err(err) = data
-                        .state
-                        .backend
-                        .kms()
-                        .schedule_render(&data.state.common.event_loop_handle, output)
-                    {
+                    let sessions = output.pending_buffers().collect::<Vec<_>>();
+                    if let Err(err) = data.state.backend.kms().schedule_render(
+                        &data.state.common.event_loop_handle,
+                        output,
+                        None,
+                        if !sessions.is_empty() {
+                            Some(sessions)
+                        } else {
+                            None
+                        },
+                    ) {
                         slog_scope::crit!(
                             "Error scheduling event loop for output {}: {:?}",
                             output.name(),
@@ -364,27 +379,87 @@ impl State {
         let dispatcher =
             Dispatcher::new(drm, move |event, metadata, data: &mut Data| match event {
                 DrmEvent::VBlank(crtc) => {
-                    if let Some(device) = data.state.backend.kms().devices.get_mut(&drm_node) {
-                        if let Some(surface) = device.surfaces.get_mut(&crtc) {
-                            match surface.surface.as_mut().map(|x| x.frame_submitted()) {
-                                Some(Ok(_)) => {
-                                    surface.last_submit = metadata.take().map(|data| data.time);
-                                    surface.pending = false;
-                                    data.state
-                                        .common
-                                        .shell
-                                        .active_space_mut(&surface.output)
-                                        .space
-                                        .send_frames(
-                                            data.state.common.start_time.elapsed().as_millis()
-                                                as u32,
-                                        );
+                    let rescheduled =
+                        if let Some(device) = data.state.backend.kms().devices.get_mut(&drm_node) {
+                            if let Some(surface) = device.surfaces.get_mut(&crtc) {
+                                #[cfg(feature = "debug")]
+                                surface.fps.displayed();
+
+                                match surface.surface.as_mut().map(|x| x.frame_submitted()) {
+                                    Some(Ok(feedback)) => {
+                                        if let Some(mut feedback) = feedback.flatten() {
+                                            let submit_time =
+                                                match metadata.take().map(|data| data.time) {
+                                                    Some(DrmEventTime::Monotonic(tp)) => Some(tp),
+                                                    _ => None,
+                                                };
+                                            let seq = metadata
+                                                .as_ref()
+                                                .map(|metadata| metadata.sequence)
+                                                .unwrap_or(0);
+
+                                            let (clock, flags) = if let Some(tp) = submit_time {
+                                                (
+                                                tp.into(),
+                                                wp_presentation_feedback::Kind::Vsync
+                                                    | wp_presentation_feedback::Kind::HwClock
+                                                    | wp_presentation_feedback::Kind::HwCompletion,
+                                            )
+                                            } else {
+                                                (
+                                                    data.state.common.clock.now(),
+                                                    wp_presentation_feedback::Kind::Vsync,
+                                                )
+                                            };
+
+                                            feedback.presented(
+                                                clock,
+                                                surface
+                                                    .output
+                                                    .current_mode()
+                                                    .map(|mode| mode.refresh as u32)
+                                                    .unwrap_or_default(),
+                                                seq as u64,
+                                                flags,
+                                            );
+                                        }
+
+                                        surface.pending = false;
+                                        surface.dirty.then(|| {
+                                            (surface.output.clone(), surface.fps.avg_rendertime(5))
+                                        })
+                                    }
+                                    Some(Err(err)) => {
+                                        slog_scope::warn!("Failed to submit frame: {}", err);
+                                        None
+                                    }
+                                    _ => None, // got disabled
                                 }
-                                Some(Err(err)) => {
-                                    slog_scope::warn!("Failed to submit frame: {}", err)
-                                }
-                                None => {} // got disabled
-                            };
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+
+                    if let Some((output, avg_rendertime)) = rescheduled {
+                        let mut scheduled_sessions =
+                            data.state.workspace_session_for_output(&output);
+                        if let Some(sessions) = output.user_data().get::<PendingScreencopyBuffers>()
+                        {
+                            scheduled_sessions
+                                .get_or_insert_with(Vec::new)
+                                .extend(sessions.borrow_mut().drain(..));
+                        }
+
+                        let repaint_delay = std::cmp::max(avg_rendertime, MIN_RENDER_TIME);
+                        if let Err(err) = data.state.backend.kms().schedule_render(
+                            &data.state.common.event_loop_handle,
+                            &output,
+                            Some(repaint_delay),
+                            scheduled_sessions,
+                        ) {
+                            slog_scope::warn!("Failed to schedule render: {}", err);
                         }
                     }
                 }
@@ -424,47 +499,44 @@ impl State {
         let outputs = device.enumerate_surfaces()?.added; // There are no removed outputs on newly added devices
         let mut wl_outputs = Vec::new();
         let mut w = self.common.shell.global_space().size.w;
-        for (crtc, conn) in outputs {
-            match device.setup_surface(crtc, conn, (w, 0)) {
-                Ok(output) => {
-                    w += output
-                        .user_data()
-                        .get::<RefCell<OutputConfig>>()
-                        .unwrap()
-                        .borrow()
-                        .mode_size()
-                        .w;
-                    wl_outputs.push(output);
-                }
-                Err(err) => slog_scope::warn!("Failed to initialize output: {}", err),
-            };
+        {
+            let backend = self.backend.kms();
+            for (crtc, conn) in outputs {
+                let mut renderer = match backend.api.renderer(&render_node, &render_node) {
+                    Ok(renderer) => renderer,
+                    Err(err) => {
+                        slog_scope::warn!("Failed to initialize output: {}", err);
+                        continue;
+                    }
+                };
+                match device.setup_surface(crtc, conn, (w, 0), &mut renderer) {
+                    Ok(output) => {
+                        w += output
+                            .user_data()
+                            .get::<RefCell<OutputConfig>>()
+                            .unwrap()
+                            .borrow()
+                            .mode_size()
+                            .w;
+                        wl_outputs.push(output);
+                    }
+                    Err(err) => slog_scope::warn!("Failed to initialize output: {}", err),
+                };
+            }
+            backend.devices.insert(drm_node, device);
         }
-        self.backend.kms().devices.insert(drm_node, device);
 
         self.common
             .output_configuration_state
             .add_heads(wl_outputs.iter());
-        self.common.output_configuration_state.update();
-        for output in wl_outputs {
-            if let Err(err) = self.backend.kms().apply_config_for_output(
-                &output,
-                &mut self.common.shell,
-                false,
-                &self.common.event_loop_handle,
-            ) {
-                slog_scope::warn!("Failed to initialize output: {}", err);
-            }
-        }
+        let seats = self.common.seats().cloned().collect::<Vec<_>>();
         self.common.config.read_outputs(
-            self.common.output_configuration_state.outputs(),
+            &mut self.common.output_configuration_state,
             &mut self.backend,
             &mut self.common.shell,
+            seats.into_iter(),
             &self.common.event_loop_handle,
         );
-        self.common.shell.refresh_outputs();
-        self.common
-            .config
-            .write_outputs(self.common.output_configuration_state.outputs());
 
         Ok(())
     }
@@ -477,32 +549,45 @@ impl State {
         let drm_node = DrmNode::from_dev_id(dev)?;
         let mut outputs_removed = Vec::new();
         let mut outputs_added = Vec::new();
-        if let Some(device) = self.backend.kms().devices.get_mut(&drm_node) {
-            let changes = device.enumerate_surfaces()?;
-            let mut w = self.common.shell.global_space().size.w;
-            for crtc in changes.removed {
-                if let Some(surface) = device.surfaces.remove(&crtc) {
-                    if let Some(token) = surface.render_timer_token {
-                        self.common.event_loop_handle.remove(token);
+        {
+            let backend = self.backend.kms();
+            if let Some(device) = backend.devices.get_mut(&drm_node) {
+                let changes = device.enumerate_surfaces()?;
+                let mut w = self.common.shell.global_space().size.w;
+                for crtc in changes.removed {
+                    if let Some(surface) = device.surfaces.remove(&crtc) {
+                        if let Some(token) = surface.render_timer_token {
+                            self.common.event_loop_handle.remove(token);
+                        }
+                        w -= surface.output.current_mode().map(|m| m.size.w).unwrap_or(0);
+                        outputs_removed.push(surface.output.clone());
                     }
-                    w -= surface.output.current_mode().map(|m| m.size.w).unwrap_or(0);
-                    outputs_removed.push(surface.output.clone());
                 }
-            }
-            for (crtc, conn) in changes.added {
-                match device.setup_surface(crtc, conn, (w, 0)) {
-                    Ok(output) => {
-                        w += output
-                            .user_data()
-                            .get::<RefCell<OutputConfig>>()
-                            .unwrap()
-                            .borrow()
-                            .mode_size()
-                            .w;
-                        outputs_added.push(output);
-                    }
-                    Err(err) => slog_scope::warn!("Failed to initialize output: {}", err),
-                };
+                for (crtc, conn) in changes.added {
+                    let mut renderer = match backend
+                        .api
+                        .renderer(&device.render_node, &device.render_node)
+                    {
+                        Ok(renderer) => renderer,
+                        Err(err) => {
+                            slog_scope::warn!("Failed to initialize output: {}", err);
+                            continue;
+                        }
+                    };
+                    match device.setup_surface(crtc, conn, (w, 0), &mut renderer) {
+                        Ok(output) => {
+                            w += output
+                                .user_data()
+                                .get::<RefCell<OutputConfig>>()
+                                .unwrap()
+                                .borrow()
+                                .mode_size()
+                                .w;
+                            outputs_added.push(output);
+                        }
+                        Err(err) => slog_scope::warn!("Failed to initialize output: {}", err),
+                    };
+                }
             }
         }
 
@@ -512,30 +597,19 @@ impl State {
         self.common
             .output_configuration_state
             .add_heads(outputs_added.iter());
-        for output in outputs_added {
-            if let Err(err) = self.backend.kms().apply_config_for_output(
-                &output,
-                &mut self.common.shell,
-                false,
-                &self.common.event_loop_handle,
-            ) {
-                slog_scope::warn!("Failed to initialize output: {}", err);
-            }
-        }
+        let seats = self.common.seats().cloned().collect::<Vec<_>>();
         for output in outputs_removed {
-            self.common.shell.remove_output(&output);
+            self.common
+                .shell
+                .remove_output(&output, seats.iter().cloned());
         }
-        self.common.output_configuration_state.update();
         self.common.config.read_outputs(
-            self.common.output_configuration_state.outputs(),
+            &mut self.common.output_configuration_state,
             &mut self.backend,
             &mut self.common.shell,
+            seats.into_iter(),
             &self.common.event_loop_handle,
         );
-        self.common.shell.refresh_outputs();
-        self.common
-            .config
-            .write_outputs(self.common.output_configuration_state.outputs());
 
         Ok(())
     }
@@ -564,22 +638,23 @@ impl State {
         self.common
             .output_configuration_state
             .remove_heads(outputs_removed.iter());
-        self.common.output_configuration_state.update();
 
+        let seats = self.common.seats().cloned().collect::<Vec<_>>();
         if self.backend.kms().session.is_active() {
             for output in outputs_removed {
-                self.common.shell.remove_output(&output);
+                self.common
+                    .shell
+                    .remove_output(&output, seats.iter().cloned());
             }
             self.common.config.read_outputs(
-                self.common.output_configuration_state.outputs(),
+                &mut self.common.output_configuration_state,
                 &mut self.backend,
                 &mut self.common.shell,
+                seats.into_iter(),
                 &self.common.event_loop_handle,
             );
-            self.common.shell.refresh_outputs();
-            self.common
-                .config
-                .write_outputs(self.common.output_configuration_state.outputs());
+        } else {
+            self.common.output_configuration_state.update();
         }
 
         Ok(())
@@ -624,6 +699,7 @@ impl Device {
         crtc: crtc::Handle,
         conn: connector::Handle,
         position: (i32, i32),
+        renderer: &mut GlMultiRenderer<'_>,
     ) -> Result<Output> {
         let drm = &mut *self.drm.as_source_mut();
         let crtc_info = drm.get_crtc(crtc)?;
@@ -689,16 +765,15 @@ impl Device {
 
         let data = Surface {
             output: output.clone(),
+            damage_tracker: DamageTrackedRenderer::from_output(&output),
             surface: None,
             connector: conn,
             vrr,
             refresh_rate,
-            last_submit: None,
-            last_render: None,
             pending: false,
+            dirty: false,
             render_timer_token: None,
-            #[cfg(feature = "debug")]
-            fps: Fps::default(),
+            fps: Fps::new(renderer.as_mut()),
         };
         self.surfaces.insert(crtc, data);
 
@@ -717,8 +792,8 @@ fn render_node_for_output(
     let workspace = shell.active_space(output);
     let nodes = workspace
         .get_fullscreen(output)
-        .map(|w| vec![w])
-        .unwrap_or_else(|| workspace.space.windows().collect::<Vec<_>>())
+        .map(|w| vec![w.clone()])
+        .unwrap_or_else(|| workspace.windows().collect::<Vec<_>>())
         .into_iter()
         .flat_map(|w| {
             dh.get_client(w.toplevel().wl_surface().id())
@@ -750,44 +825,44 @@ impl Surface {
     pub fn render_output(
         &mut self,
         dh: &DisplayHandle,
-        api: &mut GpuManager<EglGlesBackend>,
+        api: &mut GpuManager<EglGlesBackend<GlowRenderer>>,
         target_node: &DrmNode,
         state: &mut Common,
+        screencopy: Option<&[(ScreencopySession, BufferParams)]>,
     ) -> Result<()> {
         if self.surface.is_none() {
             return Ok(());
         }
 
-        if render::needs_buffer_reset(&self.output, state) {
-            self.surface.as_mut().unwrap().reset_buffers();
-        }
-
         let render_node = render_node_for_output(dh, &self.output, *target_node, &state.shell);
-        let mut renderer = api.renderer(&render_node, &target_node).unwrap();
+        let mut renderer: GlMultiRenderer = api.renderer(&render_node, &target_node).unwrap();
 
         let surface = self.surface.as_mut().unwrap();
         let (buffer, age) = surface
             .next_buffer()
             .with_context(|| "Failed to allocate buffer")?;
 
-        renderer
-            .bind(buffer.clone())
-            .with_context(|| "Failed to bind buffer")?;
-
-        match render::render_output(
+        match render::render_output::<GlMultiRenderer, _, Gles2Renderbuffer, _>(
             Some(&render_node),
             &mut renderer,
-            age,
+            buffer.clone(),
+            &mut self.damage_tracker,
+            age as usize,
             state,
             &self.output,
-            false,
-            #[cfg(feature = "debug")]
+            CursorMode::All,
+            screencopy.map(|sessions| (buffer, sessions)),
             Some(&mut self.fps),
         ) {
-            Ok(_) => {
-                self.last_render = Some((buffer, Instant::now()));
+            Ok((damage, states)) => {
+                let feedback = if damage.is_some() {
+                    Some(state.take_presentation_feedback(&self.output, &states))
+                } else {
+                    None
+                };
+                state.send_frames(&self.output, &states);
                 surface
-                    .queue_buffer()
+                    .queue_buffer(feedback)
                     .with_context(|| "Failed to submit buffer for display")?;
             }
             Err(err) => {
@@ -795,6 +870,7 @@ impl Surface {
                 anyhow::bail!("Rendering failed: {}", err);
             }
         };
+
         Ok(())
     }
 }
@@ -807,6 +883,7 @@ impl KmsState {
     pub fn apply_config_for_output(
         &mut self,
         output: &Output,
+        seats: impl Iterator<Item = Seat<State>>,
         shell: &mut Shell,
         test_only: bool,
         loop_handle: &LoopHandle<'_, Data>,
@@ -829,10 +906,11 @@ impl KmsState {
 
             if !output_config.enabled {
                 if !test_only {
+                    shell.remove_output(output, seats);
                     if surface.surface.take().is_some() {
                         // just drop it
-                        shell.remove_output(output);
                         surface.pending = false;
+                        surface.dirty = false;
                     }
                 }
                 false
@@ -856,7 +934,7 @@ impl KmsState {
                     .ok_or(anyhow::anyhow!("Unknown mode"))?;
 
                 if !test_only {
-                    if let Some(gbm_surface) = surface.surface.as_mut() {
+                    let res = if let Some(gbm_surface) = surface.surface.as_mut() {
                         if output_config.vrr != surface.vrr {
                             surface.vrr = drm_helpers::set_vrr(
                                 drm,
@@ -888,9 +966,10 @@ impl KmsState {
                             )
                         })?;
                         surface.surface = Some(target);
-                        shell.add_output(output);
                         true
-                    }
+                    };
+                    shell.add_output(output);
+                    res
                 } else {
                     false
                 }
@@ -901,7 +980,17 @@ impl KmsState {
 
         shell.refresh_outputs();
         if recreated {
-            if let Err(err) = self.schedule_render(loop_handle, output) {
+            let sessions = output.pending_buffers().collect::<Vec<_>>();
+            if let Err(err) = self.schedule_render(
+                loop_handle,
+                output,
+                None,
+                if !sessions.is_empty() {
+                    Some(sessions)
+                } else {
+                    None
+                },
+            ) {
                 slog_scope::crit!(
                     "Error scheduling event loop for output {}: {:?}",
                     output.name(),
@@ -964,6 +1053,8 @@ impl KmsState {
         &mut self,
         loop_handle: &LoopHandle<'_, Data>,
         output: &Output,
+        delay: Option<Duration>,
+        mut screencopy_sessions: Option<Vec<(ScreencopySession, BufferParams)>>,
     ) -> Result<(), InsertError<Timer>> {
         if let Some((device, crtc, surface)) = self
             .devices
@@ -975,20 +1066,8 @@ impl KmsState {
                 return Ok(());
             }
             if !surface.pending {
+                surface.dirty = false;
                 surface.pending = true;
-                /*
-                let instant = surface
-                    .last_submit
-                    .as_ref()
-                    .and_then(|x| match x {
-                        DrmEventTime::Monotonic(instant) => Some(instant),
-                        DrmEventTime::Realtime(_) => None,
-                    })
-                    .map(|i| {
-                        *i + Duration::from_secs_f64(1.0 / surface.refresh_rate as f64)
-                            - Duration::from_millis(20) // render budget
-                    });
-                */
 
                 let device = *device;
                 let crtc = *crtc;
@@ -996,10 +1075,11 @@ impl KmsState {
                     loop_handle.remove(token);
                 }
                 surface.render_timer_token = Some(loop_handle.insert_source(
-                    //if surface.vrr || instant.is_none() {
-                    Timer::immediate(), /*} else {
-                                            Timer::from_deadline(instant.unwrap())
-                                        }*/
+                    if surface.vrr || delay.is_none() {
+                        Timer::immediate()
+                    } else {
+                        Timer::from_duration(delay.unwrap())
+                    },
                     move |_time, _, data| {
                         let backend = data.state.backend.kms();
                         if let Some(device) = backend.devices.get_mut(&device) {
@@ -1009,11 +1089,17 @@ impl KmsState {
                                     &mut backend.api,
                                     &device.render_node,
                                     &mut data.state.common,
+                                    screencopy_sessions.as_deref(),
                                 ) {
+                                    if let Some(sessions) = screencopy_sessions.as_mut() {
+                                        for (session, params) in sessions.drain(..) {
+                                            data.state.common.still_pending(session, params);
+                                        }
+                                    }
                                     if backend.session.is_active() {
                                         slog_scope::error!("Error rendering: {}", err);
                                         return TimeoutAction::ToDuration(Duration::from_secs_f64(
-                                            1.0 / surface.refresh_rate as f64,
+                                            (1000.0 / surface.refresh_rate as f64) - 0.003,
                                         ));
                                     }
                                 }
@@ -1022,21 +1108,10 @@ impl KmsState {
                         TimeoutAction::Drop
                     },
                 )?);
+            } else {
+                surface.dirty = true;
             }
         }
         Ok(())
-    }
-
-    pub fn capture_output(&self, output: &Output) -> Option<(DrmNode, Dmabuf, Instant)> {
-        self.devices.values().find_map(|dev| {
-            dev.surfaces
-                .values()
-                .find(|s| &s.output == output)
-                .and_then(|s| {
-                    s.last_render
-                        .clone()
-                        .map(|(buf, time)| (dev.render_node.clone(), buf, time))
-                })
-        })
     }
 }

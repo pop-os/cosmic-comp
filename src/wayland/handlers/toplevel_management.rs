@@ -19,18 +19,35 @@ impl ToplevelManagementHandler for State {
     }
 
     fn activate(&mut self, _dh: &DisplayHandle, window: &Window, seat: Option<Seat<Self>>) {
-        if let Some(idx) = self
+        for output in self
             .common
             .shell
-            .space_for_window(window.toplevel().wl_surface())
-            .map(|w| w.idx)
+            .outputs()
+            .cloned()
+            .collect::<Vec<_>>()
+            .iter()
         {
-            let seat = seat.unwrap_or(self.common.last_active_seat.clone());
-            let output = active_output(&seat, &self.common);
-            if self.common.shell.active_space(&output).idx != idx {
-                self.common.shell.activate(&seat, &output, idx as usize);
+            let maybe = self
+                .common
+                .shell
+                .workspaces
+                .spaces_for_output(output)
+                .enumerate()
+                .find(|(_, w)| w.windows().any(|w| &w == window));
+            if let Some((idx, workspace)) = maybe {
+                let seat = seat.unwrap_or(self.common.last_active_seat().clone());
+                let mapped = workspace
+                    .mapped()
+                    .find(|m| m.windows().any(|(w, _)| &w == window))
+                    .unwrap()
+                    .clone();
+
+                std::mem::drop(workspace);
+                self.common.shell.activate(&output, idx as usize);
+                mapped.focus_window(window);
+                Common::set_focus(self, Some(&mapped.clone().into()), &seat, None);
+                return;
             }
-            Common::set_focus(self, Some(window.toplevel().wl_surface()), &seat, None);
         }
     }
 

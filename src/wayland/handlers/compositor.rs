@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{state::BackendData, utils::prelude::*};
+use crate::{state::BackendData, utils::prelude::*, wayland::protocols::screencopy::SessionType};
 use smithay::{
     backend::renderer::utils::{on_commit_buffer_handler, with_renderer_surface_state},
     delegate_compositor,
@@ -18,11 +18,13 @@ use smithay::{
 };
 use std::sync::Mutex;
 
+use super::screencopy::PendingScreencopyBuffers;
+
 impl State {
     fn early_import_surface(&mut self, surface: &WlSurface) {
         let mut import_nodes = std::collections::HashSet::new();
         let dh = &self.common.display_handle;
-        for output in self.common.shell.outputs_for_surface(&surface) {
+        for output in self.common.shell.visible_outputs_for_surface(&surface) {
             if let BackendData::Kms(ref mut kms_state) = &mut self.backend {
                 if let Some(target) = kms_state.target_node_for_output(&output) {
                     if import_nodes.insert(target) {
@@ -90,7 +92,7 @@ impl State {
         if !initial_configure_sent {
             // compute initial dimensions by mapping
             Shell::map_layer(self, &surface);
-            // this will also send a configure
+            surface.layer_surface().send_configure();
         }
         initial_configure_sent
     }
@@ -121,7 +123,7 @@ impl CompositorHandler for State {
                             state.wl_buffer().is_some()
                         })
                     {
-                        let output = active_output(&seat, &self.common);
+                        let output = seat.active_output();
                         Shell::map_window(self, &window, &output);
                     } else {
                         return;
@@ -152,36 +154,18 @@ impl CompositorHandler for State {
         // If we would re-position the window inside the grab we would get a weird jittery animation.
         // We only want to resize once the client has acknoledged & commited the new size,
         // so we need to carefully track the state through different handlers.
-        if let Some((space, window)) =
-            self.common
-                .shell
-                .space_for_window_mut(surface)
-                .and_then(|workspace| {
-                    workspace
-                        .space
-                        .window_for_surface(surface, WindowSurfaceType::TOPLEVEL)
-                        .cloned()
-                        .map(|window| (&mut workspace.space, window))
-                })
-        {
-            let new_location =
-                crate::shell::layout::floating::ResizeSurfaceGrab::apply_resize_state(
-                    &window,
-                    space.window_location(&window).unwrap(),
-                    window.geometry().size,
+        if let Some(element) = self.common.shell.element_for_surface(surface).cloned() {
+            if let Some(workspace) = self.common.shell.space_for_mut(&element) {
+                crate::shell::layout::floating::ResizeSurfaceGrab::apply_resize_to_location(
+                    element.clone(),
+                    workspace,
                 );
-            if let Some(location) = new_location {
-                space.map_window(
-                    &window,
-                    location,
-                    crate::shell::layout::floating::FLOATING_INDEX,
-                    true,
-                );
-                for window in space.windows() {
-                    update_reactive_popups(space, window);
-                }
+                workspace.commit(surface);
             }
         }
+
+        //handle window screencopy sessions
+        self.schedule_window_session(surface);
 
         // We need to know every potential output for importing to the right gpu and scheduling a render,
         // so call this only after every potential surface map operation has been done.
@@ -189,9 +173,6 @@ impl CompositorHandler for State {
 
         // and refresh smithays internal state
         self.common.shell.popups.commit(surface);
-        for workspace in &self.common.shell.spaces {
-            workspace.space.commit(surface);
-        }
 
         // re-arrange layer-surfaces (commits may change size and positioning)
         if let Some(output) = self.common.shell.outputs().find(|o| {
@@ -199,14 +180,37 @@ impl CompositorHandler for State {
             map.layer_for_surface(surface, WindowSurfaceType::ALL)
                 .is_some()
         }) {
-            let dh = &self.common.display_handle;
-            layer_map_for_output(output).arrange(dh);
+            layer_map_for_output(output).arrange();
         }
 
+        let mut scheduled_sessions = self.schedule_workspace_sessions(surface);
+
         // schedule a new render
-        for output in self.common.shell.outputs_for_surface(surface) {
-            self.backend
-                .schedule_render(&self.common.event_loop_handle, &output);
+        for output in self.common.shell.visible_outputs_for_surface(surface) {
+            if let Some(sessions) = output.user_data().get::<PendingScreencopyBuffers>() {
+                scheduled_sessions
+                    .get_or_insert_with(Vec::new)
+                    .extend(sessions.borrow_mut().drain(..));
+            }
+
+            self.backend.schedule_render(
+                &self.common.event_loop_handle,
+                &output,
+                scheduled_sessions.as_ref().map(|sessions| {
+                    sessions
+                        .iter()
+                        .filter(|(s, _)| match s.session_type() {
+                            SessionType::Output(o) | SessionType::Workspace(o, _)
+                                if o == output =>
+                            {
+                                true
+                            }
+                            _ => false,
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>()
+                }),
+            );
         }
     }
 }

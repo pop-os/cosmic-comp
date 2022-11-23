@@ -6,17 +6,22 @@ use crate::{
     input::Devices,
     state::{BackendData, Common, Data},
     utils::prelude::*,
+    wayland::protocols::screencopy::{BufferParams, Session as ScreencopySession},
 };
 use anyhow::{anyhow, Context, Result};
 use smithay::{
     backend::{
-        renderer::{ImportDma, ImportEgl},
+        renderer::{
+            damage::DamageTrackedRenderer, gles2::Gles2Renderbuffer, glow::GlowRenderer, ImportDma,
+            ImportEgl,
+        },
         winit::{self, WinitEvent, WinitGraphicsBackend, WinitVirtualDevice},
     },
     desktop::layer_map_for_output,
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
         calloop::{ping, EventLoop},
+        wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
         wayland_server::DisplayHandle,
     },
     utils::Transform,
@@ -26,52 +31,71 @@ use std::cell::RefCell;
 #[cfg(feature = "debug")]
 use crate::state::Fps;
 
+use super::render::CursorMode;
+
 pub struct WinitState {
     // The winit backend currently has no notion of multiple windows
-    pub backend: WinitGraphicsBackend,
+    pub backend: WinitGraphicsBackend<GlowRenderer>,
     output: Output,
-    age_reset: u8,
+    damage_tracker: DamageTrackedRenderer,
+    screencopy: Vec<(ScreencopySession, BufferParams)>,
     #[cfg(feature = "debug")]
     fps: Fps,
 }
 
 impl WinitState {
     pub fn render_output(&mut self, state: &mut Common) -> Result<()> {
-        if render::needs_buffer_reset(&self.output, state) {
-            self.reset_buffers();
-        }
-
         self.backend
             .bind()
             .with_context(|| "Failed to bind buffer")?;
-        let age = if self.age_reset > 0 {
-            self.age_reset -= 1;
-            0
-        } else {
-            self.backend.buffer_age().unwrap_or(0)
-        };
+        let age = self.backend.buffer_age().unwrap_or(0);
 
-        match render::render_output(
+        let surface = self.backend.egl_surface();
+        match render::render_output::<_, _, Gles2Renderbuffer, _>(
             None,
             self.backend.renderer(),
-            age as u8,
+            surface.clone(),
+            &mut self.damage_tracker,
+            age,
             state,
             &self.output,
-            true,
+            CursorMode::NotDefault,
+            if !self.screencopy.is_empty() {
+                Some((surface, &self.screencopy))
+            } else {
+                None
+            },
+            #[cfg(not(feature = "debug"))]
+            None,
             #[cfg(feature = "debug")]
             Some(&mut self.fps),
         ) {
-            Ok(damage) => {
-                state
-                    .shell
-                    .active_space_mut(&self.output)
-                    .space
-                    .send_frames(state.start_time.elapsed().as_millis() as u32);
+            Ok((damage, states)) => {
+                self.screencopy.clear();
                 self.backend
-                    .submit(damage.as_ref().map(|x| &**x))
+                    .submit(damage.as_deref())
                     .with_context(|| "Failed to submit buffer for display")?;
+                #[cfg(feature = "debug")]
+                self.fps.displayed();
+                state.send_frames(&self.output, &states);
+                if damage.is_some() {
+                    let mut output_presentation_feedback =
+                        state.take_presentation_feedback(&self.output, &states);
+                    output_presentation_feedback.presented(
+                        state.clock.now(),
+                        self.output
+                            .current_mode()
+                            .map(|mode| mode.refresh as u32)
+                            .unwrap_or_default(),
+                        0,
+                        wp_presentation_feedback::Kind::Vsync,
+                    )
+                }
             }
             Err(err) => {
+                for (session, params) in self.screencopy.drain(..) {
+                    state.still_pending(session, params)
+                }
                 anyhow::bail!("Rendering failed: {}", err);
             }
         };
@@ -105,8 +129,10 @@ impl WinitState {
         }
     }
 
-    pub fn reset_buffers(&mut self) {
-        self.age_reset = 3;
+    pub fn pending_screencopy(&mut self, new: Option<Vec<(ScreencopySession, BufferParams)>>) {
+        if let Some(sessions) = new {
+            self.screencopy.extend(sessions);
+        }
     }
 }
 
@@ -133,7 +159,6 @@ pub fn init_backend(
         refresh: 60_000,
     };
     let output = Output::new(name, props, None);
-    let _global = output.create_global::<State>(dh);
     output.add_mode(mode);
     output.set_preferred(mode);
     output.change_current_state(
@@ -180,8 +205,7 @@ pub fn init_backend(
         .handle()
         .insert_source(event_source, move |_, _, data| {
             match input.dispatch_new_events(|event| {
-                data.state
-                    .process_winit_event(&data.display.handle(), event, &render_ping_handle)
+                data.state.process_winit_event(event, &render_ping_handle)
             }) {
                 Ok(_) => {
                     event_ping_handle.ping();
@@ -189,7 +213,11 @@ pub fn init_backend(
                 }
                 Err(winit::WinitError::WindowClosed) => {
                     let output = data.state.backend.winit().output.clone();
-                    data.state.common.shell.remove_output(&output);
+                    let seats = data.state.common.seats().cloned().collect::<Vec<_>>();
+                    data.state
+                        .common
+                        .shell
+                        .remove_output(&output, seats.into_iter());
                     if let Some(token) = token.take() {
                         event_loop_handle.remove(token);
                     }
@@ -199,27 +227,30 @@ pub fn init_backend(
         .map_err(|_| anyhow::anyhow!("Failed to init eventloop timer for winit"))?;
     event_ping.ping();
 
+    #[cfg(feature = "debug")]
+    let fps = Fps::new(backend.renderer());
+
     state.backend = BackendData::Winit(WinitState {
         backend,
         output: output.clone(),
+        damage_tracker: DamageTrackedRenderer::from_output(&output),
+        screencopy: Vec::new(),
         #[cfg(feature = "debug")]
-        fps: Fps::default(),
-        age_reset: 0,
+        fps,
     });
     state
         .common
         .output_configuration_state
         .add_heads(std::iter::once(&output));
-    state.common.output_configuration_state.update();
     state.common.shell.add_output(&output);
+    let seats = state.common.seats().cloned().collect::<Vec<_>>();
     state.common.config.read_outputs(
-        std::iter::once(&output),
+        &mut state.common.output_configuration_state,
         &mut state.backend,
         &mut state.common.shell,
+        seats.iter().cloned(),
         &state.common.event_loop_handle,
     );
-    state.common.shell.refresh_outputs();
-    state.common.config.write_outputs(std::iter::once(&output));
 
     Ok(())
 }
@@ -227,7 +258,7 @@ pub fn init_backend(
 fn init_egl_client_side(
     dh: &DisplayHandle,
     state: &mut State,
-    renderer: &mut WinitGraphicsBackend,
+    renderer: &mut WinitGraphicsBackend<GlowRenderer>,
 ) -> Result<()> {
     let bind_result = renderer.renderer().bind_wl_display(dh);
     match bind_result {
@@ -250,19 +281,14 @@ fn init_egl_client_side(
 }
 
 impl State {
-    pub fn process_winit_event(
-        &mut self,
-        dh: &DisplayHandle,
-        event: WinitEvent,
-        render_ping: &ping::Ping,
-    ) {
+    pub fn process_winit_event(&mut self, event: WinitEvent, render_ping: &ping::Ping) {
         // here we can handle special cases for winit inputs
         match event {
             WinitEvent::Focus(true) => {
-                for seat in self.common.seats.clone().iter() {
+                for seat in self.common.seats().cloned().collect::<Vec<_>>().iter() {
                     let devices = seat.user_data().get::<Devices>().unwrap();
                     if devices.has_device(&WinitVirtualDevice) {
-                        set_active_output(seat, &self.backend.winit().output);
+                        seat.set_active_output(&self.backend.winit().output);
                         break;
                     }
                 }
@@ -286,7 +312,7 @@ impl State {
                 output.delete_mode(output.current_mode().unwrap());
                 output.set_preferred(mode);
                 output.change_current_state(Some(mode), None, None, None);
-                layer_map_for_output(output).arrange(dh);
+                layer_map_for_output(output).arrange();
                 self.common.output_configuration_state.update();
                 self.common.shell.refresh_outputs();
                 render_ping.ping();

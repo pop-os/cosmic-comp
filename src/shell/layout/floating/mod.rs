@@ -1,99 +1,87 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use smithay::{
-    desktop::{layer_map_for_output, space::RenderZindex, Kind, Space, Window},
-    input::{
-        pointer::{Focus, GrabStartData as PointerGrabStartData},
-        Seat,
-    },
+    backend::renderer::{element::RenderElement, ImportAll, Renderer},
+    desktop::{layer_map_for_output, space::SpaceElement, Space, Window},
+    input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
-    reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
-        ResizeEdge, State as XdgState,
-    },
-    utils::{IsAlive, Logical, Point, Rectangle, Serial},
-    wayland::{compositor::with_states, shell::xdg::XdgToplevelSurfaceRoleAttributes},
+    utils::{Logical, Point, Rectangle, Serial},
 };
-use std::{collections::HashSet, sync::Mutex};
+use std::collections::HashMap;
 
-use crate::state::State;
+use crate::{
+    backend::render::element::{AsGles2Frame, AsGlowRenderer},
+    shell::{
+        element::{CosmicMapped, CosmicMappedRenderElement},
+        grabs::ResizeEdge,
+        OutputNotMapped,
+    },
+    state::State,
+    utils::prelude::*,
+};
 
 mod grabs;
 pub use self::grabs::*;
 
-pub const FLOATING_INDEX: u8 = RenderZindex::Shell as u8 + 1;
-
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct FloatingLayout {
-    pending_windows: Vec<Window>,
-    pub windows: HashSet<Window>,
+    pub(in crate::shell) space: Space<CosmicMapped>,
 }
 
-#[derive(Default)]
-pub struct WindowUserDataInner {
-    last_geometry: Rectangle<i32, Logical>,
+impl Default for FloatingLayout {
+    fn default() -> Self {
+        FloatingLayout {
+            space: Space::new(None),
+        }
+    }
 }
-pub type WindowUserData = Mutex<WindowUserDataInner>;
 
 impl FloatingLayout {
     pub fn new() -> FloatingLayout {
         Default::default()
     }
 
-    pub fn map_window(
+    pub fn map_output(&mut self, output: &Output, location: Point<i32, Logical>) {
+        self.space.map_output(output, location)
+    }
+
+    pub fn unmap_output(&mut self, output: &Output) {
+        self.space.unmap_output(output);
+        self.refresh();
+    }
+
+    pub fn map(
         &mut self,
-        space: &mut Space,
-        window: Window,
+        mapped: impl Into<CosmicMapped>,
         seat: &Seat<State>,
         position: impl Into<Option<Point<i32, Logical>>>,
     ) {
-        if let Some(output) = super::output_from_seat(Some(seat), space) {
-            self.map_window_internal(space, window, &output, position.into());
-        } else {
-            self.pending_windows.push(window);
-        }
+        let mapped = mapped.into();
+        let output = seat.active_output();
+        let position = position.into();
+
+        self.map_internal(mapped, &output, position)
     }
 
-    pub fn refresh(&mut self, space: &mut Space) {
-        self.pending_windows.retain(|w| w.toplevel().alive());
-        if let Some(output) = super::output_from_seat(None, space) {
-            for window in std::mem::take(&mut self.pending_windows).into_iter() {
-                self.map_window_internal(space, window, &output, None);
-            }
-        }
-        // TODO make sure all windows are still visible on any output or move them
-    }
-
-    fn map_window_internal(
+    pub(in crate::shell) fn map_internal(
         &mut self,
-        space: &mut Space,
-        window: Window,
+        mapped: CosmicMapped,
         output: &Output,
         position: Option<Point<i32, Logical>>,
     ) {
-        let last_geometry = window
-            .user_data()
-            .get::<WindowUserData>()
-            .map(|u| u.lock().unwrap().last_geometry);
-        let mut win_geo = window.geometry();
+        let mut win_geo = mapped.geometry();
 
         let layers = layer_map_for_output(&output);
         let geometry = layers.non_exclusive_zone();
+        let last_geometry = mapped.last_geometry.lock().unwrap().clone();
 
         let mut geo_updated = false;
-        if let Some(size) = last_geometry.clone().map(|g| g.size) {
-            geo_updated = win_geo.size == size;
+        if let Some(size) = last_geometry.map(|g| g.size) {
+            geo_updated = win_geo.size != size;
             win_geo.size = size;
         }
         {
-            let (min_size, max_size) = with_states(window.toplevel().wl_surface(), |states| {
-                let attrs = states
-                    .data_map
-                    .get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
-                    .unwrap()
-                    .lock()
-                    .unwrap();
-                (attrs.min_size, attrs.max_size)
-            });
+            let (min_size, max_size) = (mapped.min_size(), mapped.max_size());
             if win_geo.size.w > geometry.size.w / 3 * 2 {
                 // try a more reasonable size
                 let mut width = geometry.size.w / 3 * 2;
@@ -136,124 +124,188 @@ impl FloatingLayout {
                     .into()
             });
 
-        #[allow(irrefutable_let_patterns)]
-        if let Kind::Xdg(xdg) = &window.toplevel() {
-            xdg.with_pending_state(|state| {
-                state.states.unset(XdgState::TiledLeft);
-                state.states.unset(XdgState::TiledRight);
-                state.states.unset(XdgState::TiledTop);
-                state.states.unset(XdgState::TiledBottom);
-                if geo_updated {
-                    state.size = Some(win_geo.size);
-                }
-            });
-            xdg.send_configure();
+        mapped.set_tiled(false);
+        if geo_updated {
+            mapped.set_size(win_geo.size);
         }
+        mapped.configure();
 
-        space.map_window(&window, position, FLOATING_INDEX, false);
-        self.windows.insert(window);
+        self.space.map_element(mapped, position, false);
     }
 
-    pub fn unmap_window(&mut self, space: &mut Space, window: &Window) {
+    pub fn unmap(&mut self, window: &CosmicMapped) -> bool {
         #[allow(irrefutable_let_patterns)]
-        let is_maximized = match &window.toplevel() {
-            Kind::Xdg(surface) => {
-                surface.with_pending_state(|state| state.states.contains(XdgState::Maximized))
-            }
-        };
+        let is_maximized = window.is_maximized();
 
         if !is_maximized {
-            if let Some(location) = space.window_location(window) {
-                let user_data = window.user_data();
-                user_data.insert_if_missing(|| WindowUserData::default());
-                user_data
-                    .get::<WindowUserData>()
-                    .unwrap()
-                    .lock()
-                    .unwrap()
-                    .last_geometry = Rectangle::from_loc_and_size(location, window.geometry().size);
+            if let Some(location) = self.space.element_location(window) {
+                *window.last_geometry.lock().unwrap() = Some(Rectangle::from_loc_and_size(
+                    location,
+                    window.geometry().size,
+                ));
             }
         }
 
-        space.unmap_window(window);
-        self.pending_windows.retain(|w| w != window);
-        self.windows.remove(window);
+        let was_unmaped = self.space.elements().any(|e| e == window);
+        self.space.unmap_elem(&window);
+        was_unmaped
     }
 
-    pub fn maximize_request(&mut self, space: &mut Space, window: &Window, output: &Output) {
-        let layers = layer_map_for_output(&output);
-        let geometry = layers.non_exclusive_zone();
-
-        if let Some(location) = space.window_location(window) {
-            let user_data = window.user_data();
-            user_data.insert_if_missing(|| WindowUserData::default());
-            user_data
-                .get::<WindowUserData>()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .last_geometry = Rectangle::from_loc_and_size(location, window.geometry().size);
-        }
-
-        space.map_window(
-            &window,
-            (geometry.loc.x, geometry.loc.y),
-            FLOATING_INDEX,
-            true,
-        );
-        #[allow(irrefutable_let_patterns)]
-        if let Kind::Xdg(surface) = &window.toplevel() {
-            surface.with_pending_state(|state| {
-                state.states.set(XdgState::Maximized);
-                state.size = Some(geometry.size);
-            });
-            window.configure();
-        }
+    pub fn element_geometry(&self, elem: &CosmicMapped) -> Option<Rectangle<i32, Logical>> {
+        self.space.element_geometry(elem)
     }
 
-    pub fn unmaximize_request(&mut self, space: &mut Space, window: &Window) {
-        let last_geometry = window
-            .user_data()
-            .get::<WindowUserData>()
-            .map(|u| u.lock().unwrap().last_geometry);
-        match window.toplevel() {
-            Kind::Xdg(toplevel) => {
-                toplevel.with_pending_state(|state| {
-                    state.states.unset(XdgState::Maximized);
-                    state.size = last_geometry.map(|g| g.size);
-                });
-                toplevel.send_configure();
+    pub fn maximize_request(&mut self, window: &Window) {
+        if let Some(mapped) = self
+            .space
+            .elements()
+            .find(|m| m.windows().any(|(w, _)| &w == window))
+        {
+            if let Some(location) = self.space.element_location(mapped) {
+                *mapped.last_geometry.lock().unwrap() = Some(Rectangle::from_loc_and_size(
+                    location,
+                    mapped.geometry().size,
+                ));
             }
         }
-        if let Some(last_location) = last_geometry.map(|g| g.loc) {
-            space.map_window(&window, last_location, FLOATING_INDEX, true);
+    }
+
+    pub fn unmaximize_request(&mut self, window: &Window) {
+        let maybe_mapped = self
+            .space
+            .elements()
+            .find(|m| m.windows().any(|(w, _)| &w == window))
+            .cloned();
+
+        if let Some(mapped) = maybe_mapped {
+            let last_geometry = mapped.last_geometry.lock().unwrap().clone();
+            mapped.set_size(last_geometry.map(|g| g.size).expect("No previous size?"));
+            let last_location = last_geometry.map(|g| g.loc).expect("No previous location?");
+            self.space.map_element(mapped, last_location, true);
         }
     }
 
     pub fn resize_request(
-        state: &mut State,
-        window: &Window,
+        &mut self,
+        mapped: &CosmicMapped,
         seat: &Seat<State>,
-        serial: Serial,
+        _serial: Serial,
         start_data: PointerGrabStartData<State>,
         edges: ResizeEdge,
-    ) {
-        // it is so stupid, that we have to do this here. TODO: Refactor grabs
-        let workspace = state
-            .common
-            .shell
-            .space_for_window_mut(window.toplevel().wl_surface())
-            .unwrap();
-        let space = &mut workspace.space;
+    ) -> Option<ResizeSurfaceGrab> {
+        if seat.get_pointer().is_some() {
+            let location = self.space.element_location(&mapped).unwrap();
+            let size = mapped.geometry().size;
 
-        if let Some(pointer) = seat.get_pointer() {
-            let location = space.window_location(&window).unwrap();
-            let size = window.geometry().size;
-
-            let grab =
-                grabs::ResizeSurfaceGrab::new(start_data, window.clone(), edges, location, size);
-
-            pointer.set_grab(state, grab, serial, Focus::Clear);
+            Some(grabs::ResizeSurfaceGrab::new(
+                start_data,
+                mapped.clone(),
+                edges,
+                location,
+                size,
+            ))
+        } else {
+            None
         }
+    }
+
+    pub fn mapped(&self) -> impl Iterator<Item = &CosmicMapped> {
+        self.space.elements()
+    }
+
+    pub fn windows(&self) -> impl Iterator<Item = Window> + '_ {
+        self.mapped().flat_map(|e| e.windows().map(|(w, _)| w))
+    }
+
+    pub fn refresh(&mut self) {
+        self.space.refresh();
+        for element in self
+            .space
+            .elements()
+            .filter(|e| self.space.outputs_for_element(e).is_empty())
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
+        {
+            // TODO what about windows leaving to the top with no headerbar to drag? can that happen? (Probably if the user is moving outputs down)
+            *element.last_geometry.lock().unwrap() = None;
+            let output = self.space.outputs().next().unwrap().clone();
+            self.map_internal(element, &output, None);
+        }
+    }
+
+    pub fn most_overlapped_output_for_element(&self, elem: &CosmicMapped) -> Option<Output> {
+        let elem_geo = self.space.element_geometry(elem)?;
+
+        if self.space.outputs().nth(1).is_none() {
+            return self.space.outputs().next().cloned();
+        }
+
+        Some(
+            self.space
+                .outputs_for_element(elem)
+                .into_iter()
+                .max_by_key(|o| {
+                    let output_geo = self.space.output_geometry(o).unwrap();
+                    if let Some(intersection) = output_geo.intersection(elem_geo) {
+                        intersection.size.w * intersection.size.h
+                    } else {
+                        0
+                    }
+                })
+                .unwrap_or(self.space.outputs().next().unwrap().clone()),
+        )
+    }
+
+    pub fn merge(&mut self, other: FloatingLayout) {
+        let mut output_pos_map = HashMap::new();
+        for output in self.space.outputs() {
+            output_pos_map.insert(
+                output.clone(),
+                self.space.output_geometry(output).unwrap().loc
+                    - other
+                        .space
+                        .output_geometry(output)
+                        .map(|geo| geo.loc)
+                        .unwrap_or_else(|| (0, 0).into()),
+            );
+        }
+        for element in other.space.elements() {
+            let mut elem_geo = other.space.element_geometry(element).unwrap();
+            let output = other
+                .space
+                .outputs_for_element(element)
+                .into_iter()
+                .filter(|o| self.space.outputs().any(|o2| o == o2))
+                .max_by_key(|o| {
+                    let output_geo = other.space.output_geometry(o).unwrap();
+                    let intersection = output_geo.intersection(elem_geo).unwrap();
+                    intersection.size.w * intersection.size.h
+                })
+                .unwrap_or(self.space.outputs().next().unwrap().clone());
+            elem_geo.loc += output_pos_map
+                .get(&output)
+                .copied()
+                .unwrap_or_else(|| (0, 0).into());
+            self.space.map_element(element.clone(), elem_geo.loc, false);
+        }
+        self.refresh(); //fixup any out of bounds elements
+    }
+
+    pub fn render_output<R>(
+        &self,
+        output: &Output,
+    ) -> Result<Vec<CosmicMappedRenderElement<R>>, OutputNotMapped>
+    where
+        R: Renderer + ImportAll + AsGlowRenderer,
+        <R as Renderer>::TextureId: 'static,
+        <R as Renderer>::Frame: AsGles2Frame,
+        CosmicMappedRenderElement<R>: RenderElement<R>,
+    {
+        let output_scale = output.current_scale().fractional_scale();
+        let output_geo = self.space.output_geometry(output).ok_or(OutputNotMapped)?;
+        Ok(self
+            .space
+            .render_elements_for_region::<R, _>(&output_geo, output_scale))
     }
 }

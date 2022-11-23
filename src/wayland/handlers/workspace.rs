@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
+    shell::WorkspaceMode,
     state::ClientState,
     utils::prelude::*,
     wayland::protocols::workspace::{
@@ -29,16 +30,22 @@ impl WorkspaceHandler for State {
         for request in requests.into_iter() {
             match request {
                 Request::Activate(handle) => {
-                    if let Some(idx) = self
-                        .common
-                        .shell
-                        .spaces
-                        .iter()
-                        .position(|w| w.handle == handle)
-                    {
-                        let seat = &self.common.last_active_seat;
-                        let output = active_output(seat, &self.common);
-                        self.common.shell.activate(seat, &output, idx);
+                    let maybe = match &self.common.shell.workspaces {
+                        WorkspaceMode::Global(set) => set
+                            .workspaces
+                            .iter()
+                            .position(|w| w.handle == handle)
+                            .map(|i| (self.common.last_active_seat().active_output(), i)),
+                        WorkspaceMode::OutputBound(sets, _) => sets.iter().find_map(|(o, set)| {
+                            set.workspaces
+                                .iter()
+                                .position(|w| w.handle == handle)
+                                .map(|i| (o.clone(), i))
+                        }),
+                    };
+
+                    if let Some((output, idx)) = maybe {
+                        self.common.shell.activate(&output, idx);
                     }
                 }
                 _ => {}
