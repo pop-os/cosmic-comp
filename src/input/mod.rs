@@ -693,7 +693,6 @@ impl State {
                     .cloned()
                 {
                     let idx = self.common.shell.workspaces.active_num(&prev_output);
-                    seat.set_active_output(&prev_output);
                     if let Some(new_pos) = self.common.shell.activate(&prev_output, idx) {
                         seat.set_active_output(&prev_output);
                         if let Some(ptr) = seat.get_pointer() {

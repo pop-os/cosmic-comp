@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, cell::RefCell};
 
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State as WState;
 use smithay::{
@@ -20,7 +20,7 @@ use smithay::{
 };
 
 use crate::{
-    config::{Config, WorkspaceMode as ConfigMode},
+    config::{Config, WorkspaceMode as ConfigMode, OutputConfig},
     utils::prelude::*,
     wayland::protocols::{
         toplevel_info::ToplevelInfoState,
@@ -459,7 +459,13 @@ impl Shell {
                 // TODO: Restore any window positions from previous outputs ???
                 state.add_group_output(&set.group, output);
                 for workspace in &mut set.workspaces {
-                    workspace.map_output(output, output.current_location());
+                    workspace.map_output(output, output.user_data()
+                    .get::<RefCell<OutputConfig>>()
+                    .unwrap()
+                    .borrow()
+                    .position
+                    .into()
+                 );
                 }
             }
         }
@@ -532,7 +538,12 @@ impl Shell {
         if let WorkspaceMode::Global(set) = &mut self.workspaces {
             for workspace in &mut set.workspaces {
                 for output in self.outputs.iter() {
-                    workspace.map_output(output, output.current_location());
+                    workspace.map_output(output, output.user_data()
+                    .get::<RefCell<OutputConfig>>()
+                    .unwrap()
+                    .borrow()
+                    .position
+                    .into());
                 }
             }
         }
