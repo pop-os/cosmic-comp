@@ -10,7 +10,7 @@ use smithay::{
 use std::collections::HashMap;
 
 use crate::{
-    backend::render::element::{AsGles2Frame, AsGlowRenderer},
+    backend::render::element::AsGlowRenderer,
     shell::{
         element::{CosmicMapped, CosmicMappedRenderElement},
         grabs::ResizeEdge,
@@ -294,18 +294,18 @@ impl FloatingLayout {
 
     pub fn render_output<R>(
         &self,
+        renderer: &mut R,
         output: &Output,
     ) -> Result<Vec<CosmicMappedRenderElement<R>>, OutputNotMapped>
     where
         R: Renderer + ImportAll + AsGlowRenderer,
         <R as Renderer>::TextureId: 'static,
-        <R as Renderer>::Frame: AsGles2Frame,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
         let output_scale = output.current_scale().fractional_scale();
         let output_geo = self.space.output_geometry(output).ok_or(OutputNotMapped)?;
         Ok(self
             .space
-            .render_elements_for_region::<R, _>(&output_geo, output_scale))
+            .render_elements_for_region(renderer, &output_geo, output_scale))
     }
 }

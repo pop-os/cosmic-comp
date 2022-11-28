@@ -236,7 +236,7 @@ impl PointerTarget<State> for CosmicWindow {
 
 render_elements! {
     pub CosmicWindowRenderElement<R> where R: ImportAll;
-    Window=WaylandSurfaceRenderElement,
+    Window=WaylandSurfaceRenderElement<R>,
 }
 
 impl<R> AsRenderElements<R> for CosmicWindow
@@ -247,11 +247,13 @@ where
     type RenderElement = CosmicWindowRenderElement<R>;
     fn render_elements<C: From<Self::RenderElement>>(
         &self,
+        renderer: &mut R,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
     ) -> Vec<C> {
         AsRenderElements::<R>::render_elements::<CosmicWindowRenderElement<R>>(
             &self.window,
+            renderer,
             location,
             scale,
         )

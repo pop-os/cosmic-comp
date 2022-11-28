@@ -725,7 +725,7 @@ pub fn render_workspace_to_buffer(
 
 smithay::render_elements! {
     pub WindowCaptureElement<R> where R: ImportAll;
-    WaylandElement=WaylandSurfaceRenderElement,
+    WaylandElement=WaylandSurfaceRenderElement<R>,
     CursorElement=cursor::CursorRenderElement<R>,
 }
 
@@ -769,6 +769,7 @@ pub fn render_window_to_buffer(
                 WindowCaptureElement<GlowRenderer>,
             >(
                 window,
+                renderer,
                 (-geometry.loc.x, -geometry.loc.y).into(),
                 Scale::from(1.0),
             );
@@ -810,9 +811,14 @@ pub fn render_window_to_buffer(
 
                     if let Some(wl_surface) = get_dnd_icon(seat) {
                         elements.extend(
-                            cursor::draw_dnd_icon(&wl_surface, location.to_i32_round(), 1.0)
-                                .into_iter()
-                                .map(WindowCaptureElement::from),
+                            cursor::draw_dnd_icon(
+                                renderer,
+                                &wl_surface,
+                                location.to_i32_round(),
+                                1.0,
+                            )
+                            .into_iter()
+                            .map(WindowCaptureElement::from),
                         );
                     }
                 }

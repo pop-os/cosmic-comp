@@ -535,6 +535,15 @@ impl State {
             #[cfg(feature = "debug")]
             Action::Debug => {
                 self.common.egui.active = !self.common.egui.active;
+                for mapped in self
+                    .common
+                    .shell
+                    .workspaces
+                    .spaces()
+                    .flat_map(|w| w.mapped())
+                {
+                    mapped.set_debug(self.common.egui.active);
+                }
             }
             #[cfg(not(feature = "debug"))]
             Action::Debug => {

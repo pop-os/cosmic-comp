@@ -17,6 +17,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sendfd = "0.4.1"
 egui = { version = "0.19.0", optional = true }
+renderdoc = { version = "0.10.1", optional = true }
 edid-rs = { version = "0.1" }
 png = "0.17.5"
 lazy_static = "1.4.0"
@@ -36,19 +37,19 @@ cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", branch 
 [dependencies.smithay]
 version = "0.3"
 git = "https://github.com/Smithay/smithay.git"
-rev = "b297c93edc"
+rev = "2de946cf9e"
 default-features = false
 features = ["backend_drm", "backend_gbm", "backend_egl", "backend_libinput", "backend_session_libseat", "backend_udev", "backend_winit", "backend_x11", "desktop", "use_system_lib", "renderer_glow", "renderer_multi", "wayland_frontend", "slog-stdlog"]
 
 [dependencies.smithay-egui]
 git = "https://github.com/Smithay/smithay-egui.git"
-rev = "9fe1fa5e01"
+rev = "13626ad3f4"
 features = ["svg"]
 optional = true
 
 [features]
 default = []
-debug = ["egui", "smithay-egui"]
+debug = ["egui", "smithay-egui", "renderdoc"]
 
 [profile.dev]
 lto = "thin"
@@ -61,4 +62,4 @@ debug = true
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/pop-os/smithay", rev = "c8aaa059e8" }
+smithay = { git = "https://github.com/pop-os/smithay", rev = "8f6261bbf6" }

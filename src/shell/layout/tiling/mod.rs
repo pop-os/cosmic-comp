@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::render::element::{AsGles2Frame, AsGlowRenderer},
+    backend::render::element::AsGlowRenderer,
     shell::{
         element::{CosmicMapped, CosmicMappedRenderElement},
         focus::{
@@ -1236,12 +1236,12 @@ impl TilingLayout {
 
     pub fn render_output<R>(
         &self,
+        renderer: &mut R,
         output: &Output,
     ) -> Result<Vec<CosmicMappedRenderElement<R>>, OutputNotMapped>
     where
         R: Renderer + ImportAll + AsGlowRenderer,
         <R as Renderer>::TextureId: 'static,
-        <R as Renderer>::Frame: AsGles2Frame,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
         let output_scale = output.current_scale().fractional_scale();
@@ -1276,6 +1276,7 @@ impl TilingLayout {
             .flat_map(|(mapped, loc)| {
                 AsRenderElements::<R>::render_elements::<CosmicMappedRenderElement<R>>(
                     mapped,
+                    renderer,
                     loc.to_physical_precise_round(output_scale)
                         - mapped
                             .geometry()

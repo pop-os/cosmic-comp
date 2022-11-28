@@ -129,15 +129,18 @@ fn load_icon(theme: &CursorTheme) -> Result<Vec<Image>, Error> {
 render_elements! {
     pub CursorRenderElement<R> where R: ImportAll;
     Static=TextureRenderElement<<R as Renderer>::TextureId>,
-    Surface=WaylandSurfaceRenderElement,
+    Surface=WaylandSurfaceRenderElement<R>,
 }
 
-pub fn draw_surface_cursor<R: Renderer + ImportAll>(
+pub fn draw_surface_cursor<R>(
+    renderer: &mut R,
     surface: &wl_surface::WlSurface,
     location: impl Into<Point<i32, Logical>>,
     scale: impl Into<Scale<f64>>,
 ) -> Vec<CursorRenderElement<R>>
 where
+    R: Renderer + ImportAll,
+    <R as Renderer>::TextureId: 'static,
 {
     let mut position = location.into();
     let scale = scale.into();
@@ -152,14 +155,25 @@ where
     });
     position -= h;
 
-    render_elements_from_surface_tree(surface, position.to_physical_precise_round(scale), scale)
+    render_elements_from_surface_tree(
+        renderer,
+        surface,
+        position.to_physical_precise_round(scale),
+        scale,
+        slog_scope::logger(),
+    )
 }
 
-pub fn draw_dnd_icon<R: Renderer + ImportAll>(
+pub fn draw_dnd_icon<R>(
+    renderer: &mut R,
     surface: &wl_surface::WlSurface,
     location: impl Into<Point<i32, Logical>>,
     scale: impl Into<Scale<f64>>,
-) -> Vec<CursorRenderElement<R>> {
+) -> Vec<CursorRenderElement<R>>
+where
+    R: Renderer + ImportAll,
+    <R as Renderer>::TextureId: 'static,
+{
     if get_role(&surface) != Some("dnd_icon") {
         slog_scope::warn!(
             "Trying to display as a dnd icon a surface that does not have the DndIcon role."
@@ -167,9 +181,11 @@ pub fn draw_dnd_icon<R: Renderer + ImportAll>(
     }
     let scale = scale.into();
     render_elements_from_surface_tree(
+        renderer,
         surface,
         location.into().to_physical_precise_round(scale),
         scale,
+        slog_scope::logger(),
     )
 }
 
@@ -218,7 +234,7 @@ where
         .unwrap_or(CursorImageStatus::Default);
 
     if let CursorImageStatus::Surface(ref wl_surface) = cursor_status {
-        return draw_surface_cursor(wl_surface, location.to_i32_round(), scale);
+        return draw_surface_cursor(renderer, wl_surface, location.to_i32_round(), scale);
     } else if draw_default && CursorImageStatus::Default == cursor_status {
         let integer_scale = scale.x.max(scale.y).ceil() as u32;
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::render::element::{AsGles2Frame, AsGlowRenderer},
+    backend::render::element::AsGlowRenderer,
     shell::{
         element::{CosmicMapped, CosmicMappedRenderElement},
         focus::target::{KeyboardFocusTarget, PointerFocusTarget},
@@ -36,11 +36,10 @@ pub struct MoveGrabState {
 }
 
 impl MoveGrabState {
-    pub fn render<I, R>(&self, seat: &Seat<State>, output: &Output) -> Vec<I>
+    pub fn render<I, R>(&self, renderer: &mut R, seat: &Seat<State>, output: &Output) -> Vec<I>
     where
         R: Renderer + ImportAll + AsGlowRenderer,
         <R as Renderer>::TextureId: 'static,
-        <R as Renderer>::Frame: AsGles2Frame,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         I: From<CosmicMappedRenderElement<R>>,
     {
@@ -57,6 +56,7 @@ impl MoveGrabState {
         let scale = output.current_scale().fractional_scale().into();
         AsRenderElements::<R>::render_elements::<I>(
             &self.window,
+            renderer,
             (location.to_i32_round() - output.geometry().loc - self.window.geometry().loc)
                 .to_physical_precise_round(scale),
             scale,

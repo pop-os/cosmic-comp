@@ -2,13 +2,16 @@ use crate::shell::{CosmicMappedRenderElement, WorkspaceRenderElement};
 
 use smithay::{
     backend::renderer::{
-        element::{texture::TextureRenderElement, Element, RenderElement, UnderlyingStorage},
-        gles2::{Gles2Frame, Gles2Texture},
-        glow::GlowRenderer,
-        multigpu::Error as MultiError,
+        element::{Element, RenderElement, UnderlyingStorage},
+        glow::{GlowFrame, GlowRenderer},
         Frame, ImportAll, Renderer,
     },
     utils::{Physical, Point, Rectangle, Scale},
+};
+
+#[cfg(feature = "debug")]
+use smithay::backend::renderer::{
+    element::texture::TextureRenderElement, gles2::Gles2Texture, multigpu::Error as MultiError,
 };
 
 use super::{cursor::CursorRenderElement, GlMultiFrame, GlMultiRenderer};
@@ -17,7 +20,6 @@ pub enum CosmicElement<R>
 where
     R: AsGlowRenderer + Renderer + ImportAll,
     <R as Renderer>::TextureId: 'static,
-    <R as Renderer>::Frame: AsGles2Frame,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     Workspace(WorkspaceRenderElement<R>),
@@ -31,7 +33,6 @@ impl<R> Element for CosmicElement<R>
 where
     R: AsGlowRenderer + Renderer + ImportAll,
     <R as Renderer>::TextureId: 'static,
-    <R as Renderer>::Frame: AsGles2Frame,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn id(&self) -> &smithay::backend::renderer::element::Id {
@@ -120,25 +121,22 @@ where
 }
 
 impl RenderElement<GlowRenderer> for CosmicElement<GlowRenderer> {
-    fn draw(
+    fn draw<'frame>(
         &self,
-        renderer: &mut GlowRenderer,
-        frame: &mut <GlowRenderer as Renderer>::Frame,
+        frame: &mut <GlowRenderer as Renderer>::Frame<'frame>,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         damage: &[Rectangle<i32, Physical>],
         log: &slog::Logger,
     ) -> Result<(), <GlowRenderer as Renderer>::Error> {
         match self {
-            CosmicElement::Workspace(elem) => {
-                elem.draw(renderer, frame, location, scale, damage, log)
-            }
-            CosmicElement::Cursor(elem) => elem.draw(renderer, frame, location, scale, damage, log),
-            CosmicElement::MoveGrab(elem) => {
-                elem.draw(renderer, frame, location, scale, damage, log)
-            }
+            CosmicElement::Workspace(elem) => elem.draw(frame, location, scale, damage, log),
+            CosmicElement::Cursor(elem) => elem.draw(frame, location, scale, damage, log),
+            CosmicElement::MoveGrab(elem) => elem.draw(frame, location, scale, damage, log),
             #[cfg(feature = "debug")]
-            CosmicElement::Egui(elem) => elem.draw(renderer, frame, location, scale, damage, log),
+            CosmicElement::Egui(elem) => {
+                RenderElement::<GlowRenderer>::draw(elem, frame, location, scale, damage, log)
+            }
         }
     }
 
@@ -157,29 +155,28 @@ impl RenderElement<GlowRenderer> for CosmicElement<GlowRenderer> {
 }
 
 impl<'a> RenderElement<GlMultiRenderer<'a>> for CosmicElement<GlMultiRenderer<'a>> {
-    fn draw(
+    fn draw<'frame>(
         &self,
-        renderer: &mut GlMultiRenderer<'a>,
-        frame: &mut <GlMultiRenderer<'a> as Renderer>::Frame,
+        frame: &mut GlMultiFrame<'a, 'frame>,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         damage: &[Rectangle<i32, Physical>],
         log: &slog::Logger,
     ) -> Result<(), <GlMultiRenderer<'_> as Renderer>::Error> {
         match self {
-            CosmicElement::Workspace(elem) => {
-                elem.draw(renderer, frame, location, scale, damage, log)
-            }
-            CosmicElement::Cursor(elem) => elem.draw(renderer, frame, location, scale, damage, log),
-            CosmicElement::MoveGrab(elem) => {
-                elem.draw(renderer, frame, location, scale, damage, log)
-            }
+            CosmicElement::Workspace(elem) => elem.draw(frame, location, scale, damage, log),
+            CosmicElement::Cursor(elem) => elem.draw(frame, location, scale, damage, log),
+            CosmicElement::MoveGrab(elem) => elem.draw(frame, location, scale, damage, log),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => {
-                let glow_renderer = renderer.glow_renderer_mut();
-                let gles2_frame = frame.gles2_frame_mut();
-                elem.draw(glow_renderer, gles2_frame, location, scale, damage, log)
+                let elem = {
+                    let glow_frame = frame.glow_frame_mut();
+                    RenderElement::<GlowRenderer>::draw(
+                        elem, glow_frame, location, scale, damage, log,
+                    )
                     .map_err(|err| MultiError::Render(err))
+                };
+                elem
             }
         }
     }
@@ -210,7 +207,6 @@ impl<R> From<WorkspaceRenderElement<R>> for CosmicElement<R>
 where
     R: Renderer + ImportAll + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
-    <R as Renderer>::Frame: AsGles2Frame,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: WorkspaceRenderElement<R>) -> Self {
@@ -222,7 +218,6 @@ impl<R> From<CursorRenderElement<R>> for CosmicElement<R>
 where
     R: Renderer + ImportAll + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
-    <R as Renderer>::Frame: AsGles2Frame,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: CursorRenderElement<R>) -> Self {
@@ -234,7 +229,6 @@ impl<R> From<CosmicMappedRenderElement<R>> for CosmicElement<R>
 where
     R: Renderer + ImportAll + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
-    <R as Renderer>::Frame: AsGles2Frame,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: CosmicMappedRenderElement<R>) -> Self {
@@ -247,7 +241,6 @@ impl<R> From<TextureRenderElement<Gles2Texture>> for CosmicElement<R>
 where
     R: Renderer + ImportAll + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
-    <R as Renderer>::Frame: AsGles2Frame,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: TextureRenderElement<Gles2Texture>) -> Self {
@@ -258,7 +251,6 @@ where
 pub trait AsGlowRenderer
 where
     Self: Renderer,
-    <Self as Renderer>::Frame: AsGles2Frame,
 {
     fn glow_renderer(&self) -> &GlowRenderer;
     fn glow_renderer_mut(&mut self) -> &mut GlowRenderer;
@@ -282,28 +274,28 @@ impl<'a> AsGlowRenderer for GlMultiRenderer<'a> {
     }
 }
 
-pub trait AsGles2Frame
+pub trait AsGlowFrame<'a>
 where
     Self: Frame,
 {
-    fn gles2_frame(&self) -> &Gles2Frame;
-    fn gles2_frame_mut(&mut self) -> &mut Gles2Frame;
+    fn glow_frame(&self) -> &GlowFrame<'a>;
+    fn glow_frame_mut(&mut self) -> &mut GlowFrame<'a>;
 }
 
-impl AsGles2Frame for Gles2Frame {
-    fn gles2_frame(&self) -> &Gles2Frame {
+impl<'frame> AsGlowFrame<'frame> for GlowFrame<'frame> {
+    fn glow_frame(&self) -> &GlowFrame<'frame> {
         self
     }
-    fn gles2_frame_mut(&mut self) -> &mut Gles2Frame {
+    fn glow_frame_mut(&mut self) -> &mut GlowFrame<'frame> {
         self
     }
 }
 
-impl AsGles2Frame for GlMultiFrame {
-    fn gles2_frame(&self) -> &Gles2Frame {
+impl<'renderer, 'frame> AsGlowFrame<'frame> for GlMultiFrame<'renderer, 'frame> {
+    fn glow_frame(&self) -> &GlowFrame<'frame> {
         self.as_ref()
     }
-    fn gles2_frame_mut(&mut self) -> &mut Gles2Frame {
+    fn glow_frame_mut(&mut self) -> &mut GlowFrame<'frame> {
         self.as_mut()
     }
 }

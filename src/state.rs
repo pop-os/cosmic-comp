@@ -434,6 +434,8 @@ pub struct Egui {
 
 pub struct Fps {
     #[cfg(feature = "debug")]
+    pub rd: Option<renderdoc::RenderDoc<renderdoc::V110>>,
+    #[cfg(feature = "debug")]
     pub state: smithay_egui::EguiState,
     pending_frame: Option<PendingFrame>,
     pub frames: VecDeque<Frame>,
@@ -638,6 +640,8 @@ impl Fps {
         Fps {
             #[cfg(feature = "debug")]
             state,
+            #[cfg(feature = "debug")]
+            rd: renderdoc::RenderDoc::new().ok(),
             pending_frame: None,
             frames: VecDeque::with_capacity(Fps::WINDOW_SIZE + 1),
         }

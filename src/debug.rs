@@ -185,6 +185,5 @@ pub fn fps_ui(
         area,
         scale,
         0.8,
-        state.clock.now().into(),
     )
 }

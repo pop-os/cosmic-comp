@@ -1,5 +1,5 @@
 use crate::{
-    backend::render::element::{AsGles2Frame, AsGlowRenderer},
+    backend::render::element::AsGlowRenderer,
     shell::layout::{
         floating::{FloatingLayout, MoveSurfaceGrab},
         tiling::TilingLayout,
@@ -418,12 +418,12 @@ impl Workspace {
 
     pub fn render_output<R>(
         &self,
+        renderer: &mut R,
         output: &Output,
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
     where
         R: Renderer + ImportAll + AsGlowRenderer,
         <R as Renderer>::TextureId: 'static,
-        <R as Renderer>::Frame: AsGles2Frame,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
         let mut render_elements = Vec::new();
@@ -446,6 +446,7 @@ impl Workspace {
                     .flat_map(|(loc, surface)| {
                         AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
                             surface,
+                            renderer,
                             loc.to_physical_precise_round(output_scale),
                             Scale::from(output_scale),
                         )
@@ -455,7 +456,9 @@ impl Workspace {
             // fullscreen window
             render_elements.extend(AsRenderElements::<R>::render_elements::<
                 WorkspaceRenderElement<R>,
-            >(fullscreen, (0, 0).into(), output_scale.into()));
+            >(
+                fullscreen, renderer, (0, 0).into(), output_scale.into()
+            ));
         } else {
             // TODO: Handle modes like
             // - keyboard window swapping
@@ -479,6 +482,7 @@ impl Workspace {
                         .flat_map(|(loc, surface)| {
                             AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
                                 surface,
+                                renderer,
                                 loc.to_physical_precise_round(output_scale),
                                 Scale::from(output_scale),
                             )
@@ -491,7 +495,7 @@ impl Workspace {
             // floating surfaces
             render_elements.extend(
                 self.floating_layer
-                    .render_output::<R>(output)?
+                    .render_output::<R>(renderer, output)?
                     .into_iter()
                     .map(WorkspaceRenderElement::from),
             );
@@ -499,7 +503,7 @@ impl Workspace {
             //tiling surfaces
             render_elements.extend(
                 self.tiling_layer
-                    .render_output::<R>(output)?
+                    .render_output::<R>(renderer, output)?
                     .into_iter()
                     .map(WorkspaceRenderElement::from),
             );
@@ -517,6 +521,7 @@ impl Workspace {
                         .flat_map(|(loc, surface)| {
                             AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
                                 surface,
+                                renderer,
                                 loc.to_physical_precise_round(output_scale),
                                 Scale::from(output_scale),
                             )
@@ -545,9 +550,8 @@ pub enum WorkspaceRenderElement<R>
 where
     R: Renderer + ImportAll + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
-    <R as Renderer>::Frame: AsGles2Frame,
 {
-    Wayland(WaylandSurfaceRenderElement),
+    Wayland(WaylandSurfaceRenderElement<R>),
     Window(CosmicMappedRenderElement<R>),
 }
 
@@ -555,7 +559,6 @@ impl<R> Element for WorkspaceRenderElement<R>
 where
     R: Renderer + ImportAll + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
-    <R as Renderer>::Frame: AsGles2Frame,
 {
     fn id(&self) -> &smithay::backend::renderer::element::Id {
         match self {
@@ -622,25 +625,19 @@ impl<R> RenderElement<R> for WorkspaceRenderElement<R>
 where
     R: Renderer + ImportAll + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
-    <R as Renderer>::Frame: AsGles2Frame,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
-    fn draw(
+    fn draw<'frame>(
         &self,
-        renderer: &mut R,
-        frame: &mut <R as Renderer>::Frame,
+        frame: &mut <R as Renderer>::Frame<'frame>,
         location: Point<i32, smithay::utils::Physical>,
         scale: Scale<f64>,
         damage: &[Rectangle<i32, smithay::utils::Physical>],
         log: &slog::Logger,
     ) -> Result<(), <R as Renderer>::Error> {
         match self {
-            WorkspaceRenderElement::Wayland(elem) => {
-                elem.draw(renderer, frame, location, scale, damage, log)
-            }
-            WorkspaceRenderElement::Window(elem) => {
-                elem.draw(renderer, frame, location, scale, damage, log)
-            }
+            WorkspaceRenderElement::Wayland(elem) => elem.draw(frame, location, scale, damage, log),
+            WorkspaceRenderElement::Window(elem) => elem.draw(frame, location, scale, damage, log),
         }
     }
 
@@ -655,14 +652,13 @@ where
     }
 }
 
-impl<R> From<WaylandSurfaceRenderElement> for WorkspaceRenderElement<R>
+impl<R> From<WaylandSurfaceRenderElement<R>> for WorkspaceRenderElement<R>
 where
     R: Renderer + ImportAll + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
-    <R as Renderer>::Frame: AsGles2Frame,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
-    fn from(elem: WaylandSurfaceRenderElement) -> Self {
+    fn from(elem: WaylandSurfaceRenderElement<R>) -> Self {
         WorkspaceRenderElement::Wayland(elem)
     }
 }
@@ -671,7 +667,6 @@ impl<R> From<CosmicMappedRenderElement<R>> for WorkspaceRenderElement<R>
 where
     R: Renderer + ImportAll + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
-    <R as Renderer>::Frame: AsGles2Frame,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: CosmicMappedRenderElement<R>) -> Self {

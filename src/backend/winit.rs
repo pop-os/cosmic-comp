@@ -71,10 +71,13 @@ impl WinitState {
             Some(&mut self.fps),
         ) {
             Ok((damage, states)) => {
-                self.screencopy.clear();
+                self.backend
+                    .bind()
+                    .with_context(|| "Failed to bind display")?;
                 self.backend
                     .submit(damage.as_deref())
                     .with_context(|| "Failed to submit buffer for display")?;
+                self.screencopy.clear();
                 #[cfg(feature = "debug")]
                 self.fps.displayed();
                 state.send_frames(&self.output, &states);

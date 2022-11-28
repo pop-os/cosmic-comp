@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, cell::RefCell};
+use std::{cell::RefCell, collections::HashMap};
 
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State as WState;
 use smithay::{
@@ -20,7 +20,7 @@ use smithay::{
 };
 
 use crate::{
-    config::{Config, WorkspaceMode as ConfigMode, OutputConfig},
+    config::{Config, OutputConfig, WorkspaceMode as ConfigMode},
     utils::prelude::*,
     wayland::protocols::{
         toplevel_info::ToplevelInfoState,
@@ -459,13 +459,16 @@ impl Shell {
                 // TODO: Restore any window positions from previous outputs ???
                 state.add_group_output(&set.group, output);
                 for workspace in &mut set.workspaces {
-                    workspace.map_output(output, output.user_data()
-                    .get::<RefCell<OutputConfig>>()
-                    .unwrap()
-                    .borrow()
-                    .position
-                    .into()
-                 );
+                    workspace.map_output(
+                        output,
+                        output
+                            .user_data()
+                            .get::<RefCell<OutputConfig>>()
+                            .unwrap()
+                            .borrow()
+                            .position
+                            .into(),
+                    );
                 }
             }
         }
@@ -538,12 +541,16 @@ impl Shell {
         if let WorkspaceMode::Global(set) = &mut self.workspaces {
             for workspace in &mut set.workspaces {
                 for output in self.outputs.iter() {
-                    workspace.map_output(output, output.user_data()
-                    .get::<RefCell<OutputConfig>>()
-                    .unwrap()
-                    .borrow()
-                    .position
-                    .into());
+                    workspace.map_output(
+                        output,
+                        output
+                            .user_data()
+                            .get::<RefCell<OutputConfig>>()
+                            .unwrap()
+                            .borrow()
+                            .position
+                            .into(),
+                    );
                 }
             }
         }
@@ -966,6 +973,10 @@ impl Shell {
             .toplevel_enter_workspace(&window, &workspace.handle);
 
         let mapped = CosmicMapped::from(CosmicWindow::from(window.clone()));
+        #[cfg(feature = "debug")]
+        {
+            mapped.set_debug(state.common.egui.active);
+        }
         if layout::should_be_floating(&window) || state.common.shell.floating_default {
             workspace.floating_layer.map(mapped.clone(), &seat, None);
         } else {

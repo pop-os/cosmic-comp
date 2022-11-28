@@ -41,7 +41,7 @@ use smithay::{
 pub mod cursor;
 use self::cursor::CursorRenderElement;
 pub mod element;
-use self::element::{AsGles2Frame, AsGlowRenderer, CosmicElement};
+use self::element::{AsGlowRenderer, CosmicElement};
 
 pub type GlMultiRenderer<'a> = MultiRenderer<
     'a,
@@ -50,7 +50,14 @@ pub type GlMultiRenderer<'a> = MultiRenderer<
     EglGlesBackend<GlowRenderer>,
     Gles2Renderbuffer,
 >;
-pub type GlMultiFrame = MultiFrame<EglGlesBackend<GlowRenderer>, EglGlesBackend<GlowRenderer>>;
+pub type GlMultiFrame<'a, 'frame> = MultiFrame<
+    'a,
+    'a,
+    'frame,
+    EglGlesBackend<GlowRenderer>,
+    EglGlesBackend<GlowRenderer>,
+    Gles2Renderbuffer,
+>;
 
 pub static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
 
@@ -61,7 +68,7 @@ pub enum CursorMode {
     All,
 }
 
-pub fn cursor_elements<E, R>(
+pub fn cursor_elements<'frame, E, R>(
     renderer: &mut R,
     state: &Common,
     output: &Output,
@@ -69,7 +76,6 @@ pub fn cursor_elements<E, R>(
 ) -> Vec<E>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::Frame: AsGles2Frame,
     <R as Renderer>::TextureId: Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     E: From<CursorRenderElement<R>> + From<CosmicMappedRenderElement<R>>,
@@ -101,7 +107,7 @@ where
 
         if let Some(wl_surface) = get_dnd_icon(seat) {
             elements.extend(
-                cursor::draw_dnd_icon(&wl_surface, location.to_i32_round(), scale)
+                cursor::draw_dnd_icon(renderer, &wl_surface, location.to_i32_round(), scale)
                     .into_iter()
                     .map(E::from),
             );
@@ -113,7 +119,7 @@ where
             .unwrap()
             .borrow()
             .as_ref()
-            .map(|state| state.render::<E, R>(seat, output))
+            .map(|state| state.render::<E, R>(renderer, seat, output))
         {
             elements.extend(grab_elements);
         }
@@ -122,7 +128,7 @@ where
     elements
 }
 
-pub fn render_output<R, Target, OffTarget, Source>(
+pub fn render_output<'frame, R, Target, OffTarget, Source>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,
     target: Target,
@@ -144,7 +150,6 @@ where
         + Offscreen<OffTarget>
         + Blit<Source>
         + AsGlowRenderer,
-    <R as Renderer>::Frame: AsGles2Frame,
     <R as Renderer>::TextureId: Clone + 'static,
     <R as Renderer>::Error: From<Gles2Error>,
     CosmicElement<R>: RenderElement<R>,
@@ -167,7 +172,7 @@ where
     )
 }
 
-pub fn render_workspace<R, Target, OffTarget, Source>(
+pub fn render_workspace<'frame, R, Target, OffTarget, Source>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,
     target: Target,
@@ -190,7 +195,6 @@ where
         + Offscreen<OffTarget>
         + Blit<Source>
         + AsGlowRenderer,
-    <R as Renderer>::Frame: AsGles2Frame,
     <R as Renderer>::TextureId: Clone + 'static,
     <R as Renderer>::Error: From<Gles2Error>,
     CosmicElement<R>: RenderElement<R>,
@@ -199,6 +203,15 @@ where
 {
     if let Some(ref mut fps) = fps {
         fps.start();
+        #[cfg(feature = "debug")]
+        if screencopy.is_some() {
+            if let Some(rd) = fps.rd.as_mut() {
+                rd.start_frame_capture(
+                    renderer.glow_renderer().egl_context().get_context_handle(),
+                    std::ptr::null(),
+                );
+            }
+        }
     }
 
     let workspace = state.shell.space_for_handle(&handle).ok_or(OutputNoMode)?;
@@ -245,7 +258,7 @@ where
 
     elements.extend(
         workspace
-            .render_output::<R>(output)
+            .render_output::<R>(renderer, output)
             .map_err(|_| OutputNoMode)?
             .into_iter()
             .map(Into::into),
@@ -307,6 +320,13 @@ where
         }
         if let Some(fps) = fps.as_mut() {
             fps.screencopy();
+            #[cfg(feature = "debug")]
+            if let Some(rd) = fps.rd.as_mut() {
+                rd.end_frame_capture(
+                    renderer.glow_renderer().egl_context().get_context_handle(),
+                    std::ptr::null(),
+                );
+            }
         }
     }
 

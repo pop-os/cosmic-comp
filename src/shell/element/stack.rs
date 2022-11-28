@@ -363,7 +363,7 @@ impl PointerTarget<State> for CosmicStack {
 
 render_elements! {
     pub CosmicStackRenderElement<R> where R: ImportAll;
-    Window=WaylandSurfaceRenderElement,
+    Window=WaylandSurfaceRenderElement<R>,
 }
 
 impl<R> AsRenderElements<R> for CosmicStack
@@ -374,11 +374,13 @@ where
     type RenderElement = CosmicStackRenderElement<R>;
     fn render_elements<C: From<Self::RenderElement>>(
         &self,
+        renderer: &mut R,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
     ) -> Vec<C> {
         AsRenderElements::<R>::render_elements::<CosmicStackRenderElement<R>>(
             &self.windows.lock().unwrap()[self.active.load(Ordering::SeqCst)],
+            renderer,
             location,
             scale,
         )
