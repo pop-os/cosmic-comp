@@ -80,10 +80,10 @@
         (modifiers: [Super], key: "f"): Spawn("nautilus"),
         //TODO: ability to select default terminal
         (modifiers: [Super], key: "t"): Spawn("gnome-terminal"),
-
-        (modifiers: [Super], key: "a"): Spawn("busctl --user call com.system76.CosmicAppletHost /com/system76/CosmicAppletHost com.system76.CosmicAppletHost Toggle s 'com.system76.CosmicAppLibrary'"),
-        (modifiers: [Super], key: "slash"): Spawn("busctl --user call com.system76.CosmicAppletHost /com/system76/CosmicAppletHost com.system76.CosmicAppletHost Toggle s 'com.system76.CosmicLauncher'"),
         
+        (modifiers: [Super], key: "a"): Spawn("busctl --user call com.system76.CosmicAppLibrary /com/system76/CosmicAppLibrary com.system76.CosmicAppLibrary Toggle"),
+        (modifiers: [Super], key: "slash"): Spawn("busctl --user call com.system76.CosmicLauncher /com/system76/CosmicLauncher com.system76.CosmicLauncher Toggle"),
+
         (modifiers: [], key: "XF86AudioRaiseVolume"): Spawn("amixer sset Master 5%+"),
         (modifiers: [], key: "XF86AudioLowerVolume"): Spawn("amixer sset Master 5%-"),
         (modifiers: [], key: "XF86AudioMute"): Spawn("amixer sset Master toggle"),
