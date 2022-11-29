@@ -166,6 +166,12 @@ impl WorkspaceSet {
         // add empty at the end, if necessary
         if self.workspaces.last().unwrap().windows().next().is_some() {
             let mut workspace = create_workspace(&mut state, &self.group, false);
+            workspace_set_idx(
+                &mut state,
+                self.workspaces.len() as u8,
+                self.idx,
+                &workspace.handle,
+            );
             state.set_workspace_capabilities(
                 &workspace.handle,
                 [WorkspaceCapabilities::Activate].into_iter(),
@@ -446,10 +452,9 @@ impl Shell {
             WorkspaceMode::OutputBound(sets, amount) => {
                 // TODO: Restore previously assigned workspaces, if possible!
                 if !sets.contains_key(output) {
-                    sets.insert(
-                        output.clone(),
-                        WorkspaceSet::new(&mut state, *amount, sets.len()),
-                    );
+                    let set = WorkspaceSet::new(&mut state, *amount, sets.len());
+                    state.add_group_output(&set.group, &output);
+                    sets.insert(output.clone(), set);
                 }
                 for workspace in &mut sets.get_mut(output).unwrap().workspaces {
                     workspace.map_output(output, (0, 0).into());
@@ -571,6 +576,9 @@ impl Shell {
 
                 // in this case we have to merge our sets, preserving placing of windows as nicely as possible
                 let mut new_set = WorkspaceSet::new(&mut state, WorkspaceAmount::Static(0), 0);
+                for output in &self.outputs {
+                    state.add_group_output(&new_set.group, output);
+                }
 
                 // lets construct an iterator of all the pairs of workspaces we have to merge
                 // we first split of the part of the workspaces that contain the currently active one
@@ -673,10 +681,9 @@ impl Shell {
                 // split workspaces apart, preserving window positions relative to their outputs
                 let mut sets = HashMap::new();
                 for (i, output) in self.outputs.iter().enumerate() {
-                    sets.insert(
-                        output.clone(),
-                        WorkspaceSet::new(&mut state, WorkspaceAmount::Static(0), i),
-                    );
+                    let set = WorkspaceSet::new(&mut state, WorkspaceAmount::Static(0), i);
+                    state.add_group_output(&set.group, output);
+                    sets.insert(output.clone(), set);
                 }
                 for (i, workspace) in set.workspaces.drain(..).enumerate() {
                     for (idx, output) in self.outputs.iter().enumerate() {
