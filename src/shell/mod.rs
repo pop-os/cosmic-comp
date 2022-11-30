@@ -1035,6 +1035,15 @@ impl Shell {
     ) -> Option<Point<i32, Logical>> {
         let (to_output, to_idx) = to;
         let to_idx = to_idx.unwrap_or(state.common.shell.workspaces.active_num(to_output));
+        if state
+            .common
+            .shell
+            .workspaces
+            .get(to_idx, to_output)
+            .is_none()
+        {
+            return None;
+        }
 
         if from_output == to_output
             && to_idx == state.common.shell.workspaces.active_num(from_output)
