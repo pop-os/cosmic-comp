@@ -328,6 +328,7 @@ impl ScreencopyHandler for State {
                 _ => unreachable!(),
             };
         } else {
+            let buffer = params.buffer.clone();
             let result = match session.session_type() {
                 SessionType::Output(output) => {
                     render_output_to_buffer(self, &session, params, &output)
@@ -354,6 +355,7 @@ impl ScreencopyHandler for State {
                         Vec::new(),
                         None,
                     );
+                    buffer.release();
                 }
                 Ok(true) => {} // success
                 Err((reason, error)) => {
@@ -522,6 +524,7 @@ where
     }
 
     session.commit_buffer(transform, damage, None);
+    buffer.release();
 
     Ok(())
 }
