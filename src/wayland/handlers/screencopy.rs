@@ -17,11 +17,11 @@ use smithay::{
             buffer_dimensions, buffer_type,
             damage::{DamageTrackedRenderer, DamageTrackedRendererError},
             element::{
-                surface::WaylandSurfaceRenderElement, AsRenderElements, RenderElementStates,
+                surface::WaylandSurfaceRenderElement, AsRenderElements, RenderElement,
+                RenderElementStates,
             },
-            gles2::Gles2Renderbuffer,
-            glow::GlowRenderer,
-            Bind, BufferType, ExportMem, ImportAll, Offscreen, Renderer,
+            gles2::{Gles2Error, Gles2Renderbuffer},
+            Bind, Blit, BufferType, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
         },
     },
     desktop::Window,
@@ -30,7 +30,7 @@ use smithay::{
         protocol::{wl_buffer::WlBuffer, wl_shm::Format as ShmFormat, wl_surface::WlSurface},
         Resource,
     },
-    utils::{IsAlive, Physical, Rectangle, Scale, Transform},
+    utils::{IsAlive, Logical, Physical, Rectangle, Scale, Transform},
     wayland::{
         dmabuf::get_dmabuf,
         shm::{with_buffer_contents, with_buffer_contents_mut},
@@ -38,7 +38,12 @@ use smithay::{
 };
 
 use crate::{
-    backend::render::{cursor, render_output, render_workspace, CursorMode, CLEAR_COLOR},
+    backend::render::{
+        cursor,
+        element::{AsGlowRenderer, CosmicElement},
+        render_output, render_workspace, CursorMode, CLEAR_COLOR,
+    },
+    shell::CosmicMappedRenderElement,
     state::{BackendData, ClientState, Common, State},
     utils::prelude::OutputExt,
     wayland::protocols::{
@@ -579,68 +584,117 @@ pub fn render_output_to_buffer(
         return Err((FailureReason::InvalidSize, anyhow!("Output changed mode")));
     }
 
-    let node = node_from_params(&params, &mut state.backend, Some(output));
-    let mut _tmp_multirenderer = None;
-    let renderer = match &mut state.backend {
-        BackendData::Kms(kms) => {
-            _tmp_multirenderer = Some(
-                kms.api
-                    .renderer::<Gles2Renderbuffer>(node.as_ref().unwrap(), node.as_ref().unwrap())
-                    .map_err(|err| (FailureReason::Unspec, err.into()))?,
-            );
-            _tmp_multirenderer.as_mut().unwrap().as_mut()
+    fn render_fn<R>(
+        node: Option<&DrmNode>,
+        buffer: &WlBuffer,
+        renderer: &mut R,
+        dtr: &mut DamageTrackedRenderer,
+        age: usize,
+        common: &mut Common,
+        session: &Session,
+        output: &Output,
+    ) -> Result<
+        (Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates),
+        DamageTrackedRendererError<R>,
+    >
+    where
+        R: Renderer
+            + ImportAll
+            + ImportMem
+            + ExportMem
+            + Bind<Dmabuf>
+            + Offscreen<Gles2Renderbuffer>
+            + Blit<Dmabuf>
+            + AsGlowRenderer,
+        <R as Renderer>::TextureId: Clone + 'static,
+        <R as Renderer>::Error: From<Gles2Error>,
+        CosmicElement<R>: RenderElement<R>,
+        CosmicMappedRenderElement<R>: RenderElement<R>,
+    {
+        let cursor_mode = match session.cursor_mode() {
+            ScreencopyCursorMode::Embedded => CursorMode::All,
+            ScreencopyCursorMode::Captured(_) | ScreencopyCursorMode::None => CursorMode::None,
+        };
+
+        if let Ok(dmabuf) = get_dmabuf(buffer) {
+            render_output::<_, _, Gles2Renderbuffer, Dmabuf>(
+                node,
+                renderer,
+                dmabuf,
+                dtr,
+                age,
+                common,
+                &output,
+                cursor_mode,
+                None,
+                None,
+            )
+        } else {
+            let size = buffer_dimensions(buffer).unwrap();
+            let render_buffer = Offscreen::<Gles2Renderbuffer>::create_buffer(renderer, size)
+                .map_err(DamageTrackedRendererError::Rendering)?;
+            render_output::<_, _, Gles2Renderbuffer, Dmabuf>(
+                node,
+                renderer,
+                render_buffer,
+                dtr,
+                age,
+                common,
+                &output,
+                cursor_mode,
+                None,
+                None,
+            )
         }
-        BackendData::Winit(winit) => winit.backend.renderer(),
-        BackendData::X11(x11) => &mut x11.renderer,
-        _ => unreachable!(),
-    };
+    }
 
     let common = &mut state.common;
-    render_session::<_, _>(
-        node,
-        renderer,
-        session,
-        &params,
-        output.current_transform(),
-        |node, buffer, renderer, dtr, age| {
-            let cursor_mode = match session.cursor_mode() {
-                ScreencopyCursorMode::Embedded => CursorMode::All,
-                ScreencopyCursorMode::Captured(_) | ScreencopyCursorMode::None => CursorMode::None,
-            };
-
-            if let Ok(dmabuf) = get_dmabuf(buffer) {
-                render_output::<_, _, Gles2Renderbuffer, Dmabuf>(
-                    node,
-                    renderer,
-                    dmabuf,
-                    dtr,
-                    age,
-                    common,
-                    &output,
-                    cursor_mode,
-                    None,
-                    None,
-                )
-            } else {
-                let size = buffer_dimensions(buffer).unwrap();
-                let render_buffer = Offscreen::<Gles2Renderbuffer>::create_buffer(renderer, size)
-                    .map_err(DamageTrackedRendererError::Rendering)?;
-                render_output::<_, _, Gles2Renderbuffer, Dmabuf>(
-                    node,
-                    renderer,
-                    render_buffer,
-                    dtr,
-                    age,
-                    common,
-                    &output,
-                    cursor_mode,
-                    None,
-                    None,
-                )
-            }
-        },
-    )
-    .map_err(|err| (FailureReason::Unspec, err.into()))
+    let node = node_from_params(&params, &mut state.backend, Some(output));
+    match &mut state.backend {
+        BackendData::Kms(kms) => {
+            let mut multirenderer = kms
+                .api
+                .renderer::<Gles2Renderbuffer>(node.as_ref().unwrap(), node.as_ref().unwrap())
+                .map_err(|err| (FailureReason::Unspec, err.into()))?;
+            render_session::<_, _>(
+                node,
+                &mut multirenderer,
+                session,
+                &params,
+                output.current_transform(),
+                |node, buffer, renderer, dtr, age| {
+                    render_fn(node, buffer, renderer, dtr, age, common, session, output)
+                },
+            )
+            .map_err(|err| match err {
+                DamageTrackedRendererError::OutputNoMode(x) => (FailureReason::Unspec, x.into()),
+                DamageTrackedRendererError::Rendering(x) => (FailureReason::Unspec, x.into()),
+            })
+        }
+        BackendData::Winit(winit) => render_session::<_, _>(
+            node,
+            winit.backend.renderer(),
+            session,
+            &params,
+            output.current_transform(),
+            |node, buffer, renderer, dtr, age| {
+                render_fn(node, buffer, renderer, dtr, age, common, session, output)
+            },
+        )
+        .map_err(|err| (FailureReason::Unspec, err.into())),
+        BackendData::X11(x11) => render_session::<_, _>(
+            node,
+            &mut x11.renderer,
+            session,
+            &params,
+            output.current_transform(),
+            |node, buffer, renderer, dtr, age| {
+                render_fn(node, buffer, renderer, dtr, age, common, session, output)
+            },
+        )
+        .map_err(|err| (FailureReason::Unspec, err.into())),
+        _ => unreachable!(),
+    }
 }
 
 pub fn render_workspace_to_buffer(
@@ -658,69 +712,125 @@ pub fn render_workspace_to_buffer(
         return Err((FailureReason::InvalidSize, anyhow!("Output changed mode")));
     }
 
-    let node = node_from_params(&params, &mut state.backend, Some(output));
-    let mut _tmp_multirenderer = None;
-    let renderer = match &mut state.backend {
-        BackendData::Kms(kms) => {
-            _tmp_multirenderer = Some(
-                kms.api
-                    .renderer::<Gles2Renderbuffer>(node.as_ref().unwrap(), node.as_ref().unwrap())
-                    .map_err(|err| (FailureReason::Unspec, err.into()))?,
-            );
-            _tmp_multirenderer.as_mut().unwrap().as_mut()
+    fn render_fn<R>(
+        node: Option<&DrmNode>,
+        buffer: &WlBuffer,
+        renderer: &mut R,
+        dtr: &mut DamageTrackedRenderer,
+        age: usize,
+        common: &mut Common,
+        session: &Session,
+        output: &Output,
+        handle: &WorkspaceHandle,
+    ) -> Result<
+        (Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates),
+        DamageTrackedRendererError<R>,
+    >
+    where
+        R: Renderer
+            + ImportAll
+            + ImportMem
+            + ExportMem
+            + Bind<Dmabuf>
+            + Offscreen<Gles2Renderbuffer>
+            + Blit<Dmabuf>
+            + AsGlowRenderer,
+        <R as Renderer>::TextureId: Clone + 'static,
+        <R as Renderer>::Error: From<Gles2Error>,
+        CosmicElement<R>: RenderElement<R>,
+        CosmicMappedRenderElement<R>: RenderElement<R>,
+    {
+        let cursor_mode = match session.cursor_mode() {
+            ScreencopyCursorMode::Embedded => CursorMode::All,
+            ScreencopyCursorMode::Captured(_) | ScreencopyCursorMode::None => CursorMode::None,
+        };
+        if let Ok(dmabuf) = get_dmabuf(buffer) {
+            render_workspace::<_, _, Gles2Renderbuffer, Dmabuf>(
+                node,
+                renderer,
+                dmabuf,
+                dtr,
+                age,
+                common,
+                &output,
+                handle,
+                cursor_mode,
+                None,
+                None,
+            )
+        } else {
+            let size = buffer_dimensions(buffer).unwrap();
+            let render_buffer = Offscreen::<Gles2Renderbuffer>::create_buffer(renderer, size)
+                .map_err(DamageTrackedRendererError::Rendering)?;
+            render_workspace::<_, _, Gles2Renderbuffer, Dmabuf>(
+                node,
+                renderer,
+                render_buffer,
+                dtr,
+                age,
+                common,
+                &output,
+                handle,
+                cursor_mode,
+                None,
+                None,
+            )
         }
-        BackendData::Winit(winit) => winit.backend.renderer(),
-        BackendData::X11(x11) => &mut x11.renderer,
-        _ => unreachable!(),
-    };
+    }
 
+    let node = node_from_params(&params, &mut state.backend, Some(output));
     let common = &mut state.common;
-    render_session::<_, _>(
-        node,
-        renderer,
-        session,
-        &params,
-        output.current_transform(),
-        |node, buffer, renderer, dtr, age| {
-            let cursor_mode = match session.cursor_mode() {
-                ScreencopyCursorMode::Embedded => CursorMode::All,
-                ScreencopyCursorMode::Captured(_) | ScreencopyCursorMode::None => CursorMode::None,
-            };
-            if let Ok(dmabuf) = get_dmabuf(buffer) {
-                render_workspace::<_, _, Gles2Renderbuffer, Dmabuf>(
-                    node,
-                    renderer,
-                    dmabuf,
-                    dtr,
-                    age,
-                    common,
-                    &output,
-                    handle,
-                    cursor_mode,
-                    None,
-                    None,
+    match &mut state.backend {
+        BackendData::Kms(kms) => {
+            let mut multirenderer = kms
+                .api
+                .renderer::<Gles2Renderbuffer>(node.as_ref().unwrap(), node.as_ref().unwrap())
+                .map_err(|err| (FailureReason::Unspec, err.into()))?;
+            render_session::<_, _>(
+                node,
+                &mut multirenderer,
+                session,
+                &params,
+                output.current_transform(),
+                |node, buffer, renderer, dtr, age| {
+                    render_fn(
+                        node, buffer, renderer, dtr, age, common, session, output, handle,
+                    )
+                },
+            )
+            .map_err(|err| match err {
+                DamageTrackedRendererError::OutputNoMode(x) => (FailureReason::Unspec, x.into()),
+                DamageTrackedRendererError::Rendering(x) => (FailureReason::Unspec, x.into()),
+            })
+        }
+        BackendData::Winit(winit) => render_session::<_, _>(
+            node,
+            winit.backend.renderer(),
+            session,
+            &params,
+            output.current_transform(),
+            |node, buffer, renderer, dtr, age| {
+                render_fn(
+                    node, buffer, renderer, dtr, age, common, session, output, handle,
                 )
-            } else {
-                let size = buffer_dimensions(buffer).unwrap();
-                let render_buffer = Offscreen::<Gles2Renderbuffer>::create_buffer(renderer, size)
-                    .map_err(DamageTrackedRendererError::Rendering)?;
-                render_workspace::<_, _, Gles2Renderbuffer, Dmabuf>(
-                    node,
-                    renderer,
-                    render_buffer,
-                    dtr,
-                    age,
-                    common,
-                    &output,
-                    handle,
-                    cursor_mode,
-                    None,
-                    None,
+            },
+        )
+        .map_err(|err| (FailureReason::Unspec, err.into())),
+        BackendData::X11(x11) => render_session::<_, _>(
+            node,
+            &mut x11.renderer,
+            session,
+            &params,
+            output.current_transform(),
+            |node, buffer, renderer, dtr, age| {
+                render_fn(
+                    node, buffer, renderer, dtr, age, common, session, output, handle,
                 )
-            }
-        },
-    )
-    .map_err(|err| (FailureReason::Unspec, err.into()))
+            },
+        )
+        .map_err(|err| (FailureReason::Unspec, err.into())),
+        _ => unreachable!(),
+    }
 }
 
 smithay::render_elements! {
@@ -741,106 +851,154 @@ pub fn render_window_to_buffer(
         return Err((FailureReason::InvalidSize, anyhow!("Window changed size")));
     }
 
-    let node = node_from_params(&params, &mut state.backend, None);
-    let mut _tmp_multirenderer = None;
-    let renderer = match &mut state.backend {
-        BackendData::Kms(kms) => {
-            _tmp_multirenderer = Some(
-                kms.api
-                    .renderer::<Gles2Renderbuffer>(node.as_ref().unwrap(), node.as_ref().unwrap())
-                    .map_err(|err| (FailureReason::Unspec, err.into()))?,
-            );
-            _tmp_multirenderer.as_mut().unwrap().as_mut()
-        }
-        BackendData::Winit(winit) => winit.backend.renderer(),
-        BackendData::X11(x11) => &mut x11.renderer,
-        _ => unreachable!(),
-    };
+    fn render_fn<R>(
+        buffer: &WlBuffer,
+        renderer: &mut R,
+        dtr: &mut DamageTrackedRenderer,
+        age: usize,
+        session: &Session,
+        common: &mut Common,
+        window: &Window,
+        geometry: Rectangle<i32, Logical>,
+    ) -> Result<
+        (Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates),
+        DamageTrackedRendererError<R>,
+    >
+    where
+        R: Renderer
+            + ImportAll
+            + ImportMem
+            + ExportMem
+            + Bind<Dmabuf>
+            + Offscreen<Gles2Renderbuffer>
+            + Blit<Dmabuf>
+            + AsGlowRenderer,
+        <R as Renderer>::TextureId: Clone + 'static,
+        <R as Renderer>::Error: From<Gles2Error>,
+        CosmicElement<R>: RenderElement<R>,
+        CosmicMappedRenderElement<R>: RenderElement<R>,
+    {
+        // TODO cursor elements!
+        let mut elements = AsRenderElements::<R>::render_elements::<WindowCaptureElement<R>>(
+            window,
+            renderer,
+            (-geometry.loc.x, -geometry.loc.y).into(),
+            Scale::from(1.0),
+        );
 
-    render_session::<_, _>(
-        node,
-        renderer,
-        session,
-        &params,
-        Transform::Normal,
-        |_node, buffer, renderer, dtr, age| {
-            // TODO cursor elements!
-            let mut elements = AsRenderElements::<GlowRenderer>::render_elements::<
-                WindowCaptureElement<GlowRenderer>,
-            >(
-                window,
-                renderer,
-                (-geometry.loc.x, -geometry.loc.y).into(),
-                Scale::from(1.0),
-            );
+        for seat in common.seats() {
+            if let Some(location) = {
+                // we need to find the mapped element in that case
+                if let Some(mapped) = common
+                    .shell
+                    .element_for_surface(window.toplevel().wl_surface())
+                {
+                    mapped.cursor_position(seat).and_then(|mut p| {
+                        p -= mapped.active_window_offset().loc.to_f64();
+                        if p.x < 0. || p.y < 0. {
+                            None
+                        } else {
+                            Some(p)
+                        }
+                    })
+                } else {
+                    None
+                }
+            } {
+                if session.cursor_mode() == ScreencopyCursorMode::Embedded {
+                    elements.extend(
+                        cursor::draw_cursor(
+                            renderer,
+                            seat,
+                            location,
+                            1.0.into(),
+                            common.clock.now(),
+                            true,
+                        )
+                        .into_iter()
+                        .map(WindowCaptureElement::from),
+                    );
+                }
 
-            for seat in state.common.seats() {
-                if let Some(location) = {
-                    // we need to find the mapped element in that case
-                    if let Some(mapped) = state
-                        .common
-                        .shell
-                        .element_for_surface(window.toplevel().wl_surface())
-                    {
-                        mapped.cursor_position(seat).and_then(|mut p| {
-                            p -= mapped.active_window_offset().loc.to_f64();
-                            if p.x < 0. || p.y < 0. {
-                                None
-                            } else {
-                                Some(p)
-                            }
-                        })
-                    } else {
-                        None
-                    }
-                } {
-                    if session.cursor_mode() == ScreencopyCursorMode::Embedded {
-                        elements.extend(
-                            cursor::draw_cursor(
-                                renderer,
-                                seat,
-                                location,
-                                1.0.into(),
-                                state.common.clock.now(),
-                                true,
-                            )
+                if let Some(wl_surface) = get_dnd_icon(seat) {
+                    elements.extend(
+                        cursor::draw_dnd_icon(renderer, &wl_surface, location.to_i32_round(), 1.0)
                             .into_iter()
                             .map(WindowCaptureElement::from),
-                        );
-                    }
-
-                    if let Some(wl_surface) = get_dnd_icon(seat) {
-                        elements.extend(
-                            cursor::draw_dnd_icon(
-                                renderer,
-                                &wl_surface,
-                                location.to_i32_round(),
-                                1.0,
-                            )
-                            .into_iter()
-                            .map(WindowCaptureElement::from),
-                        );
-                    }
+                    );
                 }
             }
+        }
 
-            if let Ok(dmabuf) = get_dmabuf(buffer) {
-                renderer
-                    .bind(dmabuf)
-                    .map_err(DamageTrackedRendererError::Rendering)?;
-            } else {
-                let size = buffer_dimensions(buffer).unwrap();
-                let render_buffer = Offscreen::<Gles2Renderbuffer>::create_buffer(renderer, size)
-                    .map_err(DamageTrackedRendererError::Rendering)?;
-                renderer
-                    .bind(render_buffer)
-                    .map_err(DamageTrackedRendererError::Rendering)?;
-            }
+        if let Ok(dmabuf) = get_dmabuf(buffer) {
+            renderer
+                .bind(dmabuf)
+                .map_err(DamageTrackedRendererError::Rendering)?;
+        } else {
+            let size = buffer_dimensions(buffer).unwrap();
+            let render_buffer = Offscreen::<Gles2Renderbuffer>::create_buffer(renderer, size)
+                .map_err(DamageTrackedRendererError::Rendering)?;
+            renderer
+                .bind(render_buffer)
+                .map_err(DamageTrackedRendererError::Rendering)?;
+        }
 
-            dtr.render_output(renderer, age, &elements, CLEAR_COLOR, None)
-        },
-    )
-    .map_err(|err| (FailureReason::Unspec, err.into()))
+        dtr.render_output(renderer, age, &elements, CLEAR_COLOR, None)
+    }
+
+    let node = node_from_params(&params, &mut state.backend, None);
+    let common = &mut state.common;
+    match &mut state.backend {
+        BackendData::Kms(kms) => {
+            let mut multirenderer = kms
+                .api
+                .renderer::<Gles2Renderbuffer>(node.as_ref().unwrap(), node.as_ref().unwrap())
+                .map_err(|err| (FailureReason::Unspec, err.into()))?;
+            render_session::<_, _>(
+                node,
+                &mut multirenderer,
+                session,
+                &params,
+                Transform::Normal,
+                |_node, buffer, renderer, dtr, age| {
+                    render_fn(
+                        buffer, renderer, dtr, age, session, common, window, geometry,
+                    )
+                },
+            )
+            .map_err(|err| match err {
+                DamageTrackedRendererError::OutputNoMode(x) => (FailureReason::Unspec, x.into()),
+                DamageTrackedRendererError::Rendering(x) => (FailureReason::Unspec, x.into()),
+            })
+        }
+        BackendData::Winit(winit) => render_session::<_, _>(
+            node,
+            winit.backend.renderer(),
+            session,
+            &params,
+            Transform::Normal,
+            |_node, buffer, renderer, dtr, age| {
+                render_fn(
+                    buffer, renderer, dtr, age, session, common, window, geometry,
+                )
+            },
+        )
+        .map_err(|err| (FailureReason::Unspec, err.into())),
+        BackendData::X11(x11) => render_session::<_, _>(
+            node,
+            &mut x11.renderer,
+            session,
+            &params,
+            Transform::Normal,
+            |_node, buffer, renderer, dtr, age| {
+                render_fn(
+                    buffer, renderer, dtr, age, session, common, window, geometry,
+                )
+            },
+        )
+        .map_err(|err| (FailureReason::Unspec, err.into())),
+        _ => unreachable!(),
+    }
 }
 
 impl Common {
