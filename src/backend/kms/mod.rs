@@ -7,7 +7,7 @@ use crate::{
     state::{BackendData, ClientState, Common, Data, Fps},
     utils::prelude::*,
     wayland::{
-        handlers::screencopy::{PendingScreencopyBuffers, UserdataExt},
+        handlers::screencopy::UserdataExt,
         protocols::screencopy::{BufferParams, Session as ScreencopySession},
     },
 };
@@ -445,11 +445,11 @@ impl State {
                     if let Some((output, avg_rendertime)) = rescheduled {
                         let mut scheduled_sessions =
                             data.state.workspace_session_for_output(&output);
-                        if let Some(sessions) = output.user_data().get::<PendingScreencopyBuffers>()
-                        {
+                        let mut output_sessions = output.pending_buffers().peekable();
+                        if output_sessions.peek().is_some() {
                             scheduled_sessions
                                 .get_or_insert_with(Vec::new)
-                                .extend(sessions.borrow_mut().drain(..));
+                                .extend(output_sessions);
                         }
 
                         let repaint_delay = std::cmp::max(avg_rendertime, MIN_RENDER_TIME);
@@ -1063,6 +1063,13 @@ impl KmsState {
             .find(|(_, _, s)| s.output == *output)
         {
             if surface.surface.is_none() {
+                if let Some(sessions) = screencopy_sessions {
+                    loop_handle.insert_idle(move |data| {
+                        for (session, params) in sessions.into_iter() {
+                            data.state.common.still_pending(session, params);
+                        }
+                    });
+                }
                 return Ok(());
             }
             if !surface.pending {
@@ -1084,31 +1091,44 @@ impl KmsState {
                         let backend = data.state.backend.kms();
                         if let Some(device) = backend.devices.get_mut(&device) {
                             if let Some(surface) = device.surfaces.get_mut(&crtc) {
-                                if let Err(err) = surface.render_output(
+                                match surface.render_output(
                                     &data.display.handle(),
                                     &mut backend.api,
                                     &device.render_node,
                                     &mut data.state.common,
                                     screencopy_sessions.as_deref(),
                                 ) {
-                                    if let Some(sessions) = screencopy_sessions.as_mut() {
-                                        for (session, params) in sessions.drain(..) {
-                                            data.state.common.still_pending(session, params);
+                                    Ok(_) => return TimeoutAction::Drop,
+                                    Err(err) => {
+                                        if backend.session.is_active() {
+                                            slog_scope::error!("Error rendering: {}", err);
+                                            return TimeoutAction::ToDuration(
+                                                Duration::from_secs_f64(
+                                                    (1000.0 / surface.refresh_rate as f64) - 0.003,
+                                                ),
+                                            );
                                         }
                                     }
-                                    if backend.session.is_active() {
-                                        slog_scope::error!("Error rendering: {}", err);
-                                        return TimeoutAction::ToDuration(Duration::from_secs_f64(
-                                            (1000.0 / surface.refresh_rate as f64) - 0.003,
-                                        ));
-                                    }
-                                }
+                                };
+                            }
+                        }
+
+                        if let Some(sessions) = screencopy_sessions.as_mut() {
+                            for (session, params) in sessions.drain(..) {
+                                data.state.common.still_pending(session, params);
                             }
                         }
                         TimeoutAction::Drop
                     },
                 )?);
             } else {
+                if let Some(sessions) = screencopy_sessions {
+                    loop_handle.insert_idle(|data| {
+                        for (session, params) in sessions.into_iter() {
+                            data.state.common.still_pending(session, params);
+                        }
+                    });
+                }
                 surface.dirty = true;
             }
         }
