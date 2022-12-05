@@ -376,6 +376,37 @@ impl Config {
 
             output_state.update();
             self.write_outputs(output_state.outputs());
+        } else {
+            for output in outputs {
+                if let Err(err) = backend.apply_config_for_output(
+                    &output,
+                    false,
+                    shell,
+                    seats.iter().cloned(),
+                    loop_handle,
+                ) {
+                    slog_scope::warn!(
+                        "Failed to set new config for output {}: {}",
+                        output.name(),
+                        err
+                    );
+                } else {
+                    if output
+                        .user_data()
+                        .get::<RefCell<OutputConfig>>()
+                        .unwrap()
+                        .borrow()
+                        .enabled
+                    {
+                        output_state.enable_head(&output);
+                    } else {
+                        output_state.disable_head(&output);
+                    }
+                }
+            }
+
+            output_state.update();
+            self.write_outputs(output_state.outputs());
         }
     }
 
