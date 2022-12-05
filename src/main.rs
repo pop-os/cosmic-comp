@@ -27,7 +27,7 @@ pub mod debug;
 
 fn main() -> Result<()> {
     // setup logger
-    let log = logger::init_logger()?;
+    let _log = logger::init_logger()?;
     slog_scope::info!("Cosmic starting up!");
 
     // init event loop
@@ -41,7 +41,6 @@ fn main() -> Result<()> {
         socket,
         event_loop.handle(),
         event_loop.get_signal(),
-        log,
     );
     // init backend
     backend::init_backend_auto(&display.handle(), &mut event_loop, &mut state)?;
@@ -71,9 +70,9 @@ fn main() -> Result<()> {
         let _ = data.display.flush_clients();
     })?;
 
-    let _log = data.state.destroy();
-    // drop eventloop before logger
+    // drop eventloop & state before logger
     std::mem::drop(event_loop);
+    std::mem::drop(data);
 
     Ok(())
 }

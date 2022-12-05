@@ -3,7 +3,6 @@
 use crate::{
     backend::{kms::KmsState, winit::WinitState, x11::X11State},
     config::{Config, OutputConfig},
-    logger::LogState,
     shell::Shell,
     utils::prelude::*,
     wayland::protocols::{
@@ -85,7 +84,6 @@ pub struct Common {
     pub clock: Clock<Monotonic>,
     pub should_stop: bool,
 
-    pub log: LogState,
     #[cfg(feature = "debug")]
     pub egui: Egui,
 
@@ -207,7 +205,6 @@ impl State {
         socket: OsString,
         handle: LoopHandle<'static, Data>,
         signal: LoopSignal,
-        log: LogState,
     ) -> State {
         let clock = Clock::new().expect("Failed to initialize clock");
         let config = Config::load();
@@ -251,7 +248,6 @@ impl State {
                 clock,
                 should_stop: false,
 
-                log,
                 #[cfg(feature = "debug")]
                 egui: Egui { active: false },
 
@@ -312,10 +308,6 @@ impl State {
             },
             privileged: true,
         }
-    }
-
-    pub fn destroy(self) -> LogState {
-        self.common.log
     }
 }
 
