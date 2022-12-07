@@ -168,7 +168,7 @@ impl WorkspaceSet {
             let mut workspace = create_workspace(&mut state, &self.group, false);
             workspace_set_idx(
                 &mut state,
-                self.workspaces.len() as u8,
+                self.workspaces.len() as u8 + 1,
                 self.idx,
                 &workspace.handle,
             );
@@ -270,7 +270,7 @@ impl WorkspaceSet {
     fn update_idx(&mut self, state: &mut WorkspaceUpdateGuard<'_, State>, idx: usize) {
         self.idx = idx;
         for (i, workspace) in self.workspaces.iter().enumerate() {
-            workspace_set_idx(state, i as u8, idx, &workspace.handle);
+            workspace_set_idx(state, i as u8 + 1, idx, &workspace.handle);
         }
     }
 }
