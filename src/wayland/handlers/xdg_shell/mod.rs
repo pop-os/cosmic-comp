@@ -130,7 +130,7 @@ impl XdgShellHandler for State {
         surface.send_repositioned(token);
         if let Err(err) = surface.send_configure() {
             slog_scope::warn!(
-                "Compositor bug: Unable to re configure repositioned popup: {}",
+                "Client bug: Unable to re-configure repositioned popup: {}",
                 err
             );
         }
