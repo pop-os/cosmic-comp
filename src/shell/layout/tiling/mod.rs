@@ -1155,6 +1155,10 @@ impl TilingLayout {
                         tree.traverse_pre_order(root)
                             .unwrap()
                             .filter(|node| node.data().is_mapped(None))
+                            .filter(|node| match node.data() {
+                                Data::Mapped { mapped, .. } => mapped.is_activated(),
+                                _ => unreachable!(),
+                            })
                             .map(|node| match node.data() {
                                 Data::Mapped {
                                     mapped,
@@ -1166,7 +1170,28 @@ impl TilingLayout {
                                     output_data.location + last_geometry.loc,
                                 ),
                                 _ => unreachable!(),
-                            }),
+                            })
+                            .chain(
+                                tree.traverse_pre_order(root)
+                                    .unwrap()
+                                    .filter(|node| node.data().is_mapped(None))
+                                    .filter(|node| match node.data() {
+                                        Data::Mapped { mapped, .. } => !mapped.is_activated(),
+                                        _ => unreachable!(),
+                                    })
+                                    .map(|node| match node.data() {
+                                        Data::Mapped {
+                                            mapped,
+                                            last_geometry,
+                                            ..
+                                        } => (
+                                            &output_data.output,
+                                            mapped,
+                                            output_data.location + last_geometry.loc,
+                                        ),
+                                        _ => unreachable!(),
+                                    }),
+                            ),
                     )
                 } else {
                     None
@@ -1257,20 +1282,45 @@ impl TilingLayout {
                 if &output_data.output != output {
                     return None;
                 }
-                let root = tree.root_node_id()?;
-                Some(
-                    tree.traverse_pre_order(root)
-                        .unwrap()
-                        .filter(|node| node.data().is_mapped(None))
-                        .map(|node| match node.data() {
-                            Data::Mapped {
-                                mapped,
-                                last_geometry,
-                                ..
-                            } => (mapped, last_geometry.loc),
-                            _ => unreachable!(),
-                        }),
-                )
+
+                if let Some(root) = tree.root_node_id() {
+                    Some(
+                        tree.traverse_pre_order(root)
+                            .unwrap()
+                            .filter(|node| node.data().is_mapped(None))
+                            .filter(|node| match node.data() {
+                                Data::Mapped { mapped, .. } => mapped.is_activated(),
+                                _ => unreachable!(),
+                            })
+                            .map(|node| match node.data() {
+                                Data::Mapped {
+                                    mapped,
+                                    last_geometry,
+                                    ..
+                                } => (mapped, last_geometry.loc),
+                                _ => unreachable!(),
+                            })
+                            .chain(
+                                tree.traverse_pre_order(root)
+                                    .unwrap()
+                                    .filter(|node| node.data().is_mapped(None))
+                                    .filter(|node| match node.data() {
+                                        Data::Mapped { mapped, .. } => !mapped.is_activated(),
+                                        _ => unreachable!(),
+                                    })
+                                    .map(|node| match node.data() {
+                                        Data::Mapped {
+                                            mapped,
+                                            last_geometry,
+                                            ..
+                                        } => (mapped, last_geometry.loc),
+                                        _ => unreachable!(),
+                                    }),
+                            ),
+                    )
+                } else {
+                    None
+                }
             })
             .flatten()
             .flat_map(|(mapped, loc)| {
