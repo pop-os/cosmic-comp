@@ -6,7 +6,7 @@ use smithay::{
         glow::{GlowFrame, GlowRenderer},
         Frame, ImportAll, Renderer,
     },
-    utils::{Physical, Point, Rectangle, Scale},
+    utils::{Buffer as BufferCoords, Physical, Point, Rectangle, Scale},
 };
 
 #[cfg(feature = "debug")]
@@ -124,18 +124,18 @@ impl RenderElement<GlowRenderer> for CosmicElement<GlowRenderer> {
     fn draw<'frame>(
         &self,
         frame: &mut <GlowRenderer as Renderer>::Frame<'frame>,
-        location: Point<i32, Physical>,
-        scale: Scale<f64>,
+        src: Rectangle<f64, BufferCoords>,
+        dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         log: &slog::Logger,
     ) -> Result<(), <GlowRenderer as Renderer>::Error> {
         match self {
-            CosmicElement::Workspace(elem) => elem.draw(frame, location, scale, damage, log),
-            CosmicElement::Cursor(elem) => elem.draw(frame, location, scale, damage, log),
-            CosmicElement::MoveGrab(elem) => elem.draw(frame, location, scale, damage, log),
+            CosmicElement::Workspace(elem) => elem.draw(frame, src, dst, damage, log),
+            CosmicElement::Cursor(elem) => elem.draw(frame, src, dst, damage, log),
+            CosmicElement::MoveGrab(elem) => elem.draw(frame, src, dst, damage, log),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame, location, scale, damage, log)
+                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage, log)
             }
         }
     }
@@ -158,23 +158,21 @@ impl<'a> RenderElement<GlMultiRenderer<'a>> for CosmicElement<GlMultiRenderer<'a
     fn draw<'frame>(
         &self,
         frame: &mut GlMultiFrame<'a, 'frame>,
-        location: Point<i32, Physical>,
-        scale: Scale<f64>,
+        src: Rectangle<f64, BufferCoords>,
+        dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         log: &slog::Logger,
     ) -> Result<(), <GlMultiRenderer<'_> as Renderer>::Error> {
         match self {
-            CosmicElement::Workspace(elem) => elem.draw(frame, location, scale, damage, log),
-            CosmicElement::Cursor(elem) => elem.draw(frame, location, scale, damage, log),
-            CosmicElement::MoveGrab(elem) => elem.draw(frame, location, scale, damage, log),
+            CosmicElement::Workspace(elem) => elem.draw(frame, src, dst, damage, log),
+            CosmicElement::Cursor(elem) => elem.draw(frame, src, dst, damage, log),
+            CosmicElement::MoveGrab(elem) => elem.draw(frame, src, dst, damage, log),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => {
                 let elem = {
                     let glow_frame = frame.glow_frame_mut();
-                    RenderElement::<GlowRenderer>::draw(
-                        elem, glow_frame, location, scale, damage, log,
-                    )
-                    .map_err(|err| MultiError::Render(err))
+                    RenderElement::<GlowRenderer>::draw(elem, glow_frame, src, dst, damage, log)
+                        .map_err(|err| MultiError::Render(err))
                 };
                 elem
             }

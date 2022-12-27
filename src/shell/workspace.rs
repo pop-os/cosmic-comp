@@ -28,7 +28,7 @@ use smithay::{
         wayland_protocols::xdg::shell::server::xdg_toplevel::{self, ResizeEdge},
         wayland_server::protocol::wl_surface::WlSurface,
     },
-    utils::{IsAlive, Logical, Point, Rectangle, Scale, Serial},
+    utils::{Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial},
     wayland::shell::wlr_layer::Layer,
 };
 use std::collections::HashMap;
@@ -630,14 +630,14 @@ where
     fn draw<'frame>(
         &self,
         frame: &mut <R as Renderer>::Frame<'frame>,
-        location: Point<i32, smithay::utils::Physical>,
-        scale: Scale<f64>,
+        src: Rectangle<f64, BufferCoords>,
+        dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, smithay::utils::Physical>],
         log: &slog::Logger,
     ) -> Result<(), <R as Renderer>::Error> {
         match self {
-            WorkspaceRenderElement::Wayland(elem) => elem.draw(frame, location, scale, damage, log),
-            WorkspaceRenderElement::Window(elem) => elem.draw(frame, location, scale, damage, log),
+            WorkspaceRenderElement::Wayland(elem) => elem.draw(frame, src, dst, damage, log),
+            WorkspaceRenderElement::Window(elem) => elem.draw(frame, src, dst, damage, log),
         }
     }
 

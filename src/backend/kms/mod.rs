@@ -16,7 +16,9 @@ use anyhow::{Context, Result};
 use smithay::{
     backend::{
         allocator::{dmabuf::Dmabuf, gbm::GbmDevice, Format},
-        drm::{DrmDevice, DrmEvent, DrmEventTime, DrmNode, GbmBufferedSurface, NodeType},
+        drm::{
+            DrmDevice, DrmDeviceFd, DrmEvent, DrmEventTime, DrmNode, GbmBufferedSurface, NodeType,
+        },
         egl::{EGLContext, EGLDevice, EGLDisplay},
         input::InputEvent,
         libinput::{LibinputInputBackend, LibinputSessionInterface},
@@ -45,7 +47,7 @@ use smithay::{
     },
     utils::{
         signaling::{Linkable, SignalToken, Signaler},
-        Size, Transform,
+        DeviceFd, Size, Transform,
     },
     wayland::dmabuf::DmabufGlobal,
 };
@@ -53,16 +55,13 @@ use smithay::{
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
-    os::unix::io::{FromRawFd, OwnedFd},
+    os::unix::io::FromRawFd,
     path::PathBuf,
-    rc::Rc,
     time::Duration,
 };
 
 mod drm_helpers;
-mod session_fd;
 mod socket;
-use session_fd::*;
 use socket::*;
 
 use super::render::{CursorMode, GlMultiRenderer};
@@ -82,8 +81,8 @@ pub struct KmsState {
 pub struct Device {
     render_node: DrmNode,
     surfaces: HashMap<crtc::Handle, Surface>,
-    allocator: Rc<RefCell<GbmDevice<SessionFd>>>,
-    drm: Dispatcher<'static, DrmDevice<SessionFd>, Data>,
+    allocator: GbmDevice<DrmDeviceFd>,
+    drm: Dispatcher<'static, DrmDevice, Data>,
     formats: HashSet<Format>,
     supports_atomic: bool,
     event_token: Option<RegistrationToken>,
@@ -91,13 +90,7 @@ pub struct Device {
 }
 
 pub struct Surface {
-    surface: Option<
-        GbmBufferedSurface<
-            Rc<RefCell<GbmDevice<SessionFd>>>,
-            SessionFd,
-            Option<OutputPresentationFeedback>,
-        >,
-    >,
+    surface: Option<GbmBufferedSurface<GbmDevice<DrmDeviceFd>, Option<OutputPresentationFeedback>>>,
     damage_tracker: DamageTrackedRenderer,
     connector: connector::Handle,
     output: Output,
@@ -324,23 +317,26 @@ impl State {
             return Ok(());
         }
 
-        let fd = SessionFd::new(unsafe {
-            OwnedFd::from_raw_fd(
-                self.backend
-                    .kms()
-                    .session
-                    .open(
-                        &path,
-                        OFlag::O_RDWR | OFlag::O_CLOEXEC | OFlag::O_NOCTTY | OFlag::O_NONBLOCK,
-                    )
-                    .with_context(|| {
-                        format!(
-                            "Failed to optain file descriptor for drm device: {}",
-                            path.display()
+        let fd = DrmDeviceFd::new(
+            unsafe {
+                DeviceFd::from_raw_fd(
+                    self.backend
+                        .kms()
+                        .session
+                        .open(
+                            &path,
+                            OFlag::O_RDWR | OFlag::O_CLOEXEC | OFlag::O_NOCTTY | OFlag::O_NONBLOCK,
                         )
-                    })?,
-            )
-        });
+                        .with_context(|| {
+                            format!(
+                                "Failed to optain file descriptor for drm device: {}",
+                                path.display()
+                            )
+                        })?,
+                )
+            },
+            None,
+        );
         let mut drm = DrmDevice::new(fd.clone(), false, None)
             .with_context(|| format!("Failed to initialize drm device for: {}", path.display()))?;
         let drm_node = DrmNode::from_dev_id(dev)?;
@@ -348,11 +344,9 @@ impl State {
 
         let gbm = GbmDevice::new(fd)
             .with_context(|| format!("Failed to initialize GBM device for {}", path.display()))?;
-        let egl_display = unsafe {
-            EGLDisplay::new(&gbm, None).with_context(|| {
-                format!("Failed to create EGLDisplay for device: {}", path.display())
-            })?
-        };
+        let egl_display = EGLDisplay::new(gbm.clone(), None).with_context(|| {
+            format!("Failed to create EGLDisplay for device: {}", path.display())
+        })?;
         let egl_device = EGLDevice::device_for_display(&egl_display).with_context(|| {
             format!("Unable to find matching egl device for {}", path.display())
         })?;
@@ -488,7 +482,7 @@ impl State {
         let mut device = Device {
             render_node,
             surfaces: HashMap::new(),
-            allocator: Rc::new(RefCell::new(gbm)),
+            allocator: gbm,
             drm: dispatcher,
             formats,
             supports_atomic,

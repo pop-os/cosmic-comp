@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use smithay::{
     backend::{
         allocator::dmabuf::Dmabuf,
+        drm::DrmDeviceFd,
         egl::{EGLContext, EGLDisplay},
         input::{Event, InputEvent},
         renderer::{
@@ -24,22 +25,19 @@ use smithay::{
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
         calloop::{ping, EventLoop, LoopHandle},
-        gbm::{Device as GbmDevice, FdWrapper},
+        gbm::Device as GbmDevice,
         wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
         wayland_server::DisplayHandle,
     },
-    utils::Transform,
+    utils::{DeviceFd, Transform},
 };
-use std::{
-    cell::RefCell,
-    sync::{Arc, Mutex},
-};
+use std::cell::RefCell;
 
 #[cfg(feature = "debug")]
 use crate::state::Fps;
 
 pub struct X11State {
-    allocator: Arc<Mutex<GbmDevice<FdWrapper>>>,
+    allocator: GbmDevice<DrmDeviceFd>,
     _egl: EGLDisplay,
     pub renderer: GlowRenderer,
     surfaces: Vec<Surface>,
@@ -267,11 +265,11 @@ pub fn init_backend(
         .with_context(|| "Could not get DRM node used by X server")?;
 
     // Create the gbm device for buffer allocation.
-    let device =
-        unsafe { GbmDevice::new_from_fd(fd) }.with_context(|| "Failed to create GBM device")?;
+    let device = GbmDevice::new(DrmDeviceFd::new(DeviceFd::from(fd), None))
+        .with_context(|| "Failed to create GBM device")?;
     // Initialize EGL using the GBM device.
     let egl =
-        unsafe { EGLDisplay::new(&device, None).with_context(|| "Failed to create EGL display")? };
+        EGLDisplay::new(device.clone(), None).with_context(|| "Failed to create EGL display")?;
     // Create the OpenGL context
     let context = EGLContext::new(&egl, None).with_context(|| "Failed to create EGL context")?;
     // Create a renderer
@@ -282,7 +280,7 @@ pub fn init_backend(
 
     state.backend = BackendData::X11(X11State {
         handle,
-        allocator: Arc::new(Mutex::new(device)),
+        allocator: device,
         _egl: egl,
         renderer,
         surfaces: Vec::new(),

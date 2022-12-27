@@ -351,7 +351,7 @@ impl Common {
                         states,
                         render_element_states,
                         default_primary_scanout_output_compare,
-                    )
+                    );
                 });
                 window.send_frame(output, time, throttle, surface_primary_scanout_output);
             }
@@ -380,7 +380,7 @@ impl Common {
                     states,
                     render_element_states,
                     default_primary_scanout_output_compare,
-                )
+                );
             });
             layer_surface.send_frame(output, time, throttle, surface_primary_scanout_output);
         }

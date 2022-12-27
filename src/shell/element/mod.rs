@@ -25,7 +25,9 @@ use smithay::{
         wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface},
     },
     space_elements,
-    utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size},
+    utils::{
+        Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
+    },
     wayland::{
         compositor::{with_states, with_surface_tree_downward, TraversalAction},
         seat::WaylandFocus,
@@ -850,18 +852,14 @@ impl RenderElement<GlowRenderer> for CosmicMappedRenderElement<GlowRenderer> {
     fn draw<'frame>(
         &self,
         frame: &mut <GlowRenderer as Renderer>::Frame<'frame>,
-        location: Point<i32, Physical>,
-        scale: Scale<f64>,
+        src: Rectangle<f64, BufferCoords>,
+        dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         log: &slog::Logger,
     ) -> Result<(), <GlowRenderer as Renderer>::Error> {
         match self {
-            CosmicMappedRenderElement::Stack(elem) => {
-                elem.draw(frame, location, scale, damage, log)
-            }
-            CosmicMappedRenderElement::Window(elem) => {
-                elem.draw(frame, location, scale, damage, log)
-            }
+            CosmicMappedRenderElement::Stack(elem) => elem.draw(frame, src, dst, damage, log),
+            CosmicMappedRenderElement::Window(elem) => elem.draw(frame, src, dst, damage, log),
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => {
                 RenderElement::<GlowRenderer>::draw(elem, frame, location, scale, damage, log)
@@ -886,18 +884,14 @@ impl<'a> RenderElement<GlMultiRenderer<'a>> for CosmicMappedRenderElement<GlMult
     fn draw<'frame>(
         &self,
         frame: &mut GlMultiFrame<'a, 'frame>,
-        location: Point<i32, Physical>,
-        scale: Scale<f64>,
+        src: Rectangle<f64, BufferCoords>,
+        dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         log: &slog::Logger,
     ) -> Result<(), <GlMultiRenderer<'_> as Renderer>::Error> {
         match self {
-            CosmicMappedRenderElement::Stack(elem) => {
-                elem.draw(frame, location, scale, damage, log)
-            }
-            CosmicMappedRenderElement::Window(elem) => {
-                elem.draw(frame, location, scale, damage, log)
-            }
+            CosmicMappedRenderElement::Stack(elem) => elem.draw(frame, src, dst, damage, log),
+            CosmicMappedRenderElement::Window(elem) => elem.draw(frame, src, dst, damage, log),
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => {
                 let glow_frame = frame.glow_frame_mut();
