@@ -13,3 +13,4 @@ vendor
 vendor.tar
 .vscode
 *.log
+result
