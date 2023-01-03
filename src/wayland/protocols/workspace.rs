@@ -160,8 +160,8 @@ where
         let instance = data_init.init(resource, ());
         for group in &mut state.groups {
             send_group_to_client::<D>(dh, &instance, group);
-            instance.done();
         }
+        instance.done();
         state.instances.push(instance);
     }
 
