@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use smithay::{
-    desktop::{Kind, Window},
-    input::Seat,
-    reexports::wayland_server::DisplayHandle,
-};
+use smithay::{desktop::Window, input::Seat, reexports::wayland_server::DisplayHandle};
 
 use crate::{
     utils::prelude::*,
@@ -52,10 +48,7 @@ impl ToplevelManagementHandler for State {
     }
 
     fn close(&mut self, _dh: &DisplayHandle, window: &Window) {
-        #[allow(irrefutable_let_patterns)]
-        if let Kind::Xdg(xdg) = &window.toplevel() {
-            xdg.send_close();
-        }
+        window.toplevel().send_close();
     }
 }
 

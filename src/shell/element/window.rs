@@ -9,7 +9,7 @@ use smithay::{
             ImportAll, Renderer,
         },
     },
-    desktop::{space::SpaceElement, Kind, Window},
+    desktop::{space::SpaceElement, Window},
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget},
@@ -72,18 +72,16 @@ impl CosmicWindow {
                     .unwrap_or(0),
         )
             .into();
-        match self.window.toplevel() {
-            Kind::Xdg(xdg) => xdg.with_pending_state(|state| state.size = Some(surface_size)),
-        };
+        self.window
+            .toplevel()
+            .with_pending_state(|state| state.size = Some(surface_size));
     }
 }
 
 impl From<Window> for CosmicWindow {
     fn from(window: Window) -> Self {
         let is_ssd = matches!(
-            match window.toplevel() {
-                Kind::Xdg(xdg) => xdg.current_state().decoration_mode,
-            },
+            window.toplevel().current_state().decoration_mode,
             Some(DecorationMode::ServerSide)
         );
         CosmicWindow {
@@ -100,7 +98,7 @@ impl From<ToplevelSurface> for CosmicWindow {
             Some(DecorationMode::ServerSide)
         );
         CosmicWindow {
-            window: Window::new(Kind::Xdg(surf)),
+            window: Window::new(surf),
             header: Arc::new(Mutex::new(is_ssd.then_some(HeaderBar::default()))),
         }
     }

@@ -13,7 +13,7 @@ use smithay::{
             ImportAll, Renderer,
         },
     },
-    desktop::{space::SpaceElement, Kind, PopupManager, Window, WindowSurfaceType},
+    desktop::{space::SpaceElement, PopupManager, Window, WindowSurfaceType},
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget},
@@ -252,16 +252,13 @@ impl CosmicMapped {
             CosmicMappedInternal::Window(w) => Box::new(std::iter::once(w.window.clone())),
             _ => unreachable!(),
         } {
-            match window.toplevel() {
-                Kind::Xdg(xdg) => xdg.with_pending_state(|state| {
-                    if resizing {
-                        state.states.set(XdgState::Resizing);
-                    } else {
-                        state.states.unset(XdgState::Resizing);
-                    }
-                }),
-                // Kind::X11?
-            };
+            window.toplevel().with_pending_state(|state| {
+                if resizing {
+                    state.states.set(XdgState::Resizing);
+                } else {
+                    state.states.unset(XdgState::Resizing);
+                }
+            });
         }
     }
 
@@ -272,37 +269,31 @@ impl CosmicMapped {
             _ => unreachable!(),
         };
 
-        match window.toplevel() {
-            Kind::Xdg(xdg) => {
-                xdg.current_state().states.contains(XdgState::Resizing)
-                    || xdg.with_pending_state(|states| states.states.contains(XdgState::Resizing))
-            } // Kind::X11?
-        }
+        let xdg = window.toplevel();
+        xdg.current_state().states.contains(XdgState::Resizing)
+            || xdg.with_pending_state(|states| states.states.contains(XdgState::Resizing))
     }
 
     pub fn set_tiled(&self, tiled: bool) {
-        for toplevel in match &self.element {
+        for xdg in match &self.element {
             // we use the tiled state of stack windows anyway to get rid of decorations
             CosmicMappedInternal::Stack(_) => None,
             CosmicMappedInternal::Window(w) => Some(w.window.toplevel()),
             _ => unreachable!(),
         } {
-            match toplevel {
-                Kind::Xdg(xdg) => xdg.with_pending_state(|state| {
-                    if tiled {
-                        state.states.set(XdgState::TiledLeft);
-                        state.states.set(XdgState::TiledRight);
-                        state.states.set(XdgState::TiledTop);
-                        state.states.set(XdgState::TiledBottom);
-                    } else {
-                        state.states.unset(XdgState::TiledLeft);
-                        state.states.unset(XdgState::TiledRight);
-                        state.states.unset(XdgState::TiledTop);
-                        state.states.unset(XdgState::TiledBottom);
-                    }
-                }),
-                // Kind::X11?
-            };
+            xdg.with_pending_state(|state| {
+                if tiled {
+                    state.states.set(XdgState::TiledLeft);
+                    state.states.set(XdgState::TiledRight);
+                    state.states.set(XdgState::TiledTop);
+                    state.states.set(XdgState::TiledBottom);
+                } else {
+                    state.states.unset(XdgState::TiledLeft);
+                    state.states.unset(XdgState::TiledRight);
+                    state.states.unset(XdgState::TiledTop);
+                    state.states.unset(XdgState::TiledBottom);
+                }
+            });
         }
     }
 
@@ -313,10 +304,11 @@ impl CosmicMapped {
             _ => unreachable!(),
         };
 
-        match window.toplevel() {
-            Kind::Xdg(xdg) => xdg.current_state().states.contains(XdgState::TiledLeft),
-            // Kind::X11?
-        }
+        window
+            .toplevel()
+            .current_state()
+            .states
+            .contains(XdgState::TiledLeft)
     }
 
     pub fn set_fullscreen(&self, fullscreen: bool) {
@@ -327,16 +319,13 @@ impl CosmicMapped {
             CosmicMappedInternal::Window(w) => Box::new(std::iter::once(w.window.clone())),
             _ => unreachable!(),
         } {
-            match window.toplevel() {
-                Kind::Xdg(xdg) => xdg.with_pending_state(|state| {
-                    if fullscreen {
-                        state.states.set(XdgState::Fullscreen);
-                    } else {
-                        state.states.unset(XdgState::Fullscreen);
-                    }
-                }),
-                // Kind::X11?
-            };
+            window.toplevel().with_pending_state(|state| {
+                if fullscreen {
+                    state.states.set(XdgState::Fullscreen);
+                } else {
+                    state.states.unset(XdgState::Fullscreen);
+                }
+            });
         }
     }
 
@@ -347,12 +336,9 @@ impl CosmicMapped {
             _ => unreachable!(),
         };
 
-        match window.toplevel() {
-            Kind::Xdg(xdg) => {
-                xdg.current_state().states.contains(XdgState::Fullscreen)
-                    || xdg.with_pending_state(|states| states.states.contains(XdgState::Fullscreen))
-            } // Kind::X11?
-        }
+        let xdg = window.toplevel();
+        xdg.current_state().states.contains(XdgState::Fullscreen)
+            || xdg.with_pending_state(|states| states.states.contains(XdgState::Fullscreen))
     }
 
     pub fn set_maximized(&self, maximized: bool) {
@@ -363,16 +349,13 @@ impl CosmicMapped {
             CosmicMappedInternal::Window(w) => Box::new(std::iter::once(w.window.clone())),
             _ => unreachable!(),
         } {
-            match window.toplevel() {
-                Kind::Xdg(xdg) => xdg.with_pending_state(|state| {
-                    if maximized {
-                        state.states.set(XdgState::Maximized);
-                    } else {
-                        state.states.unset(XdgState::Maximized);
-                    }
-                }),
-                // Kind::X11?
-            };
+            window.toplevel().with_pending_state(|state| {
+                if maximized {
+                    state.states.set(XdgState::Maximized);
+                } else {
+                    state.states.unset(XdgState::Maximized);
+                }
+            });
         }
     }
 
@@ -383,12 +366,9 @@ impl CosmicMapped {
             _ => unreachable!(),
         };
 
-        match window.toplevel() {
-            Kind::Xdg(xdg) => {
-                xdg.current_state().states.contains(XdgState::Maximized)
-                    || xdg.with_pending_state(|states| states.states.contains(XdgState::Maximized))
-            } // Kind::X11?
-        }
+        let xdg = window.toplevel();
+        xdg.current_state().states.contains(XdgState::Maximized)
+            || xdg.with_pending_state(|states| states.states.contains(XdgState::Maximized))
     }
 
     pub fn set_activated(&self, activated: bool) {
@@ -399,16 +379,13 @@ impl CosmicMapped {
             CosmicMappedInternal::Window(w) => Box::new(std::iter::once(w.window.clone())),
             _ => unreachable!(),
         } {
-            match window.toplevel() {
-                Kind::Xdg(xdg) => xdg.with_pending_state(|state| {
-                    if activated {
-                        state.states.set(XdgState::Activated);
-                    } else {
-                        state.states.unset(XdgState::Activated);
-                    }
-                }),
-                // Kind::X11?
-            };
+            window.toplevel().with_pending_state(|state| {
+                if activated {
+                    state.states.set(XdgState::Activated);
+                } else {
+                    state.states.unset(XdgState::Activated);
+                }
+            });
         }
     }
 
@@ -419,12 +396,9 @@ impl CosmicMapped {
             _ => unreachable!(),
         };
 
-        match window.toplevel() {
-            Kind::Xdg(xdg) => {
-                xdg.current_state().states.contains(XdgState::Activated)
-                    || xdg.with_pending_state(|states| states.states.contains(XdgState::Activated))
-            } // Kind::X11?
-        }
+        let xdg = window.toplevel();
+        xdg.current_state().states.contains(XdgState::Activated)
+            || xdg.with_pending_state(|states| states.states.contains(XdgState::Activated))
     }
 
     pub fn set_size(&self, size: Size<i32, Logical>) {
@@ -536,10 +510,7 @@ impl CosmicMapped {
             CosmicMappedInternal::Window(w) => Box::new(std::iter::once(w.window.clone())),
             _ => unreachable!(),
         } {
-            match window.toplevel() {
-                Kind::Xdg(xdg) => xdg.send_configure(),
-                // Kind::X11?
-            };
+            window.toplevel().send_configure();
         }
     }
 
@@ -550,10 +521,7 @@ impl CosmicMapped {
             _ => unreachable!(),
         };
 
-        match window.toplevel() {
-            Kind::Xdg(xdg) => xdg.send_close(),
-            // Kind::X11?
-        };
+        window.toplevel().send_close();
     }
 
     #[cfg(feature = "debug")]

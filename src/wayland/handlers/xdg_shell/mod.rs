@@ -4,7 +4,7 @@ use crate::{utils::prelude::*, wayland::protocols::screencopy::SessionType};
 use smithay::{
     delegate_xdg_shell,
     desktop::{
-        find_popup_root_surface, Kind, PopupGrab, PopupKeyboardGrab, PopupKind, PopupPointerGrab,
+        find_popup_root_surface, PopupGrab, PopupKeyboardGrab, PopupKind, PopupPointerGrab,
         PopupUngrabStrategy, Window,
     },
     input::{
@@ -39,7 +39,7 @@ impl XdgShellHandler for State {
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         let seat = self.common.last_active_seat().clone();
-        let window = Window::new(Kind::Xdg(surface));
+        let window = Window::new(surface);
         self.common.shell.toplevel_info_state.new_toplevel(&window);
         self.common.shell.pending_windows.push((window, seat));
         // We will position the window after the first commit, when we know its size hints
@@ -149,7 +149,7 @@ impl XdgShellHandler for State {
                     let output = seat.active_output();
                     let (window, _) = mapped
                         .windows()
-                        .find(|(w, _)| matches!(w.toplevel(), Kind::Xdg(s) if s == &surface))
+                        .find(|(w, _)| w.toplevel() == &surface)
                         .unwrap();
                     if let Some(grab) =
                         workspace.move_request(&window, &seat, &output, serial, start_data)
@@ -213,7 +213,7 @@ impl XdgShellHandler for State {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
                 let (window, _) = mapped
                     .windows()
-                    .find(|(w, _)| matches!(w.toplevel(), Kind::Xdg(s) if s == &surface))
+                    .find(|(w, _)| w.toplevel() == &surface)
                     .unwrap();
                 workspace.maximize_request(&window, &output)
             }
@@ -230,7 +230,7 @@ impl XdgShellHandler for State {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
                 let (window, _) = mapped
                     .windows()
-                    .find(|(w, _)| matches!(w.toplevel(), Kind::Xdg(s) if s == &surface))
+                    .find(|(w, _)| w.toplevel() == &surface)
                     .unwrap();
                 workspace.unmaximize_request(&window)
             }
@@ -255,7 +255,7 @@ impl XdgShellHandler for State {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
                 let (window, _) = mapped
                     .windows()
-                    .find(|(w, _)| matches!(w.toplevel(), Kind::Xdg(s) if s == &surface))
+                    .find(|(w, _)| w.toplevel() == &surface)
                     .unwrap();
                 workspace.fullscreen_request(&window, &output)
             }
@@ -272,7 +272,7 @@ impl XdgShellHandler for State {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
                 let (window, _) = mapped
                     .windows()
-                    .find(|(w, _)| matches!(w.toplevel(), Kind::Xdg(s) if s == &surface))
+                    .find(|(w, _)| w.toplevel() == &surface)
                     .unwrap();
                 workspace.unfullscreen_request(&window)
             }

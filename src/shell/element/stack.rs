@@ -10,7 +10,7 @@ use smithay::{
             ImportAll, Renderer,
         },
     },
-    desktop::{space::SpaceElement, Kind, Window},
+    desktop::{space::SpaceElement, Window},
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget},
@@ -95,9 +95,9 @@ impl CosmicStack {
             .into();
 
         for window in self.windows.lock().unwrap().iter() {
-            match window.toplevel() {
-                Kind::Xdg(xdg) => xdg.with_pending_state(|state| state.size = Some(surface_size)),
-            };
+            window
+                .toplevel()
+                .with_pending_state(|state| state.size = Some(surface_size));
         }
     }
 

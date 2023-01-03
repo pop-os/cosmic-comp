@@ -32,8 +32,8 @@ indexmap = "1.8.0"
 xdg = "^2.1"
 ron = "0.7"
 libsystemd = "0.5"
-wayland-backend = "=0.1.0-beta.15"
-wayland-scanner = "=0.30.0-beta.15"
+wayland-backend = "0.1.0"
+wayland-scanner = "0.30.0"
 cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", branch = "main", default-features = false, features = ["server"] }
 
 [dependencies.smithay]
@@ -41,7 +41,7 @@ version = "0.3"
 git = "https://github.com/Smithay/smithay.git"
 rev = "2de946cf9e"
 default-features = false
-features = ["backend_drm", "backend_gbm", "backend_egl", "backend_libinput", "backend_session_libseat", "backend_udev", "backend_winit", "backend_x11", "desktop", "use_system_lib", "renderer_glow", "renderer_multi", "wayland_frontend", "slog-stdlog"]
+features = ["backend_drm", "backend_gbm", "backend_egl", "backend_libinput", "backend_session_libseat", "backend_udev", "backend_winit", "backend_x11", "desktop", "use_system_lib", "renderer_glow", "renderer_multi", "wayland_frontend", "slog-stdlog", "xwayland"]
 
 [dependencies.smithay-egui]
 git = "https://github.com/Smithay/smithay-egui.git"
@@ -64,4 +64,4 @@ debug = true
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/pop-os/smithay", rev = "51368f56bc" }
+smithay = { git = "https://github.com/pop-os/smithay", rev = "2a05d8cd64" }

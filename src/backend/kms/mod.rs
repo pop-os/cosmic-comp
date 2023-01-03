@@ -28,7 +28,7 @@ use smithay::{
             glow::GlowRenderer,
             multigpu::{egl::EglGlesBackend, GpuManager},
         },
-        session::{auto::AutoSession, Session, Signal},
+        session::{libseat::LibSeatSession, Event as SessionEvent, Session},
         udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
     },
     desktop::utils::OutputPresentationFeedback,
@@ -45,10 +45,7 @@ use smithay::{
         wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
         wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle, Resource},
     },
-    utils::{
-        signaling::{Linkable, SignalToken, Signaler},
-        DeviceFd, Size, Transform,
-    },
+    utils::{DeviceFd, Size, Transform},
     wayland::dmabuf::DmabufGlobal,
 };
 
@@ -72,9 +69,7 @@ pub struct KmsState {
     devices: HashMap<DrmNode, Device>,
     pub api: GpuManager<EglGlesBackend<GlowRenderer>>,
     pub primary: DrmNode,
-    session: AutoSession,
-    signaler: Signaler<Signal>,
-    _restart_token: SignalToken,
+    session: LibSeatSession,
     _tokens: Vec<RegistrationToken>,
 }
 
@@ -107,17 +102,15 @@ pub fn init_backend(
     event_loop: &mut EventLoop<'static, Data>,
     state: &mut State,
 ) -> Result<()> {
-    let (session, notifier) = AutoSession::new(None).context("Failed to acquire session")?;
-    let signaler = notifier.signaler();
+    let (session, notifier) = LibSeatSession::new(None).context("Failed to acquire session")?;
 
     let udev_backend = UdevBackend::new(session.seat(), None)?;
     let mut libinput_context =
-        Libinput::new_with_udev::<LibinputSessionInterface<AutoSession>>(session.clone().into());
+        Libinput::new_with_udev::<LibinputSessionInterface<LibSeatSession>>(session.clone().into());
     libinput_context
         .udev_assign_seat(&session.seat())
         .map_err(|_| anyhow::anyhow!("Failed to assign seat to libinput"))?;
-    let mut libinput_backend = LibinputInputBackend::new(libinput_context, None);
-    libinput_backend.link(signaler.clone());
+    let libinput_backend = LibinputInputBackend::new(libinput_context.clone(), None);
 
     let libinput_event_source = event_loop
         .handle()
@@ -143,12 +136,6 @@ pub fn init_backend(
         })
         .map_err(|err| err.error)
         .context("Failed to initialize libinput event source")?;
-    let session_event_source = event_loop
-        .handle()
-        .insert_source(notifier, |(), &mut (), _state| {})
-        .map_err(|err| err.error)
-        .context("Failed to initialize session event source")?;
-
     let api = GpuManager::new(EglGlesBackend::<GlowRenderer>::default(), None)
         .context("Failed to initialize renderers")?;
 
@@ -209,85 +196,98 @@ pub fn init_backend(
     let handle = event_loop.handle();
     let loop_signal = state.common.event_loop_signal.clone();
     let dispatcher = udev_dispatcher.clone();
-    let _restart_token = signaler.register(move |signal| {
-        if let Signal::ActivateSession = signal {
-            let dispatcher = dispatcher.clone();
-            handle.insert_idle(move |data| {
-                for (dev, path) in dispatcher.as_source_ref().device_list() {
-                    let drm_node = match DrmNode::from_dev_id(dev) {
-                        Ok(node) => node,
-                        Err(err) => {
-                            slog_scope::error!(
-                                "Failed to read drm device {}: {}",
-                                path.display(),
-                                err
-                            );
-                            continue;
-                        }
-                    };
-                    if data.state.backend.kms().devices.contains_key(&drm_node) {
-                        if let Err(err) = data.state.device_changed(dev) {
-                            slog_scope::error!(
-                                "Failed to update drm device {}: {}",
-                                path.display(),
-                                err
-                            );
-                        }
-                    } else {
-                        if let Err(err) =
-                            data.state
-                                .device_added(dev, path.into(), &data.display.handle())
-                        {
-                            slog_scope::error!(
-                                "Failed to add drm device {}: {}",
-                                path.display(),
-                                err
-                            );
-                        }
-                    }
+    let session_event_source = event_loop
+        .handle()
+        .insert_source(notifier, move |event, &mut (), data| match event {
+            SessionEvent::ActivateSession => {
+                if let Err(err) = libinput_context.resume() {
+                    slog_scope::error!("Failed to resume libinput context: {:?}", err);
                 }
-
-                let seats = data.state.common.seats().cloned().collect::<Vec<_>>();
-                data.state.common.config.read_outputs(
-                    &mut data.state.common.output_configuration_state,
-                    &mut data.state.backend,
-                    &mut data.state.common.shell,
-                    seats.into_iter(),
-                    &data.state.common.event_loop_handle,
-                );
-                for surface in data
-                    .state
-                    .backend
-                    .kms()
-                    .devices
-                    .values_mut()
-                    .flat_map(|d| d.surfaces.values_mut())
-                {
-                    surface.pending = false;
-                }
-                for output in data.state.common.shell.outputs() {
-                    let sessions = output.pending_buffers().collect::<Vec<_>>();
-                    if let Err(err) = data.state.backend.kms().schedule_render(
-                        &data.state.common.event_loop_handle,
-                        output,
-                        None,
-                        if !sessions.is_empty() {
-                            Some(sessions)
+                let dispatcher = dispatcher.clone();
+                handle.insert_idle(move |data| {
+                    for (dev, path) in dispatcher.as_source_ref().device_list() {
+                        let drm_node = match DrmNode::from_dev_id(dev) {
+                            Ok(node) => node,
+                            Err(err) => {
+                                slog_scope::error!(
+                                    "Failed to read drm device {}: {}",
+                                    path.display(),
+                                    err
+                                );
+                                continue;
+                            }
+                        };
+                        if data.state.backend.kms().devices.contains_key(&drm_node) {
+                            if let Err(err) = data.state.device_changed(dev) {
+                                slog_scope::error!(
+                                    "Failed to update drm device {}: {}",
+                                    path.display(),
+                                    err
+                                );
+                            }
                         } else {
-                            None
-                        },
-                    ) {
-                        slog_scope::crit!(
-                            "Error scheduling event loop for output {}: {:?}",
-                            output.name(),
-                            err
-                        );
+                            if let Err(err) =
+                                data.state
+                                    .device_added(dev, path.into(), &data.display.handle())
+                            {
+                                slog_scope::error!(
+                                    "Failed to add drm device {}: {}",
+                                    path.display(),
+                                    err
+                                );
+                            }
+                        }
                     }
+
+                    let seats = data.state.common.seats().cloned().collect::<Vec<_>>();
+                    data.state.common.config.read_outputs(
+                        &mut data.state.common.output_configuration_state,
+                        &mut data.state.backend,
+                        &mut data.state.common.shell,
+                        seats.into_iter(),
+                        &data.state.common.event_loop_handle,
+                    );
+                    for surface in data
+                        .state
+                        .backend
+                        .kms()
+                        .devices
+                        .values_mut()
+                        .flat_map(|d| d.surfaces.values_mut())
+                    {
+                        surface.pending = false;
+                    }
+                    for output in data.state.common.shell.outputs() {
+                        let sessions = output.pending_buffers().collect::<Vec<_>>();
+                        if let Err(err) = data.state.backend.kms().schedule_render(
+                            &data.state.common.event_loop_handle,
+                            output,
+                            None,
+                            if !sessions.is_empty() {
+                                Some(sessions)
+                            } else {
+                                None
+                            },
+                        ) {
+                            slog_scope::crit!(
+                                "Error scheduling event loop for output {}: {:?}",
+                                output.name(),
+                                err
+                            );
+                        }
+                    }
+                });
+                loop_signal.wakeup();
+            }
+            SessionEvent::PauseSession => {
+                libinput_context.suspend();
+                for device in data.state.backend.kms().devices.values() {
+                    device.drm.as_source_ref().pause();
                 }
-            });
-            loop_signal.wakeup();
-        }
-    });
+            }
+        })
+        .map_err(|err| err.error)
+        .context("Failed to initialize session event source")?;
 
     state.backend = BackendData::Kms(KmsState {
         api,
@@ -298,8 +298,6 @@ pub fn init_backend(
         ],
         primary,
         session,
-        signaler,
-        _restart_token,
         devices: HashMap::new(),
     });
 
@@ -337,7 +335,7 @@ impl State {
             },
             None,
         );
-        let mut drm = DrmDevice::new(fd.clone(), false, None)
+        let drm = DrmDevice::new(fd.clone(), false, None)
             .with_context(|| format!("Failed to initialize drm device for: {}", path.display()))?;
         let drm_node = DrmNode::from_dev_id(dev)?;
         let supports_atomic = drm.is_atomic();
@@ -369,7 +367,6 @@ impl State {
         })?;
         let formats = egl_context.dmabuf_render_formats().clone();
 
-        drm.link(self.backend.kms().signaler.clone());
         let dispatcher =
             Dispatcher::new(drm, move |event, metadata, data: &mut Data| match event {
                 DrmEvent::VBlank(crtc) => {
@@ -943,9 +940,8 @@ impl KmsState {
                         surface.vrr = drm_helpers::set_vrr(drm, *crtc, conn, output_config.vrr)
                             .unwrap_or(false);
                         surface.refresh_rate = drm_helpers::calculate_refresh_rate(*mode);
-                        let mut drm_surface = drm.create_surface(*crtc, *mode, &[conn])?;
-                        drm_surface.link(self.signaler.clone());
 
+                        let drm_surface = drm.create_surface(*crtc, *mode, &[conn])?;
                         let target = GbmBufferedSurface::new(
                             drm_surface,
                             device.allocator.clone(),

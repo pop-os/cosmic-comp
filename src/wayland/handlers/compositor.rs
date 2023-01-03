@@ -4,7 +4,7 @@ use crate::{state::BackendData, utils::prelude::*, wayland::protocols::screencop
 use smithay::{
     backend::renderer::utils::{on_commit_buffer_handler, with_renderer_surface_state},
     delegate_compositor,
-    desktop::{layer_map_for_output, Kind, LayerSurface, PopupKind, WindowSurfaceType},
+    desktop::{layer_map_for_output, LayerSurface, PopupKind, WindowSurfaceType},
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     wayland::{
         compositor::{with_states, CompositorHandler, CompositorState},
@@ -116,19 +116,14 @@ impl CompositorHandler for State {
             .find(|(window, _)| window.toplevel().wl_surface() == surface)
             .cloned()
         {
-            match window.toplevel() {
-                Kind::Xdg(toplevel) => {
-                    if self.toplevel_ensure_initial_configure(&toplevel)
-                        && with_renderer_surface_state(&surface, |state| {
-                            state.wl_buffer().is_some()
-                        })
-                    {
-                        let output = seat.active_output();
-                        Shell::map_window(self, &window, &output);
-                    } else {
-                        return;
-                    }
-                }
+            let toplevel = window.toplevel();
+            if self.toplevel_ensure_initial_configure(&toplevel)
+                && with_renderer_surface_state(&surface, |state| state.wl_buffer().is_some())
+            {
+                let output = seat.active_output();
+                Shell::map_window(self, &window, &output);
+            } else {
+                return;
             }
         }
 

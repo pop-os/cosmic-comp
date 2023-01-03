@@ -21,7 +21,7 @@ use smithay::{
         element::{surface::WaylandSurfaceRenderElement, AsRenderElements, Element, RenderElement},
         ImportAll, Renderer,
     },
-    desktop::{layer_map_for_output, space::SpaceElement, Kind, LayerSurface, Window},
+    desktop::{layer_map_for_output, space::SpaceElement, LayerSurface, Window},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
     reexports::{
@@ -197,13 +197,10 @@ impl Workspace {
 
         self.floating_layer.maximize_request(window);
 
-        #[allow(irrefutable_let_patterns)]
-        if let Kind::Xdg(xdg) = &window.toplevel() {
-            xdg.with_pending_state(|state| {
-                state.states.set(xdg_toplevel::State::Maximized);
-                state.states.unset(xdg_toplevel::State::Fullscreen);
-            });
-        }
+        window.toplevel().with_pending_state(|state| {
+            state.states.set(xdg_toplevel::State::Maximized);
+            state.states.unset(xdg_toplevel::State::Fullscreen);
+        });
 
         self.set_fullscreen(window, output)
     }
@@ -219,13 +216,10 @@ impl Workspace {
             return;
         }
 
-        #[allow(irrefutable_let_patterns)]
-        if let Kind::Xdg(xdg) = &window.toplevel() {
-            xdg.with_pending_state(|state| {
-                state.states.set(xdg_toplevel::State::Fullscreen);
-                state.states.unset(xdg_toplevel::State::Maximized);
-            });
-        }
+        window.toplevel().with_pending_state(|state| {
+            state.states.set(xdg_toplevel::State::Fullscreen);
+            state.states.unset(xdg_toplevel::State::Maximized);
+        });
 
         self.set_fullscreen(window, output)
     }
@@ -238,38 +232,33 @@ impl Workspace {
             mapped.set_active(window);
         }
 
-        #[allow(irrefutable_let_patterns)]
-        if let Kind::Xdg(xdg) = &window.toplevel() {
-            xdg.with_pending_state(|state| {
-                state.size = Some(
-                    output
-                        .current_mode()
-                        .map(|m| m.size)
-                        .unwrap_or((0, 0).into())
-                        .to_f64()
-                        .to_logical(output.current_scale().fractional_scale())
-                        .to_i32_round(),
-                );
-            });
-
-            xdg.send_configure();
-        }
+        let xdg = window.toplevel();
+        xdg.with_pending_state(|state| {
+            state.size = Some(
+                output
+                    .current_mode()
+                    .map(|m| m.size)
+                    .unwrap_or((0, 0).into())
+                    .to_f64()
+                    .to_logical(output.current_scale().fractional_scale())
+                    .to_i32_round(),
+            );
+        });
+        xdg.send_configure();
         self.fullscreen.insert(output.clone(), window.clone());
     }
 
     pub fn unfullscreen_request(&mut self, window: &Window) {
         if self.fullscreen.values().any(|w| w == window) {
-            #[allow(irrefutable_let_patterns)]
-            if let Kind::Xdg(xdg) = &window.toplevel() {
-                xdg.with_pending_state(|state| {
-                    state.states.unset(xdg_toplevel::State::Fullscreen);
-                    state.states.unset(xdg_toplevel::State::Maximized);
-                    state.size = None;
-                });
-                self.floating_layer.refresh();
-                self.tiling_layer.refresh();
-                xdg.send_configure();
-            }
+            let xdg = window.toplevel();
+            xdg.with_pending_state(|state| {
+                state.states.unset(xdg_toplevel::State::Fullscreen);
+                state.states.unset(xdg_toplevel::State::Maximized);
+                state.size = None;
+            });
+            self.floating_layer.refresh();
+            self.tiling_layer.refresh();
+            xdg.send_configure();
             self.fullscreen.retain(|_, w| w != window);
         }
     }
@@ -331,10 +320,7 @@ impl Workspace {
         if mapped.is_fullscreen() || mapped.is_maximized() {
             // If surface is maximized then unmaximize it
             self.unmaximize_request(window);
-            let new_size = match window.toplevel() {
-                Kind::Xdg(toplevel) => toplevel.with_pending_state(|state| state.size),
-                //_ => unreachable!(), // TODO x11
-            };
+            let new_size = window.toplevel().with_pending_state(|state| state.size);
             let ratio = pos.x / output.geometry().size.w as f64;
 
             initial_window_location = new_size
