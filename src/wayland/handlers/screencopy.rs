@@ -161,10 +161,7 @@ impl ScreencopyHandler for State {
 
     fn capture_toplevel(&mut self, toplevel: Window, session: Session) -> Vec<BufferInfo> {
         let surface = toplevel.toplevel().wl_surface();
-        let size = toplevel
-            .bbox_with_popups()
-            .size
-            .to_buffer(1, Transform::Normal);
+        let size = toplevel.geometry().size.to_buffer(1, Transform::Normal);
 
         let mut _kms_renderer = None;
         let renderer = match self.backend {
