@@ -4,6 +4,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    nix-filter.url = "github:numtide/nix-filter";
     crane = {
       url = "github:ipetkov/crane";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -14,20 +15,22 @@
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, crane, fenix }:
+  outputs = { self, nixpkgs, flake-utils, nix-filter, crane, fenix }:
     flake-utils.lib.eachSystem [ "x86_64-linux" "aarch64-linux" ] (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
         craneLib = crane.lib.${system}.overrideToolchain fenix.packages.${system}.stable.toolchain;
 
         pkgDef = {
-          src = pkgs.nix-gitignore.gitignoreSource [
-            "flake.nix"
-            "flake.lock"
-            "data"
-            "debian"
-            "LICENSE"
-          ] ./.;
+          src = nix-filter.lib.filter {
+            root = ./.;
+            include = [
+              ./src
+              ./Cargo.toml
+              ./Cargo.lock
+              ./resources
+            ];
+          };
           nativeBuildInputs = with pkgs; [ pkg-config autoPatchelfHook ];
           buildInputs = with pkgs; [
             wayland
