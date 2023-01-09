@@ -19,7 +19,12 @@ pub fn init_logger() -> Result<LogState> {
     let logger = slog::Logger::root(std::sync::Mutex::new(drain).fuse(), slog::o!());
 
     let _guard = slog_scope::set_global_logger(logger);
-    slog_stdlog::init().unwrap();
+    slog_stdlog::init_with_level(if cfg!(debug_assertions) {
+        log::Level::Debug
+    } else {
+        log::Level::Info
+    })
+    .unwrap();
     log_panics::init();
 
     slog_scope::info!("Version: {}", std::env!("CARGO_PKG_VERSION"));

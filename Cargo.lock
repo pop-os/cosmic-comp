@@ -334,6 +334,7 @@ dependencies = [
  "indexmap",
  "lazy_static",
  "libsystemd 0.5.0",
+ "log",
  "log-panics",
  "png",
  "regex",
