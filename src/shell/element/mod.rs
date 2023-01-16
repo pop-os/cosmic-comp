@@ -422,6 +422,20 @@ impl CosmicMapped {
         window.close();
     }
 
+    pub fn is_window(&self) -> bool {
+        match &self.element {
+            CosmicMappedInternal::Window(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_stack(&self) -> bool {
+        match &self.element {
+            CosmicMappedInternal::Stack(_) => true,
+            _ => false,
+        }
+    }
+
     #[cfg(feature = "debug")]
     pub fn set_debug(&self, flag: bool) {
         let mut debug = self.debug.lock().unwrap();

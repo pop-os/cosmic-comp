@@ -37,10 +37,10 @@ pub mod focus;
 pub mod grabs;
 pub mod layout;
 mod workspace;
-pub use self::element::{CosmicMappedRenderElement, CosmicSurface};
+pub use self::element::{CosmicMapped, CosmicMappedRenderElement, CosmicSurface};
 pub use self::workspace::*;
 use self::{
-    element::{CosmicMapped, CosmicWindow},
+    element::CosmicWindow,
     focus::target::KeyboardFocusTarget,
     layout::{floating::FloatingLayout, tiling::TilingLayout},
 };

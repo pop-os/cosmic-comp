@@ -58,7 +58,7 @@ impl fmt::Debug for CosmicWindow {
 #[derive(Debug, Clone)]
 pub struct CosmicWindowInternal {
     pub(super) window: CosmicSurface,
-    pointer_entered: Option<Arc<AtomicU8>>,
+    pointer_entered: Arc<AtomicU8>,
 }
 
 #[repr(u8)]
@@ -71,27 +71,19 @@ pub enum Focus {
 
 impl CosmicWindowInternal {
     pub fn swap_focus(&self, focus: Focus) -> Focus {
-        if let Some(pointer_entered) = self.pointer_entered.as_ref() {
-            unsafe {
-                std::mem::transmute::<u8, Focus>(
-                    pointer_entered.swap(focus as u8, Ordering::SeqCst),
-                )
-            }
-        } else {
-            Focus::Window
+        unsafe {
+            std::mem::transmute::<u8, Focus>(
+                self.pointer_entered.swap(focus as u8, Ordering::SeqCst),
+            )
         }
     }
 
     pub fn current_focus(&self) -> Focus {
-        if let Some(pointer_entered) = self.pointer_entered.as_ref() {
-            unsafe { std::mem::transmute::<u8, Focus>(pointer_entered.load(Ordering::SeqCst)) }
-        } else {
-            Focus::Window
-        }
+        unsafe { std::mem::transmute::<u8, Focus>(self.pointer_entered.load(Ordering::SeqCst)) }
     }
 
     pub fn has_ssd(&self) -> bool {
-        self.pointer_entered.is_some()
+        !self.window.is_decorated()
     }
 }
 
@@ -101,16 +93,11 @@ impl CosmicWindow {
         handle: LoopHandle<'static, crate::state::Data>,
     ) -> CosmicWindow {
         let window = window.into();
-        let needs_ssd = !window.is_decorated();
         let width = window.geometry().size.w;
         CosmicWindow(IcedElement::new(
             CosmicWindowInternal {
                 window,
-                pointer_entered: if needs_ssd {
-                    Some(Arc::new(AtomicU8::new(Focus::None as u8)))
-                } else {
-                    None
-                },
+                pointer_entered: Arc::new(AtomicU8::new(Focus::None as u8)),
             },
             (width, SSD_HEIGHT),
             handle,
@@ -382,6 +369,7 @@ impl PointerTarget<State> for CosmicWindow {
                     Some((previous, Focus::Window))
                 }
             } else {
+                p.swap_focus(Focus::Window);
                 PointerTarget::motion(&p.window, seat, data, event);
                 None
             }
@@ -427,7 +415,6 @@ impl PointerTarget<State> for CosmicWindow {
 
             p.swap_focus(Focus::None)
         });
-        assert!(previous != Focus::None);
         match previous {
             Focus::Header => PointerTarget::leave(&self.0, seat, data, serial, time),
             Focus::Window => self
@@ -453,27 +440,27 @@ where
     fn render_elements<C: From<Self::RenderElement>>(
         &self,
         renderer: &mut R,
-        mut location: Point<i32, Physical>,
+        location: Point<i32, Physical>,
         scale: Scale<f64>,
     ) -> Vec<C> {
         let has_ssd = self.0.with_program(|p| p.has_ssd());
 
-        let mut elements = if has_ssd {
-            let elements = AsRenderElements::<R>::render_elements::<CosmicWindowRenderElement<R>>(
-                &self.0, renderer, location, scale,
-            );
-            location.y += SSD_HEIGHT;
-            elements
+        let window_loc = if has_ssd {
+            location + Point::from((0, (SSD_HEIGHT as f64 * scale.y) as i32))
         } else {
-            Vec::new()
+            location
         };
 
-        elements.extend(self.0.with_program(|p| {
+        let mut elements = self.0.with_program(|p| {
             AsRenderElements::<R>::render_elements::<CosmicWindowRenderElement<R>>(
-                &p.window, renderer, location, scale,
+                &p.window, renderer, window_loc, scale,
             )
-            .into_iter()
-        }));
+        });
+        if has_ssd {
+            elements.extend(AsRenderElements::<R>::render_elements::<
+                CosmicWindowRenderElement<R>,
+            >(&self.0, renderer, location, scale))
+        }
 
         elements.into_iter().map(C::from).collect()
     }

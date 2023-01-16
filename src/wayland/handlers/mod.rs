@@ -3,6 +3,7 @@
 pub mod buffer;
 pub mod compositor;
 pub mod data_device;
+pub mod decoration;
 pub mod dmabuf;
 pub mod keyboard_shortcuts_inhibit;
 pub mod layer_shell;

@@ -29,6 +29,7 @@ use smithay::{
     output::{Mode as OutputMode, Output, Scale},
     reexports::{
         calloop::{LoopHandle, LoopSignal},
+        wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration_manager::Mode,
         wayland_server::{
             backend::{ClientData, ClientId, DisconnectReason},
             protocol::wl_shm,
@@ -37,9 +38,15 @@ use smithay::{
     },
     utils::{Clock, Monotonic},
     wayland::{
-        compositor::CompositorState, data_device::DataDeviceState, dmabuf::DmabufState,
-        keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState, output::OutputManagerState,
-        presentation::PresentationState, primary_selection::PrimarySelectionState, shm::ShmState,
+        compositor::CompositorState,
+        data_device::DataDeviceState,
+        dmabuf::DmabufState,
+        keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState,
+        output::OutputManagerState,
+        presentation::PresentationState,
+        primary_selection::PrimarySelectionState,
+        shell::{kde::decoration::KdeDecorationState, xdg::decoration::XdgDecorationState},
+        shm::ShmState,
         viewporter::ViewporterState,
     },
 };
@@ -101,6 +108,8 @@ pub struct Common {
     pub shm_state: ShmState,
     pub wl_drm_state: WlDrmState,
     pub viewporter_state: ViewporterState,
+    pub kde_decoration_state: KdeDecorationState,
+    pub xdg_decoration_state: XdgDecorationState,
 }
 
 pub enum BackendData {
@@ -229,6 +238,8 @@ impl State {
         let seat_state = SeatState::<Self>::new();
         let viewporter_state = ViewporterState::new::<Self, _>(dh, None);
         let wl_drm_state = WlDrmState;
+        let kde_decoration_state = KdeDecorationState::new::<Self, _>(&dh, Mode::Client, None);
+        let xdg_decoration_state = XdgDecorationState::new::<Self, _>(&dh, None);
 
         let shell = Shell::new(&config, dh);
 
@@ -264,6 +275,8 @@ impl State {
                 primary_selection_state,
                 viewporter_state,
                 wl_drm_state,
+                kde_decoration_state,
+                xdg_decoration_state,
             },
             backend: BackendData::Unset,
         }
