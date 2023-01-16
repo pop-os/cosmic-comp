@@ -10,7 +10,7 @@ use crate::{
         },
         grabs::ResizeEdge,
         layout::Orientation,
-        OutputNotMapped,
+        CosmicSurface, OutputNotMapped,
     },
     utils::prelude::*,
     wayland::handlers::xdg_shell::popup::get_popup_toplevel,
@@ -20,12 +20,13 @@ use id_tree::{InsertBehavior, MoveBehavior, Node, NodeId, NodeIdError, RemoveBeh
 use smithay::{
     backend::renderer::{
         element::{AsRenderElements, RenderElement},
-        ImportAll, Renderer,
+        ImportAll, ImportMem, Renderer,
     },
-    desktop::{layer_map_for_output, space::SpaceElement, PopupKind, Window},
+    desktop::{layer_map_for_output, space::SpaceElement, PopupKind},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
     utils::{IsAlive, Logical, Point, Rectangle, Scale, Serial},
+    wayland::seat::WaylandFocus,
 };
 use std::{borrow::Borrow, collections::HashMap, hash::Hash, sync::Arc};
 
@@ -1003,7 +1004,7 @@ impl TilingLayout {
                     .find(|node| match node.data() {
                         Data::Mapped { mapped, .. } => mapped
                             .windows()
-                            .any(|(w, _)| w.toplevel().wl_surface() == &toplevel_surface),
+                            .any(|(w, _)| w.wl_surface().as_ref() == Some(&toplevel_surface)),
                         _ => false,
                     })?;
 
@@ -1200,7 +1201,9 @@ impl TilingLayout {
             .flatten()
     }
 
-    pub fn windows(&self) -> impl Iterator<Item = (Output, Window, Point<i32, Logical>)> + '_ {
+    pub fn windows(
+        &self,
+    ) -> impl Iterator<Item = (Output, CosmicSurface, Point<i32, Logical>)> + '_ {
         self.mapped().flat_map(|(output, mapped, loc)| {
             mapped
                 .windows()
@@ -1265,7 +1268,7 @@ impl TilingLayout {
         output: &Output,
     ) -> Result<Vec<CosmicMappedRenderElement<R>>, OutputNotMapped>
     where
-        R: Renderer + ImportAll + AsGlowRenderer,
+        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         <R as Renderer>::TextureId: 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {

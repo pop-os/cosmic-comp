@@ -46,7 +46,7 @@ use smithay::{
         wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle, Resource},
     },
     utils::{DeviceFd, Size, Transform},
-    wayland::dmabuf::DmabufGlobal,
+    wayland::{dmabuf::DmabufGlobal, seat::WaylandFocus},
 };
 
 use std::{
@@ -787,7 +787,7 @@ fn render_node_for_output(
         .unwrap_or_else(|| workspace.windows().collect::<Vec<_>>())
         .into_iter()
         .flat_map(|w| {
-            dh.get_client(w.toplevel().wl_surface().id())
+            dh.get_client(w.wl_surface()?.id())
                 .ok()?
                 .get_data::<ClientState>()
                 .unwrap()

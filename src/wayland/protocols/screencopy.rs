@@ -16,7 +16,6 @@ use smithay::{
         allocator::Fourcc as DrmFourcc,
         drm::{DrmNode, NodeType},
     },
-    desktop::Window,
     input::{Seat, SeatHandler},
     output::Output,
     reexports::wayland_server::{
@@ -30,10 +29,10 @@ use wayland_backend::{
     server::{GlobalId, ObjectId},
 };
 
-use crate::state::State;
+use crate::{shell::CosmicSurface, state::State};
 
 use super::{
-    toplevel_info::window_from_handle,
+    toplevel_info::{window_from_handle, ToplevelInfoHandler},
     workspace::{WorkspaceHandle, WorkspaceHandler},
 };
 
@@ -112,11 +111,11 @@ impl SessionDataInnerInner {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SessionType {
     Output(Output),
     Workspace(Output, WorkspaceHandle),
-    Window(Window),
+    Window(CosmicSurface),
     Cursor(Seat<State>),
     #[doc(hidden)]
     Unknown,
@@ -490,7 +489,7 @@ pub trait ScreencopyHandler {
         session: Session,
     ) -> Vec<BufferInfo>;
 
-    fn capture_toplevel(&mut self, toplevel: Window, session: Session) -> Vec<BufferInfo>;
+    fn capture_toplevel(&mut self, toplevel: CosmicSurface, session: Session) -> Vec<BufferInfo>;
 
     fn capture_cursor(&mut self, session: CursorSession) -> Vec<BufferInfo>;
 
@@ -605,6 +604,7 @@ where
     D: GlobalDispatch<ZcosmicScreencopyManagerV1, ScreencopyGlobalData>
         + Dispatch<ZcosmicScreencopyManagerV1, Vec<WlCursorMode>>
         + Dispatch<ZcosmicScreencopySessionV1, SessionData>
+        + ToplevelInfoHandler<Window = CosmicSurface>
         + ScreencopyHandler
         + WorkspaceHandler
         + 'static,
@@ -664,7 +664,7 @@ where
             } => {
                 let Some(cursor) = check_cursor(cursor, &data, resource) else { return; };
 
-                match window_from_handle(toplevel) {
+                match window_from_handle::<<D as ToplevelInfoHandler>::Window>(toplevel) {
                     Some(window) => {
                         let session = match init_session(
                             data_init,

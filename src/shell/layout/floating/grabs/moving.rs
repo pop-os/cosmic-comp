@@ -12,7 +12,7 @@ use crate::{
 use smithay::{
     backend::renderer::{
         element::{AsRenderElements, RenderElement},
-        ImportAll, Renderer,
+        ImportAll, ImportMem, Renderer,
     },
     desktop::space::SpaceElement,
     input::{
@@ -38,7 +38,7 @@ pub struct MoveGrabState {
 impl MoveGrabState {
     pub fn render<I, R>(&self, renderer: &mut R, seat: &Seat<State>, output: &Output) -> Vec<I>
     where
-        R: Renderer + ImportAll + AsGlowRenderer,
+        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         <R as Renderer>::TextureId: 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         I: From<CosmicMappedRenderElement<R>>,

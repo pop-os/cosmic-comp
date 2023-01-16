@@ -2,10 +2,11 @@
 
 use regex::RegexSet;
 use smithay::{
-    desktop::Window,
-    wayland::{compositor::with_states, shell::xdg::XdgToplevelSurfaceRoleAttributes},
+    wayland::{compositor::with_states, shell::xdg::XdgToplevelSurfaceData},
+    xwayland::xwm::WmWindowType,
 };
-use std::sync::Mutex;
+
+use super::CosmicSurface;
 
 pub mod floating;
 pub mod tiling;
@@ -95,33 +96,52 @@ lazy_static::lazy_static! {
     ]).unwrap();
 }
 
-pub fn should_be_floating(window: &Window) -> bool {
-    let surface = window.toplevel().wl_surface();
-    with_states(surface, |states| {
-        let attrs = states
-            .data_map
-            .get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
-            .unwrap()
-            .lock()
-            .unwrap();
-
-        // simple heuristic taken from
-        // sway/desktop/xdg_shell.c:188 @ 0ee54a52
-        if attrs.parent.is_some()
-            || (attrs.min_size.w != 0 && attrs.min_size.h != 0 && attrs.min_size == attrs.max_size)
-        {
-            return true;
-        }
-
-        // else take a look at our exceptions
-        let appid_matches = EXCEPTIONS_APPID.matches(attrs.app_id.as_deref().unwrap_or(""));
-        let title_matches = EXCEPTIONS_TITLE.matches(attrs.app_id.as_deref().unwrap_or(""));
-        for idx in appid_matches.into_iter() {
-            if title_matches.matched(idx) {
+pub fn should_be_floating(window: &CosmicSurface) -> bool {
+    // Check "window type"
+    match window {
+        CosmicSurface::Wayland(window) => {
+            if with_states(window.toplevel().wl_surface(), |states| {
+                let attrs = states
+                    .data_map
+                    .get::<XdgToplevelSurfaceData>()
+                    .unwrap()
+                    .lock()
+                    .unwrap();
+                attrs.parent.is_some()
+            }) {
                 return true;
             }
         }
+        CosmicSurface::X11(surface) => {
+            if surface.is_override_redirect()
+                || surface.is_popup()
+                || !matches!(
+                    surface.window_type(),
+                    None | Some(WmWindowType::Normal) | Some(WmWindowType::Utility)
+                )
+            {
+                return true;
+            }
+        }
+        _ => {}
+    };
 
-        false
-    })
+    // Check if sizing suggest dialog
+    let max_size = window.max_size();
+    let min_size = window.min_size();
+
+    if min_size.is_some() && min_size == max_size {
+        return true;
+    }
+
+    // else take a look at our exceptions
+    let appid_matches = EXCEPTIONS_APPID.matches(&window.app_id());
+    let title_matches = EXCEPTIONS_TITLE.matches(&window.title());
+    for idx in appid_matches.into_iter() {
+        if title_matches.matched(idx) {
+            return true;
+        }
+    }
+
+    false
 }

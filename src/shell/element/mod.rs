@@ -10,28 +10,24 @@ use smithay::{
         renderer::{
             element::{AsRenderElements, Element, RenderElement, UnderlyingStorage},
             glow::GlowRenderer,
-            ImportAll, Renderer,
+            ImportAll, ImportMem, Renderer,
         },
     },
-    desktop::{space::SpaceElement, PopupManager, Window, WindowSurfaceType},
+    desktop::{space::SpaceElement, PopupManager, WindowSurfaceType},
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget},
         Seat,
     },
     output::Output,
-    reexports::{
-        wayland_protocols::xdg::shell::server::xdg_toplevel::State as XdgState,
-        wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface},
-    },
+    reexports::wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface},
     space_elements,
     utils::{
         Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
     },
     wayland::{
-        compositor::{with_states, with_surface_tree_downward, TraversalAction},
+        compositor::{with_surface_tree_downward, TraversalAction},
         seat::WaylandFocus,
-        shell::xdg::XdgToplevelSurfaceRoleAttributes,
     },
 };
 use std::{
@@ -41,6 +37,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+pub mod surface;
+pub use self::surface::CosmicSurface;
 pub mod stack;
 pub use self::stack::CosmicStack;
 pub mod window;
@@ -110,68 +108,48 @@ impl Hash for CosmicMapped {
 }
 
 impl CosmicMapped {
-    pub fn windows(&self) -> impl Iterator<Item = (Window, Point<i32, Logical>)> + '_ {
+    pub fn windows(&self) -> impl Iterator<Item = (CosmicSurface, Point<i32, Logical>)> + '_ {
         match &self.element {
-            CosmicMappedInternal::Stack(stack) => Box::new(stack.windows().map(|w| {
-                (
-                    w,
-                    stack
-                        .header
-                        .lock()
-                        .unwrap()
-                        .as_ref()
-                        .map(|header| Point::from((0, header.height() as i32)))
-                        .unwrap_or(Point::from((0, 0))),
-                )
-            }))
-                as Box<dyn Iterator<Item = (Window, Point<i32, Logical>)>>,
-            CosmicMappedInternal::Window(window) => Box::new(std::iter::once((
-                window.window.clone(),
-                window
-                    .header
-                    .lock()
-                    .unwrap()
-                    .as_ref()
-                    .map(|header| Point::from((0, header.height() as i32)))
-                    .unwrap_or(Point::from((0, 0))),
-            ))),
+            CosmicMappedInternal::Stack(stack) => {
+                Box::new(stack.surfaces().map(|w| (w, stack.offset())))
+                    as Box<dyn Iterator<Item = (CosmicSurface, Point<i32, Logical>)>>
+            }
+            CosmicMappedInternal::Window(window) => {
+                Box::new(std::iter::once((window.surface(), window.offset())))
+            }
             _ => Box::new(std::iter::empty()),
         }
     }
 
-    pub fn active_window(&self) -> Window {
+    pub fn active_window(&self) -> CosmicSurface {
         match &self.element {
             CosmicMappedInternal::Stack(stack) => stack.active(),
-            CosmicMappedInternal::Window(win) => win.window.clone(),
+            CosmicMappedInternal::Window(win) => win.surface(),
             _ => unreachable!(),
         }
     }
 
-    pub fn active_window_offset(&self) -> Rectangle<i32, Logical> {
+    pub fn active_window_offset(&self) -> Point<i32, Logical> {
+        match &self.element {
+            CosmicMappedInternal::Stack(stack) => stack.offset(),
+            CosmicMappedInternal::Window(window) => window.offset(),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn active_window_geometry(&self) -> Rectangle<i32, Logical> {
         match &self.element {
             CosmicMappedInternal::Stack(stack) => {
-                let location = (
-                    0,
-                    stack
-                        .header
-                        .lock()
-                        .unwrap()
-                        .as_ref()
-                        .map_or(0, |header| header.height()),
-                );
-                let size = stack.active().geometry().size;
+                let win = stack.active();
+                let location = stack.offset();
+                let mut size = win.geometry().size;
+                size -= location.to_size();
                 Rectangle::from_loc_and_size(location, size)
             }
             CosmicMappedInternal::Window(win) => {
-                let location = (
-                    0,
-                    win.header
-                        .lock()
-                        .unwrap()
-                        .as_ref()
-                        .map_or(0, |header| header.height()),
-                );
-                let size = win.window.geometry().size;
+                let location = win.offset();
+                let mut size = win.geometry().size;
+                size -= location.to_size();
                 Rectangle::from_loc_and_size(location, size)
             }
             _ => unreachable!(),
@@ -186,13 +164,13 @@ impl CosmicMapped {
             .cloned()
     }
 
-    pub fn set_active(&self, window: &Window) {
+    pub fn set_active(&self, window: &CosmicSurface) {
         if let CosmicMappedInternal::Stack(stack) = &self.element {
             stack.set_active(window);
         }
     }
 
-    pub fn focus_window(&self, window: &Window) {
+    pub fn focus_window(&self, window: &CosmicSurface) {
         match &self.element {
             CosmicMappedInternal::Stack(stack) => stack.set_active(window),
             _ => {}
@@ -201,10 +179,10 @@ impl CosmicMapped {
 
     pub fn has_surface(&self, surface: &WlSurface, surface_type: WindowSurfaceType) -> bool {
         self.windows().any(|(w, _)| {
-            let toplevel = w.toplevel().wl_surface();
+            let Some(toplevel ) = w.wl_surface() else { return false };
 
             if surface_type.contains(WindowSurfaceType::TOPLEVEL) {
-                if toplevel == surface {
+                if toplevel == *surface {
                     return true;
                 }
             }
@@ -214,7 +192,7 @@ impl CosmicMapped {
 
                 let found = AtomicBool::new(false);
                 with_surface_tree_downward(
-                    toplevel,
+                    &toplevel,
                     surface,
                     |_, _, search| TraversalAction::DoChildren(search),
                     |s, _, search| {
@@ -228,7 +206,7 @@ impl CosmicMapped {
             }
 
             if surface_type.contains(WindowSurfaceType::POPUP) {
-                PopupManager::popups_for_surface(toplevel).any(|(p, _)| p.wl_surface() == surface)
+                PopupManager::popups_for_surface(&toplevel).any(|(p, _)| p.wl_surface() == surface)
             } else {
                 false
             }
@@ -247,158 +225,110 @@ impl CosmicMapped {
     pub fn set_resizing(&self, resizing: bool) {
         for window in match &self.element {
             CosmicMappedInternal::Stack(s) => {
-                Box::new(s.windows()) as Box<dyn Iterator<Item = Window>>
+                Box::new(s.surfaces()) as Box<dyn Iterator<Item = CosmicSurface>>
             }
-            CosmicMappedInternal::Window(w) => Box::new(std::iter::once(w.window.clone())),
+            CosmicMappedInternal::Window(w) => Box::new(std::iter::once(w.surface())),
             _ => unreachable!(),
         } {
-            window.toplevel().with_pending_state(|state| {
-                if resizing {
-                    state.states.set(XdgState::Resizing);
-                } else {
-                    state.states.unset(XdgState::Resizing);
-                }
-            });
+            window.set_resizing(resizing);
         }
     }
 
-    pub fn is_resizing(&self) -> bool {
+    pub fn is_resizing(&self) -> Option<bool> {
         let window = match &self.element {
             CosmicMappedInternal::Stack(s) => s.active(),
-            CosmicMappedInternal::Window(w) => w.window.clone(),
+            CosmicMappedInternal::Window(w) => w.surface(),
             _ => unreachable!(),
         };
 
-        let xdg = window.toplevel();
-        xdg.current_state().states.contains(XdgState::Resizing)
-            || xdg.with_pending_state(|states| states.states.contains(XdgState::Resizing))
+        window.is_resizing()
     }
 
     pub fn set_tiled(&self, tiled: bool) {
-        for xdg in match &self.element {
+        for window in match &self.element {
             // we use the tiled state of stack windows anyway to get rid of decorations
             CosmicMappedInternal::Stack(_) => None,
-            CosmicMappedInternal::Window(w) => Some(w.window.toplevel()),
+            CosmicMappedInternal::Window(w) => Some(w.surface()),
             _ => unreachable!(),
         } {
-            xdg.with_pending_state(|state| {
-                if tiled {
-                    state.states.set(XdgState::TiledLeft);
-                    state.states.set(XdgState::TiledRight);
-                    state.states.set(XdgState::TiledTop);
-                    state.states.set(XdgState::TiledBottom);
-                } else {
-                    state.states.unset(XdgState::TiledLeft);
-                    state.states.unset(XdgState::TiledRight);
-                    state.states.unset(XdgState::TiledTop);
-                    state.states.unset(XdgState::TiledBottom);
-                }
-            });
+            window.set_tiled(tiled)
         }
     }
 
-    pub fn is_tiled(&self) -> bool {
+    pub fn is_tiled(&self) -> Option<bool> {
         let window = match &self.element {
             CosmicMappedInternal::Stack(s) => s.active(),
-            CosmicMappedInternal::Window(w) => w.window.clone(),
+            CosmicMappedInternal::Window(w) => w.surface(),
             _ => unreachable!(),
         };
 
-        window
-            .toplevel()
-            .current_state()
-            .states
-            .contains(XdgState::TiledLeft)
+        window.is_tiled()
     }
 
     pub fn set_fullscreen(&self, fullscreen: bool) {
         for window in match &self.element {
             CosmicMappedInternal::Stack(s) => {
-                Box::new(s.windows()) as Box<dyn Iterator<Item = Window>>
+                Box::new(s.surfaces()) as Box<dyn Iterator<Item = CosmicSurface>>
             }
-            CosmicMappedInternal::Window(w) => Box::new(std::iter::once(w.window.clone())),
+            CosmicMappedInternal::Window(w) => Box::new(std::iter::once(w.surface())),
             _ => unreachable!(),
         } {
-            window.toplevel().with_pending_state(|state| {
-                if fullscreen {
-                    state.states.set(XdgState::Fullscreen);
-                } else {
-                    state.states.unset(XdgState::Fullscreen);
-                }
-            });
+            window.set_fullscreen(fullscreen);
         }
     }
 
     pub fn is_fullscreen(&self) -> bool {
         let window = match &self.element {
             CosmicMappedInternal::Stack(s) => s.active(),
-            CosmicMappedInternal::Window(w) => w.window.clone(),
+            CosmicMappedInternal::Window(w) => w.surface(),
             _ => unreachable!(),
         };
 
-        let xdg = window.toplevel();
-        xdg.current_state().states.contains(XdgState::Fullscreen)
-            || xdg.with_pending_state(|states| states.states.contains(XdgState::Fullscreen))
+        window.is_fullscreen()
     }
 
     pub fn set_maximized(&self, maximized: bool) {
         for window in match &self.element {
             CosmicMappedInternal::Stack(s) => {
-                Box::new(s.windows()) as Box<dyn Iterator<Item = Window>>
+                Box::new(s.surfaces()) as Box<dyn Iterator<Item = CosmicSurface>>
             }
-            CosmicMappedInternal::Window(w) => Box::new(std::iter::once(w.window.clone())),
+            CosmicMappedInternal::Window(w) => Box::new(std::iter::once(w.surface())),
             _ => unreachable!(),
         } {
-            window.toplevel().with_pending_state(|state| {
-                if maximized {
-                    state.states.set(XdgState::Maximized);
-                } else {
-                    state.states.unset(XdgState::Maximized);
-                }
-            });
+            window.set_maximized(maximized)
         }
     }
 
     pub fn is_maximized(&self) -> bool {
         let window = match &self.element {
             CosmicMappedInternal::Stack(s) => s.active(),
-            CosmicMappedInternal::Window(w) => w.window.clone(),
+            CosmicMappedInternal::Window(w) => w.surface(),
             _ => unreachable!(),
         };
 
-        let xdg = window.toplevel();
-        xdg.current_state().states.contains(XdgState::Maximized)
-            || xdg.with_pending_state(|states| states.states.contains(XdgState::Maximized))
+        window.is_maximized()
     }
 
     pub fn set_activated(&self, activated: bool) {
         for window in match &self.element {
             CosmicMappedInternal::Stack(s) => {
-                Box::new(s.windows()) as Box<dyn Iterator<Item = Window>>
+                Box::new(s.surfaces()) as Box<dyn Iterator<Item = CosmicSurface>>
             }
-            CosmicMappedInternal::Window(w) => Box::new(std::iter::once(w.window.clone())),
+            CosmicMappedInternal::Window(w) => Box::new(std::iter::once(w.surface())),
             _ => unreachable!(),
         } {
-            window.toplevel().with_pending_state(|state| {
-                if activated {
-                    state.states.set(XdgState::Activated);
-                } else {
-                    state.states.unset(XdgState::Activated);
-                }
-            });
+            window.set_activated(activated)
         }
     }
 
     pub fn is_activated(&self) -> bool {
         let window = match &self.element {
             CosmicMappedInternal::Stack(s) => s.active(),
-            CosmicMappedInternal::Window(w) => w.window.clone(),
+            CosmicMappedInternal::Window(w) => w.surface(),
             _ => unreachable!(),
         };
 
-        let xdg = window.toplevel();
-        xdg.current_state().states.contains(XdgState::Activated)
-            || xdg.with_pending_state(|states| states.states.contains(XdgState::Activated))
+        window.is_activated()
     }
 
     pub fn set_size(&self, size: Size<i32, Logical>) {
@@ -409,57 +339,34 @@ impl CosmicMapped {
         }
     }
 
-    pub fn min_size(&self) -> Size<i32, Logical> {
+    pub fn min_size(&self) -> Option<Size<i32, Logical>> {
         match &self.element {
-            CosmicMappedInternal::Stack(stack) => stack
-                .windows()
-                .fold(None, |min_size, window| {
-                    let win_min_size = with_states(window.toplevel().wl_surface(), |states| {
-                        let attrs = states
-                            .data_map
-                            .get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
-                            .unwrap()
-                            .lock()
-                            .unwrap();
-                        attrs.min_size
-                    });
+            CosmicMappedInternal::Stack(stack) => {
+                stack.surfaces().fold(None, |min_size, window| {
+                    let win_min_size = window.min_size();
                     match (min_size, win_min_size) {
-                        (None, x) => Some(x),
-                        (Some(min1), min2) => Some((min1.w.max(min2.w), min1.h.max(min2.h)).into()),
+                        (None, None) => None,
+                        (None, x) | (x, None) => x,
+                        (Some(min1), Some(min2)) => {
+                            Some((min1.w.max(min2.w), min1.h.max(min2.h)).into())
+                        }
                     }
                 })
-                .expect("Empty stack?"),
-            CosmicMappedInternal::Window(window) => {
-                with_states(window.window.toplevel().wl_surface(), |states| {
-                    let attrs = states
-                        .data_map
-                        .get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
-                        .unwrap()
-                        .lock()
-                        .unwrap();
-                    attrs.min_size
-                })
             }
+            CosmicMappedInternal::Window(window) => window.surface().min_size(),
             _ => unreachable!(),
         }
     }
 
-    pub fn max_size(&self) -> Size<i32, Logical> {
+    pub fn max_size(&self) -> Option<Size<i32, Logical>> {
         match &self.element {
             CosmicMappedInternal::Stack(stack) => {
-                let theoretical_max = stack.windows().fold(None, |max_size, window| {
-                    let win_max_size = with_states(window.toplevel().wl_surface(), |states| {
-                        let attrs = states
-                            .data_map
-                            .get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
-                            .unwrap()
-                            .lock()
-                            .unwrap();
-                        attrs.max_size
-                    });
+                let theoretical_max = stack.surfaces().fold(None, |max_size, window| {
+                    let win_max_size = window.max_size();
                     match (max_size, win_max_size) {
-                        (None, x) => Some(x),
-                        (Some(max1), max2) => Some(
+                        (None, None) => None,
+                        (None, x) | (x, None) => x,
+                        (Some(max1), Some(max2)) => Some(
                             (
                                 if max1.w == 0 {
                                     max2.w
@@ -483,21 +390,12 @@ impl CosmicMapped {
                 // The problem is, with accumulated sizes, the minimum size could be larger than our maximum...
                 let min_size = self.min_size();
                 match (theoretical_max, min_size) {
-                    (None, _) => (0, 0).into(),
-                    (Some(max), min) => (max.w.max(min.w), max.h.max(min.h)).into(),
+                    (None, _) => None,
+                    (Some(max), None) => Some(max),
+                    (Some(max), Some(min)) => Some((max.w.max(min.w), max.h.max(min.h)).into()),
                 }
             }
-            CosmicMappedInternal::Window(window) => {
-                with_states(window.window.toplevel().wl_surface(), |states| {
-                    let attrs = states
-                        .data_map
-                        .get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
-                        .unwrap()
-                        .lock()
-                        .unwrap();
-                    attrs.max_size
-                })
-            }
+            CosmicMappedInternal::Window(window) => window.surface().max_size(),
             _ => unreachable!(),
         }
     }
@@ -505,23 +403,23 @@ impl CosmicMapped {
     pub fn configure(&self) {
         for window in match &self.element {
             CosmicMappedInternal::Stack(s) => {
-                Box::new(s.windows()) as Box<dyn Iterator<Item = Window>>
+                Box::new(s.surfaces()) as Box<dyn Iterator<Item = CosmicSurface>>
             }
-            CosmicMappedInternal::Window(w) => Box::new(std::iter::once(w.window.clone())),
+            CosmicMappedInternal::Window(w) => Box::new(std::iter::once(w.surface())),
             _ => unreachable!(),
         } {
-            window.toplevel().send_configure();
+            window.send_configure();
         }
     }
 
     pub fn send_close(&self) {
         let window = match &self.element {
             CosmicMappedInternal::Stack(s) => s.active(),
-            CosmicMappedInternal::Window(w) => w.window.clone(),
+            CosmicMappedInternal::Window(w) => w.surface(),
             _ => unreachable!(),
         };
 
-        window.toplevel().send_close();
+        window.close();
     }
 
     #[cfg(feature = "debug")]
@@ -680,7 +578,7 @@ impl PointerTarget<State> for CosmicMapped {
 impl WaylandFocus for CosmicMapped {
     fn wl_surface(&self) -> Option<WlSurface> {
         match &self.element {
-            CosmicMappedInternal::Window(w) => w.window.wl_surface().clone(),
+            CosmicMappedInternal::Window(w) => w.surface().wl_surface().clone(),
             CosmicMappedInternal::Stack(s) => s.active().wl_surface().clone(),
             _ => None,
         }
@@ -688,8 +586,8 @@ impl WaylandFocus for CosmicMapped {
 
     fn same_client_as(&self, object_id: &ObjectId) -> bool {
         match &self.element {
-            CosmicMappedInternal::Window(w) => w.window.same_client_as(object_id),
-            CosmicMappedInternal::Stack(s) => s.windows().any(|w| w.same_client_as(object_id)),
+            CosmicMappedInternal::Window(w) => w.surface().same_client_as(object_id),
+            CosmicMappedInternal::Stack(s) => s.surfaces().any(|w| w.same_client_as(object_id)),
             _ => false,
         }
     }
@@ -725,7 +623,7 @@ impl From<CosmicStack> for CosmicMapped {
 
 pub enum CosmicMappedRenderElement<R>
 where
-    R: AsGlowRenderer + Renderer + ImportAll,
+    R: AsGlowRenderer + Renderer + ImportAll + ImportMem,
     <R as Renderer>::TextureId: 'static,
 {
     Stack(self::stack::CosmicStackRenderElement<R>),
@@ -736,7 +634,7 @@ where
 
 impl<R> Element for CosmicMappedRenderElement<R>
 where
-    R: AsGlowRenderer + Renderer + ImportAll,
+    R: AsGlowRenderer + Renderer + ImportAll + ImportMem,
     <R as Renderer>::TextureId: 'static,
 {
     fn id(&self) -> &smithay::backend::renderer::element::Id {
@@ -892,7 +790,7 @@ impl<'a> RenderElement<GlMultiRenderer<'a>> for CosmicMappedRenderElement<GlMult
 
 impl<R> From<stack::CosmicStackRenderElement<R>> for CosmicMappedRenderElement<R>
 where
-    R: Renderer + ImportAll + AsGlowRenderer,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -902,7 +800,7 @@ where
 }
 impl<R> From<window::CosmicWindowRenderElement<R>> for CosmicMappedRenderElement<R>
 where
-    R: Renderer + ImportAll + AsGlowRenderer,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -924,7 +822,7 @@ where
 
 impl<R> AsRenderElements<R> for CosmicMapped
 where
-    R: Renderer + ImportAll + AsGlowRenderer,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {

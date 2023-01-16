@@ -1,10 +1,13 @@
 use std::sync::Weak;
 
-use crate::{shell::element::CosmicMapped, utils::prelude::*};
+use crate::{
+    shell::{element::CosmicMapped, CosmicSurface},
+    utils::prelude::*,
+};
 use id_tree::NodeId;
 use smithay::{
     backend::input::KeyState,
-    desktop::{LayerSurface, PopupKind, Window},
+    desktop::{LayerSurface, PopupKind},
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget},
@@ -19,7 +22,7 @@ use smithay::{
 #[derive(Debug, Clone, PartialEq)]
 pub enum PointerFocusTarget {
     Element(CosmicMapped),
-    Fullscreen(Window),
+    Fullscreen(CosmicSurface),
     LayerSurface(LayerSurface),
     Popup(PopupKind),
 }
@@ -27,7 +30,7 @@ pub enum PointerFocusTarget {
 #[derive(Debug, Clone, PartialEq)]
 pub enum KeyboardFocusTarget {
     Element(CosmicMapped),
-    Fullscreen(Window),
+    Fullscreen(CosmicSurface),
     Group(WindowGroup),
     LayerSurface(LayerSurface),
     Popup(PopupKind),
@@ -263,9 +266,9 @@ impl From<CosmicMapped> for PointerFocusTarget {
     }
 }
 
-impl From<Window> for PointerFocusTarget {
-    fn from(w: Window) -> Self {
-        PointerFocusTarget::Fullscreen(w)
+impl From<CosmicSurface> for PointerFocusTarget {
+    fn from(s: CosmicSurface) -> Self {
+        PointerFocusTarget::Fullscreen(s)
     }
 }
 
@@ -287,9 +290,9 @@ impl From<CosmicMapped> for KeyboardFocusTarget {
     }
 }
 
-impl From<Window> for KeyboardFocusTarget {
-    fn from(w: Window) -> Self {
-        KeyboardFocusTarget::Fullscreen(w)
+impl From<CosmicSurface> for KeyboardFocusTarget {
+    fn from(s: CosmicSurface) -> Self {
+        KeyboardFocusTarget::Fullscreen(s)
     }
 }
 

@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use smithay::{desktop::Window, input::Seat, reexports::wayland_server::DisplayHandle};
+use smithay::{input::Seat, reexports::wayland_server::DisplayHandle};
 
 use crate::{
+    shell::CosmicSurface,
     utils::prelude::*,
-    wayland::protocols::toplevel_management::{
-        delegate_toplevel_management, ToplevelManagementHandler, ToplevelManagementState,
+    wayland::protocols::{
+        toplevel_info::ToplevelInfoHandler,
+        toplevel_management::{
+            delegate_toplevel_management, ManagementWindow, ToplevelManagementHandler,
+            ToplevelManagementState,
+        },
     },
 };
 
@@ -14,7 +19,12 @@ impl ToplevelManagementHandler for State {
         &mut self.common.shell.toplevel_management_state
     }
 
-    fn activate(&mut self, _dh: &DisplayHandle, window: &Window, seat: Option<Seat<Self>>) {
+    fn activate(
+        &mut self,
+        _dh: &DisplayHandle,
+        window: &<Self as ToplevelInfoHandler>::Window,
+        seat: Option<Seat<Self>>,
+    ) {
         for output in self
             .common
             .shell
@@ -47,8 +57,14 @@ impl ToplevelManagementHandler for State {
         }
     }
 
-    fn close(&mut self, _dh: &DisplayHandle, window: &Window) {
-        window.toplevel().send_close();
+    fn close(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
+        window.close();
+    }
+}
+
+impl ManagementWindow for CosmicSurface {
+    fn close(&self) {
+        CosmicSurface::close(self)
     }
 }
 

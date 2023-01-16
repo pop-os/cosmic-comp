@@ -1,16 +1,24 @@
 use crate::{
-    state::State, utils::prelude::SeatExt, wayland::handlers::screencopy::ScreencopySessions,
+    state::State,
+    utils::iced::{IcedElement, Program},
+    utils::prelude::SeatExt,
+    wayland::handlers::screencopy::ScreencopySessions,
 };
+use calloop::LoopHandle;
+use cosmic::Element;
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
 use smithay::{
     backend::{
         input::KeyState,
         renderer::{
-            element::{surface::WaylandSurfaceRenderElement, AsRenderElements},
-            ImportAll, Renderer,
+            element::{
+                memory::MemoryRenderBufferRenderElement, surface::WaylandSurfaceRenderElement,
+                AsRenderElements,
+            },
+            ImportAll, ImportMem, Renderer,
         },
     },
-    desktop::{space::SpaceElement, Window},
+    desktop::space::SpaceElement,
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget},
@@ -21,84 +29,136 @@ use smithay::{
     utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size},
 };
 use std::{
+    fmt,
     hash::Hash,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU8, AtomicUsize, Ordering},
         Arc, Mutex,
     },
 };
 
+use super::CosmicSurface;
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct CosmicStack(IcedElement<CosmicStackInternal>);
+
+impl fmt::Debug for CosmicStack {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.with_program(|stack| {
+            f.debug_struct("CosmicStack")
+                .field("internal", stack)
+                .finish_non_exhaustive()
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
-pub struct CosmicStack {
-    windows: Arc<Mutex<Vec<Window>>>,
+pub struct CosmicStackInternal {
+    windows: Arc<Mutex<Vec<CosmicSurface>>>,
     active: Arc<AtomicUsize>,
-    last_location: Arc<Mutex<Option<(Point<f64, Logical>, Serial, u32)>>>,
     previous_keyboard: Arc<AtomicUsize>,
+    pointer_entered: Option<Arc<AtomicU8>>,
     previous_pointer: Arc<AtomicUsize>,
-    pub(super) header: Arc<Mutex<Option<HeaderBar>>>,
+    last_location: Arc<Mutex<Option<(Point<f64, Logical>, Serial, u32)>>>,
 }
 
-impl PartialEq for CosmicStack {
-    fn eq(&self, other: &Self) -> bool {
-        *self.windows.lock().unwrap() == *other.windows.lock().unwrap()
+impl CosmicStackInternal {
+    pub fn swap_focus(&self, focus: Focus) -> Focus {
+        if let Some(pointer_entered) = self.pointer_entered.as_ref() {
+            unsafe {
+                std::mem::transmute::<u8, Focus>(
+                    pointer_entered.swap(focus as u8, Ordering::SeqCst),
+                )
+            }
+        } else {
+            Focus::Window
+        }
+    }
+
+    pub fn current_focus(&self) -> Focus {
+        if let Some(pointer_entered) = self.pointer_entered.as_ref() {
+            unsafe { std::mem::transmute::<u8, Focus>(pointer_entered.load(Ordering::SeqCst)) }
+        } else {
+            Focus::Window
+        }
     }
 }
 
-impl Eq for CosmicStack {}
+const TAB_HEIGHT: i32 = 24;
 
-impl Hash for CosmicStack {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        Arc::as_ptr(&self.windows).hash(state)
-    }
-}
-
-#[derive(Debug)]
-pub struct HeaderBar {}
-
-impl HeaderBar {
-    pub fn height(&self) -> i32 {
-        0
-    }
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Focus {
+    None,
+    Header,
+    Window,
 }
 
 impl CosmicStack {
-    pub fn active(&self) -> Window {
-        self.windows.lock().unwrap()[self.active.load(Ordering::SeqCst)].clone()
+    pub fn new(
+        window: impl Into<CosmicSurface>,
+        handle: LoopHandle<'static, crate::state::Data>,
+    ) -> CosmicStack {
+        let window = window.into();
+        let width = window.geometry().size.w;
+        CosmicStack(IcedElement::new(
+            CosmicStackInternal {
+                windows: Arc::new(Mutex::new(vec![window])),
+                active: Arc::new(AtomicUsize::new(0)),
+                previous_keyboard: Arc::new(AtomicUsize::new(0)),
+                pointer_entered: None,
+                previous_pointer: Arc::new(AtomicUsize::new(0)),
+                last_location: Arc::new(Mutex::new(None)),
+            },
+            (width, TAB_HEIGHT),
+            handle,
+        ))
     }
 
-    pub fn set_active(&self, window: &Window) {
-        if let Some(val) = self
-            .windows
-            .lock()
-            .unwrap()
-            .iter()
-            .position(|w| w == window)
-        {
-            let old = self.active.swap(val, Ordering::SeqCst);
-            self.previous_keyboard.store(old, Ordering::SeqCst);
-            self.previous_pointer.store(old, Ordering::SeqCst);
-        }
+    //pub fn add_window()
+    //pub fn remove_window()
+    //pub fn len
+
+    pub fn active(&self) -> CosmicSurface {
+        self.0
+            .with_program(|p| p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].clone())
+    }
+
+    pub fn set_active(&self, window: &CosmicSurface) {
+        self.0.with_program(|p| {
+            if let Some(val) = p.windows.lock().unwrap().iter().position(|w| w == window) {
+                let old = p.active.swap(val, Ordering::SeqCst);
+                p.previous_keyboard.store(old, Ordering::SeqCst);
+                p.previous_pointer.store(old, Ordering::SeqCst);
+            }
+        })
+    }
+
+    pub fn surfaces(&self) -> impl Iterator<Item = CosmicSurface> {
+        self.0.with_program(|p| {
+            p.windows
+                .lock()
+                .unwrap()
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .into_iter()
+        })
+    }
+
+    pub fn offset(&self) -> Point<i32, Logical> {
+        Point::from((0, TAB_HEIGHT))
     }
 
     pub fn set_size(&self, size: Size<i32, Logical>) {
-        let surface_size = (
-            size.w,
-            size.h
-                - self
-                    .header
-                    .lock()
-                    .unwrap()
-                    .as_ref()
-                    .map(|h| h.height())
-                    .unwrap_or(0),
-        )
-            .into();
+        self.0.with_program(|p| {
+            let surface_size = (size.w, size.h - TAB_HEIGHT).into();
 
-        for window in self.windows.lock().unwrap().iter() {
-            window
-                .toplevel()
-                .with_pending_state(|state| state.size = Some(surface_size));
-        }
+            for window in p.windows.lock().unwrap().iter() {
+                window.set_size(surface_size);
+            }
+        });
+        self.0.resize(Size::from((size.w, TAB_HEIGHT)));
     }
 
     fn keyboard_leave_if_previous(
@@ -107,13 +167,21 @@ impl CosmicStack {
         data: &mut State,
         serial: Serial,
     ) -> usize {
-        let active = self.active.load(Ordering::SeqCst);
-        let previous = self.previous_keyboard.swap(active, Ordering::SeqCst);
-        if previous != active {
-            KeyboardTarget::leave(&self.windows.lock().unwrap()[previous], seat, data, serial);
-            // TODO: KeyboardTarget::enter(&self.windows.lock().unwrap()[active], seat, data, serial, seat.keys())
-        }
-        active
+        self.0.with_program(|p| {
+            let active = p.active.load(Ordering::SeqCst);
+            let previous = p.previous_keyboard.swap(active, Ordering::SeqCst);
+            if previous != active {
+                KeyboardTarget::leave(&p.windows.lock().unwrap()[previous], seat, data, serial);
+                KeyboardTarget::enter(
+                    &p.windows.lock().unwrap()[active],
+                    seat,
+                    data,
+                    Vec::new(), //seat.keys(),
+                    serial,
+                )
+            }
+            active
+        })
     }
 
     fn pointer_leave_if_previous(
@@ -124,100 +192,141 @@ impl CosmicStack {
         time: u32,
         location: Point<f64, Logical>,
     ) -> usize {
-        let active = self.active.load(Ordering::SeqCst);
-        let previous = self.previous_pointer.swap(active, Ordering::SeqCst);
-        if previous != active {
-            if let Some(sessions) = self.windows.lock().unwrap()[previous]
-                .user_data()
-                .get::<ScreencopySessions>()
-            {
-                for session in &*sessions.0.borrow() {
-                    session.cursor_leave(seat, InputType::Pointer)
+        self.0.with_program(|p| {
+            let active = p.active.load(Ordering::SeqCst);
+            let previous = p.previous_pointer.swap(active, Ordering::SeqCst);
+            if previous != active {
+                if let Some(sessions) = p.windows.lock().unwrap()[previous]
+                    .user_data()
+                    .get::<ScreencopySessions>()
+                {
+                    for session in &*sessions.0.borrow() {
+                        session.cursor_leave(seat, InputType::Pointer)
+                    }
                 }
-            }
-            PointerTarget::leave(
-                &self.windows.lock().unwrap()[previous],
-                seat,
-                data,
-                serial,
-                time,
-            );
-            if let Some(sessions) = self.windows.lock().unwrap()[active]
-                .user_data()
-                .get::<ScreencopySessions>()
-            {
-                for session in &*sessions.0.borrow() {
-                    session.cursor_enter(seat, InputType::Pointer)
-                }
-            }
-            PointerTarget::enter(
-                &self.windows.lock().unwrap()[active],
-                seat,
-                data,
-                &MotionEvent {
-                    location,
+                PointerTarget::leave(
+                    &p.windows.lock().unwrap()[previous],
+                    seat,
+                    data,
                     serial,
                     time,
-                },
-            );
-        }
-        active
+                );
+                if let Some(sessions) = p.windows.lock().unwrap()[active]
+                    .user_data()
+                    .get::<ScreencopySessions>()
+                {
+                    for session in &*sessions.0.borrow() {
+                        session.cursor_enter(seat, InputType::Pointer)
+                    }
+                }
+                PointerTarget::enter(
+                    &p.windows.lock().unwrap()[active],
+                    seat,
+                    data,
+                    &MotionEvent {
+                        location,
+                        serial,
+                        time,
+                    },
+                );
+            }
+            active
+        })
+    }
+}
+
+impl Program for CosmicStackInternal {
+    type Message = ();
+
+    fn view(&self) -> Element<'_, Self::Message> {
+        cosmic::iced::widget::text("TODO").into()
     }
 }
 
 impl IsAlive for CosmicStack {
     fn alive(&self) -> bool {
-        self.windows.lock().unwrap().iter().any(IsAlive::alive)
+        self.0
+            .with_program(|p| p.windows.lock().unwrap().iter().any(IsAlive::alive))
     }
 }
 
 impl SpaceElement for CosmicStack {
     fn bbox(&self) -> Rectangle<i32, Logical> {
-        SpaceElement::bbox(&self.windows.lock().unwrap()[self.active.load(Ordering::SeqCst)])
+        self.0.with_program(|p| {
+            let mut bbox =
+                SpaceElement::bbox(&p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)]);
+            bbox.size.h += TAB_HEIGHT;
+            bbox
+        })
     }
     fn is_in_input_region(&self, point: &Point<f64, Logical>) -> bool {
-        SpaceElement::is_in_input_region(
-            &self.windows.lock().unwrap()[self.active.load(Ordering::SeqCst)],
-            point,
-        )
+        let mut point = *point;
+        if point.y < TAB_HEIGHT as f64 {
+            return true;
+        }
+        point.y -= TAB_HEIGHT as f64;
+        self.0.with_program(|p| {
+            SpaceElement::is_in_input_region(
+                &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)],
+                &point,
+            )
+        })
     }
     fn set_activate(&self, activated: bool) {
-        self.windows
-            .lock()
-            .unwrap()
-            .iter()
-            .for_each(|w| SpaceElement::set_activate(w, activated))
+        SpaceElement::set_activate(&self.0, activated);
+        self.0.with_program(|p| {
+            p.windows
+                .lock()
+                .unwrap()
+                .iter()
+                .for_each(|w| SpaceElement::set_activate(w, activated))
+        })
     }
     fn output_enter(&self, output: &Output, overlap: Rectangle<i32, Logical>) {
-        self.windows
-            .lock()
-            .unwrap()
-            .iter()
-            .for_each(|w| SpaceElement::output_enter(w, output, overlap))
+        SpaceElement::output_enter(&self.0, output, overlap);
+        self.0.with_program(|p| {
+            p.windows
+                .lock()
+                .unwrap()
+                .iter()
+                .for_each(|w| SpaceElement::output_enter(w, output, overlap))
+        })
     }
     fn output_leave(&self, output: &Output) {
-        self.windows
-            .lock()
-            .unwrap()
-            .iter()
-            .for_each(|w| SpaceElement::output_leave(w, output))
+        SpaceElement::output_leave(&self.0, output);
+        self.0.with_program(|p| {
+            p.windows
+                .lock()
+                .unwrap()
+                .iter()
+                .for_each(|w| SpaceElement::output_leave(w, output))
+        })
     }
     fn geometry(&self) -> Rectangle<i32, Logical> {
-        SpaceElement::geometry(&self.windows.lock().unwrap()[self.active.load(Ordering::SeqCst)])
+        self.0.with_program(|p| {
+            let mut geo =
+                SpaceElement::geometry(&p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)]);
+            geo.size.h += TAB_HEIGHT;
+            geo
+        })
     }
     fn z_index(&self) -> u8 {
-        SpaceElement::z_index(&self.windows.lock().unwrap()[self.active.load(Ordering::SeqCst)])
+        self.0.with_program(|p| {
+            SpaceElement::z_index(&p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)])
+        })
     }
     fn refresh(&self) {
-        let mut windows = self.windows.lock().unwrap();
-        windows.retain(IsAlive::alive);
-        let len = windows.len();
-        let _ = self
-            .active
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |active| {
-                (active > len).then_some(len - 1)
-            });
-        windows.iter().for_each(|w| SpaceElement::refresh(w))
+        self.0.with_program(|p| {
+            let mut windows = p.windows.lock().unwrap();
+            windows.retain(IsAlive::alive); // TODO: We don't handle empty stacks properly
+            let len = windows.len();
+            let _ = p
+                .active
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |active| {
+                    (active > len).then_some(len - 1)
+                });
+            windows.iter().for_each(|w| SpaceElement::refresh(w))
+        })
     }
 }
 
@@ -229,19 +338,23 @@ impl KeyboardTarget<State> for CosmicStack {
         keys: Vec<KeysymHandle<'_>>,
         serial: Serial,
     ) {
-        let active = self.active.load(Ordering::SeqCst);
-        self.previous_keyboard.store(active, Ordering::SeqCst);
-        KeyboardTarget::enter(
-            &self.windows.lock().unwrap()[self.active.load(Ordering::SeqCst)],
-            seat,
-            data,
-            keys,
-            serial,
-        )
+        self.0.with_program(|p| {
+            let active = p.active.load(Ordering::SeqCst);
+            p.previous_keyboard.store(active, Ordering::SeqCst);
+            KeyboardTarget::enter(
+                &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)],
+                seat,
+                data,
+                keys,
+                serial,
+            )
+        })
     }
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial) {
         let active = self.keyboard_leave_if_previous(seat, data, serial);
-        KeyboardTarget::leave(&self.windows.lock().unwrap()[active], seat, data, serial)
+        self.0.with_program(|p| {
+            KeyboardTarget::leave(&p.windows.lock().unwrap()[active], seat, data, serial)
+        })
     }
     fn key(
         &self,
@@ -253,15 +366,17 @@ impl KeyboardTarget<State> for CosmicStack {
         time: u32,
     ) {
         let active = self.keyboard_leave_if_previous(seat, data, serial);
-        KeyboardTarget::key(
-            &self.windows.lock().unwrap()[active],
-            seat,
-            data,
-            key,
-            state,
-            serial,
-            time,
-        )
+        self.0.with_program(|p| {
+            KeyboardTarget::key(
+                &p.windows.lock().unwrap()[active],
+                seat,
+                data,
+                key,
+                state,
+                serial,
+                time,
+            )
+        })
     }
     fn modifiers(
         &self,
@@ -271,132 +386,225 @@ impl KeyboardTarget<State> for CosmicStack {
         serial: Serial,
     ) {
         let active = self.keyboard_leave_if_previous(seat, data, serial);
-        KeyboardTarget::modifiers(
-            &self.windows.lock().unwrap()[active],
-            seat,
-            data,
-            modifiers,
-            serial,
-        )
+        self.0.with_program(|p| {
+            KeyboardTarget::modifiers(
+                &p.windows.lock().unwrap()[active],
+                seat,
+                data,
+                modifiers,
+                serial,
+            )
+        })
     }
 }
 
 impl PointerTarget<State> for CosmicStack {
     fn enter(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
-        if let Some(sessions) = self.active().user_data().get::<ScreencopySessions>() {
-            for session in &*sessions.0.borrow() {
-                session.cursor_enter(seat, InputType::Pointer)
+        if self.0.with_program(|p| {
+            if let Some(sessions) = p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)]
+                .user_data()
+                .get::<ScreencopySessions>()
+            {
+                for session in &*sessions.0.borrow() {
+                    session.cursor_enter(seat, InputType::Pointer)
+                }
             }
+
+            if event.location.y < TAB_HEIGHT as f64 {
+                let focus = p.swap_focus(Focus::Header);
+                assert_eq!(focus, Focus::None);
+                true
+            } else {
+                let focus = p.swap_focus(Focus::Window);
+                assert_eq!(focus, Focus::None);
+
+                *p.last_location.lock().unwrap() = Some((event.location, event.serial, event.time));
+                let active = p.active.load(Ordering::SeqCst);
+                p.previous_pointer.store(active, Ordering::SeqCst);
+
+                PointerTarget::enter(
+                    &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)],
+                    seat,
+                    data,
+                    event,
+                );
+                false
+            }
+        }) {
+            PointerTarget::enter(&self.0, seat, data, event)
         }
-
-        *self.last_location.lock().unwrap() = Some((event.location, event.serial, event.time));
-        let active = self.active.load(Ordering::SeqCst);
-        self.previous_pointer.store(active, Ordering::SeqCst);
-
-        PointerTarget::enter(
-            &self.windows.lock().unwrap()[self.active.load(Ordering::SeqCst)],
-            seat,
-            data,
-            event,
-        )
     }
+
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
         let active =
             self.pointer_leave_if_previous(seat, data, event.serial, event.time, event.location);
-
-        if let Some(sessions) = self.active().user_data().get::<ScreencopySessions>() {
-            for session in &*sessions.0.borrow() {
-                let buffer_loc = (event.location.x, event.location.y); // we always screencast windows at 1x1 scale
-                if let Some((geo, hotspot)) =
-                    seat.cursor_geometry(buffer_loc, data.common.clock.now())
-                {
-                    session.cursor_info(seat, InputType::Pointer, geo, hotspot);
+        if let Some((previous, next)) = self.0.with_program(|p| {
+            if let Some(sessions) = p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)]
+                .user_data()
+                .get::<ScreencopySessions>()
+            {
+                for session in &*sessions.0.borrow() {
+                    let buffer_loc = (event.location.x, event.location.y); // we always screencast windows at 1x1 scale
+                    if let Some((geo, hotspot)) =
+                        seat.cursor_geometry(buffer_loc, data.common.clock.now())
+                    {
+                        session.cursor_info(seat, InputType::Pointer, geo, hotspot);
+                    }
                 }
             }
-        }
 
-        PointerTarget::motion(&self.windows.lock().unwrap()[active], seat, data, event)
+            if event.location.y < TAB_HEIGHT as f64 {
+                let previous = p.swap_focus(Focus::Header);
+                if previous == Focus::Window {
+                    PointerTarget::leave(
+                        &p.windows.lock().unwrap()[active],
+                        seat,
+                        data,
+                        event.serial,
+                        event.time,
+                    );
+                }
+                Some((previous, Focus::Header))
+            } else {
+                let mut event = event.clone();
+                event.location.y -= TAB_HEIGHT as f64;
+
+                let previous = p.swap_focus(Focus::Window);
+                if previous != Focus::Window {
+                    PointerTarget::enter(&p.windows.lock().unwrap()[active], seat, data, &event);
+                } else {
+                    PointerTarget::motion(&p.windows.lock().unwrap()[active], seat, data, &event);
+                }
+
+                Some((previous, Focus::Window))
+            }
+        }) {
+            match (previous, next) {
+                (Focus::Header, Focus::Header) => PointerTarget::motion(&self.0, seat, data, event),
+                (_, Focus::Header) => PointerTarget::enter(&self.0, seat, data, event),
+                (Focus::Header, _) => {
+                    PointerTarget::leave(&self.0, seat, data, event.serial, event.time)
+                }
+                _ => {}
+            }
+        }
     }
+
     fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
-        if let Some((location, _serial, _time)) = self.last_location.lock().unwrap().clone() {
+        if let Some((location, _serial, _time)) = self
+            .0
+            .with_program(|p| p.last_location.lock().unwrap().clone())
+        {
             self.pointer_leave_if_previous(seat, data, event.serial, event.time, location);
         }
 
-        PointerTarget::button(
-            &self.windows.lock().unwrap()[self.active.load(Ordering::SeqCst)],
-            seat,
-            data,
-            event,
-        )
+        match self.0.with_program(|p| p.current_focus()) {
+            Focus::Header => PointerTarget::button(&self.0, seat, data, event),
+            Focus::Window => self.0.with_program(|p| {
+                PointerTarget::button(
+                    &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)],
+                    seat,
+                    data,
+                    event,
+                )
+            }),
+            _ => {}
+        }
     }
+
     fn axis(&self, seat: &Seat<State>, data: &mut State, frame: AxisFrame) {
-        if let Some((location, serial, time)) = self.last_location.lock().unwrap().clone() {
+        if let Some((location, serial, time)) = self
+            .0
+            .with_program(|p| p.last_location.lock().unwrap().clone())
+        {
             self.pointer_leave_if_previous(seat, data, serial, time, location);
         }
 
-        PointerTarget::axis(
-            &self.windows.lock().unwrap()[self.active.load(Ordering::SeqCst)],
-            seat,
-            data,
-            frame,
-        )
+        match self.0.with_program(|p| p.current_focus()) {
+            Focus::Header => PointerTarget::axis(&self.0, seat, data, frame),
+            Focus::Window => self.0.with_program(|p| {
+                PointerTarget::axis(
+                    &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)],
+                    seat,
+                    data,
+                    frame,
+                )
+            }),
+            _ => {}
+        }
     }
+
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
-        if let Some((location, serial, time)) = self.last_location.lock().unwrap().clone() {
+        if let Some((location, serial, time)) = self
+            .0
+            .with_program(|p| p.last_location.lock().unwrap().clone())
+        {
             self.pointer_leave_if_previous(seat, data, serial, time, location);
         }
-        if let Some(sessions) = self.active().user_data().get::<ScreencopySessions>() {
-            for session in &*sessions.0.borrow() {
-                session.cursor_leave(seat, InputType::Pointer)
-            }
-        }
 
-        PointerTarget::leave(
-            &self.windows.lock().unwrap()[self.active.load(Ordering::SeqCst)],
-            seat,
-            data,
-            serial,
-            time,
-        )
+        let previous = self.0.with_program(|p| {
+            if let Some(sessions) = p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)]
+                .user_data()
+                .get::<ScreencopySessions>()
+            {
+                for session in &*sessions.0.borrow() {
+                    session.cursor_leave(seat, InputType::Pointer)
+                }
+            }
+
+            p.swap_focus(Focus::None)
+        });
+        assert!(previous != Focus::None);
+
+        match previous {
+            Focus::Header => PointerTarget::leave(&self.0, seat, data, serial, time),
+            Focus::Window => self.0.with_program(|p| {
+                PointerTarget::leave(
+                    &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)],
+                    seat,
+                    data,
+                    serial,
+                    time,
+                )
+            }),
+            _ => {}
+        }
     }
 }
 
 render_elements! {
-    pub CosmicStackRenderElement<R> where R: ImportAll;
+    pub CosmicStackRenderElement<R> where R: ImportAll + ImportMem;
+    Header=MemoryRenderBufferRenderElement<R>,
     Window=WaylandSurfaceRenderElement<R>,
 }
 
 impl<R> AsRenderElements<R> for CosmicStack
 where
-    R: Renderer + ImportAll,
+    R: Renderer + ImportAll + ImportMem,
     <R as Renderer>::TextureId: 'static,
 {
     type RenderElement = CosmicStackRenderElement<R>;
     fn render_elements<C: From<Self::RenderElement>>(
         &self,
         renderer: &mut R,
-        location: Point<i32, Physical>,
+        mut location: Point<i32, Physical>,
         scale: Scale<f64>,
     ) -> Vec<C> {
-        AsRenderElements::<R>::render_elements::<CosmicStackRenderElement<R>>(
-            &self.windows.lock().unwrap()[self.active.load(Ordering::SeqCst)],
-            renderer,
-            location,
-            scale,
-        )
-        .into_iter()
-        .map(C::from)
-        .collect()
-    }
-}
-impl CosmicStack {
-    pub fn windows(&self) -> impl Iterator<Item = Window> {
-        self.windows
-            .lock()
-            .unwrap()
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>()
-            .into_iter()
+        let mut elements = AsRenderElements::<R>::render_elements::<CosmicStackRenderElement<R>>(
+            &self.0, renderer, location, scale,
+        );
+        location.y += TAB_HEIGHT;
+
+        elements.extend(self.0.with_program(|p| {
+            let elements = AsRenderElements::<R>::render_elements::<CosmicStackRenderElement<R>>(
+                &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)],
+                renderer,
+                location,
+                scale,
+            );
+            elements
+        }));
+
+        elements.into_iter().map(C::from).collect()
     }
 }

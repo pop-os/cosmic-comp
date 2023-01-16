@@ -19,17 +19,19 @@ use indexmap::IndexSet;
 use smithay::{
     backend::renderer::{
         element::{surface::WaylandSurfaceRenderElement, AsRenderElements, Element, RenderElement},
-        ImportAll, Renderer,
+        ImportAll, ImportMem, Renderer,
     },
-    desktop::{layer_map_for_output, space::SpaceElement, LayerSurface, Window},
+    desktop::{layer_map_for_output, space::SpaceElement, LayerSurface},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
     reexports::{
-        wayland_protocols::xdg::shell::server::xdg_toplevel::{self, ResizeEdge},
+        wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge,
         wayland_server::protocol::wl_surface::WlSurface,
     },
-    utils::{Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial},
-    wayland::shell::wlr_layer::Layer,
+    utils::{
+        Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
+    },
+    wayland::{seat::WaylandFocus, shell::wlr_layer::Layer},
 };
 use std::collections::HashMap;
 
@@ -37,7 +39,7 @@ use super::{
     element::CosmicMapped,
     focus::{FocusStack, FocusStackMut},
     grabs::ResizeGrab,
-    CosmicMappedRenderElement,
+    CosmicMappedRenderElement, CosmicSurface,
 };
 
 #[derive(Debug)]
@@ -45,7 +47,7 @@ pub struct Workspace {
     pub tiling_layer: TilingLayout,
     pub floating_layer: FloatingLayout,
     pub tiling_enabled: bool,
-    pub fullscreen: HashMap<Output, Window>,
+    pub fullscreen: HashMap<Output, CosmicSurface>,
     pub handle: WorkspaceHandle,
     pub focus_stack: FocusStacks,
     pub pending_buffers: Vec<(ScreencopySession, BufferParams)>,
@@ -85,7 +87,7 @@ impl Workspace {
         if let Some(mapped) = self.element_for_surface(surface) {
             mapped
                 .windows()
-                .find(|(w, _)| w.toplevel().wl_surface() == surface)
+                .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
                 .unwrap()
                 .0
                 .on_commit();
@@ -131,7 +133,7 @@ impl Workspace {
             .chain(self.tiling_layer.mapped().map(|(_, w, _)| w))
             .find(|e| {
                 e.windows()
-                    .any(|(w, _)| w.toplevel().wl_surface() == surface)
+                    .any(|(w, _)| w.wl_surface().as_ref() == Some(surface))
             })
     }
 
@@ -190,41 +192,37 @@ impl Workspace {
             })
     }
 
-    pub fn maximize_request(&mut self, window: &Window, output: &Output) {
+    pub fn maximize_request(&mut self, window: &CosmicSurface, output: &Output) {
         if self.fullscreen.contains_key(output) {
             return;
         }
 
         self.floating_layer.maximize_request(window);
 
-        window.toplevel().with_pending_state(|state| {
-            state.states.set(xdg_toplevel::State::Maximized);
-            state.states.unset(xdg_toplevel::State::Fullscreen);
-        });
-
+        window.set_fullscreen(false);
+        window.set_maximized(true);
         self.set_fullscreen(window, output)
     }
-    pub fn unmaximize_request(&mut self, window: &Window) {
+    pub fn unmaximize_request(&mut self, window: &CosmicSurface) -> Option<Size<i32, Logical>> {
         if self.fullscreen.values().any(|w| w == window) {
             self.unfullscreen_request(window);
-            self.floating_layer.unmaximize_request(window);
+            self.floating_layer.unmaximize_request(window)
+        } else {
+            None
         }
     }
 
-    pub fn fullscreen_request(&mut self, window: &Window, output: &Output) {
+    pub fn fullscreen_request(&mut self, window: &CosmicSurface, output: &Output) {
         if self.fullscreen.contains_key(output) {
             return;
         }
 
-        window.toplevel().with_pending_state(|state| {
-            state.states.set(xdg_toplevel::State::Fullscreen);
-            state.states.unset(xdg_toplevel::State::Maximized);
-        });
-
+        window.set_maximized(false);
+        window.set_fullscreen(true);
         self.set_fullscreen(window, output)
     }
 
-    fn set_fullscreen(&mut self, window: &Window, output: &Output) {
+    fn set_fullscreen(&mut self, window: &CosmicSurface, output: &Output) {
         if let Some(mapped) = self
             .mapped()
             .find(|m| m.windows().any(|(w, _)| &w == window))
@@ -232,46 +230,39 @@ impl Workspace {
             mapped.set_active(window);
         }
 
-        let xdg = window.toplevel();
-        xdg.with_pending_state(|state| {
-            state.size = Some(
-                output
-                    .current_mode()
-                    .map(|m| m.size)
-                    .unwrap_or((0, 0).into())
-                    .to_f64()
-                    .to_logical(output.current_scale().fractional_scale())
-                    .to_i32_round(),
-            );
-        });
-        xdg.send_configure();
+        window.set_size(
+            output
+                .current_mode()
+                .map(|m| m.size)
+                .unwrap_or((0, 0).into())
+                .to_f64()
+                .to_logical(output.current_scale().fractional_scale())
+                .to_i32_round(),
+        );
+        window.send_configure();
         self.fullscreen.insert(output.clone(), window.clone());
     }
 
-    pub fn unfullscreen_request(&mut self, window: &Window) {
+    pub fn unfullscreen_request(&mut self, window: &CosmicSurface) {
         if self.fullscreen.values().any(|w| w == window) {
-            let xdg = window.toplevel();
-            xdg.with_pending_state(|state| {
-                state.states.unset(xdg_toplevel::State::Fullscreen);
-                state.states.unset(xdg_toplevel::State::Maximized);
-                state.size = None;
-            });
+            window.set_maximized(false);
+            window.set_fullscreen(false);
             self.floating_layer.refresh();
             self.tiling_layer.refresh();
-            xdg.send_configure();
+            window.send_configure();
             self.fullscreen.retain(|_, w| w != window);
         }
     }
 
-    pub fn maximize_toggle(&mut self, window: &Window, output: &Output) {
+    pub fn maximize_toggle(&mut self, window: &CosmicSurface, output: &Output) {
         if self.fullscreen.contains_key(output) {
-            self.unmaximize_request(window)
+            self.unmaximize_request(window);
         } else {
-            self.maximize_request(window, output)
+            self.maximize_request(window, output);
         }
     }
 
-    pub fn get_fullscreen(&self, output: &Output) -> Option<&Window> {
+    pub fn get_fullscreen(&self, output: &Output) -> Option<&CosmicSurface> {
         self.fullscreen.get(output).filter(|w| w.alive())
     }
 
@@ -303,7 +294,7 @@ impl Workspace {
 
     pub fn move_request(
         &mut self,
-        window: &Window,
+        window: &CosmicSurface,
         seat: &Seat<State>,
         output: &Output,
         _serial: Serial,
@@ -312,15 +303,12 @@ impl Workspace {
         let pointer = seat.get_pointer().unwrap();
         let pos = pointer.current_location();
 
-        let mapped = self
-            .element_for_surface(window.toplevel().wl_surface())?
-            .clone();
+        let mapped = self.element_for_surface(&window.wl_surface()?)?.clone();
         let mut initial_window_location = self.element_geometry(&mapped).unwrap().loc;
 
         if mapped.is_fullscreen() || mapped.is_maximized() {
             // If surface is maximized then unmaximize it
-            self.unmaximize_request(window);
-            let new_size = window.toplevel().with_pending_state(|state| state.size);
+            let new_size = self.unmaximize_request(window);
             let ratio = pos.x / output.geometry().size.w as f64;
 
             initial_window_location = new_size
@@ -396,7 +384,7 @@ impl Workspace {
             .chain(self.tiling_layer.mapped().map(|(_, w, _)| w))
     }
 
-    pub fn windows(&self) -> impl Iterator<Item = Window> + '_ {
+    pub fn windows(&self) -> impl Iterator<Item = CosmicSurface> + '_ {
         self.floating_layer
             .windows()
             .chain(self.tiling_layer.windows().map(|(_, w, _)| w))
@@ -408,7 +396,7 @@ impl Workspace {
         output: &Output,
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
     where
-        R: Renderer + ImportAll + AsGlowRenderer,
+        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         <R as Renderer>::TextureId: 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
@@ -534,7 +522,7 @@ pub struct OutputNotMapped;
 
 pub enum WorkspaceRenderElement<R>
 where
-    R: Renderer + ImportAll + AsGlowRenderer,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
 {
     Wayland(WaylandSurfaceRenderElement<R>),
@@ -543,7 +531,7 @@ where
 
 impl<R> Element for WorkspaceRenderElement<R>
 where
-    R: Renderer + ImportAll + AsGlowRenderer,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
 {
     fn id(&self) -> &smithay::backend::renderer::element::Id {
@@ -609,7 +597,7 @@ where
 
 impl<R> RenderElement<R> for WorkspaceRenderElement<R>
 where
-    R: Renderer + ImportAll + AsGlowRenderer,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -640,7 +628,7 @@ where
 
 impl<R> From<WaylandSurfaceRenderElement<R>> for WorkspaceRenderElement<R>
 where
-    R: Renderer + ImportAll + AsGlowRenderer,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -651,7 +639,7 @@ where
 
 impl<R> From<CosmicMappedRenderElement<R>> for WorkspaceRenderElement<R>
 where
-    R: Renderer + ImportAll + AsGlowRenderer,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {

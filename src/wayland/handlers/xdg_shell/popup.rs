@@ -3,7 +3,8 @@
 use crate::{shell::Shell, utils::prelude::*};
 use smithay::{
     desktop::{
-        layer_map_for_output, LayerSurface, PopupKind, PopupManager, Window, WindowSurfaceType,
+        layer_map_for_output, space::SpaceElement, LayerSurface, PopupKind, PopupManager, Window,
+        WindowSurfaceType,
     },
     output::Output,
     reexports::{
@@ -15,6 +16,7 @@ use smithay::{
     utils::{Logical, Point, Rectangle},
     wayland::{
         compositor::{get_role, with_states},
+        seat::WaylandFocus,
         shell::xdg::{
             PopupSurface, PositionerState, SurfaceCachedState, XdgPopupSurfaceRoleAttributes,
             XDG_POPUP_ROLE,
@@ -31,12 +33,12 @@ impl Shell {
                 let element_geo = workspace.element_geometry(elem).unwrap();
                 let (window, offset) = elem
                     .windows()
-                    .find(|(w, _)| w.toplevel().wl_surface() == &parent)
+                    .find(|(w, _)| w.wl_surface().as_ref() == Some(&parent))
                     .unwrap();
                 let window_geo_offset = window.geometry().loc;
                 let window_loc = element_geo.loc + offset + window_geo_offset;
                 let anchor_point = get_anchor_point(&positioner) + window_loc;
-                if elem.is_tiled() {
+                if elem.is_tiled().unwrap() {
                     if !unconstrain_xdg_popup_tile(surface, element_geo) {
                         if let Some(output) = workspace.output_under(anchor_point) {
                             unconstrain_xdg_popup(surface, window_loc, output.geometry());

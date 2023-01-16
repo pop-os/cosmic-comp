@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::HashMap};
 
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State as WState;
 use smithay::{
-    desktop::{layer_map_for_output, LayerSurface, PopupManager, Window, WindowSurfaceType},
+    desktop::{layer_map_for_output, LayerSurface, PopupManager, WindowSurfaceType},
     input::Seat,
     output::Output,
     reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
@@ -37,7 +37,7 @@ pub mod focus;
 pub mod grabs;
 pub mod layout;
 mod workspace;
-pub use self::element::CosmicMappedRenderElement;
+pub use self::element::{CosmicMappedRenderElement, CosmicSurface};
 pub use self::workspace::*;
 use self::{
     element::{CosmicMapped, CosmicWindow},
@@ -50,12 +50,12 @@ pub struct Shell {
     pub outputs: Vec<Output>,
     pub workspaces: WorkspaceMode,
     pub floating_default: bool,
-    pub pending_windows: Vec<(Window, Seat<State>)>,
+    pub pending_windows: Vec<(CosmicSurface, Seat<State>)>,
     pub pending_layers: Vec<(LayerSurface, Output, Seat<State>)>,
 
     // wayland_state
     pub layer_shell_state: WlrLayerShellState,
-    pub toplevel_info_state: ToplevelInfoState<State>,
+    pub toplevel_info_state: ToplevelInfoState<State, CosmicSurface>,
     pub toplevel_management_state: ToplevelManagementState,
     pub xdg_shell_state: XdgShellState,
     pub workspace_state: WorkspaceState<State>,
@@ -144,7 +144,7 @@ impl WorkspaceSet {
     fn refresh<'a>(
         &mut self,
         state: &mut WorkspaceState<State>,
-        toplevel_info: &mut ToplevelInfoState<State>,
+        toplevel_info: &mut ToplevelInfoState<State, CosmicSurface>,
         outputs: impl Iterator<Item = (&'a Output, Point<i32, Logical>)>,
     ) {
         match self.amount {
@@ -213,7 +213,7 @@ impl WorkspaceSet {
         &mut self,
         amount: usize,
         state: &mut WorkspaceState<State>,
-        toplevel_info: &mut ToplevelInfoState<State>,
+        toplevel_info: &mut ToplevelInfoState<State, CosmicSurface>,
         outputs: impl Iterator<Item = (&'a Output, Point<i32, Logical>)>,
     ) {
         if amount < self.workspaces.len() {
@@ -957,7 +957,7 @@ impl Shell {
             .refresh(Some(&self.workspace_state));
     }
 
-    pub fn map_window(state: &mut State, window: &Window, output: &Output) {
+    pub fn map_window(state: &mut State, window: &CosmicSurface, output: &Output) {
         let pos = state
             .common
             .shell
@@ -979,7 +979,10 @@ impl Shell {
             .toplevel_info_state
             .toplevel_enter_workspace(&window, &workspace.handle);
 
-        let mapped = CosmicMapped::from(CosmicWindow::from(window.clone()));
+        let mapped = CosmicMapped::from(CosmicWindow::new(
+            window.clone(),
+            state.common.event_loop_handle.clone(),
+        ));
         #[cfg(feature = "debug")]
         {
             mapped.set_debug(state.common.egui.active);
@@ -1111,12 +1114,14 @@ impl Shell {
         if let Some(workspace) = self.space_for(mapped) {
             let element_loc = workspace.element_geometry(mapped).unwrap().loc;
             for (toplevel, offset) in mapped.windows() {
-                let window_geo_offset = toplevel.geometry().loc;
-                update_reactive_popups(
-                    &toplevel,
-                    element_loc + offset + window_geo_offset,
-                    self.outputs.iter(),
-                );
+                if let CosmicSurface::Wayland(toplevel) = toplevel {
+                    let window_geo_offset = toplevel.geometry().loc;
+                    update_reactive_popups(
+                        &toplevel,
+                        element_loc + offset + window_geo_offset,
+                        self.outputs.iter(),
+                    );
+                }
             }
         }
     }

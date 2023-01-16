@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use anyhow::Result;
-use slog::Drain;
+use slog::{Drain, Level};
 
 pub struct LogState {
     _guard: slog_scope::GlobalLoggerGuard,
@@ -16,7 +16,27 @@ pub fn init_logger() -> Result<LogState> {
     let drain = slog::Duplicate::new(term_drain, journald_drain);
     // usually we would not want to use a Mutex here, but this is usefull for a prototype,
     // to make sure we do not miss any in-flight messages, when we crash.
-    let logger = slog::Logger::root(std::sync::Mutex::new(drain).fuse(), slog::o!());
+    let logger = slog::Logger::root(
+        std::sync::Mutex::new(drain.filter(|record| {
+            if record.module().starts_with("smithay") || record.module().starts_with("cosmic_comp")
+            {
+                return true;
+            }
+
+            if record.module().contains("cosmic_text") {
+                // cosmic-text is very chatty
+                return record.level().is_at_least(Level::Error);
+            }
+
+            if cfg!(debug_assertions) {
+                record.level().is_at_least(Level::Warning)
+            } else {
+                record.level().is_at_least(Level::Error)
+            }
+        }))
+        .fuse(),
+        slog::o!(),
+    );
 
     let _guard = slog_scope::set_global_logger(logger);
     slog_stdlog::init_with_level(if cfg!(debug_assertions) {

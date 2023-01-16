@@ -4,7 +4,7 @@ use smithay::{
     backend::renderer::{
         element::{Element, RenderElement, UnderlyingStorage},
         glow::{GlowFrame, GlowRenderer},
-        Frame, ImportAll, Renderer,
+        Frame, ImportAll, ImportMem, Renderer,
     },
     utils::{Buffer as BufferCoords, Physical, Point, Rectangle, Scale},
 };
@@ -18,7 +18,7 @@ use super::{cursor::CursorRenderElement, GlMultiFrame, GlMultiRenderer};
 
 pub enum CosmicElement<R>
 where
-    R: AsGlowRenderer + Renderer + ImportAll,
+    R: AsGlowRenderer + Renderer + ImportAll + ImportMem,
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -31,7 +31,7 @@ where
 
 impl<R> Element for CosmicElement<R>
 where
-    R: AsGlowRenderer + Renderer + ImportAll,
+    R: AsGlowRenderer + Renderer + ImportAll + ImportMem,
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -203,7 +203,7 @@ impl<'a> RenderElement<GlMultiRenderer<'a>> for CosmicElement<GlMultiRenderer<'a
 
 impl<R> From<WorkspaceRenderElement<R>> for CosmicElement<R>
 where
-    R: Renderer + ImportAll + AsGlowRenderer,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -214,7 +214,7 @@ where
 
 impl<R> From<CursorRenderElement<R>> for CosmicElement<R>
 where
-    R: Renderer + ImportAll + AsGlowRenderer,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -225,7 +225,7 @@ where
 
 impl<R> From<CosmicMappedRenderElement<R>> for CosmicElement<R>
 where
-    R: Renderer + ImportAll + AsGlowRenderer,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -237,7 +237,7 @@ where
 #[cfg(feature = "debug")]
 impl<R> From<TextureRenderElement<Gles2Texture>> for CosmicElement<R>
 where
-    R: Renderer + ImportAll + AsGlowRenderer,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {

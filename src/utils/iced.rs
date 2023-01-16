@@ -1,22 +1,31 @@
 use std::{
+    collections::HashMap,
     fmt,
+    hash::{Hash, Hasher},
     sync::{mpsc::Receiver, Arc, Mutex},
 };
 
-use cosmic::iced_native::{
-    command::Action,
-    event::Event,
-    keyboard::{Event as KeyboardEvent, Modifiers as IcedModifiers},
-    mouse::{Button as MouseButton, Event as MouseEvent, ScrollDelta},
-    program::{Program, State},
-    renderer::Style,
-    window::{Event as WindowEvent, Id},
-    Debug, Point as IcedPoint, Size as IcedSize,
-};
 pub use cosmic::Renderer as IcedRenderer;
 use cosmic::Theme;
-use iced_swbuf::{native::*, Backend};
+use cosmic::{
+    iced_native::{
+        command::Action,
+        event::Event,
+        keyboard::{Event as KeyboardEvent, Modifiers as IcedModifiers},
+        mouse::{Button as MouseButton, Event as MouseEvent, ScrollDelta},
+        program::{Program as IcedProgram, State},
+        renderer::Style,
+        window::{Event as WindowEvent, Id},
+        Command, Debug, Point as IcedPoint, Size as IcedSize,
+    },
+    Element,
+};
+use iced_softbuffer::{
+    native::{raqote::DrawTarget, *},
+    Backend,
+};
 
+use ordered_float::OrderedFloat;
 use smithay::{
     backend::{
         input::{ButtonState, KeyState},
@@ -41,30 +50,64 @@ use smithay::{
 };
 
 #[derive(Debug)]
-pub struct IcedElement<P: Program<Renderer = IcedRenderer> + Send + 'static>(
-    Arc<Mutex<IcedElementInternal<P>>>,
-);
+pub struct IcedElement<P: Program + Send + 'static>(Arc<Mutex<IcedElementInternal<P>>>);
 
 // SAFETY: We cannot really be sure about `iced_native::program::State` sadly,
 // but the rest should be fine.
-unsafe impl<P: Program<Renderer = IcedRenderer> + Send + 'static> Send for IcedElementInternal<P> {}
+unsafe impl<P: Program + Send + 'static> Send for IcedElementInternal<P> {}
 
-impl<P: Program<Renderer = IcedRenderer> + Send + 'static> Clone for IcedElement<P> {
+impl<P: Program + Send + 'static> Clone for IcedElement<P> {
     fn clone(&self) -> Self {
         IcedElement(self.0.clone())
     }
 }
 
-impl<P: Program<Renderer = IcedRenderer> + Send + 'static> PartialEq for IcedElement<P> {
+impl<P: Program + Send + 'static> PartialEq for IcedElement<P> {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
 }
+impl<P: Program + Send + 'static> Eq for IcedElement<P> {}
 
-struct IcedElementInternal<P: Program<Renderer = IcedRenderer> + Send + 'static> {
+impl<P: Program + Send + 'static> Hash for IcedElement<P> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (Arc::as_ptr(&self.0) as usize).hash(state)
+    }
+}
+
+pub trait Program {
+    type Message: std::fmt::Debug + Send;
+    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
+        let _ = message;
+        Command::none()
+    }
+    fn view(&self) -> Element<'_, Self::Message>;
+
+    fn background(&self, target: &mut DrawTarget<&mut [u32]>) {
+        let _ = target;
+    }
+    fn foreground(&self, target: &mut DrawTarget<&mut [u32]>) {
+        let _ = target;
+    }
+}
+
+struct ProgramWrapper<P: Program>(P);
+impl<P: Program> IcedProgram for ProgramWrapper<P> {
+    type Message = <P as Program>::Message;
+    type Renderer = IcedRenderer;
+
+    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
+        self.0.update(message)
+    }
+
+    fn view(&self) -> Element<'_, Self::Message> {
+        self.0.view()
+    }
+}
+
+struct IcedElementInternal<P: Program + Send + 'static> {
     // draw buffer
-    memory: MemoryRenderBuffer,
-    needs_redraw: bool,
+    buffers: HashMap<OrderedFloat<f64>, (MemoryRenderBuffer, bool)>,
 
     // state
     size: Size<i32, Logical>,
@@ -73,7 +116,7 @@ struct IcedElementInternal<P: Program<Renderer = IcedRenderer> + Send + 'static>
     // iced
     theme: Theme,
     renderer: IcedRenderer,
-    state: State<P>,
+    state: State<ProgramWrapper<P>>,
     debug: Debug,
 
     // futures
@@ -83,53 +126,57 @@ struct IcedElementInternal<P: Program<Renderer = IcedRenderer> + Send + 'static>
     rx: Receiver<<P as Program>::Message>,
 }
 
-impl<P: Program<Renderer = IcedRenderer> + Send + 'static> fmt::Debug for IcedElementInternal<P> {
+impl<P: Program + Send + 'static> fmt::Debug for IcedElementInternal<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("IcedElementInternal")
-            .field("memory", &self.memory)
-            .field("needs_redraw", &self.needs_redraw)
+            .field("buffers", &"...")
             .field("size", &self.size)
             .field("cursor_pos", &self.cursor_pos)
             .field("theme", &self.theme)
-            .finish_non_exhaustive()
+            .field("renderer", &"...")
+            .field("state", &"...")
+            .field("debug", &self.debug)
+            .field("handle", &self.handle)
+            .field("scheduler", &self.scheduler)
+            .field("executor_token", &self.executor_token)
+            .field("rx", &self.rx)
+            .finish()
     }
 }
 
-impl<P: Program<Renderer = IcedRenderer> + Send + 'static> Drop for IcedElementInternal<P> {
+impl<P: Program + Send + 'static> Drop for IcedElementInternal<P> {
     fn drop(&mut self) {
         self.handle.remove(self.executor_token.take().unwrap());
     }
 }
 
-impl<P: Program<Renderer = IcedRenderer> + Send + 'static> IcedElement<P> {
+impl<P: Program + Send + 'static> IcedElement<P> {
     pub fn new(
         program: P,
         size: impl Into<Size<i32, Logical>>,
-        scale: i32,
         handle: LoopHandle<'static, crate::state::Data>,
-    ) -> calloop::error::Result<IcedElement<P>> {
+    ) -> IcedElement<P> {
         let size = size.into();
-        let buffer_size = size.to_buffer(scale, Transform::Normal);
-
         let mut renderer = IcedRenderer::new(Backend::new());
         let mut debug = Debug::new();
 
         let state = State::new(
-            program,
+            ProgramWrapper(program),
             IcedSize::new(size.w as f32, size.h as f32),
             &mut renderer,
             &mut debug,
         );
 
-        let (executor, scheduler) = calloop::futures::executor()?;
+        let (executor, scheduler) = calloop::futures::executor().expect("Out of file descriptors");
         let (tx, rx) = std::sync::mpsc::channel();
-        let executor_token = handle.insert_source(executor, |message, _, _| {
-            tx.send(message);
-        })?;
+        let executor_token = handle
+            .insert_source(executor, move |message, _, _| {
+                let _ = tx.send(message);
+            })
+            .ok();
 
         let mut internal = IcedElementInternal {
-            memory: MemoryRenderBuffer::new(buffer_size, scale, Transform::Normal, None),
-            needs_redraw: true,
+            buffers: HashMap::new(),
             size,
             cursor_pos: None,
             theme: Theme::Dark, // TODO
@@ -138,16 +185,41 @@ impl<P: Program<Renderer = IcedRenderer> + Send + 'static> IcedElement<P> {
             debug,
             handle,
             scheduler,
-            executor_token: Some(executor_token),
+            executor_token,
             rx,
         };
         let _ = internal.update(true);
 
-        Ok(IcedElement(Arc::new(Mutex::new(internal))))
+        IcedElement(Arc::new(Mutex::new(internal)))
+    }
+
+    pub fn with_program<R>(&self, func: impl FnOnce(&P) -> R) -> R {
+        let internal = self.0.lock().unwrap();
+        func(&internal.state.program().0)
+    }
+
+    pub fn loop_handle(&self) -> LoopHandle<'static, crate::state::Data> {
+        self.0.lock().unwrap().handle.clone()
+    }
+
+    pub fn resize(&self, size: Size<i32, Logical>) {
+        let mut internal = self.0.lock().unwrap();
+        let internal_ref = &mut *internal;
+        internal_ref.size = size;
+        for (scale, (buffer, needs_redraw)) in internal_ref.buffers.iter_mut() {
+            let buffer_size = internal_ref
+                .size
+                .to_f64()
+                .to_buffer(**scale, Transform::Normal)
+                .to_i32_round();
+            *buffer = MemoryRenderBuffer::new(buffer_size, 1, Transform::Normal, None);
+            *needs_redraw = true;
+        }
+        let _ = internal_ref.update(true);
     }
 }
 
-impl<P: Program<Renderer = IcedRenderer> + Send + 'static> IcedElementInternal<P> {
+impl<P: Program + Send + 'static> IcedElementInternal<P> {
     fn update(&mut self, mut force: bool) -> Vec<Action<<P as Program>::Message>> {
         let cursor_pos = self.cursor_pos.unwrap_or(Point::from((-1.0, -1.0)));
 
@@ -177,7 +249,9 @@ impl<P: Program<Renderer = IcedRenderer> + Send + 'static> IcedElementInternal<P
             .map(|command| command.actions());
 
         if actions.is_some() {
-            self.needs_redraw = true;
+            for (_buffer, ref mut needs_redraw) in self.buffers.values_mut() {
+                *needs_redraw = true;
+            }
         }
         let actions = actions.unwrap_or_default();
         actions
@@ -194,9 +268,7 @@ impl<P: Program<Renderer = IcedRenderer> + Send + 'static> IcedElementInternal<P
     }
 }
 
-impl<P: Program<Renderer = IcedRenderer> + Send + 'static> PointerTarget<crate::state::State>
-    for IcedElement<P>
-{
+impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedElement<P> {
     fn enter(
         &self,
         _seat: &Seat<crate::state::State>,
@@ -290,9 +362,7 @@ impl<P: Program<Renderer = IcedRenderer> + Send + 'static> PointerTarget<crate::
     }
 }
 
-impl<P: Program<Renderer = IcedRenderer> + Send + 'static> KeyboardTarget<crate::state::State>
-    for IcedElement<P>
-{
+impl<P: Program + Send + 'static> KeyboardTarget<crate::state::State> for IcedElement<P> {
     fn enter(
         &self,
         _seat: &Seat<crate::state::State>,
@@ -352,13 +422,13 @@ impl<P: Program<Renderer = IcedRenderer> + Send + 'static> KeyboardTarget<crate:
     }
 }
 
-impl<P: Program<Renderer = IcedRenderer> + Send + 'static> IsAlive for IcedElement<P> {
+impl<P: Program + Send + 'static> IsAlive for IcedElement<P> {
     fn alive(&self) -> bool {
         true
     }
 }
 
-impl<P: Program<Renderer = IcedRenderer> + Send + 'static> SpaceElement for IcedElement<P> {
+impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
     fn bbox(&self) -> Rectangle<i32, Logical> {
         Rectangle::from_loc_and_size((0, 0), self.0.lock().unwrap().size)
     }
@@ -380,12 +450,29 @@ impl<P: Program<Renderer = IcedRenderer> + Send + 'static> SpaceElement for Iced
         let _ = internal.update(true); // TODO
     }
 
-    fn output_enter(&self, _output: &Output, _overlap: Rectangle<i32, Logical>) {
-        // TODO: Update scale, once supported to the highest one
+    fn output_enter(&self, output: &Output, _overlap: Rectangle<i32, Logical>) {
+        let mut internal = self.0.lock().unwrap();
+        let scale = output.current_scale().fractional_scale();
+        if !internal.buffers.contains_key(&OrderedFloat(scale)) {
+            let buffer_size = internal
+                .size
+                .to_f64()
+                .to_buffer(scale, Transform::Normal)
+                .to_i32_round();
+            internal.buffers.insert(
+                OrderedFloat(scale),
+                (
+                    MemoryRenderBuffer::new(buffer_size, 1, Transform::Normal, None),
+                    true,
+                ),
+            );
+        }
     }
 
-    fn output_leave(&self, _output: &Output) {
-        // TODO: Update scale, once supported to the highest one
+    fn output_leave(&self, output: &Output) {
+        let mut internal = self.0.lock().unwrap();
+        let scale = output.current_scale().fractional_scale();
+        internal.buffers.remove(&OrderedFloat(scale));
     }
 
     fn z_index(&self) -> u8 {
@@ -398,7 +485,7 @@ impl<P: Program<Renderer = IcedRenderer> + Send + 'static> SpaceElement for Iced
 
 impl<P, R> AsRenderElements<R> for IcedElement<P>
 where
-    P: Program<Renderer = IcedRenderer> + Send + 'static,
+    P: Program + Send + 'static,
     R: Renderer + ImportMem,
     <R as Renderer>::TextureId: 'static,
 {
@@ -408,69 +495,79 @@ where
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
-        _scale: Scale<f64>,
+        scale: Scale<f64>,
     ) -> Vec<C> {
         let mut internal = self.0.lock().unwrap();
 
         let _ = internal.update(false); // TODO
-
-        // makes partial borrows easier
+                                        // makes partial borrows easier
         let internal_ref = &mut *internal;
-        if internal_ref.needs_redraw {
-            let renderer = &mut internal_ref.renderer;
-            let size = internal_ref.size;
-            internal_ref
-                .memory
-                .render()
-                .draw(move |buf| {
-                    let mut target = raqote::DrawTarget::from_backing(
-                        size.w,
-                        size.h,
-                        bytemuck::cast_slice_mut::<_, u32>(buf),
-                    );
+        if let Some((buffer, ref mut needs_redraw)) =
+            internal_ref.buffers.get_mut(&OrderedFloat(scale.x))
+        {
+            if *needs_redraw {
+                let renderer = &mut internal_ref.renderer;
+                let size = internal_ref
+                    .size
+                    .to_f64()
+                    .to_buffer(scale.x, Transform::Normal)
+                    .to_i32_round();
+                let state_ref = &internal_ref.state;
+                buffer
+                    .render()
+                    .draw(move |buf| {
+                        let mut target = raqote::DrawTarget::from_backing(
+                            size.w,
+                            size.h,
+                            bytemuck::cast_slice_mut::<_, u32>(buf),
+                        );
 
-                    target.clear(raqote::SolidSource::from_unpremultiplied_argb(0, 0, 0, 0));
+                        target.clear(raqote::SolidSource::from_unpremultiplied_argb(0, 0, 0, 0));
+                        state_ref.program().0.background(&mut target);
 
-                    let draw_options = raqote::DrawOptions {
-                        // Default to antialiasing off for now
-                        antialias: raqote::AntialiasMode::None,
-                        ..Default::default()
-                    };
+                        let draw_options = raqote::DrawOptions {
+                            // Default to antialiasing off for now
+                            antialias: raqote::AntialiasMode::None,
+                            ..Default::default()
+                        };
 
-                    // Having at least one clip fixes some font rendering issues
-                    target.push_clip_rect(raqote::IntRect::new(
-                        raqote::IntPoint::new(0, 0),
-                        raqote::IntPoint::new(size.w, size.h),
-                    ));
+                        // Having at least one clip fixes some font rendering issues
+                        target.push_clip_rect(raqote::IntRect::new(
+                            raqote::IntPoint::new(0, 0),
+                            raqote::IntPoint::new(size.w, size.h),
+                        ));
 
-                    renderer.with_primitives(|backend, primitives| {
-                        for primitive in primitives.iter() {
-                            draw_primitive(&mut target, &draw_options, backend, primitive);
-                        }
-                    });
+                        renderer.with_primitives(|backend, primitives| {
+                            for primitive in primitives.iter() {
+                                draw_primitive(
+                                    &mut target,
+                                    &draw_options,
+                                    backend,
+                                    scale.x as f32,
+                                    primitive,
+                                );
+                            }
+                        });
 
-                    target.pop_clip();
+                        state_ref.program().0.foreground(&mut target);
+                        Result::<_, ()>::Ok(vec![Rectangle::from_loc_and_size((0, 0), size)])
+                    })
+                    .unwrap();
+                *needs_redraw = false;
+            }
 
-                    Result::<_, ()>::Ok(vec![Rectangle::from_loc_and_size(
-                        (0, 0),
-                        size.to_buffer(1, Transform::Normal),
-                    )])
-                })
-                .unwrap();
-            internal_ref.needs_redraw = false;
+            if let Ok(buffer) = MemoryRenderBufferRenderElement::from_buffer(
+                renderer,
+                location.to_f64(),
+                &buffer,
+                None,
+                None,
+                None,
+                slog_scope::logger(),
+            ) {
+                return vec![C::from(buffer)];
+            }
         }
-
-        let Ok(buffer) = MemoryRenderBufferRenderElement::from_buffer(
-            renderer,
-            location.to_f64(),
-            &internal.memory,
-            None,
-            None,
-            None,
-            slog_scope::logger(),
-        ) else {
-            return Vec::new()
-        };
-        vec![C::from(buffer)]
+        Vec::new()
     }
 }

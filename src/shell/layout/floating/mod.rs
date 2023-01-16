@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use smithay::{
-    backend::renderer::{element::RenderElement, ImportAll, Renderer},
-    desktop::{layer_map_for_output, space::SpaceElement, Space, Window},
+    backend::renderer::{element::RenderElement, ImportAll, ImportMem, Renderer},
+    desktop::{layer_map_for_output, space::SpaceElement, Space},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
-    utils::{Logical, Point, Rectangle, Serial},
+    utils::{Logical, Point, Rectangle, Serial, Size},
 };
 use std::collections::HashMap;
 
@@ -14,7 +14,7 @@ use crate::{
     shell::{
         element::{CosmicMapped, CosmicMappedRenderElement},
         grabs::ResizeEdge,
-        OutputNotMapped,
+        CosmicSurface, OutputNotMapped,
     },
     state::State,
     utils::prelude::*,
@@ -81,7 +81,10 @@ impl FloatingLayout {
             win_geo.size = size;
         }
         {
-            let (min_size, max_size) = (mapped.min_size(), mapped.max_size());
+            let (min_size, max_size) = (
+                mapped.min_size().unwrap_or((0, 0).into()),
+                mapped.max_size().unwrap_or((0, 0).into()),
+            );
             if win_geo.size.w > geometry.size.w / 3 * 2 {
                 // try a more reasonable size
                 let mut width = geometry.size.w / 3 * 2;
@@ -155,7 +158,7 @@ impl FloatingLayout {
         self.space.element_geometry(elem)
     }
 
-    pub fn maximize_request(&mut self, window: &Window) {
+    pub fn maximize_request(&mut self, window: &CosmicSurface) {
         if let Some(mapped) = self
             .space
             .elements()
@@ -170,7 +173,7 @@ impl FloatingLayout {
         }
     }
 
-    pub fn unmaximize_request(&mut self, window: &Window) {
+    pub fn unmaximize_request(&mut self, window: &CosmicSurface) -> Option<Size<i32, Logical>> {
         let maybe_mapped = self
             .space
             .elements()
@@ -179,9 +182,13 @@ impl FloatingLayout {
 
         if let Some(mapped) = maybe_mapped {
             let last_geometry = mapped.last_geometry.lock().unwrap().clone();
-            mapped.set_size(last_geometry.map(|g| g.size).expect("No previous size?"));
+            let last_size = last_geometry.map(|g| g.size).expect("No previous size?");
+            mapped.set_size(last_size);
             let last_location = last_geometry.map(|g| g.loc).expect("No previous location?");
             self.space.map_element(mapped, last_location, true);
+            Some(last_size)
+        } else {
+            None
         }
     }
 
@@ -213,7 +220,7 @@ impl FloatingLayout {
         self.space.elements()
     }
 
-    pub fn windows(&self) -> impl Iterator<Item = Window> + '_ {
+    pub fn windows(&self) -> impl Iterator<Item = CosmicSurface> + '_ {
         self.mapped().flat_map(|e| e.windows().map(|(w, _)| w))
     }
 
@@ -298,7 +305,7 @@ impl FloatingLayout {
         output: &Output,
     ) -> Result<Vec<CosmicMappedRenderElement<R>>, OutputNotMapped>
     where
-        R: Renderer + ImportAll + AsGlowRenderer,
+        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         <R as Renderer>::TextureId: 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {

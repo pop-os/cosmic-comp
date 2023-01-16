@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    shell::{element::CosmicMapped, focus::target::PointerFocusTarget, grabs::ResizeEdge},
+    shell::{
+        element::CosmicMapped, focus::target::PointerFocusTarget, grabs::ResizeEdge, CosmicSurface,
+    },
     utils::prelude::*,
 };
 use smithay::{
@@ -84,18 +86,10 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
 
         let (min_size, max_size) = (self.window.min_size(), self.window.max_size());
 
-        let min_width = min_size.w.max(1);
-        let min_height = min_size.h.max(1);
-        let max_width = if max_size.w == 0 {
-            i32::max_value()
-        } else {
-            max_size.w
-        };
-        let max_height = if max_size.h == 0 {
-            i32::max_value()
-        } else {
-            max_size.h
-        };
+        let min_width = min_size.map(|s| s.w).unwrap_or(1);
+        let min_height = min_size.map(|s| s.h).unwrap_or(1);
+        let max_width = max_size.map(|s| s.w).unwrap_or(i32::max_value());
+        let max_height = max_size.map(|s| s.h).unwrap_or(i32::max_value());
 
         new_window_width = new_window_width.max(min_width).min(max_width);
         new_window_height = new_window_height.max(min_height).min(max_height);
@@ -210,7 +204,7 @@ impl ResizeSurfaceGrab {
 
             // Finish resizing.
             if let Some(ResizeState::WaitingForCommit(_)) = *resize_state {
-                if !window.is_resizing() {
+                if !window.is_resizing().unwrap_or(false) {
                     *resize_state = None;
                 }
             }
@@ -218,11 +212,13 @@ impl ResizeSurfaceGrab {
 
             if let Some(new_location) = new_location {
                 for (window, offset) in window.windows() {
-                    update_reactive_popups(
-                        &window,
-                        new_location + offset,
-                        space.floating_layer.space.outputs(),
-                    );
+                    if let CosmicSurface::Wayland(window) = window {
+                        update_reactive_popups(
+                            &window,
+                            new_location + offset,
+                            space.floating_layer.space.outputs(),
+                        );
+                    }
                 }
                 space
                     .floating_layer

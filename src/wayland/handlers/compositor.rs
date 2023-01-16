@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{state::BackendData, utils::prelude::*, wayland::protocols::screencopy::SessionType};
+use crate::{
+    shell::CosmicSurface, state::BackendData, utils::prelude::*,
+    wayland::protocols::screencopy::SessionType,
+};
 use smithay::{
     backend::renderer::utils::{on_commit_buffer_handler, with_renderer_surface_state},
     delegate_compositor,
@@ -8,6 +11,7 @@ use smithay::{
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     wayland::{
         compositor::{with_states, CompositorHandler, CompositorState},
+        seat::WaylandFocus,
         shell::{
             wlr_layer::LayerSurfaceAttributes,
             xdg::{
@@ -113,17 +117,28 @@ impl CompositorHandler for State {
             .shell
             .pending_windows
             .iter()
-            .find(|(window, _)| window.toplevel().wl_surface() == surface)
+            .find(|(window, _)| window.wl_surface().as_ref() == Some(surface))
             .cloned()
         {
-            let toplevel = window.toplevel();
-            if self.toplevel_ensure_initial_configure(&toplevel)
-                && with_renderer_surface_state(&surface, |state| state.wl_buffer().is_some())
-            {
-                let output = seat.active_output();
-                Shell::map_window(self, &window, &output);
-            } else {
-                return;
+            match window {
+                CosmicSurface::Wayland(ref wl_window) => {
+                    let toplevel = wl_window.toplevel();
+                    if self.toplevel_ensure_initial_configure(&toplevel)
+                        && with_renderer_surface_state(&surface, |state| {
+                            state.wl_buffer().is_some()
+                        })
+                    {
+                        let output = seat.active_output();
+                        Shell::map_window(self, &window, &output);
+                    } else {
+                        return;
+                    }
+                }
+                CosmicSurface::X11(_) => {
+                    let output = seat.active_output();
+                    Shell::map_window(self, &window, &output);
+                }
+                _ => unreachable!(),
             }
         }
 

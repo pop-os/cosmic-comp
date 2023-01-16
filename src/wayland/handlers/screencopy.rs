@@ -24,7 +24,7 @@ use smithay::{
             Bind, Blit, BufferType, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
         },
     },
-    desktop::Window,
+    desktop::space::SpaceElement,
     output::Output,
     reexports::wayland_server::{
         protocol::{wl_buffer::WlBuffer, wl_shm::Format as ShmFormat, wl_surface::WlSurface},
@@ -33,6 +33,7 @@ use smithay::{
     utils::{IsAlive, Logical, Physical, Rectangle, Scale, Transform},
     wayland::{
         dmabuf::get_dmabuf,
+        seat::WaylandFocus,
         shm::{with_buffer_contents, with_buffer_contents_mut},
     },
 };
@@ -43,7 +44,7 @@ use crate::{
         element::{AsGlowRenderer, CosmicElement},
         render_output, render_workspace, CursorMode, CLEAR_COLOR,
     },
-    shell::CosmicMappedRenderElement,
+    shell::{CosmicMappedRenderElement, CosmicSurface},
     state::{BackendData, ClientState, Common, State},
     utils::prelude::OutputExt,
     wayland::protocols::{
@@ -159,8 +160,8 @@ impl ScreencopyHandler for State {
         formats
     }
 
-    fn capture_toplevel(&mut self, toplevel: Window, session: Session) -> Vec<BufferInfo> {
-        let surface = toplevel.toplevel().wl_surface();
+    fn capture_toplevel(&mut self, toplevel: CosmicSurface, session: Session) -> Vec<BufferInfo> {
+        let Some(surface) = toplevel.wl_surface() else { return Vec::new() };
         let size = toplevel.geometry().size.to_buffer(1, Transform::Normal);
 
         let mut _kms_renderer = None;
@@ -843,7 +844,7 @@ pub fn render_window_to_buffer(
     state: &mut State,
     session: &Session,
     params: BufferParams,
-    window: &Window,
+    window: &CosmicSurface,
 ) -> Result<bool, (FailureReason, anyhow::Error)> {
     let geometry = window.geometry();
     let buffer_size = buffer_dimensions(&params.buffer).unwrap();
@@ -858,7 +859,7 @@ pub fn render_window_to_buffer(
         age: usize,
         session: &Session,
         common: &mut Common,
-        window: &Window,
+        window: &CosmicSurface,
         geometry: Rectangle<i32, Logical>,
     ) -> Result<
         (Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates),
@@ -889,12 +890,12 @@ pub fn render_window_to_buffer(
         for seat in common.seats() {
             if let Some(location) = {
                 // we need to find the mapped element in that case
-                if let Some(mapped) = common
-                    .shell
-                    .element_for_surface(window.toplevel().wl_surface())
+                if let Some(mapped) = window
+                    .wl_surface()
+                    .and_then(|surf| common.shell.element_for_surface(&surf))
                 {
                     mapped.cursor_position(seat).and_then(|mut p| {
-                        p -= mapped.active_window_offset().loc.to_f64();
+                        p -= mapped.active_window_offset().to_f64();
                         if p.x < 0. || p.y < 0. {
                             None
                         } else {
@@ -1076,7 +1077,7 @@ impl UserdataExt for Output {
     }
 }
 
-impl UserdataExt for Window {
+impl UserdataExt for CosmicSurface {
     fn sessions(&self) -> Vec<Session> {
         self.user_data()
             .get::<ScreencopySessions>()
@@ -1101,7 +1102,7 @@ impl State {
     pub fn schedule_window_session(&mut self, surface: &WlSurface) {
         if let Some(element) = self.common.shell.element_for_surface(surface).cloned() {
             let active = element.active_window();
-            if active.toplevel().wl_surface() == surface {
+            if active.wl_surface().as_ref() == Some(surface) {
                 for (session, params) in active.pending_buffers() {
                     let window = active.clone();
                     self.common.event_loop_handle.insert_idle(move |data| {

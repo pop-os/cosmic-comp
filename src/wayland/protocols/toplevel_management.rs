@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use smithay::{
-    desktop::Window,
     input::{Seat, SeatHandler},
     output::Output,
     reexports::wayland_server::{
@@ -17,7 +16,7 @@ use cosmic_protocols::toplevel_management::v1::server::zcosmic_toplevel_manager_
     self, ZcosmicToplevelManagerV1,
 };
 
-use super::toplevel_info::{window_from_handle, ToplevelInfoHandler, ToplevelState};
+use super::toplevel_info::{window_from_handle, ToplevelInfoHandler, ToplevelState, Window};
 
 pub struct ToplevelManagementState {
     instances: Vec<ZcosmicToplevelManagerV1>,
@@ -25,19 +24,39 @@ pub struct ToplevelManagementState {
     global: GlobalId,
 }
 
+pub trait ManagementWindow: Window {
+    fn close(&self);
+}
+
 #[allow(unused_variables)]
-pub trait ToplevelManagementHandler: ToplevelInfoHandler + SeatHandler {
+pub trait ToplevelManagementHandler: ToplevelInfoHandler + SeatHandler
+where
+    <Self as ToplevelInfoHandler>::Window: ManagementWindow,
+{
     fn toplevel_management_state(&mut self) -> &mut ToplevelManagementState;
 
-    fn activate(&mut self, dh: &DisplayHandle, window: &Window, seat: Option<Seat<Self>>) {}
-    fn close(&mut self, dh: &DisplayHandle, window: &Window) {}
+    fn activate(
+        &mut self,
+        dh: &DisplayHandle,
+        window: &<Self as ToplevelInfoHandler>::Window,
+        seat: Option<Seat<Self>>,
+    ) {
+    }
+    fn close(&mut self, dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {}
 
-    fn fullscreen(&mut self, dh: &DisplayHandle, window: &Window, output: Option<Output>) {}
-    fn unfullscreen(&mut self, dh: &DisplayHandle, window: &Window) {}
-    fn maximize(&mut self, dh: &DisplayHandle, window: &Window) {}
-    fn unmaximize(&mut self, dh: &DisplayHandle, window: &Window) {}
-    fn minimize(&mut self, dh: &DisplayHandle, window: &Window) {}
-    fn unminimize(&mut self, dh: &DisplayHandle, window: &Window) {}
+    fn fullscreen(
+        &mut self,
+        dh: &DisplayHandle,
+        window: &<Self as ToplevelInfoHandler>::Window,
+        output: Option<Output>,
+    ) {
+    }
+    fn unfullscreen(&mut self, dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
+    }
+    fn maximize(&mut self, dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {}
+    fn unmaximize(&mut self, dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {}
+    fn minimize(&mut self, dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {}
+    fn unminimize(&mut self, dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {}
 }
 
 pub struct ToplevelManagerGlobalData {
@@ -55,6 +74,7 @@ impl ToplevelManagementState {
             + Dispatch<ZcosmicToplevelManagerV1, ()>
             + ToplevelManagementHandler
             + 'static,
+        <D as ToplevelInfoHandler>::Window: ManagementWindow,
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
         let global = dh.create_global::<D, ZcosmicToplevelManagerV1, _>(
@@ -72,7 +92,7 @@ impl ToplevelManagementState {
 
     pub fn rectangle_for(
         &mut self,
-        window: &Window,
+        window: &impl ManagementWindow,
         client: &ClientId,
     ) -> Option<(WlSurface, Rectangle<i32, Logical>)> {
         if let Some(state) = window.user_data().get::<ToplevelState>() {
@@ -94,6 +114,7 @@ where
         + Dispatch<ZcosmicToplevelManagerV1, ()>
         + ToplevelManagementHandler
         + 'static,
+    <D as ToplevelInfoHandler>::Window: ManagementWindow,
 {
     fn bind(
         state: &mut D,
@@ -128,6 +149,7 @@ where
         + Dispatch<ZcosmicToplevelManagerV1, ()>
         + ToplevelManagementHandler
         + 'static,
+    <D as ToplevelInfoHandler>::Window: ManagementWindow,
 {
     fn request(
         state: &mut D,
@@ -179,7 +201,8 @@ where
                 width,
                 height,
             } => {
-                let window = window_from_handle(toplevel).unwrap();
+                let window =
+                    window_from_handle::<<D as ToplevelInfoHandler>::Window>(toplevel).unwrap();
                 if let Some(toplevel_state) = window.user_data().get::<ToplevelState>() {
                     let mut toplevel_state = toplevel_state.lock().unwrap();
                     if let Some(client) = surface.client() {
