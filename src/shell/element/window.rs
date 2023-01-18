@@ -1,4 +1,5 @@
 use crate::{
+    shell::Shell,
     state::State,
     utils::{
         iced::{IcedElement, Program},
@@ -30,13 +31,14 @@ use smithay::{
     output::Output,
     render_elements,
     utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size},
+    wayland::seat::WaylandFocus,
 };
 use std::{
     fmt,
     hash::Hash,
     sync::{
         atomic::{AtomicU8, Ordering},
-        Arc,
+        Arc, Mutex,
     },
 };
 
@@ -55,10 +57,23 @@ impl fmt::Debug for CosmicWindow {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CosmicWindowInternal {
     pub(super) window: CosmicSurface,
+    /// TODO: This needs to be per seat
     pointer_entered: Arc<AtomicU8>,
+    last_seat: Arc<Mutex<Option<(Seat<State>, Serial)>>>,
+}
+
+impl fmt::Debug for CosmicWindowInternal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CosmicWindowInternal")
+            .field("window", &self.window)
+            .field("pointer_entered", &self.pointer_entered)
+            // skip seat to avoid loop
+            .field("last_seat", &"...")
+            .finish()
+    }
 }
 
 #[repr(u8)]
@@ -98,6 +113,7 @@ impl CosmicWindow {
             CosmicWindowInternal {
                 window,
                 pointer_entered: Arc::new(AtomicU8::new(Focus::None as u8)),
+                last_seat: Arc::new(Mutex::new(None)),
             },
             (width, SSD_HEIGHT),
             handle,
@@ -136,18 +152,49 @@ pub enum Message {
 impl Program for CosmicWindowInternal {
     type Message = Message;
 
-    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
-        /*
+    fn update(
+        &mut self,
+        message: Self::Message,
+        loop_handle: &LoopHandle<'static, crate::state::Data>,
+    ) -> Command<Self::Message> {
         match message {
-            Message::DragStart => match &self.window {
-                CosmicWindowSurface::Wayland(window) => self
-                    .with_program(|internal| internal.loop_handle())
-                    .insert_idle(|data| {}),
-                CosmicWindowSurface::X11(surface) => {}
-                _ => unreachable!(),
-            },
+            Message::DragStart => {
+                if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
+                    if let Some(surface) = self.window.wl_surface() {
+                        loop_handle.insert_idle(move |data| {
+                            Shell::move_request(&mut data.state, &surface, &seat, serial);
+                        });
+                    }
+                }
+            }
+            Message::Maximize => {
+                if let Some((seat, _serial)) = self.last_seat.lock().unwrap().clone() {
+                    if let Some(surface) = self.window.wl_surface() {
+                        loop_handle.insert_idle(move |data| {
+                            if let Some(mapped) = data
+                                .state
+                                .common
+                                .shell
+                                .element_for_wl_surface(&surface)
+                                .cloned()
+                            {
+                                if let Some(workspace) =
+                                    data.state.common.shell.space_for_mut(&mapped)
+                                {
+                                    let output = seat.active_output();
+                                    let (window, _) = mapped
+                                        .windows()
+                                        .find(|(w, _)| w.wl_surface().as_ref() == Some(&surface))
+                                        .unwrap();
+                                    workspace.maximize_request(&window, &output)
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+            Message::Close => self.window.close(),
         }
-        */
         Command::none()
     }
 
@@ -155,21 +202,23 @@ impl Program for CosmicWindowInternal {
         let radius = 8.;
         let (w, h) = (target.width() as f32, target.height() as f32);
 
-        let mut pb = PathBuilder::new();
-        pb.move_to(0., h); // lower-left
+        if !(self.window.is_maximized() || self.window.is_fullscreen()) {
+            let mut pb = PathBuilder::new();
+            pb.move_to(0., h); // lower-left
 
-        // upper-left rounded corner
-        pb.line_to(0., radius);
-        pb.quad_to(0., 0., radius, 0.);
+            // upper-left rounded corner
+            pb.line_to(0., radius);
+            pb.quad_to(0., 0., radius, 0.);
 
-        // upper-right rounded corner
-        pb.line_to(w - radius, 0.);
-        pb.quad_to(w, 0., w, radius);
+            // upper-right rounded corner
+            pb.line_to(w - radius, 0.);
+            pb.quad_to(w, 0., w, radius);
 
-        pb.line_to(w, h); // lower-right
+            pb.line_to(w, h); // lower-right
 
-        let path = pb.finish();
-        target.push_clip(&path);
+            let path = pb.finish();
+            target.push_clip(&path);
+        }
 
         if self.window.is_activated() {
             target.clear(SolidSource::from_unpremultiplied_argb(u8::MAX, 30, 30, 30));
@@ -387,7 +436,12 @@ impl PointerTarget<State> for CosmicWindow {
 
     fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
         match self.0.with_program(|p| p.current_focus()) {
-            Focus::Header => PointerTarget::button(&self.0, seat, data, event),
+            Focus::Header => {
+                self.0.with_program(|p| {
+                    *p.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
+                });
+                PointerTarget::button(&self.0, seat, data, event)
+            }
             Focus::Window => self
                 .0
                 .with_program(|p| PointerTarget::button(&p.window, seat, data, event)),

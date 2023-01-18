@@ -13,6 +13,8 @@ use std::{ffi::OsString, os::unix::prelude::AsRawFd, sync::Arc};
 
 pub mod backend;
 pub mod config;
+#[cfg(feature = "debug")]
+pub mod debug;
 pub mod input;
 mod logger;
 pub mod session;
@@ -21,9 +23,7 @@ pub mod state;
 pub mod systemd;
 pub mod utils;
 pub mod wayland;
-
-#[cfg(feature = "debug")]
-pub mod debug;
+pub mod xwayland;
 
 fn main() -> Result<()> {
     // setup logger

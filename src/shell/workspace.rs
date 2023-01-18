@@ -24,13 +24,8 @@ use smithay::{
     desktop::{layer_map_for_output, space::SpaceElement, LayerSurface},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
-    reexports::{
-        wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge,
-        wayland_server::protocol::wl_surface::WlSurface,
-    },
-    utils::{
-        Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
-    },
+    reexports::wayland_server::protocol::wl_surface::WlSurface,
+    utils::{Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Size},
     wayland::{seat::WaylandFocus, shell::wlr_layer::Layer},
 };
 use std::collections::HashMap;
@@ -38,7 +33,7 @@ use std::collections::HashMap;
 use super::{
     element::CosmicMapped,
     focus::{FocusStack, FocusStackMut},
-    grabs::ResizeGrab,
+    grabs::{ResizeEdge, ResizeGrab},
     CosmicMappedRenderElement, CosmicSurface,
 };
 
@@ -84,7 +79,7 @@ impl Workspace {
     }
 
     pub fn commit(&mut self, surface: &WlSurface) {
-        if let Some(mapped) = self.element_for_surface(surface) {
+        if let Some(mapped) = self.element_for_wl_surface(surface) {
             mapped
                 .windows()
                 .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
@@ -127,7 +122,14 @@ impl Workspace {
         }
     }
 
-    pub fn element_for_surface(&self, surface: &WlSurface) -> Option<&CosmicMapped> {
+    pub fn element_for_surface(&self, surface: &CosmicSurface) -> Option<&CosmicMapped> {
+        self.floating_layer
+            .mapped()
+            .chain(self.tiling_layer.mapped().map(|(_, w, _)| w))
+            .find(|e| e.windows().any(|(w, _)| &w == surface))
+    }
+
+    pub fn element_for_wl_surface(&self, surface: &WlSurface) -> Option<&CosmicMapped> {
         self.floating_layer
             .mapped()
             .chain(self.tiling_layer.mapped().map(|(_, w, _)| w))
@@ -270,7 +272,6 @@ impl Workspace {
         &mut self,
         mapped: &CosmicMapped,
         seat: &Seat<State>,
-        serial: Serial,
         start_data: PointerGrabStartData<State>,
         edges: ResizeEdge,
     ) -> Option<ResizeGrab> {
@@ -278,14 +279,13 @@ impl Workspace {
             return None;
         }
 
-        let edges = edges.into();
         if self.floating_layer.mapped().any(|m| m == mapped) {
             self.floating_layer
-                .resize_request(mapped, seat, serial, start_data.clone(), edges)
+                .resize_request(mapped, seat, start_data.clone(), edges)
                 .map(Into::into)
         } else if self.tiling_layer.mapped().any(|(_, m, _)| m == mapped) {
             self.tiling_layer
-                .resize_request(mapped, seat, serial, start_data, edges)
+                .resize_request(mapped, seat, start_data, edges)
                 .map(Into::into)
         } else {
             None
@@ -297,13 +297,12 @@ impl Workspace {
         window: &CosmicSurface,
         seat: &Seat<State>,
         output: &Output,
-        _serial: Serial,
         start_data: PointerGrabStartData<State>,
     ) -> Option<MoveSurfaceGrab> {
         let pointer = seat.get_pointer().unwrap();
         let pos = pointer.current_location();
 
-        let mapped = self.element_for_surface(&window.wl_surface()?)?.clone();
+        let mapped = self.element_for_surface(&window)?.clone();
         let mut initial_window_location = self.element_geometry(&mapped).unwrap().loc;
 
         if mapped.is_fullscreen() || mapped.is_maximized() {
@@ -388,6 +387,10 @@ impl Workspace {
         self.floating_layer
             .windows()
             .chain(self.tiling_layer.windows().map(|(_, w, _)| w))
+    }
+
+    pub fn is_floating(&self, mapped: &CosmicMapped) -> bool {
+        self.floating_layer.mapped().any(|m| m == mapped)
     }
 
     pub fn render_output<R>(

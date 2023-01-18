@@ -11,6 +11,7 @@ use smithay::{
         wayland_server::{backend::GlobalId, Client, DisplayHandle},
     },
     wayland::{dmabuf::DmabufGlobal, socket::ListeningSocketSource},
+    xwayland::XWaylandClientData,
 };
 use std::sync::Arc;
 
@@ -46,8 +47,15 @@ impl State {
 
         // initialize globals
         let filter = move |client: &Client| {
-            let dev_id = client.get_data::<ClientState>().unwrap().drm_node.unwrap();
-            dev_id == render_node
+            if let Some(normal_client) = client.get_data::<ClientState>() {
+                let dev_id = normal_client.drm_node.unwrap();
+                return dev_id == render_node;
+            }
+            if let Some(xwayland_client) = client.get_data::<XWaylandClientData>() {
+                let dev_id = xwayland_client.user_data().get::<DrmNode>().unwrap();
+                return *dev_id == render_node;
+            }
+            false
         };
 
         let dmabuf_global = self

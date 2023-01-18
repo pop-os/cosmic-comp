@@ -29,9 +29,9 @@ use smithay::{
     wayland::{
         compositor::{with_states, SurfaceData},
         seat::WaylandFocus,
-        shell::xdg::XdgToplevelSurfaceData,
+        shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData},
     },
-    xwayland::X11Surface,
+    xwayland::{xwm::X11Relatable, X11Surface},
 };
 
 space_elements! {
@@ -39,6 +39,24 @@ space_elements! {
     pub CosmicSurface;
     Wayland=Window,
     X11=X11Surface,
+}
+
+impl From<ToplevelSurface> for CosmicSurface {
+    fn from(s: ToplevelSurface) -> Self {
+        CosmicSurface::Wayland(Window::new(s))
+    }
+}
+
+impl From<Window> for CosmicSurface {
+    fn from(w: Window) -> Self {
+        CosmicSurface::Wayland(w)
+    }
+}
+
+impl From<X11Surface> for CosmicSurface {
+    fn from(s: X11Surface) -> Self {
+        CosmicSurface::X11(s)
+    }
 }
 
 pub const SSD_HEIGHT: i32 = 48;
@@ -574,6 +592,15 @@ where
             CosmicSurface::Wayland(window) => window.render_elements(renderer, location, scale),
             CosmicSurface::X11(surface) => surface.render_elements(renderer, location, scale),
             _ => unreachable!(),
+        }
+    }
+}
+
+impl X11Relatable for CosmicSurface {
+    fn is_window(&self, window: &X11Surface) -> bool {
+        match self {
+            CosmicSurface::X11(surface) => surface == window,
+            _ => false,
         }
     }
 }

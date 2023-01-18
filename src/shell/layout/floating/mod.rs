@@ -5,7 +5,7 @@ use smithay::{
     desktop::{layer_map_for_output, space::SpaceElement, Space},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
-    utils::{Logical, Point, Rectangle, Serial, Size},
+    utils::{Logical, Point, Rectangle, Size},
 };
 use std::collections::HashMap;
 
@@ -196,7 +196,6 @@ impl FloatingLayout {
         &mut self,
         mapped: &CosmicMapped,
         seat: &Seat<State>,
-        _serial: Serial,
         start_data: PointerGrabStartData<State>,
         edges: ResizeEdge,
     ) -> Option<ResizeSurfaceGrab> {

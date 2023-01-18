@@ -25,7 +25,7 @@ use smithay::{
     desktop::{layer_map_for_output, space::SpaceElement, PopupKind},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
-    utils::{IsAlive, Logical, Point, Rectangle, Scale, Serial},
+    utils::{IsAlive, Logical, Point, Rectangle, Scale},
     wayland::seat::WaylandFocus,
 };
 use std::{borrow::Borrow, collections::HashMap, hash::Hash, sync::Arc};
@@ -928,7 +928,6 @@ impl TilingLayout {
         &self,
         mapped: &CosmicMapped,
         _seat: &Seat<State>,
-        _serial: Serial,
         start_data: PointerGrabStartData<State>,
         edges: ResizeEdge,
     ) -> Option<ResizeForkGrab> {

@@ -11,6 +11,7 @@ use crate::{
         screencopy::{BufferParams, ScreencopyState, Session as ScreencopySession},
         workspace::WorkspaceClientState,
     },
+    xwayland::XWaylandState,
 };
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_manager_v1::CursorMode;
 use smithay::{
@@ -51,7 +52,7 @@ use smithay::{
     },
 };
 
-use std::{cell::RefCell, ffi::OsString, time::Duration};
+use std::{cell::RefCell, collections::HashMap, ffi::OsString, time::Duration};
 use std::{collections::VecDeque, time::Instant};
 
 pub struct ClientState {
@@ -110,6 +111,9 @@ pub struct Common {
     pub viewporter_state: ViewporterState,
     pub kde_decoration_state: KdeDecorationState,
     pub xdg_decoration_state: XdgDecorationState,
+
+    // xwayland state
+    pub xwayland_state: HashMap<Option<DrmNode>, XWaylandState>,
 }
 
 pub enum BackendData {
@@ -277,6 +281,8 @@ impl State {
                 wl_drm_state,
                 kde_decoration_state,
                 xdg_decoration_state,
+
+                xwayland_state: HashMap::new(),
             },
             backend: BackendData::Unset,
         }

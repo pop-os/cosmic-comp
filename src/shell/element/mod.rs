@@ -29,6 +29,7 @@ use smithay::{
         compositor::{with_surface_tree_downward, TraversalAction},
         seat::WaylandFocus,
     },
+    xwayland::{xwm::X11Relatable, X11Surface},
 };
 use std::{
     collections::HashMap,
@@ -480,6 +481,15 @@ impl SpaceElement for CosmicMapped {
     }
     fn refresh(&self) {
         SpaceElement::refresh(&self.element)
+    }
+}
+
+impl X11Relatable for CosmicMapped {
+    fn is_window(&self, window: &X11Surface) -> bool {
+        match self.active_window() {
+            CosmicSurface::X11(surface) => &surface == window,
+            _ => false,
+        }
     }
 }
 

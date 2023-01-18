@@ -77,8 +77,12 @@ impl<P: Program + Send + 'static> Hash for IcedElement<P> {
 
 pub trait Program {
     type Message: std::fmt::Debug + Send;
-    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
-        let _ = message;
+    fn update(
+        &mut self,
+        message: Self::Message,
+        loop_handle: &LoopHandle<'static, crate::state::Data>,
+    ) -> Command<Self::Message> {
+        let _ = (message, loop_handle);
         Command::none()
     }
     fn view(&self) -> Element<'_, Self::Message>;
@@ -91,13 +95,13 @@ pub trait Program {
     }
 }
 
-struct ProgramWrapper<P: Program>(P);
+struct ProgramWrapper<P: Program>(P, LoopHandle<'static, crate::state::Data>);
 impl<P: Program> IcedProgram for ProgramWrapper<P> {
     type Message = <P as Program>::Message;
     type Renderer = IcedRenderer;
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
-        self.0.update(message)
+        self.0.update(message, &self.1)
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
@@ -161,7 +165,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         let mut debug = Debug::new();
 
         let state = State::new(
-            ProgramWrapper(program),
+            ProgramWrapper(program, handle.clone()),
             IcedSize::new(size.w as f32, size.h as f32),
             &mut renderer,
             &mut debug,

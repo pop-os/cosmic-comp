@@ -301,6 +301,9 @@ pub fn init_backend(
         devices: HashMap::new(),
     });
 
+    // TODO: Do multiple Xwaylands for better multigpu
+    state.launch_xwayland(Some(primary));
+
     for (dev, path) in udev_dispatcher.as_source_ref().device_list() {
         state
             .device_added(dev, path.into(), dh)

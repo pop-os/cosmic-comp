@@ -241,6 +241,7 @@ pub fn init_backend(
         #[cfg(feature = "debug")]
         fps,
     });
+
     state
         .common
         .output_configuration_state
@@ -254,6 +255,8 @@ pub fn init_backend(
         seats.iter().cloned(),
         &state.common.event_loop_handle,
     );
+
+    state.launch_xwayland(None);
 
     Ok(())
 }

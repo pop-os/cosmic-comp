@@ -19,6 +19,7 @@ use smithay::{
             },
         },
     },
+    xwayland::X11Wm,
 };
 use std::sync::Mutex;
 
@@ -108,6 +109,7 @@ impl CompositorHandler for State {
     }
 
     fn commit(&mut self, surface: &WlSurface) {
+        X11Wm::commit_hook(surface);
         // first load the buffer for various smithay helper functions
         on_commit_buffer_handler(surface);
 
@@ -134,10 +136,7 @@ impl CompositorHandler for State {
                         return;
                     }
                 }
-                CosmicSurface::X11(_) => {
-                    let output = seat.active_output();
-                    Shell::map_window(self, &window, &output);
-                }
+                CosmicSurface::X11(_) => {}
                 _ => unreachable!(),
             }
         }
@@ -164,7 +163,7 @@ impl CompositorHandler for State {
         // If we would re-position the window inside the grab we would get a weird jittery animation.
         // We only want to resize once the client has acknoledged & commited the new size,
         // so we need to carefully track the state through different handlers.
-        if let Some(element) = self.common.shell.element_for_surface(surface).cloned() {
+        if let Some(element) = self.common.shell.element_for_wl_surface(surface).cloned() {
             if let Some(workspace) = self.common.shell.space_for_mut(&element) {
                 crate::shell::layout::floating::ResizeSurfaceGrab::apply_resize_to_location(
                     element.clone(),

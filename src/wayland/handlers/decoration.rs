@@ -76,13 +76,21 @@ impl State {
 
 impl XdgDecorationHandler for State {
     fn new_decoration(&mut self, toplevel: ToplevelSurface) {
-        if let Some(mapped) = self.common.shell.element_for_surface(toplevel.wl_surface()) {
+        if let Some(mapped) = self
+            .common
+            .shell
+            .element_for_wl_surface(toplevel.wl_surface())
+        {
             State::new_decoration(mapped, toplevel.wl_surface());
         }
     }
 
     fn request_mode(&mut self, toplevel: ToplevelSurface, mode: XdgMode) {
-        if let Some(mapped) = self.common.shell.element_for_surface(toplevel.wl_surface()) {
+        if let Some(mapped) = self
+            .common
+            .shell
+            .element_for_wl_surface(toplevel.wl_surface())
+        {
             State::request_mode(mapped, toplevel.wl_surface(), mode);
         } else {
             toplevel.with_pending_state(|state| state.decoration_mode = Some(mode));
@@ -90,7 +98,11 @@ impl XdgDecorationHandler for State {
     }
 
     fn unset_mode(&mut self, toplevel: ToplevelSurface) {
-        if let Some(mapped) = self.common.shell.element_for_surface(toplevel.wl_surface()) {
+        if let Some(mapped) = self
+            .common
+            .shell
+            .element_for_wl_surface(toplevel.wl_surface())
+        {
             State::unset_mode(mapped, toplevel.wl_surface())
         }
     }
@@ -102,7 +114,7 @@ impl KdeDecorationHandler for State {
     }
 
     fn new_decoration(&mut self, surface: &WlSurface, decoration: &OrgKdeKwinServerDecoration) {
-        if let Some(mapped) = self.common.shell.element_for_surface(surface) {
+        if let Some(mapped) = self.common.shell.element_for_wl_surface(surface) {
             let mode = State::new_decoration(mapped, surface);
             decoration.mode(mode);
         }
@@ -116,7 +128,7 @@ impl KdeDecorationHandler for State {
     ) {
         if let WEnum::Value(mode) = mode {
             // TODO: We need to store this value until it gets mapped and apply it then, if it is not mapped yet.
-            if let Some(mapped) = self.common.shell.element_for_surface(surface) {
+            if let Some(mapped) = self.common.shell.element_for_wl_surface(surface) {
                 State::request_mode(
                     mapped,
                     surface,
@@ -131,7 +143,7 @@ impl KdeDecorationHandler for State {
     }
 
     fn release(&mut self, _decoration: &OrgKdeKwinServerDecoration, surface: &WlSurface) {
-        if let Some(mapped) = self.common.shell.element_for_surface(surface) {
+        if let Some(mapped) = self.common.shell.element_for_wl_surface(surface) {
             State::unset_mode(mapped, surface)
         }
     }

@@ -5,6 +5,7 @@ use smithay::{
     },
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
     utils::{Logical, Point},
+    xwayland::xwm,
 };
 
 use crate::state::State;
@@ -40,6 +41,22 @@ impl From<ResizeEdge> for xdg_toplevel::ResizeEdge {
     #[inline]
     fn from(x: ResizeEdge) -> Self {
         Self::try_from(x.bits()).unwrap()
+    }
+}
+
+impl From<xwm::ResizeEdge> for ResizeEdge {
+    #[inline]
+    fn from(x: xwm::ResizeEdge) -> Self {
+        match x {
+            xwm::ResizeEdge::Top => ResizeEdge::TOP,
+            xwm::ResizeEdge::Bottom => ResizeEdge::BOTTOM,
+            xwm::ResizeEdge::Left => ResizeEdge::LEFT,
+            xwm::ResizeEdge::Right => ResizeEdge::RIGHT,
+            xwm::ResizeEdge::TopLeft => ResizeEdge::TOP_LEFT,
+            xwm::ResizeEdge::BottomLeft => ResizeEdge::BOTTOM_LEFT,
+            xwm::ResizeEdge::TopRight => ResizeEdge::TOP_RIGHT,
+            xwm::ResizeEdge::BottomRight => ResizeEdge::BOTTOM_RIGHT,
+        }
     }
 }
 

@@ -28,7 +28,7 @@ use std::sync::Mutex;
 impl Shell {
     pub fn unconstrain_popup(&self, surface: &PopupSurface, positioner: &PositionerState) {
         if let Some(parent) = get_popup_toplevel(&surface) {
-            if let Some(elem) = self.element_for_surface(&parent) {
+            if let Some(elem) = self.element_for_wl_surface(&parent) {
                 let workspace = self.space_for(elem).unwrap();
                 let element_geo = workspace.element_geometry(elem).unwrap();
                 let (window, offset) = elem

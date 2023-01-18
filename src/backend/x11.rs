@@ -305,6 +305,8 @@ pub fn init_backend(
         &state.common.event_loop_handle,
     );
 
+    state.launch_xwayland(None);
+
     event_loop
         .handle()
         .insert_source(backend, move |event, _, data| match event {

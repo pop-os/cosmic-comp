@@ -4,12 +4,19 @@ use std::{cell::RefCell, collections::HashMap};
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State as WState;
 use smithay::{
     desktop::{layer_map_for_output, LayerSurface, PopupManager, WindowSurfaceType},
-    input::Seat,
+    input::{
+        pointer::{Focus, GrabStartData as PointerGrabStartData},
+        Seat,
+    },
     output::Output,
-    reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
-    utils::{Logical, Point, Rectangle},
+    reexports::{
+        wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
+        x11rb::protocol::xproto::Window as X11Window,
+    },
+    utils::{Logical, Point, Rectangle, Serial, SERIAL_COUNTER},
     wayland::{
         compositor::with_states,
+        seat::WaylandFocus,
         shell::{
             wlr_layer::{
                 KeyboardInteractivity, Layer, LayerSurfaceCachedState, WlrLayerShellState,
@@ -17,6 +24,7 @@ use smithay::{
             xdg::XdgShellState,
         },
     },
+    xwayland::X11Surface,
 };
 
 use crate::{
@@ -42,6 +50,7 @@ pub use self::workspace::*;
 use self::{
     element::CosmicWindow,
     focus::target::KeyboardFocusTarget,
+    grabs::ResizeEdge,
     layout::{floating::FloatingLayout, tiling::TilingLayout},
 };
 
@@ -52,6 +61,7 @@ pub struct Shell {
     pub floating_default: bool,
     pub pending_windows: Vec<(CosmicSurface, Seat<State>)>,
     pub pending_layers: Vec<(LayerSurface, Output, Seat<State>)>,
+    pub override_redirect_windows: Vec<OverrideRedirectWindow>,
 
     // wayland_state
     pub layer_shell_state: WlrLayerShellState,
@@ -59,6 +69,11 @@ pub struct Shell {
     pub toplevel_management_state: ToplevelManagementState,
     pub xdg_shell_state: XdgShellState,
     pub workspace_state: WorkspaceState<State>,
+}
+
+pub struct OverrideRedirectWindow {
+    pub surface: X11Surface,
+    pub above: Option<X11Window>,
 }
 
 #[derive(Debug)]
@@ -431,6 +446,7 @@ impl Shell {
 
             pending_windows: Vec::new(),
             pending_layers: Vec::new(),
+            override_redirect_windows: Vec::new(),
 
             layer_shell_state,
             toplevel_info_state,
@@ -871,10 +887,16 @@ impl Shell {
         .into_iter()
     }
 
-    pub fn element_for_surface(&self, surface: &WlSurface) -> Option<&CosmicMapped> {
+    pub fn element_for_surface(&self, surface: &CosmicSurface) -> Option<&CosmicMapped> {
         self.workspaces
             .spaces()
             .find_map(|w| w.element_for_surface(surface))
+    }
+
+    pub fn element_for_wl_surface(&self, surface: &WlSurface) -> Option<&CosmicMapped> {
+        self.workspaces
+            .spaces()
+            .find_map(|w| w.element_for_wl_surface(surface))
     }
 
     pub fn space_for(&self, mapped: &CosmicMapped) -> Option<&Workspace> {
@@ -996,12 +1018,52 @@ impl Shell {
                 .map(mapped.clone(), &seat, focus_stack.iter());
         }
 
+        if let CosmicSurface::X11(surface) = window {
+            let geometry = workspace.element_geometry(&mapped);
+            if let Err(err) = surface.configure(geometry) {
+                slog_scope::warn!("Failed to configure X11 surface ({:?}): {}", surface, err);
+            };
+            if let Some(xwm) = state
+                .common
+                .xwayland_state
+                .values_mut()
+                .flat_map(|state| state.xwm.as_mut())
+                .find(|xwm| Some(xwm.id()) == surface.xwm_id())
+            {
+                if let Err(err) = xwm.update_stacking_order_downwards(workspace.mapped()) {
+                    slog_scope::warn!("Failed to update Xwayland stacking order: {}", err);
+                }
+            }
+        }
+
         Shell::set_focus(state, Some(&KeyboardFocusTarget::from(mapped)), &seat, None);
 
         let active_space = state.common.shell.active_space(output);
         for mapped in active_space.mapped() {
             state.common.shell.update_reactive_popups(mapped);
         }
+    }
+
+    pub fn map_override_redirect(state: &mut State, window: X11Surface) {
+        let seat = state.common.last_active_seat().clone();
+        let mut pos = window.geometry().loc;
+        let output = state
+            .common
+            .shell
+            .outputs()
+            .find(|o| o.geometry().contains(pos))
+            .cloned()
+            .unwrap_or_else(|| seat.active_output());
+        pos -= output.geometry().loc;
+
+        state
+            .common
+            .shell
+            .override_redirect_windows
+            .push(OverrideRedirectWindow {
+                surface: window,
+                above: None,
+            });
     }
 
     pub fn map_layer(state: &mut State, layer_surface: &LayerSurface) {
@@ -1125,6 +1187,71 @@ impl Shell {
             }
         }
     }
+
+    pub fn move_request(
+        state: &mut State,
+        surface: &WlSurface,
+        seat: &Seat<State>,
+        serial: impl Into<Option<Serial>>,
+    ) {
+        let serial = serial.into();
+        if let Some(start_data) = check_grab_preconditions(&seat, surface, serial) {
+            if let Some(mapped) = state.common.shell.element_for_wl_surface(surface).cloned() {
+                if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
+                    let output = seat.active_output();
+                    let (window, _) = mapped
+                        .windows()
+                        .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
+                        .unwrap();
+                    if let Some(grab) = workspace.move_request(&window, &seat, &output, start_data)
+                    {
+                        let handle = workspace.handle;
+                        state
+                            .common
+                            .shell
+                            .toplevel_info_state
+                            .toplevel_leave_workspace(&window, &handle);
+                        state
+                            .common
+                            .shell
+                            .toplevel_info_state
+                            .toplevel_leave_output(&window, &output);
+                        seat.get_pointer().unwrap().set_grab(
+                            state,
+                            grab,
+                            serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
+                            Focus::Clear,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn resize_request(
+        state: &mut State,
+        surface: &WlSurface,
+        seat: &Seat<State>,
+        serial: impl Into<Option<Serial>>,
+        edges: ResizeEdge,
+    ) {
+        let serial = serial.into();
+        if let Some(start_data) = check_grab_preconditions(&seat, surface, serial) {
+            if let Some(mapped) = state.common.shell.element_for_wl_surface(surface).cloned() {
+                if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
+                    if let Some(grab) = workspace.resize_request(&mapped, &seat, start_data, edges)
+                    {
+                        seat.get_pointer().unwrap().set_grab(
+                            state,
+                            grab,
+                            serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
+                            Focus::Clear,
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn workspace_set_idx<'a>(
@@ -1135,4 +1262,39 @@ fn workspace_set_idx<'a>(
 ) {
     state.set_workspace_name(&handle, format!("{}", idx));
     state.set_workspace_coordinates(&handle, [Some(idx as u32), Some(output_pos as u32), None]);
+}
+
+pub fn check_grab_preconditions(
+    seat: &Seat<State>,
+    surface: &WlSurface,
+    serial: Option<Serial>,
+) -> Option<PointerGrabStartData<State>> {
+    use smithay::reexports::wayland_server::Resource;
+
+    // TODO: touch resize.
+    let pointer = seat.get_pointer().unwrap();
+
+    // Check that this surface has a click grab.
+    if !match serial {
+        Some(serial) => pointer.has_grab(serial),
+        None => pointer.is_grabbed(),
+    } {
+        return None;
+    }
+
+    let start_data = pointer.grab_start_data().unwrap();
+
+    // If the focus was for a different surface, ignore the request.
+    if start_data.focus.is_none()
+        || !start_data
+            .focus
+            .as_ref()
+            .unwrap()
+            .0
+            .same_client_as(&surface.id())
+    {
+        return None;
+    }
+
+    Some(start_data)
 }
