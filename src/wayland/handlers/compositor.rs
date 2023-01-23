@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    shell::CosmicSurface, state::BackendData, utils::prelude::*,
+    shell::CosmicSurface,
+    state::{BackendData, Data},
+    utils::prelude::*,
     wayland::protocols::screencopy::SessionType,
 };
 use smithay::{
@@ -109,7 +111,7 @@ impl CompositorHandler for State {
     }
 
     fn commit(&mut self, surface: &WlSurface) {
-        X11Wm::commit_hook(surface);
+        X11Wm::commit_hook::<Data>(surface);
         // first load the buffer for various smithay helper functions
         on_commit_buffer_handler(surface);
 

@@ -1,12 +1,12 @@
 use crate::{
     backend::render::cursor::Cursor,
-    shell::{CosmicSurface, Shell},
+    shell::{CosmicSurface, Ordering, Shell},
     state::{Data, State},
     utils::prelude::SeatExt,
     wayland::{handlers::screencopy::PendingScreencopyBuffers, protocols::screencopy::SessionType},
 };
 use smithay::{
-    backend::drm::DrmNode,
+    backend::{drm::DrmNode, renderer::element::Id},
     reexports::x11rb::protocol::xproto::Window as X11Window,
     utils::{Logical, Point, Rectangle, Size},
     xwayland::{
@@ -131,6 +131,16 @@ impl XwmHandler for Data {
                 err
             );
         }
+        if self
+            .state
+            .common
+            .shell
+            .element_for_surface(&CosmicSurface::X11(window.clone()))
+            .is_some()
+        {
+            return;
+        }
+
         let window = CosmicSurface::X11(window);
         self.state
             .common
@@ -149,11 +159,27 @@ impl XwmHandler for Data {
     }
 
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, window: X11Surface) {
+        if self
+            .state
+            .common
+            .shell
+            .override_redirect_windows
+            .iter()
+            .any(|or| or.surface == window)
+        {
+            return;
+        }
         Shell::map_override_redirect(&mut self.state, window)
     }
 
     fn unmapped_window(&mut self, _xwm: XwmId, window: X11Surface) {
-        if let Some((element, space)) = self
+        if window.is_override_redirect() {
+            self.state
+                .common
+                .shell
+                .override_redirect_windows
+                .retain(|or| or.surface != window);
+        } else if let Some((element, space)) = self
             .state
             .common
             .shell
@@ -225,30 +251,45 @@ impl XwmHandler for Data {
         &mut self,
         _xwm: XwmId,
         window: X11Surface,
-        _x: Option<i32>,
-        _y: Option<i32>,
+        x: Option<i32>,
+        y: Option<i32>,
         w: Option<u32>,
         h: Option<u32>,
         _reorder: Option<Reorder>,
     ) {
         // We only allow floating X11 windows to resize themselves. Nothing else
-        let current_size = window.geometry().size;
+        let mut current_geo = window.geometry();
         if let Some(mapped) = self
             .state
             .common
             .shell
-            .element_for_surface(&CosmicSurface::X11(window))
+            .element_for_surface(&CosmicSurface::X11(window.clone()))
         {
             let space = self.state.common.shell.space_for(mapped).unwrap();
             if space.is_floating(mapped) {
-                mapped.set_size(
+                mapped.set_geometry(Rectangle::from_loc_and_size(
+                    current_geo.loc,
                     (
-                        w.map(|w| w as i32).unwrap_or(current_size.w),
-                        h.map(|h| h as i32).unwrap_or(current_size.h),
-                    )
-                        .into(),
-                )
+                        w.map(|w| w as i32).unwrap_or(current_geo.size.w),
+                        h.map(|h| h as i32).unwrap_or(current_geo.size.h),
+                    ),
+                ))
             }
+        } else {
+            if let Some(x) = x {
+                current_geo.loc.x = x;
+            }
+            if let Some(y) = y {
+                current_geo.loc.y = y;
+            }
+            if let Some(w) = w {
+                current_geo.size.w = w as i32;
+            }
+            if let Some(h) = h {
+                current_geo.size.h = h as i32;
+            }
+            // the window is not yet mapped. Lets give it what it wants
+            let _ = window.configure(current_geo);
         }
     }
 
@@ -260,6 +301,44 @@ impl XwmHandler for Data {
         above: Option<X11Window>,
     ) {
         if window.is_override_redirect() {
+            let ordering = match above {
+                None => Ordering::Below,
+                Some(id) => self
+                    .state
+                    .common
+                    .shell
+                    .override_redirect_windows
+                    .iter()
+                    .find_map(|or| {
+                        if or.surface.window_id() == id {
+                            or.surface
+                                .wl_surface()
+                                .map(|s| Id::from_wayland_resource(&s))
+                        } else {
+                            None
+                        }
+                    })
+                    .or_else(|| {
+                        self.state
+                            .common
+                            .shell
+                            .workspaces
+                            .spaces()
+                            .flat_map(|s| s.windows())
+                            .find_map(|w| {
+                                if let CosmicSurface::X11(w) = w {
+                                    if w.window_id() == id || w.mapped_window_id() == Some(id) {
+                                        return w
+                                            .wl_surface()
+                                            .map(|s| Id::from_wayland_resource(&s));
+                                    }
+                                }
+                                None
+                            })
+                    })
+                    .map(Ordering::AboveWindow)
+                    .unwrap_or(Ordering::Above),
+            };
             if let Some(or) = self
                 .state
                 .common
@@ -268,7 +347,7 @@ impl XwmHandler for Data {
                 .iter_mut()
                 .find(|or| or.surface == window)
             {
-                or.above = above;
+                or.above = ordering;
             }
         }
     }

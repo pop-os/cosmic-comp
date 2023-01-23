@@ -102,14 +102,13 @@ impl CosmicSurface {
         }
     }
 
-    pub fn set_size(&self, size: Size<i32, Logical>) {
+    pub fn set_geometry(&self, geo: Rectangle<i32, Logical>) {
         match self {
             CosmicSurface::Wayland(window) => window
                 .toplevel()
-                .with_pending_state(|state| state.size = Some(size)),
+                .with_pending_state(|state| state.size = Some(geo.size)),
             CosmicSurface::X11(surface) => {
-                let rect = Rectangle::from_loc_and_size(surface.geometry().loc, size);
-                let _ = surface.configure(rect);
+                let _ = surface.configure(geo);
             }
             _ => {}
         }
@@ -296,6 +295,13 @@ impl CosmicSurface {
             CosmicSurface::X11(surface) => surface.min_size(),
             _ => unreachable!(),
         }
+        .map(|size| {
+            if self.is_decorated() {
+                size + (0, SSD_HEIGHT).into()
+            } else {
+                size
+            }
+        })
     }
 
     pub fn max_size(&self) -> Option<Size<i32, Logical>> {
@@ -315,6 +321,13 @@ impl CosmicSurface {
             CosmicSurface::X11(surface) => surface.max_size(),
             _ => unreachable!(),
         }
+        .map(|size| {
+            if self.is_decorated() {
+                size + (0, SSD_HEIGHT).into()
+            } else {
+                size
+            }
+        })
     }
 
     pub fn send_configure(&self) {

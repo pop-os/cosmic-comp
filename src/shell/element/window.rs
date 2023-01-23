@@ -120,12 +120,20 @@ impl CosmicWindow {
         ))
     }
 
-    pub fn set_size(&self, size: Size<i32, Logical>) {
+    pub fn set_geometry(&self, geo: Rectangle<i32, Logical>) {
         self.0.with_program(|p| {
-            let surface_size = (size.w, size.h - if p.has_ssd() { SSD_HEIGHT } else { 0 }).into();
-            p.window.set_size(surface_size)
+            let loc = (
+                geo.loc.x,
+                geo.loc.y + if p.has_ssd() { SSD_HEIGHT } else { 0 },
+            );
+            let size = (
+                geo.size.w,
+                geo.size.h - if p.has_ssd() { SSD_HEIGHT } else { 0 },
+            );
+            p.window
+                .set_geometry(Rectangle::from_loc_and_size(loc, size));
         });
-        self.0.resize(Size::from((size.w, SSD_HEIGHT)));
+        self.0.resize(Size::from((geo.size.w, SSD_HEIGHT)));
     }
 
     pub fn surface(&self) -> CosmicSurface {
@@ -264,6 +272,7 @@ impl SpaceElement for CosmicWindow {
         self.0.with_program(|p| {
             let mut bbox = SpaceElement::bbox(&p.window);
             if p.has_ssd() {
+                bbox.loc.y -= SSD_HEIGHT;
                 bbox.size.h += SSD_HEIGHT;
             }
             bbox
@@ -301,6 +310,7 @@ impl SpaceElement for CosmicWindow {
         self.0.with_program(|p| {
             let mut geo = SpaceElement::geometry(&p.window);
             if p.has_ssd() {
+                geo.loc.y -= SSD_HEIGHT;
                 geo.size.h += SSD_HEIGHT;
             }
             geo

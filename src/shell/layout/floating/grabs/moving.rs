@@ -23,7 +23,7 @@ use smithay::{
         Seat,
     },
     output::Output,
-    utils::{IsAlive, Logical, Point, Serial},
+    utils::{IsAlive, Logical, Point, Rectangle, Serial},
 };
 use std::cell::RefCell;
 
@@ -183,6 +183,10 @@ impl MoveSurfaceGrab {
                     .output_geometry(&output)
                     .unwrap()
                     .loc;
+                grab_state.window.set_geometry(Rectangle::from_loc_and_size(
+                    window_location + offset,
+                    grab_state.window.geometry().size,
+                ));
                 state
                     .common
                     .shell

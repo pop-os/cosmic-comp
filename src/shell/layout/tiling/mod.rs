@@ -1129,14 +1129,17 @@ impl TilingLayout {
                                 data.update_geometry(geo);
                             }
                             Data::Mapped { mapped, .. } => {
+                                geo.loc += (inner, inner).into();
                                 if !(mapped.is_fullscreen() || mapped.is_maximized()) {
                                     mapped.set_tiled(true);
-                                    mapped.set_size(
-                                        (geo.size.w - inner * 2, geo.size.h - inner * 2).into(),
-                                    );
-                                    mapped.configure();
+                                    let size = (geo.size.w - inner * 2, geo.size.h - inner * 2);
+                                    let internal_geometry =
+                                        Rectangle::from_loc_and_size(geo.loc, size);
+                                    if mapped.geometry() != internal_geometry {
+                                        mapped.set_geometry(internal_geometry);
+                                        mapped.configure();
+                                    }
                                 }
-                                geo.loc += (inner, inner).into();
                                 data.update_geometry(geo);
                             }
                         }

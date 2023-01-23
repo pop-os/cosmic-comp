@@ -12,7 +12,7 @@ use smithay::{
         AxisFrame, ButtonEvent, GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab,
         PointerInnerHandle,
     },
-    utils::{IsAlive, Logical, Point, Size},
+    utils::{IsAlive, Logical, Point, Rectangle, Size},
 };
 
 /// Information about the resize operation.
@@ -97,7 +97,10 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
         self.last_window_size = (new_window_width, new_window_height).into();
 
         self.window.set_resizing(true);
-        self.window.set_size(self.last_window_size);
+        self.window.set_geometry(Rectangle::from_loc_and_size(
+            self.window.geometry().loc,
+            self.last_window_size,
+        ));
         self.window.configure();
     }
 
@@ -118,7 +121,10 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
             }
 
             self.window.set_resizing(false);
-            self.window.set_size(self.last_window_size);
+            self.window.set_geometry(Rectangle::from_loc_and_size(
+                self.window.geometry().loc,
+                self.last_window_size,
+            ));
             self.window.configure();
 
             let mut resize_state = self.window.resize_state.lock().unwrap();
@@ -220,6 +226,9 @@ impl ResizeSurfaceGrab {
                         );
                     }
                 }
+                let mut geometry = window.geometry();
+                geometry.loc = new_location;
+                let _ = window.set_geometry(geometry);
                 space
                     .floating_layer
                     .space

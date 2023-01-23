@@ -150,15 +150,16 @@ impl CosmicStack {
         Point::from((0, TAB_HEIGHT))
     }
 
-    pub fn set_size(&self, size: Size<i32, Logical>) {
+    pub fn set_geometry(&self, geo: Rectangle<i32, Logical>) {
         self.0.with_program(|p| {
-            let surface_size = (size.w, size.h - TAB_HEIGHT).into();
+            let loc = (geo.loc.x, geo.loc.y + TAB_HEIGHT);
+            let size = (geo.size.w, geo.size.h - TAB_HEIGHT);
 
             for window in p.windows.lock().unwrap().iter() {
-                window.set_size(surface_size);
+                window.set_geometry(Rectangle::from_loc_and_size(loc, size));
             }
         });
-        self.0.resize(Size::from((size.w, TAB_HEIGHT)));
+        self.0.resize(Size::from((geo.size.w, TAB_HEIGHT)));
     }
 
     fn keyboard_leave_if_previous(

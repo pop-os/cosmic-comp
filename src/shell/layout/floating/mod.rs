@@ -75,9 +75,7 @@ impl FloatingLayout {
         let geometry = layers.non_exclusive_zone();
         let last_geometry = mapped.last_geometry.lock().unwrap().clone();
 
-        let mut geo_updated = false;
         if let Some(size) = last_geometry.map(|g| g.size) {
-            geo_updated = win_geo.size != size;
             win_geo.size = size;
         }
         {
@@ -98,7 +96,6 @@ impl FloatingLayout {
                 }
                 // but no matter the supported sizes, don't be larger than our non-exclusive-zone
                 win_geo.size.w = std::cmp::min(width, geometry.size.w);
-                geo_updated = true;
             }
             if win_geo.size.h > geometry.size.h / 3 * 2 {
                 // try a more reasonable size
@@ -113,7 +110,6 @@ impl FloatingLayout {
                 }
                 // but no matter the supported sizes, don't be larger than our non-exclusive-zone
                 win_geo.size.h = std::cmp::min(height, geometry.size.h);
-                geo_updated = true;
             }
         }
 
@@ -128,11 +124,8 @@ impl FloatingLayout {
             });
 
         mapped.set_tiled(false);
-        if geo_updated {
-            mapped.set_size(win_geo.size);
-        }
+        mapped.set_geometry(Rectangle::from_loc_and_size(position, win_geo.size));
         mapped.configure();
-
         self.space.map_element(mapped, position, false);
     }
 
@@ -183,8 +176,8 @@ impl FloatingLayout {
         if let Some(mapped) = maybe_mapped {
             let last_geometry = mapped.last_geometry.lock().unwrap().clone();
             let last_size = last_geometry.map(|g| g.size).expect("No previous size?");
-            mapped.set_size(last_size);
             let last_location = last_geometry.map(|g| g.loc).expect("No previous location?");
+            mapped.set_geometry(Rectangle::from_loc_and_size(last_location, last_size));
             self.space.map_element(mapped, last_location, true);
             Some(last_size)
         } else {
@@ -293,6 +286,7 @@ impl FloatingLayout {
                 .get(&output)
                 .copied()
                 .unwrap_or_else(|| (0, 0).into());
+            element.set_geometry(elem_geo);
             self.space.map_element(element.clone(), elem_geo.loc, false);
         }
         self.refresh(); //fixup any out of bounds elements

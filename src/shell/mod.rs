@@ -3,16 +3,14 @@ use std::{cell::RefCell, collections::HashMap};
 
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State as WState;
 use smithay::{
+    backend::renderer::element::Id,
     desktop::{layer_map_for_output, LayerSurface, PopupManager, WindowSurfaceType},
     input::{
         pointer::{Focus, GrabStartData as PointerGrabStartData},
         Seat,
     },
     output::Output,
-    reexports::{
-        wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
-        x11rb::protocol::xproto::Window as X11Window,
-    },
+    reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
     utils::{Logical, Point, Rectangle, Serial, SERIAL_COUNTER},
     wayland::{
         compositor::with_states,
@@ -71,9 +69,17 @@ pub struct Shell {
     pub workspace_state: WorkspaceState<State>,
 }
 
+#[derive(Debug)]
 pub struct OverrideRedirectWindow {
     pub surface: X11Surface,
-    pub above: Option<X11Window>,
+    pub above: Ordering,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Ordering {
+    Above,
+    AboveWindow(Id),
+    Below,
 }
 
 #[derive(Debug)]
@@ -837,12 +843,25 @@ impl Shell {
             Some(output) => {
                 Box::new(std::iter::once(output.clone())) as Box<dyn Iterator<Item = Output>>
             }
-            None => Box::new(self.outputs().map(|o| self.active_space(o)).flat_map(|w| {
-                w.mapped()
-                    .find(|e| e.has_surface(surface, WindowSurfaceType::ALL))
-                    .into_iter()
-                    .flat_map(|e| w.outputs_for_element(e))
-            })),
+            None => Box::new(
+                self.outputs()
+                    .filter(|o| {
+                        self.override_redirect_windows.iter().any(|or| {
+                            if or.surface.wl_surface().as_ref() == Some(surface) {
+                                or.surface.geometry().intersection(o.geometry()).is_some()
+                            } else {
+                                false
+                            }
+                        })
+                    })
+                    .cloned()
+                    .chain(self.outputs().map(|o| self.active_space(o)).flat_map(|w| {
+                        w.mapped()
+                            .find(|e| e.has_surface(surface, WindowSurfaceType::ALL))
+                            .into_iter()
+                            .flat_map(|e| w.outputs_for_element(e))
+                    })),
+            ),
         }
     }
 
@@ -975,6 +994,9 @@ impl Shell {
             map.cleanup();
         }
 
+        self.override_redirect_windows
+            .retain(|or| or.surface.alive());
+
         self.toplevel_info_state
             .refresh(Some(&self.workspace_state));
     }
@@ -1019,10 +1041,6 @@ impl Shell {
         }
 
         if let CosmicSurface::X11(surface) = window {
-            let geometry = workspace.element_geometry(&mapped);
-            if let Err(err) = surface.configure(geometry) {
-                slog_scope::warn!("Failed to configure X11 surface ({:?}): {}", surface, err);
-            };
             if let Some(xwm) = state
                 .common
                 .xwayland_state
@@ -1062,7 +1080,7 @@ impl Shell {
             .override_redirect_windows
             .push(OverrideRedirectWindow {
                 surface: window,
-                above: None,
+                above: Ordering::Above,
             });
     }
 

@@ -34,7 +34,7 @@ use super::{
     element::CosmicMapped,
     focus::{FocusStack, FocusStackMut},
     grabs::{ResizeEdge, ResizeGrab},
-    CosmicMappedRenderElement, CosmicSurface,
+    CosmicMappedRenderElement, CosmicSurface, Ordering,
 };
 
 #[derive(Debug)]
@@ -232,15 +232,14 @@ impl Workspace {
             mapped.set_active(window);
         }
 
-        window.set_size(
-            output
-                .current_mode()
-                .map(|m| m.size)
-                .unwrap_or((0, 0).into())
-                .to_f64()
-                .to_logical(output.current_scale().fractional_scale())
-                .to_i32_round(),
-        );
+        let size = output
+            .current_mode()
+            .map(|m| m.size)
+            .unwrap_or((0, 0).into())
+            .to_f64()
+            .to_logical(output.current_scale().fractional_scale())
+            .to_i32_round();
+        window.set_geometry(Rectangle::from_loc_and_size((0, 0), size));
         window.send_configure();
         self.fullscreen.insert(output.clone(), window.clone());
     }
@@ -397,6 +396,7 @@ impl Workspace {
         &self,
         renderer: &mut R,
         output: &Output,
+        override_redirect_windows: &[super::OverrideRedirectWindow],
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
@@ -469,8 +469,33 @@ impl Workspace {
                 lower
             };
 
+            let mut window_elements = Vec::new();
+
+            // OR windows above all
+            window_elements.extend(
+                override_redirect_windows
+                    .iter()
+                    .filter(|or| {
+                        or.above == Ordering::Above
+                            && or
+                                .surface
+                                .geometry()
+                                .intersection(output.geometry())
+                                .is_some()
+                    })
+                    .flat_map(|or| {
+                        AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
+                            &or.surface,
+                            renderer,
+                            (or.surface.geometry().loc - output.geometry().loc)
+                                .to_physical_precise_round(output_scale),
+                            Scale::from(output_scale),
+                        )
+                    }),
+            );
+
             // floating surfaces
-            render_elements.extend(
+            window_elements.extend(
                 self.floating_layer
                     .render_output::<R>(renderer, output)?
                     .into_iter()
@@ -478,13 +503,64 @@ impl Workspace {
             );
 
             //tiling surfaces
-            render_elements.extend(
+            window_elements.extend(
                 self.tiling_layer
                     .render_output::<R>(renderer, output)?
                     .into_iter()
                     .map(WorkspaceRenderElement::from),
             );
 
+            // Sort other OR windows in between
+            for or in override_redirect_windows.iter().filter(|or| {
+                matches!(or.above, Ordering::AboveWindow(_))
+                    && or
+                        .surface
+                        .geometry()
+                        .intersection(output.geometry())
+                        .is_some()
+            }) {
+                let pos = window_elements
+                    .iter()
+                    .position(|w| Ordering::AboveWindow(w.id().clone()) == or.above)
+                    .unwrap_or(0);
+                for element in AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
+                    &or.surface,
+                    renderer,
+                    (or.surface.geometry().loc - output.geometry().loc)
+                        .to_physical_precise_round(output_scale),
+                    Scale::from(output_scale),
+                )
+                .into_iter()
+                .rev()
+                {
+                    window_elements.insert(pos, element);
+                }
+            }
+
+            render_elements.extend(window_elements.into_iter());
+
+            // OR windows below all
+            render_elements.extend(
+                override_redirect_windows
+                    .iter()
+                    .filter(|or| {
+                        or.above == Ordering::Below
+                            && or
+                                .surface
+                                .geometry()
+                                .intersection(output.geometry())
+                                .is_some()
+                    })
+                    .flat_map(|or| {
+                        AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
+                            &or.surface,
+                            renderer,
+                            (or.surface.geometry().loc - output.geometry().loc)
+                                .to_physical_precise_round(output_scale),
+                            Scale::from(output_scale),
+                        )
+                    }),
+            );
             // bottom and background layer surfaces
             {
                 render_elements.extend(

@@ -332,10 +332,10 @@ impl CosmicMapped {
         window.is_activated()
     }
 
-    pub fn set_size(&self, size: Size<i32, Logical>) {
+    pub fn set_geometry(&self, geo: Rectangle<i32, Logical>) {
         match &self.element {
-            CosmicMappedInternal::Stack(s) => s.set_size(size),
-            CosmicMappedInternal::Window(w) => w.set_size(size),
+            CosmicMappedInternal::Stack(s) => s.set_geometry(geo),
+            CosmicMappedInternal::Window(w) => w.set_geometry(geo),
             _ => {}
         }
     }
