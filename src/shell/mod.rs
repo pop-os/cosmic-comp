@@ -4,7 +4,9 @@ use std::{cell::RefCell, collections::HashMap};
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State as WState;
 use smithay::{
     backend::renderer::element::Id,
-    desktop::{layer_map_for_output, LayerSurface, PopupManager, WindowSurfaceType},
+    desktop::{
+        layer_map_for_output, space::SpaceElement, LayerSurface, PopupManager, WindowSurfaceType,
+    },
     input::{
         pointer::{Focus, GrabStartData as PointerGrabStartData},
         Seat,
@@ -996,6 +998,9 @@ impl Shell {
 
         self.override_redirect_windows
             .retain(|or| or.surface.alive());
+        self.override_redirect_windows
+            .iter()
+            .for_each(|or| or.surface.refresh());
 
         self.toplevel_info_state
             .refresh(Some(&self.workspace_state));
@@ -1063,16 +1068,16 @@ impl Shell {
     }
 
     pub fn map_override_redirect(state: &mut State, window: X11Surface) {
-        let seat = state.common.last_active_seat().clone();
-        let mut pos = window.geometry().loc;
-        let output = state
+        let geo = window.geometry();
+        for (output, overlap) in state
             .common
             .shell
             .outputs()
-            .find(|o| o.geometry().contains(pos))
             .cloned()
-            .unwrap_or_else(|| seat.active_output());
-        pos -= output.geometry().loc;
+            .filter_map(|o| o.geometry().intersection(geo).map(|overlap| (o, overlap)))
+        {
+            window.output_enter(&output, overlap);
+        }
 
         state
             .common
