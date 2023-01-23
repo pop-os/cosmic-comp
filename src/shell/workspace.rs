@@ -430,6 +430,28 @@ impl Workspace {
                     }),
             );
 
+            render_elements.extend(
+                override_redirect_windows
+                    .iter()
+                    .filter(|or| {
+                        or.above != Ordering::Below
+                            && or
+                                .surface
+                                .geometry()
+                                .intersection(output.geometry())
+                                .is_some()
+                    })
+                    .flat_map(|or| {
+                        AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
+                            &or.surface,
+                            renderer,
+                            (or.surface.geometry().loc - output.geometry().loc)
+                                .to_physical_precise_round(output_scale),
+                            Scale::from(output_scale),
+                        )
+                    }),
+            );
+
             // fullscreen window
             render_elements.extend(AsRenderElements::<R>::render_elements::<
                 WorkspaceRenderElement<R>,
