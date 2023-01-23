@@ -371,6 +371,19 @@ impl State {
                             geometry,
                             &workspace,
                         );
+
+                        for session in sessions_for_output(&self.common, &output) {
+                            if let Some((geometry, offset)) = seat.cursor_geometry(
+                                position.to_buffer(
+                                    output.current_scale().fractional_scale(),
+                                    output.current_transform(),
+                                    &output.geometry().size.to_f64(),
+                                ),
+                                self.common.clock.now(),
+                            ) {
+                                session.cursor_info(seat, InputType::Pointer, geometry, offset);
+                            }
+                        }
                         seat.get_pointer().unwrap().motion(
                             self,
                             under,
