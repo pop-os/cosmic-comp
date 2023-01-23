@@ -171,24 +171,6 @@ where
         fps,
     );
 
-    /*
-    if let Ok((_, states)) = result.as_ref() {
-        for xwm in state
-            .xwayland_state
-            .values_mut()
-            .flat_map(|state| state.xwm.as_mut())
-        {
-            if let Err(err) = xwm.update_stacking_order_upwards(states.states.keys()) {
-                slog_scope::warn!(
-                    "Failed to update Xwm ({:?}) stacking order: {}",
-                    xwm.id(),
-                    err
-                );
-            }
-        }
-    }
-    */
-
     result
 }
 
@@ -278,7 +260,12 @@ where
 
     elements.extend(
         workspace
-            .render_output::<R>(renderer, output, &state.shell.override_redirect_windows)
+            .render_output::<R>(
+                renderer,
+                output,
+                &state.shell.override_redirect_windows,
+                state.xwayland_state.values_mut(),
+            )
             .map_err(|_| OutputNoMode)?
             .into_iter()
             .map(Into::into),

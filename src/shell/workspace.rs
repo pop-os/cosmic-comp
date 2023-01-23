@@ -13,6 +13,7 @@ use crate::{
             workspace::WorkspaceHandle,
         },
     },
+    xwayland::XWaylandState,
 };
 
 use indexmap::IndexSet;
@@ -392,11 +393,12 @@ impl Workspace {
         self.floating_layer.mapped().any(|m| m == mapped)
     }
 
-    pub fn render_output<R>(
+    pub fn render_output<'a, R>(
         &self,
         renderer: &mut R,
         output: &Output,
         override_redirect_windows: &[super::OverrideRedirectWindow],
+        xwm_state: impl Iterator<Item = &'a mut XWaylandState>,
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
@@ -458,6 +460,18 @@ impl Workspace {
             >(
                 fullscreen, renderer, (0, 0).into(), output_scale.into()
             ));
+
+            for xwm in xwm_state.flat_map(|state| state.xwm.as_mut()) {
+                if let Err(err) =
+                    xwm.update_stacking_order_upwards(render_elements.iter().rev().map(|e| e.id()))
+                {
+                    slog_scope::warn!(
+                        "Failed to update Xwm ({:?}) stacking order: {}",
+                        xwm.id(),
+                        err
+                    );
+                }
+            }
         } else {
             // TODO: Handle modes like
             // - keyboard window swapping
@@ -559,10 +573,8 @@ impl Workspace {
                 }
             }
 
-            render_elements.extend(window_elements.into_iter());
-
             // OR windows below all
-            render_elements.extend(
+            window_elements.extend(
                 override_redirect_windows
                     .iter()
                     .filter(|or| {
@@ -583,6 +595,21 @@ impl Workspace {
                         )
                     }),
             );
+
+            for xwm in xwm_state.flat_map(|state| state.xwm.as_mut()) {
+                if let Err(err) =
+                    xwm.update_stacking_order_upwards(window_elements.iter().rev().map(|e| e.id()))
+                {
+                    slog_scope::warn!(
+                        "Failed to update Xwm ({:?}) stacking order: {}",
+                        xwm.id(),
+                        err
+                    );
+                }
+            }
+
+            render_elements.extend(window_elements.into_iter());
+
             // bottom and background layer surfaces
             {
                 render_elements.extend(
