@@ -2,11 +2,12 @@ use crate::{
     backend::render::cursor::Cursor,
     shell::{CosmicSurface, Ordering, Shell},
     state::{Data, State},
-    utils::prelude::SeatExt,
+    utils::prelude::*,
     wayland::{handlers::screencopy::PendingScreencopyBuffers, protocols::screencopy::SessionType},
 };
 use smithay::{
     backend::{drm::DrmNode, renderer::element::Id},
+    desktop::space::SpaceElement,
     reexports::x11rb::protocol::xproto::Window as X11Window,
     utils::{Logical, Point, Rectangle, Size},
     xwayland::{
@@ -348,6 +349,17 @@ impl XwmHandler for Data {
                 .find(|or| or.surface == window)
             {
                 or.above = ordering;
+            }
+            let geo = window.geometry();
+            for (output, overlap) in self.state.common.shell.outputs().cloned().map(|o| {
+                let intersection = o.geometry().intersection(geo);
+                (o, intersection)
+            }) {
+                if let Some(overlap) = overlap {
+                    window.output_enter(&output, overlap);
+                } else {
+                    window.output_leave(&output);
+                }
             }
         }
     }
