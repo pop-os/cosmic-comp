@@ -272,7 +272,6 @@ impl SpaceElement for CosmicWindow {
         self.0.with_program(|p| {
             let mut bbox = SpaceElement::bbox(&p.window);
             if p.has_ssd() {
-                bbox.loc.y -= SSD_HEIGHT;
                 bbox.size.h += SSD_HEIGHT;
             }
             bbox
@@ -310,7 +309,6 @@ impl SpaceElement for CosmicWindow {
         self.0.with_program(|p| {
             let mut geo = SpaceElement::geometry(&p.window);
             if p.has_ssd() {
-                geo.loc.y -= SSD_HEIGHT;
                 geo.size.h += SSD_HEIGHT;
             }
             geo

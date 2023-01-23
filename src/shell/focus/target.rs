@@ -17,6 +17,7 @@ use smithay::{
     reexports::wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface, Resource},
     utils::{IsAlive, Serial},
     wayland::seat::WaylandFocus,
+    xwayland::X11Surface,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,6 +26,7 @@ pub enum PointerFocusTarget {
     Fullscreen(CosmicSurface),
     LayerSurface(LayerSurface),
     Popup(PopupKind),
+    OverrideRedirect(X11Surface),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -70,6 +72,7 @@ impl IsAlive for PointerFocusTarget {
             PointerFocusTarget::Fullscreen(f) => f.alive(),
             PointerFocusTarget::LayerSurface(l) => l.alive(),
             PointerFocusTarget::Popup(p) => p.alive(),
+            PointerFocusTarget::OverrideRedirect(s) => s.alive(),
         }
     }
 }
@@ -93,6 +96,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::Fullscreen(w) => PointerTarget::enter(w, seat, data, event),
             PointerFocusTarget::LayerSurface(l) => PointerTarget::enter(l, seat, data, event),
             PointerFocusTarget::Popup(p) => PointerTarget::enter(p.wl_surface(), seat, data, event),
+            PointerFocusTarget::OverrideRedirect(s) => PointerTarget::enter(s, seat, data, event),
         }
     }
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
@@ -103,6 +107,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::Popup(p) => {
                 PointerTarget::motion(p.wl_surface(), seat, data, event)
             }
+            PointerFocusTarget::OverrideRedirect(s) => PointerTarget::enter(s, seat, data, event),
         }
     }
     fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
@@ -113,6 +118,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::Popup(p) => {
                 PointerTarget::button(p.wl_surface(), seat, data, event)
             }
+            PointerFocusTarget::OverrideRedirect(s) => PointerTarget::button(s, seat, data, event),
         }
     }
     fn axis(&self, seat: &Seat<State>, data: &mut State, frame: AxisFrame) {
@@ -121,6 +127,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::Fullscreen(w) => PointerTarget::axis(w, seat, data, frame),
             PointerFocusTarget::LayerSurface(l) => PointerTarget::axis(l, seat, data, frame),
             PointerFocusTarget::Popup(p) => PointerTarget::axis(p.wl_surface(), seat, data, frame),
+            PointerFocusTarget::OverrideRedirect(s) => PointerTarget::axis(s, seat, data, frame),
         }
     }
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
@@ -132,6 +139,9 @@ impl PointerTarget<State> for PointerFocusTarget {
             }
             PointerFocusTarget::Popup(p) => {
                 PointerTarget::leave(p.wl_surface(), seat, data, serial, time)
+            }
+            PointerFocusTarget::OverrideRedirect(s) => {
+                PointerTarget::leave(s, seat, data, serial, time)
             }
         }
     }
@@ -248,6 +258,9 @@ impl WaylandFocus for PointerFocusTarget {
             PointerFocusTarget::Fullscreen(w) => WaylandFocus::wl_surface(w)?,
             PointerFocusTarget::LayerSurface(l) => l.wl_surface().clone(),
             PointerFocusTarget::Popup(p) => p.wl_surface().clone(),
+            PointerFocusTarget::OverrideRedirect(s) => {
+                return s.wl_surface();
+            }
         })
     }
     fn same_client_as(&self, object_id: &ObjectId) -> bool {
@@ -256,6 +269,7 @@ impl WaylandFocus for PointerFocusTarget {
             PointerFocusTarget::Fullscreen(w) => WaylandFocus::same_client_as(w, object_id),
             PointerFocusTarget::LayerSurface(l) => l.wl_surface().id().same_client_as(object_id),
             PointerFocusTarget::Popup(p) => p.wl_surface().id().same_client_as(object_id),
+            PointerFocusTarget::OverrideRedirect(s) => WaylandFocus::same_client_as(s, object_id),
         }
     }
 }
@@ -281,6 +295,12 @@ impl From<LayerSurface> for PointerFocusTarget {
 impl From<PopupKind> for PointerFocusTarget {
     fn from(p: PopupKind) -> Self {
         PointerFocusTarget::Popup(p)
+    }
+}
+
+impl From<X11Surface> for PointerFocusTarget {
+    fn from(s: X11Surface) -> Self {
+        PointerFocusTarget::OverrideRedirect(s)
     }
 }
 

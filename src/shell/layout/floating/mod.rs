@@ -209,7 +209,7 @@ impl FloatingLayout {
     }
 
     pub fn mapped(&self) -> impl Iterator<Item = &CosmicMapped> {
-        self.space.elements()
+        self.space.elements().rev()
     }
 
     pub fn windows(&self) -> impl Iterator<Item = CosmicSurface> + '_ {
