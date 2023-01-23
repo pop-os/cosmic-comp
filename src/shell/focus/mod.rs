@@ -3,6 +3,7 @@ use crate::{
     state::Common,
     utils::prelude::*,
     wayland::handlers::xdg_shell::PopupGrabData,
+    xwayland::XWaylandState,
 };
 use indexmap::IndexSet;
 use smithay::{
@@ -13,6 +14,8 @@ use smithay::{
 use std::cell::RefCell;
 
 use self::target::{KeyboardFocusTarget, WindowGroup};
+
+use super::CosmicSurface;
 
 pub mod target;
 
@@ -124,7 +127,11 @@ impl Shell {
         }
     }
 
-    fn update_active<'a>(&mut self, seats: impl Iterator<Item = &'a Seat<State>>) {
+    fn update_active<'a, 'b>(
+        &mut self,
+        seats: impl Iterator<Item = &'a Seat<State>>,
+        xwms: impl Iterator<Item = &'b mut XWaylandState>,
+    ) {
         // update activate status
         let focused_windows = seats
             .flat_map(|seat| {
@@ -136,10 +143,18 @@ impl Shell {
             })
             .collect::<Vec<_>>();
 
+        let mut xwms = xwms.collect::<Vec<_>>();
         for output in self.outputs.iter() {
             let workspace = self.workspaces.active_mut(output);
             for focused in focused_windows.iter() {
                 if workspace.floating_layer.mapped().any(|m| m == focused) {
+                    if let CosmicSurface::X11(window) = focused.active_window() {
+                        for xwm in xwms.iter_mut().flat_map(|state| state.xwm.as_mut()) {
+                            if Some(xwm.id()) == window.xwm_id() {
+                                let _ = xwm.raise_window(&window);
+                            }
+                        }
+                    }
                     workspace.floating_layer.space.raise_element(focused, true);
                 }
             }
@@ -160,7 +175,10 @@ impl Common {
     ) {
         Shell::set_focus(state, target, active_seat, serial);
         let seats = state.common.seats().cloned().collect::<Vec<_>>();
-        state.common.shell.update_active(seats.iter());
+        state
+            .common
+            .shell
+            .update_active(seats.iter(), state.common.xwayland_state.values_mut());
     }
 
     pub fn refresh_focus(state: &mut State) {
@@ -241,6 +259,9 @@ impl Common {
         }
 
         let seats = state.common.seats().cloned().collect::<Vec<_>>();
-        state.common.shell.update_active(seats.iter())
+        state
+            .common
+            .shell
+            .update_active(seats.iter(), state.common.xwayland_state.values_mut())
     }
 }
