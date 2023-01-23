@@ -23,8 +23,10 @@ use smithay::{
         },
     },
     desktop::utils::{
-        surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
-        update_surface_primary_scanout_output, OutputPresentationFeedback,
+        send_frames_surface_tree, surface_presentation_feedback_flags_from_states,
+        surface_primary_scanout_output, take_presentation_feedback_surface_tree,
+        update_surface_primary_scanout_output, with_surfaces_surface_tree,
+        OutputPresentationFeedback,
     },
     input::{Seat, SeatState},
     output::{Mode as OutputMode, Output, Scale},
@@ -390,6 +392,27 @@ impl Common {
             });
         }
 
+        self.shell.override_redirect_windows.iter().for_each(|or| {
+            if let Some(wl_surface) = or.surface.wl_surface() {
+                with_surfaces_surface_tree(&wl_surface, |surface, states| {
+                    update_surface_primary_scanout_output(
+                        surface,
+                        output,
+                        states,
+                        render_element_states,
+                        default_primary_scanout_output_compare,
+                    );
+                });
+                send_frames_surface_tree(
+                    &wl_surface,
+                    output,
+                    time,
+                    throttle,
+                    surface_primary_scanout_output,
+                )
+            }
+        });
+
         let map = smithay::desktop::layer_map_for_output(output);
         for layer_surface in map.layers() {
             layer_surface.with_surfaces(|surface, states| {
@@ -421,6 +444,22 @@ impl Common {
                     surface_presentation_feedback_flags_from_states(surface, render_element_states)
                 },
             );
+        });
+
+        self.shell.override_redirect_windows.iter().for_each(|or| {
+            if let Some(wl_surface) = or.surface.wl_surface() {
+                take_presentation_feedback_surface_tree(
+                    &wl_surface,
+                    &mut output_presentation_feedback,
+                    surface_primary_scanout_output,
+                    |surface, _| {
+                        surface_presentation_feedback_flags_from_states(
+                            surface,
+                            render_element_states,
+                        )
+                    },
+                )
+            }
         });
 
         let map = smithay::desktop::layer_map_for_output(output);
