@@ -617,20 +617,23 @@ impl State {
                     .saturating_sub(1);
                 let _ = self.common.shell.activate(&current_output, workspace);
             }
-            Action::MoveToWorkspace(key_num) => {
+            x @ Action::MoveToWorkspace(_) | x @ Action::SendToWorkspace(_) => {
                 let current_output = seat.active_output();
-                let workspace = match key_num {
-                    0 => 9,
-                    x => x - 1,
+                let follow = matches!(x, Action::MoveToWorkspace(_));
+                let workspace = match x {
+                    Action::MoveToWorkspace(0) | Action::SendToWorkspace(0) => 9,
+                    Action::MoveToWorkspace(x) | Action::SendToWorkspace(x) => x - 1,
+                    _ => unreachable!(),
                 };
                 Shell::move_current_window(
                     self,
                     seat,
                     &current_output,
                     (&current_output, Some(workspace as usize)),
+                    follow,
                 );
             }
-            Action::MoveToNextWorkspace => {
+            x @ Action::MoveToNextWorkspace | x @ Action::SendToNextWorkspace => {
                 let current_output = seat.active_output();
                 let workspace = self
                     .common
@@ -644,9 +647,10 @@ impl State {
                     seat,
                     &current_output,
                     (&current_output, Some(workspace as usize)),
+                    matches!(x, Action::MoveToNextWorkspace),
                 );
             }
-            Action::MoveToPreviousWorkspace => {
+            x @ Action::MoveToPreviousWorkspace | x @ Action::SendToPreviousWorkspace => {
                 let current_output = seat.active_output();
                 let workspace = self
                     .common
@@ -660,9 +664,10 @@ impl State {
                     seat,
                     &current_output,
                     (&current_output, Some(workspace as usize)),
+                    matches!(x, Action::MoveToPreviousWorkspace),
                 );
             }
-            Action::MoveToLastWorkspace => {
+            x @ Action::MoveToLastWorkspace | x @ Action::SendToLastWorkspace => {
                 let current_output = seat.active_output();
                 let workspace = self
                     .common
@@ -675,6 +680,7 @@ impl State {
                     seat,
                     &current_output,
                     (&current_output, Some(workspace as usize)),
+                    matches!(x, Action::MoveToLastWorkspace),
                 );
             }
             Action::NextOutput => {
@@ -753,6 +759,7 @@ impl State {
                         seat,
                         &current_output,
                         (&next_output, None),
+                        true,
                     ) {
                         if let Some(ptr) = seat.get_pointer() {
                             ptr.motion(
@@ -786,6 +793,7 @@ impl State {
                         seat,
                         &current_output,
                         (&prev_output, None),
+                        true,
                     ) {
                         if let Some(ptr) = seat.get_pointer() {
                             ptr.motion(

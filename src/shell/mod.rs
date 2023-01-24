@@ -1120,6 +1120,7 @@ impl Shell {
         seat: &Seat<State>,
         from_output: &Output,
         to: (&Output, Option<usize>),
+        follow: bool,
     ) -> Option<Point<i32, Logical>> {
         let (to_output, to_idx) = to;
         let to_idx = to_idx.unwrap_or(state.common.shell.workspaces.active_num(to_output));
@@ -1157,9 +1158,12 @@ impl Shell {
         for mapped in elements.into_iter() {
             state.common.shell.update_reactive_popups(&mapped);
         }
-
-        seat.set_active_output(&to_output);
-        let new_pos = state.common.shell.activate(to_output, to_idx);
+        let new_pos = if follow {
+            seat.set_active_output(&to_output);
+            state.common.shell.activate(to_output, to_idx)
+        } else {
+            None
+        };
 
         let to_workspace = state
             .common
@@ -1191,7 +1195,9 @@ impl Shell {
             state.common.shell.update_reactive_popups(&mapped);
         }
 
-        Common::set_focus(state, Some(&KeyboardFocusTarget::from(mapped)), &seat, None);
+        if follow {
+            Common::set_focus(state, Some(&KeyboardFocusTarget::from(mapped)), &seat, None);
+        }
         new_pos
     }
 

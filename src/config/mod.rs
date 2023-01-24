@@ -851,6 +851,10 @@ pub enum Action {
     MoveToNextWorkspace,
     MoveToPreviousWorkspace,
     MoveToLastWorkspace,
+    SendToWorkspace(u8),
+    SendToNextWorkspace,
+    SendToPreviousWorkspace,
+    SendToLastWorkspace,
 
     NextOutput,
     PreviousOutput,
