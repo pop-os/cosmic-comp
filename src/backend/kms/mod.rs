@@ -593,18 +593,22 @@ impl State {
             .output_configuration_state
             .add_heads(outputs_added.iter());
         let seats = self.common.seats().cloned().collect::<Vec<_>>();
+        self.common.config.read_outputs(
+            &mut self.common.output_configuration_state,
+            &mut self.backend,
+            &mut self.common.shell,
+            seats.iter().cloned(),
+            &self.common.event_loop_handle,
+        );
+        // Don't remove the outputs, before potentially new ones have been initialized.
+        // reading a new config means outputs might become enabled, that were previously disabled.
+        // If we have 0 outputs at some point, we won't quit, but shell doesn't know where to move
+        // windows and workspaces to.
         for output in outputs_removed {
             self.common
                 .shell
                 .remove_output(&output, seats.iter().cloned());
         }
-        self.common.config.read_outputs(
-            &mut self.common.output_configuration_state,
-            &mut self.backend,
-            &mut self.common.shell,
-            seats.into_iter(),
-            &self.common.event_loop_handle,
-        );
 
         Ok(())
     }
