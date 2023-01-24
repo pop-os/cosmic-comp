@@ -10,7 +10,7 @@ anyhow = { version = "1.0.51", features = ["backtrace"] }
 bitflags = "1.3.2"
 bytemuck = "1.12"
 calloop = { version = "0.10.1", features = ["executor"] }
-slog = { version = "2.7", features = [ "max_level_debug" ] } # "release_max_level_debug", "max_level_trace"] }
+slog = { version = "2.7", features = ["release_max_level_info", "max_level_debug"] }#, features = [ "release_max_level_debug", "max_level_trace"] }
 slog-term = "2.8"
 slog-async = "2.7"
 slog-journald = "2.2.0"
@@ -70,4 +70,4 @@ debug = true
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/pop-os/smithay", rev = "b6742bfc5d" }
+smithay = { git = "https://github.com/pop-os/smithay", rev = "05f5db5beb" }

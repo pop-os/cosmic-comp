@@ -1,3 +1,5 @@
+use std::ffi::OsString;
+
 use crate::{
     backend::render::cursor::Cursor,
     shell::{CosmicSurface, Ordering, Shell},
@@ -90,7 +92,16 @@ impl State {
                 }
             };
 
-        match xwayland.start(self.common.event_loop_handle.clone()) {
+        match xwayland.start(
+            self.common.event_loop_handle.clone(),
+            None,
+            std::iter::empty::<(OsString, OsString)>(),
+            |map| {
+                if let Some(node) = drm_node {
+                    map.insert_if_missing(|| node);
+                }
+            },
+        ) {
             Ok(_) => {
                 self.common.xwayland_state.insert(
                     drm_node,
