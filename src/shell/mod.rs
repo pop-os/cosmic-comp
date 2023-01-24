@@ -421,7 +421,7 @@ impl Shell {
         let xdg_shell_state = XdgShellState::new::<State, _>(dh, None);
         let toplevel_info_state = ToplevelInfoState::new(
             dh,
-            //|client| client.get_data::<ClientState>().unwrap().privileged,
+            //|client| client.get_data::<ClientState>().map_or(false, |s| s.privileged),
             |_| true,
         );
         let toplevel_management_state = ToplevelManagementState::new::<State, _>(
@@ -430,12 +430,12 @@ impl Shell {
                 ManagementCapabilities::Close,
                 ManagementCapabilities::Activate,
             ],
-            //|client| client.get_data::<ClientState>().unwrap().privileged,
+            //|client| client.get_data::<ClientState>().map_or(false, |s| s.privileged),
             |_| true,
         );
         let mut workspace_state = WorkspaceState::new(
             dh,
-            //|client| client.get_data::<ClientState>().unwrap().privileged,
+            //|client| client.get_data::<ClientState>().map_or(false, |s| s.privileged),
             |_| true,
         );
 

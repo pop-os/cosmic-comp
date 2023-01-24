@@ -47,6 +47,7 @@ use smithay::{
     },
     utils::{DeviceFd, Size, Transform},
     wayland::{dmabuf::DmabufGlobal, seat::WaylandFocus},
+    xwayland::XWaylandClientData,
 };
 
 use std::{
@@ -790,12 +791,14 @@ fn render_node_for_output(
         .unwrap_or_else(|| workspace.windows().collect::<Vec<_>>())
         .into_iter()
         .flat_map(|w| {
-            dh.get_client(w.wl_surface()?.id())
-                .ok()?
-                .get_data::<ClientState>()
-                .unwrap()
-                .drm_node
-                .clone()
+            let client = dh.get_client(w.wl_surface()?.id()).ok()?;
+            if let Some(normal_client) = client.get_data::<ClientState>() {
+                return normal_client.drm_node.clone();
+            }
+            if let Some(xwayland_client) = client.get_data::<XWaylandClientData>() {
+                return xwayland_client.user_data().get::<DrmNode>().cloned();
+            }
+            None
         })
         .collect::<Vec<_>>();
     if nodes.contains(&target_node) || nodes.len() < MAX_CPU_COPIES {
@@ -1011,9 +1014,17 @@ impl KmsState {
     ) {
         let render = render_node_for_output(dh, &output, target, &shell);
         if let Err(err) = self.api.early_import(
-            dh.get_client(surface.id())
-                .ok()
-                .and_then(|c| c.get_data::<ClientState>().unwrap().drm_node.clone()),
+            if let Some(client) = dh.get_client(surface.id()).ok() {
+                if let Some(normal_client) = client.get_data::<ClientState>() {
+                    normal_client.drm_node.clone()
+                } else if let Some(xwayland_client) = client.get_data::<XWaylandClientData>() {
+                    xwayland_client.user_data().get::<DrmNode>().cloned()
+                } else {
+                    None
+                }
+            } else {
+                None
+            },
             render,
             surface,
         ) {

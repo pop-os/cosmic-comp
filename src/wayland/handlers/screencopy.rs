@@ -36,6 +36,7 @@ use smithay::{
         seat::WaylandFocus,
         shm::{with_buffer_contents, with_buffer_contents_mut},
     },
+    xwayland::XWaylandClientData,
 };
 
 use crate::{
@@ -172,7 +173,15 @@ impl ScreencopyHandler for State {
                     .display_handle
                     .get_client(surface.id())
                     .ok()
-                    .and_then(|client| client.get_data::<ClientState>().unwrap().drm_node.clone())
+                    .and_then(|client| {
+                        if let Some(normal_client) = client.get_data::<ClientState>() {
+                            return normal_client.drm_node.clone();
+                        }
+                        if let Some(xwayland_client) = client.get_data::<XWaylandClientData>() {
+                            return xwayland_client.user_data().get::<DrmNode>().cloned();
+                        }
+                        None
+                    })
                     .unwrap_or(kms.primary.clone());
                 _kms_renderer = Some(kms.api.renderer::<Gles2Renderbuffer>(&node, &node).unwrap());
                 _kms_renderer.as_mut().unwrap().as_mut()
