@@ -38,8 +38,8 @@ libsystemd = "0.5"
 wayland-backend = "0.1.0"
 wayland-scanner = "0.30.0"
 cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", branch = "main", default-features = false, features = ["server"] }
-libcosmic = { git = "https://github.com/pop-os/libcosmic", ref = "abf8fc96c", default-features = false, features = ["softbuffer"] }
-iced_softbuffer = { git = "https://github.com/pop-os/libcosmic", ref = "abf8fc96c" }
+libcosmic = { git = "https://github.com/pop-os/libcosmic", rev = "abf8fc96c", default-features = false, features = ["softbuffer"] }
+iced_softbuffer = { git = "https://github.com/pop-os/libcosmic", rev = "abf8fc96c" }
 ordered-float = "3.0"
 
 [dependencies.smithay]

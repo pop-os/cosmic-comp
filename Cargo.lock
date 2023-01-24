@@ -1186,16 +1186,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 
 [[package]]
-name = "fraction"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c37ba08fe22fba12a3ada3e479d09a8f7fac6081aa6f5c27f22b78639025031"
-dependencies = [
- "lazy_static",
- "num",
-]
-
-[[package]]
 name = "freedesktop-icons"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1571,10 +1561,9 @@ dependencies = [
 [[package]]
 name = "iced"
 version = "0.6.0"
-source = "git+https://github.com/pop-os/libcosmic#4733069988e784ef390c72eaad46cde74c2559f5"
+source = "git+https://github.com/pop-os/libcosmic?rev=abf8fc96c#abf8fc96c2eb8c3ed25d90c4538e29c3a12029fb"
 dependencies = [
  "iced_core",
- "iced_dyrend",
  "iced_futures",
  "iced_glow",
  "iced_graphics",
@@ -1588,7 +1577,7 @@ dependencies = [
 [[package]]
 name = "iced_core"
 version = "0.6.2"
-source = "git+https://github.com/pop-os/libcosmic#4733069988e784ef390c72eaad46cde74c2559f5"
+source = "git+https://github.com/pop-os/libcosmic?rev=abf8fc96c#abf8fc96c2eb8c3ed25d90c4538e29c3a12029fb"
 dependencies = [
  "bitflags",
  "palette",
@@ -1596,23 +1585,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "iced_dyrend"
-version = "0.1.0"
-source = "git+https://github.com/pop-os/libcosmic#4733069988e784ef390c72eaad46cde74c2559f5"
-dependencies = [
- "iced_glow",
- "iced_graphics",
- "iced_native",
- "iced_softbuffer",
- "iced_wgpu",
- "log",
- "raw-window-handle 0.5.0",
-]
-
-[[package]]
 name = "iced_futures"
 version = "0.5.1"
-source = "git+https://github.com/pop-os/libcosmic#4733069988e784ef390c72eaad46cde74c2559f5"
+source = "git+https://github.com/pop-os/libcosmic?rev=abf8fc96c#abf8fc96c2eb8c3ed25d90c4538e29c3a12029fb"
 dependencies = [
  "futures",
  "log",
@@ -1623,7 +1598,7 @@ dependencies = [
 [[package]]
 name = "iced_glow"
 version = "0.5.1"
-source = "git+https://github.com/pop-os/libcosmic#4733069988e784ef390c72eaad46cde74c2559f5"
+source = "git+https://github.com/pop-os/libcosmic?rev=abf8fc96c#abf8fc96c2eb8c3ed25d90c4538e29c3a12029fb"
 dependencies = [
  "bytemuck",
  "euclid",
@@ -1638,7 +1613,7 @@ dependencies = [
 [[package]]
 name = "iced_graphics"
 version = "0.5.0"
-source = "git+https://github.com/pop-os/libcosmic#4733069988e784ef390c72eaad46cde74c2559f5"
+source = "git+https://github.com/pop-os/libcosmic?rev=abf8fc96c#abf8fc96c2eb8c3ed25d90c4538e29c3a12029fb"
 dependencies = [
  "bitflags",
  "bytemuck",
@@ -1658,7 +1633,7 @@ dependencies = [
 [[package]]
 name = "iced_lazy"
 version = "0.3.0"
-source = "git+https://github.com/pop-os/libcosmic#4733069988e784ef390c72eaad46cde74c2559f5"
+source = "git+https://github.com/pop-os/libcosmic?rev=abf8fc96c#abf8fc96c2eb8c3ed25d90c4538e29c3a12029fb"
 dependencies = [
  "iced_native",
  "ouroboros 0.13.0",
@@ -1667,7 +1642,7 @@ dependencies = [
 [[package]]
 name = "iced_native"
 version = "0.7.0"
-source = "git+https://github.com/pop-os/libcosmic#4733069988e784ef390c72eaad46cde74c2559f5"
+source = "git+https://github.com/pop-os/libcosmic?rev=abf8fc96c#abf8fc96c2eb8c3ed25d90c4538e29c3a12029fb"
 dependencies = [
  "iced_core",
  "iced_futures",
@@ -1680,7 +1655,7 @@ dependencies = [
 [[package]]
 name = "iced_softbuffer"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/libcosmic#4733069988e784ef390c72eaad46cde74c2559f5"
+source = "git+https://github.com/pop-os/libcosmic?rev=abf8fc96c#abf8fc96c2eb8c3ed25d90c4538e29c3a12029fb"
 dependencies = [
  "cosmic-text",
  "iced_graphics",
@@ -1695,7 +1670,7 @@ dependencies = [
 [[package]]
 name = "iced_style"
 version = "0.5.1"
-source = "git+https://github.com/pop-os/libcosmic#4733069988e784ef390c72eaad46cde74c2559f5"
+source = "git+https://github.com/pop-os/libcosmic?rev=abf8fc96c#abf8fc96c2eb8c3ed25d90c4538e29c3a12029fb"
 dependencies = [
  "iced_core",
  "once_cell",
@@ -1705,7 +1680,7 @@ dependencies = [
 [[package]]
 name = "iced_wgpu"
 version = "0.7.0"
-source = "git+https://github.com/pop-os/libcosmic#4733069988e784ef390c72eaad46cde74c2559f5"
+source = "git+https://github.com/pop-os/libcosmic?rev=abf8fc96c#abf8fc96c2eb8c3ed25d90c4538e29c3a12029fb"
 dependencies = [
  "bitflags",
  "bytemuck",
@@ -1908,12 +1883,11 @@ checksum = "201de327520df007757c1f0adce6e827fe8562fbc28bfd9c15571c66ca1f5f79"
 [[package]]
 name = "libcosmic"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/libcosmic#4733069988e784ef390c72eaad46cde74c2559f5"
+source = "git+https://github.com/pop-os/libcosmic?rev=abf8fc96c#abf8fc96c2eb8c3ed25d90c4538e29c3a12029fb"
 dependencies = [
  "apply",
  "cosmic-theme",
  "derive_setters",
- "fraction",
  "freedesktop-icons",
  "iced",
  "iced_core",
@@ -2315,40 +2289,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "num"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43db66d1170d347f9a065114077f7dccb00c1b9478c89384490a3425279a4606"
-dependencies = [
- "num-bigint",
- "num-complex",
- "num-integer",
- "num-iter",
- "num-rational",
- "num-traits",
-]
-
-[[package]]
-name = "num-bigint"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f93ab6289c7b344a8a9f60f88d80aa20032336fe78da341afc91c8a2341fc75f"
-dependencies = [
- "autocfg",
- "num-integer",
- "num-traits",
-]
-
-[[package]]
-name = "num-complex"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02e0d21255c828d6f128a1e41534206671e8c3ea0c62f32291e808dc82cff17d"
-dependencies = [
- "num-traits",
-]
-
-[[package]]
 name = "num-integer"
 version = "0.1.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2359,24 +2299,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "num-iter"
-version = "0.1.43"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d03e6c028c5dc5cac6e2dec0efda81fc887605bb3d884578bb6d6bf7514e252"
-dependencies = [
- "autocfg",
- "num-integer",
- "num-traits",
-]
-
-[[package]]
 name = "num-rational"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0638a1c9d0a3c0914158145bc76cff373a75a627e6ecbfb71cbe6f453a5a19b0"
 dependencies = [
  "autocfg",
- "num-bigint",
  "num-integer",
  "num-traits",
 ]
@@ -3433,7 +3361,8 @@ checksum = "27207bb65232eda1f588cf46db2fee75c0808d557f6b3cf19a75f5d6d7c94df1"
 [[package]]
 name = "softbuffer"
 version = "0.2.0"
-source = "git+https://github.com/pop-os/softbuffer?rev=68240f56b#68240f56b6e837b9c4f43438bce866a0e1b1ab61"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3177eca2c15033e254b9b70c4915150200b1cf6fa777de18be9977ae5850077f"
 dependencies = [
  "bytemuck",
  "cfg_aliases",
