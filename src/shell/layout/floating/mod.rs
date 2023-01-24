@@ -18,6 +18,7 @@ use crate::{
     },
     state::State,
     utils::prelude::*,
+    wayland::protocols::toplevel_info::ToplevelInfoState,
 };
 
 mod grabs;
@@ -45,9 +46,30 @@ impl FloatingLayout {
         self.space.map_output(output, location)
     }
 
-    pub fn unmap_output(&mut self, output: &Output) {
+    pub fn unmap_output(
+        &mut self,
+        output: &Output,
+        toplevel_info: &mut ToplevelInfoState<State, CosmicSurface>,
+    ) {
+        let windows = self
+            .space
+            .elements_for_output(output)
+            .cloned()
+            .collect::<Vec<_>>();
+        for window in &windows {
+            for (toplevel, _) in window.windows() {
+                toplevel_info.toplevel_leave_output(&toplevel, output);
+            }
+        }
         self.space.unmap_output(output);
         self.refresh();
+        for window in &windows {
+            for output in self.space.outputs_for_element(&window) {
+                for (toplevel, _) in window.windows() {
+                    toplevel_info.toplevel_enter_output(&toplevel, &output);
+                }
+            }
+        }
     }
 
     pub fn map(

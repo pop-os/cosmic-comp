@@ -13,7 +13,9 @@ use crate::{
         CosmicSurface, OutputNotMapped,
     },
     utils::prelude::*,
-    wayland::handlers::xdg_shell::popup::get_popup_toplevel,
+    wayland::{
+        handlers::xdg_shell::popup::get_popup_toplevel, protocols::toplevel_info::ToplevelInfoState,
+    },
 };
 
 use id_tree::{InsertBehavior, MoveBehavior, Node, NodeId, NodeIdError, RemoveBehavior, Tree};
@@ -275,14 +277,37 @@ impl TilingLayout {
         }
     }
 
-    pub fn unmap_output(&mut self, output: &Output) {
+    pub fn unmap_output(
+        &mut self,
+        output: &Output,
+        toplevel_info: &mut ToplevelInfoState<State, CosmicSurface>,
+    ) {
         if let Some(src) = self.trees.remove(output) {
             // TODO: expects last remaining output
-            let Some((output, dst)) = self.trees.iter_mut().next() else { return; };
-            let orientation = match output.output.geometry().size {
+            let Some((new_output, dst)) = self.trees.iter_mut().next() else { return; };
+            let orientation = match new_output.output.geometry().size {
                 x if x.w >= x.h => Orientation::Vertical,
                 _ => Orientation::Horizontal,
             };
+            for node in src
+                .root_node_id()
+                .and_then(|root_id| src.traverse_pre_order(root_id).ok())
+                .into_iter()
+                .flatten()
+            {
+                if let Data::Mapped {
+                    mapped,
+                    last_geometry: _,
+                } = node.data()
+                {
+                    for (toplevel, _) in mapped.windows() {
+                        toplevel_info.toplevel_leave_output(&toplevel, output);
+                        toplevel_info.toplevel_enter_output(&toplevel, &new_output.output);
+                    }
+                    mapped.output_leave(output);
+                    mapped.output_enter(&new_output.output, mapped.bbox());
+                }
+            }
             TilingLayout::merge_trees(src, dst, orientation);
             self.refresh()
         }

@@ -10,6 +10,7 @@ use crate::{
         handlers::screencopy::DropableSession,
         protocols::{
             screencopy::{BufferParams, Session as ScreencopySession},
+            toplevel_info::ToplevelInfoState,
             workspace::WorkspaceHandle,
         },
     },
@@ -95,12 +96,16 @@ impl Workspace {
         self.floating_layer.map_output(output, position);
     }
 
-    pub fn unmap_output(&mut self, output: &Output) {
+    pub fn unmap_output(
+        &mut self,
+        output: &Output,
+        toplevel_info: &mut ToplevelInfoState<State, CosmicSurface>,
+    ) {
         if let Some(dead_output_window) = self.fullscreen.remove(output) {
             self.unfullscreen_request(&dead_output_window);
         }
-        self.tiling_layer.unmap_output(output);
-        self.floating_layer.unmap_output(output);
+        self.tiling_layer.unmap_output(output, toplevel_info);
+        self.floating_layer.unmap_output(output, toplevel_info);
         self.refresh();
     }
 

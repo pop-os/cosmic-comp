@@ -541,7 +541,7 @@ impl Shell {
 
                             // update mapping
                             workspace.map_output(new_output, (0, 0).into());
-                            workspace.unmap_output(output);
+                            workspace.unmap_output(output, &mut self.toplevel_info_state);
                             workspace.refresh();
 
                             new_set.workspaces.push(workspace);
@@ -559,7 +559,7 @@ impl Shell {
             WorkspaceMode::Global(set) => {
                 state.remove_group_output(&set.group, output);
                 for workspace in &mut set.workspaces {
-                    workspace.unmap_output(output);
+                    workspace.unmap_output(output, &mut self.toplevel_info_state);
                     workspace.refresh();
                 }
             }
@@ -1152,6 +1152,13 @@ impl Shell {
                 .shell
                 .toplevel_info_state
                 .toplevel_leave_workspace(&toplevel, &from_workspace.handle);
+            if from_output != to_output {
+                state
+                    .common
+                    .shell
+                    .toplevel_info_state
+                    .toplevel_leave_output(&toplevel, from_output);
+            }
         }
         let elements = from_workspace.mapped().cloned().collect::<Vec<_>>();
         std::mem::drop(from_workspace);
@@ -1180,6 +1187,13 @@ impl Shell {
                 .map(mapped.clone(), &seat, focus_stack.iter());
         }
         for (toplevel, _) in mapped.windows() {
+            if from_output != to_output {
+                state
+                    .common
+                    .shell
+                    .toplevel_info_state
+                    .toplevel_enter_output(&toplevel, to_output);
+            }
             state
                 .common
                 .shell
