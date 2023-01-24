@@ -900,6 +900,15 @@ impl State {
                     .arg("-c")
                     .arg(command)
                     .env("WAYLAND_DISPLAY", &self.common.socket)
+                    .env(
+                        "DISPLAY",
+                        &self
+                            .common
+                            .xwayland_state
+                            .values()
+                            .find_map(|s| s.display.map(|v| format!(":{}", v)))
+                            .unwrap_or(String::new()),
+                    )
                     .env_remove("COSMIC_SESSION_SOCK")
                     .spawn()
                 {

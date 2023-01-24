@@ -7,13 +7,22 @@ use std::process::Command;
 pub fn ready(state: &State) {
     if booted() {
         match Command::new("systemctl")
-            .args(["--user", "import-environment", "WAYLAND_DISPLAY"])
+            .args(["--user", "import-environment", "WAYLAND_DISPLAY", "DISPLAY"])
             .env("WAYLAND_DISPLAY", &state.common.socket)
+            .env(
+                "DISPLAY",
+                &state
+                    .common
+                    .xwayland_state
+                    .values()
+                    .find_map(|s| s.display.map(|v| format!(":{}", v)))
+                    .unwrap_or(String::new()),
+            )
             .status()
         {
             Ok(x) if x.success() => {}
             Ok(x) => slog_scope::warn!(
-                "Failed to import WAYLAND_DISPLAY into systemd (exit code {:?})",
+                "Failed to import WAYLAND_DISPLAY/DISPLAY into systemd (exit code {:?})",
                 x.code()
             ),
             Err(err) => slog_scope::error!(
