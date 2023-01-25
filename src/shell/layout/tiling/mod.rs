@@ -1158,8 +1158,10 @@ impl TilingLayout {
                                 if !(mapped.is_fullscreen() || mapped.is_maximized()) {
                                     mapped.set_tiled(true);
                                     let size = (geo.size.w - inner * 2, geo.size.h - inner * 2);
-                                    let internal_geometry =
-                                        Rectangle::from_loc_and_size(geo.loc, size);
+                                    let internal_geometry = Rectangle::from_loc_and_size(
+                                        geo.loc + output.geometry().loc,
+                                        size,
+                                    );
                                     if mapped.geometry() != internal_geometry {
                                         mapped.set_geometry(internal_geometry);
                                         mapped.configure();

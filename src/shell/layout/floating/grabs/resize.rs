@@ -176,7 +176,7 @@ impl ResizeSurfaceGrab {
     }
 
     pub fn apply_resize_to_location(window: CosmicMapped, space: &mut Workspace) {
-        if let Some(mut location) = space.floating_layer.space.element_location(&window) {
+        if let Some(location) = space.floating_layer.space.element_location(&window) {
             let mut new_location = None;
 
             let mut resize_state = window.resize_state.lock().unwrap();
@@ -193,16 +193,15 @@ impl ResizeSurfaceGrab {
 
                     if edges.intersects(ResizeEdge::TOP_LEFT) {
                         let size = window.geometry().size;
+                        let mut new = location.clone();
                         if edges.intersects(ResizeEdge::LEFT) {
-                            location.x =
-                                initial_window_location.x + (initial_window_size.w - size.w);
+                            new.x = initial_window_location.x + (initial_window_size.w - size.w);
                         }
                         if edges.intersects(ResizeEdge::TOP) {
-                            location.y =
-                                initial_window_location.y + (initial_window_size.h - size.h);
+                            new.y = initial_window_location.y + (initial_window_size.h - size.h);
                         }
 
-                        new_location = Some(location);
+                        new_location = Some(new);
                     }
                 }
                 _ => {}
@@ -227,7 +226,7 @@ impl ResizeSurfaceGrab {
                     }
                 }
                 let mut geometry = window.geometry();
-                geometry.loc = new_location;
+                geometry.loc += location - new_location;
                 let _ = window.set_geometry(geometry);
                 space
                     .floating_layer

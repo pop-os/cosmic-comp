@@ -146,7 +146,16 @@ impl FloatingLayout {
             });
 
         mapped.set_tiled(false);
-        mapped.set_geometry(Rectangle::from_loc_and_size(position, win_geo.size));
+        let offset = output.geometry().loc
+            - self
+                .space
+                .output_geometry(output)
+                .map(|g| g.loc)
+                .unwrap_or_default();
+        mapped.set_geometry(Rectangle::from_loc_and_size(
+            position + offset,
+            win_geo.size,
+        ));
         mapped.configure();
         self.space.map_element(mapped, position, false);
     }
@@ -199,7 +208,21 @@ impl FloatingLayout {
             let last_geometry = mapped.last_geometry.lock().unwrap().clone();
             let last_size = last_geometry.map(|g| g.size).expect("No previous size?");
             let last_location = last_geometry.map(|g| g.loc).expect("No previous location?");
-            mapped.set_geometry(Rectangle::from_loc_and_size(last_location, last_size));
+            let output = self
+                .space
+                .output_under(last_location.to_f64())
+                .next()
+                .unwrap_or(self.space.outputs().next().unwrap());
+            let offset = output.geometry().loc
+                - self
+                    .space
+                    .output_geometry(output)
+                    .map(|g| g.loc)
+                    .unwrap_or_default();
+            mapped.set_geometry(Rectangle::from_loc_and_size(
+                last_location + offset,
+                last_size,
+            ));
             self.space.map_element(mapped, last_location, true);
             Some(last_size)
         } else {
@@ -308,7 +331,16 @@ impl FloatingLayout {
                 .get(&output)
                 .copied()
                 .unwrap_or_else(|| (0, 0).into());
-            element.set_geometry(elem_geo);
+            let offset = output.geometry().loc
+                - self
+                    .space
+                    .output_geometry(&output)
+                    .map(|g| g.loc)
+                    .unwrap_or_default();
+            element.set_geometry(Rectangle::from_loc_and_size(
+                elem_geo.loc + offset,
+                elem_geo.size,
+            ));
             self.space.map_element(element.clone(), elem_geo.loc, false);
         }
         self.refresh(); //fixup any out of bounds elements

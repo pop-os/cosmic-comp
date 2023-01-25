@@ -238,14 +238,7 @@ impl Workspace {
             mapped.set_active(window);
         }
 
-        let size = output
-            .current_mode()
-            .map(|m| m.size)
-            .unwrap_or((0, 0).into())
-            .to_f64()
-            .to_logical(output.current_scale().fractional_scale())
-            .to_i32_round();
-        window.set_geometry(Rectangle::from_loc_and_size((0, 0), size));
+        window.set_geometry(output.geometry());
         window.send_configure();
         self.fullscreen.insert(output.clone(), window.clone());
     }
