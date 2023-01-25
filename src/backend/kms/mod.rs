@@ -204,6 +204,9 @@ pub fn init_backend(
                 if let Err(err) = libinput_context.resume() {
                     slog_scope::error!("Failed to resume libinput context: {:?}", err);
                 }
+                for device in data.state.backend.kms().devices.values() {
+                    device.drm.as_source_ref().activate();
+                }
                 let dispatcher = dispatcher.clone();
                 handle.insert_idle(move |data| {
                     for (dev, path) in dispatcher.as_source_ref().device_list() {
