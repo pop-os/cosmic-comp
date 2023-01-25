@@ -41,7 +41,7 @@ impl State {
                         connection,
                         client,
                         client_fd: _,
-                        display,
+                        display: _,
                     } => {
                         let mut wm = match X11Wm::start_wm(
                             data.state.common.event_loop_handle.clone(),
