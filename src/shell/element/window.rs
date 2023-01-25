@@ -301,6 +301,9 @@ impl SpaceElement for CosmicWindow {
     }
     fn is_in_input_region(&self, point: &Point<f64, Logical>) -> bool {
         let mut point = *point;
+        if !self.bbox().contains(point.to_i32_round()) {
+            return false;
+        }
         self.0.with_program(|p| {
             if p.has_ssd() {
                 if point.y < SSD_HEIGHT as f64 {
