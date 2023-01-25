@@ -98,7 +98,10 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
 
         self.window.set_resizing(true);
         self.window.set_geometry(Rectangle::from_loc_and_size(
-            self.window.geometry().loc,
+            match self.window.active_window() {
+                CosmicSurface::X11(s) => s.geometry().loc,
+                _ => (0, 0).into(),
+            },
             self.last_window_size,
         ));
         self.window.configure();
@@ -122,7 +125,10 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
 
             self.window.set_resizing(false);
             self.window.set_geometry(Rectangle::from_loc_and_size(
-                self.window.geometry().loc,
+                match self.window.active_window() {
+                    CosmicSurface::X11(s) => s.geometry().loc,
+                    _ => (0, 0).into(),
+                },
                 self.last_window_size,
             ));
             self.window.configure();
@@ -217,17 +223,22 @@ impl ResizeSurfaceGrab {
 
             if let Some(new_location) = new_location {
                 for (window, offset) in window.windows() {
-                    if let CosmicSurface::Wayland(window) = window {
-                        update_reactive_popups(
-                            &window,
-                            new_location + offset,
-                            space.floating_layer.space.outputs(),
-                        );
+                    match window {
+                        CosmicSurface::Wayland(window) => {
+                            update_reactive_popups(
+                                &window,
+                                new_location + offset,
+                                space.floating_layer.space.outputs(),
+                            );
+                        }
+                        CosmicSurface::X11(surface) => {
+                            let mut geometry = surface.geometry();
+                            geometry.loc += location - new_location;
+                            let _ = surface.configure(geometry);
+                        }
+                        _ => unreachable!(),
                     }
                 }
-                let mut geometry = window.geometry();
-                geometry.loc += location - new_location;
-                let _ = window.set_geometry(geometry);
                 space
                     .floating_layer
                     .space
