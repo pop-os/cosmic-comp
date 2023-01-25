@@ -15,7 +15,8 @@ pub fn ready(state: &State) {
                     .common
                     .xwayland_state
                     .values()
-                    .find_map(|s| s.display.map(|v| format!(":{}", v)))
+                    .next()
+                    .map(|s| format!(":{}", s.display))
                     .unwrap_or(String::new()),
             )
             .status()

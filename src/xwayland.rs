@@ -20,7 +20,7 @@ use smithay::{
 
 pub struct XWaylandState {
     pub xwm: Option<X11Wm>,
-    pub display: Option<u32>,
+    pub display: u32,
     #[allow(unused)]
     xwayland: XWayland,
 }
@@ -74,14 +74,12 @@ impl State {
                         let mut xwayland_state =
                             data.state.common.xwayland_state.get_mut(&drm_node).unwrap();
                         xwayland_state.xwm = Some(wm);
-                        xwayland_state.display = Some(display);
                     }
                     XWaylandEvent::Exited => {
                         if let Some(mut xwayland_state) =
                             data.state.common.xwayland_state.remove(&drm_node)
                         {
                             xwayland_state.xwm = None;
-                            xwayland_state.display = None;
                         }
                     }
                 }) {
@@ -102,13 +100,13 @@ impl State {
                 }
             },
         ) {
-            Ok(_) => {
+            Ok(display) => {
                 self.common.xwayland_state.insert(
                     drm_node,
                     XWaylandState {
                         xwayland,
                         xwm: None,
-                        display: None,
+                        display,
                     },
                 );
             }
