@@ -111,6 +111,7 @@ impl<P: Program> IcedProgram for ProgramWrapper<P> {
 
 struct IcedElementInternal<P: Program + Send + 'static> {
     // draw buffer
+    outputs: Vec<Output>,
     buffers: HashMap<OrderedFloat<f64>, (MemoryRenderBuffer, bool)>,
 
     // state
@@ -180,6 +181,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             .ok();
 
         let mut internal = IcedElementInternal {
+            outputs: Vec::new(),
             buffers: HashMap::new(),
             size,
             cursor_pos: None,
@@ -471,12 +473,12 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
                 ),
             );
         }
+        internal.outputs.push(output.clone());
     }
 
     fn output_leave(&self, output: &Output) {
-        let mut internal = self.0.lock().unwrap();
-        let scale = output.current_scale().fractional_scale();
-        internal.buffers.remove(&OrderedFloat(scale));
+        self.0.lock().unwrap().outputs.retain(|o| o != output);
+        self.refresh();
     }
 
     fn z_index(&self) -> u8 {
@@ -484,7 +486,38 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
         RenderZindex::Shell as u8
     }
 
-    fn refresh(&self) {}
+    fn refresh(&self) {
+        let mut internal = self.0.lock().unwrap();
+        // makes partial borrows easier
+        let internal_ref = &mut *internal;
+        internal_ref.buffers.retain(|scale, _| {
+            internal_ref
+                .outputs
+                .iter()
+                .any(|o| o.current_scale().fractional_scale() == **scale)
+        });
+        for scale in internal_ref
+            .outputs
+            .iter()
+            .map(|o| OrderedFloat(o.current_scale().fractional_scale()))
+            .filter(|scale| !internal_ref.buffers.contains_key(scale))
+            .collect::<Vec<_>>()
+            .into_iter()
+        {
+            let buffer_size = internal_ref
+                .size
+                .to_f64()
+                .to_buffer(*scale, Transform::Normal)
+                .to_i32_round();
+            internal_ref.buffers.insert(
+                scale,
+                (
+                    MemoryRenderBuffer::new(buffer_size, 1, Transform::Normal, None),
+                    true,
+                ),
+            );
+        }
+    }
 }
 
 impl<P, R> AsRenderElements<R> for IcedElement<P>
@@ -504,18 +537,20 @@ where
         let mut internal = self.0.lock().unwrap();
 
         let _ = internal.update(false); // TODO
-                                        // makes partial borrows easier
+
+        // makes partial borrows easier
         let internal_ref = &mut *internal;
         if let Some((buffer, ref mut needs_redraw)) =
             internal_ref.buffers.get_mut(&OrderedFloat(scale.x))
         {
+            let size = internal_ref
+                .size
+                .to_f64()
+                .to_buffer(scale.x, Transform::Normal)
+                .to_i32_round();
+
             if *needs_redraw {
                 let renderer = &mut internal_ref.renderer;
-                let size = internal_ref
-                    .size
-                    .to_f64()
-                    .to_buffer(scale.x, Transform::Normal)
-                    .to_i32_round();
                 let state_ref = &internal_ref.state;
                 buffer
                     .render()
@@ -565,8 +600,11 @@ where
                 location.to_f64(),
                 &buffer,
                 None,
-                None,
-                None,
+                Some(Rectangle::from_loc_and_size(
+                    (0., 0.),
+                    size.to_f64().to_logical(1.0, Transform::Normal),
+                )),
+                Some(internal_ref.size),
                 slog_scope::logger(),
             ) {
                 return vec![C::from(buffer)];

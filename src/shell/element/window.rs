@@ -128,7 +128,7 @@ impl CosmicWindow {
             );
             let size = (
                 geo.size.w,
-                geo.size.h - if p.has_ssd() { SSD_HEIGHT } else { 0 },
+                std::cmp::max(geo.size.h - if p.has_ssd() { SSD_HEIGHT } else { 0 }, 0),
             );
             p.window
                 .set_geometry(Rectangle::from_loc_and_size(loc, size));
@@ -233,6 +233,8 @@ impl Program for CosmicWindowInternal {
         } else {
             target.clear(SolidSource::from_unpremultiplied_argb(u8::MAX, 39, 39, 39));
         }
+
+        target.pop_clip();
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
@@ -246,7 +248,27 @@ impl Program for CosmicWindowInternal {
 
     fn foreground(&self, target: &mut DrawTarget<&mut [u32]>) {
         if !self.window.is_activated() {
+            let radius = 8.;
             let (w, h) = (target.width() as f32, target.height() as f32);
+
+            if !(self.window.is_maximized() || self.window.is_fullscreen()) {
+                let mut pb = PathBuilder::new();
+                pb.move_to(0., h); // lower-left
+
+                // upper-left rounded corner
+                pb.line_to(0., radius);
+                pb.quad_to(0., 0., radius, 0.);
+
+                // upper-right rounded corner
+                pb.line_to(w - radius, 0.);
+                pb.quad_to(w, 0., w, radius);
+
+                pb.line_to(w, h); // lower-right
+
+                let path = pb.finish();
+                target.push_clip(&path);
+            }
+
             let mut options = DrawOptions::new();
             options.alpha = 0.4;
             target.fill_rect(
@@ -318,6 +340,7 @@ impl SpaceElement for CosmicWindow {
         self.0.with_program(|p| SpaceElement::z_index(&p.window))
     }
     fn refresh(&self) {
+        SpaceElement::refresh(&self.0);
         self.0.with_program(|p| SpaceElement::refresh(&p.window))
     }
 }

@@ -946,6 +946,9 @@ impl TilingLayout {
                 }
             }
         }
+        for (_, mapped, _) in self.mapped() {
+            mapped.refresh();
+        }
         TilingLayout::update_space_positions(&mut self.trees, self.gaps);
     }
 
