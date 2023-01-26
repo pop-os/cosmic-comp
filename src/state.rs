@@ -28,7 +28,7 @@ use smithay::{
         update_surface_primary_scanout_output, with_surfaces_surface_tree,
         OutputPresentationFeedback,
     },
-    input::{Seat, SeatState},
+    input::{pointer::CursorImageStatus, Seat, SeatState},
     output::{Mode as OutputMode, Output, Scale},
     reexports::{
         calloop::{LoopHandle, LoopSignal},
@@ -39,7 +39,7 @@ use smithay::{
             Display, DisplayHandle,
         },
     },
-    utils::{Clock, Monotonic},
+    utils::{Clock, IsAlive, Monotonic},
     wayland::{
         compositor::CompositorState,
         data_device::DataDeviceState,
@@ -360,6 +360,34 @@ impl Common {
     pub fn send_frames(&self, output: &Output, render_element_states: &RenderElementStates) {
         let time = self.clock.now();
         let throttle = Some(Duration::from_secs(1));
+
+        for seat in self.seats.iter() {
+            if &seat.active_output() == output {
+                let cursor_status = seat
+                    .user_data()
+                    .get::<RefCell<CursorImageStatus>>()
+                    .map(|cell| {
+                        let mut cursor_status = cell.borrow_mut();
+                        if let CursorImageStatus::Surface(ref surface) = *cursor_status {
+                            if !surface.alive() {
+                                *cursor_status = CursorImageStatus::Default;
+                            }
+                        }
+                        cursor_status.clone()
+                    })
+                    .unwrap_or(CursorImageStatus::Default);
+
+                if let CursorImageStatus::Surface(wl_surface) = cursor_status {
+                    send_frames_surface_tree(
+                        &wl_surface,
+                        output,
+                        time,
+                        Some(Duration::ZERO),
+                        |_, _| None,
+                    )
+                }
+            }
+        }
 
         let active = self.shell.active_space(output);
         active.mapped().for_each(|mapped| {
