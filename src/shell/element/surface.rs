@@ -451,7 +451,9 @@ impl KeyboardTarget<crate::state::State> for CosmicSurface {
             CosmicSurface::Wayland(window) => {
                 KeyboardTarget::enter(window, seat, data, keys, serial)
             }
-            CosmicSurface::X11(surface) => KeyboardTarget::enter(surface, seat, data, keys, serial),
+            CosmicSurface::X11(surface) => {
+                KeyboardTarget::enter(surface, seat, data, vec![], serial)
+            }
             _ => unreachable!(),
         }
     }
