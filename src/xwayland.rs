@@ -2,13 +2,13 @@ use std::ffi::OsString;
 
 use crate::{
     backend::render::cursor::Cursor,
-    shell::{CosmicSurface, Ordering, Shell},
+    shell::{CosmicSurface, Shell},
     state::{Data, State},
     utils::prelude::*,
     wayland::{handlers::screencopy::PendingScreencopyBuffers, protocols::screencopy::SessionType},
 };
 use smithay::{
-    backend::{drm::DrmNode, renderer::element::Id},
+    backend::drm::DrmNode,
     desktop::space::SpaceElement,
     reexports::x11rb::protocol::xproto::Window as X11Window,
     utils::{Logical, Point, Rectangle, Size},
@@ -190,7 +190,7 @@ impl XwmHandler for Data {
             .shell
             .override_redirect_windows
             .iter()
-            .any(|or| or.surface == window)
+            .any(|or| or == &window)
         {
             return;
         }
@@ -203,7 +203,7 @@ impl XwmHandler for Data {
                 .common
                 .shell
                 .override_redirect_windows
-                .retain(|or| or.surface != window);
+                .retain(|or| or != &window);
         } else if let Some((element, space)) = self
             .state
             .common
@@ -326,54 +326,20 @@ impl XwmHandler for Data {
         above: Option<X11Window>,
     ) {
         if window.is_override_redirect() {
-            let ordering = match above {
-                None => Ordering::Below,
-                Some(id) => self
-                    .state
-                    .common
-                    .shell
-                    .override_redirect_windows
-                    .iter()
-                    .find_map(|or| {
-                        if or.surface.window_id() == id {
-                            or.surface
-                                .wl_surface()
-                                .map(|s| Id::from_wayland_resource(&s))
-                        } else {
-                            None
-                        }
-                    })
-                    .or_else(|| {
-                        self.state
-                            .common
-                            .shell
-                            .workspaces
-                            .spaces()
-                            .flat_map(|s| s.windows())
-                            .find_map(|w| {
-                                if let CosmicSurface::X11(w) = w {
-                                    if w.window_id() == id || w.mapped_window_id() == Some(id) {
-                                        return w
-                                            .wl_surface()
-                                            .map(|s| Id::from_wayland_resource(&s));
-                                    }
-                                }
-                                None
-                            })
-                    })
-                    .map(Ordering::AboveWindow)
-                    .unwrap_or(Ordering::Above),
-            };
-            if let Some(or) = self
-                .state
-                .common
-                .shell
-                .override_redirect_windows
-                .iter_mut()
-                .find(|or| or.surface == window)
-            {
-                or.above = ordering;
+            if let Some(id) = above {
+                let or_windows = &mut self.state.common.shell.override_redirect_windows;
+                if let Some(own_pos) = or_windows.iter().position(|or| or == &window) {
+                    let compare_pos = or_windows
+                        .iter()
+                        .position(|or| or.window_id() == id)
+                        .unwrap_or(0);
+                    if compare_pos > own_pos {
+                        let this = or_windows.remove(own_pos);
+                        or_windows.insert(compare_pos, this);
+                    }
+                }
             }
+
             let geo = window.geometry();
             for (output, overlap) in self.state.common.shell.outputs().cloned().map(|o| {
                 let intersection = o.geometry().intersection(geo);

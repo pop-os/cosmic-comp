@@ -8,7 +8,7 @@ use crate::{
             floating::SeatMoveGrabState,
             tiling::{Direction, FocusResult},
         },
-        Ordering, OverrideRedirectWindow, Workspace,
+        Workspace,
     }, // shell::grabs::SeatMoveGrabState
     state::Common,
     utils::prelude::*,
@@ -16,12 +16,9 @@ use crate::{
 };
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
 use smithay::{
-    backend::{
-        input::{
-            Axis, AxisSource, Device, DeviceCapability, InputBackend, InputEvent, KeyState,
-            PointerAxisEvent,
-        },
-        renderer::element::Id,
+    backend::input::{
+        Axis, AxisSource, Device, DeviceCapability, InputBackend, InputEvent, KeyState,
+        PointerAxisEvent,
     },
     desktop::{layer_map_for_output, space::SpaceElement, WindowSurfaceType},
     input::{
@@ -36,6 +33,7 @@ use smithay::{
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat, seat::WaylandFocus,
         shell::wlr_layer::Layer as WlrLayer,
     },
+    xwayland::X11Surface,
 };
 
 use std::{cell::RefCell, collections::HashMap};
@@ -932,7 +930,7 @@ impl State {
         relative_pos: Point<f64, Logical>,
         output: &Output,
         output_geo: Rectangle<i32, Logical>,
-        override_redirect_windows: &[OverrideRedirectWindow],
+        override_redirect_windows: &[X11Surface],
         workspace: &Workspace,
     ) -> Option<(PointerFocusTarget, Point<i32, Logical>)> {
         let layers = layer_map_for_output(output);
@@ -945,6 +943,12 @@ impl State {
                 {
                     return Some((layer.clone().into(), output_geo.loc + layer_loc));
                 }
+            }
+            if let Some(or) = override_redirect_windows
+                .iter()
+                .find(|or| or.is_in_input_region(&(global_pos - or.geometry().loc.to_f64())))
+            {
+                return Some((or.clone().into(), or.geometry().loc));
             }
             Some((window.clone().into(), output_geo.loc))
         } else {
@@ -960,53 +964,17 @@ impl State {
                     return Some((layer.clone().into(), output_geo.loc + layer_loc));
                 }
             }
-            if let Some(or) = override_redirect_windows.iter().find(|or| {
-                or.above == Ordering::Above
-                    && or
-                        .surface
-                        .is_in_input_region(&(global_pos - or.surface.geometry().loc.to_f64()))
-            }) {
-                return Some((or.surface.clone().into(), or.surface.geometry().loc));
+            if let Some(or) = override_redirect_windows
+                .iter()
+                .find(|or| or.is_in_input_region(&(global_pos - or.geometry().loc.to_f64())))
+            {
+                return Some((or.clone().into(), or.geometry().loc));
             }
             if let Some((mapped, loc)) = workspace.element_under(relative_pos) {
-                let filter = workspace
-                    .mapped()
-                    .skip_while(|m| *m != mapped)
-                    .collect::<Vec<_>>();
-                if let Some(or) = override_redirect_windows
-                    .iter()
-                    .filter(|or| {
-                        if let Ordering::AboveWindow(w) = &or.above {
-                            !filter.iter().any(|f| {
-                                f.wl_surface()
-                                    .map(|s| Id::from_wayland_resource(&s))
-                                    .as_ref()
-                                    == Some(&w)
-                            })
-                        } else {
-                            false
-                        }
-                    })
-                    .find(|or| {
-                        or.surface
-                            .is_in_input_region(&(global_pos - or.surface.geometry().loc.to_f64()))
-                    })
-                {
-                    return Some((or.surface.clone().into(), or.surface.geometry().loc));
-                }
-
                 return Some((
                     mapped.clone().into(),
                     loc + (global_pos - relative_pos).to_i32_round(),
                 ));
-            }
-            if let Some(or) = override_redirect_windows.iter().find(|or| {
-                or.above == Ordering::Below
-                    && or
-                        .surface
-                        .is_in_input_region(&(global_pos - or.surface.geometry().loc.to_f64()))
-            }) {
-                return Some((or.surface.clone().into(), or.surface.geometry().loc));
             }
             if let Some(layer) = layers
                 .layer_under(WlrLayer::Bottom, relative_pos)

@@ -421,7 +421,7 @@ impl Common {
         }
 
         self.shell.override_redirect_windows.iter().for_each(|or| {
-            if let Some(wl_surface) = or.surface.wl_surface() {
+            if let Some(wl_surface) = or.wl_surface() {
                 with_surfaces_surface_tree(&wl_surface, |surface, states| {
                     update_surface_primary_scanout_output(
                         surface,
@@ -475,7 +475,7 @@ impl Common {
         });
 
         self.shell.override_redirect_windows.iter().for_each(|or| {
-            if let Some(wl_surface) = or.surface.wl_surface() {
+            if let Some(wl_surface) = or.wl_surface() {
                 take_presentation_feedback_surface_tree(
                     &wl_surface,
                     &mut output_presentation_feedback,

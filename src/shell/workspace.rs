@@ -29,6 +29,7 @@ use smithay::{
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Size},
     wayland::{seat::WaylandFocus, shell::wlr_layer::Layer},
+    xwayland::X11Surface,
 };
 use std::collections::HashMap;
 
@@ -36,7 +37,7 @@ use super::{
     element::CosmicMapped,
     focus::{FocusStack, FocusStackMut},
     grabs::{ResizeEdge, ResizeGrab},
-    CosmicMappedRenderElement, CosmicSurface, Ordering,
+    CosmicMappedRenderElement, CosmicSurface,
 };
 
 #[derive(Debug)]
@@ -395,7 +396,7 @@ impl Workspace {
         &self,
         renderer: &mut R,
         output: &Output,
-        override_redirect_windows: &[super::OverrideRedirectWindow],
+        override_redirect_windows: &[X11Surface],
         xwm_state: impl Iterator<Item = &'a mut XWaylandState>,
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
     where
@@ -433,19 +434,12 @@ impl Workspace {
             render_elements.extend(
                 override_redirect_windows
                     .iter()
-                    .filter(|or| {
-                        or.above != Ordering::Below
-                            && or
-                                .surface
-                                .geometry()
-                                .intersection(output.geometry())
-                                .is_some()
-                    })
+                    .filter(|or| or.geometry().intersection(output.geometry()).is_some())
                     .flat_map(|or| {
                         AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
-                            &or.surface,
+                            or,
                             renderer,
-                            (or.surface.geometry().loc - output.geometry().loc)
+                            (or.geometry().loc - output.geometry().loc)
                                 .to_physical_precise_round(output_scale),
                             Scale::from(output_scale),
                         )
@@ -503,25 +497,16 @@ impl Workspace {
                 lower
             };
 
-            let mut window_elements = Vec::new();
-
             // OR windows above all
-            window_elements.extend(
+            render_elements.extend(
                 override_redirect_windows
                     .iter()
-                    .filter(|or| {
-                        or.above == Ordering::Above
-                            && or
-                                .surface
-                                .geometry()
-                                .intersection(output.geometry())
-                                .is_some()
-                    })
+                    .filter(|or| or.geometry().intersection(output.geometry()).is_some())
                     .flat_map(|or| {
                         AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
-                            &or.surface,
+                            or,
                             renderer,
-                            (or.surface.geometry().loc - output.geometry().loc)
+                            (or.geometry().loc - output.geometry().loc)
                                 .to_physical_precise_round(output_scale),
                             Scale::from(output_scale),
                         )
@@ -529,7 +514,7 @@ impl Workspace {
             );
 
             // floating surfaces
-            window_elements.extend(
+            render_elements.extend(
                 self.floating_layer
                     .render_output::<R>(renderer, output)?
                     .into_iter()
@@ -537,66 +522,16 @@ impl Workspace {
             );
 
             //tiling surfaces
-            window_elements.extend(
+            render_elements.extend(
                 self.tiling_layer
                     .render_output::<R>(renderer, output)?
                     .into_iter()
                     .map(WorkspaceRenderElement::from),
             );
 
-            // Sort other OR windows in between
-            for or in override_redirect_windows.iter().filter(|or| {
-                matches!(or.above, Ordering::AboveWindow(_))
-                    && or
-                        .surface
-                        .geometry()
-                        .intersection(output.geometry())
-                        .is_some()
-            }) {
-                let pos = window_elements
-                    .iter()
-                    .position(|w| Ordering::AboveWindow(w.id().clone()) == or.above)
-                    .unwrap_or(0);
-                for element in AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
-                    &or.surface,
-                    renderer,
-                    (or.surface.geometry().loc - output.geometry().loc)
-                        .to_physical_precise_round(output_scale),
-                    Scale::from(output_scale),
-                )
-                .into_iter()
-                .rev()
-                {
-                    window_elements.insert(pos, element);
-                }
-            }
-
-            // OR windows below all
-            window_elements.extend(
-                override_redirect_windows
-                    .iter()
-                    .filter(|or| {
-                        or.above == Ordering::Below
-                            && or
-                                .surface
-                                .geometry()
-                                .intersection(output.geometry())
-                                .is_some()
-                    })
-                    .flat_map(|or| {
-                        AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
-                            &or.surface,
-                            renderer,
-                            (or.surface.geometry().loc - output.geometry().loc)
-                                .to_physical_precise_round(output_scale),
-                            Scale::from(output_scale),
-                        )
-                    }),
-            );
-
             for xwm in xwm_state.flat_map(|state| state.xwm.as_mut()) {
                 if let Err(err) =
-                    xwm.update_stacking_order_upwards(window_elements.iter().rev().map(|e| e.id()))
+                    xwm.update_stacking_order_upwards(render_elements.iter().rev().map(|e| e.id()))
                 {
                     slog_scope::warn!(
                         "Failed to update Xwm ({:?}) stacking order: {}",
@@ -605,8 +540,6 @@ impl Workspace {
                     );
                 }
             }
-
-            render_elements.extend(window_elements.into_iter());
 
             // bottom and background layer surfaces
             {

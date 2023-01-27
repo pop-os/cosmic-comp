@@ -3,7 +3,6 @@ use std::{cell::RefCell, collections::HashMap};
 
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State as WState;
 use smithay::{
-    backend::renderer::element::Id,
     desktop::{
         layer_map_for_output, space::SpaceElement, LayerSurface, PopupManager, WindowSurfaceType,
     },
@@ -61,7 +60,7 @@ pub struct Shell {
     pub tiling_enabled: bool,
     pub pending_windows: Vec<(CosmicSurface, Seat<State>)>,
     pub pending_layers: Vec<(LayerSurface, Output, Seat<State>)>,
-    pub override_redirect_windows: Vec<OverrideRedirectWindow>,
+    pub override_redirect_windows: Vec<X11Surface>,
 
     // wayland_state
     pub layer_shell_state: WlrLayerShellState,
@@ -69,19 +68,6 @@ pub struct Shell {
     pub toplevel_management_state: ToplevelManagementState,
     pub xdg_shell_state: XdgShellState,
     pub workspace_state: WorkspaceState<State>,
-}
-
-#[derive(Debug)]
-pub struct OverrideRedirectWindow {
-    pub surface: X11Surface,
-    pub above: Ordering,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Ordering {
-    Above,
-    AboveWindow(Id),
-    Below,
 }
 
 #[derive(Debug)]
@@ -891,8 +877,8 @@ impl Shell {
                 self.outputs()
                     .filter(|o| {
                         self.override_redirect_windows.iter().any(|or| {
-                            if or.surface.wl_surface().as_ref() == Some(surface) {
-                                or.surface.geometry().intersection(o.geometry()).is_some()
+                            if or.wl_surface().as_ref() == Some(surface) {
+                                or.geometry().intersection(o.geometry()).is_some()
                             } else {
                                 false
                             }
@@ -1038,11 +1024,10 @@ impl Shell {
             map.cleanup();
         }
 
-        self.override_redirect_windows
-            .retain(|or| or.surface.alive());
+        self.override_redirect_windows.retain(|or| or.alive());
         self.override_redirect_windows
             .iter()
-            .for_each(|or| or.surface.refresh());
+            .for_each(|or| or.refresh());
 
         self.toplevel_info_state
             .refresh(Some(&self.workspace_state));
@@ -1122,14 +1107,7 @@ impl Shell {
             window.output_enter(&output, overlap);
         }
 
-        state
-            .common
-            .shell
-            .override_redirect_windows
-            .push(OverrideRedirectWindow {
-                surface: window,
-                above: Ordering::Above,
-            });
+        state.common.shell.override_redirect_windows.push(window);
     }
 
     pub fn map_layer(state: &mut State, layer_surface: &LayerSurface) {
