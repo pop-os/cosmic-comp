@@ -92,5 +92,5 @@
     },
     workspace_mode: OutputBound,
     workspace_amount: Dynamic,
-    floating_default: false,
+    tiling_enabled: false,
 )

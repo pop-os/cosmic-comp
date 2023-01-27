@@ -58,7 +58,7 @@ pub struct Shell {
     pub popups: PopupManager,
     pub outputs: Vec<Output>,
     pub workspaces: WorkspaceMode,
-    pub floating_default: bool,
+    pub tiling_enabled: bool,
     pub pending_windows: Vec<(CosmicSurface, Seat<State>)>,
     pub pending_layers: Vec<(LayerSurface, Output, Seat<State>)>,
     pub override_redirect_windows: Vec<OverrideRedirectWindow>,
@@ -90,6 +90,7 @@ pub struct WorkspaceSet {
     amount: WorkspaceAmount,
     group: WorkspaceGroupHandle,
     idx: usize,
+    tiling_enabled: bool,
     pub(crate) workspaces: Vec<Workspace>,
 }
 
@@ -103,6 +104,7 @@ fn create_workspace(
     state: &mut WorkspaceUpdateGuard<'_, State>,
     group_handle: &WorkspaceGroupHandle,
     active: bool,
+    tiling: bool,
 ) -> Workspace {
     let workspace_handle = state.create_workspace(&group_handle).unwrap();
     if active {
@@ -112,7 +114,7 @@ fn create_workspace(
         &workspace_handle,
         [WorkspaceCapabilities::Activate].into_iter(),
     );
-    Workspace::new(workspace_handle)
+    Workspace::new(workspace_handle, tiling)
 }
 
 impl WorkspaceSet {
@@ -120,12 +122,13 @@ impl WorkspaceSet {
         state: &mut WorkspaceUpdateGuard<'_, State>,
         amount: WorkspaceAmount,
         idx: usize,
+        tiling_enabled: bool,
     ) -> WorkspaceSet {
         let group_handle = state.create_workspace_group();
 
         let workspaces = match amount {
             WorkspaceAmount::Dynamic => {
-                let workspace = create_workspace(state, &group_handle, true);
+                let workspace = create_workspace(state, &group_handle, true, tiling_enabled);
                 workspace_set_idx(state, 1, idx, &workspace.handle);
                 state.set_workspace_capabilities(
                     &workspace.handle,
@@ -135,7 +138,7 @@ impl WorkspaceSet {
             }
             WorkspaceAmount::Static(len) => (0..len)
                 .map(|i| {
-                    let workspace = create_workspace(state, &group_handle, i == 0);
+                    let workspace = create_workspace(state, &group_handle, i == 0, tiling_enabled);
                     workspace_set_idx(state, i + 1, idx, &workspace.handle);
                     state.set_workspace_capabilities(
                         &workspace.handle,
@@ -151,6 +154,7 @@ impl WorkspaceSet {
             amount,
             group: group_handle,
             idx,
+            tiling_enabled,
             workspaces,
         }
     }
@@ -188,7 +192,8 @@ impl WorkspaceSet {
 
         // add empty at the end, if necessary
         if self.workspaces.last().unwrap().windows().next().is_some() {
-            let mut workspace = create_workspace(&mut state, &self.group, false);
+            let mut workspace =
+                create_workspace(&mut state, &self.group, false, self.tiling_enabled);
             workspace_set_idx(
                 &mut state,
                 self.workspaces.len() as u8 + 1,
@@ -271,7 +276,8 @@ impl WorkspaceSet {
             // add empty ones
             let outputs = outputs.collect::<Vec<_>>();
             while amount > self.workspaces.len() {
-                let mut workspace = create_workspace(&mut state, &self.group, false);
+                let mut workspace =
+                    create_workspace(&mut state, &self.group, false, self.tiling_enabled);
                 workspace_set_idx(
                     &mut state,
                     self.workspaces.len() as u8 + 1,
@@ -296,6 +302,15 @@ impl WorkspaceSet {
             workspace_set_idx(state, i as u8 + 1, idx, &workspace.handle);
         }
     }
+
+    fn update_tiling_status(&mut self, seat: &Seat<State>, tiling_enabled: bool) {
+        self.tiling_enabled = tiling_enabled;
+        for workspace in &mut self.workspaces {
+            if workspace.tiling_enabled != tiling_enabled {
+                workspace.toggle_tiling(seat);
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -309,10 +324,11 @@ impl WorkspaceMode {
         config: crate::config::WorkspaceMode,
         amount: WorkspaceAmount,
         state: &mut WorkspaceUpdateGuard<'_, State>,
+        tiling_enabled: bool,
     ) -> WorkspaceMode {
         match config {
             crate::config::WorkspaceMode::Global => {
-                WorkspaceMode::Global(WorkspaceSet::new(state, amount, 0))
+                WorkspaceMode::Global(WorkspaceSet::new(state, amount, 0, tiling_enabled))
             }
             crate::config::WorkspaceMode::OutputBound => {
                 WorkspaceMode::OutputBound(HashMap::new(), amount)
@@ -412,6 +428,17 @@ impl WorkspaceMode {
             }
         }
     }
+
+    pub fn update_tiling_status(&mut self, seat: &Seat<State>, tiling: bool) {
+        match self {
+            WorkspaceMode::Global(set) => set.update_tiling_status(seat, tiling),
+            WorkspaceMode::OutputBound(sets, _) => {
+                for set in sets.values_mut() {
+                    set.update_tiling_status(seat, tiling)
+                }
+            }
+        }
+    }
 }
 
 impl Shell {
@@ -439,18 +466,19 @@ impl Shell {
             |_| true,
         );
 
+        let tiling_enabled = config.static_conf.tiling_enabled;
         let mode = WorkspaceMode::new(
             config.static_conf.workspace_mode,
             config.static_conf.workspace_amount,
             &mut workspace_state.update(),
+            tiling_enabled,
         );
-        let floating_default = config.static_conf.floating_default;
 
         Shell {
             popups: PopupManager::new(None),
             outputs: Vec::new(),
             workspaces: mode,
-            floating_default,
+            tiling_enabled,
 
             pending_windows: Vec::new(),
             pending_layers: Vec::new(),
@@ -476,7 +504,8 @@ impl Shell {
             WorkspaceMode::OutputBound(sets, amount) => {
                 // TODO: Restore previously assigned workspaces, if possible!
                 if !sets.contains_key(output) {
-                    let set = WorkspaceSet::new(&mut state, *amount, sets.len());
+                    let set =
+                        WorkspaceSet::new(&mut state, *amount, sets.len(), self.tiling_enabled);
                     state.add_group_output(&set.group, &output);
                     sets.insert(output.clone(), set);
                 }
@@ -521,6 +550,9 @@ impl Shell {
 
         match &mut self.workspaces {
             WorkspaceMode::OutputBound(sets, _) => {
+                // TODO:
+                // If amount::static merge them instead of appending
+
                 if let Some(set) = sets.remove(output) {
                     // TODO: Heuristic which output to move to.
                     // It is supposed to be the *most* internal, we just pick the first one for now
@@ -599,7 +631,12 @@ impl Shell {
                     };
 
                 // in this case we have to merge our sets, preserving placing of windows as nicely as possible
-                let mut new_set = WorkspaceSet::new(&mut state, WorkspaceAmount::Static(0), 0);
+                let mut new_set = WorkspaceSet::new(
+                    &mut state,
+                    WorkspaceAmount::Static(0),
+                    0,
+                    self.tiling_enabled,
+                );
                 for output in &self.outputs {
                     state.add_group_output(&new_set.group, output);
                 }
@@ -660,7 +697,7 @@ impl Shell {
                     );
                     workspace_set_idx(&mut state, i as u8 + 1, 0, &workspace_handle);
 
-                    let mut new_workspace = Workspace::new(workspace_handle);
+                    let mut new_workspace = Workspace::new(workspace_handle, self.tiling_enabled);
                     for output in self.outputs.iter() {
                         new_workspace.map_output(output, output.current_location());
                     }
@@ -705,7 +742,12 @@ impl Shell {
                 // split workspaces apart, preserving window positions relative to their outputs
                 let mut sets = HashMap::new();
                 for (i, output) in self.outputs.iter().enumerate() {
-                    let set = WorkspaceSet::new(&mut state, WorkspaceAmount::Static(0), i);
+                    let set = WorkspaceSet::new(
+                        &mut state,
+                        WorkspaceAmount::Static(0),
+                        i,
+                        self.tiling_enabled,
+                    );
                     state.add_group_output(&set.group, output);
                     sets.insert(output.clone(), set);
                 }
@@ -770,7 +812,7 @@ impl Shell {
                                 .filter(|(key, _)| *key == output)
                                 .map(|(o, w)| (o.clone(), w.clone()))
                                 .collect(),
-                            ..Workspace::new(new_workspace_handle)
+                            ..Workspace::new(new_workspace_handle, true)
                         };
                         for toplevel in new_workspace.windows() {
                             self.toplevel_info_state
@@ -1036,7 +1078,7 @@ impl Shell {
         {
             mapped.set_debug(state.common.egui.active);
         }
-        if layout::should_be_floating(&window) || state.common.shell.floating_default {
+        if layout::should_be_floating(&window) || !workspace.tiling_enabled {
             workspace.floating_layer.map(mapped.clone(), &seat, None);
         } else {
             let focus_stack = workspace.focus_stack.get(&seat);

@@ -61,11 +61,11 @@ pub enum ManagedState {
 }
 
 impl Workspace {
-    pub fn new(handle: WorkspaceHandle) -> Workspace {
+    pub fn new(handle: WorkspaceHandle, tiling_enabled: bool) -> Workspace {
         Workspace {
             tiling_layer: TilingLayout::new(),
             floating_layer: FloatingLayout::new(),
-            tiling_enabled: true,
+            tiling_enabled,
             fullscreen: HashMap::new(),
             handle,
             focus_stack: FocusStacks::default(),
