@@ -37,7 +37,6 @@ impl XdgShellHandler for State {
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         let seat = self.common.last_active_seat().clone();
         let window = CosmicSurface::Wayland(Window::new(surface));
-        self.common.shell.toplevel_info_state.new_toplevel(&window);
         self.common.shell.pending_windows.push((window, seat));
         // We will position the window after the first commit, when we know its size hints
     }

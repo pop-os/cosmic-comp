@@ -3282,7 +3282,7 @@ checksum = "a507befe795404456341dfab10cef66ead4c041f62b8b11bbb92bffe5d0953e0"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/pop-os/smithay?rev=217e0a4114#217e0a41148ad073e2b34fc8861c0532828e941f"
+source = "git+https://github.com/pop-os/smithay?rev=406a40d6ec#406a40d6ec09723d8f1c73f3b7c9d62494cdbd13"
 dependencies = [
  "appendlist",
  "bitflags",

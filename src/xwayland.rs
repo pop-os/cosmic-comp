@@ -94,6 +94,7 @@ impl State {
             self.common.event_loop_handle.clone(),
             None,
             std::iter::empty::<(OsString, OsString)>(),
+            //vec![("WAYLAND_DEBUG", "client")].into_iter(),
             |map| {
                 if let Some(node) = drm_node {
                     map.insert_if_missing(|| node);
@@ -141,31 +142,45 @@ impl XwmHandler for Data {
                 err
             );
         }
+
+        let surface = CosmicSurface::X11(window.clone());
         if self
             .state
             .common
             .shell
-            .element_for_surface(&CosmicSurface::X11(window.clone()))
+            .element_for_surface(&surface)
             .is_some()
         {
             return;
         }
 
-        let window = CosmicSurface::X11(window);
-        self.state
-            .common
-            .shell
-            .toplevel_info_state
-            .new_toplevel(&window);
-
         let seat = self.state.common.last_active_seat().clone();
-        let output = seat.active_output();
         self.state
             .common
             .shell
             .pending_windows
-            .push((window.clone(), seat));
-        Shell::map_window(&mut self.state, &window, &output);
+            .push((surface, seat));
+    }
+
+    fn map_window_notify(&mut self, _xwm: XwmId, surface: X11Surface) {
+        if let Some((window, seat)) = self
+            .state
+            .common
+            .shell
+            .pending_windows
+            .iter()
+            .find(|(window, _)| {
+                if let CosmicSurface::X11(window) = window {
+                    window == &surface
+                } else {
+                    false
+                }
+            })
+            .cloned()
+        {
+            let output = seat.active_output();
+            Shell::map_window(&mut self.state, &window, &output);
+        }
     }
 
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, window: X11Surface) {

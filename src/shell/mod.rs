@@ -1059,6 +1059,7 @@ impl Shell {
         let (window, seat) = state.common.shell.pending_windows.remove(pos);
 
         let workspace = state.common.shell.workspaces.active_mut(output);
+        state.common.shell.toplevel_info_state.new_toplevel(&window);
         state
             .common
             .shell
