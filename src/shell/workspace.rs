@@ -116,6 +116,11 @@ impl Workspace {
         if was_floating || was_tiling {
             assert!(was_floating != was_tiling);
         }
+
+        if mapped.is_maximized() || mapped.is_fullscreen() {
+            self.unmaximize_request(&mapped.active_window());
+        }
+
         self.focus_stack
             .0
             .values_mut()
