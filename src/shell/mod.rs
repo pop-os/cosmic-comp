@@ -531,6 +531,13 @@ impl Shell {
             return;
         }
 
+        {
+            let map = layer_map_for_output(output);
+            for surface in map.layers() {
+                surface.layer_surface().send_close();
+            }
+        }
+
         let mut state = self.workspace_state.update();
         self.outputs.retain(|o| o != output);
 
