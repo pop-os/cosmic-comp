@@ -178,6 +178,18 @@ pub fn fps_ui(
                                 plot_ui.bar_chart(screencopy_chart);
                                 plot_ui.bar_chart(display_chart);
                             });
+
+                        ui.separator();
+                        ui.label(egui::RichText::new("Input States").heading());
+                        for (num, seat) in state.seats().enumerate() {
+                            ui.label(egui::RichText::new(format!("\tseat-{}", num)).strong());
+                            if let Some(ptr) = seat.get_pointer() {
+                                ui.label(egui::RichText::new(format!("{:#?}", ptr)).code());
+                            }
+                            if let Some(kbd) = seat.get_keyboard() {
+                                ui.label(egui::RichText::new(format!("{:#?}", kbd)).code());
+                            }
+                        }
                     }
                 });
         },
