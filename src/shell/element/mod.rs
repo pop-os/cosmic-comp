@@ -16,7 +16,7 @@ use smithay::{
     desktop::{space::SpaceElement, PopupManager, WindowSurfaceType},
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
-        pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget},
+        pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget, RelativeMotionEvent},
         Seat,
     },
     output::Output,
@@ -570,6 +570,13 @@ impl PointerTarget<State> for CosmicMapped {
         match &self.element {
             CosmicMappedInternal::Stack(s) => PointerTarget::motion(s, seat, data, event),
             CosmicMappedInternal::Window(w) => PointerTarget::motion(w, seat, data, event),
+            _ => {}
+        }
+    }
+    fn relative_motion(&self, seat: &Seat<State>, data: &mut State, event: &RelativeMotionEvent) {
+        match &self.element {
+            CosmicMappedInternal::Stack(s) => PointerTarget::relative_motion(s, seat, data, event),
+            CosmicMappedInternal::Window(w) => PointerTarget::relative_motion(w, seat, data, event),
             _ => {}
         }
     }

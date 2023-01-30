@@ -21,7 +21,7 @@ use smithay::{
     desktop::space::SpaceElement,
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
-        pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget},
+        pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget, RelativeMotionEvent},
         Seat,
     },
     output::Output,
@@ -489,6 +489,15 @@ impl PointerTarget<State> for CosmicStack {
                 _ => {}
             }
         }
+    }
+
+    fn relative_motion(&self, seat: &Seat<State>, data: &mut State, event: &RelativeMotionEvent) {
+        self.0.with_program(|p| {
+            if p.current_focus() == Focus::Window {
+                let window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
+                window.relative_motion(seat, data, event)
+            }
+        })
     }
 
     fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {

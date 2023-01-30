@@ -40,7 +40,7 @@ use smithay::{
     desktop::space::{RenderZindex, SpaceElement},
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
-        pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget},
+        pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget, RelativeMotionEvent},
         Seat,
     },
     output::Output,
@@ -306,6 +306,14 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
             .queue_event(Event::Mouse(MouseEvent::CursorMoved { position }));
         internal.cursor_pos = Some(event.location);
         let _ = internal.update(true); // TODO
+    }
+
+    fn relative_motion(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: &RelativeMotionEvent,
+    ) {
     }
 
     fn button(

@@ -25,7 +25,7 @@ use smithay::{
     desktop::space::SpaceElement,
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
-        pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget},
+        pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget, RelativeMotionEvent},
         Seat,
     },
     output::Output,
@@ -466,6 +466,14 @@ impl PointerTarget<State> for CosmicWindow {
                 _ => {}
             };
         }
+    }
+
+    fn relative_motion(&self, seat: &Seat<State>, data: &mut State, event: &RelativeMotionEvent) {
+        self.0.with_program(|p| {
+            if !p.has_ssd() || p.current_focus() == Focus::Window {
+                PointerTarget::relative_motion(&p.window, seat, data, event)
+            }
+        })
     }
 
     fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {

@@ -10,7 +10,7 @@ use smithay::{
     desktop::{LayerSurface, PopupKind},
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
-        pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget},
+        pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget, RelativeMotionEvent},
         Seat,
     },
     output::WeakOutput,
@@ -107,7 +107,24 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::Popup(p) => {
                 PointerTarget::motion(p.wl_surface(), seat, data, event)
             }
-            PointerFocusTarget::OverrideRedirect(s) => PointerTarget::enter(s, seat, data, event),
+            PointerFocusTarget::OverrideRedirect(s) => PointerTarget::motion(s, seat, data, event),
+        }
+    }
+    fn relative_motion(&self, seat: &Seat<State>, data: &mut State, event: &RelativeMotionEvent) {
+        match self {
+            PointerFocusTarget::Element(w) => PointerTarget::relative_motion(w, seat, data, event),
+            PointerFocusTarget::Fullscreen(w) => {
+                PointerTarget::relative_motion(w, seat, data, event)
+            }
+            PointerFocusTarget::LayerSurface(l) => {
+                PointerTarget::relative_motion(l, seat, data, event)
+            }
+            PointerFocusTarget::Popup(p) => {
+                PointerTarget::relative_motion(p.wl_surface(), seat, data, event)
+            }
+            PointerFocusTarget::OverrideRedirect(s) => {
+                PointerTarget::relative_motion(s, seat, data, event)
+            }
         }
     }
     fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {

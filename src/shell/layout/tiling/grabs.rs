@@ -8,7 +8,7 @@ use id_tree::NodeId;
 use smithay::{
     input::pointer::{
         AxisFrame, ButtonEvent, GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab,
-        PointerInnerHandle,
+        PointerInnerHandle, RelativeMotionEvent,
     },
     output::{Output, WeakOutput},
     utils::{Logical, Point},
@@ -187,6 +187,17 @@ impl PointerGrab<State> for ResizeForkGrab {
                 }
             }
         }
+    }
+
+    fn relative_motion(
+        &mut self,
+        state: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        event: &RelativeMotionEvent,
+    ) {
+        // While the grab is active, no client has pointer focus
+        handle.relative_motion(state, None, event);
     }
 
     fn button(

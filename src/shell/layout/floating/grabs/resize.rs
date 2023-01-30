@@ -10,7 +10,7 @@ use smithay::{
     desktop::space::SpaceElement,
     input::pointer::{
         AxisFrame, ButtonEvent, GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab,
-        PointerInnerHandle,
+        PointerInnerHandle, RelativeMotionEvent,
     },
     utils::{IsAlive, Logical, Point, Rectangle, Size},
 };
@@ -105,6 +105,17 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
             self.last_window_size,
         ));
         self.window.configure();
+    }
+
+    fn relative_motion(
+        &mut self,
+        state: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        event: &RelativeMotionEvent,
+    ) {
+        // While the grab is active, no client has pointer focus
+        handle.relative_motion(state, None, event);
     }
 
     fn button(

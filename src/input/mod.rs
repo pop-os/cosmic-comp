@@ -23,7 +23,7 @@ use smithay::{
     desktop::{layer_map_for_output, space::SpaceElement, WindowSurfaceType},
     input::{
         keyboard::{keysyms, FilterResult, KeysymHandle, XkbConfig},
-        pointer::{AxisFrame, ButtonEvent, CursorImageStatus, MotionEvent},
+        pointer::{AxisFrame, ButtonEvent, CursorImageStatus, MotionEvent, RelativeMotionEvent},
         Seat, SeatState,
     },
     output::Output,
@@ -207,7 +207,7 @@ impl State {
                         slog_scope::trace!("key"; "keycode" => keycode, "state" => format!("{:?}", state));
 
                         let serial = SERIAL_COUNTER.next_serial();
-                        let time = Event::time(&event);
+                        let time = Event::time_msec(&event);
                         if let Some(action) = seat
                             .get_keyboard()
                             .unwrap()
@@ -337,13 +337,23 @@ impl State {
                                 session.cursor_info(seat, InputType::Pointer, geometry, offset);
                             }
                         }
-                        seat.get_pointer().unwrap().motion(
+                        let ptr = seat.get_pointer().unwrap();
+                        ptr.motion(
                             self,
-                            under,
+                            under.clone(),
                             &MotionEvent {
                                 location: position,
                                 serial,
-                                time: event.time(),
+                                time: event.time_msec(),
+                            },
+                        );
+                        ptr.relative_motion(
+                            self,
+                            under,
+                            &RelativeMotionEvent {
+                                delta: event.delta(),
+                                delta_unaccel: event.delta_unaccel(),
+                                utime: event.time(),
                             },
                         );
                         break;
@@ -393,7 +403,7 @@ impl State {
                             &MotionEvent {
                                 location: position,
                                 serial,
-                                time: event.time(),
+                                time: event.time_msec(),
                             },
                         );
 
@@ -492,7 +502,7 @@ impl State {
                                 button,
                                 state: event.state(),
                                 serial,
-                                time: event.time(),
+                                time: event.time_msec(),
                             },
                         );
                         break;
@@ -516,7 +526,8 @@ impl State {
                         let vertical_amount_discrete = event.amount_discrete(Axis::Vertical);
 
                         {
-                            let mut frame = AxisFrame::new(event.time()).source(event.source());
+                            let mut frame =
+                                AxisFrame::new(event.time_msec()).source(event.source());
                             if horizontal_amount != 0.0 {
                                 frame = frame.value(Axis::Horizontal, horizontal_amount);
                                 if let Some(discrete) = horizontal_amount_discrete {

@@ -537,6 +537,23 @@ impl PointerTarget<crate::state::State> for CosmicSurface {
         }
     }
 
+    fn relative_motion(
+        &self,
+        seat: &smithay::input::Seat<crate::state::State>,
+        data: &mut crate::state::State,
+        event: &smithay::input::pointer::RelativeMotionEvent,
+    ) {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                PointerTarget::relative_motion(window, seat, data, event)
+            }
+            CosmicSurface::X11(surface) => {
+                PointerTarget::relative_motion(surface, seat, data, event)
+            }
+            _ => unreachable!(),
+        }
+    }
+
     fn button(
         &self,
         seat: &smithay::input::Seat<crate::state::State>,

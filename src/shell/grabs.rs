@@ -1,7 +1,7 @@
 use smithay::{
     input::pointer::{
         AxisFrame, ButtonEvent, GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab,
-        PointerInnerHandle,
+        PointerInnerHandle, RelativeMotionEvent,
     },
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
     utils::{Logical, Point},
@@ -88,6 +88,19 @@ impl PointerGrab<State> for ResizeGrab {
         match self {
             ResizeGrab::Floating(grab) => grab.motion(data, handle, focus, event),
             ResizeGrab::Tiling(grab) => grab.motion(data, handle, focus, event),
+        }
+    }
+
+    fn relative_motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        event: &RelativeMotionEvent,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => grab.relative_motion(data, handle, focus, event),
+            ResizeGrab::Tiling(grab) => grab.relative_motion(data, handle, focus, event),
         }
     }
 
