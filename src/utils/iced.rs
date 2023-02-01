@@ -557,7 +557,7 @@ where
                 .to_buffer(scale.x, Transform::Normal)
                 .to_i32_round();
 
-            if *needs_redraw {
+            if *needs_redraw && size.w > 0 && size.h > 0 {
                 let renderer = &mut internal_ref.renderer;
                 let state_ref = &internal_ref.state;
                 buffer
