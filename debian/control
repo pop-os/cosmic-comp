@@ -8,7 +8,6 @@ Build-Depends:
     rustc (>=1.57),
     libudev-dev,
     libegl1-mesa-dev,
-    libgl1-mesa-dri,
     libgbm-dev,
     libinput-dev,
     libwayland-dev,
@@ -18,21 +17,15 @@ Build-Depends:
     libseat-dev
 Standards-Version: 4.1.1
 Homepage: https://github.com/pop-os/cosmic-comp
+
 Package: cosmic-comp
 Architecture: amd64 arm64
 Depends:
     ${misc:Depends},
     ${shlibs:Depends},
     libegl1,
-    libgl1-mesa-dri,
-    libudev,
-    libinput,
-    libgbm,
-    libwayland,
-    libxcb1,
-    libxkbcommon,
-    libsystemd,
-    libseat
+    libwayland-server0,
 Recommends:
-    cosmic-session
+    cosmic-session,
+    libgl1-mesa-dri
 Description: Wayland compositor of pop-os cosmic shell
