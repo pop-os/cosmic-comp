@@ -239,10 +239,12 @@ pub fn init_backend(
                                 );
                             }
                         } else {
-                            if let Err(err) =
-                                data.state
-                                    .device_added(dev, path.into(), &data.display.handle(), true)
-                            {
+                            if let Err(err) = data.state.device_added(
+                                dev,
+                                path.into(),
+                                &data.display.handle(),
+                                true,
+                            ) {
                                 slog_scope::error!(
                                     "Failed to add drm device {}: {}",
                                     path.display(),
@@ -322,10 +324,16 @@ pub fn init_backend(
             .device_added(dev, path.into(), dh, false)
             .with_context(|| format!("Failed to add drm device: {}", path.display()))?;
     }
-    
+
     // HACK: amdgpu doesn't like us initializing vulkan too early..
     //      so lets do that delayed until mesa fixes that.
-    let devices = state.backend.kms().devices.iter().map(|(drm_node, device)| (*drm_node, device.render_node)).collect::<Vec<_>>();
+    let devices = state
+        .backend
+        .kms()
+        .devices
+        .iter()
+        .map(|(drm_node, device)| (*drm_node, device.render_node))
+        .collect::<Vec<_>>();
     for (drm_node, render_node) in devices {
         state.init_vulkan(drm_node, render_node);
     }
@@ -333,7 +341,13 @@ pub fn init_backend(
 }
 
 impl State {
-    fn device_added(&mut self, dev: dev_t, path: PathBuf, dh: &DisplayHandle, try_vulkan: bool) -> Result<()> {
+    fn device_added(
+        &mut self,
+        dev: dev_t,
+        path: PathBuf,
+        dh: &DisplayHandle,
+        try_vulkan: bool,
+    ) -> Result<()> {
         if !self.backend.kms().session.is_active() {
             return Ok(());
         }

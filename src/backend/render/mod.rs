@@ -158,6 +158,7 @@ where
         cursor_mode,
         screencopy,
         fps,
+        false,
     );
 
     result
@@ -175,6 +176,7 @@ pub fn render_workspace<'frame, R, Target, OffTarget, Source>(
     mut cursor_mode: CursorMode,
     screencopy: Option<(Source, &[(ScreencopySession, BufferParams)])>,
     mut fps: Option<&mut Fps>,
+    exclude_workspace_overview: bool,
 ) -> Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), RenderError<R>>
 where
     R: Renderer
@@ -254,6 +256,7 @@ where
                 output,
                 &state.shell.override_redirect_windows,
                 state.xwayland_state.values_mut(),
+                exclude_workspace_overview,
             )
             .map_err(|_| OutputNoMode)?
             .into_iter()

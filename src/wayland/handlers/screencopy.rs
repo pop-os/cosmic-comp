@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::anyhow;
+use calloop::LoopHandle;
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::{
     FailureReason, InputType,
 };
@@ -24,7 +25,7 @@ use smithay::{
             Bind, Blit, BufferType, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
         },
     },
-    desktop::space::SpaceElement,
+    desktop::{layer_map_for_output, space::SpaceElement},
     output::Output,
     reexports::wayland_server::{
         protocol::{wl_buffer::WlBuffer, wl_shm::Format as ShmFormat, wl_surface::WlSurface},
@@ -46,7 +47,7 @@ use crate::{
         render_output, render_workspace, CursorMode, CLEAR_COLOR,
     },
     shell::{CosmicMappedRenderElement, CosmicSurface},
-    state::{BackendData, ClientState, Common, State},
+    state::{BackendData, ClientState, Common, Data, State},
     utils::prelude::OutputExt,
     wayland::protocols::{
         screencopy::{
@@ -58,6 +59,8 @@ use crate::{
 };
 
 use super::data_device::get_dnd_icon;
+
+pub const WORKSPACE_OVERVIEW_NAMESPACE: &str = "cosmic-workspace-overview";
 
 pub type PendingScreencopyBuffers = RefCell<Vec<(Session, BufferParams)>>;
 
@@ -767,6 +770,7 @@ pub fn render_workspace_to_buffer(
                 cursor_mode,
                 None,
                 None,
+                true,
             )
         } else {
             let size = buffer_dimensions(buffer).unwrap();
@@ -784,6 +788,7 @@ pub fn render_workspace_to_buffer(
                 cursor_mode,
                 None,
                 None,
+                true,
             )
         }
     }
@@ -1144,8 +1149,30 @@ impl State {
         output: &Output,
     ) -> Option<Vec<(Session, BufferParams)>> {
         let workspace = self.common.shell.active_space_mut(output);
-        if !workspace.pending_buffers.is_empty() {
-            Some(std::mem::take(&mut workspace.pending_buffers))
+        let mut pending_buffers = std::mem::take(&mut workspace.pending_buffers);
+
+        let mut i = 0;
+        while i < pending_buffers.len() {
+            let layer_map = layer_map_for_output(&output);
+            if layer_map
+                .layers()
+                .any(|s| s.namespace() == WORKSPACE_OVERVIEW_NAMESPACE)
+            {
+                let (session, params) = pending_buffers.remove(i);
+                schedule_offscreen_workspace_session(
+                    &self.common.event_loop_handle,
+                    session,
+                    params,
+                    output.clone(),
+                    workspace.handle.clone(),
+                );
+            } else {
+                i += 1;
+            }
+        }
+
+        if !pending_buffers.is_empty() {
+            Some(pending_buffers)
         } else {
             None
         }
@@ -1174,7 +1201,12 @@ impl State {
                     if let SessionType::Workspace(o, w) =
                         workspace.pending_buffers[i].0.session_type()
                     {
-                        if active_spaces.contains(&(o.clone(), w)) {
+                        let layer_map = layer_map_for_output(&o);
+                        if active_spaces.contains(&(o.clone(), w))
+                            && !layer_map
+                                .layers()
+                                .any(|s| s.namespace() == WORKSPACE_OVERVIEW_NAMESPACE)
+                        {
                             // surface is on an active workspace/output combo, add to workspace_sessions
                             let (session, params) = workspace.pending_buffers.remove(i);
                             output_sessions
@@ -1183,32 +1215,13 @@ impl State {
                         } else if handle == w && output == o {
                             // surface is visible on an offscreen workspace session, schedule a new render
                             let (session, params) = workspace.pending_buffers.remove(i);
-                            let output = output.clone();
-                            self.common.event_loop_handle.insert_idle(move |data| {
-                                if !session.alive() {
-                                    return;
-                                }
-                                if !data.state.common.shell.outputs.contains(&output) {
-                                    return;
-                                }
-                                match render_workspace_to_buffer(
-                                    &mut data.state,
-                                    &session,
-                                    params.clone(),
-                                    &output,
-                                    &handle,
-                                ) {
-                                    Ok(false) => {
-                                        // rendering yielded no new damage, buffer still pending
-                                        data.state.common.still_pending(session, params);
-                                    }
-                                    Ok(true) => {}
-                                    Err((reason, err)) => {
-                                        slog_scope::warn!("Screencopy session failed: {}", err);
-                                        session.failed(reason);
-                                    }
-                                }
-                            });
+                            schedule_offscreen_workspace_session(
+                                &self.common.event_loop_handle,
+                                session,
+                                params,
+                                output.clone(),
+                                handle,
+                            );
                         } else {
                             i += 1;
                         }
@@ -1221,6 +1234,40 @@ impl State {
 
         output_sessions
     }
+}
+
+pub fn schedule_offscreen_workspace_session(
+    event_loop_handle: &LoopHandle<'static, Data>,
+    session: Session,
+    params: BufferParams,
+    output: Output,
+    handle: WorkspaceHandle,
+) {
+    event_loop_handle.insert_idle(move |data| {
+        if !session.alive() {
+            return;
+        }
+        if !data.state.common.shell.outputs.contains(&output) {
+            return;
+        }
+        match render_workspace_to_buffer(
+            &mut data.state,
+            &session,
+            params.clone(),
+            &output,
+            &handle,
+        ) {
+            Ok(false) => {
+                // rendering yielded no new damage, buffer still pending
+                data.state.common.still_pending(session, params);
+            }
+            Ok(true) => {}
+            Err((reason, err)) => {
+                slog_scope::warn!("Screencopy session failed: {}", err);
+                session.failed(reason);
+            }
+        }
+    });
 }
 
 delegate_screencopy!(State);
