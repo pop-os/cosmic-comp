@@ -236,17 +236,30 @@ impl Workspace {
         self.set_fullscreen(window, output)
     }
 
-    fn set_fullscreen(&mut self, window: &CosmicSurface, output: &Output) {
-        if let Some(mapped) = self
-            .mapped()
-            .find(|m| m.windows().any(|(w, _)| &w == window))
-        {
-            mapped.set_active(window);
-        }
+    pub(super) fn set_fullscreen<'a>(
+        &mut self,
+        window: impl Into<Option<&'a CosmicSurface>>,
+        output: &Output,
+    ) {
+        match window.into() {
+            Some(window) => {
+                if let Some(mapped) = self
+                    .mapped()
+                    .find(|m| m.windows().any(|(w, _)| &w == window))
+                {
+                    mapped.set_active(window);
+                }
 
-        window.set_geometry(output.geometry());
-        window.send_configure();
-        self.fullscreen.insert(output.clone(), window.clone());
+                window.set_geometry(output.geometry());
+                window.send_configure();
+                self.fullscreen.insert(output.clone(), window.clone());
+            }
+            None => {
+                if let Some(surface) = self.fullscreen.get(output).cloned() {
+                    self.unfullscreen_request(&surface);
+                }
+            }
+        }
     }
 
     pub fn unfullscreen_request(&mut self, window: &CosmicSurface) {
