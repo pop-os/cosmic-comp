@@ -2,7 +2,13 @@
 
 use std::collections::HashMap;
 
-use crate::state::{Common, Fps};
+use crate::{
+    shell::{
+        focus::target::{KeyboardFocusTarget, PointerFocusTarget},
+        CosmicSurface,
+    },
+    state::{Common, Fps},
+};
 use egui::{Color32, Vec2};
 use smithay::{
     backend::{
@@ -13,6 +19,8 @@ use smithay::{
             glow::GlowRenderer,
         },
     },
+    input::keyboard::xkb,
+    reexports::wayland_server::Resource,
     utils::{Logical, Rectangle},
 };
 
@@ -181,13 +189,80 @@ pub fn fps_ui(
 
                         ui.separator();
                         ui.label(egui::RichText::new("Input States").heading());
-                        for (num, seat) in state.seats().enumerate() {
-                            ui.label(egui::RichText::new(format!("\tseat-{}", num)).strong());
+                        for seat in state.seats() {
+                            ui.label(egui::RichText::new(format!("\t{}", seat.name())).strong());
                             if let Some(ptr) = seat.get_pointer() {
-                                ui.label(egui::RichText::new(format!("{:#?}", ptr)).code());
+                                egui::Frame::none()
+                                    .fill(egui::Color32::DARK_GRAY)
+                                    .rounding(5.)
+                                    .inner_margin(10.)
+                                    .show(ui, |ui| {
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "Pos: {:?}",
+                                                ptr.current_location()
+                                            ))
+                                            .code(),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "Focus: {}",
+                                                format_pointer_focus(ptr.current_focus())
+                                            ))
+                                            .code(),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "Grabbed: {:?}",
+                                                ptr.is_grabbed()
+                                            ))
+                                            .code(),
+                                        );
+                                    });
                             }
                             if let Some(kbd) = seat.get_keyboard() {
-                                ui.label(egui::RichText::new(format!("{:#?}", kbd)).code());
+                                egui::Frame::none()
+                                    .fill(egui::Color32::DARK_GRAY)
+                                    .rounding(5.)
+                                    .inner_margin(10.)
+                                    .show(ui, |ui| {
+                                        let mut keysyms = format!(
+                                            "Keys: {:?}",
+                                            kbd.with_pressed_keysyms(|syms| syms
+                                                .into_iter()
+                                                .map(|k| xkb::keysym_get_name(k.modified_sym()))
+                                                .fold(String::new(), |mut list, val| {
+                                                    list.push_str(&format!("{}, ", val));
+                                                    list
+                                                }))
+                                        );
+                                        keysyms.truncate(keysyms.len().saturating_sub(2));
+                                        ui.label(egui::RichText::new(keysyms).code());
+
+                                        let mods = kbd.modifier_state();
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "Mods: Ctrl {} / Alt {} / Logo {} / Shift {}",
+                                                mods.ctrl, mods.alt, mods.logo, mods.shift,
+                                            ))
+                                            .code(),
+                                        );
+
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "Focus: {}",
+                                                format_keyboard_focus(kbd.current_focus())
+                                            ))
+                                            .code(),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "Grabbed: {:?}",
+                                                kbd.is_grabbed()
+                                            ))
+                                            .code(),
+                                        );
+                                    });
                             }
                         }
                     }
@@ -198,4 +273,86 @@ pub fn fps_ui(
         scale,
         0.8,
     )
+}
+
+fn format_pointer_focus(focus: Option<PointerFocusTarget>) -> String {
+    use PointerFocusTarget::*;
+
+    match focus {
+        Some(Element(x)) => match x {
+            x if x.is_stack() => format!(
+                "Stacked Window {} ({})",
+                match x.active_window() {
+                    CosmicSurface::Wayland(w) => w.toplevel().wl_surface().id().protocol_id(),
+                    CosmicSurface::X11(x) => x.window_id(),
+                    _ => unreachable!(),
+                },
+                x.active_window().title()
+            ),
+            x if x.is_window() => format!(
+                "Window {} ({})",
+                match x.active_window() {
+                    CosmicSurface::Wayland(w) => w.toplevel().wl_surface().id().protocol_id(),
+                    CosmicSurface::X11(x) => x.window_id(),
+                    _ => unreachable!(),
+                },
+                x.active_window().title()
+            ),
+            _ => unreachable!(),
+        },
+        Some(Fullscreen(x)) => format!(
+            "Fullscreen {} ({})",
+            match &x {
+                CosmicSurface::Wayland(w) => w.toplevel().wl_surface().id().protocol_id(),
+                CosmicSurface::X11(x) => x.window_id(),
+                _ => unreachable!(),
+            },
+            x.title()
+        ),
+        Some(LayerSurface(x)) => format!("LayerSurface {}", x.wl_surface().id().protocol_id()),
+        Some(Popup(x)) => format!("Popup {}", x.wl_surface().id().protocol_id()),
+        Some(OverrideRedirect(x)) => format!("Override Redirect {}", x.window_id()),
+        None => format!("None"),
+    }
+}
+
+fn format_keyboard_focus(focus: Option<KeyboardFocusTarget>) -> String {
+    use KeyboardFocusTarget::*;
+
+    match focus {
+        Some(Element(x)) => match x {
+            x if x.is_stack() => format!(
+                "Stacked Window {} ({})",
+                match x.active_window() {
+                    CosmicSurface::Wayland(w) => w.toplevel().wl_surface().id().protocol_id(),
+                    CosmicSurface::X11(x) => x.window_id(),
+                    _ => unreachable!(),
+                },
+                x.active_window().title()
+            ),
+            x if x.is_window() => format!(
+                "Window {} ({})",
+                match x.active_window() {
+                    CosmicSurface::Wayland(w) => w.toplevel().wl_surface().id().protocol_id(),
+                    CosmicSurface::X11(x) => x.window_id(),
+                    _ => unreachable!(),
+                },
+                x.active_window().title()
+            ),
+            _ => unreachable!(),
+        },
+        Some(Fullscreen(x)) => format!(
+            "Fullscreen {} ({})",
+            match &x {
+                CosmicSurface::Wayland(w) => w.toplevel().wl_surface().id().protocol_id(),
+                CosmicSurface::X11(x) => x.window_id(),
+                _ => unreachable!(),
+            },
+            x.title()
+        ),
+        Some(LayerSurface(x)) => format!("LayerSurface {}", x.wl_surface().id().protocol_id()),
+        Some(Popup(x)) => format!("Popup {}", x.wl_surface().id().protocol_id()),
+        Some(Group(_)) => format!("Window Group"),
+        None => format!("None"),
+    }
 }
