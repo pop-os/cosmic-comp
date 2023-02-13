@@ -38,7 +38,7 @@ impl Shell {
                 let window_geo_offset = window.geometry().loc;
                 let window_loc = element_geo.loc + offset + window_geo_offset;
                 let anchor_point = get_anchor_point(&positioner) + window_loc;
-                if elem.is_tiled().unwrap() {
+                if workspace.is_tiled(elem) {
                     if !unconstrain_xdg_popup_tile(surface, element_geo) {
                         if let Some(output) = workspace.output_under(anchor_point) {
                             unconstrain_xdg_popup(surface, window_loc, output.geometry());

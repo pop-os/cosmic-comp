@@ -393,8 +393,26 @@ impl Workspace {
             .chain(self.tiling_layer.windows().map(|(_, w, _)| w))
     }
 
+    pub fn is_fullscreen(&self, mapped: &CosmicMapped) -> bool {
+        self.fullscreen
+            .values()
+            .any(|s| s == &mapped.active_window())
+    }
+
     pub fn is_floating(&self, mapped: &CosmicMapped) -> bool {
-        self.floating_layer.mapped().any(|m| m == mapped)
+        !self
+            .fullscreen
+            .values()
+            .any(|s| s == &mapped.active_window())
+            && self.floating_layer.mapped().any(|m| m == mapped)
+    }
+
+    pub fn is_tiled(&self, mapped: &CosmicMapped) -> bool {
+        !self
+            .fullscreen
+            .values()
+            .any(|s| s == &mapped.active_window())
+            && self.tiling_layer.mapped().any(|(_, m, _)| m == mapped)
     }
 
     pub fn render_output<'a, R>(
