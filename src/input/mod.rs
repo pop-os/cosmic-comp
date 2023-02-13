@@ -306,10 +306,10 @@ impl State {
                         }
                         let output_geometry = output.geometry();
 
-                        position.x = 0.0f64
+                        position.x = (output_geometry.loc.x as f64)
                             .max(position.x)
                             .min((output_geometry.loc.x + output_geometry.size.w) as f64);
-                        position.y = 0.0f64
+                        position.y = (output_geometry.loc.y as f64)
                             .max(position.y)
                             .min((output_geometry.loc.y + output_geometry.size.h) as f64);
 
