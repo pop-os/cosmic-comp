@@ -3,7 +3,7 @@
 use crate::{
     backend::{kms::KmsState, winit::WinitState, x11::X11State},
     config::{Config, OutputConfig},
-    shell::Shell,
+    shell::{layout::floating::SeatMoveGrabState, Shell},
     utils::prelude::*,
     wayland::protocols::{
         drm::WlDrmState,
@@ -385,6 +385,17 @@ impl Common {
                         Some(Duration::ZERO),
                         |_, _| None,
                     )
+                }
+
+                if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {
+                    if let Some(grab_state) = move_grab.borrow().as_ref() {
+                        grab_state.send_frames(
+                            output,
+                            time,
+                            throttle,
+                            surface_primary_scanout_output,
+                        );
+                    }
                 }
             }
         }

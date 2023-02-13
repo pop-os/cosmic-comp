@@ -23,9 +23,11 @@ use smithay::{
         Seat,
     },
     output::Output,
+    reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{IsAlive, Logical, Point, Rectangle, Serial},
+    wayland::compositor::SurfaceData,
 };
-use std::cell::RefCell;
+use std::{cell::RefCell, time::Duration};
 
 pub type SeatMoveGrabState = RefCell<Option<MoveGrabState>>;
 
@@ -61,6 +63,18 @@ impl MoveGrabState {
                 .to_physical_precise_round(scale),
             scale,
         )
+    }
+
+    pub fn send_frames(
+        &self,
+        output: &Output,
+        time: impl Into<Duration>,
+        throttle: Option<Duration>,
+        primary_scan_out_output: impl FnMut(&WlSurface, &SurfaceData) -> Option<Output> + Copy,
+    ) {
+        self.window
+            .active_window()
+            .send_frame(output, time, throttle, primary_scan_out_output)
     }
 }
 
