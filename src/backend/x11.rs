@@ -11,14 +11,19 @@ use crate::{
 use anyhow::{Context, Result};
 use smithay::{
     backend::{
-        allocator::dmabuf::Dmabuf,
-        drm::DrmDeviceFd,
-        egl::{EGLContext, EGLDisplay},
+        allocator::{
+            dmabuf::{Dmabuf, DmabufAllocator},
+            gbm::{GbmAllocator, GbmBufferFlags},
+            vulkan::{ImageUsageFlags, VulkanAllocator},
+        },
+        drm::{DrmDeviceFd, DrmNode},
+        egl::{EGLContext, EGLDevice, EGLDisplay},
         input::{Event, InputEvent},
         renderer::{
             damage::DamageTrackedRenderer, gles2::Gles2Renderbuffer, glow::GlowRenderer, Bind,
             ImportDma, ImportEgl,
         },
+        vulkan::{version::Version, Instance, PhysicalDevice},
         x11::{Window, WindowBuilder, X11Backend, X11Event, X11Handle, X11Input, X11Surface},
     },
     desktop::layer_map_for_output,
@@ -31,13 +36,18 @@ use smithay::{
     },
     utils::{DeviceFd, Transform},
 };
-use std::cell::RefCell;
+use std::{cell::RefCell, os::unix::io::OwnedFd};
 
 #[cfg(feature = "debug")]
 use crate::state::Fps;
 
+enum Allocator {
+    Gbm(GbmAllocator<DrmDeviceFd>),
+    Vulkan(PhysicalDevice),
+}
+
 pub struct X11State {
-    allocator: GbmDevice<DrmDeviceFd>,
+    allocator: Allocator,
     _egl: EGLDisplay,
     pub renderer: GlowRenderer,
     surfaces: Vec<Surface>,
@@ -51,18 +61,28 @@ impl X11State {
             .build(&self.handle)
             .with_context(|| "Failed to create window")?;
         let fourcc = window.format();
-        let surface = self
-            .handle
-            .create_surface(
-                &window,
-                self.allocator.clone(),
-                Bind::<Dmabuf>::supported_formats(&self.renderer)
-                    .unwrap()
-                    .iter()
-                    .filter(|format| format.code == fourcc)
-                    .map(|format| format.modifier),
-            )
-            .with_context(|| "Failed to create surface")?;
+        let modifiers = Bind::<Dmabuf>::supported_formats(&self.renderer).unwrap();
+        let filtered_modifiers = modifiers
+            .iter()
+            .filter(|format| format.code == fourcc)
+            .map(|format| format.modifier);
+        let surface = match &self.allocator {
+            Allocator::Gbm(gbm) => self
+                .handle
+                .create_surface(&window, DmabufAllocator(gbm.clone()), filtered_modifiers)
+                .with_context(|| "Failed to create surface")?,
+            Allocator::Vulkan(vulkan) => self
+                .handle
+                .create_surface(
+                    &window,
+                    DmabufAllocator(
+                        VulkanAllocator::new(vulkan, ImageUsageFlags::COLOR_ATTACHMENT)
+                            .with_context(|| "Failed to create vulkan allocator for window")?,
+                    ),
+                    filtered_modifiers,
+                )
+                .with_context(|| "Failed to create surface")?,
+        };
 
         let name = format!("X11-{}", self.surfaces.len());
         let size = window.size();
@@ -251,6 +271,57 @@ impl Surface {
     }
 }
 
+fn try_vulkan_allocator(node: &DrmNode) -> Option<Allocator> {
+    let instance = match Instance::new(Version::VERSION_1_2, None, None) {
+        Ok(instance) => instance,
+        Err(err) => {
+            slog_scope::warn!(
+                "Failed to instanciate vulkan, falling back to gbm allocator: {}",
+                err
+            );
+            return None;
+        }
+    };
+
+    let devices = match PhysicalDevice::enumerate(&instance) {
+        Ok(devices) => devices,
+        Err(err) => {
+            slog_scope::debug!("No vulkan devices, falling back to gbm: {}", err);
+            return None;
+        }
+    };
+
+    let Some(device) = devices
+        .filter(|phd| {
+            phd.has_device_extension(smithay::reexports::ash::extensions::ext::PhysicalDeviceDrm::name())
+        })
+        .find(|phd| {
+            phd.primary_node().unwrap() == Some(*node) || phd.render_node().unwrap() == Some(*node)
+        })
+    else {
+        slog_scope::debug!("No vulkan device for node {:?}, falling back to gbm", node);
+        return None;
+    };
+
+    Some(Allocator::Vulkan(device))
+}
+
+fn try_gbm_allocator(fd: OwnedFd) -> Option<Allocator> {
+    // Create the gbm device for buffer allocation.
+    let device = match GbmDevice::new(DrmDeviceFd::new(DeviceFd::from(fd), None)) {
+        Ok(gbm) => gbm,
+        Err(err) => {
+            slog_scope::error!("Failed to create GBM device: {}", err);
+            return None;
+        }
+    };
+
+    Some(Allocator::Gbm(GbmAllocator::new(
+        device,
+        GbmBufferFlags::RENDERING,
+    )))
+}
+
 pub fn init_backend(
     dh: &DisplayHandle,
     event_loop: &mut EventLoop<Data>,
@@ -260,16 +331,16 @@ pub fn init_backend(
     let handle = backend.handle();
 
     // Obtain the DRM node the X server uses for direct rendering.
-    let (_drm_node, fd) = handle
+    let (drm_node, fd) = handle
         .drm_node()
         .with_context(|| "Could not get DRM node used by X server")?;
 
-    // Create the gbm device for buffer allocation.
-    let device = GbmDevice::new(DrmDeviceFd::new(DeviceFd::from(fd), None))
-        .with_context(|| "Failed to create GBM device")?;
-    // Initialize EGL using the GBM device.
-    let egl =
-        EGLDisplay::new(device.clone(), None).with_context(|| "Failed to create EGL display")?;
+    let device = EGLDevice::enumerate()
+        .with_context(|| "Failed to enumerate EGL devices")?
+        .find(|device| device.try_get_render_node().ok().flatten() == Some(drm_node))
+        .with_context(|| format!("Failed to find EGLDevice for node {}", drm_node))?;
+    // Initialize EGL
+    let egl = EGLDisplay::new(device, None).with_context(|| "Failed to create EGL display")?;
     // Create the OpenGL context
     let context = EGLContext::new(&egl, None).with_context(|| "Failed to create EGL context")?;
     // Create a renderer
@@ -280,7 +351,9 @@ pub fn init_backend(
 
     state.backend = BackendData::X11(X11State {
         handle,
-        allocator: device,
+        allocator: try_vulkan_allocator(&drm_node)
+            .or_else(|| try_gbm_allocator(fd))
+            .expect("Failed to create allocator for x11"),
         _egl: egl,
         renderer,
         surfaces: Vec::new(),

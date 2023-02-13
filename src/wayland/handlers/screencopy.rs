@@ -183,7 +183,7 @@ impl ScreencopyHandler for State {
                         None
                     })
                     .unwrap_or(kms.primary.clone());
-                _kms_renderer = Some(kms.api.renderer::<Gles2Renderbuffer>(&node, &node).unwrap());
+                _kms_renderer = Some(kms.api.single_renderer(&node).unwrap());
                 _kms_renderer.as_mut().unwrap().as_mut()
             }
             BackendData::Winit(ref mut winit) => winit.backend.renderer(),
@@ -423,7 +423,7 @@ fn formats_for_output(
     let renderer = match backend {
         BackendData::Kms(ref mut kms) => {
             let node = kms.target_node_for_output(&output).unwrap_or(kms.primary);
-            _kms_renderer = Some(kms.api.renderer::<Gles2Renderbuffer>(&node, &node).unwrap());
+            _kms_renderer = Some(kms.api.single_renderer(&node).unwrap());
             _kms_renderer.as_mut().unwrap().as_mut()
         }
         BackendData::Winit(ref mut winit) => winit.backend.renderer(),
@@ -664,7 +664,7 @@ pub fn render_output_to_buffer(
         BackendData::Kms(kms) => {
             let mut multirenderer = kms
                 .api
-                .renderer::<Gles2Renderbuffer>(node.as_ref().unwrap(), node.as_ref().unwrap())
+                .single_renderer(node.as_ref().unwrap())
                 .map_err(|err| (FailureReason::Unspec, err.into()))?;
             render_session::<_, _>(
                 node,
@@ -794,7 +794,7 @@ pub fn render_workspace_to_buffer(
         BackendData::Kms(kms) => {
             let mut multirenderer = kms
                 .api
-                .renderer::<Gles2Renderbuffer>(node.as_ref().unwrap(), node.as_ref().unwrap())
+                .single_renderer(node.as_ref().unwrap())
                 .map_err(|err| (FailureReason::Unspec, err.into()))?;
             render_session::<_, _>(
                 node,
@@ -959,7 +959,7 @@ pub fn render_window_to_buffer(
         BackendData::Kms(kms) => {
             let mut multirenderer = kms
                 .api
-                .renderer::<Gles2Renderbuffer>(node.as_ref().unwrap(), node.as_ref().unwrap())
+                .single_renderer(node.as_ref().unwrap())
                 .map_err(|err| (FailureReason::Unspec, err.into()))?;
             render_session::<_, _>(
                 node,

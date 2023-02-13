@@ -154,15 +154,15 @@ impl RenderElement<GlowRenderer> for CosmicElement<GlowRenderer> {
     }
 }
 
-impl<'a> RenderElement<GlMultiRenderer<'a>> for CosmicElement<GlMultiRenderer<'a>> {
+impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>> for CosmicElement<GlMultiRenderer<'a, 'b>> {
     fn draw<'frame>(
         &self,
-        frame: &mut GlMultiFrame<'a, 'frame>,
+        frame: &mut GlMultiFrame<'a, 'b, 'frame>,
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         log: &slog::Logger,
-    ) -> Result<(), <GlMultiRenderer<'_> as Renderer>::Error> {
+    ) -> Result<(), <GlMultiRenderer<'a, 'b> as Renderer>::Error> {
         match self {
             CosmicElement::Workspace(elem) => elem.draw(frame, src, dst, damage, log),
             CosmicElement::Cursor(elem) => elem.draw(frame, src, dst, damage, log),
@@ -181,8 +181,8 @@ impl<'a> RenderElement<GlMultiRenderer<'a>> for CosmicElement<GlMultiRenderer<'a
 
     fn underlying_storage(
         &self,
-        renderer: &GlMultiRenderer<'a>,
-    ) -> Option<UnderlyingStorage<'_, GlMultiRenderer<'a>>> {
+        renderer: &GlMultiRenderer<'a, 'b>,
+    ) -> Option<UnderlyingStorage<'_, GlMultiRenderer<'a, 'b>>> {
         match self {
             CosmicElement::Workspace(elem) => elem.underlying_storage(renderer),
             CosmicElement::Cursor(elem) => elem.underlying_storage(renderer),
@@ -263,7 +263,7 @@ impl AsGlowRenderer for GlowRenderer {
     }
 }
 
-impl<'a> AsGlowRenderer for GlMultiRenderer<'a> {
+impl<'a, 'b> AsGlowRenderer for GlMultiRenderer<'a, 'b> {
     fn glow_renderer(&self) -> &GlowRenderer {
         self.as_ref()
     }
@@ -289,7 +289,7 @@ impl<'frame> AsGlowFrame<'frame> for GlowFrame<'frame> {
     }
 }
 
-impl<'renderer, 'frame> AsGlowFrame<'frame> for GlMultiFrame<'renderer, 'frame> {
+impl<'renderer, 'alloc, 'frame> AsGlowFrame<'frame> for GlMultiFrame<'renderer, 'alloc, 'frame> {
     fn glow_frame(&self) -> &GlowFrame<'frame> {
         self.as_ref()
     }

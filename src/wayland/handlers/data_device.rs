@@ -7,10 +7,12 @@ use smithay::{
     reexports::wayland_server::protocol::{wl_data_source::WlDataSource, wl_surface::WlSurface},
     utils::IsAlive,
     wayland::data_device::{
-        ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
+        with_source_metadata, ClientDndGrabHandler, DataDeviceHandler, DataDeviceState,
+        ServerDndGrabHandler,
     },
+    xwayland::xwm::{SelectionType, XwmId},
 };
-use std::cell::RefCell;
+use std::{cell::RefCell, os::unix::io::OwnedFd};
 
 pub struct DnDIcon {
     surface: RefCell<Option<WlSurface>>,
@@ -48,8 +50,53 @@ impl ClientDndGrabHandler for State {
 }
 impl ServerDndGrabHandler for State {}
 impl DataDeviceHandler for State {
+    type SelectionUserData = XwmId;
+
     fn data_device_state(&self) -> &DataDeviceState {
         &self.common.data_device_state
+    }
+
+    fn new_selection(&mut self, source: Option<WlDataSource>) {
+        for xstate in self.common.xwayland_state.values_mut() {
+            if let Some(xwm) = xstate.xwm.as_mut() {
+                if let Some(source) = &source {
+                    if let Ok(Err(err)) = with_source_metadata(source, |metadata| {
+                        xwm.new_selection(
+                            SelectionType::Clipboard,
+                            Some(metadata.mime_types.clone()),
+                        )
+                    }) {
+                        slog_scope::warn!("Failed to set Xwayland clipboard selection: {}", err);
+                    }
+                } else if let Err(err) = xwm.new_selection(SelectionType::Clipboard, None) {
+                    slog_scope::warn!("Failed to clear Xwayland clipboard selection: {}", err);
+                }
+            }
+        }
+    }
+
+    fn send_selection(
+        &mut self,
+        mime_type: String,
+        fd: OwnedFd,
+        user_data: &Self::SelectionUserData,
+    ) {
+        if let Some(xwm) = self
+            .common
+            .xwayland_state
+            .values_mut()
+            .flat_map(|xstate| xstate.xwm.as_mut())
+            .find(|xwm| &xwm.id() == user_data)
+        {
+            if let Err(err) = xwm.send_selection(
+                SelectionType::Clipboard,
+                mime_type,
+                fd,
+                self.common.event_loop_handle.clone(),
+            ) {
+                slog_scope::warn!("Failed to send clipboard (X11 -> Wayland): {}", err);
+            }
+        }
     }
 }
 

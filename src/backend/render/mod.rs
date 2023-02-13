@@ -27,9 +27,9 @@ use smithay::{
                 DamageTrackedRenderer, DamageTrackedRendererError as RenderError, OutputNoMode,
             },
             element::{RenderElement, RenderElementStates},
-            gles2::{Gles2Error, Gles2Renderbuffer},
+            gles2::Gles2Error,
             glow::GlowRenderer,
-            multigpu::{egl::EglGlesBackend, MultiFrame, MultiRenderer},
+            multigpu::{gbm::GbmGlesBackend, MultiFrame, MultiRenderer},
             Bind, Blit, ExportMem, ImportAll, ImportMem, Offscreen, Renderer, TextureFilter,
         },
     },
@@ -43,21 +43,10 @@ use self::cursor::CursorRenderElement;
 pub mod element;
 use self::element::{AsGlowRenderer, CosmicElement};
 
-pub type GlMultiRenderer<'a> = MultiRenderer<
-    'a,
-    'a,
-    EglGlesBackend<GlowRenderer>,
-    EglGlesBackend<GlowRenderer>,
-    Gles2Renderbuffer,
->;
-pub type GlMultiFrame<'a, 'frame> = MultiFrame<
-    'a,
-    'a,
-    'frame,
-    EglGlesBackend<GlowRenderer>,
-    EglGlesBackend<GlowRenderer>,
-    Gles2Renderbuffer,
->;
+pub type GlMultiRenderer<'a, 'b> =
+    MultiRenderer<'a, 'a, 'b, GbmGlesBackend<GlowRenderer>, GbmGlesBackend<GlowRenderer>>;
+pub type GlMultiFrame<'a, 'b, 'frame> =
+    MultiFrame<'a, 'a, 'b, 'frame, GbmGlesBackend<GlowRenderer>, GbmGlesBackend<GlowRenderer>>;
 
 pub static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
 

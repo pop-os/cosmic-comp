@@ -1,8 +1,8 @@
-use std::ffi::OsString;
+use std::{ffi::OsString, os::unix::io::OwnedFd};
 
 use crate::{
     backend::render::cursor::Cursor,
-    shell::{CosmicSurface, Shell},
+    shell::{focus::target::KeyboardFocusTarget, CosmicSurface, Shell},
     state::{Data, State},
     utils::prelude::*,
     wayland::{handlers::screencopy::PendingScreencopyBuffers, protocols::screencopy::SessionType},
@@ -12,8 +12,18 @@ use smithay::{
     desktop::space::SpaceElement,
     reexports::x11rb::protocol::xproto::Window as X11Window,
     utils::{Logical, Point, Rectangle, Size},
+    wayland::{
+        data_device::{
+            clear_data_device_selection, current_data_device_selection_userdata,
+            request_data_device_client_selection, set_data_device_selection,
+        },
+        primary_selection::{
+            clear_primary_selection, current_primary_selection_userdata,
+            request_primary_client_selection, set_primary_selection,
+        },
+    },
     xwayland::{
-        xwm::{Reorder, XwmId},
+        xwm::{Reorder, SelectionType, XwmId},
         X11Surface, X11Wm, XWayland, XWaylandEvent, XwmHandler,
     },
 };
@@ -448,5 +458,87 @@ impl XwmHandler for Data {
                 workspace.unfullscreen_request(&window)
             }
         }
+    }
+
+    fn send_selection(
+        &mut self,
+        _xwm: XwmId,
+        selection: SelectionType,
+        mime_type: String,
+        fd: OwnedFd,
+    ) {
+        let seat = self.state.common.last_active_seat();
+        match selection {
+            SelectionType::Clipboard => {
+                if let Err(err) = request_data_device_client_selection(seat, mime_type, fd) {
+                    slog_scope::error!(
+                        "Failed to request current wayland clipboard for Xwayland: {}",
+                        err
+                    );
+                }
+            }
+            SelectionType::Primary => {
+                if let Err(err) = request_primary_client_selection(seat, mime_type, fd) {
+                    slog_scope::error!(
+                        "Failed to request current wayland primary selection for Xwayland: {}",
+                        err
+                    );
+                }
+            }
+        }
+    }
+
+    fn allow_selection_access(&mut self, xwm: XwmId, _selection: SelectionType) -> bool {
+        self.state.common.is_x_focused(xwm)
+    }
+
+    fn new_selection(&mut self, xwm: XwmId, selection: SelectionType, mime_types: Vec<String>) {
+        slog_scope::info!("Got Selection {:?} from X11: {:?}", selection, mime_types);
+
+        if self.state.common.is_x_focused(xwm) {
+            let seat = self.state.common.last_active_seat();
+            match selection {
+                SelectionType::Clipboard => set_data_device_selection(
+                    &self.state.common.display_handle,
+                    &seat,
+                    mime_types,
+                    xwm,
+                ),
+                SelectionType::Primary => {
+                    set_primary_selection(&self.state.common.display_handle, &seat, mime_types, xwm)
+                }
+            }
+        }
+    }
+
+    fn cleared_selection(&mut self, xwm: XwmId, selection: SelectionType) {
+        for seat in self.state.common.seats() {
+            match selection {
+                SelectionType::Clipboard => {
+                    if current_data_device_selection_userdata(seat).as_deref() == Some(&xwm) {
+                        clear_data_device_selection(&self.state.common.display_handle, seat)
+                    }
+                }
+                SelectionType::Primary => {
+                    if current_primary_selection_userdata(seat).as_deref() == Some(&xwm) {
+                        clear_primary_selection(&self.state.common.display_handle, seat)
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl Common {
+    fn is_x_focused(&self, xwm: XwmId) -> bool {
+        if let Some(keyboard) = self.last_active_seat().get_keyboard() {
+            if let Some(KeyboardFocusTarget::Element(mapped)) = keyboard.current_focus() {
+                if let CosmicSurface::X11(surface) = mapped.active_window() {
+                    return surface.xwm_id().unwrap() == xwm;
+                }
+            }
+        }
+
+        false
     }
 }

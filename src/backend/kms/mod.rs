@@ -15,7 +15,12 @@ use crate::{
 use anyhow::{Context, Result};
 use smithay::{
     backend::{
-        allocator::{dmabuf::Dmabuf, gbm::GbmDevice, Format},
+        allocator::{
+            dmabuf::{AnyError, Dmabuf, DmabufAllocator},
+            gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
+            vulkan::{ImageUsageFlags, VulkanAllocator},
+            Allocator, Format,
+        },
         drm::{
             DrmDevice, DrmDeviceFd, DrmEvent, DrmEventTime, DrmNode, GbmBufferedSurface, NodeType,
         },
@@ -26,10 +31,11 @@ use smithay::{
             damage::DamageTrackedRenderer,
             gles2::Gles2Renderbuffer,
             glow::GlowRenderer,
-            multigpu::{egl::EglGlesBackend, GpuManager},
+            multigpu::{gbm::GbmGlesBackend, GpuManager},
         },
         session::{libseat::LibSeatSession, Event as SessionEvent, Session},
         udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
+        vulkan::{version::Version, Instance, PhysicalDevice},
     },
     desktop::utils::OutputPresentationFeedback,
     input::Seat,
@@ -53,6 +59,7 @@ use smithay::{
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
+    ffi::CStr,
     os::unix::io::FromRawFd,
     path::PathBuf,
     time::Duration,
@@ -68,7 +75,7 @@ const MIN_RENDER_TIME: Duration = Duration::from_millis(3);
 
 pub struct KmsState {
     devices: HashMap<DrmNode, Device>,
-    pub api: GpuManager<EglGlesBackend<GlowRenderer>>,
+    pub api: GpuManager<GbmGlesBackend<GlowRenderer>>,
     pub primary: DrmNode,
     session: LibSeatSession,
     _tokens: Vec<RegistrationToken>,
@@ -77,8 +84,9 @@ pub struct KmsState {
 pub struct Device {
     render_node: DrmNode,
     surfaces: HashMap<crtc::Handle, Surface>,
-    allocator: GbmDevice<DrmDeviceFd>,
     drm: Dispatcher<'static, DrmDevice, Data>,
+    gbm: GbmDevice<DrmDeviceFd>,
+    allocator: Box<dyn Allocator<Buffer = Dmabuf, Error = AnyError>>,
     formats: HashSet<Format>,
     supports_atomic: bool,
     event_token: Option<RegistrationToken>,
@@ -86,7 +94,8 @@ pub struct Device {
 }
 
 pub struct Surface {
-    surface: Option<GbmBufferedSurface<GbmDevice<DrmDeviceFd>, Option<OutputPresentationFeedback>>>,
+    surface:
+        Option<GbmBufferedSurface<GbmAllocator<DrmDeviceFd>, Option<OutputPresentationFeedback>>>,
     damage_tracker: DamageTrackedRenderer,
     connector: connector::Handle,
     output: Output,
@@ -137,7 +146,7 @@ pub fn init_backend(
         })
         .map_err(|err| err.error)
         .context("Failed to initialize libinput event source")?;
-    let api = GpuManager::new(EglGlesBackend::<GlowRenderer>::default(), None)
+    let api = GpuManager::new(GbmGlesBackend::<GlowRenderer>::default(), None)
         .context("Failed to initialize renderers")?;
 
     // TODO get this info from system76-power, if available and setup a watcher
@@ -359,12 +368,7 @@ impl State {
             .try_get_render_node()
             .ok()
             .and_then(std::convert::identity)
-            .with_context(|| {
-                format!(
-                    "Failed to determine path of egl device for {}",
-                    path.display()
-                )
-            })?;
+            .unwrap_or(drm_node);
         let egl_context = EGLContext::new(&egl_display, None).with_context(|| {
             format!(
                 "Failed to create EGLContext for device {:?}:{}",
@@ -483,10 +487,15 @@ impl State {
             }
         };
 
+        let allocator = Box::new(DmabufAllocator(GbmAllocator::new(
+            gbm.clone(),
+            GbmBufferFlags::RENDERING,
+        )));
         let mut device = Device {
             render_node,
             surfaces: HashMap::new(),
-            allocator: gbm,
+            gbm,
+            allocator,
             drm: dispatcher,
             formats,
             supports_atomic,
@@ -500,7 +509,7 @@ impl State {
         {
             let backend = self.backend.kms();
             for (crtc, conn) in outputs {
-                let mut renderer = match backend.api.renderer(&render_node, &render_node) {
+                let mut renderer = match backend.api.single_renderer(&render_node) {
                     Ok(renderer) => renderer,
                     Err(err) => {
                         slog_scope::warn!("Failed to initialize output: {}", err);
@@ -536,6 +545,44 @@ impl State {
             &self.common.event_loop_handle,
         );
 
+        if let Ok(instance) = Instance::new(Version::VERSION_1_2, None, None) {
+            if let Some(physical_device) =
+                PhysicalDevice::enumerate(&instance)
+                    .ok()
+                    .and_then(|devices| {
+                        devices
+                            .filter(|phd| {
+                                phd.has_device_extension(unsafe {
+                                    CStr::from_bytes_with_nul_unchecked(
+                                        b"VK_EXT_physical_device_drm\0",
+                                    )
+                                })
+                            })
+                            .find(|phd| {
+                                phd.primary_node().unwrap() == Some(render_node)
+                                    || phd.render_node().unwrap() == Some(render_node)
+                            })
+                    })
+            {
+                match VulkanAllocator::new(
+                    &physical_device,
+                    ImageUsageFlags::COLOR_ATTACHMENT | ImageUsageFlags::SAMPLED,
+                ) {
+                    Ok(allocator) => {
+                        self.backend
+                            .kms()
+                            .devices
+                            .get_mut(&drm_node)
+                            .unwrap()
+                            .allocator = Box::new(DmabufAllocator(allocator));
+                    }
+                    Err(err) => {
+                        slog_scope::warn!("Failed to create vulkan allocator: {}", err);
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -562,10 +609,7 @@ impl State {
                     }
                 }
                 for (crtc, conn) in changes.added {
-                    let mut renderer = match backend
-                        .api
-                        .renderer(&device.render_node, &device.render_node)
-                    {
+                    let mut renderer = match backend.api.single_renderer(&device.render_node) {
                         Ok(renderer) => renderer,
                         Err(err) => {
                             slog_scope::warn!("Failed to initialize output: {}", err);
@@ -701,7 +745,7 @@ impl Device {
         crtc: crtc::Handle,
         conn: connector::Handle,
         position: (i32, i32),
-        renderer: &mut GlMultiRenderer<'_>,
+        renderer: &mut GlMultiRenderer<'_, '_>,
     ) -> Result<Output> {
         let drm = &mut *self.drm.as_source_mut();
         let crtc_info = drm.get_crtc(crtc)?;
@@ -828,8 +872,11 @@ fn render_node_for_output(
 impl Surface {
     pub fn render_output(
         &mut self,
-        dh: &DisplayHandle,
-        api: &mut GpuManager<EglGlesBackend<GlowRenderer>>,
+        api: &mut GpuManager<GbmGlesBackend<GlowRenderer>>,
+        render_node: Option<(
+            &DrmNode,
+            &mut dyn Allocator<Buffer = Dmabuf, Error = AnyError>,
+        )>,
         target_node: &DrmNode,
         state: &mut Common,
         screencopy: Option<&[(ScreencopySession, BufferParams)]>,
@@ -838,10 +885,16 @@ impl Surface {
             return Ok(());
         }
 
-        let render_node = render_node_for_output(dh, &self.output, *target_node, &state.shell);
-        let mut renderer: GlMultiRenderer = api.renderer(&render_node, &target_node).unwrap();
-
         let surface = self.surface.as_mut().unwrap();
+        let (render_node, mut renderer) = match render_node {
+            Some((render_node, allocator)) => (
+                render_node,
+                api.renderer(&render_node, &target_node, allocator, surface.format())
+                    .unwrap(),
+            ),
+            None => (target_node, api.single_renderer(&target_node).unwrap()),
+        };
+
         let (buffer, age) = surface
             .next_buffer()
             .with_context(|| "Failed to allocate buffer")?;
@@ -957,7 +1010,10 @@ impl KmsState {
                         let drm_surface = drm.create_surface(*crtc, *mode, &[conn])?;
                         let target = GbmBufferedSurface::new(
                             drm_surface,
-                            device.allocator.clone(),
+                            GbmAllocator::new(
+                                device.gbm.clone(),
+                                GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
+                            ),
                             device.formats.clone(),
                             None,
                         )
@@ -1051,7 +1107,7 @@ impl KmsState {
             {
                 return self
                     .api
-                    .renderer::<Gles2Renderbuffer>(&device.render_node, &device.render_node)?
+                    .single_renderer(&device.render_node)?
                     .import_dmabuf(&dmabuf, None)
                     .map(|_| ())
                     .map_err(Into::into);
@@ -1100,28 +1156,59 @@ impl KmsState {
                     },
                     move |_time, _, data| {
                         let backend = data.state.backend.kms();
-                        if let Some(device) = backend.devices.get_mut(&device) {
-                            if let Some(surface) = device.surfaces.get_mut(&crtc) {
-                                match surface.render_output(
-                                    &data.display.handle(),
+                        let (mut device, mut other) = backend
+                            .devices
+                            .iter_mut()
+                            .partition::<Vec<_>, _>(|(key, _val)| *key == &device);
+                        let target_device = &mut device[0].1;
+
+                        if let Some(surface) = target_device.surfaces.get_mut(&crtc) {
+                            let target_node = target_device.render_node;
+                            let render_node = render_node_for_output(
+                                &data.display.handle(),
+                                &surface.output,
+                                target_node,
+                                &data.state.common.shell,
+                            );
+                            let state = &mut data.state.common;
+
+                            let result = if render_node != target_node {
+                                let render_device = &mut other
+                                    .iter_mut()
+                                    .find(|(_, val)| val.render_node == render_node)
+                                    .unwrap()
+                                    .1;
+                                surface.render_output(
                                     &mut backend.api,
-                                    &device.render_node,
-                                    &mut data.state.common,
+                                    Some((
+                                        &render_device.render_node,
+                                        render_device.allocator.as_mut(),
+                                    )),
+                                    &target_node,
+                                    state,
                                     screencopy_sessions.as_deref(),
-                                ) {
-                                    Ok(_) => return TimeoutAction::Drop,
-                                    Err(err) => {
-                                        if backend.session.is_active() {
-                                            slog_scope::error!("Error rendering: {}", err);
-                                            return TimeoutAction::ToDuration(
-                                                Duration::from_secs_f64(
-                                                    (1000.0 / surface.refresh_rate as f64) - 0.003,
-                                                ),
-                                            );
-                                        }
+                                )
+                            } else {
+                                surface.render_output(
+                                    &mut backend.api,
+                                    None,
+                                    &target_node,
+                                    state,
+                                    screencopy_sessions.as_deref(),
+                                )
+                            };
+
+                            match result {
+                                Ok(_) => return TimeoutAction::Drop,
+                                Err(err) => {
+                                    if backend.session.is_active() {
+                                        slog_scope::error!("Error rendering: {}", err);
+                                        return TimeoutAction::ToDuration(Duration::from_secs_f64(
+                                            (1000.0 / surface.refresh_rate as f64) - 0.003,
+                                        ));
                                     }
-                                };
-                            }
+                                }
+                            };
                         }
 
                         if let Some(sessions) = screencopy_sessions.as_mut() {
