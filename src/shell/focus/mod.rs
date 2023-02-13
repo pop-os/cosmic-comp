@@ -197,7 +197,9 @@ impl Common {
                         KeyboardFocusTarget::Element(mapped) => {
                             let workspace = state.common.shell.active_space(&output);
                             let focus_stack = workspace.focus_stack.get(&seat);
-                            if focus_stack.last().map(|m| m == &mapped).unwrap_or(false) {
+                            if focus_stack.last().map(|m| m == &mapped).unwrap_or(false)
+                                && workspace.get_fullscreen(&output).is_none()
+                            {
                                 continue; // Focus is valid
                             } else {
                                 slog_scope::debug!("Wrong Window, focus fixup");
@@ -245,11 +247,20 @@ impl Common {
                     .common
                     .shell
                     .active_space(&output)
-                    .focus_stack
-                    .get(&seat)
-                    .last()
+                    .get_fullscreen(&output)
                     .cloned()
-                    .map(KeyboardFocusTarget::from);
+                    .map(KeyboardFocusTarget::Fullscreen)
+                    .or_else(|| {
+                        state
+                            .common
+                            .shell
+                            .active_space(&output)
+                            .focus_stack
+                            .get(&seat)
+                            .last()
+                            .cloned()
+                            .map(KeyboardFocusTarget::from)
+                    });
                 if let Some(keyboard) = seat.get_keyboard() {
                     slog_scope::info!("restoring focus to: {:?}", target.as_ref());
                     keyboard.set_focus(state, target.clone(), SERIAL_COUNTER.next_serial());
