@@ -822,10 +822,14 @@ impl State {
                 let current_output = seat.active_output();
                 let workspace = self.common.shell.active_space_mut(&current_output);
                 let focus_stack = workspace.focus_stack.get(seat);
-                match workspace
+                let mut result = workspace
                     .tiling_layer
-                    .next_focus(focus, seat, focus_stack.iter())
-                {
+                    .next_focus(focus, seat, focus_stack.iter());
+                if workspace.get_fullscreen(&current_output).is_some() {
+                    result = FocusResult::None;
+                }
+
+                match result {
                     FocusResult::None => {
                         // TODO: Handle Workspace orientation
                         match focus {
@@ -854,6 +858,10 @@ impl State {
             Action::Move(direction) => {
                 let current_output = seat.active_output();
                 let workspace = self.common.shell.active_space_mut(&current_output);
+                if workspace.get_fullscreen(&current_output).is_some() {
+                    return; // TODO, is this what we want? How do we indicate the switch?
+                }
+
                 if let Some(_move_further) =
                     workspace.tiling_layer.move_current_window(direction, seat)
                 {
