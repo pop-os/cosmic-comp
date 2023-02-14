@@ -179,7 +179,7 @@ pub fn init_backend(
         match match event {
             UdevEvent::Added { device_id, path } => data
                 .state
-                .device_added(device_id, path, &data.display.handle())
+                .device_added(device_id, path, &data.display.handle(), true)
                 .with_context(|| format!("Failed to add drm device: {}", device_id)),
             UdevEvent::Changed { device_id } => data
                 .state
@@ -241,7 +241,7 @@ pub fn init_backend(
                         } else {
                             if let Err(err) =
                                 data.state
-                                    .device_added(dev, path.into(), &data.display.handle())
+                                    .device_added(dev, path.into(), &data.display.handle(), true)
                             {
                                 slog_scope::error!(
                                     "Failed to add drm device {}: {}",
@@ -319,14 +319,21 @@ pub fn init_backend(
 
     for (dev, path) in udev_dispatcher.as_source_ref().device_list() {
         state
-            .device_added(dev, path.into(), dh)
+            .device_added(dev, path.into(), dh, false)
             .with_context(|| format!("Failed to add drm device: {}", path.display()))?;
+    }
+    
+    // HACK: amdgpu doesn't like us initializing vulkan too early..
+    //      so lets do that delayed until mesa fixes that.
+    let devices = state.backend.kms().devices.iter().map(|(drm_node, device)| (*drm_node, device.render_node)).collect::<Vec<_>>();
+    for (drm_node, render_node) in devices {
+        state.init_vulkan(drm_node, render_node);
     }
     Ok(())
 }
 
 impl State {
-    fn device_added(&mut self, dev: dev_t, path: PathBuf, dh: &DisplayHandle) -> Result<()> {
+    fn device_added(&mut self, dev: dev_t, path: PathBuf, dh: &DisplayHandle, try_vulkan: bool) -> Result<()> {
         if !self.backend.kms().session.is_active() {
             return Ok(());
         }
@@ -358,25 +365,30 @@ impl State {
 
         let gbm = GbmDevice::new(fd)
             .with_context(|| format!("Failed to initialize GBM device for {}", path.display()))?;
-        let egl_display = EGLDisplay::new(gbm.clone(), None).with_context(|| {
-            format!("Failed to create EGLDisplay for device: {}", path.display())
-        })?;
-        let egl_device = EGLDevice::device_for_display(&egl_display).with_context(|| {
-            format!("Unable to find matching egl device for {}", path.display())
-        })?;
-        let render_node = egl_device
-            .try_get_render_node()
-            .ok()
-            .and_then(std::convert::identity)
-            .unwrap_or(drm_node);
-        let egl_context = EGLContext::new(&egl_display, None).with_context(|| {
-            format!(
-                "Failed to create EGLContext for device {:?}:{}",
-                egl_device,
-                path.display()
-            )
-        })?;
-        let formats = egl_context.dmabuf_render_formats().clone();
+        let (render_node, formats) = {
+            let egl_display = EGLDisplay::new(gbm.clone(), None).with_context(|| {
+                format!("Failed to create EGLDisplay for device: {}", path.display())
+            })?;
+            let egl_device = EGLDevice::device_for_display(&egl_display).with_context(|| {
+                format!("Unable to find matching egl device for {}", path.display())
+            })?;
+            let render_node = egl_device
+                .try_get_render_node()
+                .ok()
+                .and_then(std::convert::identity)
+                .unwrap_or(drm_node);
+            let egl_context = EGLContext::new(&egl_display, None).with_context(|| {
+                format!(
+                    "Failed to create EGLContext for device {:?}:{}",
+                    egl_device,
+                    path.display()
+                )
+            })?;
+            let formats = egl_context.dmabuf_render_formats().clone();
+            (render_node, formats)
+            // NOTE: We need the to drop the EGL types here again,
+            //  otherwise the EGLDisplay created below might share the same GBM context
+        };
 
         let dispatcher =
             Dispatcher::new(drm, move |event, metadata, data: &mut Data| match event {
@@ -494,7 +506,7 @@ impl State {
         let mut device = Device {
             render_node,
             surfaces: HashMap::new(),
-            gbm,
+            gbm: gbm.clone(),
             allocator,
             drm: dispatcher,
             formats,
@@ -508,6 +520,16 @@ impl State {
         let mut w = self.common.shell.global_space().size.w;
         {
             let backend = self.backend.kms();
+            backend
+                .api
+                .as_mut()
+                .add_node(render_node, gbm)
+                .with_context(|| {
+                    format!(
+                        "Failed to initialize renderer for device: {}, skipping",
+                        render_node
+                    )
+                })?;
             for (crtc, conn) in outputs {
                 let mut renderer = match backend.api.single_renderer(&render_node) {
                     Ok(renderer) => renderer,
@@ -545,6 +567,14 @@ impl State {
             &self.common.event_loop_handle,
         );
 
+        if try_vulkan {
+            self.init_vulkan(drm_node, render_node);
+        }
+
+        Ok(())
+    }
+
+    fn init_vulkan(&mut self, drm_node: DrmNode, render_node: DrmNode) {
         if let Ok(instance) = Instance::new(Version::VERSION_1_2, None, None) {
             if let Some(physical_device) =
                 PhysicalDevice::enumerate(&instance)
@@ -582,8 +612,6 @@ impl State {
                 }
             }
         }
-
-        Ok(())
     }
 
     fn device_changed(&mut self, dev: dev_t) -> Result<()> {
@@ -663,7 +691,9 @@ impl State {
     fn device_removed(&mut self, dev: dev_t, dh: &DisplayHandle) -> Result<()> {
         let drm_node = DrmNode::from_dev_id(dev)?;
         let mut outputs_removed = Vec::new();
-        if let Some(mut device) = self.backend.kms().devices.remove(&drm_node) {
+        let backend = self.backend.kms();
+        if let Some(mut device) = backend.devices.remove(&drm_node) {
+            backend.api.as_mut().remove_node(&device.render_node);
             for surface in device.surfaces.values_mut() {
                 if let Some(token) = surface.render_timer_token.take() {
                     self.common.event_loop_handle.remove(token);
