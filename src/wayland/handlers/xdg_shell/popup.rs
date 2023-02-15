@@ -30,7 +30,7 @@ impl Shell {
         if let Some(parent) = get_popup_toplevel(&surface) {
             if let Some(elem) = self.element_for_wl_surface(&parent) {
                 let workspace = self.space_for(elem).unwrap();
-                let element_geo = workspace.element_geometry(elem).unwrap();
+                let mut element_geo = workspace.element_geometry(elem).unwrap();
                 let (window, offset) = elem
                     .windows()
                     .find(|(w, _)| w.wl_surface().as_ref() == Some(&parent))
@@ -39,6 +39,7 @@ impl Shell {
                 let window_loc = element_geo.loc + offset + window_geo_offset;
                 let anchor_point = get_anchor_point(&positioner) + window_loc;
                 if workspace.is_tiled(elem) {
+                    element_geo.loc = (0, 0).into(); //-= window_loc;
                     if !unconstrain_xdg_popup_tile(surface, element_geo) {
                         if let Some(output) = workspace.output_under(anchor_point) {
                             unconstrain_xdg_popup(surface, window_loc, output.geometry());
@@ -281,30 +282,21 @@ fn check_constrained(
     geometry: Rectangle<i32, Logical>,
     toplevel_box: Rectangle<i32, Logical>,
 ) -> Point<i32, Logical> {
-    let relative_coords =
-        Rectangle::from_loc_and_size(geometry.loc + toplevel_box.loc, geometry.size);
-
     let mut offset = (0, 0).into();
-    if toplevel_box.contains_rect(relative_coords) {
+    if toplevel_box.contains_rect(geometry) {
         return offset;
     }
 
-    if relative_coords.loc.x < toplevel_box.loc.x {
-        offset.x = toplevel_box.loc.x - relative_coords.loc.x;
-    } else if relative_coords.loc.x + relative_coords.size.w
-        > toplevel_box.loc.x + toplevel_box.size.w
-    {
-        offset.x = toplevel_box.loc.x + toplevel_box.size.w
-            - (relative_coords.loc.x + relative_coords.size.w);
+    if geometry.loc.x < toplevel_box.loc.x {
+        offset.x = toplevel_box.loc.x - geometry.loc.x;
+    } else if geometry.loc.x + geometry.size.w > toplevel_box.loc.x + toplevel_box.size.w {
+        offset.x = toplevel_box.loc.x + toplevel_box.size.w - (geometry.loc.x + geometry.size.w);
     }
 
-    if relative_coords.loc.y < toplevel_box.loc.y {
-        offset.y = toplevel_box.loc.y - relative_coords.loc.y;
-    } else if relative_coords.loc.y + relative_coords.size.h
-        > toplevel_box.loc.y + toplevel_box.size.h
-    {
-        offset.y = toplevel_box.loc.y + toplevel_box.size.h
-            - (relative_coords.loc.y + relative_coords.size.h);
+    if geometry.loc.y < toplevel_box.loc.y {
+        offset.y = toplevel_box.loc.y - geometry.loc.y;
+    } else if geometry.loc.y + geometry.size.h > toplevel_box.loc.y + toplevel_box.size.h {
+        offset.y = toplevel_box.loc.y + toplevel_box.size.h - (geometry.loc.y + geometry.size.h);
     }
 
     offset
