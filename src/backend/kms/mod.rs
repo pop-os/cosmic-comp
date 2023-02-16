@@ -1184,9 +1184,6 @@ impl KmsState {
                 return Ok(());
             }
             if !surface.pending {
-                surface.dirty = false;
-                surface.pending = true;
-
                 let device = *device;
                 let crtc = *crtc;
                 if let Some(token) = surface.render_timer_token.take() {
@@ -1243,10 +1240,14 @@ impl KmsState {
                             };
 
                             match result {
-                                Ok(_) => return TimeoutAction::Drop,
+                                Ok(_) => {
+                                    surface.dirty = false;
+                                    surface.pending = true;
+                                    return TimeoutAction::Drop;
+                                }
                                 Err(err) => {
                                     if backend.session.is_active() {
-                                        slog_scope::error!("Error rendering: {}", err);
+                                        slog_scope::error!("Error rendering: {:?}", err);
                                         return TimeoutAction::ToDuration(Duration::from_secs_f64(
                                             (1000.0 / surface.refresh_rate as f64) - 0.003,
                                         ));
