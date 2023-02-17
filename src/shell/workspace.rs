@@ -9,6 +9,7 @@ use crate::{
     wayland::{
         handlers::screencopy::{DropableSession, WORKSPACE_OVERVIEW_NAMESPACE},
         protocols::{
+            ext_foreign_toplevel_list,
             screencopy::{BufferParams, Session as ScreencopySession},
             toplevel_info::ToplevelInfoState,
             workspace::WorkspaceHandle,
@@ -105,12 +106,18 @@ impl Workspace {
         &mut self,
         output: &Output,
         toplevel_info: &mut ToplevelInfoState<State, CosmicSurface>,
+        foreign_toplevel_info: &mut ext_foreign_toplevel_list::ToplevelInfoState<
+            State,
+            CosmicSurface,
+        >,
     ) {
         if let Some(dead_output_window) = self.fullscreen.remove(output) {
             self.unfullscreen_request(&dead_output_window);
         }
-        self.tiling_layer.unmap_output(output, toplevel_info);
-        self.floating_layer.unmap_output(output, toplevel_info);
+        self.tiling_layer
+            .unmap_output(output, toplevel_info, foreign_toplevel_info);
+        self.floating_layer
+            .unmap_output(output, toplevel_info, foreign_toplevel_info);
         self.refresh();
     }
 

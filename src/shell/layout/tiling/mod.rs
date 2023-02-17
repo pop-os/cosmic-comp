@@ -14,7 +14,8 @@ use crate::{
     },
     utils::prelude::*,
     wayland::{
-        handlers::xdg_shell::popup::get_popup_toplevel, protocols::toplevel_info::ToplevelInfoState,
+        handlers::xdg_shell::popup::get_popup_toplevel,
+        protocols::{ext_foreign_toplevel_list, toplevel_info::ToplevelInfoState},
     },
 };
 
@@ -282,6 +283,10 @@ impl TilingLayout {
         &mut self,
         output: &Output,
         toplevel_info: &mut ToplevelInfoState<State, CosmicSurface>,
+        foreign_toplevel_info: &mut ext_foreign_toplevel_list::ToplevelInfoState<
+            State,
+            CosmicSurface,
+        >,
     ) {
         if let Some(src) = self.trees.remove(output) {
             // TODO: expects last remaining output
@@ -304,6 +309,8 @@ impl TilingLayout {
                     for (toplevel, _) in mapped.windows() {
                         toplevel_info.toplevel_leave_output(&toplevel, output);
                         toplevel_info.toplevel_enter_output(&toplevel, &new_output.output);
+                        foreign_toplevel_info.toplevel_leave_output(&toplevel, &output);
+                        foreign_toplevel_info.toplevel_enter_output(&toplevel, &new_output.output);
                     }
                     mapped.output_leave(output);
                     mapped.output_enter(&new_output.output, mapped.bbox());

@@ -30,12 +30,15 @@ use smithay::{
 use crate::{
     config::{Config, OutputConfig, WorkspaceMode as ConfigMode},
     utils::prelude::*,
-    wayland::protocols::{
-        toplevel_info::ToplevelInfoState,
-        toplevel_management::{ManagementCapabilities, ToplevelManagementState},
-        workspace::{
-            WorkspaceCapabilities, WorkspaceGroupHandle, WorkspaceHandle, WorkspaceState,
-            WorkspaceUpdateGuard,
+    wayland::{
+        protocols::ext_foreign_toplevel_list,
+        protocols::{
+            toplevel_info::ToplevelInfoState,
+            toplevel_management::{ManagementCapabilities, ToplevelManagementState},
+            workspace::{
+                WorkspaceCapabilities, WorkspaceGroupHandle, WorkspaceHandle, WorkspaceState,
+                WorkspaceUpdateGuard,
+            },
         },
     },
 };
@@ -66,6 +69,8 @@ pub struct Shell {
     // wayland_state
     pub layer_shell_state: WlrLayerShellState,
     pub toplevel_info_state: ToplevelInfoState<State, CosmicSurface>,
+    pub foreign_toplevel_info_state:
+        ext_foreign_toplevel_list::ToplevelInfoState<State, CosmicSurface>,
     pub toplevel_management_state: ToplevelManagementState,
     pub xdg_shell_state: XdgShellState,
     pub workspace_state: WorkspaceState<State>,
@@ -456,6 +461,13 @@ impl Shell {
             //|client| client.get_data::<ClientState>().map_or(false, |s| s.privileged),
             |_| true,
         );
+
+        let foreign_toplevel_info_state = ext_foreign_toplevel_list::ToplevelInfoState::new(
+            dh,
+            //|client| client.get_data::<ClientState>().map_or(false, |s| s.privileged),
+            |_| true,
+        );
+
         let toplevel_management_state = ToplevelManagementState::new::<State, _>(
             dh,
             vec![
@@ -492,6 +504,7 @@ impl Shell {
 
             layer_shell_state,
             toplevel_info_state,
+            foreign_toplevel_info_state,
             toplevel_management_state,
             xdg_shell_state,
             workspace_state,
@@ -593,7 +606,11 @@ impl Shell {
 
                             // update mapping
                             workspace.map_output(new_output, (0, 0).into());
-                            workspace.unmap_output(output, &mut self.toplevel_info_state);
+                            workspace.unmap_output(
+                                output,
+                                &mut self.toplevel_info_state,
+                                &mut self.foreign_toplevel_info_state,
+                            );
                             workspace.refresh();
 
                             new_set.workspaces.push(workspace);
@@ -611,7 +628,11 @@ impl Shell {
             WorkspaceMode::Global(set) => {
                 state.remove_group_output(&set.group, output);
                 for workspace in &mut set.workspaces {
-                    workspace.unmap_output(output, &mut self.toplevel_info_state);
+                    workspace.unmap_output(
+                        output,
+                        &mut self.toplevel_info_state,
+                        &mut self.foreign_toplevel_info_state,
+                    );
                     workspace.refresh();
                 }
             }
@@ -730,6 +751,10 @@ impl Shell {
                             self.toplevel_info_state
                                 .toplevel_leave_workspace(&toplevel, &workspace.handle);
                             self.toplevel_info_state
+                                .toplevel_enter_workspace(&toplevel, &new_workspace.handle);
+                            self.foreign_toplevel_info_state
+                                .toplevel_leave_workspace(&toplevel, &workspace.handle);
+                            self.foreign_toplevel_info_state
                                 .toplevel_enter_workspace(&toplevel, &new_workspace.handle);
                         }
                         new_workspace.tiling_layer.merge(workspace.tiling_layer);
@@ -1071,6 +1096,10 @@ impl Shell {
 
         self.toplevel_info_state
             .refresh(Some(&self.workspace_state));
+        self.foreign_toplevel_info_state
+            .refresh(Some(&self.workspace_state));
+        self.foreign_toplevel_info_state
+            .refresh(Some(&self.workspace_state));
     }
 
     pub fn map_window(state: &mut State, window: &CosmicSurface, output: &Output) {
@@ -1089,12 +1118,27 @@ impl Shell {
         state
             .common
             .shell
+            .foreign_toplevel_info_state
+            .new_toplevel(&window);
+        state
+            .common
+            .shell
             .toplevel_info_state
             .toplevel_enter_output(&window, &output);
         state
             .common
             .shell
             .toplevel_info_state
+            .toplevel_enter_workspace(&window, &workspace.handle);
+        state
+            .common
+            .shell
+            .foreign_toplevel_info_state
+            .toplevel_enter_output(&window, &output);
+        state
+            .common
+            .shell
+            .foreign_toplevel_info_state
             .toplevel_enter_workspace(&window, &workspace.handle);
 
         let mapped = CosmicMapped::from(CosmicWindow::new(
@@ -1213,11 +1257,21 @@ impl Shell {
                 .shell
                 .toplevel_info_state
                 .toplevel_leave_workspace(&toplevel, &from_workspace.handle);
+            state
+                .common
+                .shell
+                .foreign_toplevel_info_state
+                .toplevel_leave_workspace(&toplevel, &from_workspace.handle);
             if from_output != to_output {
                 state
                     .common
                     .shell
                     .toplevel_info_state
+                    .toplevel_leave_output(&toplevel, from_output);
+                state
+                    .common
+                    .shell
+                    .foreign_toplevel_info_state
                     .toplevel_leave_output(&toplevel, from_output);
             }
         }
@@ -1324,6 +1378,16 @@ impl Shell {
                             .common
                             .shell
                             .toplevel_info_state
+                            .toplevel_leave_output(&window, &output);
+                        state
+                            .common
+                            .shell
+                            .foreign_toplevel_info_state
+                            .toplevel_leave_workspace(&window, &handle);
+                        state
+                            .common
+                            .shell
+                            .foreign_toplevel_info_state
                             .toplevel_leave_output(&window, &output);
                         seat.get_pointer().unwrap().set_grab(
                             state,
