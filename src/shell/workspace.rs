@@ -7,7 +7,7 @@ use crate::{
     state::State,
     utils::prelude::*,
     wayland::{
-        handlers::screencopy::DropableSession,
+        handlers::screencopy::{DropableSession, WORKSPACE_OVERVIEW_NAMESPACE},
         protocols::{
             screencopy::{BufferParams, Session as ScreencopySession},
             toplevel_info::ToplevelInfoState,
@@ -434,6 +434,7 @@ impl Workspace {
         output: &Output,
         override_redirect_windows: &[X11Surface],
         xwm_state: impl Iterator<Item = &'a mut XWaylandState>,
+        exclude_workspace_overview: bool,
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
@@ -451,7 +452,11 @@ impl Workspace {
                 layer_map
                     .layers()
                     .rev()
-                    .filter(|s| s.layer() == Layer::Overlay)
+                    .filter(|s| {
+                        s.layer() == Layer::Overlay
+                            && !(exclude_workspace_overview
+                                && s.namespace() == WORKSPACE_OVERVIEW_NAMESPACE)
+                    })
                     .filter_map(|surface| {
                         layer_map
                             .layer_geometry(surface)
@@ -510,6 +515,10 @@ impl Workspace {
                 let (lower, upper): (Vec<&LayerSurface>, Vec<&LayerSurface>) = layer_map
                     .layers()
                     .rev()
+                    .filter(|s| {
+                        !(exclude_workspace_overview
+                            && s.namespace() == "cosmic-workspace-overview")
+                    })
                     .partition(|s| matches!(s.layer(), Layer::Background | Layer::Bottom));
 
                 render_elements.extend(
