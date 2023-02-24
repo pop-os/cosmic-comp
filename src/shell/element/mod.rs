@@ -1,5 +1,8 @@
 use crate::{
-    backend::render::{element::AsGlowRenderer, GlMultiFrame, GlMultiRenderer},
+    backend::render::{
+        element::{AsGlowFrame, AsGlowRenderer},
+        GlMultiFrame, GlMultiRenderer,
+    },
     state::State,
     utils::prelude::SeatExt,
 };
@@ -9,7 +12,9 @@ use smithay::{
         input::KeyState,
         renderer::{
             element::{AsRenderElements, Element, RenderElement, UnderlyingStorage},
+            gles2::element::PixelShaderElement,
             glow::GlowRenderer,
+            multigpu::Error as MultiError,
             ImportAll, ImportMem, Renderer,
         },
     },
@@ -47,13 +52,9 @@ pub mod window;
 pub use self::window::CosmicWindow;
 
 #[cfg(feature = "debug")]
-use crate::backend::render::element::AsGlowFrame;
-#[cfg(feature = "debug")]
 use egui::plot::{Corner, Legend, Plot, PlotPoints, Polygon};
 #[cfg(feature = "debug")]
-use smithay::backend::renderer::{
-    element::texture::TextureRenderElement, gles2::Gles2Texture, multigpu::Error as MultiError,
-};
+use smithay::backend::renderer::{element::texture::TextureRenderElement, gles2::Gles2Texture};
 #[cfg(feature = "debug")]
 use tracing::debug;
 
@@ -659,6 +660,7 @@ where
 {
     Stack(self::stack::CosmicStackRenderElement<R>),
     Window(self::window::CosmicWindowRenderElement<R>),
+    Indicator(PixelShaderElement),
     #[cfg(feature = "debug")]
     Egui(TextureRenderElement<Gles2Texture>),
 }
@@ -672,6 +674,7 @@ where
         match self {
             CosmicMappedRenderElement::Stack(elem) => elem.id(),
             CosmicMappedRenderElement::Window(elem) => elem.id(),
+            CosmicMappedRenderElement::Indicator(elem) => elem.id(),
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => elem.id(),
         }
@@ -681,6 +684,7 @@ where
         match self {
             CosmicMappedRenderElement::Stack(elem) => elem.current_commit(),
             CosmicMappedRenderElement::Window(elem) => elem.current_commit(),
+            CosmicMappedRenderElement::Indicator(elem) => elem.current_commit(),
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => elem.current_commit(),
         }
@@ -690,6 +694,7 @@ where
         match self {
             CosmicMappedRenderElement::Stack(elem) => elem.src(),
             CosmicMappedRenderElement::Window(elem) => elem.src(),
+            CosmicMappedRenderElement::Indicator(elem) => elem.src(),
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => elem.src(),
         }
@@ -699,6 +704,7 @@ where
         match self {
             CosmicMappedRenderElement::Stack(elem) => elem.geometry(scale),
             CosmicMappedRenderElement::Window(elem) => elem.geometry(scale),
+            CosmicMappedRenderElement::Indicator(elem) => elem.geometry(scale),
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => elem.geometry(scale),
         }
@@ -708,6 +714,7 @@ where
         match self {
             CosmicMappedRenderElement::Stack(elem) => elem.location(scale),
             CosmicMappedRenderElement::Window(elem) => elem.location(scale),
+            CosmicMappedRenderElement::Indicator(elem) => elem.location(scale),
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => elem.location(scale),
         }
@@ -717,6 +724,7 @@ where
         match self {
             CosmicMappedRenderElement::Stack(elem) => elem.transform(),
             CosmicMappedRenderElement::Window(elem) => elem.transform(),
+            CosmicMappedRenderElement::Indicator(elem) => elem.transform(),
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => elem.transform(),
         }
@@ -730,6 +738,7 @@ where
         match self {
             CosmicMappedRenderElement::Stack(elem) => elem.damage_since(scale, commit),
             CosmicMappedRenderElement::Window(elem) => elem.damage_since(scale, commit),
+            CosmicMappedRenderElement::Indicator(elem) => elem.damage_since(scale, commit),
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => elem.damage_since(scale, commit),
         }
@@ -739,6 +748,7 @@ where
         match self {
             CosmicMappedRenderElement::Stack(elem) => elem.opaque_regions(scale),
             CosmicMappedRenderElement::Window(elem) => elem.opaque_regions(scale),
+            CosmicMappedRenderElement::Indicator(elem) => elem.opaque_regions(scale),
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => elem.opaque_regions(scale),
         }
@@ -756,6 +766,9 @@ impl RenderElement<GlowRenderer> for CosmicMappedRenderElement<GlowRenderer> {
         match self {
             CosmicMappedRenderElement::Stack(elem) => elem.draw(frame, src, dst, damage),
             CosmicMappedRenderElement::Window(elem) => elem.draw(frame, src, dst, damage),
+            CosmicMappedRenderElement::Indicator(elem) => {
+                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage)
+            }
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => {
                 RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage)
@@ -767,6 +780,7 @@ impl RenderElement<GlowRenderer> for CosmicMappedRenderElement<GlowRenderer> {
         match self {
             CosmicMappedRenderElement::Stack(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::Window(elem) => elem.underlying_storage(renderer),
+            CosmicMappedRenderElement::Indicator(elem) => elem.underlying_storage(renderer),
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => elem.underlying_storage(renderer),
         }
@@ -786,6 +800,10 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>>
         match self {
             CosmicMappedRenderElement::Stack(elem) => elem.draw(frame, src, dst, damage),
             CosmicMappedRenderElement::Window(elem) => elem.draw(frame, src, dst, damage),
+            CosmicMappedRenderElement::Indicator(elem) => {
+                RenderElement::<GlowRenderer>::draw(elem, frame.glow_frame_mut(), src, dst, damage)
+                    .map_err(|err| MultiError::Render(err))
+            }
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => {
                 let glow_frame = frame.glow_frame_mut();
@@ -802,6 +820,9 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>>
         match self {
             CosmicMappedRenderElement::Stack(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::Window(elem) => elem.underlying_storage(renderer),
+            CosmicMappedRenderElement::Indicator(elem) => {
+                elem.underlying_storage(renderer.glow_renderer_mut())
+            }
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => {
                 let glow_renderer = renderer.glow_renderer_mut();
@@ -836,6 +857,18 @@ where
         CosmicMappedRenderElement::Window(elem)
     }
 }
+
+impl<R> From<PixelShaderElement> for CosmicMappedRenderElement<R>
+where
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    <R as Renderer>::TextureId: 'static,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+{
+    fn from(elem: PixelShaderElement) -> Self {
+        CosmicMappedRenderElement::Indicator(elem)
+    }
+}
+
 #[cfg(feature = "debug")]
 impl<R> From<TextureRenderElement<Gles2Texture>> for CosmicMappedRenderElement<R>
 where

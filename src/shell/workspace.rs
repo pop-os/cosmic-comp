@@ -435,6 +435,7 @@ impl Workspace {
         output: &Output,
         override_redirect_windows: &[X11Surface],
         xwm_state: impl Iterator<Item = &'a mut XWaylandState>,
+        draw_focus_indicator: Option<&Seat<State>>,
         exclude_workspace_overview: bool,
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
     where
@@ -559,10 +560,12 @@ impl Workspace {
                     }),
             );
 
+            let focused =
+                draw_focus_indicator.and_then(|seat| self.focus_stack.get(seat).last().cloned());
             // floating surfaces
             render_elements.extend(
                 self.floating_layer
-                    .render_output::<R>(renderer, output)?
+                    .render_output::<R>(renderer, output, focused.as_ref())
                     .into_iter()
                     .map(WorkspaceRenderElement::from),
             );
@@ -570,7 +573,7 @@ impl Workspace {
             //tiling surfaces
             render_elements.extend(
                 self.tiling_layer
-                    .render_output::<R>(renderer, output)?
+                    .render_output::<R>(renderer, output, focused.as_ref())?
                     .into_iter()
                     .map(WorkspaceRenderElement::from),
             );

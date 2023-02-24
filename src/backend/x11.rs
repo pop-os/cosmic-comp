@@ -42,6 +42,8 @@ use tracing::{debug, error, info, warn};
 #[cfg(feature = "debug")]
 use crate::state::Fps;
 
+use super::render::init_shaders;
+
 enum Allocator {
     Gbm(GbmAllocator<DrmDeviceFd>),
     Vulkan(PhysicalDevice),
@@ -348,6 +350,7 @@ pub fn init_backend(
     let mut renderer =
         unsafe { GlowRenderer::new(context) }.with_context(|| "Failed to initialize renderer")?;
 
+    init_shaders(&mut renderer).expect("Failed to initialize renderer");
     init_egl_client_side(dh, state, &mut renderer)?;
 
     state.backend = BackendData::X11(X11State {

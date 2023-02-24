@@ -32,7 +32,7 @@ use tracing::{error, info, warn};
 #[cfg(feature = "debug")]
 use crate::state::Fps;
 
-use super::render::CursorMode;
+use super::render::{init_shaders, CursorMode};
 
 pub struct WinitState {
     // The winit backend currently has no notion of multiple windows
@@ -147,6 +147,7 @@ pub fn init_backend(
 ) -> Result<()> {
     let (mut backend, mut input) =
         winit::init().map_err(|_| anyhow!("Failed to initilize winit backend"))?;
+    init_shaders(backend.renderer()).expect("Failed to initialize renderer");
 
     init_egl_client_side(dh, state, &mut backend)?;
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::render::element::AsGlowRenderer,
+    backend::render::{element::AsGlowRenderer, IndicatorShader},
     shell::{
         element::{CosmicMapped, CosmicMappedRenderElement},
         focus::target::{KeyboardFocusTarget, PointerFocusTarget},
@@ -56,13 +56,22 @@ impl MoveGrabState {
         }
 
         let scale = output.current_scale().fractional_scale().into();
-        AsRenderElements::<R>::render_elements::<I>(
+        let mut elements: Vec<I> = vec![CosmicMappedRenderElement::from(IndicatorShader::element(
+            renderer,
+            Rectangle::from_loc_and_size(
+                location.to_i32_round() - output.geometry().loc,
+                self.window.geometry().size,
+            ),
+        ))
+        .into()];
+        elements.extend(AsRenderElements::<R>::render_elements::<I>(
             &self.window,
             renderer,
             (location.to_i32_round() - output.geometry().loc - self.window.geometry().loc)
                 .to_physical_precise_round(scale),
             scale,
-        )
+        ));
+        elements
     }
 
     pub fn send_frames(

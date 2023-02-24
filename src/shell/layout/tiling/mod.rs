@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::render::element::AsGlowRenderer,
+    backend::render::{element::AsGlowRenderer, IndicatorShader},
     shell::{
         element::{CosmicMapped, CosmicMappedRenderElement},
         focus::{
@@ -1299,6 +1299,7 @@ impl TilingLayout {
         &self,
         renderer: &mut R,
         output: &Output,
+        focused: Option<&CosmicMapped>,
     ) -> Result<Vec<CosmicMappedRenderElement<R>>, OutputNotMapped>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
@@ -1360,16 +1361,25 @@ impl TilingLayout {
             })
             .flatten()
             .flat_map(|(mapped, loc)| {
-                AsRenderElements::<R>::render_elements::<CosmicMappedRenderElement<R>>(
-                    mapped,
-                    renderer,
-                    loc.to_physical_precise_round(output_scale)
-                        - mapped
-                            .geometry()
-                            .loc
-                            .to_physical_precise_round(output_scale),
-                    Scale::from(output_scale),
-                )
+                let mut elements =
+                    AsRenderElements::<R>::render_elements::<CosmicMappedRenderElement<R>>(
+                        mapped,
+                        renderer,
+                        loc.to_physical_precise_round(output_scale)
+                            - mapped
+                                .geometry()
+                                .loc
+                                .to_physical_precise_round(output_scale),
+                        Scale::from(output_scale),
+                    );
+                if focused == Some(mapped) {
+                    let element = IndicatorShader::element(
+                        renderer,
+                        Rectangle::from_loc_and_size(loc, mapped.geometry().size),
+                    );
+                    elements.insert(0, element.into());
+                }
+                elements
             })
             .collect::<Vec<_>>())
     }

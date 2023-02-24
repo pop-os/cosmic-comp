@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use smithay::{
-    backend::renderer::{element::RenderElement, ImportAll, ImportMem, Renderer},
+    backend::renderer::{
+        element::{AsRenderElements, RenderElement},
+        ImportAll, ImportMem, Renderer,
+    },
     desktop::{layer_map_for_output, space::SpaceElement, Space},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
@@ -10,11 +13,11 @@ use smithay::{
 use std::collections::HashMap;
 
 use crate::{
-    backend::render::element::AsGlowRenderer,
+    backend::render::{element::AsGlowRenderer, IndicatorShader},
     shell::{
         element::{CosmicMapped, CosmicMappedRenderElement},
         grabs::ResizeEdge,
-        CosmicSurface, OutputNotMapped,
+        CosmicSurface,
     },
     state::State,
     utils::prelude::*,
@@ -342,16 +345,37 @@ impl FloatingLayout {
         &self,
         renderer: &mut R,
         output: &Output,
-    ) -> Result<Vec<CosmicMappedRenderElement<R>>, OutputNotMapped>
+        focused: Option<&CosmicMapped>,
+    ) -> Vec<CosmicMappedRenderElement<R>>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         <R as Renderer>::TextureId: 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
         let output_scale = output.current_scale().fractional_scale();
-        let output_geo = self.space.output_geometry(output).ok_or(OutputNotMapped)?;
-        Ok(self
-            .space
-            .render_elements_for_region(renderer, &output_geo, output_scale))
+        self.space
+            .elements_for_output(output)
+            .rev()
+            .flat_map(|elem| {
+                let render_location =
+                    self.space.element_location(elem).unwrap() - elem.geometry().loc;
+                let mut elements = elem.render_elements(
+                    renderer,
+                    render_location.to_physical_precise_round(output_scale),
+                    output_scale.into(),
+                );
+                if focused == Some(elem) {
+                    let element = IndicatorShader::element(
+                        renderer,
+                        Rectangle::from_loc_and_size(
+                            self.space.element_location(elem).unwrap(),
+                            elem.geometry().size,
+                        ),
+                    );
+                    elements.insert(0, element.into());
+                }
+                elements
+            })
+            .collect()
     }
 }

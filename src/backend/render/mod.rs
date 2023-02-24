@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::{
+    borrow::{Borrow, BorrowMut},
+    cell::RefCell,
+};
+
 #[cfg(feature = "debug")]
 use crate::{debug::fps_ui, utils::prelude::*};
 use crate::{
@@ -26,15 +31,18 @@ use smithay::{
             damage::{
                 DamageTrackedRenderer, DamageTrackedRendererError as RenderError, OutputNoMode,
             },
-            element::{RenderElement, RenderElementStates},
-            gles2::Gles2Error,
+            element::{Element, RenderElement, RenderElementStates},
+            gles2::{
+                element::PixelShaderElement, Gles2Error, Gles2PixelProgram, Gles2Renderer, Uniform,
+                UniformName, UniformType,
+            },
             glow::GlowRenderer,
             multigpu::{gbm::GbmGlesBackend, MultiFrame, MultiRenderer},
             Bind, Blit, ExportMem, ImportAll, ImportMem, Offscreen, Renderer, TextureFilter,
         },
     },
     output::Output,
-    utils::{Physical, Rectangle},
+    utils::{Logical, Physical, Point, Rectangle, Size},
     wayland::dmabuf::get_dmabuf,
 };
 use tracing::warn;
@@ -50,6 +58,93 @@ pub type GlMultiFrame<'a, 'b, 'frame> =
     MultiFrame<'a, 'a, 'b, 'frame, GbmGlesBackend<GlowRenderer>, GbmGlesBackend<GlowRenderer>>;
 
 pub static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
+pub static FOCUS_INDICATOR_COLOR: [f32; 4] = [0.580, 0.921, 0.921, 1.0];
+pub static FOCUS_INDICATOR_THICKNESS: f32 = 4.0;
+pub static FOCUS_INDICATOR_RADIUS: f32 = 8.0;
+pub static FOCUS_INDICATOR_SHADER: &str = include_str!("./shaders/focus_indicator.frag");
+
+pub struct IndicatorShader(pub Gles2PixelProgram);
+struct IndicatorElement(pub RefCell<PixelShaderElement>);
+
+impl IndicatorShader {
+    pub fn get<R: AsGlowRenderer>(renderer: &R) -> Gles2PixelProgram {
+        Borrow::<Gles2Renderer>::borrow(renderer.glow_renderer())
+            .egl_context()
+            .user_data()
+            .get::<IndicatorShader>()
+            .expect("Custom Shaders not initialized")
+            .0
+            .clone()
+    }
+
+    pub fn element<R: AsGlowRenderer>(
+        renderer: &R,
+        geo: Rectangle<i32, Logical>,
+    ) -> PixelShaderElement {
+        let thickness = FOCUS_INDICATOR_THICKNESS;
+        let thickness_loc = (thickness as i32, thickness as i32);
+        let thickness_size = ((thickness * 2.0) as i32, (thickness * 2.0) as i32);
+        let geo = Rectangle::from_loc_and_size(
+            geo.loc - Point::from(thickness_loc),
+            geo.size + Size::from(thickness_size),
+        );
+
+        let user_data = Borrow::<Gles2Renderer>::borrow(renderer.glow_renderer())
+            .egl_context()
+            .user_data();
+
+        match user_data.get::<IndicatorElement>() {
+            Some(elem) => {
+                let mut elem = elem.0.borrow_mut();
+                if elem.geometry(1.0.into()).to_logical(1) != geo {
+                    elem.resize(geo, None);
+                }
+                elem.clone()
+            }
+            None => {
+                let shader = Self::get(renderer);
+                let color = FOCUS_INDICATOR_COLOR;
+
+                let elem = PixelShaderElement::new(
+                    shader,
+                    dbg!(geo),
+                    None, //TODO
+                    color[3],
+                    vec![
+                        Uniform::new("color", [color[0], color[1], color[2]]),
+                        Uniform::new("thickness", thickness),
+                        Uniform::new("radius", FOCUS_INDICATOR_RADIUS),
+                    ],
+                );
+                if !user_data.insert_if_missing(|| IndicatorElement(RefCell::new(elem.clone()))) {
+                    *user_data.get::<IndicatorElement>().unwrap().0.borrow_mut() = elem.clone();
+                }
+                elem
+            }
+        }
+    }
+}
+
+pub fn init_shaders<R: AsGlowRenderer>(renderer: &mut R) -> Result<(), Gles2Error> {
+    let glow_renderer = renderer.glow_renderer_mut();
+    let gles_renderer: &mut Gles2Renderer = glow_renderer.borrow_mut();
+
+    let indicator_shader = gles_renderer.compile_custom_pixel_shader(
+        FOCUS_INDICATOR_SHADER,
+        &[
+            UniformName::new("color", UniformType::_3f),
+            UniformName::new("thickness", UniformType::_1f),
+            UniformName::new("radius", UniformType::_1f),
+        ],
+    )?;
+
+    let egl_context = gles_renderer.egl_context();
+    egl_context
+        .user_data()
+        .insert_if_missing(|| IndicatorShader(indicator_shader));
+
+    Ok(())
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CursorMode {
@@ -248,6 +343,13 @@ where
         }
     }
 
+    let last_active_seat = state.last_active_seat().clone();
+    let move_active = last_active_seat
+        .user_data()
+        .get::<SeatMoveGrabState>()
+        .unwrap()
+        .borrow()
+        .is_some();
     elements.extend(
         workspace
             .render_output::<R>(
@@ -255,6 +357,7 @@ where
                 output,
                 &state.shell.override_redirect_windows,
                 state.xwayland_state.values_mut(),
+                (!move_active).then_some(&last_active_seat),
                 exclude_workspace_overview,
             )
             .map_err(|_| OutputNoMode)?

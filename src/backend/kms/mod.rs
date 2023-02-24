@@ -72,7 +72,7 @@ mod drm_helpers;
 mod socket;
 use socket::*;
 
-use super::render::{CursorMode, GlMultiRenderer};
+use super::render::{init_shaders, CursorMode, GlMultiRenderer};
 // for now we assume we need at least 3ms
 const MIN_RENDER_TIME: Duration = Duration::from_millis(3);
 
@@ -542,14 +542,18 @@ impl State {
                         render_node
                     )
                 })?;
+
+            let mut renderer = match backend.api.single_renderer(&render_node) {
+                Ok(renderer) => renderer,
+                Err(err) => {
+                    warn!(?err, "Failed to initialize output.");
+                    backend.api.as_mut().remove_node(&render_node);
+                    return Ok(());
+                }
+            };
+            init_shaders(&mut renderer).expect("Failed to initialize renderer");
+
             for (crtc, conn) in outputs {
-                let mut renderer = match backend.api.single_renderer(&render_node) {
-                    Ok(renderer) => renderer,
-                    Err(err) => {
-                        warn!(?err, "Failed to initialize output.");
-                        continue;
-                    }
-                };
                 match device.setup_surface(crtc, conn, (w, 0), &mut renderer) {
                     Ok(output) => {
                         w += output
