@@ -17,6 +17,7 @@ use std::{
     },
     sync::Arc,
 };
+use tracing::{error, warn};
 
 use crate::state::{Data, State};
 
@@ -108,7 +109,7 @@ pub fn setup_socket(handle: LoopHandle<Data>, state: &State) -> Result<()> {
                                 stream.buffer = vec![0; stream.size as usize];
                             },
                             Err(err) => {
-                                slog_scope::warn!("Error reading from session socket: {}", err);
+                                warn!(?err, "Error reading from session socket");
                                 return Ok(PostAction::Remove);
                             }
                         }
@@ -117,7 +118,7 @@ pub fn setup_socket(handle: LoopHandle<Data>, state: &State) -> Result<()> {
                     stream.read_bytes += match stream.stream.read(&mut stream.buffer) {
                         Ok(size) => size,
                         Err(err) => {
-                            slog_scope::error!("Error reading from session socket: {}", err);
+                            error!(?err, "Error reading from session socket");
                             return Ok(PostAction::Remove);
                         }
                     };
@@ -137,22 +138,22 @@ pub fn setup_socket(handle: LoopHandle<Data>, state: &State) -> Result<()> {
                                                 for fd in fds.into_iter().take(received_count) {
                                                     let stream = unsafe { UnixStream::from_raw_fd(fd) };
                                                     if let Err(err) = data.display.handle().insert_client(stream, Arc::new(data.state.new_privileged_client_state())) {
-                                                        slog_scope::warn!("Failed to add privileged client to display: {}", err);
+                                                        warn!(?err, "Failed to add privileged client to display");
                                                     }
                                                 }
                                             },
                                             Err(err) => {
-                                                slog_scope::warn!("Failed to read file descriptors from session sock: {}", err);
+                                                warn!(?err, "Failed to read file descriptors from session sock");
                                             }
                                         }
                                     },
-                                    Ok(Message::SetEnv { .. }) => slog_scope::warn!("Got SetEnv from session? What is this?"),
-                                    _ => slog_scope::warn!("Unknown session socket message, are you using incompatible cosmic-session and cosmic-comp versions?"),
+                                    Ok(Message::SetEnv { .. }) => warn!("Got SetEnv from session? What is this?"),
+                                    _ => warn!("Unknown session socket message, are you using incompatible cosmic-session and cosmic-comp versions?"),
                                 };
                                 Ok(PostAction::Continue)
                             },
                             Err(err) => {
-                                slog_scope::warn!("Invalid message from session sock: {}", err);
+                                warn!(?err, "Invalid message from session sock");
                                 Ok(PostAction::Continue)
                             }
                         }
@@ -162,7 +163,7 @@ pub fn setup_socket(handle: LoopHandle<Data>, state: &State) -> Result<()> {
                 },
             ).with_context(|| "Failed to init the cosmic session socket source")?;
         } else {
-            slog_scope::error!("COSMIC_SESSION_SOCK is no valid RawFd: {}", fd_num);
+            error!(socket = fd_num, "COSMIC_SESSION_SOCK is no valid RawFd.");
         }
     };
 

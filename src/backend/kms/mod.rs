@@ -55,6 +55,7 @@ use smithay::{
     wayland::{dmabuf::DmabufGlobal, seat::WaylandFocus},
     xwayland::XWaylandClientData,
 };
+use tracing::{debug, error, info, warn};
 
 use std::{
     cell::RefCell,
@@ -112,15 +113,15 @@ pub fn init_backend(
     event_loop: &mut EventLoop<'static, Data>,
     state: &mut State,
 ) -> Result<()> {
-    let (session, notifier) = LibSeatSession::new(None).context("Failed to acquire session")?;
+    let (session, notifier) = LibSeatSession::new().context("Failed to acquire session")?;
 
-    let udev_backend = UdevBackend::new(session.seat(), None)?;
+    let udev_backend = UdevBackend::new(session.seat())?;
     let mut libinput_context =
         Libinput::new_with_udev::<LibinputSessionInterface<LibSeatSession>>(session.clone().into());
     libinput_context
         .udev_assign_seat(&session.seat())
         .map_err(|_| anyhow::anyhow!("Failed to assign seat to libinput"))?;
-    let libinput_backend = LibinputInputBackend::new(libinput_context.clone(), None);
+    let libinput_backend = LibinputInputBackend::new(libinput_context.clone());
 
     let libinput_event_source = event_loop
         .handle()
@@ -136,17 +137,17 @@ pub fn init_backend(
                     None,
                     None,
                 ) {
-                    slog_scope::crit!(
-                        "Error scheduling event loop for output {}: {:?}",
+                    error!(
+                        ?err,
+                        "Error scheduling event loop for output {}.",
                         output.name(),
-                        err
                     );
                 }
             }
         })
         .map_err(|err| err.error)
         .context("Failed to initialize libinput event source")?;
-    let api = GpuManager::new(GbmGlesBackend::<GlowRenderer>::default(), None)
+    let api = GpuManager::new(GbmGlesBackend::<GlowRenderer>::default())
         .context("Failed to initialize renderers")?;
 
     // TODO get this info from system76-power, if available and setup a watcher
@@ -173,7 +174,7 @@ pub fn init_backend(
                 panic!("Failed to initialize any GPU");
             })
     };
-    slog_scope::info!("Using {} as primary gpu for rendering", primary);
+    info!("Using {} as primary gpu for rendering.", primary);
 
     let udev_dispatcher = Dispatcher::new(udev_backend, move |event, _, data: &mut Data| {
         match match event {
@@ -191,10 +192,10 @@ pub fn init_backend(
                 .with_context(|| format!("Failed to remove drm device: {}", device_id)),
         } {
             Ok(()) => {
-                slog_scope::debug!("Successfully handled udev event")
+                debug!("Successfully handled udev event.")
             }
             Err(err) => {
-                slog_scope::error!("Error while handling udev event: {}", err)
+                error!(?err, "Error while handling udev event.")
             }
         }
     });
@@ -211,7 +212,7 @@ pub fn init_backend(
         .insert_source(notifier, move |event, &mut (), data| match event {
             SessionEvent::ActivateSession => {
                 if let Err(err) = libinput_context.resume() {
-                    slog_scope::error!("Failed to resume libinput context: {:?}", err);
+                    error!(?err, "Failed to resume libinput context.");
                 }
                 for device in data.state.backend.kms().devices.values() {
                     device.drm.as_source_ref().activate();
@@ -222,21 +223,13 @@ pub fn init_backend(
                         let drm_node = match DrmNode::from_dev_id(dev) {
                             Ok(node) => node,
                             Err(err) => {
-                                slog_scope::error!(
-                                    "Failed to read drm device {}: {}",
-                                    path.display(),
-                                    err
-                                );
+                                error!(?err, "Failed to read drm device {}.", path.display(),);
                                 continue;
                             }
                         };
                         if data.state.backend.kms().devices.contains_key(&drm_node) {
                             if let Err(err) = data.state.device_changed(dev) {
-                                slog_scope::error!(
-                                    "Failed to update drm device {}: {}",
-                                    path.display(),
-                                    err
-                                );
+                                error!(?err, "Failed to update drm device {}.", path.display(),);
                             }
                         } else {
                             if let Err(err) = data.state.device_added(
@@ -245,11 +238,7 @@ pub fn init_backend(
                                 &data.display.handle(),
                                 true,
                             ) {
-                                slog_scope::error!(
-                                    "Failed to add drm device {}: {}",
-                                    path.display(),
-                                    err
-                                );
+                                error!(?err, "Failed to add drm device {}.", path.display(),);
                             }
                         }
                     }
@@ -284,10 +273,10 @@ pub fn init_backend(
                                 None
                             },
                         ) {
-                            slog_scope::crit!(
-                                "Error scheduling event loop for output {}: {:?}",
+                            error!(
+                                ?err,
+                                "Error scheduling event loop for output {}.",
                                 output.name(),
-                                err
                             );
                         }
                     }
@@ -352,27 +341,24 @@ impl State {
             return Ok(());
         }
 
-        let fd = DrmDeviceFd::new(
-            unsafe {
-                DeviceFd::from_raw_fd(
-                    self.backend
-                        .kms()
-                        .session
-                        .open(
-                            &path,
-                            OFlag::O_RDWR | OFlag::O_CLOEXEC | OFlag::O_NOCTTY | OFlag::O_NONBLOCK,
+        let fd = DrmDeviceFd::new(unsafe {
+            DeviceFd::from_raw_fd(
+                self.backend
+                    .kms()
+                    .session
+                    .open(
+                        &path,
+                        OFlag::O_RDWR | OFlag::O_CLOEXEC | OFlag::O_NOCTTY | OFlag::O_NONBLOCK,
+                    )
+                    .with_context(|| {
+                        format!(
+                            "Failed to optain file descriptor for drm device: {}",
+                            path.display()
                         )
-                        .with_context(|| {
-                            format!(
-                                "Failed to optain file descriptor for drm device: {}",
-                                path.display()
-                            )
-                        })?,
-                )
-            },
-            None,
-        );
-        let drm = DrmDevice::new(fd.clone(), false, None)
+                    })?,
+            )
+        });
+        let drm = DrmDevice::new(fd.clone(), false)
             .with_context(|| format!("Failed to initialize drm device for: {}", path.display()))?;
         let drm_node = DrmNode::from_dev_id(dev)?;
         let supports_atomic = drm.is_atomic();
@@ -380,7 +366,7 @@ impl State {
         let gbm = GbmDevice::new(fd)
             .with_context(|| format!("Failed to initialize GBM device for {}", path.display()))?;
         let (render_node, formats) = {
-            let egl_display = EGLDisplay::new(gbm.clone(), None).with_context(|| {
+            let egl_display = EGLDisplay::new(gbm.clone()).with_context(|| {
                 format!("Failed to create EGLDisplay for device: {}", path.display())
             })?;
             let egl_device = EGLDevice::device_for_display(&egl_display).with_context(|| {
@@ -391,7 +377,7 @@ impl State {
                 .ok()
                 .and_then(std::convert::identity)
                 .unwrap_or(drm_node);
-            let egl_context = EGLContext::new(&egl_display, None).with_context(|| {
+            let egl_context = EGLContext::new(&egl_display).with_context(|| {
                 format!(
                     "Failed to create EGLContext for device {:?}:{}",
                     egl_device,
@@ -458,7 +444,7 @@ impl State {
                                         })
                                     }
                                     Some(Err(err)) => {
-                                        slog_scope::warn!("Failed to submit frame: {}", err);
+                                        warn!(?err, "Failed to submit frame.");
                                         None
                                     }
                                     _ => None, // got disabled
@@ -487,12 +473,12 @@ impl State {
                             Some(repaint_delay),
                             scheduled_sessions,
                         ) {
-                            slog_scope::warn!("Failed to schedule render: {}", err);
+                            warn!(?err, "Failed to schedule render.");
                         }
                     }
                 }
                 DrmEvent::Error(err) => {
-                    slog_scope::warn!("Failed to read events of device {:?}: {}", dev, err);
+                    warn!(?err, "Failed to read events of device {:?}.", dev);
                 }
             });
         let token = self
@@ -504,10 +490,9 @@ impl State {
         let socket = match self.create_socket(dh, render_node, formats.clone().into_iter()) {
             Ok(socket) => Some(socket),
             Err(err) => {
-                slog_scope::warn!(
-                    "Failed to initialize hardware-acceleration for clients on {}: {}",
-                    render_node,
-                    err
+                warn!(
+                    ?err,
+                    "Failed to initialize hardware-acceleration for clients on {}.", render_node,
                 );
                 None
             }
@@ -548,7 +533,7 @@ impl State {
                 let mut renderer = match backend.api.single_renderer(&render_node) {
                     Ok(renderer) => renderer,
                     Err(err) => {
-                        slog_scope::warn!("Failed to initialize output: {}", err);
+                        warn!(?err, "Failed to initialize output.");
                         continue;
                     }
                 };
@@ -563,7 +548,7 @@ impl State {
                             .w;
                         wl_outputs.push(output);
                     }
-                    Err(err) => slog_scope::warn!("Failed to initialize output: {}", err),
+                    Err(err) => warn!(?err, "Failed to initialize output."),
                 };
             }
             backend.devices.insert(drm_node, device);
@@ -589,7 +574,7 @@ impl State {
     }
 
     fn init_vulkan(&mut self, drm_node: DrmNode, render_node: DrmNode) {
-        if let Ok(instance) = Instance::new(Version::VERSION_1_2, None, None) {
+        if let Ok(instance) = Instance::new(Version::VERSION_1_2, None) {
             if let Some(physical_device) =
                 PhysicalDevice::enumerate(&instance)
                     .ok()
@@ -621,7 +606,7 @@ impl State {
                             .allocator = Box::new(DmabufAllocator(allocator));
                     }
                     Err(err) => {
-                        slog_scope::warn!("Failed to create vulkan allocator: {}", err);
+                        warn!(?err, "Failed to create vulkan allocator.");
                     }
                 }
             }
@@ -654,7 +639,7 @@ impl State {
                     let mut renderer = match backend.api.single_renderer(&device.render_node) {
                         Ok(renderer) => renderer,
                         Err(err) => {
-                            slog_scope::warn!("Failed to initialize output: {}", err);
+                            warn!(?err, "Failed to initialize output.");
                             continue;
                         }
                     };
@@ -669,7 +654,7 @@ impl State {
                                 .w;
                             outputs_added.push(output);
                         }
-                        Err(err) => slog_scope::warn!("Failed to initialize output: {}", err),
+                        Err(err) => warn!(?err, "Failed to initialize output."),
                     };
                 }
             }
@@ -826,7 +811,6 @@ impl Device {
                     .map(|info| info.model.clone())
                     .unwrap_or_else(|_| String::from("Unknown")),
             },
-            None,
         );
         for mode in conn_info.modes() {
             let refresh_rate = drm_helpers::calculate_refresh_rate(*mode);
@@ -1059,7 +1043,6 @@ impl KmsState {
                                 GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
                             ),
                             device.formats.clone(),
-                            None,
                         )
                         .with_context(|| {
                             format!(
@@ -1094,10 +1077,10 @@ impl KmsState {
                     None
                 },
             ) {
-                slog_scope::crit!(
-                    "Error scheduling event loop for output {}: {:?}",
+                error!(
+                    ?err,
+                    "Error scheduling event loop for output {}.",
                     output.name(),
-                    err
                 );
             }
         }
@@ -1135,7 +1118,7 @@ impl KmsState {
             render,
             surface,
         ) {
-            slog_scope::debug!("Early import failed: {}", err);
+            debug!(?err, "Early import failed.");
         }
     }
 
@@ -1247,7 +1230,7 @@ impl KmsState {
                                 }
                                 Err(err) => {
                                     if backend.session.is_active() {
-                                        slog_scope::error!("Error rendering: {:?}", err);
+                                        error!(?err, "Error rendering.");
                                         return TimeoutAction::ToDuration(Duration::from_secs_f64(
                                             (1000.0 / surface.refresh_rate as f64) - 0.003,
                                         ));

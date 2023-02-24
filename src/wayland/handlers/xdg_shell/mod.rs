@@ -22,6 +22,7 @@ use smithay::{
     },
 };
 use std::cell::Cell;
+use tracing::warn;
 
 use super::screencopy::PendingScreencopyBuffers;
 
@@ -125,9 +126,9 @@ impl XdgShellHandler for State {
         self.common.shell.unconstrain_popup(&surface, &positioner);
         surface.send_repositioned(token);
         if let Err(err) = surface.send_configure() {
-            slog_scope::warn!(
-                "Client bug: Unable to re-configure repositioned popup: {}",
-                err
+            warn!(
+                ?err,
+                "Client bug: Unable to re-configure repositioned popup.",
             );
         }
     }

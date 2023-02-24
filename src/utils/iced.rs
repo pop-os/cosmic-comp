@@ -613,7 +613,6 @@ where
                     size.to_f64().to_logical(1.0, Transform::Normal),
                 )),
                 Some(internal_ref.size),
-                slog_scope::logger(),
             ) {
                 return vec![C::from(buffer)];
             }

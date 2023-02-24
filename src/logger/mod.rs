@@ -1,59 +1,60 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::str::FromStr;
+
 use anyhow::Result;
-use slog::{Drain, Level};
 
-pub struct LogState {
-    _guard: slog_scope::GlobalLoggerGuard,
-}
+use tracing::{debug, info, warn};
+use tracing_journald as journald;
+use tracing_subscriber::{filter::Directive, fmt, prelude::*, EnvFilter};
 
-pub fn init_logger() -> Result<LogState> {
-    let decorator = slog_term::TermDecorator::new().stderr().build();
-    let term_drain = slog_term::CompactFormat::new(decorator)
-        .build()
-        .ignore_res();
-    let journald_drain = slog_journald::JournaldDrain.ignore_res();
-    let drain = slog::Duplicate::new(term_drain, journald_drain);
-    // usually we would not want to use a Mutex here, but this is usefull for a prototype,
-    // to make sure we do not miss any in-flight messages, when we crash.
-    let logger = slog::Logger::root(
-        std::sync::Mutex::new(drain.filter(|record| {
-            if record.module().starts_with("smithay") || record.module().starts_with("cosmic_comp")
-            {
-                return true;
-            }
-
-            if record.module().contains("cosmic_text") {
-                // cosmic-text is very chatty
-                return record.level().is_at_least(Level::Error);
-            }
-
-            if cfg!(debug_assertions) {
-                record.level().is_at_least(Level::Warning)
+pub fn init_logger() -> Result<()> {
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| {
+            EnvFilter::new(if cfg!(debug_assertions) {
+                "warning"
             } else {
-                record.level().is_at_least(Level::Error)
-            }
-        }))
-        .fuse(),
-        slog::o!(),
-    );
+                "error"
+            })
+        })
+        .add_directive(Directive::from_str("cosmic_text=error").unwrap())
+        .add_directive(
+            Directive::from_str(&format!(
+                "smithay={level},cosmic_comp={level}",
+                level = if cfg!(debug_assertions) {
+                    "debug"
+                } else {
+                    "info"
+                }
+            ))
+            .unwrap(),
+        );
 
-    let _guard = slog_scope::set_global_logger(logger);
-    slog_stdlog::init_with_level(if cfg!(debug_assertions) {
-        log::Level::Debug
-    } else {
-        log::Level::Info
-    })
-    .unwrap();
+    let fmt_layer = fmt::layer().compact();
+
+    match journald::layer() {
+        Ok(journald_layer) => tracing_subscriber::registry()
+            .with(fmt_layer)
+            .with(journald_layer)
+            .with(filter)
+            .init(),
+        Err(err) => {
+            tracing_subscriber::registry()
+                .with(fmt_layer)
+                .with(filter)
+                .init();
+            warn!(?err, "Failed to init journald logging.");
+        }
+    };
     log_panics::init();
 
-    slog_scope::info!("Version: {}", std::env!("CARGO_PKG_VERSION"));
+    info!("Version: {}", std::env!("CARGO_PKG_VERSION"));
     if cfg!(feature = "debug") {
-        slog_scope::debug!(
+        debug!(
             "Debug build ({})",
             std::option_env!("GIT_HASH").unwrap_or("Unknown")
         );
     }
 
-    Ok(LogState { _guard })
+    Ok(())
 }

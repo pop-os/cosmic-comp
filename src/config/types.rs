@@ -10,6 +10,7 @@ pub use smithay::{
     reexports::input::{AccelProfile, ClickMethod, ScrollMethod, TapButtonMap},
     utils::{Logical, Physical, Point, Size, Transform},
 };
+use tracing::warn;
 use xkbcommon::xkb;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -247,7 +248,7 @@ where
                 &"One of the keysym names of xkbcommon.h without the 'KEY_' prefix",
             )),
             x => {
-                slog_scope::warn!(
+                warn!(
                     "Key-Binding '{}' only matched case insensitive for {:?}",
                     name,
                     xkb::keysym_get_name(x)

@@ -26,6 +26,7 @@ use std::{
     sync::Mutex,
     time::Duration,
 };
+use tracing::warn;
 use xcursor::{
     parser::{parse_xcursor, Image},
     CursorTheme,
@@ -51,9 +52,7 @@ impl Cursor {
 
         let theme = CursorTheme::load(&name);
         let icons = load_icon(&theme)
-            .map_err(|err| {
-                slog_scope::warn!("Unable to load xcursor: {}, using fallback cursor", err)
-            })
+            .map_err(|err| warn!(?err, "Unable to load xcursor, using fallback cursor"))
             .unwrap_or_else(|_| {
                 vec![Image {
                     size: 32,
@@ -160,7 +159,6 @@ where
         surface,
         position.to_physical_precise_round(scale),
         scale,
-        slog_scope::logger(),
     )
 }
 
@@ -175,7 +173,8 @@ where
     <R as Renderer>::TextureId: 'static,
 {
     if get_role(&surface) != Some("dnd_icon") {
-        slog_scope::warn!(
+        warn!(
+            ?surface,
             "Trying to display as a dnd icon a surface that does not have the DndIcon role."
         );
     }
@@ -185,7 +184,6 @@ where
         surface,
         location.into().to_physical_precise_round(scale),
         scale,
-        slog_scope::logger(),
     )
 }
 

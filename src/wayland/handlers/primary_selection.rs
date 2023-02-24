@@ -5,6 +5,7 @@ use smithay::{
     delegate_primary_selection,
     wayland::primary_selection::{PrimarySelectionHandler, PrimarySelectionState, with_source_metadata}, xwayland::xwm::{XwmId, SelectionType}, reexports::wayland_protocols::wp::primary_selection::zv1::server::zwp_primary_selection_source_v1::ZwpPrimarySelectionSourceV1,
 };
+use tracing::warn;
 
 use std::os::unix::io::OwnedFd;
 
@@ -22,10 +23,10 @@ impl PrimarySelectionHandler for State {
                     if let Ok(Err(err)) = with_source_metadata(source, |metadata| {
                         xwm.new_selection(SelectionType::Primary, Some(metadata.mime_types.clone()))
                     }) {
-                        slog_scope::warn!("Failed to set Xwayland primary selection: {}", err);
+                        warn!(?err, "Failed to set Xwayland primary selection");
                     }
                 } else if let Err(err) = xwm.new_selection(SelectionType::Primary, None) {
-                    slog_scope::warn!("Failed to clear Xwayland primary selection: {}", err);
+                    warn!(?err, "Failed to clear Xwayland primary selection");
                 }
             }
         }
@@ -50,7 +51,7 @@ impl PrimarySelectionHandler for State {
                 fd,
                 self.common.event_loop_handle.clone(),
             ) {
-                slog_scope::warn!("Failed to send primary selection (X11 -> Wayland): {}", err);
+                warn!(?err, "Failed to send primary selection (X11 -> Wayland).");
             }
         }
     }

@@ -3,6 +3,7 @@
 use crate::state::State;
 use libsystemd::daemon::{booted, notify, NotifyState};
 use std::process::Command;
+use tracing::{error, warn};
 
 pub fn ready(state: &State) {
     if booted() {
@@ -22,18 +23,15 @@ pub fn ready(state: &State) {
             .status()
         {
             Ok(x) if x.success() => {}
-            Ok(x) => slog_scope::warn!(
-                "Failed to import WAYLAND_DISPLAY/DISPLAY into systemd (exit code {:?})",
-                x.code()
+            Ok(x) => warn!(
+                exit_code = ?x.code(),
+                "Failed to import WAYLAND_DISPLAY/DISPLAY into systemd",
             ),
-            Err(err) => slog_scope::error!(
-                "Failed to run systemctl although booted with systemd: {}",
-                err
-            ),
+            Err(err) => error!(?err, "Failed to run systemctl although booted with systemd",),
         };
 
         if let Err(err) = notify(false, &[NotifyState::Ready]) {
-            slog_scope::error!("Failed to notify systemd: {}", err);
+            error!(?err, "Failed to notify systemd");
         }
     }
 }

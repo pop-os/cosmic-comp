@@ -37,6 +37,7 @@ use smithay::{
     utils::{DeviceFd, Transform},
 };
 use std::{cell::RefCell, os::unix::io::OwnedFd};
+use tracing::{debug, error, info, warn};
 
 #[cfg(feature = "debug")]
 use crate::state::Fps;
@@ -96,7 +97,7 @@ impl X11State {
             size: (size.w as i32, size.h as i32).into(),
             refresh: 60_000,
         };
-        let output = Output::new(name, props, None);
+        let output = Output::new(name, props);
         output.add_mode(mode);
         output.set_preferred(mode);
         output.change_current_state(
@@ -126,7 +127,7 @@ impl X11State {
                     if let Err(err) =
                         surface.render_output(&mut x11_state.renderer, &mut data.state.common)
                     {
-                        slog_scope::error!("Error rendering: {}", err);
+                        error!(?err, "Error rendering.");
                     }
                     surface.dirty = false;
                     surface.pending = true;
@@ -272,12 +273,12 @@ impl Surface {
 }
 
 fn try_vulkan_allocator(node: &DrmNode) -> Option<Allocator> {
-    let instance = match Instance::new(Version::VERSION_1_2, None, None) {
+    let instance = match Instance::new(Version::VERSION_1_2, None) {
         Ok(instance) => instance,
         Err(err) => {
-            slog_scope::warn!(
-                "Failed to instanciate vulkan, falling back to gbm allocator: {}",
-                err
+            warn!(
+                ?err,
+                "Failed to instanciate vulkan, falling back to gbm allocator.",
             );
             return None;
         }
@@ -286,7 +287,7 @@ fn try_vulkan_allocator(node: &DrmNode) -> Option<Allocator> {
     let devices = match PhysicalDevice::enumerate(&instance) {
         Ok(devices) => devices,
         Err(err) => {
-            slog_scope::debug!("No vulkan devices, falling back to gbm: {}", err);
+            debug!(?err, "No vulkan devices, falling back to gbm.");
             return None;
         }
     };
@@ -299,7 +300,7 @@ fn try_vulkan_allocator(node: &DrmNode) -> Option<Allocator> {
             phd.primary_node().unwrap() == Some(*node) || phd.render_node().unwrap() == Some(*node)
         })
     else {
-        slog_scope::debug!("No vulkan device for node {:?}, falling back to gbm", node);
+        debug!(?node, "No vulkan device for node, falling back to gbm.");
         return None;
     };
 
@@ -308,10 +309,10 @@ fn try_vulkan_allocator(node: &DrmNode) -> Option<Allocator> {
 
 fn try_gbm_allocator(fd: OwnedFd) -> Option<Allocator> {
     // Create the gbm device for buffer allocation.
-    let device = match GbmDevice::new(DrmDeviceFd::new(DeviceFd::from(fd), None)) {
+    let device = match GbmDevice::new(DrmDeviceFd::new(DeviceFd::from(fd))) {
         Ok(gbm) => gbm,
         Err(err) => {
-            slog_scope::error!("Failed to create GBM device: {}", err);
+            error!(?err, "Failed to create GBM device.");
             return None;
         }
     };
@@ -327,7 +328,7 @@ pub fn init_backend(
     event_loop: &mut EventLoop<Data>,
     state: &mut State,
 ) -> Result<()> {
-    let backend = X11Backend::new(None).with_context(|| "Failed to initilize X11 backend")?;
+    let backend = X11Backend::new().with_context(|| "Failed to initilize X11 backend")?;
     let handle = backend.handle();
 
     // Obtain the DRM node the X server uses for direct rendering.
@@ -340,12 +341,12 @@ pub fn init_backend(
         .find(|device| device.try_get_render_node().ok().flatten() == Some(drm_node))
         .with_context(|| format!("Failed to find EGLDevice for node {}", drm_node))?;
     // Initialize EGL
-    let egl = EGLDisplay::new(device, None).with_context(|| "Failed to create EGL display")?;
+    let egl = EGLDisplay::new(device).with_context(|| "Failed to create EGL display")?;
     // Create the OpenGL context
-    let context = EGLContext::new(&egl, None).with_context(|| "Failed to create EGL context")?;
+    let context = EGLContext::new(&egl).with_context(|| "Failed to create EGL context")?;
     // Create a renderer
-    let mut renderer = unsafe { GlowRenderer::new(context, None) }
-        .with_context(|| "Failed to initialize renderer")?;
+    let mut renderer =
+        unsafe { GlowRenderer::new(context) }.with_context(|| "Failed to initialize renderer")?;
 
     init_egl_client_side(dh, state, &mut renderer)?;
 
@@ -478,14 +479,14 @@ where
     let bind_result = renderer.bind_wl_display(dh);
     match bind_result {
         Ok(_) => {
-            slog_scope::info!("EGL hardware-acceleration enabled");
+            info!("EGL hardware-acceleration enabled.");
             let dmabuf_formats = renderer.dmabuf_formats().cloned().collect::<Vec<_>>();
             state
                 .common
                 .dmabuf_state
-                .create_global::<State, _>(dh, dmabuf_formats, None);
+                .create_global::<State>(dh, dmabuf_formats);
         }
-        Err(err) => slog_scope::warn!("Unable to initialize bind display to EGL: {}", err),
+        Err(err) => warn!(?err, "Unable to initialize bind display to EGL."),
     };
 
     Ok(())

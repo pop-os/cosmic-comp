@@ -128,9 +128,7 @@ impl CompositorHandler for State {
                 CosmicSurface::Wayland(ref wl_window) => {
                     let toplevel = wl_window.toplevel();
                     if self.toplevel_ensure_initial_configure(&toplevel)
-                        && with_renderer_surface_state(&surface, |state| {
-                            state.wl_buffer().is_some()
-                        })
+                        && with_renderer_surface_state(&surface, |state| state.buffer().is_some())
                     {
                         let output = seat.active_output();
                         Shell::map_window(self, &window, &output);

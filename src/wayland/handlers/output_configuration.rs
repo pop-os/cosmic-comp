@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use smithay::output::Output;
+use tracing::{error, warn};
 
 use crate::{
     config::OutputConfig,
@@ -89,10 +90,10 @@ impl State {
                 seats.iter().cloned(),
                 &self.common.event_loop_handle,
             ) {
-                slog_scope::warn!(
-                    "Failed to apply config to {}: {}. Resetting",
+                warn!(
+                    ?err,
+                    "Failed to apply config to {}. Resetting",
                     output.name(),
-                    err
                 );
                 for (output, backup) in backups {
                     {
@@ -111,11 +112,7 @@ impl State {
                             seats.iter().cloned(),
                             &self.common.event_loop_handle,
                         ) {
-                            slog_scope::error!(
-                                "Failed to reset output config for {}: {}",
-                                output.name(),
-                                err
-                            );
+                            error!(?err, "Failed to reset output config for {}.", output.name(),);
                         }
                     }
                 }

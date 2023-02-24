@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, collections::HashMap};
+use tracing::warn;
 
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State as WState;
 use smithay::{
@@ -430,8 +431,8 @@ impl WorkspaceMode {
 impl Shell {
     pub fn new(config: &Config, dh: &DisplayHandle) -> Self {
         // TODO: Privileged protocols
-        let layer_shell_state = WlrLayerShellState::new::<State, _>(dh, None);
-        let xdg_shell_state = XdgShellState::new::<State, _>(dh, None);
+        let layer_shell_state = WlrLayerShellState::new::<State>(dh);
+        let xdg_shell_state = XdgShellState::new::<State>(dh);
         let toplevel_info_state = ToplevelInfoState::new(
             dh,
             //|client| client.get_data::<ClientState>().map_or(false, |s| s.privileged),
@@ -461,7 +462,7 @@ impl Shell {
         );
 
         Shell {
-            popups: PopupManager::new(None),
+            popups: PopupManager::default(),
             outputs: Vec::new(),
             workspaces: mode,
             tiling_enabled,
@@ -1090,7 +1091,7 @@ impl Shell {
                 .find(|xwm| Some(xwm.id()) == surface.xwm_id())
             {
                 if let Err(err) = xwm.update_stacking_order_downwards(workspace.mapped()) {
-                    slog_scope::warn!("Failed to update Xwayland stacking order: {}", err);
+                    warn!(?err, "Failed to update Xwayland stacking order.");
                 }
             }
         }

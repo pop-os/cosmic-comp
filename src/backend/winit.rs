@@ -27,6 +27,7 @@ use smithay::{
     utils::Transform,
 };
 use std::cell::RefCell;
+use tracing::{error, info, warn};
 
 #[cfg(feature = "debug")]
 use crate::state::Fps;
@@ -145,7 +146,7 @@ pub fn init_backend(
     state: &mut State,
 ) -> Result<()> {
     let (mut backend, mut input) =
-        winit::init(None).map_err(|_| anyhow!("Failed to initilize winit backend"))?;
+        winit::init().map_err(|_| anyhow!("Failed to initilize winit backend"))?;
 
     init_egl_client_side(dh, state, &mut backend)?;
 
@@ -161,7 +162,7 @@ pub fn init_backend(
         size: (size.physical_size.w as i32, size.physical_size.h as i32).into(),
         refresh: 60_000,
     };
-    let output = Output::new(name, props, None);
+    let output = Output::new(name, props);
     output.add_mode(mode);
     output.set_preferred(mode);
     output.change_current_state(
@@ -197,7 +198,7 @@ pub fn init_backend(
                     .winit()
                     .render_output(&mut data.state.common)
                 {
-                    slog_scope::error!("Failed to render frame: {}", err);
+                    error!(?err, "Failed to render frame.");
                     render_ping.ping();
                 }
             })
@@ -269,7 +270,7 @@ fn init_egl_client_side(
     let bind_result = renderer.renderer().bind_wl_display(dh);
     match bind_result {
         Ok(_) => {
-            slog_scope::info!("EGL hardware-acceleration enabled");
+            info!("EGL hardware-acceleration enabled.");
             let dmabuf_formats = renderer
                 .renderer()
                 .dmabuf_formats()
@@ -278,9 +279,9 @@ fn init_egl_client_side(
             state
                 .common
                 .dmabuf_state
-                .create_global::<State, _>(dh, dmabuf_formats, None);
+                .create_global::<State>(dh, dmabuf_formats);
         }
-        Err(err) => slog_scope::warn!("Unable to initialize bind display to EGL: {}", err),
+        Err(err) => warn!(?err, "Unable to initialize bind display to EGL."),
     };
 
     Ok(())

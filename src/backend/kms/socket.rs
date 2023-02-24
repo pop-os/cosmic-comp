@@ -14,6 +14,7 @@ use smithay::{
     xwayland::XWaylandClientData,
 };
 use std::sync::Arc;
+use tracing::{info, warn};
 
 use crate::{
     state::{ClientState, Data},
@@ -61,7 +62,7 @@ impl State {
         let dmabuf_global = self
             .common
             .dmabuf_state
-            .create_global_with_filter::<State, _, _>(dh, formats.clone(), filter, None);
+            .create_global_with_filter::<State, _>(dh, formats.clone(), filter);
 
         let drm_global_id = self
             .common
@@ -81,8 +82,9 @@ impl State {
             );
 
         // add a special socket for the gpu
-        let listener = ListeningSocketSource::with_name(&socket_name, None)
+        let listener = ListeningSocketSource::with_name(&socket_name)
             .with_context(|| format!("Failed to bind socket to {}", socket_name))?;
+        let socket_name_clone = socket_name.clone();
         let token = self
             .common
             .event_loop_handle
@@ -91,12 +93,16 @@ impl State {
                     client_stream,
                     Arc::new(data.state.new_client_state_with_node(render_node)),
                 ) {
-                    slog_scope::warn!("Error adding wayland client ({}): {}", render_node, err);
+                    warn!(
+                        socket_name = socket_name_clone,
+                        ?err,
+                        "Error adding wayland client."
+                    );
                 }
             })
             .context("Failed to add gpu-wayland socket to the event loop")?;
 
-        slog_scope::info!("Added socket at {} for gpu {}", socket_name, render_node,);
+        info!(socket_name, ?render_node, "Added gpu-specific socket.");
 
         Ok(Socket {
             token,

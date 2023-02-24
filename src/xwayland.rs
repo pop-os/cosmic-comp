@@ -27,6 +27,7 @@ use smithay::{
         X11Surface, X11Wm, XWayland, XWaylandEvent, XwmHandler,
     },
 };
+use tracing::{error, info, warn};
 
 pub struct XWaylandState {
     pub xwm: Option<X11Wm>,
@@ -41,7 +42,7 @@ impl State {
             return;
         }
 
-        let (xwayland, source) = XWayland::new(None, &self.common.display_handle);
+        let (xwayland, source) = XWayland::new(&self.common.display_handle);
         let token =
             match self
                 .common
@@ -58,11 +59,10 @@ impl State {
                             data.state.common.display_handle.clone(),
                             connection,
                             client,
-                            None,
                         ) {
                             Ok(wm) => wm,
                             Err(err) => {
-                                slog_scope::error!("Failed to start Xwayland WM: {}", err);
+                                error!(?err, "Failed to start Xwayland WM");
                                 return;
                             }
                         };
@@ -74,10 +74,10 @@ impl State {
                             Size::from((image.width as u16, image.height as u16)),
                             Point::from((image.xhot as u16, image.yhot as u16)),
                         ) {
-                            slog_scope::warn!(
-                                "Failed to set default cursor for Xwayland WM ({:?}): {}",
-                                wm.id(),
-                                err
+                            warn!(
+                                id = ?wm.id(),
+                                ?err,
+                                "Failed to set default cursor for Xwayland WM",
                             );
                         }
 
@@ -95,7 +95,7 @@ impl State {
                 }) {
                 Ok(token) => token,
                 Err(err) => {
-                    slog_scope::error!("Failed to listen for Xwayland: {}", err);
+                    error!(?err, "Failed to listen for Xwayland");
                     return;
                 }
             };
@@ -122,7 +122,7 @@ impl State {
                 );
             }
             Err(err) => {
-                slog_scope::error!("Failed to start Xwayland: {}", err);
+                error!(?err, "Failed to start Xwayland.");
                 self.common.event_loop_handle.remove(token);
             }
         }
@@ -146,11 +146,7 @@ impl XwmHandler for Data {
 
     fn map_window_request(&mut self, _xwm: XwmId, window: X11Surface) {
         if let Err(err) = window.set_mapped(true) {
-            slog_scope::warn!(
-                "Failed to send Xwayland Mapped-Event (for window {:?}): {}",
-                window,
-                err
-            );
+            warn!(?window, ?err, "Failed to send Xwayland Mapped-Event",);
         }
 
         let surface = CosmicSurface::X11(window.clone());
@@ -471,17 +467,17 @@ impl XwmHandler for Data {
         match selection {
             SelectionType::Clipboard => {
                 if let Err(err) = request_data_device_client_selection(seat, mime_type, fd) {
-                    slog_scope::error!(
-                        "Failed to request current wayland clipboard for Xwayland: {}",
-                        err
+                    error!(
+                        ?err,
+                        "Failed to request current wayland clipboard for Xwayland.",
                     );
                 }
             }
             SelectionType::Primary => {
                 if let Err(err) = request_primary_client_selection(seat, mime_type, fd) {
-                    slog_scope::error!(
-                        "Failed to request current wayland primary selection for Xwayland: {}",
-                        err
+                    error!(
+                        ?err,
+                        "Failed to request current wayland primary selection for Xwayland.",
                     );
                 }
             }
@@ -493,7 +489,7 @@ impl XwmHandler for Data {
     }
 
     fn new_selection(&mut self, xwm: XwmId, selection: SelectionType, mime_types: Vec<String>) {
-        slog_scope::info!("Got Selection {:?} from X11: {:?}", selection, mime_types);
+        info!(?selection, ?mime_types, "Got Selection from Xwayland",);
 
         if self.state.common.is_x_focused(xwm) {
             let seat = self.state.common.last_active_seat();

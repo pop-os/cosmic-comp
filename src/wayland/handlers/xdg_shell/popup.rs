@@ -24,6 +24,7 @@ use smithay::{
     },
 };
 use std::sync::Mutex;
+use tracing::{debug, warn};
 
 impl Shell {
     pub fn unconstrain_popup(&self, surface: &PopupSurface, positioner: &PositionerState) {
@@ -86,9 +87,9 @@ pub fn update_reactive_popups<'a>(
                     {
                         unconstrain_xdg_popup(&surface, loc, rect);
                         if let Err(err) = surface.send_configure() {
-                            slog_scope::warn!(
-                                "Compositor bug: Unable to re-configure reactive popup: {}",
-                                err
+                            warn!(
+                                ?err,
+                                "Compositor bug: Unable to re-configure reactive popup",
                             );
                         }
                     }
@@ -103,7 +104,7 @@ fn unconstrain_xdg_popup_tile(surface: &PopupSurface, rect: Rectangle<i32, Logic
     let offset = check_constrained(geometry, rect);
 
     if offset.x != 0 || offset.y != 0 {
-        slog_scope::debug!("Unconstraining popup to tile: {:?}", surface);
+        debug!(?surface, "Unconstraining popup to tile.");
         if !unconstrain_flip(&surface, rect) {
             return unconstrain_slide(&surface, rect);
             // don't try to resize for fitting to a tile
@@ -123,7 +124,7 @@ fn unconstrain_xdg_popup(
     let offset = check_constrained(geometry, relative);
 
     if offset.x != 0 || offset.y != 0 {
-        slog_scope::debug!("Unconstraining popup: {:?}", surface);
+        debug!(?surface, "Unconstraining popup.");
         if !unconstrain_flip(&surface, relative) {
             if !unconstrain_slide(&surface, relative) {
                 unconstrain_resize(&surface, relative);
@@ -143,7 +144,7 @@ fn unconstrain_layer_popup(surface: &PopupSurface, output: &Output, layer_surfac
     let offset = check_constrained(geometry, relative);
 
     if offset.x != 0 || offset.y != 0 {
-        slog_scope::debug!("Unconstraining popup: {:?}", surface);
+        debug!(?surface, "Unconstraining popup.");
         if !unconstrain_flip(&surface, relative) {
             if !unconstrain_slide(&surface, relative) {
                 unconstrain_resize(&surface, relative);

@@ -21,6 +21,7 @@ pub use smithay::{
     utils::{Logical, Physical, Point, Size, Transform},
 };
 use std::{cell::RefCell, collections::HashMap, fs::OpenOptions, path::PathBuf};
+use tracing::{debug, error, info, warn};
 
 mod types;
 pub use self::types::*;
@@ -207,9 +208,9 @@ impl Config {
         locations.push(PathBuf::from("/etc/cosmic-comp.ron"));
 
         for path in locations {
-            slog_scope::debug!("Trying config location: {}", path.display());
+            debug!("Trying config location: {}", path.display());
             if path.exists() {
-                slog_scope::info!("Using config at {}", path.display());
+                info!("Using config at {}", path.display());
                 return ron::de::from_reader(OpenOptions::new().read(true).open(path).unwrap())
                     .expect("Malformed config file");
             }
@@ -243,9 +244,9 @@ impl Config {
                 match ron::de::from_reader(OpenOptions::new().read(true).open(path).unwrap()) {
                     Ok(config) => return config,
                     Err(err) => {
-                        slog_scope::warn!("Failed to read output_config ({}), resetting..", err);
+                        warn!(?err, "Failed to read output_config, resetting..");
                         if let Err(err) = std::fs::remove_file(path) {
-                            slog_scope::error!("Failed to remove output_config {}", err);
+                            error!(?err, "Failed to remove output_config.");
                         }
                     }
                 };
@@ -263,9 +264,9 @@ impl Config {
                 match ron::de::from_reader(OpenOptions::new().read(true).open(path).unwrap()) {
                     Ok(config) => return config,
                     Err(err) => {
-                        slog_scope::warn!("Failed to read input_config ({}), resetting..", err);
+                        warn!(?err, "Failed to read input_config, resetting..");
                         if let Err(err) = std::fs::remove_file(path) {
-                            slog_scope::error!("Failed to remove input_config {}", err);
+                            error!(?err, "Failed to remove input_config.");
                         }
                     }
                 };
@@ -324,10 +325,10 @@ impl Config {
                     seats.iter().cloned(),
                     loop_handle,
                 ) {
-                    slog_scope::warn!(
-                        "Failed to set new config for output {}: {}",
+                    warn!(
+                        ?err,
+                        "Failed to set new config for output {}.",
                         output.name(),
-                        err
                     );
                     reset = true;
                     break;
@@ -359,11 +360,7 @@ impl Config {
                         seats.iter().cloned(),
                         loop_handle,
                     ) {
-                        slog_scope::error!(
-                            "Failed to reset config for output {}: {}",
-                            output.name(),
-                            err
-                        );
+                        error!(?err, "Failed to reset config for output {}.", output.name());
                     } else {
                         if enabled {
                             output_state.enable_head(&output);
@@ -385,10 +382,10 @@ impl Config {
                     seats.iter().cloned(),
                     loop_handle,
                 ) {
-                    slog_scope::warn!(
-                        "Failed to set new config for output {}: {}",
+                    warn!(
+                        ?err,
+                        "Failed to set new config for output {}.",
                         output.name(),
-                        err
                     );
                 } else {
                     if output
@@ -456,158 +453,158 @@ impl Config {
                     DeviceState::DisabledOnExternalMouse => device
                         .config_send_events_set_mode(SendEventsMode::DISABLED_ON_EXTERNAL_MOUSE),
                 } {
-                    slog_scope::warn!(
-                        "Failed to apply mode {:?} for device {:?}: {:?}",
+                    warn!(
+                        ?err,
+                        "Failed to apply mode {:?} for device {:?}.",
                         config.state,
                         device.name(),
-                        err
                     );
                 }
                 if let Some(accel) = config.acceleration.as_ref() {
                     if let Some(profile) = accel.profile {
                         if let Err(err) = device.config_accel_set_profile(profile) {
-                            slog_scope::warn!(
-                                "Failed to apply acceleration profile {:?} for device {:?}: {:?}",
+                            warn!(
+                                ?err,
+                                "Failed to apply acceleration profile {:?} for device {:?}.",
                                 profile,
                                 device.name(),
-                                err
                             );
                         }
                     }
                     if let Err(err) = device.config_accel_set_speed(accel.speed) {
-                        slog_scope::warn!(
-                            "Failed to apply acceleration speed {:?} for device {:?}: {:?}",
+                        warn!(
+                            ?err,
+                            "Failed to apply acceleration speed {:?} for device {:?}.",
                             accel.speed,
                             device.name(),
-                            err
                         );
                     }
                 }
                 if let Some(matrix) = config.calibration {
                     if let Err(err) = device.config_calibration_set_matrix(matrix) {
-                        slog_scope::warn!(
-                            "Failed to apply calibration matrix {:?} for device {:?}: {:?}",
+                        warn!(
+                            ?err,
+                            "Failed to apply calibration matrix {:?} for device {:?}.",
                             matrix,
                             device.name(),
-                            err
                         );
                     }
                 }
                 if let Some(method) = config.click_method {
                     if let Err(err) = device.config_click_set_method(method) {
-                        slog_scope::warn!(
-                            "Failed to apply click method {:?} for device {:?}: {:?}",
+                        warn!(
+                            ?err,
+                            "Failed to apply click method {:?} for device {:?}.",
                             method,
                             device.name(),
-                            err
                         );
                     }
                 }
                 if let Some(dwt) = config.disable_while_typing {
                     if let Err(err) = device.config_dwt_set_enabled(dwt) {
-                        slog_scope::warn!(
-                            "Failed to apply disable-while-typing {:?} for device {:?}: {:?}",
+                        warn!(
+                            ?err,
+                            "Failed to apply disable-while-typing {:?} for device {:?}.",
                             dwt,
                             device.name(),
-                            err
                         );
                     }
                 }
                 if let Some(left) = config.left_handed {
                     if let Err(err) = device.config_left_handed_set(left) {
-                        slog_scope::warn!(
-                            "Failed to apply left-handed {:?} for device {:?}: {:?}",
+                        warn!(
+                            ?err,
+                            "Failed to apply left-handed {:?} for device {:?}.",
                             left,
                             device.name(),
-                            err
                         );
                     }
                 }
                 if let Some(middle) = config.middle_button_emulation {
                     if let Err(err) = device.config_middle_emulation_set_enabled(middle) {
-                        slog_scope::warn!(
-                            "Failed to apply middle-button-emulation {:?} for device {:?}: {:?}",
+                        warn!(
+                            ?err,
+                            "Failed to apply middle-button-emulation {:?} for device {:?}.",
                             middle,
                             device.name(),
-                            err
                         );
                     }
                 }
                 if let Some(angle) = config.rotation_angle {
                     if let Err(err) = device.config_rotation_set_angle(angle) {
-                        slog_scope::warn!(
-                            "Failed to apply rotation-angle {:?} for device {:?}: {:?}",
+                        warn!(
+                            ?err,
+                            "Failed to apply rotation-angle {:?} for device {:?}",
                             angle,
                             device.name(),
-                            err
                         );
                     }
                 }
                 if let Some(scroll) = config.scroll_config.as_ref() {
                     if let Some(method) = scroll.method {
                         if let Err(err) = device.config_scroll_set_method(method) {
-                            slog_scope::warn!(
-                                "Failed to apply scroll method {:?} for device {:?}: {:?}",
+                            warn!(
+                                ?err,
+                                "Failed to apply scroll method {:?} for device {:?}.",
                                 method,
                                 device.name(),
-                                err
                             );
                         }
                     }
                     if let Some(natural) = scroll.natural_scroll {
                         if let Err(err) = device.config_scroll_set_natural_scroll_enabled(natural) {
-                            slog_scope::warn!(
-                                "Failed to apply natural scrolling {:?} for device {:?}: {:?}",
+                            warn!(
+                                ?err,
+                                "Failed to apply natural scrolling {:?} for device {:?}.",
                                 natural,
                                 device.name(),
-                                err
                             );
                         }
                     }
                     if let Some(button) = scroll.scroll_button {
                         if let Err(err) = device.config_scroll_set_button(button) {
-                            slog_scope::warn!(
-                                "Failed to apply scroll button {:?} for device {:?}: {:?}",
+                            warn!(
+                                ?err,
+                                "Failed to apply scroll button {:?} for device {:?}.",
                                 button,
                                 device.name(),
-                                err
                             );
                         }
                     }
                 }
                 if let Some(tap) = config.tap_config.as_ref() {
                     if let Err(err) = device.config_tap_set_enabled(tap.enabled) {
-                        slog_scope::warn!(
-                            "Failed to apply tap-to-click {:?} for device {:?}: {:?}",
+                        warn!(
+                            ?err,
+                            "Failed to apply tap-to-click {:?} for device {:?}.",
                             tap.enabled,
                             device.name(),
-                            err
                         );
                     }
                     if let Some(button_map) = tap.button_map {
                         if let Err(err) = device.config_tap_set_button_map(button_map) {
-                            slog_scope::warn!(
-                                "Failed to apply button map {:?} for device {:?}: {:?}",
+                            warn!(
+                                ?err,
+                                "Failed to apply button map {:?} for device {:?}.",
                                 button_map,
                                 device.name(),
-                                err
                             );
                         }
                     }
                     if let Err(err) = device.config_tap_set_drag_enabled(tap.drag) {
-                        slog_scope::warn!(
-                            "Failed to apply tap-drag {:?} for device {:?}: {:?}",
+                        warn!(
+                            ?err,
+                            "Failed to apply tap-drag {:?} for device {:?}.",
                             tap.drag,
                             device.name(),
-                            err
                         );
                     }
                     if let Err(err) = device.config_tap_set_drag_lock_enabled(tap.drag_lock) {
-                        slog_scope::warn!(
-                            "Failed to apply tap-drag-lock {:?} for device {:?}: {:?}",
+                        warn!(
+                            ?err,
+                            "Failed to apply tap-drag-lock {:?} for device {:?}.",
                             tap.drag_lock,
                             device.name(),
-                            err
                         );
                     }
                 }
@@ -717,12 +714,12 @@ impl<'a, T: Serialize> Drop for PersistenceGuard<'a, T> {
             {
                 Ok(writer) => writer,
                 Err(err) => {
-                    slog_scope::warn!("Failed to persist {}: {}", path.display(), err);
+                    warn!(?err, "Failed to persist {}.", path.display());
                     return;
                 }
             };
             if let Err(err) = ron::ser::to_writer_pretty(writer, &self.1, Default::default()) {
-                slog_scope::warn!("Failed to persist {}: {}", path.display(), err);
+                warn!(?err, "Failed to persist {}", path.display());
             }
         }
     }

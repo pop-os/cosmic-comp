@@ -53,6 +53,7 @@ use smithay::{
         viewporter::ViewporterState,
     },
 };
+use tracing::error;
 
 use std::{cell::RefCell, collections::HashMap, ffi::OsString, time::Duration};
 use std::{collections::VecDeque, time::Instant};
@@ -206,7 +207,7 @@ impl BackendData {
             BackendData::X11(ref mut state) => state.schedule_render(output, screencopy),
             BackendData::Kms(ref mut state) => {
                 if let Err(err) = state.schedule_render(loop_handle, output, None, screencopy) {
-                    slog_scope::crit!("Failed to schedule event, are we shutting down? {:?}", err);
+                    error!(?err, "Failed to schedule event, are we shutting down?");
                 }
             }
             _ => unreachable!("No backend was initialized"),
@@ -223,29 +224,26 @@ impl State {
     ) -> State {
         let clock = Clock::new().expect("Failed to initialize clock");
         let config = Config::load();
-        let compositor_state = CompositorState::new::<Self, _>(dh, None);
-        let data_device_state = DataDeviceState::new::<Self, _>(dh, None);
+        let compositor_state = CompositorState::new::<Self>(dh);
+        let data_device_state = DataDeviceState::new::<Self>(dh);
         let dmabuf_state = DmabufState::new();
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<Self>(dh);
         let output_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
         let output_configuration_state = OutputConfigurationState::new(dh, |_| true);
         let presentation_state = PresentationState::new::<Self>(dh, clock.id() as u32);
-        let primary_selection_state = PrimarySelectionState::new::<Self, _>(dh, None);
+        let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
         let screencopy_state = ScreencopyState::new::<Self, _, _>(
             dh,
             vec![CursorMode::Embedded, CursorMode::Hidden],
             |_| true,
         ); // TODO: privileged
-        let shm_state = ShmState::new::<Self, _>(
-            dh,
-            vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888],
-            None,
-        );
+        let shm_state =
+            ShmState::new::<Self>(dh, vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888]);
         let seat_state = SeatState::<Self>::new();
-        let viewporter_state = ViewporterState::new::<Self, _>(dh, None);
+        let viewporter_state = ViewporterState::new::<Self>(dh);
         let wl_drm_state = WlDrmState;
-        let kde_decoration_state = KdeDecorationState::new::<Self, _>(&dh, Mode::Client, None);
-        let xdg_decoration_state = XdgDecorationState::new::<Self, _>(&dh, None);
+        let kde_decoration_state = KdeDecorationState::new::<Self>(&dh, Mode::Client);
+        let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
 
         let shell = Shell::new(&config, dh);
 

@@ -3,6 +3,7 @@
 use crate::state::{Data, State};
 use anyhow::{Context, Result};
 use smithay::reexports::{calloop::EventLoop, wayland_server::DisplayHandle};
+use tracing::{info, warn};
 
 pub mod render;
 
@@ -29,8 +30,8 @@ pub fn init_backend_auto(
                 match x11::init_backend(dh, event_loop, state) {
                     Ok(_) => Ok(()),
                     Err(err) => {
-                        slog_scope::warn!("X11 Backend failed with error: {}", err);
-                        slog_scope::info!("Falling back to winit backend.");
+                        warn!(?err, "Initializing X11 Backend failed.");
+                        info!("Falling back to winit backend.");
                         winit::init_backend(dh, event_loop, state)
                     }
                 }

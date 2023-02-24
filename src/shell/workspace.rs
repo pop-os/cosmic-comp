@@ -32,6 +32,7 @@ use smithay::{
     xwayland::X11Surface,
 };
 use std::collections::HashMap;
+use tracing::warn;
 
 use super::{
     element::CosmicMapped,
@@ -498,10 +499,10 @@ impl Workspace {
                 if let Err(err) =
                     xwm.update_stacking_order_upwards(render_elements.iter().rev().map(|e| e.id()))
                 {
-                    slog_scope::warn!(
-                        "Failed to update Xwm ({:?}) stacking order: {}",
-                        xwm.id(),
-                        err
+                    warn!(
+                        wm_id = ?xwm.id(),
+                        ?err,
+                        "Failed to update Xwm stacking order.",
                     );
                 }
             }
@@ -578,10 +579,10 @@ impl Workspace {
                 if let Err(err) =
                     xwm.update_stacking_order_upwards(render_elements.iter().rev().map(|e| e.id()))
                 {
-                    slog_scope::warn!(
-                        "Failed to update Xwm ({:?}) stacking order: {}",
-                        xwm.id(),
-                        err
+                    warn!(
+                        wm_id = ?xwm.id(),
+                        ?err,
+                        "Failed to update Xwm stacking order.",
                     );
                 }
             }
@@ -711,11 +712,10 @@ where
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, smithay::utils::Physical>],
-        log: &slog::Logger,
     ) -> Result<(), <R as Renderer>::Error> {
         match self {
-            WorkspaceRenderElement::Wayland(elem) => elem.draw(frame, src, dst, damage, log),
-            WorkspaceRenderElement::Window(elem) => elem.draw(frame, src, dst, damage, log),
+            WorkspaceRenderElement::Wayland(elem) => elem.draw(frame, src, dst, damage),
+            WorkspaceRenderElement::Window(elem) => elem.draw(frame, src, dst, damage),
         }
     }
 

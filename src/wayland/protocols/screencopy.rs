@@ -24,6 +24,7 @@ use smithay::{
     },
     utils::{user_data::UserDataMap, Buffer, IsAlive, Physical, Point, Rectangle, Size, Transform},
 };
+use tracing::warn;
 use wayland_backend::{
     protocol::WEnum,
     server::{GlobalId, ObjectId},
@@ -540,7 +541,7 @@ fn check_cursor(
     match cursor.into_result() {
         Ok(mode) => {
             if !supported.contains(&mode) {
-                slog_scope::warn!("Client did send unsupported cursor mode: {:?}", mode);
+                warn!(?mode, "Client did send unsupported cursor mode");
                 resource.post_error(
                     zcosmic_screencopy_manager_v1::Error::InvalidCursorMode,
                     "Unsupported cursor mode",
@@ -550,7 +551,7 @@ fn check_cursor(
             Some(mode)
         }
         Err(err) => {
-            slog_scope::warn!("Client did send unknown cursor mode: {}", err);
+            warn!(?err, "Client did send unknown cursor mode");
             resource.post_error(
                 zcosmic_screencopy_manager_v1::Error::InvalidCursorMode,
                 "Unknown cursor mode, wrong protocol version?",

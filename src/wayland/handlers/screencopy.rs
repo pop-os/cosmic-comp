@@ -39,6 +39,7 @@ use smithay::{
     },
     xwayland::XWaylandClientData,
 };
+use tracing::warn;
 
 use crate::{
     backend::render::{
@@ -250,7 +251,7 @@ impl ScreencopyHandler for State {
         let buffer_size = match buffer_dimensions(&params.buffer) {
             Some(size) => size.to_logical(1, Transform::Normal),
             None => {
-                slog_scope::warn!("Error during screencopy session: Buffer has no size");
+                warn!("Error during screencopy session: Buffer has no size");
                 session.failed(FailureReason::InvalidBuffer);
                 return;
             }
@@ -260,7 +261,7 @@ impl ScreencopyHandler for State {
                 let mode = match output.current_mode() {
                     Some(mode) => mode,
                     None => {
-                        slog_scope::warn!("Error during screencopy session: Output has no mode");
+                        warn!("Error during screencopy session: Output has no mode");
                         session.failed(FailureReason::InvalidOutput);
                         return;
                     }
@@ -268,7 +269,7 @@ impl ScreencopyHandler for State {
                 .size;
 
                 if buffer_size.to_physical(1) != mode {
-                    slog_scope::warn!("Error during screencopy session: Buffer size doesn't match");
+                    warn!("Error during screencopy session: Buffer size doesn't match");
                     session.failed(FailureReason::InvalidSize);
                     return;
                 }
@@ -276,7 +277,7 @@ impl ScreencopyHandler for State {
             SessionType::Window(window) => {
                 let geometry = window.geometry();
                 if buffer_size != geometry.size {
-                    slog_scope::warn!("Error during screencopy session: Buffer size doesn't match");
+                    warn!("Error during screencopy session: Buffer size doesn't match");
                     session.failed(FailureReason::InvalidSize);
                     return;
                 }
@@ -288,7 +289,7 @@ impl ScreencopyHandler for State {
             buffer_type(&params.buffer),
             Some(BufferType::Shm) | Some(BufferType::Dma)
         ) {
-            slog_scope::warn!("Error during screencopy session: Buffer is neither shm or dma");
+            warn!("Error during screencopy session: Buffer is neither shm or dma");
             session.failed(FailureReason::InvalidBuffer);
             return;
         }
@@ -299,7 +300,7 @@ impl ScreencopyHandler for State {
             })
             .unwrap()
             {
-                slog_scope::warn!("Error during screencopy session: Invalid shm buffer format");
+                warn!("Error during screencopy session: Invalid shm buffer format");
                 session.failed(FailureReason::InvalidBuffer);
                 return;
             }
@@ -368,8 +369,8 @@ impl ScreencopyHandler for State {
                     buffer.release();
                 }
                 Ok(true) => {} // success
-                Err((reason, error)) => {
-                    slog_scope::warn!("Error during screencopy session: {}", error);
+                Err((reason, err)) => {
+                    warn!(?err, "Error during screencopy session");
                     session.failed(reason);
                 }
             }
@@ -955,7 +956,7 @@ pub fn render_window_to_buffer(
                 .map_err(DamageTrackedRendererError::Rendering)?;
         }
 
-        dtr.render_output(renderer, age, &elements, CLEAR_COLOR, None)
+        dtr.render_output(renderer, age, &elements, CLEAR_COLOR)
     }
 
     let node = node_from_params(&params, &mut state.backend, None);
@@ -1134,7 +1135,7 @@ impl State {
                             Ok(false) => data.state.common.still_pending(session, params),
                             Ok(true) => {} // success
                             Err((reason, err)) => {
-                                slog_scope::warn!("Screencopy session failed: {}", err);
+                                warn!(?err, "Screencopy session failed");
                                 session.failed(reason);
                             }
                         }
@@ -1263,7 +1264,7 @@ pub fn schedule_offscreen_workspace_session(
             }
             Ok(true) => {}
             Err((reason, err)) => {
-                slog_scope::warn!("Screencopy session failed: {}", err);
+                warn!(?err, "Screencopy session failed.");
                 session.failed(reason);
             }
         }

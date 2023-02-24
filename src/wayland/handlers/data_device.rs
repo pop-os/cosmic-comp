@@ -13,6 +13,7 @@ use smithay::{
     xwayland::xwm::{SelectionType, XwmId},
 };
 use std::{cell::RefCell, os::unix::io::OwnedFd};
+use tracing::warn;
 
 pub struct DnDIcon {
     surface: RefCell<Option<WlSurface>>,
@@ -66,10 +67,10 @@ impl DataDeviceHandler for State {
                             Some(metadata.mime_types.clone()),
                         )
                     }) {
-                        slog_scope::warn!("Failed to set Xwayland clipboard selection: {}", err);
+                        warn!(?err, "Failed to set Xwayland clipboard selection.");
                     }
                 } else if let Err(err) = xwm.new_selection(SelectionType::Clipboard, None) {
-                    slog_scope::warn!("Failed to clear Xwayland clipboard selection: {}", err);
+                    warn!(?err, "Failed to clear Xwayland clipboard selection.");
                 }
             }
         }
@@ -94,7 +95,7 @@ impl DataDeviceHandler for State {
                 fd,
                 self.common.event_loop_handle.clone(),
             ) {
-                slog_scope::warn!("Failed to send clipboard (X11 -> Wayland): {}", err);
+                warn!(?err, "Failed to send clipboard (X11 -> Wayland).");
             }
         }
     }

@@ -34,6 +34,7 @@ use smithay::{
         dmabuf::{DmabufGlobal, DmabufHandler, ImportError},
     },
 };
+use tracing::trace;
 
 use std::{convert::TryFrom, path::PathBuf, sync::Arc};
 
@@ -44,7 +45,6 @@ pub struct DrmGlobalData {
     filter: Box<dyn for<'a> Fn(&'a Client) -> bool + Send + Sync>,
     formats: Arc<Vec<Fourcc>>,
     device_path: PathBuf,
-    _logger: slog::Logger,
     dmabuf_global: DmabufGlobal,
 }
 
@@ -165,9 +165,7 @@ where
                             Ok(_) => {
                                 // import was successful
                                 data_init.init(id, dmabuf);
-                                slog_scope::trace!(
-                                    "Created a new validated dma wl_buffer via wl_drm."
-                                );
+                                trace!("Created a new validated dma wl_buffer via wl_drm.");
                             }
 
                             Err(ImportError::InvalidFormat) => {
@@ -246,7 +244,6 @@ impl WlDrmState {
             formats,
             device_path,
             dmabuf_global: dmabuf_global.clone(),
-            _logger: slog_scope::logger().new(slog::o!("cosmic_module" => "wayland_drm")),
         };
 
         display.create_global::<D, wl_drm::WlDrm, _>(2, data)

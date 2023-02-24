@@ -24,17 +24,9 @@ use crate::{
 mod grabs;
 pub use self::grabs::*;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct FloatingLayout {
     pub(in crate::shell) space: Space<CosmicMapped>,
-}
-
-impl Default for FloatingLayout {
-    fn default() -> Self {
-        FloatingLayout {
-            space: Space::new(None),
-        }
-    }
 }
 
 impl FloatingLayout {

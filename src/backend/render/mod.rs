@@ -37,6 +37,7 @@ use smithay::{
     utils::{Physical, Rectangle},
     wayland::dmabuf::get_dmabuf,
 };
+use tracing::warn;
 
 pub mod cursor;
 use self::cursor::CursorRenderElement;
@@ -268,7 +269,7 @@ where
     }
 
     renderer.bind(target).map_err(RenderError::Rendering)?;
-    let res = damage_tracker.render_output(renderer, age, &elements, CLEAR_COLOR, None);
+    let res = damage_tracker.render_output(renderer, age, &elements, CLEAR_COLOR);
 
     if let Some(fps) = fps.as_mut() {
         fps.render();
@@ -284,7 +285,7 @@ where
                     params,
                     output.current_transform(),
                     |_node, buffer, renderer, dtr, age| {
-                        let res = dtr.damage_output(age, &elements, slog_scope::logger())?;
+                        let res = dtr.damage_output(age, &elements)?;
 
                         if let (Some(ref damage), _) = &res {
                             if let Ok(dmabuf) = get_dmabuf(buffer) {
@@ -311,7 +312,7 @@ where
                     Ok(true) => {} // success
                     Ok(false) => state.still_pending(session.clone(), params.clone()),
                     Err(err) => {
-                        slog_scope::warn!("Error rendering to screencopy session: {}", err);
+                        warn!(?err, "Error rendering to screencopy session.");
                         session.failed(FailureReason::Unspec);
                     }
                 }

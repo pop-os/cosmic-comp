@@ -54,6 +54,8 @@ use egui::plot::{Corner, Legend, Plot, PlotPoints, Polygon};
 use smithay::backend::renderer::{
     element::texture::TextureRenderElement, gles2::Gles2Texture, multigpu::Error as MultiError,
 };
+#[cfg(feature = "debug")]
+use tracing::debug;
 
 use super::{focus::FocusDirection, layout::floating::ResizeState};
 
@@ -750,14 +752,13 @@ impl RenderElement<GlowRenderer> for CosmicMappedRenderElement<GlowRenderer> {
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
-        log: &slog::Logger,
     ) -> Result<(), <GlowRenderer as Renderer>::Error> {
         match self {
-            CosmicMappedRenderElement::Stack(elem) => elem.draw(frame, src, dst, damage, log),
-            CosmicMappedRenderElement::Window(elem) => elem.draw(frame, src, dst, damage, log),
+            CosmicMappedRenderElement::Stack(elem) => elem.draw(frame, src, dst, damage),
+            CosmicMappedRenderElement::Window(elem) => elem.draw(frame, src, dst, damage),
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage, log)
+                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage)
             }
         }
     }
@@ -781,15 +782,14 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>>
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
-        log: &slog::Logger,
     ) -> Result<(), <GlMultiRenderer<'a, 'b> as Renderer>::Error> {
         match self {
-            CosmicMappedRenderElement::Stack(elem) => elem.draw(frame, src, dst, damage, log),
-            CosmicMappedRenderElement::Window(elem) => elem.draw(frame, src, dst, damage, log),
+            CosmicMappedRenderElement::Stack(elem) => elem.draw(frame, src, dst, damage),
+            CosmicMappedRenderElement::Window(elem) => elem.draw(frame, src, dst, damage),
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => {
                 let glow_frame = frame.glow_frame_mut();
-                RenderElement::<GlowRenderer>::draw(elem, glow_frame, src, dst, damage, log)
+                RenderElement::<GlowRenderer>::draw(elem, glow_frame, src, dst, damage)
                     .map_err(|err| MultiError::Render(err))
             }
         }
@@ -804,7 +804,7 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>>
             CosmicMappedRenderElement::Window(elem) => elem.underlying_storage(renderer),
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => {
-                let glow_renderer = renderer.glow_renderer();
+                let glow_renderer = renderer.glow_renderer_mut();
                 match elem.underlying_storage(glow_renderer) {
                     Some(UnderlyingStorage::Wayland(buffer)) => {
                         Some(UnderlyingStorage::Wayland(buffer))
@@ -1015,7 +1015,7 @@ where
             ) {
                 Ok(element) => vec![element.into()],
                 Err(err) => {
-                    slog_scope::debug!("Error rendering debug overlay: {}", err);
+                    debug!(?err, "Error rendering debug overlay.");
                     Vec::new()
                 }
             }

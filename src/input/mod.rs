@@ -35,6 +35,9 @@ use smithay::{
     },
     xwayland::X11Surface,
 };
+#[cfg(not(feature = "debug"))]
+use tracing::info;
+use tracing::{error, trace, warn};
 
 use std::{cell::RefCell, collections::HashMap};
 use xkbcommon::xkb::KEY_XF86Switch_VT_12;
@@ -117,7 +120,7 @@ pub fn add_seat(
     config: &Config,
     name: String,
 ) -> Seat<State> {
-    let mut seat = seat_state.new_wl_seat(dh, name, None);
+    let mut seat = seat_state.new_wl_seat(dh, name);
     let userdata = seat.user_data();
     userdata.insert_if_missing(SeatId::default);
     userdata.insert_if_missing(Devices::default);
@@ -137,9 +140,9 @@ pub fn add_seat(
     // devices appear), we have to surrender to reality and just always expose a keyboard and pointer.
     let conf = config.xkb_config();
     if let Err(err) = seat.add_keyboard((&conf).into(), 200, 25) {
-        slog_scope::warn!(
-            "Failed to load provided xkb config: {}. Trying default...",
-            err
+        warn!(
+            ?err,
+            "Failed to load provided xkb config. Trying default...",
         );
         seat.add_keyboard(XkbConfig::default(), 200, 25)
             .expect("Failed to load xkb configuration files");
@@ -204,7 +207,7 @@ impl State {
                     if devices.has_device(&device) {
                         let keycode = event.key_code();
                         let state = event.state();
-                        slog_scope::trace!("key"; "keycode" => keycode, "state" => format!("{:?}", state));
+                        trace!(?keycode, ?state, "key");
 
                         let serial = SERIAL_COUNTER.next_serial();
                         let time = Event::time_msec(&event);
@@ -233,10 +236,7 @@ impl State {
                                                 + 1)
                                                 as i32,
                                         ) {
-                                            slog_scope::error!(
-                                                "Failed switching virtual terminal: {}",
-                                                err
-                                            );
+                                            error!(?err, "Failed switching virtual terminal.");
                                         }
                                         userdata.get::<SupressedKeys>().unwrap().add(&handle);
                                         return FilterResult::Intercept(None);
@@ -574,7 +574,7 @@ impl State {
             }
             #[cfg(not(feature = "debug"))]
             Action::Debug => {
-                slog_scope::info!("Debug overlay not included in this version")
+                info!("Debug overlay not included in this build.")
             }
             Action::Close => {
                 let current_output = seat.active_output();
@@ -923,7 +923,7 @@ impl State {
             Action::Spawn(command) => {
                 if let Err(err) = std::process::Command::new("/bin/sh")
                     .arg("-c")
-                    .arg(command)
+                    .arg(command.clone())
                     .env("WAYLAND_DISPLAY", &self.common.socket)
                     .env(
                         "DISPLAY",
@@ -938,7 +938,7 @@ impl State {
                     .env_remove("COSMIC_SESSION_SOCK")
                     .spawn()
                 {
-                    slog_scope::warn!("Failed to spawn: {}", err);
+                    warn!(?err, "Failed to spawn \"{}\"", command);
                 }
             }
         }

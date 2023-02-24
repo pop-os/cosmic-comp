@@ -127,23 +127,19 @@ impl RenderElement<GlowRenderer> for CosmicElement<GlowRenderer> {
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
-        log: &slog::Logger,
     ) -> Result<(), <GlowRenderer as Renderer>::Error> {
         match self {
-            CosmicElement::Workspace(elem) => elem.draw(frame, src, dst, damage, log),
-            CosmicElement::Cursor(elem) => elem.draw(frame, src, dst, damage, log),
-            CosmicElement::MoveGrab(elem) => elem.draw(frame, src, dst, damage, log),
+            CosmicElement::Workspace(elem) => elem.draw(frame, src, dst, damage),
+            CosmicElement::Cursor(elem) => elem.draw(frame, src, dst, damage),
+            CosmicElement::MoveGrab(elem) => elem.draw(frame, src, dst, damage),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage, log)
+                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage)
             }
         }
     }
 
-    fn underlying_storage(
-        &self,
-        renderer: &GlowRenderer,
-    ) -> Option<UnderlyingStorage<'_, GlowRenderer>> {
+    fn underlying_storage(&self, renderer: &mut GlowRenderer) -> Option<UnderlyingStorage> {
         match self {
             CosmicElement::Workspace(elem) => elem.underlying_storage(renderer),
             CosmicElement::Cursor(elem) => elem.underlying_storage(renderer),
@@ -161,17 +157,16 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>> for CosmicElement<GlMultiRen
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
-        log: &slog::Logger,
     ) -> Result<(), <GlMultiRenderer<'a, 'b> as Renderer>::Error> {
         match self {
-            CosmicElement::Workspace(elem) => elem.draw(frame, src, dst, damage, log),
-            CosmicElement::Cursor(elem) => elem.draw(frame, src, dst, damage, log),
-            CosmicElement::MoveGrab(elem) => elem.draw(frame, src, dst, damage, log),
+            CosmicElement::Workspace(elem) => elem.draw(frame, src, dst, damage),
+            CosmicElement::Cursor(elem) => elem.draw(frame, src, dst, damage),
+            CosmicElement::MoveGrab(elem) => elem.draw(frame, src, dst, damage),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => {
                 let elem = {
                     let glow_frame = frame.glow_frame_mut();
-                    RenderElement::<GlowRenderer>::draw(elem, glow_frame, src, dst, damage, log)
+                    RenderElement::<GlowRenderer>::draw(elem, glow_frame, src, dst, damage)
                         .map_err(|err| MultiError::Render(err))
                 };
                 elem
@@ -181,15 +176,15 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>> for CosmicElement<GlMultiRen
 
     fn underlying_storage(
         &self,
-        renderer: &GlMultiRenderer<'a, 'b>,
-    ) -> Option<UnderlyingStorage<'_, GlMultiRenderer<'a, 'b>>> {
+        renderer: &mut GlMultiRenderer<'a, 'b>,
+    ) -> Option<UnderlyingStorage> {
         match self {
             CosmicElement::Workspace(elem) => elem.underlying_storage(renderer),
             CosmicElement::Cursor(elem) => elem.underlying_storage(renderer),
             CosmicElement::MoveGrab(elem) => elem.underlying_storage(renderer),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => {
-                let glow_renderer = renderer.glow_renderer();
+                let glow_renderer = renderer.glow_renderer_mut();
                 match elem.underlying_storage(glow_renderer) {
                     Some(UnderlyingStorage::Wayland(buffer)) => {
                         Some(UnderlyingStorage::Wayland(buffer))

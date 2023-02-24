@@ -10,6 +10,7 @@ use smithay::{
 
 use anyhow::{Context, Result};
 use std::{ffi::OsString, os::unix::prelude::AsRawFd, sync::Arc};
+use tracing::{error, info, warn};
 
 pub mod backend;
 pub mod config;
@@ -27,8 +28,8 @@ pub mod xwayland;
 
 fn main() -> Result<()> {
     // setup logger
-    let _log = logger::init_logger()?;
-    slog_scope::info!("Cosmic starting up!");
+    logger::init_logger()?;
+    info!("Cosmic starting up!");
 
     // init event loop
     let mut event_loop =
@@ -56,7 +57,7 @@ fn main() -> Result<()> {
     event_loop.run(None, &mut data, |data| {
         // shall we shut down?
         if data.state.common.shell.outputs().next().is_none() || data.state.common.should_stop {
-            slog_scope::info!("Shutting down");
+            info!("Shutting down");
             data.state.common.event_loop_signal.stop();
             data.state.common.event_loop_signal.wakeup();
             return;
@@ -82,9 +83,9 @@ fn init_wayland_display(
 ) -> Result<(Display<state::State>, OsString)> {
     let mut display = Display::new().unwrap();
 
-    let source = ListeningSocketSource::new_auto(None).unwrap();
+    let source = ListeningSocketSource::new_auto().unwrap();
     let socket_name = source.socket_name().to_os_string();
-    slog_scope::info!("Listening on {:?}", socket_name);
+    info!("Listening on {:?}", socket_name);
 
     event_loop
         .handle()
@@ -97,7 +98,7 @@ fn init_wayland_display(
                     data.state.new_client_state()
                 }),
             ) {
-                slog_scope::warn!("Error adding wayland client: {}", err);
+                warn!(?err, "Error adding wayland client");
             };
         })
         .with_context(|| "Failed to init the wayland socket source.")?;
@@ -112,10 +113,10 @@ fn init_wayland_display(
             move |_, _, data: &mut state::Data| match data.display.dispatch_clients(&mut data.state)
             {
                 Ok(_) => Ok(PostAction::Continue),
-                Err(e) => {
-                    slog_scope::error!("I/O error on the Wayland display: {}", e);
+                Err(err) => {
+                    error!(?err, "I/O error on the Wayland display");
                     data.state.common.should_stop = true;
-                    Err(e)
+                    Err(err)
                 }
             },
         )
