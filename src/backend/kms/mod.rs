@@ -963,7 +963,7 @@ impl Surface {
                 };
                 state.send_frames(&self.output, &states);
                 surface
-                    .queue_buffer(feedback)
+                    .queue_buffer(damage, feedback)
                     .with_context(|| "Failed to submit buffer for display")?;
             }
             Err(err) => {

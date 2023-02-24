@@ -762,10 +762,7 @@ impl RenderElement<GlowRenderer> for CosmicMappedRenderElement<GlowRenderer> {
         }
     }
 
-    fn underlying_storage(
-        &self,
-        renderer: &GlowRenderer,
-    ) -> Option<UnderlyingStorage<'_, GlowRenderer>> {
+    fn underlying_storage(&self, renderer: &mut GlowRenderer) -> Option<UnderlyingStorage> {
         match self {
             CosmicMappedRenderElement::Stack(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::Window(elem) => elem.underlying_storage(renderer),
@@ -800,8 +797,8 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>>
 
     fn underlying_storage(
         &self,
-        renderer: &GlMultiRenderer<'a, 'b>,
-    ) -> Option<UnderlyingStorage<'_, GlMultiRenderer<'a, 'b>>> {
+        renderer: &mut GlMultiRenderer<'a, 'b>,
+    ) -> Option<UnderlyingStorage> {
         match self {
             CosmicMappedRenderElement::Stack(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::Window(elem) => elem.underlying_storage(renderer),

@@ -721,8 +721,8 @@ where
 
     fn underlying_storage(
         &self,
-        renderer: &R,
-    ) -> Option<smithay::backend::renderer::element::UnderlyingStorage<'_, R>> {
+        renderer: &mut R,
+    ) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
         match self {
             WorkspaceRenderElement::Wayland(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::Window(elem) => elem.underlying_storage(renderer),
