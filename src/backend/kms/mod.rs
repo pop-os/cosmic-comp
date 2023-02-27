@@ -52,7 +52,9 @@ use smithay::{
         wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle, Resource},
     },
     utils::{DeviceFd, Size, Transform},
-    wayland::{dmabuf::DmabufGlobal, seat::WaylandFocus},
+    wayland::{
+        dmabuf::DmabufGlobal, relative_pointer::RelativePointerManagerState, seat::WaylandFocus,
+    },
     xwayland::XWaylandClientData,
 };
 use tracing::{debug, error, info, warn};
@@ -304,6 +306,9 @@ pub fn init_backend(
         session,
         devices: HashMap::new(),
     });
+
+    // Create relative pointer global
+    RelativePointerManagerState::new::<State>(&dh);
 
     // TODO: Do multiple Xwaylands for better multigpu
     state.launch_xwayland(Some(primary));

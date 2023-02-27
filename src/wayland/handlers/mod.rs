@@ -11,6 +11,7 @@ pub mod output;
 pub mod output_configuration;
 pub mod presentation;
 pub mod primary_selection;
+pub mod relative_pointer;
 pub mod screencopy;
 pub mod seat;
 pub mod shm;
