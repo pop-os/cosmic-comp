@@ -198,13 +198,11 @@ where
     if let Some(ref mut fps) = fps {
         fps.start();
         #[cfg(feature = "debug")]
-        if screencopy.is_some() {
-            if let Some(rd) = fps.rd.as_mut() {
-                rd.start_frame_capture(
-                    renderer.glow_renderer().egl_context().get_context_handle(),
-                    std::ptr::null(),
-                );
-            }
+        if let Some(rd) = fps.rd.as_mut() {
+            rd.start_frame_capture(
+                renderer.glow_renderer().egl_context().get_context_handle(),
+                std::ptr::null(),
+            );
         }
     }
 
@@ -320,13 +318,16 @@ where
         }
         if let Some(fps) = fps.as_mut() {
             fps.screencopy();
-            #[cfg(feature = "debug")]
-            if let Some(rd) = fps.rd.as_mut() {
-                rd.end_frame_capture(
-                    renderer.glow_renderer().egl_context().get_context_handle(),
-                    std::ptr::null(),
-                );
-            }
+        }
+    }
+
+    #[cfg(feature = "debug")]
+    if let Some(ref mut fps) = fps {
+        if let Some(rd) = fps.rd.as_mut() {
+            rd.end_frame_capture(
+                renderer.glow_renderer().egl_context().get_context_handle(),
+                std::ptr::null(),
+            );
         }
     }
 
