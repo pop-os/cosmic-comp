@@ -87,7 +87,7 @@ pub struct KmsState {
 pub struct Device {
     render_node: DrmNode,
     surfaces: HashMap<crtc::Handle, Surface>,
-    drm: Dispatcher<'static, DrmDevice, Data>,
+    drm: DrmDevice,
     gbm: GbmDevice<DrmDeviceFd>,
     allocator: Box<dyn Allocator<Buffer = Dmabuf, Error = AnyError>>,
     formats: HashSet<Format>,
@@ -223,7 +223,7 @@ pub fn init_backend(
                     error!(?err, "Failed to resume libinput context.");
                 }
                 for device in data.state.backend.kms().devices.values() {
-                    device.drm.as_source_ref().activate();
+                    device.drm.activate();
                 }
                 let dispatcher = dispatcher.clone();
                 handle.insert_idle(move |data| {
@@ -294,7 +294,7 @@ pub fn init_backend(
             SessionEvent::PauseSession => {
                 libinput_context.suspend();
                 for device in data.state.backend.kms().devices.values() {
-                    device.drm.as_source_ref().pause();
+                    device.drm.pause();
                 }
             }
         })
@@ -369,7 +369,7 @@ impl State {
                     })?,
             )
         });
-        let drm = DrmDevice::new(fd.clone(), false)
+        let (drm, notifier) = DrmDevice::new(fd.clone(), false)
             .with_context(|| format!("Failed to initialize drm device for: {}", path.display()))?;
         let drm_node = DrmNode::from_dev_id(dev)?;
         let supports_atomic = drm.is_atomic();
@@ -401,11 +401,16 @@ impl State {
             //  otherwise the EGLDisplay created below might share the same GBM context
         };
 
-        let dispatcher =
-            Dispatcher::new(drm, move |event, metadata, data: &mut Data| match event {
-                DrmEvent::VBlank(crtc) => {
-                    let rescheduled =
-                        if let Some(device) = data.state.backend.kms().devices.get_mut(&drm_node) {
+        let token = self
+            .common
+            .event_loop_handle
+            .insert_source(
+                notifier,
+                move |event, metadata, data: &mut Data| match event {
+                    DrmEvent::VBlank(crtc) => {
+                        let rescheduled = if let Some(device) =
+                            data.state.backend.kms().devices.get_mut(&drm_node)
+                        {
                             if let Some(surface) = device.surfaces.get_mut(&crtc) {
                                 #[cfg(feature = "debug")]
                                 surface.fps.displayed();
@@ -467,35 +472,32 @@ impl State {
                             None
                         };
 
-                    if let Some((output, avg_rendertime)) = rescheduled {
-                        let mut scheduled_sessions =
-                            data.state.workspace_session_for_output(&output);
-                        let mut output_sessions = output.pending_buffers().peekable();
-                        if output_sessions.peek().is_some() {
-                            scheduled_sessions
-                                .get_or_insert_with(Vec::new)
-                                .extend(output_sessions);
-                        }
+                        if let Some((output, avg_rendertime)) = rescheduled {
+                            let mut scheduled_sessions =
+                                data.state.workspace_session_for_output(&output);
+                            let mut output_sessions = output.pending_buffers().peekable();
+                            if output_sessions.peek().is_some() {
+                                scheduled_sessions
+                                    .get_or_insert_with(Vec::new)
+                                    .extend(output_sessions);
+                            }
 
-                        let repaint_delay = std::cmp::max(avg_rendertime, MIN_RENDER_TIME);
-                        if let Err(err) = data.state.backend.kms().schedule_render(
-                            &data.state.common.event_loop_handle,
-                            &output,
-                            Some(repaint_delay),
-                            scheduled_sessions,
-                        ) {
-                            warn!(?err, "Failed to schedule render.");
+                            let repaint_delay = std::cmp::max(avg_rendertime, MIN_RENDER_TIME);
+                            if let Err(err) = data.state.backend.kms().schedule_render(
+                                &data.state.common.event_loop_handle,
+                                &output,
+                                Some(repaint_delay),
+                                scheduled_sessions,
+                            ) {
+                                warn!(?err, "Failed to schedule render.");
+                            }
                         }
                     }
-                }
-                DrmEvent::Error(err) => {
-                    warn!(?err, "Failed to read events of device {:?}.", dev);
-                }
-            });
-        let token = self
-            .common
-            .event_loop_handle
-            .register_dispatcher(dispatcher.clone())
+                    DrmEvent::Error(err) => {
+                        warn!(?err, "Failed to read events of device {:?}.", dev);
+                    }
+                },
+            )
             .with_context(|| format!("Failed to add drm device to event loop: {}", dev))?;
 
         let socket = match self.create_socket(dh, render_node, formats.clone().into_iter()) {
@@ -518,7 +520,7 @@ impl State {
             surfaces: HashMap::new(),
             gbm: gbm.clone(),
             allocator,
-            drm: dispatcher,
+            drm,
             formats,
             supports_atomic,
             event_token: Some(token),
@@ -754,10 +756,8 @@ pub struct OutputChanges {
 
 impl Device {
     pub fn enumerate_surfaces(&mut self) -> Result<OutputChanges> {
-        let drm = &mut *self.drm.as_source_mut();
-
         // enumerate our outputs
-        let config = drm_helpers::display_configuration(drm, self.supports_atomic)?;
+        let config = drm_helpers::display_configuration(&mut self.drm, self.supports_atomic)?;
 
         let surfaces = self
             .surfaces
@@ -787,7 +787,7 @@ impl Device {
         position: (i32, i32),
         renderer: &mut GlMultiRenderer<'_, '_>,
     ) -> Result<Output> {
-        let drm = &mut *self.drm.as_source_mut();
+        let drm = &mut self.drm;
         let crtc_info = drm.get_crtc(crtc)?;
         let conn_info = drm.get_connector(conn, false)?;
         let vrr = drm_helpers::set_vrr(drm, crtc, conn, true).unwrap_or(false);
@@ -1011,7 +1011,7 @@ impl KmsState {
                 }
                 false
             } else {
-                let drm = &mut *device.drm.as_source_mut();
+                let drm = &mut device.drm;
                 let conn = surface.connector;
                 let conn_info = drm.get_connector(conn, false)?;
                 let mode = conn_info

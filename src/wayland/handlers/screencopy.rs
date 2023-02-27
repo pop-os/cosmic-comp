@@ -295,7 +295,7 @@ impl ScreencopyHandler for State {
         }
 
         if let Some(BufferType::Shm) = buffer_type(&params.buffer) {
-            if with_buffer_contents(&params.buffer, |_, info| {
+            if with_buffer_contents(&params.buffer, |_, _, info| {
                 info.format != ShmFormat::Abgr8888 && info.format != ShmFormat::Xbgr8888
             })
             .unwrap()
@@ -502,7 +502,7 @@ where
 {
     if matches!(buffer_type(buffer), Some(BufferType::Shm)) {
         let buffer_size = buffer_dimensions(buffer).unwrap();
-        with_buffer_contents_mut(buffer, |slice, data| {
+        with_buffer_contents_mut(buffer, |ptr, len, data| {
             let offset = data.offset as i32;
             let width = data.width as i32;
             let height = data.height as i32;
@@ -513,7 +513,7 @@ where
             let pixelsize = 4i32;
 
             // ensure consistency, the SHM handler of smithay should ensure this
-            assert!((offset + (height - 1) * stride + width * pixelsize) as usize <= slice.len());
+            assert!((offset + (height - 1) * stride + width * pixelsize) as usize <= len);
 
             let mapping =
                 renderer.copy_framebuffer(Rectangle::from_loc_and_size((0, 0), buffer_size))?;
@@ -524,7 +524,7 @@ where
                 unsafe {
                     std::ptr::copy_nonoverlapping::<u8>(
                         gl_data.as_ptr().offset((width * pixelsize * i) as isize),
-                        slice.as_mut_ptr().offset((offset + stride * i) as isize),
+                        ptr.offset((offset + stride * i) as isize),
                         (width * pixelsize) as usize,
                     );
                 }

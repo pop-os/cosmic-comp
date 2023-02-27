@@ -42,7 +42,7 @@ tracing = "0.1.37"
 [dependencies.smithay]
 version = "0.3"
 git = "https://github.com/smithay/smithay.git"
-branch = "30dc3abb57"
+rev = "30dc3abb57"
 default-features = false
 features = ["backend_drm", "backend_gbm", "backend_egl", "backend_libinput", "backend_session_libseat", "backend_udev", "backend_winit", "backend_vulkan", "backend_x11", "desktop", "use_system_lib", "renderer_glow", "renderer_multi", "wayland_frontend", "xwayland"]
 
@@ -68,4 +68,4 @@ debug = true
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/pop-os/smithay", rev = "6276454e856" }
+smithay = { git = "https://github.com/pop-os/smithay", rev = "19f7c9aad6" }
