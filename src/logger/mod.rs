@@ -9,6 +9,11 @@ use tracing_journald as journald;
 use tracing_subscriber::{filter::Directive, fmt, prelude::*, EnvFilter};
 
 pub fn init_logger() -> Result<()> {
+    let compositor_level = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "info"
+    };
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| {
             EnvFilter::new(if cfg!(debug_assertions) {
@@ -18,17 +23,8 @@ pub fn init_logger() -> Result<()> {
             })
         })
         .add_directive(Directive::from_str("cosmic_text=error").unwrap())
-        .add_directive(
-            Directive::from_str(&format!(
-                "smithay={level},cosmic_comp={level}",
-                level = if cfg!(debug_assertions) {
-                    "debug"
-                } else {
-                    "info"
-                }
-            ))
-            .unwrap(),
-        );
+        .add_directive(Directive::from_str(&format!("smithay={compositor_level}")).unwrap())
+        .add_directive(Directive::from_str(&format!("cosmic_comp={compositor_level}")).unwrap());
 
     let fmt_layer = fmt::layer().compact();
 
