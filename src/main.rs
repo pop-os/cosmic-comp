@@ -21,6 +21,7 @@ mod logger;
 pub mod session;
 pub mod shell;
 pub mod state;
+#[cfg(feature = "systemd")]
 pub mod systemd;
 pub mod utils;
 pub mod wayland;
@@ -46,6 +47,7 @@ fn main() -> Result<()> {
     // init backend
     backend::init_backend_auto(&display.handle(), &mut event_loop, &mut state)?;
     // potentially tell systemd we are setup now
+    #[cfg(feature = "systemd")]
     if let state::BackendData::Kms(_) = &state.backend {
         systemd::ready(&state);
     }
