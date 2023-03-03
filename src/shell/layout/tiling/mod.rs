@@ -31,7 +31,7 @@ use smithay::{
     wayland::seat::WaylandFocus,
 };
 use std::{borrow::Borrow, collections::HashMap, hash::Hash, sync::Arc};
-use tracing::debug;
+use tracing::trace;
 
 mod grabs;
 pub use self::grabs::*;
@@ -421,7 +421,7 @@ impl TilingLayout {
                 });
 
                 // remove self
-                debug!(?mapped, "Remove window.");
+                trace!(?mapped, "Remove window.");
                 let _ = tree.remove_node(node_id.clone(), RemoveBehavior::DropChildren);
 
                 // fixup parent node
@@ -434,7 +434,7 @@ impl TilingLayout {
                         if group.len() > 2 {
                             group.remove_window(position);
                         } else {
-                            debug!("Removing Group");
+                            trace!("Removing Group");
                             let other_child =
                                 tree.children_ids(&id).unwrap().cloned().next().unwrap();
                             let fork_pos = parent_parent_id.as_ref().and_then(|parent_id| {

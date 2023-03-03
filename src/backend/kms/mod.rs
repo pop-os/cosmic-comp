@@ -57,7 +57,7 @@ use smithay::{
     },
     xwayland::XWaylandClientData,
 };
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, trace, warn};
 
 use std::{
     cell::RefCell,
@@ -200,7 +200,7 @@ pub fn init_backend(
                 .with_context(|| format!("Failed to remove drm device: {}", device_id)),
         } {
             Ok(()) => {
-                debug!("Successfully handled udev event.")
+                trace!("Successfully handled udev event.")
             }
             Err(err) => {
                 error!(?err, "Error while handling udev event.")
@@ -1133,7 +1133,7 @@ impl KmsState {
             render,
             surface,
         ) {
-            debug!(?err, "Early import failed.");
+            trace!(?err, "Early import failed.");
         }
     }
 

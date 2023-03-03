@@ -17,9 +17,9 @@ pub fn init_logger() -> Result<()> {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| {
             EnvFilter::new(if cfg!(debug_assertions) {
-                "warn"
+                "info"
             } else {
-                "error"
+                "warn"
             })
         })
         .add_directive(Directive::from_str("cosmic_text=error").unwrap())

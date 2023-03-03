@@ -12,7 +12,7 @@ use smithay::{
     utils::{IsAlive, Serial, SERIAL_COUNTER},
 };
 use std::cell::RefCell;
-use tracing::{debug, info};
+use tracing::{debug, trace};
 
 use self::target::{KeyboardFocusTarget, WindowGroup};
 
@@ -101,7 +101,7 @@ impl Shell {
             if let Some(workspace) = state.common.shell.space_for_mut(mapped) {
                 let mut focus_stack = workspace.focus_stack.get_mut(active_seat);
                 if Some(mapped) != focus_stack.last() {
-                    debug!(?mapped, "Focusing window.");
+                    trace!(?mapped, "Focusing window.");
                     focus_stack.append(mapped);
                     // also remove popup grabs, if we are switching focus
                     if let Some(mut popup_grab) = active_seat
@@ -203,7 +203,7 @@ impl Common {
                             {
                                 continue; // Focus is valid
                             } else {
-                                debug!("Wrong Window, focus fixup");
+                                trace!("Wrong Window, focus fixup");
                             }
                         }
                         KeyboardFocusTarget::LayerSurface(layer) => {
@@ -224,7 +224,7 @@ impl Common {
                         } // Focus is valid
                     };
                 } else {
-                    debug!("Surface dead, focus fixup");
+                    trace!("Surface dead, focus fixup");
                 }
             } else {
                 continue;
@@ -263,7 +263,7 @@ impl Common {
                             .map(KeyboardFocusTarget::from)
                     });
                 if let Some(keyboard) = seat.get_keyboard() {
-                    info!("Restoring focus to {:?}", target.as_ref());
+                    debug!("Restoring focus to {:?}", target.as_ref());
                     keyboard.set_focus(state, target.clone(), SERIAL_COUNTER.next_serial());
                     ActiveFocus::set(&seat, target);
                 }

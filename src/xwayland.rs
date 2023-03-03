@@ -27,7 +27,7 @@ use smithay::{
         X11Surface, X11Wm, XWayland, XWaylandEvent, XwmHandler,
     },
 };
-use tracing::{error, info, warn};
+use tracing::{error, trace, warn};
 
 pub struct XWaylandState {
     pub xwm: Option<X11Wm>,
@@ -489,7 +489,7 @@ impl XwmHandler for Data {
     }
 
     fn new_selection(&mut self, xwm: XwmId, selection: SelectionType, mime_types: Vec<String>) {
-        info!(?selection, ?mime_types, "Got Selection from Xwayland",);
+        trace!(?selection, ?mime_types, "Got Selection from Xwayland",);
 
         if self.state.common.is_x_focused(xwm) {
             let seat = self.state.common.last_active_seat();
