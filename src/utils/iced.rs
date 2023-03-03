@@ -221,7 +221,6 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             *buffer = MemoryRenderBuffer::new(buffer_size, 1, Transform::Normal, None);
             *needs_redraw = true;
         }
-        let _ = internal_ref.update(true);
     }
 }
 
