@@ -13,6 +13,7 @@ use crate::{
 use crate::{
     shell::{layout::floating::SeatMoveGrabState, CosmicMappedRenderElement},
     state::{Common, Fps},
+    utils::prelude::SeatExt,
     wayland::{
         handlers::{data_device::get_dnd_icon, screencopy::render_session},
         protocols::{
@@ -372,6 +373,8 @@ where
         .unwrap()
         .borrow()
         .is_some();
+    let active_output = &last_active_seat.active_output() == output;
+
     elements.extend(
         workspace
             .render_output::<R>(
@@ -379,7 +382,7 @@ where
                 output,
                 &state.shell.override_redirect_windows,
                 state.xwayland_state.values_mut(),
-                (!move_active).then_some(&last_active_seat),
+                (!move_active && active_output).then_some(&last_active_seat),
                 exclude_workspace_overview,
             )
             .map_err(|_| OutputNoMode)?
