@@ -27,14 +27,13 @@ use smithay::{
     utils::{IsAlive, Logical, Point, Rectangle, Serial},
     wayland::compositor::SurfaceData,
 };
-use std::{cell::RefCell, time::Duration};
+use std::{cell::RefCell, collections::HashSet, time::Duration};
 
 pub type SeatMoveGrabState = RefCell<Option<MoveGrabState>>;
 
 pub struct MoveGrabState {
     window: CosmicMapped,
-    initial_cursor_location: Point<f64, Logical>,
-    initial_window_location: Point<i32, Logical>,
+    window_offset: Point<i32, Logical>,
 }
 
 impl MoveGrabState {
@@ -45,30 +44,29 @@ impl MoveGrabState {
         CosmicMappedRenderElement<R>: RenderElement<R>,
         I: From<CosmicMappedRenderElement<R>>,
     {
+        #[cfg(feature = "debug")]
+        puffin::profile_function!();
+
         let cursor_at = seat.get_pointer().unwrap().current_location();
-        let delta = cursor_at - self.initial_cursor_location;
-        let location = self.initial_window_location.to_f64() + delta;
 
         let mut window_geo = self.window.geometry();
-        window_geo.loc += location.to_i32_round();
+        window_geo.loc += cursor_at.to_i32_round() + self.window_offset;
         if !output.geometry().intersection(window_geo).is_some() {
             return Vec::new();
         }
 
         let scale = output.current_scale().fractional_scale().into();
+        let render_location = cursor_at.to_i32_round() - output.geometry().loc + self.window_offset;
+
         let mut elements: Vec<I> = vec![CosmicMappedRenderElement::from(IndicatorShader::element(
             renderer,
-            Rectangle::from_loc_and_size(
-                location.to_i32_round() - output.geometry().loc,
-                self.window.geometry().size,
-            ),
+            Rectangle::from_loc_and_size(render_location, self.window.geometry().size),
         ))
         .into()];
         elements.extend(AsRenderElements::<R>::render_elements::<I>(
             &self.window,
             renderer,
-            (location.to_i32_round() - output.geometry().loc - self.window.geometry().loc)
-                .to_physical_precise_round(scale),
+            render_location.to_physical_precise_round(scale),
             scale,
         ));
         elements
@@ -91,6 +89,7 @@ pub struct MoveSurfaceGrab {
     window: CosmicMapped,
     start_data: PointerGrabStartData<State>,
     seat: Seat<State>,
+    outputs: HashSet<Output>,
 }
 
 impl PointerGrab<State> for MoveSurfaceGrab {
@@ -101,6 +100,26 @@ impl PointerGrab<State> for MoveSurfaceGrab {
         _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
         event: &MotionEvent,
     ) {
+        let borrow = self
+            .seat
+            .user_data()
+            .get::<SeatMoveGrabState>()
+            .map(|s| s.borrow());
+        if let Some(grab_state) = borrow.as_ref().and_then(|s| s.as_ref()) {
+            let mut window_geo = self.window.geometry();
+            window_geo.loc += event.location.to_i32_round() + grab_state.window_offset;
+            for output in state.common.shell.outputs() {
+                if let Some(overlap) = output.geometry().intersection(window_geo) {
+                    if self.outputs.insert(output.clone()) {
+                        self.window.output_enter(output, overlap);
+                    }
+                } else if self.outputs.remove(&output) {
+                    self.window.output_leave(output);
+                }
+            }
+        }
+        drop(borrow);
+
         // While the grab is active, no client has pointer focus
         handle.motion(state, None, event);
         if !self.window.alive() {
@@ -153,10 +172,15 @@ impl MoveSurfaceGrab {
         initial_cursor_location: Point<f64, Logical>,
         initial_window_location: Point<i32, Logical>,
     ) -> MoveSurfaceGrab {
+        let output = seat.active_output();
+        let mut outputs = HashSet::new();
+        outputs.insert(output.clone());
+        window.output_enter(&output, window.geometry()); // not accurate but...
+
         let grab_state = MoveGrabState {
             window: window.clone(),
-            initial_cursor_location,
-            initial_window_location,
+            window_offset: dbg!(initial_window_location) + output.geometry().loc
+                - dbg!(initial_cursor_location.to_i32_round()),
         };
 
         *seat
@@ -169,6 +193,7 @@ impl MoveSurfaceGrab {
             window,
             start_data,
             seat: seat.clone(),
+            outputs,
         }
     }
 
@@ -189,10 +214,9 @@ impl MoveSurfaceGrab {
             .and_then(|s| s.borrow_mut().take())
         {
             if grab_state.window.alive() {
-                let delta = handle.current_location() - grab_state.initial_cursor_location;
-                let window_location = (grab_state.initial_window_location.to_f64() + delta)
-                    .to_i32_round()
-                    - output.geometry().loc;
+                let window_location = handle.current_location().to_i32_round()
+                    - output.geometry().loc
+                    + grab_state.window_offset;
 
                 let workspace_handle = state.common.shell.active_space(&output).handle;
                 for (window, _) in grab_state.window.windows() {
