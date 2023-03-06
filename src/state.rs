@@ -14,6 +14,8 @@ use crate::{
     xwayland::XWaylandState,
 };
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_manager_v1::CursorMode;
+#[cfg(feature = "debug")]
+use smithay::utils::Rectangle;
 use smithay::{
     backend::{
         drm::DrmNode,
@@ -264,7 +266,13 @@ impl State {
                 should_stop: false,
 
                 #[cfg(feature = "debug")]
-                egui: Egui { active: false },
+                egui: Egui {
+                    active: false,
+                    state: smithay_egui::EguiState::new(Rectangle::from_loc_and_size(
+                        (0, 0),
+                        (800, 600),
+                    )),
+                },
 
                 compositor_state,
                 data_device_state,
@@ -517,6 +525,7 @@ impl Common {
 #[cfg(feature = "debug")]
 pub struct Egui {
     pub active: bool,
+    pub state: smithay_egui::EguiState,
 }
 
 pub struct Fps {

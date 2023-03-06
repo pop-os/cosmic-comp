@@ -6,7 +6,10 @@ use std::{
 };
 
 #[cfg(feature = "debug")]
-use crate::{debug::fps_ui, utils::prelude::*};
+use crate::{
+    debug::{fps_ui, profiler_ui},
+    utils::prelude::*,
+};
 use crate::{
     shell::{layout::floating::SeatMoveGrabState, CosmicMappedRenderElement},
     state::{Common, Fps},
@@ -301,8 +304,6 @@ where
         }
     }
 
-    let workspace = state.shell.space_for_handle(&handle).ok_or(OutputNoMode)?;
-
     let screencopy_contains_embedded = screencopy.as_ref().map_or(false, |(_, sessions)| {
         sessions
             .iter()
@@ -341,8 +342,23 @@ where
             .map_err(RenderError::Rendering)?;
             elements.push(fps_overlay.into());
         }
+
+        if state.shell.outputs.first() == Some(output) {
+            if let Some(profiler_overlay) = profiler_ui(
+                state,
+                renderer.glow_renderer_mut(),
+                Rectangle::from_loc_and_size((0, 0), output_geo.size),
+                scale,
+            )
+            .map_err(<R as Renderer>::Error::from)
+            .map_err(RenderError::Rendering)?
+            {
+                elements.push(profiler_overlay.into());
+            }
+        }
     }
 
+    let workspace = state.shell.space_for_handle(&handle).ok_or(OutputNoMode)?;
     let last_active_seat = state.last_active_seat().clone();
     let move_active = last_active_seat
         .user_data()
