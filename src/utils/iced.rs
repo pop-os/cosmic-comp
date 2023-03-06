@@ -185,7 +185,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             buffers: HashMap::new(),
             size,
             cursor_pos: None,
-            theme: Theme::Dark, // TODO
+            theme: Theme::dark(), // TODO
             renderer,
             state,
             debug,
@@ -211,6 +211,10 @@ impl<P: Program + Send + 'static> IcedElement<P> {
     pub fn resize(&self, size: Size<i32, Logical>) {
         let mut internal = self.0.lock().unwrap();
         let internal_ref = &mut *internal;
+        if internal_ref.size == size {
+            return;
+        }
+
         internal_ref.size = size;
         for (scale, (buffer, needs_redraw)) in internal_ref.buffers.iter_mut() {
             let buffer_size = internal_ref
@@ -221,13 +225,12 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             *buffer = MemoryRenderBuffer::new(buffer_size, 1, Transform::Normal, None);
             *needs_redraw = true;
         }
+        internal_ref.update(true);
     }
 }
 
 impl<P: Program + Send + 'static> IcedElementInternal<P> {
     fn update(&mut self, mut force: bool) -> Vec<Action<<P as Program>::Message>> {
-        let cursor_pos = self.cursor_pos.unwrap_or(Point::from((-1.0, -1.0)));
-
         while let Ok(message) = self.rx.try_recv() {
             self.state.queue_message(message);
             force = true;
@@ -237,6 +240,8 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
             return Vec::new();
         }
 
+        let cursor_pos = self.cursor_pos.unwrap_or(Point::from((-1.0, -1.0)));
+
         let actions = self
             .state
             .update(
@@ -245,7 +250,7 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
                 &mut self.renderer,
                 &self.theme,
                 &Style {
-                    text_color: self.theme.palette().text,
+                    text_color: self.theme.cosmic().on_bg_color().into(),
                 },
                 &mut cosmic::iced_native::clipboard::Null,
                 &mut self.debug,
@@ -289,7 +294,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorMoved { position }));
         internal.cursor_pos = Some(event.location);
-        let _ = internal.update(true); // TODO
+        let _ = internal.update(true);
     }
 
     fn motion(
@@ -304,7 +309,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorMoved { position }));
         internal.cursor_pos = Some(event.location);
-        let _ = internal.update(true); // TODO
+        let _ = internal.update(true);
     }
 
     fn relative_motion(
@@ -332,7 +337,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
             ButtonState::Pressed => MouseEvent::ButtonPressed(button),
             ButtonState::Released => MouseEvent::ButtonReleased(button),
         }));
-        let _ = internal.update(true); // TODO
+        let _ = internal.update(true);
     }
 
     fn axis(
@@ -357,7 +362,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
                     }
                 },
             }));
-        let _ = internal.update(true); // TODO
+        let _ = internal.update(true);
     }
 
     fn leave(
@@ -371,7 +376,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         internal
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorLeft));
-        let _ = internal.update(true); // TODO
+        let _ = internal.update(true);
     }
 }
 
@@ -431,7 +436,7 @@ impl<P: Program + Send + 'static> KeyboardTarget<crate::state::State> for IcedEl
         internal
             .state
             .queue_event(Event::Keyboard(KeyboardEvent::ModifiersChanged(mods)));
-        let _ = internal.update(true); // TODO
+        let _ = internal.update(true);
     }
 }
 
