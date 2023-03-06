@@ -172,6 +172,9 @@ where
     R: Renderer + ImportAll,
     <R as Renderer>::TextureId: 'static,
 {
+    #[cfg(feature = "debug")]
+    puffin::profile_function!();
+
     if get_role(&surface) != Some("dnd_icon") {
         warn!(
             ?surface,
@@ -215,6 +218,8 @@ where
     R: Renderer + ImportMem + ImportAll,
     <R as Renderer>::TextureId: Clone + 'static,
 {
+    #[cfg(feature = "debug")]
+    puffin::profile_function!();
     // draw the cursor as relevant
     // reset the cursor if the surface is no longer alive
     let cursor_status = seat

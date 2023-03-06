@@ -1008,6 +1008,9 @@ impl Shell {
     }
 
     pub fn refresh(&mut self) {
+        #[cfg(feature = "debug")]
+        puffin::profile_function!();
+
         self.popups.cleanup();
 
         match &mut self.workspaces {

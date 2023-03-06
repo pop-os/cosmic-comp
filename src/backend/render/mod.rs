@@ -168,6 +168,9 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
     E: From<CursorRenderElement<R>> + From<CosmicMappedRenderElement<R>>,
 {
+    #[cfg(feature = "debug")]
+    puffin::profile_function!();
+
     let scale = output.current_scale().fractional_scale();
     let mut elements = Vec::new();
 
@@ -293,6 +296,9 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
     Source: Clone,
 {
+    #[cfg(feature = "debug")]
+    puffin::profile_function!();
+
     if let Some(ref mut fps) = fps {
         fps.start();
         #[cfg(feature = "debug")]
@@ -448,6 +454,8 @@ where
                 std::ptr::null(),
             );
         }
+
+        puffin::GlobalProfiler::lock().new_frame();
     }
 
     res

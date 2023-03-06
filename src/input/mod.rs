@@ -648,6 +648,7 @@ impl State {
             #[cfg(feature = "debug")]
             Action::Debug => {
                 self.common.egui.active = !self.common.egui.active;
+                puffin::set_scopes_on(self.common.egui.active);
                 for mapped in self
                     .common
                     .shell

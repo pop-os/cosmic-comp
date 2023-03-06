@@ -77,6 +77,9 @@ impl Workspace {
     }
 
     pub fn refresh(&mut self) {
+        #[cfg(feature = "debug")]
+        puffin::profile_function!();
+
         self.fullscreen.retain(|_, w| w.alive());
         self.floating_layer.refresh();
         self.tiling_layer.refresh();
@@ -443,6 +446,9 @@ impl Workspace {
         <R as Renderer>::TextureId: 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
+        #[cfg(feature = "debug")]
+        puffin::profile_function!();
+
         let mut render_elements = Vec::new();
 
         let output_scale = output.current_scale().fractional_scale();

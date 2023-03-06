@@ -257,6 +257,9 @@ impl FloatingLayout {
     }
 
     pub fn refresh(&mut self) {
+        #[cfg(feature = "debug")]
+        puffin::profile_function!();
+
         self.space.refresh();
         for element in self
             .space
@@ -352,6 +355,9 @@ impl FloatingLayout {
         <R as Renderer>::TextureId: 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
+        #[cfg(feature = "debug")]
+        puffin::profile_function!();
+
         let output_scale = output.current_scale().fractional_scale();
         self.space
             .elements_for_output(output)

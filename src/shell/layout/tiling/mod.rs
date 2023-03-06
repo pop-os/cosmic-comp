@@ -896,6 +896,9 @@ impl TilingLayout {
     }
 
     pub fn refresh<'a>(&mut self) {
+        #[cfg(feature = "debug")]
+        puffin::profile_function!();
+
         let dead_windows = self
             .mapped()
             .map(|(_, w, _)| w.clone())
@@ -1107,6 +1110,9 @@ impl TilingLayout {
     }
 
     fn update_space_positions(trees: &mut HashMap<OutputData, Tree<Data>>, gaps: (i32, i32)) {
+        #[cfg(feature = "debug")]
+        puffin::profile_function!();
+
         let (outer, inner) = gaps;
         for (output, tree) in trees
             .iter_mut()
@@ -1306,6 +1312,9 @@ impl TilingLayout {
         <R as Renderer>::TextureId: 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
+        #[cfg(feature = "debug")]
+        puffin::profile_function!();
+
         let output_scale = output.current_scale().fractional_scale();
 
         if !self.trees.contains_key(output) {
