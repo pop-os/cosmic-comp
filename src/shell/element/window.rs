@@ -63,6 +63,7 @@ pub struct CosmicWindowInternal {
     /// TODO: This needs to be per seat
     pointer_entered: Arc<AtomicU8>,
     last_seat: Arc<Mutex<Option<(Seat<State>, Serial)>>>,
+    last_title: Arc<Mutex<String>>,
 }
 
 impl fmt::Debug for CosmicWindowInternal {
@@ -109,11 +110,13 @@ impl CosmicWindow {
     ) -> CosmicWindow {
         let window = window.into();
         let width = window.geometry().size.w;
+        let last_title = window.title();
         CosmicWindow(IcedElement::new(
             CosmicWindowInternal {
                 window,
                 pointer_entered: Arc::new(AtomicU8::new(Focus::None as u8)),
                 last_seat: Arc::new(Mutex::new(None)),
+                last_title: Arc::new(Mutex::new(last_title)),
             },
             (width, SSD_HEIGHT),
             handle,
@@ -239,7 +242,7 @@ impl Program for CosmicWindowInternal {
 
     fn view(&self) -> Element<'_, Self::Message> {
         cosmic::widget::header_bar()
-            .title(self.window.title())
+            .title(self.last_title.lock().unwrap().clone())
             .on_drag(Message::DragStart)
             .on_maximize(Message::Maximize)
             .on_close(Message::Close)
@@ -344,7 +347,19 @@ impl SpaceElement for CosmicWindow {
     }
     fn refresh(&self) {
         SpaceElement::refresh(&self.0);
-        self.0.with_program(|p| SpaceElement::refresh(&p.window))
+        if self.0.with_program(|p| {
+            SpaceElement::refresh(&p.window);
+            let title = p.window.title();
+            let mut last_title = p.last_title.lock().unwrap();
+            if *last_title != title {
+                *last_title = title;
+                true
+            } else {
+                false
+            }
+        }) {
+            self.0.force_update();
+        }
     }
 }
 
