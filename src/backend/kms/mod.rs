@@ -157,10 +157,11 @@ pub fn init_backend(
     {
         path
     } else {
-        primary_gpu(session.seat())
+        let primary_node = primary_gpu(session.seat())
             .ok()
             .flatten()
-            .and_then(|x| DrmNode::from_path(x).ok())
+            .and_then(|x| DrmNode::from_path(x).ok());
+        primary_node
             .and_then(|x| x.node_with_type(NodeType::Render).and_then(Result::ok))
             .unwrap_or_else(|| {
                 for dev in all_gpus(session.seat()).expect("No GPU found") {
@@ -171,7 +172,12 @@ pub fn init_backend(
                         return node;
                     }
                 }
-                panic!("Failed to initialize any GPU");
+                // If we find no render nodes, use primary node
+                if let Some(primary_node) = primary_node {
+                    return primary_node;
+                } else {
+                    panic!("Failed to initialize any GPU");
+                }
             })
     };
     info!("Using {} as primary gpu for rendering.", primary);
