@@ -11,7 +11,9 @@ use crate::{
     utils::prelude::*,
 };
 use crate::{
-    shell::{layout::floating::SeatMoveGrabState, CosmicMappedRenderElement},
+    shell::{
+        layout::floating::SeatMoveGrabState, CosmicMappedRenderElement, WorkspaceRenderElement,
+    },
     state::{Common, Fps},
     utils::prelude::SeatExt,
     wayland::{
@@ -220,6 +222,94 @@ where
     elements
 }
 
+pub fn workspace_elements<R, E>(
+    _gpu: Option<&DrmNode>,
+    renderer: &mut R,
+    state: &mut Common,
+    output: &Output,
+    handle: &WorkspaceHandle,
+    cursor_mode: CursorMode,
+    _fps: &mut Option<&mut Fps>,
+    exclude_workspace_overview: bool,
+) -> Result<Vec<E>, OutputNoMode>
+where
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    <R as Renderer>::TextureId: Clone + 'static,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+    E: From<CursorRenderElement<R>>
+        + From<CosmicMappedRenderElement<R>>
+        + From<WorkspaceRenderElement<R>>,
+{
+    #[cfg(feature = "debug")]
+    puffin::profile_function!();
+
+    let mut elements: Vec<E> = cursor_elements(renderer, state, output, cursor_mode);
+
+    #[cfg(feature = "debug")]
+    {
+        let output_geo = output.geometry();
+        let scale = output.current_scale().fractional_scale();
+
+        if let Some(fps) = _fps.as_mut() {
+            let fps_overlay = fps_ui(
+                _gpu,
+                state,
+                renderer.glow_renderer_mut(),
+                *fps,
+                Rectangle::from_loc_and_size(
+                    (0, 0),
+                    (output_geo.size.w.min(400), output_geo.size.h.min(800)),
+                ),
+                scale,
+            )
+            .map_err(<R as Renderer>::Error::from)
+            .map_err(RenderError::Rendering)?;
+            elements.push(fps_overlay.into());
+        }
+
+        if state.shell.outputs.first() == Some(output) {
+            if let Some(profiler_overlay) = profiler_ui(
+                state,
+                renderer.glow_renderer_mut(),
+                Rectangle::from_loc_and_size((0, 0), output_geo.size),
+                scale,
+            )
+            .map_err(<R as Renderer>::Error::from)
+            .map_err(RenderError::Rendering)?
+            {
+                elements.push(profiler_overlay.into());
+            }
+        }
+    }
+
+    let workspace = state.shell.space_for_handle(&handle).ok_or(OutputNoMode)?;
+    let last_active_seat = state.last_active_seat().clone();
+    let move_active = last_active_seat
+        .user_data()
+        .get::<SeatMoveGrabState>()
+        .unwrap()
+        .borrow()
+        .is_some();
+    let active_output = &last_active_seat.active_output() == output;
+
+    elements.extend(
+        workspace
+            .render_output::<R>(
+                renderer,
+                output,
+                &state.shell.override_redirect_windows,
+                state.xwayland_state.values_mut(),
+                (!move_active && active_output).then_some(&last_active_seat),
+                exclude_workspace_overview,
+            )
+            .map_err(|_| OutputNoMode)?
+            .into_iter()
+            .map(Into::into),
+    );
+
+    Ok(elements)
+}
+
 pub fn render_output<'frame, R, Target, OffTarget, Source>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,
@@ -326,70 +416,16 @@ where
         cursor_mode = CursorMode::All;
     };
 
-    let mut elements: Vec<CosmicElement<R>> = cursor_elements(renderer, state, output, cursor_mode);
-
-    #[cfg(feature = "debug")]
-    {
-        let output_geo = output.geometry();
-        let scale = output.current_scale().fractional_scale();
-
-        if let Some(fps) = fps.as_mut() {
-            let fps_overlay = fps_ui(
-                gpu,
-                state,
-                renderer.glow_renderer_mut(),
-                fps,
-                Rectangle::from_loc_and_size(
-                    (0, 0),
-                    (output_geo.size.w.min(400), output_geo.size.h.min(800)),
-                ),
-                scale,
-            )
-            .map_err(<R as Renderer>::Error::from)
-            .map_err(RenderError::Rendering)?;
-            elements.push(fps_overlay.into());
-        }
-
-        if state.shell.outputs.first() == Some(output) {
-            if let Some(profiler_overlay) = profiler_ui(
-                state,
-                renderer.glow_renderer_mut(),
-                Rectangle::from_loc_and_size((0, 0), output_geo.size),
-                scale,
-            )
-            .map_err(<R as Renderer>::Error::from)
-            .map_err(RenderError::Rendering)?
-            {
-                elements.push(profiler_overlay.into());
-            }
-        }
-    }
-
-    let workspace = state.shell.space_for_handle(&handle).ok_or(OutputNoMode)?;
-    let last_active_seat = state.last_active_seat().clone();
-    let move_active = last_active_seat
-        .user_data()
-        .get::<SeatMoveGrabState>()
-        .unwrap()
-        .borrow()
-        .is_some();
-    let active_output = &last_active_seat.active_output() == output;
-
-    elements.extend(
-        workspace
-            .render_output::<R>(
-                renderer,
-                output,
-                &state.shell.override_redirect_windows,
-                state.xwayland_state.values_mut(),
-                (!move_active && active_output).then_some(&last_active_seat),
-                exclude_workspace_overview,
-            )
-            .map_err(|_| OutputNoMode)?
-            .into_iter()
-            .map(Into::into),
-    );
-
+    let elements: Vec<CosmicElement<R>> = workspace_elements(
+        gpu,
+        renderer,
+        state,
+        output,
+        handle,
+        cursor_mode,
+        &mut fps,
+        exclude_workspace_overview,
+    )?;
     if let Some(fps) = fps.as_mut() {
         fps.elements();
     }

@@ -1,37 +1,42 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::render,
+    backend::render::{element::CosmicElement, workspace_elements, CLEAR_COLOR},
     config::OutputConfig,
     shell::Shell,
     state::{BackendData, ClientState, Common, Data, Fps},
     utils::prelude::*,
     wayland::{
-        handlers::screencopy::UserdataExt,
+        handlers::screencopy::{render_session, UserdataExt},
         protocols::screencopy::{BufferParams, Session as ScreencopySession},
     },
 };
 
 use anyhow::{Context, Result};
+use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::FailureReason;
 use smithay::{
     backend::{
         allocator::{
-            dmabuf::{AnyError, Dmabuf, DmabufAllocator},
+            dmabuf::{AnyError, AsDmabuf, Dmabuf, DmabufAllocator},
             gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
             vulkan::{ImageUsageFlags, VulkanAllocator},
             Allocator, Format,
         },
         drm::{
-            DrmDevice, DrmDeviceFd, DrmEvent, DrmEventTime, DrmNode, GbmBufferedSurface, NodeType,
+            compositor::{DrmCompositor, PrimaryPlaneElement},
+            DrmDevice, DrmDeviceFd, DrmEvent, DrmEventTime, DrmNode, NodeType,
         },
         egl::{EGLContext, EGLDevice, EGLDisplay},
         input::InputEvent,
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
-            damage::DamageTrackedRenderer,
+            buffer_dimensions,
+            damage::{DamageTrackedRendererError as RenderError, OutputNoMode},
             gles2::Gles2Renderbuffer,
             glow::GlowRenderer,
-            multigpu::{gbm::GbmGlesBackend, GpuManager},
+            multigpu::{gbm::GbmGlesBackend, Error as MultiError, GpuManager},
+            utils::draw_render_elements,
+            Bind, Blit, Offscreen, Renderer, TextureFilter,
         },
         session::{libseat::LibSeatSession, Event as SessionEvent, Session},
         udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
@@ -45,7 +50,10 @@ use smithay::{
             timer::{TimeoutAction, Timer},
             Dispatcher, EventLoop, InsertError, LoopHandle, RegistrationToken,
         },
-        drm::control::{connector, crtc, Device as ControlDevice, ModeTypeFlags},
+        drm::{
+            control::{connector, crtc, Device as ControlDevice, ModeTypeFlags},
+            Device as _,
+        },
         input::Libinput,
         nix::{fcntl::OFlag, sys::stat::dev_t},
         wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
@@ -53,7 +61,9 @@ use smithay::{
     },
     utils::{DeviceFd, Size, Transform},
     wayland::{
-        dmabuf::DmabufGlobal, relative_pointer::RelativePointerManagerState, seat::WaylandFocus,
+        dmabuf::{get_dmabuf, DmabufGlobal},
+        relative_pointer::RelativePointerManagerState,
+        seat::WaylandFocus,
     },
     xwayland::XWaylandClientData,
 };
@@ -97,9 +107,7 @@ pub struct Device {
 }
 
 pub struct Surface {
-    surface:
-        Option<GbmBufferedSurface<GbmAllocator<DrmDeviceFd>, Option<OutputPresentationFeedback>>>,
-    damage_tracker: DamageTrackedRenderer,
+    surface: Option<GbmDrmCompositor>,
     connector: connector::Handle,
     output: Output,
     refresh_rate: u32,
@@ -109,6 +117,13 @@ pub struct Surface {
     render_timer_token: Option<RegistrationToken>,
     fps: Fps,
 }
+
+pub type GbmDrmCompositor = DrmCompositor<
+    GbmAllocator<DrmDeviceFd>,
+    GbmDevice<DrmDeviceFd>,
+    Option<OutputPresentationFeedback>,
+    DrmDeviceFd,
+>;
 
 pub fn init_backend(
     dh: &DisplayHandle,
@@ -854,7 +869,6 @@ impl Device {
 
         let data = Surface {
             output: output.clone(),
-            damage_tracker: DamageTrackedRenderer::from_output(&output),
             surface: None,
             connector: conn,
             vrr,
@@ -924,52 +938,153 @@ impl Surface {
         state: &mut Common,
         screencopy: Option<&[(ScreencopySession, BufferParams)]>,
     ) -> Result<()> {
+        #[cfg(feature = "debug")]
+        puffin::profile_function!();
+
         if self.surface.is_none() {
             return Ok(());
         }
 
-        let surface = self.surface.as_mut().unwrap();
+        self.fps.start();
+        #[cfg(feature = "debug")]
+        if let Some(rd) = self.fps.rd.as_mut() {
+            rd.start_frame_capture(
+                renderer.glow_renderer().egl_context().get_context_handle(),
+                std::ptr::null(),
+            );
+        }
+
+        let compositor = self.surface.as_mut().unwrap();
         let (render_node, mut renderer) = match render_node {
             Some((render_node, allocator)) => (
                 render_node,
-                api.renderer(&render_node, &target_node, allocator, surface.format())
+                api.renderer(&render_node, &target_node, allocator, compositor.format())
                     .unwrap(),
             ),
             None => (target_node, api.single_renderer(&target_node).unwrap()),
         };
 
-        let (buffer, age) = surface
-            .next_buffer()
-            .with_context(|| "Failed to allocate buffer")?;
-
-        match render::render_output::<GlMultiRenderer, _, Gles2Renderbuffer, _>(
+        let handle = state.shell.workspaces.active(&self.output).handle;
+        let elements: Vec<CosmicElement<GlMultiRenderer<'_, '_>>> = workspace_elements(
             Some(&render_node),
             &mut renderer,
-            buffer.clone(),
-            &mut self.damage_tracker,
-            age as usize,
             state,
             &self.output,
+            &handle,
             CursorMode::All,
-            screencopy.map(|sessions| (buffer, sessions)),
-            Some(&mut self.fps),
-        ) {
-            Ok((damage, states)) => {
-                let feedback = if damage.is_some() {
-                    Some(state.take_presentation_feedback(&self.output, &states))
+            &mut Some(&mut self.fps),
+            false,
+        )?;
+        self.fps.elements();
+
+        let res = compositor.render_frame::<_, _, Gles2Renderbuffer>(
+            &mut renderer,
+            &elements,
+            CLEAR_COLOR,
+        );
+        self.fps.render();
+
+        match res {
+            Ok(frame_result) => {
+                if let Some(screencopy) = screencopy {
+                    let primary_element = frame_result.primary_element;
+                    let mut plane_elements = frame_result
+                        .cursor_element
+                        .into_iter()
+                        .chain(frame_result.overlay_elements.into_iter())
+                        .collect::<Vec<_>>();
+                    for (session, params) in screencopy {
+                        match render_session(
+                            Some(*render_node),
+                            &mut renderer,
+                            &session,
+                            params,
+                            self.output.current_transform(),
+                            |_node, buffer, renderer, dtr, age| {
+                                let res = dtr.damage_output(age, &elements)?;
+
+                                if let (Some(ref damage), _) = &res {
+                                    if let Ok(dmabuf) = get_dmabuf(buffer) {
+                                        renderer.bind(dmabuf).map_err(RenderError::Rendering)?;
+                                    } else {
+                                        let size = buffer_dimensions(buffer).unwrap();
+                                        let render_buffer =
+                                            Offscreen::<Gles2Renderbuffer>::create_buffer(
+                                                renderer, size,
+                                            )
+                                            .map_err(RenderError::Rendering)?;
+                                        renderer
+                                            .bind(render_buffer)
+                                            .map_err(RenderError::Rendering)?;
+                                    }
+                                    match primary_element {
+                                        PrimaryPlaneElement::Swapchain { slot, .. } => {
+                                            let source = slot.export().map_err(|_| {
+                                                // TODO AnyError::from
+                                                RenderError::Rendering(MultiError::ImportFailed)
+                                            })?;
+                                            for rect in damage {
+                                                renderer
+                                                    .blit_from(
+                                                        source.clone(),
+                                                        *rect,
+                                                        *rect,
+                                                        TextureFilter::Nearest,
+                                                    )
+                                                    .map_err(RenderError::Rendering)?;
+                                            }
+                                        }
+                                        PrimaryPlaneElement::Element(e) => plane_elements.push(e),
+                                    };
+
+                                    let (output_size, output_scale, output_transform) = (
+                                        self.output.current_mode().ok_or(OutputNoMode)?.size,
+                                        self.output.current_scale().fractional_scale(),
+                                        self.output.current_transform(),
+                                    );
+                                    {
+                                        let mut frame = renderer
+                                            .render(output_size, output_transform)
+                                            .map_err(RenderError::Rendering)?;
+                                        draw_render_elements(
+                                            &mut frame,
+                                            output_scale,
+                                            &plane_elements,
+                                            damage,
+                                        )
+                                        .map_err(RenderError::Rendering)?;
+                                    }
+                                }
+
+                                Ok(res)
+                            },
+                        ) {
+                            Ok(true) => {} // success
+                            Ok(false) => state.still_pending(session.clone(), params.clone()),
+                            Err(err) => {
+                                warn!(?err, "Error rendering to screencopy session.");
+                                session.failed(FailureReason::Unspec);
+                            }
+                        }
+                    }
+                    self.fps.screencopy();
+                }
+
+                let feedback = if frame_result.damage.is_some() {
+                    Some(state.take_presentation_feedback(&self.output, &frame_result.states))
                 } else {
                     None
                 };
-                state.send_frames(&self.output, &states);
-                surface
-                    .queue_buffer(damage, feedback)
-                    .with_context(|| "Failed to submit buffer for display")?;
+                state.send_frames(&self.output, &frame_result.states);
+                compositor
+                    .queue_frame(feedback)
+                    .with_context(|| "Failed to submit result for display")?
             }
             Err(err) => {
-                surface.reset_buffers();
+                compositor.reset_buffers();
                 anyhow::bail!("Rendering failed: {}", err);
             }
-        };
+        }
 
         Ok(())
     }
@@ -1034,7 +1149,7 @@ impl KmsState {
                     .ok_or(anyhow::anyhow!("Unknown mode"))?;
 
                 if !test_only {
-                    let res = if let Some(gbm_surface) = surface.surface.as_mut() {
+                    let res = if let Some(compositor) = surface.surface.as_mut() {
                         if output_config.vrr != surface.vrr {
                             surface.vrr = drm_helpers::set_vrr(
                                 drm,
@@ -1043,7 +1158,7 @@ impl KmsState {
                                 output_config.vrr,
                             )?;
                         }
-                        gbm_surface.use_mode(*mode).unwrap();
+                        compositor.use_mode(*mode).unwrap();
                         false
                     } else {
                         surface.vrr = drm_helpers::set_vrr(drm, *crtc, conn, output_config.vrr)
@@ -1051,17 +1166,38 @@ impl KmsState {
                         surface.refresh_rate = drm_helpers::calculate_refresh_rate(*mode);
 
                         let drm_surface = drm.create_surface(*crtc, *mode, &[conn])?;
-                        let target = GbmBufferedSurface::new(
+                        let driver = drm
+                            .get_driver()
+                            .with_context(|| "Failed to query drm driver")?;
+                        let mut planes = drm_surface
+                            .planes()
+                            .with_context(|| "Failed to query drm planes")?;
+                        // QUIRK: Using an overlay plane on a nvidia card breaks the display controller (wtf...)
+                        if driver
+                            .name()
+                            .to_string_lossy()
+                            .to_lowercase()
+                            .contains("nvidia")
+                        {
+                            planes.overlay = vec![];
+                        }
+
+                        let target = DrmCompositor::new(
+                            &surface.output,
                             drm_surface,
+                            Some(planes),
                             GbmAllocator::new(
                                 device.gbm.clone(),
                                 GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
                             ),
+                            device.gbm.clone(),
                             device.formats.clone(),
+                            drm.cursor_size(),
+                            Some(device.gbm.clone()),
                         )
                         .with_context(|| {
                             format!(
-                                "Failed to initialize Gbm surface for {}",
+                                "Failed to initialize drm surface for {}",
                                 drm_helpers::interface_name(drm, conn)
                                     .unwrap_or_else(|_| String::from("Unknown"))
                             )
