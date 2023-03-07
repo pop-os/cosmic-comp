@@ -58,8 +58,8 @@ impl DataDeviceHandler for State {
     }
 
     fn new_selection(&mut self, source: Option<WlDataSource>) {
-        for xstate in self.common.xwayland_state.values_mut() {
-            if let Some(xwm) = xstate.xwm.as_mut() {
+        if let Some(state) = self.common.xwayland_state.as_mut() {
+            if let Some(xwm) = state.xwm.as_mut() {
                 if let Some(source) = &source {
                     if let Ok(Err(err)) = with_source_metadata(source, |metadata| {
                         xwm.new_selection(
@@ -80,14 +80,13 @@ impl DataDeviceHandler for State {
         &mut self,
         mime_type: String,
         fd: OwnedFd,
-        user_data: &Self::SelectionUserData,
+        _user_data: &Self::SelectionUserData,
     ) {
         if let Some(xwm) = self
             .common
             .xwayland_state
-            .values_mut()
-            .flat_map(|xstate| xstate.xwm.as_mut())
-            .find(|xwm| &xwm.id() == user_data)
+            .as_mut()
+            .and_then(|xstate| xstate.xwm.as_mut())
         {
             if let Err(err) = xwm.send_selection(
                 SelectionType::Clipboard,

@@ -11,6 +11,7 @@ use crate::{
 use anyhow::{anyhow, Context, Result};
 use smithay::{
     backend::{
+        egl::EGLDevice,
         renderer::{
             damage::DamageTrackedRenderer, gles2::Gles2Renderbuffer, glow::GlowRenderer, ImportDma,
             ImportEgl,
@@ -25,6 +26,7 @@ use smithay::{
         wayland_server::DisplayHandle,
     },
     utils::Transform,
+    wayland::dmabuf::DmabufFeedbackBuilder,
 };
 use std::cell::RefCell;
 use tracing::{error, info, warn};
@@ -257,7 +259,6 @@ pub fn init_backend(
         seats.iter().cloned(),
         &state.common.event_loop_handle,
     );
-
     state.launch_xwayland(None);
 
     Ok(())
@@ -269,21 +270,56 @@ fn init_egl_client_side(
     renderer: &mut WinitGraphicsBackend<GlowRenderer>,
 ) -> Result<()> {
     let bind_result = renderer.renderer().bind_wl_display(dh);
-    match bind_result {
-        Ok(_) => {
+    let render_node = EGLDevice::device_for_display(renderer.renderer().egl_context().display())
+        .and_then(|device| device.try_get_render_node());
+
+    let dmabuf_formats = renderer
+        .renderer()
+        .dmabuf_formats()
+        .cloned()
+        .collect::<Vec<_>>();
+    let dmabuf_default_feedback = match render_node {
+        Ok(Some(node)) => {
+            let dmabuf_default_feedback =
+                DmabufFeedbackBuilder::new(node.dev_id(), dmabuf_formats.clone())
+                    .build()
+                    .unwrap();
+            Some(dmabuf_default_feedback)
+        }
+        Ok(None) => {
+            warn!("Failed to query render node, dmabuf protocol will only advertise v3");
+            None
+        }
+        Err(err) => {
+            warn!(
+                ?err,
+                "Failed to egl device for display, dmabuf protocol will only advertise v3"
+            );
+            None
+        }
+    };
+
+    match dmabuf_default_feedback {
+        Some(feedback) => {
+            state
+                .common
+                .dmabuf_state
+                .create_global_with_default_feedback::<State>(dh, &feedback);
+
             info!("EGL hardware-acceleration enabled.");
-            let dmabuf_formats = renderer
-                .renderer()
-                .dmabuf_formats()
-                .cloned()
-                .collect::<Vec<_>>();
+        }
+        None if bind_result.is_ok() => {
             state
                 .common
                 .dmabuf_state
                 .create_global::<State>(dh, dmabuf_formats);
+            info!("EGL hardware-acceleration enabled.");
         }
-        Err(err) => warn!(?err, "Unable to initialize bind display to EGL."),
-    };
+        None => {
+            let err = bind_result.unwrap_err();
+            warn!(?err, "Unable to initialize bind display to EGL.")
+        }
+    }
 
     Ok(())
 }

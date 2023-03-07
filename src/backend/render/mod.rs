@@ -298,7 +298,7 @@ where
                 renderer,
                 output,
                 &state.shell.override_redirect_windows,
-                state.xwayland_state.values_mut(),
+                state.xwayland_state.as_mut(),
                 (!move_active && active_output).then_some(&last_active_seat),
                 exclude_workspace_overview,
             )

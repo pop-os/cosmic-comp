@@ -78,13 +78,7 @@ pub fn setup_socket(handle: LoopHandle<Data>, state: &State) -> Result<()> {
                     .into_string()
                     .map_err(|_| anyhow!("wayland socket is no valid utf-8 string?"))?,
             );
-            if let Some(display) = state
-                .common
-                .xwayland_state
-                .values()
-                .next()
-                .map(|s| s.display)
-            {
+            if let Some(display) = state.common.xwayland_state.as_ref().map(|s| s.display) {
                 env.insert(String::from("DISPLAY"), format!(":{}", display));
             }
             let message = serde_json::to_string(&Message::SetEnv { variables: env })

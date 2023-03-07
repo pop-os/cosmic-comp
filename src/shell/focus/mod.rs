@@ -131,7 +131,7 @@ impl Shell {
     fn update_active<'a, 'b>(
         &mut self,
         seats: impl Iterator<Item = &'a Seat<State>>,
-        xwms: impl Iterator<Item = &'b mut XWaylandState>,
+        mut xwm: Option<&'b mut XWaylandState>,
     ) {
         // update activate status
         let focused_windows = seats
@@ -144,16 +144,13 @@ impl Shell {
             })
             .collect::<Vec<_>>();
 
-        let mut xwms = xwms.collect::<Vec<_>>();
         for output in self.outputs.iter() {
             let workspace = self.workspaces.active_mut(output);
             for focused in focused_windows.iter() {
                 if workspace.floating_layer.mapped().any(|m| m == focused) {
                     if let CosmicSurface::X11(window) = focused.active_window() {
-                        for xwm in xwms.iter_mut().flat_map(|state| state.xwm.as_mut()) {
-                            if Some(xwm.id()) == window.xwm_id() {
-                                let _ = xwm.raise_window(&window);
-                            }
+                        if let Some(xwm) = xwm.as_mut().and_then(|state| state.xwm.as_mut()) {
+                            let _ = xwm.raise_window(&window);
                         }
                     }
                     workspace.floating_layer.space.raise_element(focused, true);
@@ -179,7 +176,7 @@ impl Common {
         state
             .common
             .shell
-            .update_active(seats.iter(), state.common.xwayland_state.values_mut());
+            .update_active(seats.iter(), state.common.xwayland_state.as_mut());
     }
 
     pub fn refresh_focus(state: &mut State) {
@@ -274,6 +271,6 @@ impl Common {
         state
             .common
             .shell
-            .update_active(seats.iter(), state.common.xwayland_state.values_mut())
+            .update_active(seats.iter(), state.common.xwayland_state.as_mut())
     }
 }

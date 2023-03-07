@@ -35,6 +35,7 @@ use smithay::{
         wayland_server::DisplayHandle,
     },
     utils::{DeviceFd, Transform},
+    wayland::dmabuf::DmabufFeedbackBuilder,
 };
 use std::{cell::RefCell, os::unix::io::OwnedFd};
 use tracing::{debug, error, info, warn};
@@ -351,7 +352,7 @@ pub fn init_backend(
         unsafe { GlowRenderer::new(context) }.with_context(|| "Failed to initialize renderer")?;
 
     init_shaders(&mut renderer).expect("Failed to initialize renderer");
-    init_egl_client_side(dh, state, &mut renderer)?;
+    init_egl_client_side(dh, state, &drm_node, &mut renderer)?;
 
     state.backend = BackendData::X11(X11State {
         handle,
@@ -381,7 +382,6 @@ pub fn init_backend(
         seats.iter().cloned(),
         &state.common.event_loop_handle,
     );
-
     state.launch_xwayland(None);
 
     event_loop
@@ -475,22 +475,32 @@ pub fn init_backend(
     Ok(())
 }
 
-fn init_egl_client_side<R>(dh: &DisplayHandle, state: &mut State, renderer: &mut R) -> Result<()>
+fn init_egl_client_side<R>(
+    dh: &DisplayHandle,
+    state: &mut State,
+    render_node: &DrmNode,
+    renderer: &mut R,
+) -> Result<()>
 where
     R: ImportEgl + ImportDma,
 {
-    let bind_result = renderer.bind_wl_display(dh);
-    match bind_result {
-        Ok(_) => {
-            info!("EGL hardware-acceleration enabled.");
-            let dmabuf_formats = renderer.dmabuf_formats().cloned().collect::<Vec<_>>();
-            state
-                .common
-                .dmabuf_state
-                .create_global::<State>(dh, dmabuf_formats);
-        }
-        Err(err) => warn!(?err, "Unable to initialize bind display to EGL."),
-    };
+    if let Err(err) = renderer.bind_wl_display(dh) {
+        warn!(
+            ?err,
+            "Unable to initialize bind display to EGL. Some older clients may not work correctly."
+        )
+    }
+    let dmabuf_formats = renderer.dmabuf_formats().cloned().collect::<Vec<_>>();
+
+    let default_feedback = DmabufFeedbackBuilder::new(render_node.dev_id(), dmabuf_formats.clone())
+        .build()
+        .unwrap();
+    state
+        .common
+        .dmabuf_state
+        .create_global_with_default_feedback::<State>(dh, &default_feedback);
+
+    info!("EGL hardware-acceleration enabled.");
 
     Ok(())
 }

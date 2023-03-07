@@ -57,7 +57,7 @@ use smithay::{
 };
 use tracing::error;
 
-use std::{cell::RefCell, collections::HashMap, ffi::OsString, time::Duration};
+use std::{cell::RefCell, ffi::OsString, time::Duration};
 use std::{collections::VecDeque, time::Instant};
 
 pub struct ClientState {
@@ -118,7 +118,7 @@ pub struct Common {
     pub xdg_decoration_state: XdgDecorationState,
 
     // xwayland state
-    pub xwayland_state: HashMap<Option<DrmNode>, XWaylandState>,
+    pub xwayland_state: Option<XWaylandState>,
 }
 
 pub enum BackendData {
@@ -290,7 +290,7 @@ impl State {
                 kde_decoration_state,
                 xdg_decoration_state,
 
-                xwayland_state: HashMap::new(),
+                xwayland_state: None,
             },
             backend: BackendData::Unset,
         }

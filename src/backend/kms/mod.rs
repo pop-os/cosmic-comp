@@ -331,7 +331,6 @@ pub fn init_backend(
     // Create relative pointer global
     RelativePointerManagerState::new::<State>(&dh);
 
-    // TODO: Do multiple Xwaylands for better multigpu
     state.launch_xwayland(Some(primary));
 
     for (dev, path) in udev_dispatcher.as_source_ref().device_list() {

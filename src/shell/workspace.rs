@@ -437,7 +437,7 @@ impl Workspace {
         renderer: &mut R,
         output: &Output,
         override_redirect_windows: &[X11Surface],
-        xwm_state: impl Iterator<Item = &'a mut XWaylandState>,
+        xwm_state: Option<&'a mut XWaylandState>,
         draw_focus_indicator: Option<&Seat<State>>,
         exclude_workspace_overview: bool,
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
@@ -502,7 +502,7 @@ impl Workspace {
                 fullscreen, renderer, (0, 0).into(), output_scale.into()
             ));
 
-            for xwm in xwm_state.flat_map(|state| state.xwm.as_mut()) {
+            if let Some(xwm) = xwm_state.and_then(|state| state.xwm.as_mut()) {
                 if let Err(err) =
                     xwm.update_stacking_order_upwards(render_elements.iter().rev().map(|e| e.id()))
                 {
@@ -584,7 +584,7 @@ impl Workspace {
                     .map(WorkspaceRenderElement::from),
             );
 
-            for xwm in xwm_state.flat_map(|state| state.xwm.as_mut()) {
+            if let Some(xwm) = xwm_state.and_then(|state| state.xwm.as_mut()) {
                 if let Err(err) =
                     xwm.update_stacking_order_upwards(render_elements.iter().rev().map(|e| e.id()))
                 {

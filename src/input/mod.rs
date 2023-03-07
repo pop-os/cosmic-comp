@@ -1017,8 +1017,7 @@ impl State {
                         &self
                             .common
                             .xwayland_state
-                            .values()
-                            .next()
+                            .as_ref()
                             .map(|s| format!(":{}", s.display))
                             .unwrap_or(String::new()),
                     )

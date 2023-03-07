@@ -37,8 +37,8 @@ pub struct XWaylandState {
 }
 
 impl State {
-    pub fn launch_xwayland(&mut self, drm_node: Option<DrmNode>) {
-        if self.common.xwayland_state.contains_key(&drm_node) {
+    pub fn launch_xwayland(&mut self, render_node: Option<DrmNode>) {
+        if self.common.xwayland_state.is_some() {
             return;
         }
 
@@ -81,14 +81,11 @@ impl State {
                             );
                         }
 
-                        let mut xwayland_state =
-                            data.state.common.xwayland_state.get_mut(&drm_node).unwrap();
+                        let mut xwayland_state = data.state.common.xwayland_state.as_mut().unwrap();
                         xwayland_state.xwm = Some(wm);
                     }
                     XWaylandEvent::Exited => {
-                        if let Some(mut xwayland_state) =
-                            data.state.common.xwayland_state.remove(&drm_node)
-                        {
+                        if let Some(mut xwayland_state) = data.state.common.xwayland_state.take() {
                             xwayland_state.xwm = None;
                         }
                     }
@@ -105,21 +102,18 @@ impl State {
             None,
             std::iter::empty::<(OsString, OsString)>(),
             //vec![("WAYLAND_DEBUG", "client")].into_iter(),
-            |map| {
-                if let Some(node) = drm_node {
-                    map.insert_if_missing(|| node);
+            |user_data| {
+                if let Some(node) = render_node {
+                    user_data.insert_if_missing(|| node);
                 }
             },
         ) {
             Ok(display) => {
-                self.common.xwayland_state.insert(
-                    drm_node,
-                    XWaylandState {
-                        xwayland,
-                        xwm: None,
-                        display,
-                    },
-                );
+                self.common.xwayland_state = Some(XWaylandState {
+                    xwayland,
+                    xwm: None,
+                    display,
+                });
             }
             Err(err) => {
                 error!(?err, "Failed to start Xwayland.");
@@ -130,13 +124,12 @@ impl State {
 }
 
 impl XwmHandler for Data {
-    fn xwm_state(&mut self, xwm: XwmId) -> &mut X11Wm {
+    fn xwm_state(&mut self, _xwm: XwmId) -> &mut X11Wm {
         self.state
             .common
             .xwayland_state
-            .values_mut()
-            .flat_map(|state| &mut state.xwm)
-            .find(|wm| wm.id() == xwm)
+            .as_mut()
+            .and_then(|state| state.xwm.as_mut())
             .unwrap()
     }
 
