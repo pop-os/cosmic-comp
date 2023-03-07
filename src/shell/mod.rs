@@ -40,7 +40,7 @@ use crate::{
     },
 };
 
-mod element;
+pub mod element;
 pub mod focus;
 pub mod grabs;
 pub mod layout;

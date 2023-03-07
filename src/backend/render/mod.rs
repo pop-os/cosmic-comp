@@ -12,7 +12,8 @@ use crate::{
 };
 use crate::{
     shell::{
-        layout::floating::SeatMoveGrabState, CosmicMappedRenderElement, WorkspaceRenderElement,
+        element::window::CosmicWindowRenderElement, layout::floating::SeatMoveGrabState,
+        CosmicMappedRenderElement,
     },
     state::{Common, Fps},
     utils::prelude::SeatExt,
@@ -169,6 +170,7 @@ where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
+    CosmicWindowRenderElement<R>: RenderElement<R>,
     E: From<CursorRenderElement<R>> + From<CosmicMappedRenderElement<R>>,
 {
     #[cfg(feature = "debug")]
@@ -222,7 +224,7 @@ where
     elements
 }
 
-pub fn workspace_elements<R, E>(
+pub fn workspace_elements<R>(
     _gpu: Option<&DrmNode>,
     renderer: &mut R,
     state: &mut Common,
@@ -231,19 +233,18 @@ pub fn workspace_elements<R, E>(
     cursor_mode: CursorMode,
     _fps: &mut Option<&mut Fps>,
     exclude_workspace_overview: bool,
-) -> Result<Vec<E>, OutputNoMode>
+) -> Result<Vec<CosmicElement<R>>, RenderError<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: Clone + 'static,
+    <R as Renderer>::Error: From<Gles2Error>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
-    E: From<CursorRenderElement<R>>
-        + From<CosmicMappedRenderElement<R>>
-        + From<WorkspaceRenderElement<R>>,
+    CosmicWindowRenderElement<R>: RenderElement<R>,
 {
     #[cfg(feature = "debug")]
     puffin::profile_function!();
 
-    let mut elements: Vec<E> = cursor_elements(renderer, state, output, cursor_mode);
+    let mut elements = cursor_elements(renderer, state, output, cursor_mode);
 
     #[cfg(feature = "debug")]
     {
@@ -336,6 +337,7 @@ where
     <R as Renderer>::Error: From<Gles2Error>,
     CosmicElement<R>: RenderElement<R>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
+    CosmicWindowRenderElement<R>: RenderElement<R>,
     Source: Clone,
 {
     let handle = state.shell.workspaces.active(output).handle;
@@ -385,6 +387,7 @@ where
     <R as Renderer>::Error: From<Gles2Error>,
     CosmicElement<R>: RenderElement<R>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
+    CosmicWindowRenderElement<R>: RenderElement<R>,
     Source: Clone,
 {
     #[cfg(feature = "debug")]

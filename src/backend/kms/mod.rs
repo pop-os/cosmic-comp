@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+#[cfg(feature = "debug")]
+use crate::backend::render::element::AsGlowRenderer;
 use crate::{
-    backend::render::{element::CosmicElement, workspace_elements, CLEAR_COLOR},
+    backend::render::{workspace_elements, CLEAR_COLOR},
     config::OutputConfig,
     shell::Shell,
     state::{BackendData, ClientState, Common, Data, Fps},
@@ -944,15 +946,6 @@ impl Surface {
             return Ok(());
         }
 
-        self.fps.start();
-        #[cfg(feature = "debug")]
-        if let Some(rd) = self.fps.rd.as_mut() {
-            rd.start_frame_capture(
-                renderer.glow_renderer().egl_context().get_context_handle(),
-                std::ptr::null(),
-            );
-        }
-
         let compositor = self.surface.as_mut().unwrap();
         let (render_node, mut renderer) = match render_node {
             Some((render_node, allocator)) => (
@@ -963,8 +956,17 @@ impl Surface {
             None => (target_node, api.single_renderer(&target_node).unwrap()),
         };
 
+        self.fps.start();
+        #[cfg(feature = "debug")]
+        if let Some(rd) = self.fps.rd.as_mut() {
+            rd.start_frame_capture(
+                renderer.glow_renderer().egl_context().get_context_handle(),
+                std::ptr::null(),
+            );
+        }
+
         let handle = state.shell.workspaces.active(&self.output).handle;
-        let elements: Vec<CosmicElement<GlMultiRenderer<'_, '_>>> = workspace_elements(
+        let elements = workspace_elements(
             Some(&render_node),
             &mut renderer,
             state,
@@ -973,7 +975,10 @@ impl Surface {
             CursorMode::All,
             &mut Some(&mut self.fps),
             false,
-        )?;
+        )
+        .map_err(|err| {
+            anyhow::format_err!("Failed to accumulate elements for rendering: {:?}", err)
+        })?;
         self.fps.elements();
 
         let res = compositor.render_frame::<_, _, Gles2Renderbuffer>(

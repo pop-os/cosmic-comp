@@ -230,10 +230,10 @@ impl<P: Program + Send + 'static> IcedElement<P> {
 
     pub fn force_update(&self) {
         let mut internal = self.0.lock().unwrap();
-        internal.update(true);
         for (_buffer, ref mut needs_redraw) in internal.buffers.values_mut() {
             *needs_redraw = true;
         }
+        internal.update(true);
     }
 }
 
