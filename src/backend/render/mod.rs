@@ -66,8 +66,6 @@ pub type GlMultiFrame<'a, 'b, 'frame> =
 
 pub static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
 pub static FOCUS_INDICATOR_COLOR: [f32; 4] = [0.580, 0.921, 0.921, 1.0];
-pub static FOCUS_INDICATOR_THICKNESS: f32 = 4.0;
-pub static FOCUS_INDICATOR_RADIUS: f32 = 8.0;
 pub static FOCUS_INDICATOR_SHADER: &str = include_str!("./shaders/focus_indicator.frag");
 
 pub struct IndicatorShader(pub Gles2PixelProgram);
@@ -87,8 +85,9 @@ impl IndicatorShader {
     pub fn element<R: AsGlowRenderer>(
         renderer: &R,
         geo: Rectangle<i32, Logical>,
+        thickness: u8,
     ) -> PixelShaderElement {
-        let thickness = FOCUS_INDICATOR_THICKNESS;
+        let thickness: f32 = thickness as f32;
         let thickness_loc = (thickness as i32, thickness as i32);
         let thickness_size = ((thickness * 2.0) as i32, (thickness * 2.0) as i32);
         let geo = Rectangle::from_loc_and_size(
@@ -120,7 +119,7 @@ impl IndicatorShader {
                     vec![
                         Uniform::new("color", [color[0], color[1], color[2]]),
                         Uniform::new("thickness", thickness),
-                        Uniform::new("radius", FOCUS_INDICATOR_RADIUS),
+                        Uniform::new("radius", thickness * 2.0),
                     ],
                 );
                 if !user_data.insert_if_missing(|| IndicatorElement(RefCell::new(elem.clone()))) {
@@ -301,6 +300,7 @@ where
                 &state.shell.override_redirect_windows,
                 state.xwayland_state.as_mut(),
                 (!move_active && active_output).then_some(&last_active_seat),
+                state.config.static_conf.active_hint,
                 exclude_workspace_overview,
             )
             .map_err(|_| OutputNoMode)?

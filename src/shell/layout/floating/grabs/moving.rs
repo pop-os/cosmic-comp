@@ -34,6 +34,7 @@ pub type SeatMoveGrabState = RefCell<Option<MoveGrabState>>;
 pub struct MoveGrabState {
     window: CosmicMapped,
     window_offset: Point<i32, Logical>,
+    indicator_thickness: u8,
 }
 
 impl MoveGrabState {
@@ -59,11 +60,17 @@ impl MoveGrabState {
         let scale = output.current_scale().fractional_scale().into();
         let render_location = cursor_at.to_i32_round() - output.geometry().loc + self.window_offset;
 
-        let mut elements: Vec<I> = vec![CosmicMappedRenderElement::from(IndicatorShader::element(
-            renderer,
-            Rectangle::from_loc_and_size(render_location, self.window.geometry().size),
-        ))
-        .into()];
+        let mut elements: Vec<I> = Vec::new();
+        if self.indicator_thickness > 0 {
+            elements.push(
+                CosmicMappedRenderElement::from(IndicatorShader::element(
+                    renderer,
+                    Rectangle::from_loc_and_size(render_location, self.window.geometry().size),
+                    self.indicator_thickness,
+                ))
+                .into(),
+            );
+        }
         elements.extend(AsRenderElements::<R>::render_elements::<I>(
             &self.window,
             renderer,
@@ -172,6 +179,7 @@ impl MoveSurfaceGrab {
         seat: &Seat<State>,
         initial_cursor_location: Point<f64, Logical>,
         initial_window_location: Point<i32, Logical>,
+        indicator_thickness: u8,
     ) -> MoveSurfaceGrab {
         let output = seat.active_output();
         let mut outputs = HashSet::new();
@@ -182,6 +190,7 @@ impl MoveSurfaceGrab {
             window: window.clone(),
             window_offset: dbg!(initial_window_location)
                 - dbg!(initial_cursor_location.to_i32_round()),
+            indicator_thickness,
         };
 
         *seat

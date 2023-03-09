@@ -349,6 +349,7 @@ impl FloatingLayout {
         renderer: &mut R,
         output: &Output,
         focused: Option<&CosmicMapped>,
+        indicator_thickness: u8,
     ) -> Vec<CosmicMappedRenderElement<R>>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
@@ -372,14 +373,17 @@ impl FloatingLayout {
                     output_scale.into(),
                 );
                 if focused == Some(elem) {
-                    let element = IndicatorShader::element(
-                        renderer,
-                        Rectangle::from_loc_and_size(
-                            self.space.element_location(elem).unwrap(),
-                            elem.geometry().size,
-                        ),
-                    );
-                    elements.insert(0, element.into());
+                    if indicator_thickness > 0 {
+                        let element = IndicatorShader::element(
+                            renderer,
+                            Rectangle::from_loc_and_size(
+                                self.space.element_location(elem).unwrap(),
+                                elem.geometry().size,
+                            ),
+                            indicator_thickness,
+                        );
+                        elements.insert(0, element.into());
+                    }
                 }
                 elements
             })

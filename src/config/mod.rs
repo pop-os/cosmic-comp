@@ -37,6 +37,8 @@ pub struct StaticConfig {
     pub workspace_mode: WorkspaceMode,
     pub workspace_amount: WorkspaceAmount,
     pub tiling_enabled: bool,
+    #[serde(default = "default_active_hint")]
+    pub active_hint: u8,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -75,6 +77,10 @@ impl From<Output> for OutputInfo {
 
 fn default_enabled() -> bool {
     true
+}
+
+fn default_active_hint() -> u8 {
+    4
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
@@ -221,6 +227,7 @@ impl Config {
             workspace_mode: WorkspaceMode::Global,
             workspace_amount: WorkspaceAmount::Dynamic,
             tiling_enabled: false,
+            active_hint: default_active_hint(),
         }
     }
 

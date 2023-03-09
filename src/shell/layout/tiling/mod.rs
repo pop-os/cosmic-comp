@@ -1306,6 +1306,7 @@ impl TilingLayout {
         renderer: &mut R,
         output: &Output,
         focused: Option<&CosmicMapped>,
+        indicator_thickness: u8,
     ) -> Result<Vec<CosmicMappedRenderElement<R>>, OutputNotMapped>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
@@ -1383,11 +1384,14 @@ impl TilingLayout {
                         Scale::from(output_scale),
                     );
                 if focused == Some(mapped) {
-                    let element = IndicatorShader::element(
-                        renderer,
-                        Rectangle::from_loc_and_size(loc, mapped.geometry().size),
-                    );
-                    elements.insert(0, element.into());
+                    if indicator_thickness > 0 {
+                        let element = IndicatorShader::element(
+                            renderer,
+                            Rectangle::from_loc_and_size(loc, mapped.geometry().size),
+                            indicator_thickness,
+                        );
+                        elements.insert(0, element.into());
+                    }
                 }
                 elements
             })

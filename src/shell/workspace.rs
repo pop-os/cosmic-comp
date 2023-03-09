@@ -319,6 +319,7 @@ impl Workspace {
         seat: &Seat<State>,
         output: &Output,
         start_data: PointerGrabStartData<State>,
+        indicator_thickness: u8,
     ) -> Option<MoveSurfaceGrab> {
         let pointer = seat.get_pointer().unwrap();
         let pos = pointer.current_location();
@@ -348,6 +349,7 @@ impl Workspace {
                 seat,
                 pos,
                 initial_window_location,
+                indicator_thickness,
             ))
         } else {
             None // TODO
@@ -439,6 +441,7 @@ impl Workspace {
         override_redirect_windows: &[X11Surface],
         xwm_state: Option<&'a mut XWaylandState>,
         draw_focus_indicator: Option<&Seat<State>>,
+        indicator_thickness: u8,
         exclude_workspace_overview: bool,
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
     where
@@ -572,7 +575,7 @@ impl Workspace {
             // floating surfaces
             render_elements.extend(
                 self.floating_layer
-                    .render_output::<R>(renderer, output, focused.as_ref())
+                    .render_output::<R>(renderer, output, focused.as_ref(), indicator_thickness)
                     .into_iter()
                     .map(WorkspaceRenderElement::from),
             );
@@ -580,7 +583,7 @@ impl Workspace {
             //tiling surfaces
             render_elements.extend(
                 self.tiling_layer
-                    .render_output::<R>(renderer, output, focused.as_ref())?
+                    .render_output::<R>(renderer, output, focused.as_ref(), indicator_thickness)?
                     .into_iter()
                     .map(WorkspaceRenderElement::from),
             );

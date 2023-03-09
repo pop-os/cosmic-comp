@@ -1278,8 +1278,13 @@ impl Shell {
                         .windows()
                         .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
                         .unwrap();
-                    if let Some(grab) = workspace.move_request(&window, &seat, &output, start_data)
-                    {
+                    if let Some(grab) = workspace.move_request(
+                        &window,
+                        &seat,
+                        &output,
+                        start_data,
+                        state.common.config.static_conf.active_hint,
+                    ) {
                         let handle = workspace.handle;
                         state
                             .common
