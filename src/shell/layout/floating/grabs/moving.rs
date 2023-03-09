@@ -6,12 +6,13 @@ use crate::{
         element::{window::CosmicWindowRenderElement, CosmicMapped, CosmicMappedRenderElement},
         focus::target::{KeyboardFocusTarget, PointerFocusTarget},
     },
+    state::SurfaceDmabufFeedback,
     utils::prelude::*,
 };
 
 use smithay::{
     backend::renderer::{
-        element::{AsRenderElements, RenderElement},
+        element::{AsRenderElements, RenderElement, RenderElementStates},
         ImportAll, ImportMem, Renderer,
     },
     desktop::space::SpaceElement,
@@ -90,6 +91,21 @@ impl MoveGrabState {
         self.window
             .active_window()
             .send_frame(output, time, throttle, primary_scan_out_output)
+    }
+
+    pub fn send_dmabuf_feedback(
+        &self,
+        output: &Output,
+        feedback: &SurfaceDmabufFeedback,
+        render_element_states: &RenderElementStates,
+        primary_scan_out_output: impl FnMut(&WlSurface, &SurfaceData) -> Option<Output> + Copy,
+    ) {
+        self.window.active_window().send_dmabuf_feedback(
+            output,
+            feedback,
+            render_element_states,
+            primary_scan_out_output,
+        )
     }
 }
 

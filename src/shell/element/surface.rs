@@ -2,13 +2,17 @@ use std::time::Duration;
 
 use smithay::{
     backend::renderer::{
-        element::{surface::WaylandSurfaceRenderElement, AsRenderElements},
+        element::{
+            surface::WaylandSurfaceRenderElement, utils::select_dmabuf_feedback, AsRenderElements,
+            RenderElementStates,
+        },
         ImportAll, Renderer,
     },
     desktop::{
         utils::{
-            send_frames_surface_tree, take_presentation_feedback_surface_tree,
-            with_surfaces_surface_tree, OutputPresentationFeedback,
+            send_dmabuf_feedback_surface_tree, send_frames_surface_tree,
+            take_presentation_feedback_surface_tree, with_surfaces_surface_tree,
+            OutputPresentationFeedback,
         },
         Window,
     },
@@ -33,6 +37,8 @@ use smithay::{
     },
     xwayland::{xwm::X11Relatable, X11Surface},
 };
+
+use crate::state::SurfaceDmabufFeedback;
 
 space_elements! {
     #[derive(Debug, Clone, PartialEq)]
@@ -369,7 +375,7 @@ impl CosmicSurface {
     {
         match self {
             CosmicSurface::Wayland(window) => {
-                window.send_frame(output, time, throttle, primary_scan_out_output)
+                window.send_frame(output, time, throttle, primary_scan_out_output);
             }
             CosmicSurface::X11(surface) => {
                 if let Some(wl_surface) = surface.wl_surface() {
@@ -379,6 +385,47 @@ impl CosmicSurface {
                         time,
                         throttle,
                         primary_scan_out_output,
+                    )
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn send_dmabuf_feedback<F1>(
+        &self,
+        output: &Output,
+        feedback: &SurfaceDmabufFeedback,
+        render_element_states: &RenderElementStates,
+        primary_scan_out_output: F1,
+    ) where
+        F1: FnMut(&WlSurface, &SurfaceData) -> Option<Output> + Copy,
+    {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                window.send_dmabuf_feedback(output, primary_scan_out_output, |surface, _| {
+                    select_dmabuf_feedback(
+                        surface,
+                        render_element_states,
+                        &feedback.render_feedback,
+                        &feedback.scanout_feedback,
+                    )
+                })
+            }
+            CosmicSurface::X11(surface) => {
+                if let Some(wl_surface) = surface.wl_surface() {
+                    send_dmabuf_feedback_surface_tree(
+                        &wl_surface,
+                        output,
+                        primary_scan_out_output,
+                        |surface, _| {
+                            select_dmabuf_feedback(
+                                surface,
+                                render_element_states,
+                                &feedback.render_feedback,
+                                &feedback.scanout_feedback,
+                            )
+                        },
                     )
                 }
             }

@@ -247,7 +247,7 @@ impl Surface {
                     .with_context(|| "Failed to submit buffer for display")?;
                 #[cfg(feature = "debug")]
                 self.fps.displayed();
-                state.send_frames(&self.output, &states);
+                state.send_frames(&self.output, &states, None);
                 if damage.is_some() {
                     let mut output_presentation_feedback =
                         state.take_presentation_feedback(&self.output, &states);
