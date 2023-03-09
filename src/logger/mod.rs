@@ -23,6 +23,7 @@ pub fn init_logger() -> Result<()> {
             })
         })
         .add_directive(Directive::from_str("cosmic_text=error").unwrap())
+        .add_directive(Directive::from_str("calloop=error").unwrap())
         .add_directive(Directive::from_str(&format!("smithay={level}")).unwrap())
         .add_directive(Directive::from_str(&format!("cosmic_comp={level}")).unwrap());
 
