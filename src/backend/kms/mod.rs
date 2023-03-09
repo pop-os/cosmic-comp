@@ -885,8 +885,6 @@ impl Device {
     }
 }
 
-const MAX_CPU_COPIES: usize = 3;
-
 fn render_node_for_output(
     dh: &DisplayHandle,
     output: &Output,
@@ -910,7 +908,7 @@ fn render_node_for_output(
             None
         })
         .collect::<Vec<_>>();
-    if nodes.contains(&target_node) || nodes.len() < MAX_CPU_COPIES {
+    if nodes.contains(&target_node) || nodes.is_empty() {
         target_node
     } else {
         nodes
