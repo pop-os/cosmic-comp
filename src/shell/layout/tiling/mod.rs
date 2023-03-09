@@ -248,9 +248,9 @@ impl Data {
 }
 
 impl TilingLayout {
-    pub fn new() -> TilingLayout {
+    pub fn new(gaps: (u8, u8)) -> TilingLayout {
         TilingLayout {
-            gaps: (0, 4),
+            gaps: (gaps.0 as i32, gaps.1 as i32),
             trees: HashMap::new(),
         }
     }

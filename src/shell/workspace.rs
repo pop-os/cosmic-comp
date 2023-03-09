@@ -63,9 +63,9 @@ pub enum ManagedState {
 }
 
 impl Workspace {
-    pub fn new(handle: WorkspaceHandle, tiling_enabled: bool) -> Workspace {
+    pub fn new(handle: WorkspaceHandle, tiling_enabled: bool, gaps: (u8, u8)) -> Workspace {
         Workspace {
-            tiling_layer: TilingLayout::new(),
+            tiling_layer: TilingLayout::new(gaps),
             floating_layer: FloatingLayout::new(),
             tiling_enabled,
             fullscreen: HashMap::new(),

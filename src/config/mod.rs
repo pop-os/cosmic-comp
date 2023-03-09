@@ -39,6 +39,8 @@ pub struct StaticConfig {
     pub tiling_enabled: bool,
     #[serde(default = "default_active_hint")]
     pub active_hint: u8,
+    #[serde(default = "default_gaps")]
+    pub gaps: (u8, u8),
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -81,6 +83,10 @@ fn default_enabled() -> bool {
 
 fn default_active_hint() -> u8 {
     4
+}
+
+fn default_gaps() -> (u8, u8) {
+    (0, 4)
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
@@ -228,6 +234,7 @@ impl Config {
             workspace_amount: WorkspaceAmount::Dynamic,
             tiling_enabled: false,
             active_hint: default_active_hint(),
+            gaps: default_gaps(),
         }
     }
 
