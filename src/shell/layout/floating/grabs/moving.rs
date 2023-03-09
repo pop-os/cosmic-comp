@@ -67,7 +67,7 @@ impl MoveGrabState {
         elements.extend(AsRenderElements::<R>::render_elements::<I>(
             &self.window,
             renderer,
-            render_location.to_physical_precise_round(scale),
+            (render_location - self.window.geometry().loc).to_physical_precise_round(scale),
             scale,
         ));
         elements
@@ -180,7 +180,7 @@ impl MoveSurfaceGrab {
 
         let grab_state = MoveGrabState {
             window: window.clone(),
-            window_offset: dbg!(initial_window_location) + output.geometry().loc
+            window_offset: dbg!(initial_window_location)
                 - dbg!(initial_cursor_location.to_i32_round()),
         };
 
