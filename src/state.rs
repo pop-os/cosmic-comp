@@ -408,7 +408,8 @@ impl Common {
 
         let active = self.shell.active_space(output);
         active.mapped().for_each(|mapped| {
-            if active.outputs_for_element(mapped).any(|o| &o == output) {
+            let outputs_for_element: Vec<_> = active.outputs_for_element(mapped).collect();
+            if outputs_for_element.contains(&output) {
                 let window = mapped.active_window();
                 window.with_surfaces(|surface, states| {
                     update_surface_primary_scanout_output(
@@ -416,7 +417,18 @@ impl Common {
                         output,
                         states,
                         render_element_states,
-                        default_primary_scanout_output_compare,
+                        |current_output, current_state, next_output, next_state| {
+                            if outputs_for_element.contains(current_output) {
+                                default_primary_scanout_output_compare(
+                                    current_output,
+                                    current_state,
+                                    next_output,
+                                    next_state,
+                                )
+                            } else {
+                                next_output
+                            }
+                        },
                     );
                 });
                 window.send_frame(output, time, throttle, surface_primary_scanout_output);
