@@ -361,12 +361,14 @@ impl FloatingLayout {
         puffin::profile_function!();
 
         let output_scale = output.current_scale().fractional_scale();
+        let output_loc = self.space.output_geometry(output).unwrap().loc;
+
         self.space
             .elements_for_output(output)
             .rev()
             .flat_map(|elem| {
                 let render_location =
-                    self.space.element_location(elem).unwrap() - elem.geometry().loc;
+                    self.space.element_location(elem).unwrap() - output_loc - elem.geometry().loc;
                 let mut elements = elem.render_elements(
                     renderer,
                     render_location.to_physical_precise_round(output_scale),
@@ -377,7 +379,7 @@ impl FloatingLayout {
                         let element = IndicatorShader::element(
                             renderer,
                             Rectangle::from_loc_and_size(
-                                self.space.element_location(elem).unwrap(),
+                                self.space.element_location(elem).unwrap() - output_loc,
                                 elem.geometry().size,
                             ),
                             indicator_thickness,

@@ -290,7 +290,8 @@ where
         .unwrap()
         .borrow()
         .is_some();
-    let active_output = &last_active_seat.active_output() == output;
+    let active_output = last_active_seat.active_output();
+    let is_active_space = workspace.outputs().any(|o| o == &active_output);
 
     elements.extend(
         workspace
@@ -299,7 +300,7 @@ where
                 output,
                 &state.shell.override_redirect_windows,
                 state.xwayland_state.as_mut(),
-                (!move_active && active_output).then_some(&last_active_seat),
+                (!move_active && is_active_space).then_some(&last_active_seat),
                 state.config.static_conf.active_hint,
                 exclude_workspace_overview,
             )

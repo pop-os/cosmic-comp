@@ -406,6 +406,10 @@ impl Workspace {
             .chain(self.tiling_layer.mapped().map(|(_, w, _)| w))
     }
 
+    pub fn outputs(&self) -> impl Iterator<Item = &Output> {
+        self.floating_layer.space.outputs()
+    }
+
     pub fn windows(&self) -> impl Iterator<Item = CosmicSurface> + '_ {
         self.floating_layer
             .windows()
