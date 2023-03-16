@@ -310,8 +310,11 @@ pub fn init_backend(
             }
             SessionEvent::PauseSession => {
                 libinput_context.suspend();
-                for device in data.state.backend.kms().devices.values() {
+                for device in data.state.backend.kms().devices.values_mut() {
                     device.drm.pause();
+                    for surface in device.surfaces.values_mut() {
+                        surface.surface = None;
+                    }
                 }
             }
         })
