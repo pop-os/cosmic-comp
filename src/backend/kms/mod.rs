@@ -114,6 +114,7 @@ pub struct Surface {
     output: Output,
     refresh_rate: u32,
     vrr: bool,
+    scheduled: bool,
     pending: bool,
     dirty: bool,
     render_timer_token: Option<RegistrationToken>,
@@ -284,6 +285,7 @@ pub fn init_backend(
                         .values_mut()
                         .flat_map(|d| d.surfaces.values_mut())
                     {
+                        surface.scheduled = false;
                         surface.pending = false;
                     }
                     for output in data.state.common.shell.outputs() {
@@ -314,6 +316,10 @@ pub fn init_backend(
                     device.drm.pause();
                     for surface in device.surfaces.values_mut() {
                         surface.surface = None;
+                        if let Some(token) = surface.render_timer_token.take() {
+                            data.state.common.event_loop_handle.remove(token);
+                        }
+                        surface.scheduled = false;
                     }
                 }
             }
@@ -501,11 +507,12 @@ impl State {
                                     .extend(output_sessions);
                             }
 
-                            let repaint_delay = std::cmp::max(avg_rendertime, MIN_RENDER_TIME);
+                            let estimated_rendertime =
+                                std::cmp::max(avg_rendertime, MIN_RENDER_TIME);
                             if let Err(err) = data.state.backend.kms().schedule_render(
                                 &data.state.common.event_loop_handle,
                                 &output,
-                                Some(repaint_delay),
+                                Some(estimated_rendertime),
                                 scheduled_sessions,
                             ) {
                                 warn!(?err, "Failed to schedule render.");
@@ -877,6 +884,7 @@ impl Device {
             connector: conn,
             vrr,
             refresh_rate,
+            scheduled: false,
             pending: false,
             dirty: false,
             render_timer_token: None,
@@ -1303,7 +1311,7 @@ impl KmsState {
         &mut self,
         loop_handle: &LoopHandle<'_, Data>,
         output: &Output,
-        delay: Option<Duration>,
+        estimated_rendertime: Option<Duration>,
         mut screencopy_sessions: Option<Vec<(ScreencopySession, BufferParams)>>,
     ) -> Result<(), InsertError<Timer>> {
         if let Some((device, crtc, surface)) = self
@@ -1322,17 +1330,20 @@ impl KmsState {
                 }
                 return Ok(());
             }
-            if !surface.pending {
+            if !surface.scheduled {
                 let device = *device;
                 let crtc = *crtc;
                 if let Some(token) = surface.render_timer_token.take() {
                     loop_handle.remove(token);
                 }
                 surface.render_timer_token = Some(loop_handle.insert_source(
-                    if surface.vrr || delay.is_none() {
+                    if surface.vrr || estimated_rendertime.is_none() {
                         Timer::immediate()
                     } else {
-                        Timer::from_duration(delay.unwrap())
+                        Timer::from_duration(
+                            Duration::from_secs_f64(1000.0 / surface.refresh_rate as f64)
+                                .saturating_sub(estimated_rendertime.unwrap()),
+                        )
                     },
                     move |_time, _, data| {
                         let backend = data.state.backend.kms();
@@ -1382,6 +1393,7 @@ impl KmsState {
                                 Ok(_) => {
                                     surface.dirty = false;
                                     surface.pending = true;
+                                    surface.scheduled = false;
                                     return TimeoutAction::Drop;
                                 }
                                 Err(err) => {
@@ -1403,6 +1415,7 @@ impl KmsState {
                         TimeoutAction::Drop
                     },
                 )?);
+                surface.scheduled = true;
             } else {
                 if let Some(sessions) = screencopy_sessions {
                     loop_handle.insert_idle(|data| {
