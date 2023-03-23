@@ -10,10 +10,7 @@ use smithay::{
         calloop::RegistrationToken,
         wayland_server::{backend::GlobalId, Client, DisplayHandle},
     },
-    wayland::{
-        dmabuf::{DmabufFeedbackBuilder, DmabufGlobal},
-        socket::ListeningSocketSource,
-    },
+    wayland::{dmabuf::DmabufGlobal, socket::ListeningSocketSource},
     xwayland::XWaylandClientData,
 };
 use std::sync::Arc;
@@ -62,14 +59,10 @@ impl State {
             false
         };
 
-        let feedback = DmabufFeedbackBuilder::new(render_node.dev_id(), formats.clone())
-            .build()
-            .with_context(|| "Failed to create drm format shared memory table")?;
-
         let dmabuf_global = self
             .common
             .dmabuf_state
-            .create_global_with_filter_and_default_feedback::<State, _>(dh, &feedback, filter);
+            .create_global_with_filter::<State, _>(dh, formats.clone(), filter);
 
         let drm_global_id = self
             .common

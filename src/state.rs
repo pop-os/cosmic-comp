@@ -20,18 +20,15 @@ use smithay::{
     backend::{
         drm::DrmNode,
         renderer::{
-            element::{
-                default_primary_scanout_output_compare, utils::select_dmabuf_feedback,
-                RenderElementStates,
-            },
+            element::{default_primary_scanout_output_compare, RenderElementStates},
             glow::GlowRenderer,
         },
     },
     desktop::utils::{
-        send_dmabuf_feedback_surface_tree, send_frames_surface_tree,
-        surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
-        take_presentation_feedback_surface_tree, update_surface_primary_scanout_output,
-        with_surfaces_surface_tree, OutputPresentationFeedback,
+        send_frames_surface_tree, surface_presentation_feedback_flags_from_states,
+        surface_primary_scanout_output, take_presentation_feedback_surface_tree,
+        update_surface_primary_scanout_output, with_surfaces_surface_tree,
+        OutputPresentationFeedback,
     },
     input::{pointer::CursorImageStatus, Seat, SeatState},
     output::{Mode as OutputMode, Output, Scale},
@@ -48,7 +45,7 @@ use smithay::{
     wayland::{
         compositor::CompositorState,
         data_device::DataDeviceState,
-        dmabuf::{DmabufFeedback, DmabufState},
+        dmabuf::DmabufState,
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState,
         output::OutputManagerState,
         presentation::PresentationState,
@@ -131,11 +128,6 @@ pub enum BackendData {
     // TODO
     // Wayland(WaylandState),
     Unset,
-}
-
-pub struct SurfaceDmabufFeedback {
-    pub render_feedback: DmabufFeedback,
-    pub scanout_feedback: DmabufFeedback,
 }
 
 impl BackendData {
@@ -371,12 +363,7 @@ impl Common {
         self.last_active_seat.as_ref().expect("No seat?")
     }
 
-    pub fn send_frames(
-        &self,
-        output: &Output,
-        render_element_states: &RenderElementStates,
-        dmabuf_feedback: Option<&SurfaceDmabufFeedback>,
-    ) {
+    pub fn send_frames(&self, output: &Output, render_element_states: &RenderElementStates) {
         let time = self.clock.now();
         let throttle = Some(Duration::from_secs(1));
 
@@ -414,14 +401,6 @@ impl Common {
                             throttle,
                             surface_primary_scanout_output,
                         );
-                        if let Some(feedback) = dmabuf_feedback {
-                            grab_state.send_dmabuf_feedback(
-                                output,
-                                feedback,
-                                render_element_states,
-                                surface_primary_scanout_output,
-                            );
-                        }
                     }
                 }
             }
@@ -453,14 +432,6 @@ impl Common {
                     );
                 });
                 window.send_frame(output, time, throttle, surface_primary_scanout_output);
-                if let Some(feedback) = dmabuf_feedback {
-                    window.send_dmabuf_feedback(
-                        output,
-                        feedback,
-                        render_element_states,
-                        surface_primary_scanout_output,
-                    );
-                }
             }
         });
 
@@ -495,22 +466,7 @@ impl Common {
                     time,
                     throttle,
                     surface_primary_scanout_output,
-                );
-                if let Some(feedback) = dmabuf_feedback {
-                    send_dmabuf_feedback_surface_tree(
-                        &wl_surface,
-                        output,
-                        surface_primary_scanout_output,
-                        |surface, _| {
-                            select_dmabuf_feedback(
-                                surface,
-                                render_element_states,
-                                &feedback.render_feedback,
-                                &feedback.scanout_feedback,
-                            )
-                        },
-                    )
-                }
+                )
             }
         });
 
@@ -526,20 +482,6 @@ impl Common {
                 );
             });
             layer_surface.send_frame(output, time, throttle, surface_primary_scanout_output);
-            if let Some(feedback) = dmabuf_feedback {
-                layer_surface.send_dmabuf_feedback(
-                    output,
-                    surface_primary_scanout_output,
-                    |surface, _| {
-                        select_dmabuf_feedback(
-                            surface,
-                            render_element_states,
-                            &feedback.render_feedback,
-                            &feedback.scanout_feedback,
-                        )
-                    },
-                );
-            }
         }
     }
 

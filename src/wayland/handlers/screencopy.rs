@@ -25,7 +25,7 @@ use smithay::{
             Bind, Blit, BufferType, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
         },
     },
-    desktop::{layer_map_for_output, space::SpaceElement, utils::surface_primary_scanout_output},
+    desktop::{layer_map_for_output, space::SpaceElement},
     output::Output,
     reexports::wayland_server::{
         protocol::{wl_buffer::WlBuffer, wl_shm::Format as ShmFormat, wl_surface::WlSurface},
@@ -33,8 +33,7 @@ use smithay::{
     },
     utils::{IsAlive, Logical, Physical, Rectangle, Scale, Transform},
     wayland::{
-        compositor::with_states,
-        dmabuf::{get_dmabuf, SurfaceDmabufFeedbackState},
+        dmabuf::get_dmabuf,
         seat::WaylandFocus,
         shm::{with_buffer_contents, with_buffer_contents_mut},
     },
@@ -179,21 +178,9 @@ impl ScreencopyHandler for State {
                     .get_client(surface.id())
                     .ok()
                     .and_then(|client| {
-                        // has the client requested surface-feedback? If yes it is properly rendering on the node of the display
-                        if with_states(&surface, |data| {
-                            SurfaceDmabufFeedbackState::from_states(data).is_some()
-                        }) {
-                            if let Some(output) = with_states(&surface, |data| {
-                                surface_primary_scanout_output(&surface, data)
-                            }) {
-                                return kms.target_node_for_output(&output);
-                            }
-                        }
-                        // else lets check the global drm-node the client got either through default-feedback or wl_drm
                         if let Some(normal_client) = client.get_data::<ClientState>() {
                             return normal_client.drm_node.clone();
                         }
-                        // last but not least all xwayland-surfaces should also share a single node
                         if let Some(xwayland_client) = client.get_data::<XWaylandClientData>() {
                             return xwayland_client.user_data().get::<DrmNode>().cloned();
                         }
