@@ -676,10 +676,7 @@ impl State {
                     0 => 9,
                     x => x - 1,
                 };
-                let _ = self
-                    .common
-                    .shell
-                    .activate(&current_output, workspace as usize);
+                Shell::activate_and_focus(self, seat, &current_output, workspace as usize)
             }
             Action::NextWorkspace => {
                 let current_output = seat.active_output();
@@ -690,7 +687,7 @@ impl State {
                     .active_num(&current_output)
                     .saturating_add(1);
                 // TODO: Possibly move to next output, if idx to large
-                let _ = self.common.shell.activate(&current_output, workspace);
+                Shell::activate_and_focus(self, seat, &current_output, workspace)
             }
             Action::PreviousWorkspace => {
                 let current_output = seat.active_output();
@@ -701,7 +698,7 @@ impl State {
                     .active_num(&current_output)
                     .saturating_sub(1);
                 // TODO: Possibly move to prev output, if idx < 0
-                let _ = self.common.shell.activate(&current_output, workspace);
+                Shell::activate_and_focus(self, seat, &current_output, workspace)
             }
             Action::LastWorkspace => {
                 let current_output = seat.active_output();
@@ -711,7 +708,7 @@ impl State {
                     .workspaces
                     .len(&current_output)
                     .saturating_sub(1);
-                let _ = self.common.shell.activate(&current_output, workspace);
+                Shell::activate_and_focus(self, seat, &current_output, workspace)
             }
             x @ Action::MoveToWorkspace(_) | x @ Action::SendToWorkspace(_) => {
                 let current_output = seat.active_output();

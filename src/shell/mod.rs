@@ -1176,6 +1176,19 @@ impl Shell {
         }
     }
 
+    pub fn activate_and_focus(state: &mut State, seat: &Seat<State>, output: &Output, idx: usize) {
+        let _ = state.common.shell.activate(output, idx);
+
+        // without this the last window of the target workspace may not receive focus when switching
+        // from a workspace having focused fullscreen window (there may be other cases).
+        let workspace = state.common.shell.active_space(output);
+        if let Some(mapped) = workspace.focus_stack.get(seat).last() {
+            // TODO: There should probably be a `KeyboardFocusTargetRef<'a>` to avoid unnecessary
+            //       cloning.
+            Common::set_focus(state, Some(&(mapped.clone().into())), seat, None);
+        }
+    }
+
     pub fn move_current_window(
         state: &mut State,
         seat: &Seat<State>,
