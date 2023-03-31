@@ -35,9 +35,7 @@ use smithay::{
         drm::DrmNode,
         renderer::{
             buffer_dimensions,
-            damage::{
-                DamageTrackedRenderer, DamageTrackedRendererError as RenderError, OutputNoMode,
-            },
+            damage::{Error as RenderError, OutputDamageTracker, OutputNoMode},
             element::{Element, RenderElement, RenderElementStates},
             gles2::{
                 element::PixelShaderElement, Gles2Error, Gles2PixelProgram, Gles2Renderer, Uniform,
@@ -316,7 +314,7 @@ pub fn render_output<'frame, R, Target, OffTarget, Source>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,
     target: Target,
-    damage_tracker: &mut DamageTrackedRenderer,
+    damage_tracker: &mut OutputDamageTracker,
     age: usize,
     state: &mut Common,
     output: &Output,
@@ -364,7 +362,7 @@ pub fn render_workspace<'frame, R, Target, OffTarget, Source>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,
     target: Target,
-    damage_tracker: &mut DamageTrackedRenderer,
+    damage_tracker: &mut OutputDamageTracker,
     age: usize,
     state: &mut Common,
     output: &Output,
@@ -450,8 +448,8 @@ where
                     &session,
                     params,
                     output.current_transform(),
-                    |_node, buffer, renderer, dtr, age| {
-                        let res = dtr.damage_output(age, &elements)?;
+                    |_node, buffer, renderer, dt, age| {
+                        let res = dt.damage_output(age, &elements)?;
 
                         if let (Some(ref damage), _) = &res {
                             if let Ok(dmabuf) = get_dmabuf(buffer) {

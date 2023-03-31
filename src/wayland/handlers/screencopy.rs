@@ -16,7 +16,7 @@ use smithay::{
         egl::EGLDevice,
         renderer::{
             buffer_dimensions, buffer_type,
-            damage::{DamageTrackedRenderer, DamageTrackedRendererError},
+            damage::{Error as DTError, OutputDamageTracker},
             element::{
                 surface::WaylandSurfaceRenderElement, AsRenderElements, RenderElement,
                 RenderElementStates,
@@ -92,7 +92,7 @@ impl PartialEq<Session> for DropableSession {
     }
 }
 
-pub type SessionDTR = RefCell<DamageTrackedRenderer>;
+pub type SessionDT = RefCell<OutputDamageTracker>;
 
 impl ScreencopyHandler for State {
     fn capture_output(&mut self, output: Output, session: Session) -> Vec<BufferInfo> {
@@ -117,7 +117,7 @@ impl ScreencopyHandler for State {
 
         session
             .user_data()
-            .insert_if_missing(|| SessionDTR::new(DamageTrackedRenderer::from_output(&output)));
+            .insert_if_missing(|| SessionDT::new(OutputDamageTracker::from_output(&output)));
         output
             .user_data()
             .insert_if_missing(ScreencopySessions::default);
@@ -156,7 +156,7 @@ impl ScreencopyHandler for State {
 
         session
             .user_data()
-            .insert_if_missing(|| SessionDTR::new(DamageTrackedRenderer::from_output(&output)));
+            .insert_if_missing(|| SessionDT::new(OutputDamageTracker::from_output(&output)));
 
         workspace
             .screencopy_sessions
@@ -226,7 +226,7 @@ impl ScreencopyHandler for State {
 
         let size = toplevel.geometry().size.to_physical(1);
         session.user_data().insert_if_missing(|| {
-            SessionDTR::new(DamageTrackedRenderer::new(size, 1.0, Transform::Normal))
+            SessionDT::new(OutputDamageTracker::new(size, 1.0, Transform::Normal))
         });
         toplevel
             .user_data()
@@ -547,40 +547,34 @@ pub fn render_session<F, R>(
     params: &BufferParams,
     transform: Transform,
     render_fn: F,
-) -> Result<bool, DamageTrackedRendererError<R>>
+) -> Result<bool, DTError<R>>
 where
     R: ExportMem,
     F: FnOnce(
         Option<&DrmNode>,
         &WlBuffer,
         &mut R,
-        &mut DamageTrackedRenderer,
+        &mut OutputDamageTracker,
         usize,
-    ) -> Result<
-        (Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates),
-        DamageTrackedRendererError<R>,
-    >,
+    )
+        -> Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), DTError<R>>,
 {
     #[cfg(feature = "debug")]
     puffin::profile_function!();
 
-    let mut dtr = session
-        .user_data()
-        .get::<SessionDTR>()
-        .unwrap()
-        .borrow_mut();
+    let mut dt = session.user_data().get::<SessionDT>().unwrap().borrow_mut();
 
     let res = render_fn(
         node.as_ref(),
         &params.buffer,
         renderer,
-        &mut *dtr,
+        &mut *dt,
         params.age as usize,
     )?;
 
     if let (Some(damage), _) = res {
         submit_buffer(session, &params.buffer, renderer, transform, damage)
-            .map_err(DamageTrackedRendererError::Rendering)?;
+            .map_err(DTError::Rendering)?;
         Ok(true)
     } else {
         Ok(false)
@@ -605,15 +599,12 @@ pub fn render_output_to_buffer(
         node: Option<&DrmNode>,
         buffer: &WlBuffer,
         renderer: &mut R,
-        dtr: &mut DamageTrackedRenderer,
+        dt: &mut OutputDamageTracker,
         age: usize,
         common: &mut Common,
         session: &Session,
         output: &Output,
-    ) -> Result<
-        (Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates),
-        DamageTrackedRendererError<R>,
-    >
+    ) -> Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), DTError<R>>
     where
         R: Renderer
             + ImportAll
@@ -639,7 +630,7 @@ pub fn render_output_to_buffer(
                 node,
                 renderer,
                 dmabuf,
-                dtr,
+                dt,
                 age,
                 common,
                 &output,
@@ -650,12 +641,12 @@ pub fn render_output_to_buffer(
         } else {
             let size = buffer_dimensions(buffer).unwrap();
             let render_buffer = Offscreen::<Gles2Renderbuffer>::create_buffer(renderer, size)
-                .map_err(DamageTrackedRendererError::Rendering)?;
+                .map_err(DTError::Rendering)?;
             render_output::<_, _, Gles2Renderbuffer, Dmabuf>(
                 node,
                 renderer,
                 render_buffer,
-                dtr,
+                dt,
                 age,
                 common,
                 &output,
@@ -680,13 +671,13 @@ pub fn render_output_to_buffer(
                 session,
                 &params,
                 output.current_transform(),
-                |node, buffer, renderer, dtr, age| {
-                    render_fn(node, buffer, renderer, dtr, age, common, session, output)
+                |node, buffer, renderer, dt, age| {
+                    render_fn(node, buffer, renderer, dt, age, common, session, output)
                 },
             )
             .map_err(|err| match err {
-                DamageTrackedRendererError::OutputNoMode(x) => (FailureReason::Unspec, x.into()),
-                DamageTrackedRendererError::Rendering(x) => (FailureReason::Unspec, x.into()),
+                DTError::OutputNoMode(x) => (FailureReason::Unspec, x.into()),
+                DTError::Rendering(x) => (FailureReason::Unspec, x.into()),
             })
         }
         BackendData::Winit(winit) => render_session::<_, _>(
@@ -695,8 +686,8 @@ pub fn render_output_to_buffer(
             session,
             &params,
             output.current_transform(),
-            |node, buffer, renderer, dtr, age| {
-                render_fn(node, buffer, renderer, dtr, age, common, session, output)
+            |node, buffer, renderer, dt, age| {
+                render_fn(node, buffer, renderer, dt, age, common, session, output)
             },
         )
         .map_err(|err| (FailureReason::Unspec, err.into())),
@@ -706,8 +697,8 @@ pub fn render_output_to_buffer(
             session,
             &params,
             output.current_transform(),
-            |node, buffer, renderer, dtr, age| {
-                render_fn(node, buffer, renderer, dtr, age, common, session, output)
+            |node, buffer, renderer, dt, age| {
+                render_fn(node, buffer, renderer, dt, age, common, session, output)
             },
         )
         .map_err(|err| (FailureReason::Unspec, err.into())),
@@ -734,16 +725,13 @@ pub fn render_workspace_to_buffer(
         node: Option<&DrmNode>,
         buffer: &WlBuffer,
         renderer: &mut R,
-        dtr: &mut DamageTrackedRenderer,
+        dt: &mut OutputDamageTracker,
         age: usize,
         common: &mut Common,
         session: &Session,
         output: &Output,
         handle: &WorkspaceHandle,
-    ) -> Result<
-        (Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates),
-        DamageTrackedRendererError<R>,
-    >
+    ) -> Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), DTError<R>>
     where
         R: Renderer
             + ImportAll
@@ -768,7 +756,7 @@ pub fn render_workspace_to_buffer(
                 node,
                 renderer,
                 dmabuf,
-                dtr,
+                dt,
                 age,
                 common,
                 &output,
@@ -781,12 +769,12 @@ pub fn render_workspace_to_buffer(
         } else {
             let size = buffer_dimensions(buffer).unwrap();
             let render_buffer = Offscreen::<Gles2Renderbuffer>::create_buffer(renderer, size)
-                .map_err(DamageTrackedRendererError::Rendering)?;
+                .map_err(DTError::Rendering)?;
             render_workspace::<_, _, Gles2Renderbuffer, Dmabuf>(
                 node,
                 renderer,
                 render_buffer,
-                dtr,
+                dt,
                 age,
                 common,
                 &output,
@@ -813,15 +801,15 @@ pub fn render_workspace_to_buffer(
                 session,
                 &params,
                 output.current_transform(),
-                |node, buffer, renderer, dtr, age| {
+                |node, buffer, renderer, dt, age| {
                     render_fn(
-                        node, buffer, renderer, dtr, age, common, session, output, handle,
+                        node, buffer, renderer, dt, age, common, session, output, handle,
                     )
                 },
             )
             .map_err(|err| match err {
-                DamageTrackedRendererError::OutputNoMode(x) => (FailureReason::Unspec, x.into()),
-                DamageTrackedRendererError::Rendering(x) => (FailureReason::Unspec, x.into()),
+                DTError::OutputNoMode(x) => (FailureReason::Unspec, x.into()),
+                DTError::Rendering(x) => (FailureReason::Unspec, x.into()),
             })
         }
         BackendData::Winit(winit) => render_session::<_, _>(
@@ -830,9 +818,9 @@ pub fn render_workspace_to_buffer(
             session,
             &params,
             output.current_transform(),
-            |node, buffer, renderer, dtr, age| {
+            |node, buffer, renderer, dt, age| {
                 render_fn(
-                    node, buffer, renderer, dtr, age, common, session, output, handle,
+                    node, buffer, renderer, dt, age, common, session, output, handle,
                 )
             },
         )
@@ -843,9 +831,9 @@ pub fn render_workspace_to_buffer(
             session,
             &params,
             output.current_transform(),
-            |node, buffer, renderer, dtr, age| {
+            |node, buffer, renderer, dt, age| {
                 render_fn(
-                    node, buffer, renderer, dtr, age, common, session, output, handle,
+                    node, buffer, renderer, dt, age, common, session, output, handle,
                 )
             },
         )
@@ -878,16 +866,13 @@ pub fn render_window_to_buffer(
     fn render_fn<R>(
         buffer: &WlBuffer,
         renderer: &mut R,
-        dtr: &mut DamageTrackedRenderer,
+        dt: &mut OutputDamageTracker,
         age: usize,
         session: &Session,
         common: &mut Common,
         window: &CosmicSurface,
         geometry: Rectangle<i32, Logical>,
-    ) -> Result<
-        (Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates),
-        DamageTrackedRendererError<R>,
-    >
+    ) -> Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), DTError<R>>
     where
         R: Renderer
             + ImportAll
@@ -952,19 +937,15 @@ pub fn render_window_to_buffer(
         }
 
         if let Ok(dmabuf) = get_dmabuf(buffer) {
-            renderer
-                .bind(dmabuf)
-                .map_err(DamageTrackedRendererError::Rendering)?;
+            renderer.bind(dmabuf).map_err(DTError::Rendering)?;
         } else {
             let size = buffer_dimensions(buffer).unwrap();
             let render_buffer = Offscreen::<Gles2Renderbuffer>::create_buffer(renderer, size)
-                .map_err(DamageTrackedRendererError::Rendering)?;
-            renderer
-                .bind(render_buffer)
-                .map_err(DamageTrackedRendererError::Rendering)?;
+                .map_err(DTError::Rendering)?;
+            renderer.bind(render_buffer).map_err(DTError::Rendering)?;
         }
 
-        dtr.render_output(renderer, age, &elements, CLEAR_COLOR)
+        dt.render_output(renderer, age, &elements, CLEAR_COLOR)
     }
 
     let node = node_from_params(&params, &mut state.backend, None);
@@ -981,15 +962,13 @@ pub fn render_window_to_buffer(
                 session,
                 &params,
                 Transform::Normal,
-                |_node, buffer, renderer, dtr, age| {
-                    render_fn(
-                        buffer, renderer, dtr, age, session, common, window, geometry,
-                    )
+                |_node, buffer, renderer, dt, age| {
+                    render_fn(buffer, renderer, dt, age, session, common, window, geometry)
                 },
             )
             .map_err(|err| match err {
-                DamageTrackedRendererError::OutputNoMode(x) => (FailureReason::Unspec, x.into()),
-                DamageTrackedRendererError::Rendering(x) => (FailureReason::Unspec, x.into()),
+                DTError::OutputNoMode(x) => (FailureReason::Unspec, x.into()),
+                DTError::Rendering(x) => (FailureReason::Unspec, x.into()),
             })
         }
         BackendData::Winit(winit) => render_session::<_, _>(
@@ -998,10 +977,8 @@ pub fn render_window_to_buffer(
             session,
             &params,
             Transform::Normal,
-            |_node, buffer, renderer, dtr, age| {
-                render_fn(
-                    buffer, renderer, dtr, age, session, common, window, geometry,
-                )
+            |_node, buffer, renderer, dt, age| {
+                render_fn(buffer, renderer, dt, age, session, common, window, geometry)
             },
         )
         .map_err(|err| (FailureReason::Unspec, err.into())),
@@ -1011,10 +988,8 @@ pub fn render_window_to_buffer(
             session,
             &params,
             Transform::Normal,
-            |_node, buffer, renderer, dtr, age| {
-                render_fn(
-                    buffer, renderer, dtr, age, session, common, window, geometry,
-                )
+            |_node, buffer, renderer, dt, age| {
+                render_fn(buffer, renderer, dt, age, session, common, window, geometry)
             },
         )
         .map_err(|err| (FailureReason::Unspec, err.into())),

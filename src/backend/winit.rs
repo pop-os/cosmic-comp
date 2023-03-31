@@ -13,7 +13,7 @@ use smithay::{
     backend::{
         egl::EGLDevice,
         renderer::{
-            damage::DamageTrackedRenderer, gles2::Gles2Renderbuffer, glow::GlowRenderer, ImportDma,
+            damage::OutputDamageTracker, gles2::Gles2Renderbuffer, glow::GlowRenderer, ImportDma,
             ImportEgl,
         },
         winit::{self, WinitEvent, WinitGraphicsBackend, WinitVirtualDevice},
@@ -40,7 +40,7 @@ pub struct WinitState {
     // The winit backend currently has no notion of multiple windows
     pub backend: WinitGraphicsBackend<GlowRenderer>,
     output: Output,
-    damage_tracker: DamageTrackedRenderer,
+    damage_tracker: OutputDamageTracker,
     screencopy: Vec<(ScreencopySession, BufferParams)>,
     #[cfg(feature = "debug")]
     fps: Fps,
@@ -240,7 +240,7 @@ pub fn init_backend(
     state.backend = BackendData::Winit(WinitState {
         backend,
         output: output.clone(),
-        damage_tracker: DamageTrackedRenderer::from_output(&output),
+        damage_tracker: OutputDamageTracker::from_output(&output),
         screencopy: Vec::new(),
         #[cfg(feature = "debug")]
         fps,

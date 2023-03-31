@@ -20,7 +20,7 @@ use smithay::{
         egl::{EGLContext, EGLDevice, EGLDisplay},
         input::{Event, InputEvent},
         renderer::{
-            damage::DamageTrackedRenderer, gles2::Gles2Renderbuffer, glow::GlowRenderer, Bind,
+            damage::OutputDamageTracker, gles2::Gles2Renderbuffer, glow::GlowRenderer, Bind,
             ImportDma, ImportEgl,
         },
         vulkan::{version::Version, Instance, PhysicalDevice},
@@ -141,7 +141,7 @@ impl X11State {
         self.surfaces.push(Surface {
             window,
             surface,
-            damage_tracker: DamageTrackedRenderer::from_output(&output),
+            damage_tracker: OutputDamageTracker::from_output(&output),
             output: output.clone(),
             render: ping.clone(),
             dirty: false,
@@ -204,7 +204,7 @@ impl X11State {
 
 pub struct Surface {
     window: Window,
-    damage_tracker: DamageTrackedRenderer,
+    damage_tracker: OutputDamageTracker,
     screencopy: Vec<(ScreencopySession, BufferParams)>,
     surface: X11Surface,
     output: Output,

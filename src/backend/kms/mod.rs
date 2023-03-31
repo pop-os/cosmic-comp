@@ -33,7 +33,7 @@ use smithay::{
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
             buffer_dimensions,
-            damage::{DamageTrackedRendererError as RenderError, OutputNoMode},
+            damage::{Error as RenderError, OutputNoMode},
             gles2::Gles2Renderbuffer,
             glow::GlowRenderer,
             multigpu::{gbm::GbmGlesBackend, Error as MultiError, GpuManager},
@@ -1013,8 +1013,8 @@ impl Surface {
                             &session,
                             params,
                             self.output.current_transform(),
-                            |_node, buffer, renderer, dtr, age| {
-                                let res = dtr.damage_output(age, &elements)?;
+                            |_node, buffer, renderer, dt, age| {
+                                let res = dt.damage_output(age, &elements)?;
 
                                 if let (Some(ref damage), _) = &res {
                                     if let Ok(dmabuf) = get_dmabuf(buffer) {

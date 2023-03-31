@@ -70,4 +70,4 @@ debug = true
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/pop-os/smithay", rev = "4e287a585a" }
+smithay = { git = "https://github.com/smithay//smithay", rev = "a5a3c2bd4e" }
