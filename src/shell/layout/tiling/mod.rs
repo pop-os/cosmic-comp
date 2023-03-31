@@ -322,6 +322,7 @@ impl TilingLayout {
     ) {
         let output = seat.active_output();
         window.output_enter(&output, window.bbox());
+        window.set_bounds(output.geometry().size);
         self.map_internal(window, &output, Some(focus_stack));
         self.refresh();
     }

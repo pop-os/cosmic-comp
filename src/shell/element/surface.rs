@@ -120,6 +120,15 @@ impl CosmicSurface {
         }
     }
 
+    pub fn set_bounds(&self, size: impl Into<Option<Size<i32, Logical>>>) {
+        match self {
+            CosmicSurface::Wayland(window) => window.toplevel().with_pending_state(|state| {
+                state.bounds = size.into();
+            }),
+            _ => {}
+        }
+    }
+
     pub fn is_activated(&self) -> bool {
         match self {
             CosmicSurface::Wayland(window) => window

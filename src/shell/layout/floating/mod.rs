@@ -90,6 +90,7 @@ impl FloatingLayout {
 
         let layers = layer_map_for_output(&output);
         let geometry = layers.non_exclusive_zone();
+        mapped.set_bounds(geometry.size);
         let last_geometry = mapped.last_geometry.lock().unwrap().clone();
 
         if let Some(size) = last_geometry.map(|g| g.size) {

@@ -411,6 +411,13 @@ impl CosmicMapped {
         }
     }
 
+    pub fn set_bounds(&self, size: impl Into<Option<Size<i32, Logical>>>) {
+        let size = size.into();
+        for (surface, _) in self.windows() {
+            surface.set_bounds(size.clone())
+        }
+    }
+
     pub fn configure(&self) {
         for window in match &self.element {
             CosmicMappedInternal::Stack(s) => {
