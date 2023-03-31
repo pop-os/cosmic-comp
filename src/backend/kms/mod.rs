@@ -6,7 +6,7 @@ use crate::{
     backend::render::{workspace_elements, CLEAR_COLOR},
     config::OutputConfig,
     shell::Shell,
-    state::{BackendData, ClientState, Common, Data, Fps},
+    state::{BackendData, ClientState, Common, Data, Fps, SurfaceDmabufFeedback},
     utils::prelude::*,
     wayland::{
         handlers::screencopy::{render_session, UserdataExt},
@@ -22,7 +22,7 @@ use smithay::{
             dmabuf::{AnyError, AsDmabuf, Dmabuf, DmabufAllocator},
             gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
             vulkan::{ImageUsageFlags, VulkanAllocator},
-            Allocator, Format,
+            Allocator, Format, Fourcc,
         },
         drm::{
             compositor::{DrmCompositor, PrimaryPlaneElement},
@@ -38,7 +38,7 @@ use smithay::{
             glow::GlowRenderer,
             multigpu::{gbm::GbmGlesBackend, Error as MultiError, GpuManager},
             utils::draw_render_elements,
-            Bind, Blit, Offscreen, Renderer, TextureFilter,
+            Bind, Blit, ImportDma, Offscreen, Renderer, TextureFilter,
         },
         session::{libseat::LibSeatSession, Event as SessionEvent, Session},
         udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
@@ -58,12 +58,15 @@ use smithay::{
         },
         input::Libinput,
         nix::{fcntl::OFlag, sys::stat::dev_t},
-        wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
+        wayland_protocols::wp::{
+            linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1,
+            presentation_time::server::wp_presentation_feedback,
+        },
         wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle, Resource},
     },
     utils::{DeviceFd, Size, Transform},
     wayland::{
-        dmabuf::{get_dmabuf, DmabufGlobal},
+        dmabuf::{get_dmabuf, DmabufFeedbackBuilder, DmabufGlobal},
         relative_pointer::RelativePointerManagerState,
         seat::WaylandFocus,
     },
@@ -119,6 +122,7 @@ pub struct Surface {
     dirty: bool,
     render_timer_token: Option<RegistrationToken>,
     fps: Fps,
+    feedback: HashMap<DrmNode, SurfaceDmabufFeedback>,
 }
 
 pub type GbmDrmCompositor = DrmCompositor<
@@ -420,7 +424,7 @@ impl State {
                     path.display()
                 )
             })?;
-            let formats = egl_context.dmabuf_render_formats().clone();
+            let formats = egl_context.dmabuf_texture_formats().clone();
             (render_node, formats)
             // NOTE: We need the to drop the EGL types here again,
             //  otherwise the EGLDisplay created below might share the same GBM context
@@ -889,11 +893,25 @@ impl Device {
             dirty: false,
             render_timer_token: None,
             fps: Fps::new(renderer.as_mut()),
+            feedback: HashMap::new(),
         };
         self.surfaces.insert(crtc, data);
 
         Ok(output)
     }
+}
+
+pub fn source_node_for_surface(w: &WlSurface, dh: &DisplayHandle) -> Option<DrmNode> {
+    // Lets check the global drm-node the client got either through default-feedback or wl_drm
+    let client = dh.get_client(w.id()).ok()?;
+    if let Some(normal_client) = client.get_data::<ClientState>() {
+        return normal_client.drm_node.clone();
+    }
+    // last but not least all xwayland-surfaces should also share a single node
+    if let Some(xwayland_client) = client.get_data::<XWaylandClientData>() {
+        return xwayland_client.user_data().get::<DrmNode>().cloned();
+    }
+    None
 }
 
 fn render_node_for_output(
@@ -908,16 +926,7 @@ fn render_node_for_output(
         .map(|w| vec![w.clone()])
         .unwrap_or_else(|| workspace.windows().collect::<Vec<_>>())
         .into_iter()
-        .flat_map(|w| {
-            let client = dh.get_client(w.wl_surface()?.id()).ok()?;
-            if let Some(normal_client) = client.get_data::<ClientState>() {
-                return normal_client.drm_node.clone();
-            }
-            if let Some(xwayland_client) = client.get_data::<XWaylandClientData>() {
-                return xwayland_client.user_data().get::<DrmNode>().cloned();
-            }
-            None
-        })
+        .flat_map(|w| w.wl_surface().and_then(|s| source_node_for_surface(&s, dh)))
         .collect::<Vec<_>>();
     if nodes.contains(&target_node) || nodes.is_empty() {
         target_node
@@ -933,6 +942,59 @@ fn render_node_for_output(
             .reduce(|a, b| if a.1 > b.1 { a } else { b })
             .map(|(node, _)| *node)
             .unwrap_or(target_node)
+    }
+}
+
+fn get_surface_dmabuf_feedback(
+    render_node: DrmNode,
+    render_formats: HashSet<Format>,
+    target_formats: HashSet<Format>,
+    compositor: &GbmDrmCompositor,
+) -> SurfaceDmabufFeedback {
+    let combined_formats = render_formats
+        .intersection(&target_formats)
+        .copied()
+        .collect::<HashSet<_>>();
+
+    let surface = compositor.surface();
+    let planes = surface.planes().unwrap();
+    // We limit the scan-out trache to formats we can also render from
+    // so that there is always a fallback render path available in case
+    // the supplied buffer can not be scanned out directly
+    let planes_formats = surface
+        .supported_formats(planes.primary.handle)
+        .unwrap()
+        .into_iter()
+        .chain(
+            planes
+                .overlay
+                .iter()
+                .flat_map(|p| surface.supported_formats(p.handle).unwrap()),
+        )
+        .collect::<HashSet<_>>()
+        .intersection(&combined_formats)
+        .copied()
+        .collect::<Vec<_>>();
+
+    let target_node = surface.device_fd().dev_id().unwrap();
+    let mut builder = DmabufFeedbackBuilder::new(render_node.dev_id(), render_formats);
+    if target_node != render_node.dev_id() && !combined_formats.is_empty() {
+        builder = builder.add_preference_tranche(target_node, None, combined_formats);
+    };
+    let render_feedback = builder.clone().build().unwrap();
+
+    let scanout_feedback = builder
+        .add_preference_tranche(
+            target_node,
+            Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
+            planes_formats,
+        )
+        .build()
+        .unwrap();
+
+    SurfaceDmabufFeedback {
+        render_feedback,
+        scanout_feedback,
     }
 }
 
@@ -1088,7 +1150,34 @@ impl Surface {
                 } else {
                     None
                 };
-                state.send_frames(&self.output, &frame_result.states);
+
+                state.send_frames(&self.output, &frame_result.states, |source_node| {
+                    Some(
+                        self.feedback
+                            .entry(source_node)
+                            .or_insert_with(|| {
+                                let render_formats = api
+                                    .single_renderer(&source_node)
+                                    .unwrap()
+                                    .dmabuf_formats()
+                                    .copied()
+                                    .collect::<HashSet<_>>();
+                                let target_formats = api
+                                    .single_renderer(target_node)
+                                    .unwrap()
+                                    .dmabuf_formats()
+                                    .copied()
+                                    .collect::<HashSet<_>>();
+                                get_surface_dmabuf_feedback(
+                                    source_node,
+                                    render_formats,
+                                    target_formats,
+                                    compositor,
+                                )
+                            })
+                            .clone(),
+                    )
+                });
                 compositor
                     .queue_frame(feedback)
                     .with_context(|| "Failed to submit result for display")?
@@ -1204,6 +1293,7 @@ impl KmsState {
                                 GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
                             ),
                             device.gbm.clone(),
+                            &[Fourcc::Abgr8888, Fourcc::Argb8888],
                             device.formats.clone(),
                             drm.cursor_size(),
                             Some(device.gbm.clone()),
@@ -1287,8 +1377,6 @@ impl KmsState {
     }
 
     pub fn dmabuf_imported(&mut self, global: &DmabufGlobal, dmabuf: Dmabuf) -> Result<()> {
-        use smithay::backend::renderer::ImportDma;
-
         for device in self.devices.values() {
             if device
                 .socket

@@ -178,9 +178,11 @@ impl ScreencopyHandler for State {
                     .get_client(surface.id())
                     .ok()
                     .and_then(|client| {
+                        // Lets check the global drm-node the client got either through default-feedback or wl_drm
                         if let Some(normal_client) = client.get_data::<ClientState>() {
                             return normal_client.drm_node.clone();
                         }
+                        // last but not least all xwayland-surfaces should also share a single node
                         if let Some(xwayland_client) = client.get_data::<XWaylandClientData>() {
                             return xwayland_client.user_data().get::<DrmNode>().cloned();
                         }

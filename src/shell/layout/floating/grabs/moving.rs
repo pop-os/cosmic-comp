@@ -5,6 +5,7 @@ use crate::{
     shell::{
         element::{window::CosmicWindowRenderElement, CosmicMapped, CosmicMappedRenderElement},
         focus::target::{KeyboardFocusTarget, PointerFocusTarget},
+        CosmicSurface,
     },
     utils::prelude::*,
 };
@@ -90,6 +91,10 @@ impl MoveGrabState {
         self.window
             .active_window()
             .send_frame(output, time, throttle, primary_scan_out_output)
+    }
+
+    pub fn window(&self) -> CosmicSurface {
+        self.window.active_window()
     }
 }
 
