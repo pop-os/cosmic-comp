@@ -149,6 +149,10 @@ impl CosmicWindow {
         self.0.with_program(|p| p.window.clone())
     }
 
+    pub fn contains_surface(&self, window: &CosmicSurface) -> bool {
+        self.0.with_program(|p| &p.window == window)
+    }
+
     pub fn offset(&self) -> Point<i32, Logical> {
         let has_ssd = self.0.with_program(|p| p.has_ssd());
         if has_ssd {

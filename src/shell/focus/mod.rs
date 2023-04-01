@@ -216,9 +216,24 @@ impl Common {
                                 continue; // Focus is valid,
                             }
                         }
-                        KeyboardFocusTarget::Popup(_) | KeyboardFocusTarget::Fullscreen(_) => {
-                            continue;
-                        } // Focus is valid
+                        KeyboardFocusTarget::Fullscreen(surface) => {
+                            let workspace = state.common.shell.active_space(&output);
+                            let focus_stack = workspace.focus_stack.get(&seat);
+
+                            if focus_stack
+                                .last()
+                                .map(|m| m.has_active_window(&surface))
+                                .unwrap_or(false)
+                                && workspace.get_fullscreen(&output).is_some()
+                            {
+                                continue; // Focus is valid
+                            } else {
+                                trace!("Wrong Window, focus fixup");
+                            }
+                        }
+                        KeyboardFocusTarget::Popup(_) => {
+                            continue; // Focus is valid
+                        }
                     };
                 } else {
                     trace!("Surface dead, focus fixup");
