@@ -239,7 +239,14 @@ impl Common {
                     trace!("Surface dead, focus fixup");
                 }
             } else {
-                continue;
+                let workspace = state.common.shell.active_space(&output);
+                let focus_stack = workspace.focus_stack.get(&seat);
+
+                if focus_stack.last().is_none() {
+                    continue; // Focus is valid
+                } else {
+                    trace!("No previous window, focus fixup");
+                }
             }
 
             // fixup focus
