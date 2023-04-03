@@ -132,6 +132,14 @@ impl CosmicMapped {
         }
     }
 
+    pub fn has_active_window(&self, window: &CosmicSurface) -> bool {
+        match &self.element {
+            CosmicMappedInternal::Stack(stack) => stack.has_active(window),
+            CosmicMappedInternal::Window(win) => win.contains_surface(window),
+            _ => unreachable!(),
+        }
+    }
+
     pub fn active_window_offset(&self) -> Point<i32, Logical> {
         match &self.element {
             CosmicMappedInternal::Stack(stack) => stack.offset(),

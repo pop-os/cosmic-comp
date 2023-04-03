@@ -124,6 +124,11 @@ impl CosmicStack {
             .with_program(|p| p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].clone())
     }
 
+    pub fn has_active(&self, window: &CosmicSurface) -> bool {
+        self.0
+            .with_program(|p| &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)] == window)
+    }
+
     pub fn set_active(&self, window: &CosmicSurface) {
         self.0.with_program(|p| {
             if let Some(val) = p.windows.lock().unwrap().iter().position(|w| w == window) {
