@@ -331,6 +331,7 @@ pub fn supports_vrr(dev: &impl ControlDevice, conn: connector::Handle) -> Result
     get_property_val(dev, conn, "vrr_capable").map(|(val_type, val)| {
         match val_type.convert_value(val) {
             property::Value::UnsignedRange(res) => res == 1,
+            property::Value::Boolean(res) => res,
             _ => false,
         }
     })
@@ -352,6 +353,7 @@ pub fn set_vrr(
         .and_then(|_| get_property_val(dev, crtc, "VRR_ENABLED"))
         .map(|(val_type, val)| match val_type.convert_value(val) {
             property::Value::UnsignedRange(vrr) => vrr == 1,
+            property::Value::Boolean(vrr) => vrr,
             _ => false,
         })
     } else {
