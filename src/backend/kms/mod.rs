@@ -826,6 +826,7 @@ impl Device {
         let crtc_info = drm.get_crtc(crtc)?;
         let conn_info = drm.get_connector(conn, false)?;
         let vrr = drm_helpers::set_vrr(drm, crtc, conn, false).unwrap_or(false);
+        let max_bpc = drm_helpers::get_max_bpc(drm, conn)?.map(|(_val, range)| range.end.min(16));
         let interface = drm_helpers::interface_name(drm, conn)?;
         let edid_info = drm_helpers::edid_info(drm, conn);
         let mode = crtc_info.mode().unwrap_or_else(|| {
@@ -879,6 +880,7 @@ impl Device {
                 mode: ((output_mode.size.w, output_mode.size.h), Some(refresh_rate)),
                 vrr,
                 position,
+                max_bpc,
                 ..Default::default()
             })
         });
@@ -1268,6 +1270,16 @@ impl KmsState {
                     } else {
                         surface.vrr = drm_helpers::set_vrr(drm, *crtc, conn, output_config.vrr)
                             .unwrap_or(false);
+                        if let Some(bpc) = output_config.max_bpc {
+                            if let Err(err) = drm_helpers::set_max_bpc(drm, conn, bpc) {
+                                warn!(
+                                    ?bpc,
+                                    ?err,
+                                    "Failed to set max_bpc on connector: {}",
+                                    output.name()
+                                );
+                            }
+                        }
                         surface.refresh_rate = drm_helpers::calculate_refresh_rate(*mode);
 
                         let drm_surface = drm.create_surface(*crtc, *mode, &[conn])?;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use smithay::reexports::drm::control::{
     atomic::AtomicModeReq,
     connector::{self, State as ConnectorState},
@@ -9,7 +9,7 @@ use smithay::reexports::drm::control::{
     property, AtomicCommitFlags, Device as ControlDevice, Mode, ModeFlags, PlaneType,
     ResourceHandle,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Range};
 
 pub fn display_configuration(
     device: &mut impl ControlDevice,
@@ -359,4 +359,44 @@ pub fn set_vrr(
     } else {
         Ok(false)
     }
+}
+
+pub fn get_max_bpc(
+    dev: &impl ControlDevice,
+    conn: connector::Handle,
+) -> Result<Option<(u32, Range<u32>)>> {
+    let Some(handle) = get_prop(dev, conn, "max bpc").ok() else {
+        return Ok(None);
+    };
+
+    let info = dev.get_property(handle)?;
+    let range = match info.value_type() {
+        property::ValueType::UnsignedRange(x, y) => (x as u32)..(y as u32),
+        _ => return Err(anyhow!("max bpc has wrong value type")),
+    };
+
+    let value = get_property_val(dev, conn, "max bpc").map(|(val_type, val)| {
+        match val_type.convert_value(val) {
+            property::Value::UnsignedRange(res) => res as u32,
+            _ => unreachable!(),
+        }
+    })?;
+
+    Ok(Some((value, range)))
+}
+
+pub fn set_max_bpc(dev: &impl ControlDevice, conn: connector::Handle, bpc: u32) -> Result<u32> {
+    let (_, range) =
+        get_max_bpc(dev, conn)?.ok_or(anyhow!("max bpc does not exist for connector"))?;
+    dev.set_property(
+        conn,
+        get_prop(dev, conn, "max bpc")?,
+        property::Value::UnsignedRange(bpc.clamp(range.start, range.end) as u64).into(),
+    )
+    .map_err(Into::<anyhow::Error>::into)
+    .and_then(|_| get_property_val(dev, conn, "max bpc"))
+    .map(|(val_type, val)| match val_type.convert_value(val) {
+        property::Value::UnsignedRange(val) => val as u32,
+        _ => unreachable!(),
+    })
 }
