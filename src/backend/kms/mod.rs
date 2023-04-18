@@ -34,7 +34,7 @@ use smithay::{
         renderer::{
             buffer_dimensions,
             damage::{Error as RenderError, OutputNoMode},
-            gles::GlesRenderbuffer,
+            gles::{GlesRenderbuffer, GlesTexture},
             glow::GlowRenderer,
             multigpu::{gbm::GbmGlesBackend, Error as MultiError, GpuManager},
             utils::draw_render_elements,
@@ -1053,7 +1053,7 @@ impl Surface {
         })?;
         self.fps.elements();
 
-        let res = compositor.render_frame::<_, _, GlesRenderbuffer>(
+        let res = compositor.render_frame::<_, _, GlesTexture>(
             &mut renderer,
             &elements,
             CLEAR_COLOR,
