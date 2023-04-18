@@ -3,7 +3,7 @@
 use crate::state::State;
 use smithay::{
     delegate_primary_selection,
-    wayland::primary_selection::{PrimarySelectionHandler, PrimarySelectionState, with_source_metadata}, xwayland::xwm::{XwmId, SelectionType}, reexports::wayland_protocols::wp::primary_selection::zv1::server::zwp_primary_selection_source_v1::ZwpPrimarySelectionSourceV1,
+    wayland::primary_selection::{PrimarySelectionHandler, PrimarySelectionState, with_source_metadata}, xwayland::xwm::{XwmId, SelectionType}, reexports::wayland_protocols::wp::primary_selection::zv1::server::zwp_primary_selection_source_v1::ZwpPrimarySelectionSourceV1, input::Seat,
 };
 use tracing::warn;
 
@@ -16,7 +16,7 @@ impl PrimarySelectionHandler for State {
         &self.common.primary_selection_state
     }
 
-    fn new_selection(&mut self, source: Option<ZwpPrimarySelectionSourceV1>) {
+    fn new_selection(&mut self, source: Option<ZwpPrimarySelectionSourceV1>, _seat: Seat<State>) {
         if let Some(state) = self.common.xwayland_state.as_mut() {
             if let Some(xwm) = state.xwm.as_mut() {
                 if let Some(source) = &source {
@@ -36,6 +36,7 @@ impl PrimarySelectionHandler for State {
         &mut self,
         mime_type: String,
         fd: OwnedFd,
+        _seat: Seat<State>,
         _user_data: &Self::SelectionUserData,
     ) {
         if let Some(xwm) = self

@@ -20,7 +20,7 @@ use smithay::{
         egl::{EGLContext, EGLDevice, EGLDisplay},
         input::{Event, InputEvent},
         renderer::{
-            damage::OutputDamageTracker, gles2::Gles2Renderbuffer, glow::GlowRenderer, Bind,
+            damage::OutputDamageTracker, gles::GlesRenderbuffer, glow::GlowRenderer, Bind,
             ImportDma, ImportEgl,
         },
         vulkan::{version::Version, Instance, PhysicalDevice},
@@ -221,7 +221,7 @@ impl Surface {
             .surface
             .buffer()
             .with_context(|| "Failed to allocate buffer")?;
-        match render::render_output::<_, _, Gles2Renderbuffer, _>(
+        match render::render_output::<_, _, GlesRenderbuffer, _>(
             None,
             renderer,
             buffer.clone(),
@@ -490,11 +490,11 @@ where
             "Unable to initialize bind display to EGL. Some older clients may not work correctly."
         )
     }
-    let dmabuf_formats = renderer.dmabuf_formats().cloned().collect::<Vec<_>>();
 
-    let default_feedback = DmabufFeedbackBuilder::new(render_node.dev_id(), dmabuf_formats.clone())
-        .build()
-        .unwrap();
+    let default_feedback =
+        DmabufFeedbackBuilder::new(render_node.dev_id(), renderer.dmabuf_formats())
+            .build()
+            .unwrap();
     state
         .common
         .dmabuf_state

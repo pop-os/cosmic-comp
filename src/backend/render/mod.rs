@@ -37,8 +37,8 @@ use smithay::{
             buffer_dimensions,
             damage::{Error as RenderError, OutputDamageTracker, OutputNoMode},
             element::{Element, RenderElement, RenderElementStates},
-            gles2::{
-                element::PixelShaderElement, Gles2Error, Gles2PixelProgram, Gles2Renderer, Uniform,
+            gles::{
+                element::PixelShaderElement, GlesError, GlesPixelProgram, GlesRenderer, Uniform,
                 UniformName, UniformType,
             },
             glow::GlowRenderer,
@@ -48,7 +48,10 @@ use smithay::{
     },
     output::Output,
     utils::{Logical, Physical, Point, Rectangle, Size},
-    wayland::dmabuf::get_dmabuf,
+    wayland::{
+        dmabuf::get_dmabuf,
+        shm::{shm_format_to_fourcc, with_buffer_contents},
+    },
 };
 use tracing::warn;
 
@@ -66,12 +69,12 @@ pub static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
 pub static FOCUS_INDICATOR_COLOR: [f32; 4] = [0.580, 0.921, 0.921, 1.0];
 pub static FOCUS_INDICATOR_SHADER: &str = include_str!("./shaders/focus_indicator.frag");
 
-pub struct IndicatorShader(pub Gles2PixelProgram);
+pub struct IndicatorShader(pub GlesPixelProgram);
 struct IndicatorElement(pub RefCell<PixelShaderElement>);
 
 impl IndicatorShader {
-    pub fn get<R: AsGlowRenderer>(renderer: &R) -> Gles2PixelProgram {
-        Borrow::<Gles2Renderer>::borrow(renderer.glow_renderer())
+    pub fn get<R: AsGlowRenderer>(renderer: &R) -> GlesPixelProgram {
+        Borrow::<GlesRenderer>::borrow(renderer.glow_renderer())
             .egl_context()
             .user_data()
             .get::<IndicatorShader>()
@@ -93,7 +96,7 @@ impl IndicatorShader {
             geo.size + Size::from(thickness_size),
         );
 
-        let user_data = Borrow::<Gles2Renderer>::borrow(renderer.glow_renderer())
+        let user_data = Borrow::<GlesRenderer>::borrow(renderer.glow_renderer())
             .egl_context()
             .user_data();
 
@@ -129,9 +132,9 @@ impl IndicatorShader {
     }
 }
 
-pub fn init_shaders<R: AsGlowRenderer>(renderer: &mut R) -> Result<(), Gles2Error> {
+pub fn init_shaders<R: AsGlowRenderer>(renderer: &mut R) -> Result<(), GlesError> {
     let glow_renderer = renderer.glow_renderer_mut();
-    let gles_renderer: &mut Gles2Renderer = glow_renderer.borrow_mut();
+    let gles_renderer: &mut GlesRenderer = glow_renderer.borrow_mut();
 
     let indicator_shader = gles_renderer.compile_custom_pixel_shader(
         FOCUS_INDICATOR_SHADER,
@@ -234,7 +237,7 @@ pub fn workspace_elements<R>(
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: Clone + 'static,
-    <R as Renderer>::Error: From<Gles2Error>,
+    <R as Renderer>::Error: From<GlesError>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
 {
@@ -333,7 +336,7 @@ where
         + Blit<Source>
         + AsGlowRenderer,
     <R as Renderer>::TextureId: Clone + 'static,
-    <R as Renderer>::Error: From<Gles2Error>,
+    <R as Renderer>::Error: From<GlesError>,
     CosmicElement<R>: RenderElement<R>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
@@ -383,7 +386,7 @@ where
         + Blit<Source>
         + AsGlowRenderer,
     <R as Renderer>::TextureId: Clone + 'static,
-    <R as Renderer>::Error: From<Gles2Error>,
+    <R as Renderer>::Error: From<GlesError>,
     CosmicElement<R>: RenderElement<R>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
@@ -456,8 +459,12 @@ where
                                 renderer.bind(dmabuf).map_err(RenderError::Rendering)?;
                             } else {
                                 let size = buffer_dimensions(buffer).unwrap();
+                                let format =
+                                            with_buffer_contents(buffer, |_, _, data| shm_format_to_fourcc(data.format))
+                                                .map_err(|_| OutputNoMode)? // eh, we have to do some error
+                                                .expect("We should be able to convert all hardcoded shm screencopy formats");
                                 let render_buffer = renderer
-                                    .create_buffer(size)
+                                    .create_buffer(format, size)
                                     .map_err(RenderError::Rendering)?;
                                 renderer
                                     .bind(render_buffer)

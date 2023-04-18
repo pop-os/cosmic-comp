@@ -28,6 +28,7 @@ use iced_softbuffer::{
 use ordered_float::OrderedFloat;
 use smithay::{
     backend::{
+        allocator::Fourcc,
         input::{ButtonState, KeyState},
         renderer::{
             element::{
@@ -222,7 +223,8 @@ impl<P: Program + Send + 'static> IcedElement<P> {
                 .to_f64()
                 .to_buffer(**scale, Transform::Normal)
                 .to_i32_round();
-            *buffer = MemoryRenderBuffer::new(buffer_size, 1, Transform::Normal, None);
+            *buffer =
+                MemoryRenderBuffer::new(Fourcc::Argb8888, buffer_size, 1, Transform::Normal, None);
             *needs_redraw = true;
         }
         internal_ref.update(true);
@@ -488,7 +490,13 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
             internal.buffers.insert(
                 OrderedFloat(scale),
                 (
-                    MemoryRenderBuffer::new(buffer_size, 1, Transform::Normal, None),
+                    MemoryRenderBuffer::new(
+                        Fourcc::Argb8888,
+                        buffer_size,
+                        1,
+                        Transform::Normal,
+                        None,
+                    ),
                     true,
                 ),
             );
@@ -532,7 +540,13 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
             internal_ref.buffers.insert(
                 scale,
                 (
-                    MemoryRenderBuffer::new(buffer_size, 1, Transform::Normal, None),
+                    MemoryRenderBuffer::new(
+                        Fourcc::Argb8888,
+                        buffer_size,
+                        1,
+                        Transform::Normal,
+                        None,
+                    ),
                     true,
                 ),
             );

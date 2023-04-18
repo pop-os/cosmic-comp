@@ -57,7 +57,7 @@ impl DataDeviceHandler for State {
         &self.common.data_device_state
     }
 
-    fn new_selection(&mut self, source: Option<WlDataSource>) {
+    fn new_selection(&mut self, source: Option<WlDataSource>, _seat: Seat<State>) {
         if let Some(state) = self.common.xwayland_state.as_mut() {
             if let Some(xwm) = state.xwm.as_mut() {
                 if let Some(source) = &source {
@@ -80,6 +80,7 @@ impl DataDeviceHandler for State {
         &mut self,
         mime_type: String,
         fd: OwnedFd,
+        _seat: Seat<State>,
         _user_data: &Self::SelectionUserData,
     ) {
         if let Some(xwm) = self

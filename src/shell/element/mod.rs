@@ -12,7 +12,7 @@ use smithay::{
         input::KeyState,
         renderer::{
             element::{AsRenderElements, Element, RenderElement, UnderlyingStorage},
-            gles2::element::PixelShaderElement,
+            gles::element::PixelShaderElement,
             glow::GlowRenderer,
             multigpu::Error as MultiError,
             ImportAll, ImportMem, Renderer,

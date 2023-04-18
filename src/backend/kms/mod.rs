@@ -34,7 +34,7 @@ use smithay::{
         renderer::{
             buffer_dimensions,
             damage::{Error as RenderError, OutputNoMode},
-            gles2::Gles2Renderbuffer,
+            gles::GlesRenderbuffer,
             glow::GlowRenderer,
             multigpu::{gbm::GbmGlesBackend, Error as MultiError, GpuManager},
             utils::draw_render_elements,
@@ -69,6 +69,7 @@ use smithay::{
         dmabuf::{get_dmabuf, DmabufFeedbackBuilder, DmabufGlobal},
         relative_pointer::RelativePointerManagerState,
         seat::WaylandFocus,
+        shm::{shm_format_to_fourcc, with_buffer_contents},
     },
     xwayland::XWaylandClientData,
 };
@@ -1052,7 +1053,7 @@ impl Surface {
         })?;
         self.fps.elements();
 
-        let res = compositor.render_frame::<_, _, Gles2Renderbuffer>(
+        let res = compositor.render_frame::<_, _, GlesRenderbuffer>(
             &mut renderer,
             &elements,
             CLEAR_COLOR,
@@ -1083,9 +1084,13 @@ impl Surface {
                                         renderer.bind(dmabuf).map_err(RenderError::Rendering)?;
                                     } else {
                                         let size = buffer_dimensions(buffer).unwrap();
+                                        let format =
+                                            with_buffer_contents(buffer, |_, _, data| shm_format_to_fourcc(data.format))
+                                                .map_err(|_| OutputNoMode)? // eh, we have to do some error
+                                                .expect("We should be able to convert all hardcoded shm screencopy formats");
                                         let render_buffer =
-                                            Offscreen::<Gles2Renderbuffer>::create_buffer(
-                                                renderer, size,
+                                            Offscreen::<GlesRenderbuffer>::create_buffer(
+                                                renderer, format, size,
                                             )
                                             .map_err(RenderError::Rendering)?;
                                         renderer
@@ -1160,13 +1165,11 @@ impl Surface {
                                     .single_renderer(&source_node)
                                     .unwrap()
                                     .dmabuf_formats()
-                                    .copied()
                                     .collect::<HashSet<_>>();
                                 let target_formats = api
                                     .single_renderer(target_node)
                                     .unwrap()
                                     .dmabuf_formats()
-                                    .copied()
                                     .collect::<HashSet<_>>();
                                 get_surface_dmabuf_feedback(
                                     source_node,
@@ -1293,7 +1296,12 @@ impl KmsState {
                                 GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
                             ),
                             device.gbm.clone(),
-                            &[Fourcc::Abgr8888, Fourcc::Argb8888],
+                            &[
+                                Fourcc::Abgr2101010,
+                                Fourcc::Argb2101010,
+                                Fourcc::Abgr8888,
+                                Fourcc::Argb8888,
+                            ],
                             device.formats.clone(),
                             drm.cursor_size(),
                             Some(device.gbm.clone()),

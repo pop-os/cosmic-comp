@@ -2,12 +2,15 @@
 
 use crate::utils::prelude::*;
 use smithay::{
-    backend::renderer::{
-        element::{
-            surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
-            texture::{TextureBuffer, TextureRenderElement},
+    backend::{
+        allocator::Fourcc,
+        renderer::{
+            element::{
+                surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
+                texture::{TextureBuffer, TextureRenderElement},
+            },
+            ImportAll, ImportMem, Renderer,
         },
-        ImportAll, ImportMem, Renderer,
     },
     input::{
         pointer::{CursorImageAttributes, CursorImageStatus},
@@ -264,6 +267,7 @@ where
                 let texture = TextureBuffer::from_memory(
                     renderer,
                     &frame.pixels_rgba,
+                    Fourcc::Abgr8888,
                     (frame.width as i32, frame.height as i32),
                     false,
                     integer_scale as i32,

@@ -1,4 +1,5 @@
 use std::{
+    borrow::Borrow,
     cell::RefCell,
     collections::HashSet,
     ops::{Deref, DerefMut},
@@ -16,12 +17,12 @@ use smithay::{
         egl::EGLDevice,
         renderer::{
             buffer_dimensions, buffer_type,
-            damage::{Error as DTError, OutputDamageTracker},
+            damage::{Error as DTError, OutputDamageTracker, OutputNoMode},
             element::{
                 surface::WaylandSurfaceRenderElement, AsRenderElements, RenderElement,
                 RenderElementStates,
             },
-            gles2::{Gles2Error, Gles2Renderbuffer},
+            gles::{Capability, GlesError, GlesRenderbuffer, GlesRenderer},
             Bind, Blit, BufferType, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
         },
     },
@@ -35,7 +36,7 @@ use smithay::{
     wayland::{
         dmabuf::get_dmabuf,
         seat::WaylandFocus,
-        shm::{with_buffer_contents, with_buffer_contents_mut},
+        shm::{shm_format_to_fourcc, with_buffer_contents, with_buffer_contents_mut},
     },
     xwayland::XWaylandClientData,
 };
@@ -209,6 +210,24 @@ impl ScreencopyHandler for State {
                 stride: size.w as u32 * 4,
             },
         ];
+        if (renderer as &dyn Borrow<GlesRenderer>)
+            .borrow()
+            .capabilities()
+            .contains(&Capability::ColorTransformations)
+        {
+            formats.extend([
+                BufferInfo::Shm {
+                    format: ShmFormat::Abgr2101010,
+                    size,
+                    stride: size.w as u32 * 4,
+                },
+                BufferInfo::Shm {
+                    format: ShmFormat::Xbgr2101010,
+                    size,
+                    stride: size.w as u32 * 4,
+                },
+            ]);
+        }
 
         if let Some(node) = EGLDevice::device_for_display(renderer.egl_context().display())
             .ok()
@@ -298,7 +317,10 @@ impl ScreencopyHandler for State {
 
         if let Some(BufferType::Shm) = buffer_type(&params.buffer) {
             if with_buffer_contents(&params.buffer, |_, _, info| {
-                info.format != ShmFormat::Abgr8888 && info.format != ShmFormat::Xbgr8888
+                info.format != ShmFormat::Abgr8888
+                    && info.format != ShmFormat::Xbgr8888
+                    && info.format != ShmFormat::Abgr2101010
+                    && info.format != ShmFormat::Xbgr2101010
             })
             .unwrap()
             {
@@ -449,6 +471,24 @@ fn formats_for_output(
             stride: mode.w as u32 * 4,
         },
     ];
+    if (renderer as &dyn Borrow<GlesRenderer>)
+        .borrow()
+        .capabilities()
+        .contains(&Capability::ColorTransformations)
+    {
+        formats.extend([
+            BufferInfo::Shm {
+                format: ShmFormat::Abgr2101010,
+                size: mode,
+                stride: mode.w as u32 * 4,
+            },
+            BufferInfo::Shm {
+                format: ShmFormat::Xbgr2101010,
+                size: mode,
+                stride: mode.w as u32 * 4,
+            },
+        ]);
+    }
 
     if let Some(node) = EGLDevice::device_for_display(renderer.egl_context().display())
         .ok()
@@ -509,6 +549,8 @@ where
             let width = data.width as i32;
             let height = data.height as i32;
             let stride = data.stride as i32;
+            let format = shm_format_to_fourcc(data.format)
+                .expect("We should be able to convert all hardcoded shm screencopy formats");
 
             // number of bytes per pixel
             // TODO: compute from data.format
@@ -517,8 +559,8 @@ where
             // ensure consistency, the SHM handler of smithay should ensure this
             assert!((offset + (height - 1) * stride + width * pixelsize) as usize <= len);
 
-            let mapping =
-                renderer.copy_framebuffer(Rectangle::from_loc_and_size((0, 0), buffer_size))?;
+            let mapping = renderer
+                .copy_framebuffer(Rectangle::from_loc_and_size((0, 0), buffer_size), format)?;
             let gl_data = renderer.map_texture(&mapping)?;
             assert!((width * height * pixelsize) as usize <= gl_data.len());
 
@@ -613,11 +655,11 @@ pub fn render_output_to_buffer(
             + ImportMem
             + ExportMem
             + Bind<Dmabuf>
-            + Offscreen<Gles2Renderbuffer>
+            + Offscreen<GlesRenderbuffer>
             + Blit<Dmabuf>
             + AsGlowRenderer,
         <R as Renderer>::TextureId: Clone + 'static,
-        <R as Renderer>::Error: From<Gles2Error>,
+        <R as Renderer>::Error: From<GlesError>,
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
@@ -628,7 +670,7 @@ pub fn render_output_to_buffer(
         };
 
         if let Ok(dmabuf) = get_dmabuf(buffer) {
-            render_output::<_, _, Gles2Renderbuffer, Dmabuf>(
+            render_output::<_, _, GlesRenderbuffer, Dmabuf>(
                 node,
                 renderer,
                 dmabuf,
@@ -642,9 +684,14 @@ pub fn render_output_to_buffer(
             )
         } else {
             let size = buffer_dimensions(buffer).unwrap();
-            let render_buffer = Offscreen::<Gles2Renderbuffer>::create_buffer(renderer, size)
-                .map_err(DTError::Rendering)?;
-            render_output::<_, _, Gles2Renderbuffer, Dmabuf>(
+            let format =
+                with_buffer_contents(buffer, |_, _, data| shm_format_to_fourcc(data.format))
+                    .map_err(|_| DTError::OutputNoMode(OutputNoMode))? // eh, we have to do some error
+                    .expect("We should be able to convert all hardcoded shm screencopy formats");
+            let render_buffer =
+                Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, size)
+                    .map_err(DTError::Rendering)?;
+            render_output::<_, _, GlesRenderbuffer, Dmabuf>(
                 node,
                 renderer,
                 render_buffer,
@@ -740,11 +787,11 @@ pub fn render_workspace_to_buffer(
             + ImportMem
             + ExportMem
             + Bind<Dmabuf>
-            + Offscreen<Gles2Renderbuffer>
+            + Offscreen<GlesRenderbuffer>
             + Blit<Dmabuf>
             + AsGlowRenderer,
         <R as Renderer>::TextureId: Clone + 'static,
-        <R as Renderer>::Error: From<Gles2Error>,
+        <R as Renderer>::Error: From<GlesError>,
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
@@ -754,7 +801,7 @@ pub fn render_workspace_to_buffer(
             ScreencopyCursorMode::Captured(_) | ScreencopyCursorMode::None => CursorMode::None,
         };
         if let Ok(dmabuf) = get_dmabuf(buffer) {
-            render_workspace::<_, _, Gles2Renderbuffer, Dmabuf>(
+            render_workspace::<_, _, GlesRenderbuffer, Dmabuf>(
                 node,
                 renderer,
                 dmabuf,
@@ -770,9 +817,14 @@ pub fn render_workspace_to_buffer(
             )
         } else {
             let size = buffer_dimensions(buffer).unwrap();
-            let render_buffer = Offscreen::<Gles2Renderbuffer>::create_buffer(renderer, size)
-                .map_err(DTError::Rendering)?;
-            render_workspace::<_, _, Gles2Renderbuffer, Dmabuf>(
+            let format =
+                with_buffer_contents(buffer, |_, _, data| shm_format_to_fourcc(data.format))
+                    .map_err(|_| DTError::OutputNoMode(OutputNoMode))? // eh, we have to do some error
+                    .expect("We should be able to convert all hardcoded shm screencopy formats");
+            let render_buffer =
+                Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, size)
+                    .map_err(DTError::Rendering)?;
+            render_workspace::<_, _, GlesRenderbuffer, Dmabuf>(
                 node,
                 renderer,
                 render_buffer,
@@ -881,11 +933,11 @@ pub fn render_window_to_buffer(
             + ImportMem
             + ExportMem
             + Bind<Dmabuf>
-            + Offscreen<Gles2Renderbuffer>
+            + Offscreen<GlesRenderbuffer>
             + Blit<Dmabuf>
             + AsGlowRenderer,
         <R as Renderer>::TextureId: Clone + 'static,
-        <R as Renderer>::Error: From<Gles2Error>,
+        <R as Renderer>::Error: From<GlesError>,
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
@@ -942,8 +994,13 @@ pub fn render_window_to_buffer(
             renderer.bind(dmabuf).map_err(DTError::Rendering)?;
         } else {
             let size = buffer_dimensions(buffer).unwrap();
-            let render_buffer = Offscreen::<Gles2Renderbuffer>::create_buffer(renderer, size)
-                .map_err(DTError::Rendering)?;
+            let format =
+                with_buffer_contents(buffer, |_, _, data| shm_format_to_fourcc(data.format))
+                    .map_err(|_| DTError::OutputNoMode(OutputNoMode))? // eh, we have to do some error
+                    .expect("We should be able to convert all hardcoded shm screencopy formats");
+            let render_buffer =
+                Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, size)
+                    .map_err(DTError::Rendering)?;
             renderer.bind(render_buffer).map_err(DTError::Rendering)?;
         }
 
