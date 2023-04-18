@@ -825,7 +825,7 @@ impl Device {
         let drm = &mut self.drm;
         let crtc_info = drm.get_crtc(crtc)?;
         let conn_info = drm.get_connector(conn, false)?;
-        let vrr = drm_helpers::set_vrr(drm, crtc, conn, true).unwrap_or(false);
+        let vrr = drm_helpers::set_vrr(drm, crtc, conn, false).unwrap_or(false);
         let interface = drm_helpers::interface_name(drm, conn)?;
         let edid_info = drm_helpers::edid_info(drm, conn);
         let mode = crtc_info.mode().unwrap_or_else(|| {
