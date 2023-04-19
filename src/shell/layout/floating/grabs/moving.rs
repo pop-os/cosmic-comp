@@ -222,7 +222,7 @@ impl MoveSurfaceGrab {
         // No more buttons are pressed, release the grab.
         let output = self.seat.active_output();
 
-        if let Some(grab_state) = self
+        let offset = if let Some(grab_state) = self
             .seat
             .user_data()
             .get::<SeatMoveGrabState>()
@@ -266,11 +266,27 @@ impl MoveSurfaceGrab {
                     .active_space_mut(&output)
                     .floating_layer
                     .map_internal(grab_state.window, &output, Some(window_location + offset));
+                Some(grab_state.window_offset)
+            } else {
+                None
             }
-        }
+        } else {
+            None
+        };
 
         handle.unset_grab(state, serial, time);
         if self.window.alive() {
+            if let Some(offset) = offset {
+                handle.motion(
+                    state,
+                    Some((PointerFocusTarget::from(self.window.clone()), offset)),
+                    &MotionEvent {
+                        location: handle.current_location(),
+                        serial: serial,
+                        time: time,
+                    },
+                );
+            }
             Common::set_focus(
                 state,
                 Some(&KeyboardFocusTarget::from(self.window.clone())),
