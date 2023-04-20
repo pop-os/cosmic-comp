@@ -435,6 +435,7 @@ impl PointerTarget<State> for CosmicWindow {
                     PointerTarget::enter(&p.window, seat, data, &event)
                 }
             } else {
+                p.swap_focus(Focus::Window);
                 PointerTarget::enter(&p.window, seat, data, event)
             }
             false
