@@ -244,6 +244,16 @@ impl MoveSurfaceGrab {
                         .common
                         .shell
                         .toplevel_info_state
+                        .toplevel_enter_workspace(&window, &workspace_handle);
+                    state
+                        .common
+                        .shell
+                        .toplevel_info_state
+                        .toplevel_enter_output(&window, &output);
+                    state
+                        .common
+                        .shell
+                        .foreign_toplevel_info_state
                         .toplevel_enter_output(&window, &output);
                 }
 

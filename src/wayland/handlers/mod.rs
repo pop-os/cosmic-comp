@@ -5,6 +5,7 @@ pub mod compositor;
 pub mod data_device;
 pub mod decoration;
 pub mod dmabuf;
+pub mod ext_foreign_toplevel_info;
 pub mod keyboard_shortcuts_inhibit;
 pub mod layer_shell;
 pub mod output;

@@ -21,7 +21,7 @@ use crate::{
     },
     state::State,
     utils::prelude::*,
-    wayland::protocols::toplevel_info::ToplevelInfoState,
+    wayland::protocols::{ext_foreign_toplevel_list, toplevel_info::ToplevelInfoState},
 };
 
 mod grabs;
@@ -45,6 +45,10 @@ impl FloatingLayout {
         &mut self,
         output: &Output,
         toplevel_info: &mut ToplevelInfoState<State, CosmicSurface>,
+        foreign_toplevel_info: &mut ext_foreign_toplevel_list::ToplevelInfoState<
+            State,
+            CosmicSurface,
+        >,
     ) {
         let windows = self
             .space
@@ -54,6 +58,7 @@ impl FloatingLayout {
         for window in &windows {
             for (toplevel, _) in window.windows() {
                 toplevel_info.toplevel_leave_output(&toplevel, output);
+                foreign_toplevel_info.toplevel_leave_output(&toplevel, output);
             }
         }
         self.space.unmap_output(output);
@@ -62,6 +67,7 @@ impl FloatingLayout {
             for output in self.space.outputs_for_element(&window) {
                 for (toplevel, _) in window.windows() {
                     toplevel_info.toplevel_enter_output(&toplevel, &output);
+                    foreign_toplevel_info.toplevel_enter_output(&toplevel, &output);
                 }
             }
         }

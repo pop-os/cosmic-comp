@@ -429,6 +429,7 @@ dependencies = [
  "png",
  "puffin",
  "puffin_egui",
+ "rand",
  "regex",
  "renderdoc",
  "ron 0.7.1",
