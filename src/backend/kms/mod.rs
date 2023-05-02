@@ -19,13 +19,13 @@ use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::Fai
 use smithay::{
     backend::{
         allocator::{
-            dmabuf::{AnyError, AsDmabuf, Dmabuf, DmabufAllocator},
+            dmabuf::{AnyError, Dmabuf, DmabufAllocator},
             gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
             vulkan::{ImageUsageFlags, VulkanAllocator},
             Allocator, Format, Fourcc,
         },
         drm::{
-            compositor::{DrmCompositor, PrimaryPlaneElement},
+            compositor::{BlitFrameResultError, DrmCompositor, FrameError},
             DrmDevice, DrmDeviceFd, DrmEvent, DrmEventTime, DrmNode, NodeType,
         },
         egl::{EGLContext, EGLDevice, EGLDisplay},
@@ -34,11 +34,11 @@ use smithay::{
         renderer::{
             buffer_dimensions,
             damage::{Error as RenderError, OutputNoMode},
+            element::Element,
             gles::{GlesRenderbuffer, GlesTexture},
             glow::GlowRenderer,
             multigpu::{gbm::GbmGlesBackend, Error as MultiError, GpuManager},
-            utils::draw_render_elements,
-            Bind, Blit, ImportDma, Offscreen, Renderer, TextureFilter,
+            Bind, ImportDma, Offscreen,
         },
         session::{libseat::LibSeatSession, Event as SessionEvent, Session},
         udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
@@ -1055,22 +1055,26 @@ impl Surface {
         })?;
         self.fps.elements();
 
-        let res = compositor.render_frame::<_, _, GlesTexture>(
-            &mut renderer,
-            &elements,
-            CLEAR_COLOR,
-        );
+        let res =
+            compositor.render_frame::<_, _, GlesTexture>(&mut renderer, &elements, CLEAR_COLOR);
         self.fps.render();
 
         match res {
             Ok(frame_result) => {
+                let feedback = if frame_result.damage.is_some() {
+                    Some(state.take_presentation_feedback(&self.output, &frame_result.states))
+                } else {
+                    None
+                };
+
+                match compositor.queue_frame(feedback) {
+                    Ok(()) | Err(FrameError::EmptyFrame) => {}
+                    Err(err) => {
+                        return Err(err).with_context(|| "Failed to submit result for display")
+                    }
+                };
+
                 if let Some(screencopy) = screencopy {
-                    let primary_element = frame_result.primary_element;
-                    let mut plane_elements = frame_result
-                        .cursor_element
-                        .into_iter()
-                        .chain(frame_result.overlay_elements.into_iter())
-                        .collect::<Vec<_>>();
                     for (session, params) in screencopy {
                         match render_session(
                             Some(*render_node),
@@ -1085,7 +1089,9 @@ impl Surface {
                                     if let Ok(dmabuf) = get_dmabuf(buffer) {
                                         renderer.bind(dmabuf).map_err(RenderError::Rendering)?;
                                     } else {
-                                        let size = buffer_dimensions(buffer).unwrap();
+                                        let size = buffer_dimensions(buffer).ok_or(
+                                            RenderError::Rendering(MultiError::ImportFailed),
+                                        )?;
                                         let format =
                                             with_buffer_contents(buffer, |_, _, data| shm_format_to_fourcc(data.format))
                                                 .map_err(|_| OutputNoMode)? // eh, we have to do some error
@@ -1099,43 +1105,30 @@ impl Surface {
                                             .bind(render_buffer)
                                             .map_err(RenderError::Rendering)?;
                                     }
-                                    match primary_element {
-                                        PrimaryPlaneElement::Swapchain { slot, .. } => {
-                                            let source = slot.export().map_err(|_| {
-                                                // TODO AnyError::from
-                                                RenderError::Rendering(MultiError::ImportFailed)
-                                            })?;
-                                            for rect in damage {
-                                                renderer
-                                                    .blit_from(
-                                                        source.clone(),
-                                                        *rect,
-                                                        *rect,
-                                                        TextureFilter::Nearest,
-                                                    )
-                                                    .map_err(RenderError::Rendering)?;
-                                            }
-                                        }
-                                        PrimaryPlaneElement::Element(e) => plane_elements.push(e),
-                                    };
 
                                     let (output_size, output_scale, output_transform) = (
                                         self.output.current_mode().ok_or(OutputNoMode)?.size,
                                         self.output.current_scale().fractional_scale(),
                                         self.output.current_transform(),
                                     );
-                                    {
-                                        let mut frame = renderer
-                                            .render(output_size, output_transform)
-                                            .map_err(RenderError::Rendering)?;
-                                        draw_render_elements(
-                                            &mut frame,
+                                    frame_result
+                                        .blit_frame_result(
+                                            output_size,
+                                            output_transform,
                                             output_scale,
-                                            &plane_elements,
-                                            damage,
+                                            renderer,
+                                            damage.iter().copied(),
+                                            // TODO: Filter cursor element
+                                            elements.iter().map(|e| e.id().clone()),
                                         )
-                                        .map_err(RenderError::Rendering)?;
-                                    }
+                                        .map_err(|err| match err {
+                                            BlitFrameResultError::Rendering(err) => {
+                                                RenderError::Rendering(err)
+                                            }
+                                            BlitFrameResultError::Export(_) => {
+                                                RenderError::Rendering(MultiError::DeviceMissing)
+                                            }
+                                        })?;
                                 }
 
                                 Ok(res)
@@ -1151,12 +1144,6 @@ impl Surface {
                     }
                     self.fps.screencopy();
                 }
-
-                let feedback = if frame_result.damage.is_some() {
-                    Some(state.take_presentation_feedback(&self.output, &frame_result.states))
-                } else {
-                    None
-                };
 
                 state.send_frames(&self.output, &frame_result.states, |source_node| {
                     Some(
@@ -1183,9 +1170,6 @@ impl Surface {
                             .clone(),
                     )
                 });
-                compositor
-                    .queue_frame(feedback)
-                    .with_context(|| "Failed to submit result for display")?
             }
             Err(err) => {
                 compositor.reset_buffers();
