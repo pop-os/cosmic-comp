@@ -11,7 +11,7 @@ use smithay::{
 
 #[cfg(feature = "debug")]
 use smithay::backend::renderer::{
-    element::texture::TextureRenderElement, gles2::Gles2Texture, multigpu::Error as MultiError,
+    element::texture::TextureRenderElement, gles::GlesTexture, multigpu::Error as MultiError,
 };
 
 use super::{cursor::CursorRenderElement, GlMultiFrame, GlMultiRenderer};
@@ -26,7 +26,7 @@ where
     Cursor(CursorRenderElement<R>),
     MoveGrab(CosmicMappedRenderElement<R>),
     #[cfg(feature = "debug")]
-    Egui(TextureRenderElement<Gles2Texture>),
+    Egui(TextureRenderElement<GlesTexture>),
 }
 
 impl<R> Element for CosmicElement<R>
@@ -230,13 +230,13 @@ where
 }
 
 #[cfg(feature = "debug")]
-impl<R> From<TextureRenderElement<Gles2Texture>> for CosmicElement<R>
+impl<R> From<TextureRenderElement<GlesTexture>> for CosmicElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
-    fn from(elem: TextureRenderElement<Gles2Texture>) -> Self {
+    fn from(elem: TextureRenderElement<GlesTexture>) -> Self {
         Self::Egui(elem)
     }
 }
