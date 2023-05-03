@@ -100,8 +100,9 @@ impl State {
         match xwayland.start(
             self.common.event_loop_handle.clone(),
             None,
-            std::iter::empty::<(OsString, OsString)>(),
             //vec![("WAYLAND_DEBUG", "client")].into_iter(),
+            std::iter::empty::<(OsString, OsString)>(),
+            true,
             |user_data| {
                 if let Some(node) = render_node {
                     user_data.insert_if_missing(|| node);
