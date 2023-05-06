@@ -9,7 +9,7 @@ use smithay::{
     wayland::primary_selection::{
         with_source_metadata, PrimarySelectionHandler, PrimarySelectionState,
     },
-    xwayland::xwm::SelectionType,
+    xwayland::xwm::SelectionType, input::Seat,
 };
 use smithay::
     reexports::wayland_protocols::wp::primary_selection::zv1::server::zwp_primary_selection_source_v1::ZwpPrimarySelectionSourceV1;
