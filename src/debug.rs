@@ -15,7 +15,7 @@ use smithay::{
         drm::DrmNode,
         renderer::{
             element::texture::TextureRenderElement,
-            gles2::{Gles2Error, Gles2Texture},
+            gles::{GlesError, GlesTexture},
             glow::GlowRenderer,
         },
     },
@@ -34,7 +34,7 @@ pub fn profiler_ui(
     renderer: &mut GlowRenderer,
     area: Rectangle<i32, Logical>,
     scale: f64,
-) -> Result<Option<TextureRenderElement<Gles2Texture>>, Gles2Error> {
+) -> Result<Option<TextureRenderElement<GlesTexture>>, GlesError> {
     if !state.egui.active {
         return Ok(None);
     }
@@ -61,7 +61,7 @@ pub fn fps_ui(
     fps: &mut Fps,
     area: Rectangle<i32, Logical>,
     scale: f64,
-) -> Result<TextureRenderElement<Gles2Texture>, Gles2Error> {
+) -> Result<TextureRenderElement<GlesTexture>, GlesError> {
     use egui::widgets::plot::{Bar, BarChart, Legend, Plot};
 
     let (max, min, avg, avg_fps) = (

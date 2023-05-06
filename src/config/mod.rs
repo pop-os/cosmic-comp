@@ -100,6 +100,8 @@ pub struct OutputConfig {
     pub position: (i32, i32),
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_bpc: Option<u32>,
 }
 
 impl Default for OutputConfig {
@@ -111,6 +113,7 @@ impl Default for OutputConfig {
             transform: Transform::Normal,
             position: (0, 0),
             enabled: true,
+            max_bpc: None,
         }
     }
 }

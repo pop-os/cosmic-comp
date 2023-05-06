@@ -60,7 +60,7 @@ impl DataDeviceHandler for State {
         &self.common.data_device_state
     }
 
-    fn new_selection(&mut self, source: Option<WlDataSource>) {
+    fn new_selection(&mut self, source: Option<WlDataSource>, _seat: Seat<State>) {
         let Ok(mime_types) = source
             .map(|s| with_source_metadata(&s, |metadata| metadata.mime_types.clone()))
             .transpose() else { return };
@@ -100,6 +100,7 @@ impl DataDeviceHandler for State {
         &mut self,
         mime_type: String,
         fd: OwnedFd,
+        _seat: Seat<State>,
         _user_data: &Self::SelectionUserData,
     ) {
         let seat = self.common.last_active_seat();

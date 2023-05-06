@@ -13,7 +13,7 @@ use smithay::{
     backend::{
         egl::EGLDevice,
         renderer::{
-            damage::OutputDamageTracker, gles2::Gles2Renderbuffer, glow::GlowRenderer, ImportDma,
+            damage::OutputDamageTracker, gles::GlesRenderbuffer, glow::GlowRenderer, ImportDma,
             ImportEgl,
         },
         winit::{self, WinitEvent, WinitGraphicsBackend, WinitVirtualDevice},
@@ -54,7 +54,7 @@ impl WinitState {
         let age = self.backend.buffer_age().unwrap_or(0);
 
         let surface = self.backend.egl_surface();
-        match render::render_output::<_, _, Gles2Renderbuffer, _>(
+        match render::render_output::<_, _, GlesRenderbuffer, _>(
             None,
             self.backend.renderer(),
             surface.clone(),
@@ -273,11 +273,7 @@ fn init_egl_client_side(
     let render_node = EGLDevice::device_for_display(renderer.renderer().egl_context().display())
         .and_then(|device| device.try_get_render_node());
 
-    let dmabuf_formats = renderer
-        .renderer()
-        .dmabuf_formats()
-        .cloned()
-        .collect::<Vec<_>>();
+    let dmabuf_formats = renderer.renderer().dmabuf_formats().collect::<Vec<_>>();
     let dmabuf_default_feedback = match render_node {
         Ok(Some(node)) => {
             let dmabuf_default_feedback =

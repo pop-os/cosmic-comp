@@ -24,7 +24,7 @@ impl PrimarySelectionHandler for State {
         &self.common.primary_selection_state
     }
 
-    fn new_selection(&mut self, source: Option<ZwpPrimarySelectionSourceV1>) {
+    fn new_selection(&mut self, source: Option<ZwpPrimarySelectionSourceV1>, _seat: Seat<State>) {
         let Ok(mime_types) = source
             .map(|s| with_source_metadata(&s, |metadata| metadata.mime_types.clone()))
             .transpose() else { return };
@@ -64,6 +64,7 @@ impl PrimarySelectionHandler for State {
         &mut self,
         mime_type: String,
         fd: OwnedFd,
+        _seat: Seat<State>,
         _user_data: &Self::SelectionUserData,
     ) {
         let seat = self.common.last_active_seat();

@@ -19,13 +19,13 @@ use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::Fai
 use smithay::{
     backend::{
         allocator::{
-            dmabuf::{AnyError, AsDmabuf, Dmabuf, DmabufAllocator},
+            dmabuf::{AnyError, Dmabuf, DmabufAllocator},
             gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
             vulkan::{ImageUsageFlags, VulkanAllocator},
             Allocator, Format, Fourcc,
         },
         drm::{
-            compositor::{DrmCompositor, PrimaryPlaneElement},
+            compositor::{BlitFrameResultError, DrmCompositor, FrameError},
             DrmDevice, DrmDeviceFd, DrmEvent, DrmEventTime, DrmNode, NodeType,
         },
         egl::{EGLContext, EGLDevice, EGLDisplay},
@@ -34,11 +34,11 @@ use smithay::{
         renderer::{
             buffer_dimensions,
             damage::{Error as RenderError, OutputNoMode},
-            gles2::Gles2Renderbuffer,
+            element::Element,
+            gles::{GlesRenderbuffer, GlesTexture},
             glow::GlowRenderer,
             multigpu::{gbm::GbmGlesBackend, Error as MultiError, GpuManager},
-            utils::draw_render_elements,
-            Bind, Blit, ImportDma, Offscreen, Renderer, TextureFilter,
+            Bind, ImportDma, Offscreen,
         },
         session::{libseat::LibSeatSession, Event as SessionEvent, Session},
         udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
@@ -69,6 +69,7 @@ use smithay::{
         dmabuf::{get_dmabuf, DmabufFeedbackBuilder, DmabufGlobal},
         relative_pointer::RelativePointerManagerState,
         seat::WaylandFocus,
+        shm::{shm_format_to_fourcc, with_buffer_contents},
     },
     xwayland::XWaylandClientData,
 };
@@ -824,7 +825,8 @@ impl Device {
         let drm = &mut self.drm;
         let crtc_info = drm.get_crtc(crtc)?;
         let conn_info = drm.get_connector(conn, false)?;
-        let vrr = drm_helpers::set_vrr(drm, crtc, conn, true).unwrap_or(false);
+        let vrr = drm_helpers::set_vrr(drm, crtc, conn, false).unwrap_or(false);
+        let max_bpc = drm_helpers::get_max_bpc(drm, conn)?.map(|(_val, range)| range.end.min(16));
         let interface = drm_helpers::interface_name(drm, conn)?;
         let edid_info = drm_helpers::edid_info(drm, conn);
         let mode = crtc_info.mode().unwrap_or_else(|| {
@@ -878,6 +880,7 @@ impl Device {
                 mode: ((output_mode.size.w, output_mode.size.h), Some(refresh_rate)),
                 vrr,
                 position,
+                max_bpc,
                 ..Default::default()
             })
         });
@@ -1052,22 +1055,26 @@ impl Surface {
         })?;
         self.fps.elements();
 
-        let res = compositor.render_frame::<_, _, Gles2Renderbuffer>(
-            &mut renderer,
-            &elements,
-            CLEAR_COLOR,
-        );
+        let res =
+            compositor.render_frame::<_, _, GlesTexture>(&mut renderer, &elements, CLEAR_COLOR);
         self.fps.render();
 
         match res {
             Ok(frame_result) => {
+                let feedback = if frame_result.damage.is_some() {
+                    Some(state.take_presentation_feedback(&self.output, &frame_result.states))
+                } else {
+                    None
+                };
+
+                match compositor.queue_frame(feedback) {
+                    Ok(()) | Err(FrameError::EmptyFrame) => {}
+                    Err(err) => {
+                        return Err(err).with_context(|| "Failed to submit result for display")
+                    }
+                };
+
                 if let Some(screencopy) = screencopy {
-                    let primary_element = frame_result.primary_element;
-                    let mut plane_elements = frame_result
-                        .cursor_element
-                        .into_iter()
-                        .chain(frame_result.overlay_elements.into_iter())
-                        .collect::<Vec<_>>();
                     for (session, params) in screencopy {
                         match render_session(
                             Some(*render_node),
@@ -1082,53 +1089,46 @@ impl Surface {
                                     if let Ok(dmabuf) = get_dmabuf(buffer) {
                                         renderer.bind(dmabuf).map_err(RenderError::Rendering)?;
                                     } else {
-                                        let size = buffer_dimensions(buffer).unwrap();
+                                        let size = buffer_dimensions(buffer).ok_or(
+                                            RenderError::Rendering(MultiError::ImportFailed),
+                                        )?;
+                                        let format =
+                                            with_buffer_contents(buffer, |_, _, data| shm_format_to_fourcc(data.format))
+                                                .map_err(|_| OutputNoMode)? // eh, we have to do some error
+                                                .expect("We should be able to convert all hardcoded shm screencopy formats");
                                         let render_buffer =
-                                            Offscreen::<Gles2Renderbuffer>::create_buffer(
-                                                renderer, size,
+                                            Offscreen::<GlesRenderbuffer>::create_buffer(
+                                                renderer, format, size,
                                             )
                                             .map_err(RenderError::Rendering)?;
                                         renderer
                                             .bind(render_buffer)
                                             .map_err(RenderError::Rendering)?;
                                     }
-                                    match primary_element {
-                                        PrimaryPlaneElement::Swapchain { slot, .. } => {
-                                            let source = slot.export().map_err(|_| {
-                                                // TODO AnyError::from
-                                                RenderError::Rendering(MultiError::ImportFailed)
-                                            })?;
-                                            for rect in damage {
-                                                renderer
-                                                    .blit_from(
-                                                        source.clone(),
-                                                        *rect,
-                                                        *rect,
-                                                        TextureFilter::Nearest,
-                                                    )
-                                                    .map_err(RenderError::Rendering)?;
-                                            }
-                                        }
-                                        PrimaryPlaneElement::Element(e) => plane_elements.push(e),
-                                    };
 
                                     let (output_size, output_scale, output_transform) = (
                                         self.output.current_mode().ok_or(OutputNoMode)?.size,
                                         self.output.current_scale().fractional_scale(),
                                         self.output.current_transform(),
                                     );
-                                    {
-                                        let mut frame = renderer
-                                            .render(output_size, output_transform)
-                                            .map_err(RenderError::Rendering)?;
-                                        draw_render_elements(
-                                            &mut frame,
+                                    frame_result
+                                        .blit_frame_result(
+                                            output_size,
+                                            output_transform,
                                             output_scale,
-                                            &plane_elements,
-                                            damage,
+                                            renderer,
+                                            damage.iter().copied(),
+                                            // TODO: Filter cursor element
+                                            elements.iter().map(|e| e.id().clone()),
                                         )
-                                        .map_err(RenderError::Rendering)?;
-                                    }
+                                        .map_err(|err| match err {
+                                            BlitFrameResultError::Rendering(err) => {
+                                                RenderError::Rendering(err)
+                                            }
+                                            BlitFrameResultError::Export(_) => {
+                                                RenderError::Rendering(MultiError::DeviceMissing)
+                                            }
+                                        })?;
                                 }
 
                                 Ok(res)
@@ -1145,12 +1145,6 @@ impl Surface {
                     self.fps.screencopy();
                 }
 
-                let feedback = if frame_result.damage.is_some() {
-                    Some(state.take_presentation_feedback(&self.output, &frame_result.states))
-                } else {
-                    None
-                };
-
                 state.send_frames(&self.output, &frame_result.states, |source_node| {
                     Some(
                         self.feedback
@@ -1160,13 +1154,11 @@ impl Surface {
                                     .single_renderer(&source_node)
                                     .unwrap()
                                     .dmabuf_formats()
-                                    .copied()
                                     .collect::<HashSet<_>>();
                                 let target_formats = api
                                     .single_renderer(target_node)
                                     .unwrap()
                                     .dmabuf_formats()
-                                    .copied()
                                     .collect::<HashSet<_>>();
                                 get_surface_dmabuf_feedback(
                                     source_node,
@@ -1178,9 +1170,6 @@ impl Surface {
                             .clone(),
                     )
                 });
-                compositor
-                    .queue_frame(feedback)
-                    .with_context(|| "Failed to submit result for display")?
             }
             Err(err) => {
                 compositor.reset_buffers();
@@ -1265,6 +1254,16 @@ impl KmsState {
                     } else {
                         surface.vrr = drm_helpers::set_vrr(drm, *crtc, conn, output_config.vrr)
                             .unwrap_or(false);
+                        if let Some(bpc) = output_config.max_bpc {
+                            if let Err(err) = drm_helpers::set_max_bpc(drm, conn, bpc) {
+                                warn!(
+                                    ?bpc,
+                                    ?err,
+                                    "Failed to set max_bpc on connector: {}",
+                                    output.name()
+                                );
+                            }
+                        }
                         surface.refresh_rate = drm_helpers::calculate_refresh_rate(*mode);
 
                         let drm_surface = drm.create_surface(*crtc, *mode, &[conn])?;
@@ -1293,7 +1292,12 @@ impl KmsState {
                                 GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
                             ),
                             device.gbm.clone(),
-                            &[Fourcc::Abgr8888, Fourcc::Argb8888],
+                            &[
+                                Fourcc::Abgr2101010,
+                                Fourcc::Argb2101010,
+                                Fourcc::Abgr8888,
+                                Fourcc::Argb8888,
+                            ],
                             device.formats.clone(),
                             drm.cursor_size(),
                             Some(device.gbm.clone()),

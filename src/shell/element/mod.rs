@@ -12,7 +12,7 @@ use smithay::{
         input::KeyState,
         renderer::{
             element::{AsRenderElements, Element, RenderElement, UnderlyingStorage},
-            gles2::element::PixelShaderElement,
+            gles::element::PixelShaderElement,
             glow::GlowRenderer,
             multigpu::Error as MultiError,
             ImportAll, ImportMem, Renderer,
@@ -55,7 +55,7 @@ use self::window::CosmicWindowRenderElement;
 #[cfg(feature = "debug")]
 use egui::plot::{Corner, Legend, Plot, PlotPoints, Polygon};
 #[cfg(feature = "debug")]
-use smithay::backend::renderer::{element::texture::TextureRenderElement, gles2::Gles2Texture};
+use smithay::backend::renderer::{element::texture::TextureRenderElement, gles::GlesTexture};
 #[cfg(feature = "debug")]
 use tracing::debug;
 
@@ -678,7 +678,7 @@ where
     Window(self::window::CosmicWindowRenderElement<R>),
     Indicator(PixelShaderElement),
     #[cfg(feature = "debug")]
-    Egui(TextureRenderElement<Gles2Texture>),
+    Egui(TextureRenderElement<GlesTexture>),
 }
 
 impl<R> Element for CosmicMappedRenderElement<R>
@@ -886,13 +886,13 @@ where
 }
 
 #[cfg(feature = "debug")]
-impl<R> From<TextureRenderElement<Gles2Texture>> for CosmicMappedRenderElement<R>
+impl<R> From<TextureRenderElement<GlesTexture>> for CosmicMappedRenderElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
-    fn from(elem: TextureRenderElement<Gles2Texture>) -> Self {
+    fn from(elem: TextureRenderElement<GlesTexture>) -> Self {
         CosmicMappedRenderElement::Egui(elem)
     }
 }
