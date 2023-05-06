@@ -10,6 +10,7 @@ use crate::{
     shell::{layout::floating::SeatMoveGrabState, Shell},
     utils::prelude::*,
     wayland::protocols::{
+        data_control,
         drm::WlDrmState,
         output_configuration::OutputConfigurationState,
         screencopy::{BufferParams, ScreencopyState, Session as ScreencopySession},
@@ -62,6 +63,7 @@ use smithay::{
         shm::ShmState,
         viewporter::ViewporterState,
     },
+    xwayland::xwm::XwmId,
 };
 use tracing::error;
 
@@ -117,6 +119,7 @@ pub struct Common {
     pub output_configuration_state: OutputConfigurationState<State>,
     pub presentation_state: PresentationState,
     pub primary_selection_state: PrimarySelectionState,
+    pub data_control_state: Option<data_control::State<State>>,
     pub screencopy_state: ScreencopyState,
     pub seat_state: SeatState<State>,
     pub shm_state: ShmState,
@@ -127,6 +130,26 @@ pub struct Common {
 
     // xwayland state
     pub xwayland_state: Option<XWaylandState>,
+}
+
+#[derive(Clone, Copy, Default)]
+pub enum SelectionSource {
+    #[default]
+    Native,
+    DataControl,
+    XWayland(XwmId),
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct SelectionSources {
+    pub clipboard: SelectionSource,
+    pub primary_selection: SelectionSource,
+}
+
+impl SelectionSources {
+    pub fn tuple(self) -> (SelectionSource, SelectionSource) {
+        (self.clipboard, self.primary_selection)
+    }
 }
 
 pub enum BackendData {
@@ -261,6 +284,11 @@ impl State {
         let kde_decoration_state = KdeDecorationState::new::<Self>(&dh, Mode::Client);
         let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
 
+        let data_control_state = config
+            .static_conf
+            .data_control_enabled
+            .then(|| data_control::State::<Self>::new(dh));
+
         let shell = Shell::new(&config, dh);
 
         State {
@@ -299,6 +327,7 @@ impl State {
                 output_configuration_state,
                 presentation_state,
                 primary_selection_state,
+                data_control_state,
                 viewporter_state,
                 wl_drm_state,
                 kde_decoration_state,

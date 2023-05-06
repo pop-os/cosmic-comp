@@ -1,6 +1,6 @@
 use crate::{
     shell::{element::CosmicMapped, Shell, Workspace},
-    state::Common,
+    state::{Common, SelectionSources},
     utils::prelude::*,
     wayland::handlers::xdg_shell::PopupGrabData,
     xwayland::XWaylandState,
@@ -11,7 +11,7 @@ use smithay::{
     input::Seat,
     utils::{IsAlive, Serial, SERIAL_COUNTER},
 };
-use std::cell::RefCell;
+use std::cell::{RefCell, RefMut};
 use tracing::{debug, trace};
 
 use self::target::{KeyboardFocusTarget, WindowGroup};
@@ -165,6 +165,24 @@ impl Shell {
 }
 
 impl Common {
+    fn selection_sources_inner(seat: &Seat<State>) -> &RefCell<SelectionSources> {
+        seat.user_data()
+            .insert_if_missing(|| RefCell::new(SelectionSources::default()));
+        seat.user_data().get::<RefCell<SelectionSources>>().unwrap()
+    }
+
+    pub fn selection_sources(seat: &Seat<State>) -> SelectionSources {
+        *Self::selection_sources_inner(seat).borrow()
+    }
+
+    pub fn update_selection_sources(
+        seat: &Seat<State>,
+        f: impl FnOnce(RefMut<'_, SelectionSources>),
+    ) {
+        let sources = Self::selection_sources_inner(seat).borrow_mut();
+        f(sources)
+    }
+
     pub fn set_focus(
         state: &mut State,
         target: Option<&KeyboardFocusTarget>,

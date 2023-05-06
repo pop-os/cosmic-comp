@@ -2,6 +2,7 @@
 
 pub mod drm;
 //pub mod export_dmabuf;
+pub mod data_control;
 pub mod output_configuration;
 pub mod screencopy;
 pub mod toplevel_info;

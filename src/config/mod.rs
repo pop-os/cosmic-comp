@@ -41,6 +41,7 @@ pub struct StaticConfig {
     pub active_hint: u8,
     #[serde(default = "default_gaps")]
     pub gaps: (u8, u8),
+    pub data_control_enabled: bool,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -235,6 +236,7 @@ impl Config {
             tiling_enabled: false,
             active_hint: default_active_hint(),
             gaps: default_gaps(),
+            data_control_enabled: false,
         }
     }
 

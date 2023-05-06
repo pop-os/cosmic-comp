@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::state::State;
+use crate::{
+    state::{Common, SelectionSource, State},
+    wayland::protocols::data_control,
+};
 use smithay::{
     delegate_data_device,
     input::Seat,
@@ -10,7 +13,7 @@ use smithay::{
         with_source_metadata, ClientDndGrabHandler, DataDeviceHandler, DataDeviceState,
         ServerDndGrabHandler,
     },
-    xwayland::xwm::{SelectionType, XwmId},
+    xwayland::xwm::SelectionType,
 };
 use std::{cell::RefCell, os::unix::io::OwnedFd};
 use tracing::warn;
@@ -51,22 +54,23 @@ impl ClientDndGrabHandler for State {
 }
 impl ServerDndGrabHandler for State {}
 impl DataDeviceHandler for State {
-    type SelectionUserData = XwmId;
+    type SelectionUserData = ();
 
     fn data_device_state(&self) -> &DataDeviceState {
         &self.common.data_device_state
     }
 
     fn new_selection(&mut self, source: Option<WlDataSource>) {
+        let Ok(mime_types) = source
+            .map(|s| with_source_metadata(&s, |metadata| metadata.mime_types.clone()))
+            .transpose() else { return };
+
         if let Some(state) = self.common.xwayland_state.as_mut() {
             if let Some(xwm) = state.xwm.as_mut() {
-                if let Some(source) = &source {
-                    if let Ok(Err(err)) = with_source_metadata(source, |metadata| {
-                        xwm.new_selection(
-                            SelectionType::Clipboard,
-                            Some(metadata.mime_types.clone()),
-                        )
-                    }) {
+                if let Some(mime_types) = &mime_types {
+                    if let Err(err) =
+                        xwm.new_selection(SelectionType::Clipboard, Some(mime_types.clone()))
+                    {
                         warn!(?err, "Failed to set Xwayland clipboard selection.");
                     }
                 } else if let Err(err) = xwm.new_selection(SelectionType::Clipboard, None) {
@@ -74,6 +78,22 @@ impl DataDeviceHandler for State {
                 }
             }
         }
+
+        let seat = self.common.last_active_seat().clone();
+        if self.common.data_control_state.is_some() {
+            let dh = self.common.display_handle.clone();
+            data_control::set_selection(
+                self,
+                &seat,
+                &dh,
+                data_control::SelectionType::Clipboard,
+                mime_types,
+            );
+        }
+
+        Common::update_selection_sources(&seat, |mut sources| {
+            sources.clipboard = SelectionSource::Native
+        });
     }
 
     fn send_selection(
@@ -82,20 +102,40 @@ impl DataDeviceHandler for State {
         fd: OwnedFd,
         _user_data: &Self::SelectionUserData,
     ) {
-        if let Some(xwm) = self
-            .common
-            .xwayland_state
-            .as_mut()
-            .and_then(|xstate| xstate.xwm.as_mut())
-        {
-            if let Err(err) = xwm.send_selection(
-                SelectionType::Clipboard,
-                mime_type,
-                fd,
-                self.common.event_loop_handle.clone(),
-            ) {
-                warn!(?err, "Failed to send clipboard (X11 -> Wayland).");
+        let seat = self.common.last_active_seat();
+        match Common::selection_sources(seat).clipboard {
+            SelectionSource::XWayland(_) => {
+                if let Some(xwm) = self
+                    .common
+                    .xwayland_state
+                    .as_mut()
+                    .and_then(|xstate| xstate.xwm.as_mut())
+                {
+                    if let Err(err) = xwm.send_selection(
+                        SelectionType::Clipboard,
+                        mime_type,
+                        fd,
+                        self.common.event_loop_handle.clone(),
+                    ) {
+                        warn!(?err, "Failed to send clipboard (X11 -> Wayland).");
+                    }
+                }
             }
+            SelectionSource::DataControl => {
+                if self.common.data_control_state.is_some() {
+                    let seat = seat.clone();
+                    if let Err(err) = data_control::request_selection(
+                        self,
+                        &seat,
+                        data_control::SelectionType::Clipboard,
+                        mime_type,
+                        fd,
+                    ) {
+                        warn!(?err, "Failed to send clipboard (X11 -> DataControl).");
+                    };
+                }
+            }
+            SelectionSource::Native => {}
         }
     }
 }

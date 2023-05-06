@@ -3,9 +3,12 @@ use std::{ffi::OsString, os::unix::io::OwnedFd};
 use crate::{
     backend::render::cursor::Cursor,
     shell::{focus::target::KeyboardFocusTarget, CosmicSurface, Shell},
-    state::{Data, State},
+    state::{Data, SelectionSource, State},
     utils::prelude::*,
-    wayland::{handlers::screencopy::PendingScreencopyBuffers, protocols::screencopy::SessionType},
+    wayland::{
+        handlers::screencopy::PendingScreencopyBuffers,
+        protocols::{data_control, screencopy::SessionType},
+    },
 };
 use smithay::{
     backend::drm::DrmNode,
@@ -14,12 +17,11 @@ use smithay::{
     utils::{Logical, Point, Rectangle, Size},
     wayland::{
         data_device::{
-            clear_data_device_selection, current_data_device_selection_userdata,
-            request_data_device_client_selection, set_data_device_selection,
+            clear_data_device_selection, request_data_device_client_selection,
+            set_data_device_selection,
         },
         primary_selection::{
-            clear_primary_selection, current_primary_selection_userdata,
-            request_primary_client_selection, set_primary_selection,
+            clear_primary_selection, request_primary_client_selection, set_primary_selection,
         },
     },
     xwayland::{
@@ -457,8 +459,8 @@ impl XwmHandler for Data {
         fd: OwnedFd,
     ) {
         let seat = self.state.common.last_active_seat();
-        match selection {
-            SelectionType::Clipboard => {
+        match (selection, Common::selection_sources(seat).tuple()) {
+            (SelectionType::Clipboard, (SelectionSource::Native, _)) => {
                 if let Err(err) = request_data_device_client_selection(seat, mime_type, fd) {
                     error!(
                         ?err,
@@ -466,7 +468,7 @@ impl XwmHandler for Data {
                     );
                 }
             }
-            SelectionType::Primary => {
+            (SelectionType::Primary, (_, SelectionSource::Native)) => {
                 if let Err(err) = request_primary_client_selection(seat, mime_type, fd) {
                     error!(
                         ?err,
@@ -474,6 +476,27 @@ impl XwmHandler for Data {
                     );
                 }
             }
+            (SelectionType::Clipboard, (SelectionSource::DataControl, _))
+            | (SelectionType::Primary, (_, SelectionSource::DataControl)) => {
+                if self.state.common.data_control_state.is_some() {
+                    let seat = seat.clone();
+                    if let Err(err) = data_control::request_selection(
+                        &mut self.state,
+                        &seat,
+                        selection.into(),
+                        mime_type,
+                        fd,
+                    ) {
+                        error!(
+                            ?err,
+                            ?selection,
+                            "Failed to request current data control selection for Xwayland.",
+                        );
+                    }
+                }
+            }
+            (SelectionType::Clipboard, (SelectionSource::XWayland(_), _))
+            | (SelectionType::Primary, (_, SelectionSource::XWayland(_))) => {}
         }
     }
 
@@ -485,34 +508,56 @@ impl XwmHandler for Data {
         trace!(?selection, ?mime_types, "Got Selection from Xwayland",);
 
         if self.state.common.is_x_focused(xwm) {
-            let seat = self.state.common.last_active_seat();
-            match selection {
-                SelectionType::Clipboard => set_data_device_selection(
-                    &self.state.common.display_handle,
+            let seat = self.state.common.last_active_seat().clone();
+            let dh = self.state.common.display_handle.clone();
+
+            if self.state.common.data_control_state.is_some() {
+                data_control::set_selection(
+                    &mut self.state,
                     &seat,
-                    mime_types,
-                    xwm,
-                ),
-                SelectionType::Primary => {
-                    set_primary_selection(&self.state.common.display_handle, &seat, mime_types, xwm)
-                }
+                    &dh,
+                    selection.into(),
+                    Some(mime_types.clone()),
+                );
             }
+
+            match selection {
+                SelectionType::Clipboard => set_data_device_selection(&dh, &seat, mime_types, ()),
+                SelectionType::Primary => set_primary_selection(&dh, &seat, mime_types, ()),
+            }
+
+            Common::update_selection_sources(&seat, |mut sources| match selection {
+                SelectionType::Clipboard => sources.clipboard = SelectionSource::XWayland(xwm),
+                SelectionType::Primary => {
+                    sources.primary_selection = SelectionSource::XWayland(xwm)
+                }
+            });
         }
     }
 
     fn cleared_selection(&mut self, xwm: XwmId, selection: SelectionType) {
-        for seat in self.state.common.seats() {
+        let dh = self.state.common.display_handle.clone();
+        let seats = self.state.common.seats();
+        let seats = seats
+            .filter(|seat| {
+                let source = match selection {
+                    SelectionType::Clipboard => Common::selection_sources(&seat).clipboard,
+                    SelectionType::Primary => Common::selection_sources(&seat).primary_selection,
+                };
+
+                matches!(source,SelectionSource::XWayland(id) if id == xwm)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for seat in seats {
             match selection {
-                SelectionType::Clipboard => {
-                    if current_data_device_selection_userdata(seat).as_deref() == Some(&xwm) {
-                        clear_data_device_selection(&self.state.common.display_handle, seat)
-                    }
-                }
-                SelectionType::Primary => {
-                    if current_primary_selection_userdata(seat).as_deref() == Some(&xwm) {
-                        clear_primary_selection(&self.state.common.display_handle, seat)
-                    }
-                }
+                SelectionType::Clipboard => clear_data_device_selection(&dh, &seat),
+                SelectionType::Primary => clear_primary_selection(&dh, &seat),
+            };
+
+            if self.state.common.data_control_state.is_some() {
+                data_control::set_selection(&mut self.state, &seat, &dh, selection.into(), None);
             }
         }
     }
