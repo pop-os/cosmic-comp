@@ -38,6 +38,7 @@
             seatd # For libseat
             libxkbcommon
             libinput
+            stdenv.cc.cc.lib
             mesa # For libgbm
           ];
           runtimeDependencies = with pkgs; [ libglvnd ]; # For libEGL
