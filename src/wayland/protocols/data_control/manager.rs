@@ -20,7 +20,7 @@ where
     D: GlobalDispatch<Addr, ()> + 'static,
 {
     Manager {
-        _id: dh.create_global::<D, Addr, _>(1, ()),
+        _id: dh.create_global::<D, Addr, _>(2, ()),
     }
 }
 
