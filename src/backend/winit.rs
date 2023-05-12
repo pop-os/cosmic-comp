@@ -95,7 +95,7 @@ impl WinitState {
                             .unwrap_or_default(),
                         0,
                         wp_presentation_feedback::Kind::Vsync,
-                    )
+                    );
                 }
             }
             Err(err) => {

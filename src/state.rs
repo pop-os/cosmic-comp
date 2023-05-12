@@ -50,7 +50,7 @@ use smithay::{
     },
     utils::{Clock, IsAlive, Monotonic},
     wayland::{
-        compositor::CompositorState,
+        compositor::{CompositorClientState, CompositorState},
         data_device::DataDeviceState,
         dmabuf::{DmabufFeedback, DmabufState},
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState,
@@ -69,6 +69,7 @@ use std::{cell::RefCell, ffi::OsString, time::Duration};
 use std::{collections::VecDeque, time::Instant};
 
 pub struct ClientState {
+    pub compositor_client_state: CompositorClientState,
     pub workspace_client_state: WorkspaceClientState,
     pub drm_node: Option<DrmNode>,
     pub privileged: bool,
@@ -312,6 +313,7 @@ impl State {
 
     pub fn new_client_state(&self) -> ClientState {
         ClientState {
+            compositor_client_state: CompositorClientState::default(),
             workspace_client_state: WorkspaceClientState::default(),
             drm_node: match &self.backend {
                 BackendData::Kms(kms_state) => {
@@ -334,6 +336,7 @@ impl State {
 
     pub fn new_client_state_with_node(&self, drm_node: DrmNode) -> ClientState {
         ClientState {
+            compositor_client_state: CompositorClientState::default(),
             workspace_client_state: WorkspaceClientState::default(),
             drm_node: Some(drm_node),
             privileged: false,
@@ -342,6 +345,7 @@ impl State {
 
     pub fn new_privileged_client_state(&self) -> ClientState {
         ClientState {
+            compositor_client_state: CompositorClientState::default(),
             workspace_client_state: WorkspaceClientState::default(),
             drm_node: match &self.backend {
                 BackendData::Kms(kms_state) => Some(kms_state.primary),

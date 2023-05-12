@@ -162,6 +162,7 @@ where
         surface,
         position.to_physical_precise_round(scale),
         scale,
+        1.0,
     )
 }
 
@@ -190,6 +191,7 @@ where
         surface,
         location.into().to_physical_precise_round(scale),
         scale,
+        1.0,
     )
 }
 

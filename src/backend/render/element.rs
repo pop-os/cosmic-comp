@@ -118,6 +118,16 @@ where
             CosmicElement::Egui(elem) => elem.opaque_regions(scale),
         }
     }
+
+    fn alpha(&self) -> f32 {
+        match self {
+            CosmicElement::Workspace(elem) => elem.alpha(),
+            CosmicElement::Cursor(elem) => elem.alpha(),
+            CosmicElement::MoveGrab(elem) => elem.alpha(),
+            #[cfg(feature = "debug")]
+            CosmicElement::Egui(elem) => elem.alpha(),
+        }
+    }
 }
 
 impl RenderElement<GlowRenderer> for CosmicElement<GlowRenderer> {

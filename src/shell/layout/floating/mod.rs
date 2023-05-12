@@ -374,6 +374,7 @@ impl FloatingLayout {
                     renderer,
                     render_location.to_physical_precise_round(output_scale),
                     output_scale.into(),
+                    1.0,
                 );
                 if focused == Some(elem) {
                     if indicator_thickness > 0 {
@@ -384,6 +385,7 @@ impl FloatingLayout {
                                 elem.geometry().size,
                             ),
                             indicator_thickness,
+                            1.0,
                         );
                         elements.insert(0, element.into());
                     }

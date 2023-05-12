@@ -17,6 +17,7 @@ use crate::{
     xwayland::XWaylandState,
 };
 
+use calloop::LoopHandle;
 use indexmap::IndexSet;
 use smithay::{
     backend::renderer::{
@@ -83,6 +84,14 @@ impl Workspace {
         self.fullscreen.retain(|_, w| w.alive());
         self.floating_layer.refresh();
         self.tiling_layer.refresh();
+    }
+
+    pub fn animations_going(&self) -> bool {
+        self.tiling_layer.animations_going()
+    }
+
+    pub fn update_animations(&mut self, handle: &LoopHandle<'static, crate::state::Data>) {
+        self.tiling_layer.update_animation_state(handle)
     }
 
     pub fn commit(&mut self, surface: &WlSurface) {
@@ -484,6 +493,7 @@ impl Workspace {
                             renderer,
                             loc.to_physical_precise_round(output_scale),
                             Scale::from(output_scale),
+                            1.0,
                         )
                     }),
             );
@@ -499,6 +509,7 @@ impl Workspace {
                             (or.geometry().loc - output.geometry().loc)
                                 .to_physical_precise_round(output_scale),
                             Scale::from(output_scale),
+                            1.0,
                         )
                     }),
             );
@@ -507,7 +518,11 @@ impl Workspace {
             render_elements.extend(AsRenderElements::<R>::render_elements::<
                 WorkspaceRenderElement<R>,
             >(
-                fullscreen, renderer, (0, 0).into(), output_scale.into()
+                fullscreen,
+                renderer,
+                (0, 0).into(),
+                output_scale.into(),
+                1.0,
             ));
 
             if let Some(xwm) = xwm_state.and_then(|state| state.xwm.as_mut()) {
@@ -551,6 +566,7 @@ impl Workspace {
                                 renderer,
                                 loc.to_physical_precise_round(output_scale),
                                 Scale::from(output_scale),
+                                1.0,
                             )
                         }),
                 );
@@ -570,6 +586,7 @@ impl Workspace {
                             (or.geometry().loc - output.geometry().loc)
                                 .to_physical_precise_round(output_scale),
                             Scale::from(output_scale),
+                            1.0,
                         )
                     }),
             );
@@ -620,6 +637,7 @@ impl Workspace {
                                 renderer,
                                 loc.to_physical_precise_round(output_scale),
                                 Scale::from(output_scale),
+                                1.0,
                             )
                         }),
                 );
@@ -713,6 +731,13 @@ where
         match self {
             WorkspaceRenderElement::Wayland(elem) => elem.opaque_regions(scale),
             WorkspaceRenderElement::Window(elem) => elem.opaque_regions(scale),
+        }
+    }
+
+    fn alpha(&self) -> f32 {
+        match self {
+            WorkspaceRenderElement::Wayland(elem) => elem.alpha(),
+            WorkspaceRenderElement::Window(elem) => elem.alpha(),
         }
     }
 }

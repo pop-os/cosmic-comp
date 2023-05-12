@@ -68,6 +68,7 @@ impl MoveGrabState {
                     renderer,
                     Rectangle::from_loc_and_size(render_location, self.window.geometry().size),
                     self.indicator_thickness,
+                    1.0,
                 ))
                 .into(),
             );
@@ -77,6 +78,7 @@ impl MoveGrabState {
             renderer,
             (render_location - self.window.geometry().loc).to_physical_precise_round(scale),
             scale,
+            1.0,
         ));
         elements
     }
@@ -266,7 +268,7 @@ impl MoveSurfaceGrab {
                     .active_space_mut(&output)
                     .floating_layer
                     .map_internal(grab_state.window, &output, Some(window_location + offset));
-                
+
                 let pointer_pos = handle.current_location();
                 let relative_pos = state.common.shell.map_global_to_space(pointer_pos, &output);
                 Some(window_location + offset + (pointer_pos - relative_pos).to_i32_round())
@@ -282,7 +284,10 @@ impl MoveSurfaceGrab {
             if let Some(position) = position {
                 handle.motion(
                     state,
-                    Some((PointerFocusTarget::from(self.window.clone()), position - self.window.geometry().loc)),
+                    Some((
+                        PointerFocusTarget::from(self.window.clone()),
+                        position - self.window.geometry().loc,
+                    )),
                     &MotionEvent {
                         location: handle.current_location(),
                         serial: serial,

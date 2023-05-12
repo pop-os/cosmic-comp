@@ -22,7 +22,6 @@ log-panics = { version = "2", features = ["with-backtrace"] }
 thiserror = "1.0.26"
 regex = "1"
 xcursor = "0.3.3"
-id_tree = "1.8.0"
 xkbcommon = "0.4"
 indexmap = "1.8.0"
 xdg = "^2.1"
@@ -40,6 +39,11 @@ tracing-journald = "0.3.0"
 tracing = { version = "0.1.37", features = ["max_level_debug", "release_max_level_info"] }
 puffin = { version = "0.14.3", optional = true }
 puffin_egui = { version = "0.21.0", optional = true }
+cosmic-time = "0.2.0"
+
+[dependencies.id_tree]
+git = "https://github.com/Drakulix/id-tree.git"
+branch = "feature/copy_clone"
 
 [dependencies.smithay]
 version = "0.3"
@@ -70,4 +74,4 @@ debug = true
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/smithay//smithay", rev = "25d1176484" }
+smithay = { git = "https://github.com/pop-os/smithay", branch = "tiling_rework" }

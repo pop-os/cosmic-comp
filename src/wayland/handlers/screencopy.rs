@@ -947,6 +947,7 @@ pub fn render_window_to_buffer(
             renderer,
             (-geometry.loc.x, -geometry.loc.y).into(),
             Scale::from(1.0),
+            1.0,
         );
 
         for seat in common.seats() {

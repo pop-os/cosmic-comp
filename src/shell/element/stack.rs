@@ -604,9 +604,10 @@ where
         renderer: &mut R,
         mut location: Point<i32, Physical>,
         scale: Scale<f64>,
+        alpha: f32,
     ) -> Vec<C> {
         let mut elements = AsRenderElements::<R>::render_elements::<CosmicStackRenderElement<R>>(
-            &self.0, renderer, location, scale,
+            &self.0, renderer, location, scale, alpha,
         );
         location.y += TAB_HEIGHT;
 
@@ -616,6 +617,7 @@ where
                 renderer,
                 location,
                 scale,
+                alpha,
             );
             elements
         }));

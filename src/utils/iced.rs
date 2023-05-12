@@ -567,6 +567,7 @@ where
         renderer: &mut R,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
+        alpha: f32,
     ) -> Vec<C> {
         let mut internal = self.0.lock().unwrap();
 
@@ -633,7 +634,7 @@ where
                 renderer,
                 location.to_f64(),
                 &buffer,
-                None,
+                Some(alpha),
                 Some(Rectangle::from_loc_and_size(
                     (0., 0.),
                     size.to_f64().to_logical(1.0, Transform::Normal),

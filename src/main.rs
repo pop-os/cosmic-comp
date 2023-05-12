@@ -66,6 +66,10 @@ fn main() -> Result<()> {
         }
 
         // trigger routines
+        data.state
+            .common
+            .shell
+            .update_animations(&data.state.common.event_loop_handle);
         data.state.common.shell.refresh();
         state::Common::refresh_focus(&mut data.state);
 

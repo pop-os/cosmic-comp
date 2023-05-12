@@ -485,7 +485,9 @@ impl State {
                                         }
 
                                         surface.pending = false;
-                                        surface.dirty.then(|| {
+                                        (surface.dirty
+                                            || data.state.common.shell.animations_going())
+                                        .then(|| {
                                             (surface.output.clone(), surface.fps.avg_rendertime(5))
                                         })
                                     }

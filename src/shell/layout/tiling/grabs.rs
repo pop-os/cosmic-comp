@@ -64,7 +64,8 @@ impl PointerGrab<State> for ResizeForkGrab {
 
         if let Some(output) = self.output.upgrade() {
             let tiling_layer = &mut data.common.shell.active_space_mut(&output).tiling_layer;
-            if let Some(tree) = tiling_layer.trees.get_mut(&output) {
+            if let Some(queue) = tiling_layer.queues.get_mut(&output) {
+                let tree = &mut queue.trees.back_mut().unwrap().0;
                 if tree.get(&self.node).is_ok() {
                     let orientation = tree.get(&self.node).unwrap().data().orientation();
                     let delta = match orientation {

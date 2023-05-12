@@ -66,7 +66,7 @@ pub type GlMultiFrame<'a, 'b, 'frame> =
     MultiFrame<'a, 'a, 'b, 'frame, GbmGlesBackend<GlowRenderer>, GbmGlesBackend<GlowRenderer>>;
 
 pub static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
-pub static FOCUS_INDICATOR_COLOR: [f32; 4] = [0.580, 0.921, 0.921, 1.0];
+pub static FOCUS_INDICATOR_COLOR: [f32; 3] = [0.580, 0.921, 0.921];
 pub static FOCUS_INDICATOR_SHADER: &str = include_str!("./shaders/focus_indicator.frag");
 
 pub struct IndicatorShader(pub GlesPixelProgram);
@@ -87,6 +87,7 @@ impl IndicatorShader {
         renderer: &R,
         geo: Rectangle<i32, Logical>,
         thickness: u8,
+        alpha: f32,
     ) -> PixelShaderElement {
         let thickness: f32 = thickness as f32;
         let thickness_loc = (thickness as i32, thickness as i32);
@@ -110,15 +111,14 @@ impl IndicatorShader {
             }
             None => {
                 let shader = Self::get(renderer);
-                let color = FOCUS_INDICATOR_COLOR;
 
                 let elem = PixelShaderElement::new(
                     shader,
-                    dbg!(geo),
+                    geo,
                     None, //TODO
-                    color[3],
+                    alpha,
                     vec![
-                        Uniform::new("color", [color[0], color[1], color[2]]),
+                        Uniform::new("color", FOCUS_INDICATOR_COLOR),
                         Uniform::new("thickness", thickness),
                         Uniform::new("radius", thickness * 2.0),
                     ],
@@ -283,6 +283,11 @@ where
         }
     }
 
+    state
+        .shell
+        .space_for_handle_mut(&handle)
+        .ok_or(OutputNoMode)?
+        .update_animations(&state.event_loop_handle);
     let workspace = state.shell.space_for_handle(&handle).ok_or(OutputNoMode)?;
     let last_active_seat = state.last_active_seat().clone();
     let move_active = last_active_seat

@@ -640,6 +640,13 @@ where
             CosmicWindowRenderElement::Window(w) => w.opaque_regions(scale),
         }
     }
+
+    fn alpha(&self) -> f32 {
+        match self {
+            CosmicWindowRenderElement::Header(h) => h.alpha(),
+            CosmicWindowRenderElement::Window(w) => w.alpha(),
+        }
+    }
 }
 
 impl RenderElement<GlowRenderer> for CosmicWindowRenderElement<GlowRenderer> {
@@ -710,6 +717,7 @@ where
         renderer: &mut R,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
+        alpha: f32,
     ) -> Vec<C> {
         let has_ssd = self.0.with_program(|p| p.has_ssd());
 
@@ -721,14 +729,18 @@ where
 
         let mut elements = self.0.with_program(|p| {
             AsRenderElements::<R>::render_elements::<CosmicWindowRenderElement<R>>(
-                &p.window, renderer, window_loc, scale,
+                &p.window, renderer, window_loc, scale, alpha,
             )
         });
         if has_ssd {
             elements.extend(AsRenderElements::<GlowRenderer>::render_elements::<
                 CosmicWindowRenderElement<R>,
             >(
-                &self.0, renderer.glow_renderer_mut(), location, scale
+                &self.0,
+                renderer.glow_renderer_mut(),
+                location,
+                scale,
+                alpha,
             ))
         }
 

@@ -29,7 +29,7 @@ use smithay::{
         wayland_server::protocol::wl_surface::WlSurface,
     },
     space_elements,
-    utils::{user_data::UserDataMap, Logical, Rectangle, Size},
+    utils::{user_data::UserDataMap, Logical, Rectangle, Serial, Size},
     wayland::{
         compositor::{with_states, SurfaceData},
         seat::WaylandFocus,
@@ -345,11 +345,44 @@ impl CosmicSurface {
         })
     }
 
-    pub fn send_configure(&self) {
+    pub fn serial_acked(&self, serial: &Serial) -> bool {
         match self {
-            CosmicSurface::Wayland(window) => window.toplevel().send_configure(),
+            CosmicSurface::Wayland(window) => {
+                with_states(window.toplevel().wl_surface(), |states| {
+                    let attrs = states
+                        .data_map
+                        .get::<XdgToplevelSurfaceData>()
+                        .unwrap()
+                        .lock()
+                        .unwrap();
+                    attrs
+                        .configure_serial
+                        .as_ref()
+                        .map(|s| s >= serial)
+                        .unwrap_or(false)
+                })
+            }
+            _ => true,
+        }
+    }
+
+    pub fn force_configure(&self) -> Option<Serial> {
+        match self {
+            CosmicSurface::Wayland(window) => Some(window.toplevel().send_configure()),
             CosmicSurface::X11(surface) => {
                 let _ = surface.configure(None);
+                None
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn send_configure(&self) -> Option<Serial> {
+        match self {
+            CosmicSurface::Wayland(window) => window.toplevel().send_pending_configure(),
+            CosmicSurface::X11(surface) => {
+                let _ = surface.configure(None);
+                None
             }
             _ => unreachable!(),
         }
@@ -675,10 +708,15 @@ where
         renderer: &mut R,
         location: smithay::utils::Point<i32, smithay::utils::Physical>,
         scale: smithay::utils::Scale<f64>,
+        alpha: f32,
     ) -> Vec<C> {
         match self {
-            CosmicSurface::Wayland(window) => window.render_elements(renderer, location, scale),
-            CosmicSurface::X11(surface) => surface.render_elements(renderer, location, scale),
+            CosmicSurface::Wayland(window) => {
+                window.render_elements(renderer, location, scale, alpha)
+            }
+            CosmicSurface::X11(surface) => {
+                surface.render_elements(renderer, location, scale, alpha)
+            }
             _ => unreachable!(),
         }
     }

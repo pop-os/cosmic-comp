@@ -1,3 +1,4 @@
+use calloop::LoopHandle;
 use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, collections::HashMap};
 use tracing::warn;
@@ -1033,6 +1034,18 @@ impl Shell {
                 let p = global_loc.into().to_f64() - output.current_location().to_f64();
                 (C::from_f64(p.x), C::from_f64(p.y)).into()
             }
+        }
+    }
+
+    pub fn animations_going(&self) -> bool {
+        self.workspaces
+            .spaces()
+            .any(|workspace| workspace.animations_going())
+    }
+
+    pub fn update_animations(&mut self, handle: &LoopHandle<'static, crate::state::Data>) {
+        for workspace in self.workspaces.spaces_mut() {
+            workspace.update_animations(handle)
         }
     }
 
