@@ -4,6 +4,7 @@ Priority: optional
 Maintainer: Victoria Brekenfeld <victoria@system76.com>
 Build-Depends:
     cargo,
+    cmake,
     debhelper-compat (=10),
     rustc (>=1.57),
     libudev-dev,
