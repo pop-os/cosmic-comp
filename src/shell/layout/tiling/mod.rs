@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::render::{element::AsGlowRenderer, IndicatorShader},
+    backend::render::{
+        element::AsGlowRenderer, IndicatorShader, Key, ACTIVE_GROUP_COLOR, FOCUS_INDICATOR_COLOR,
+        GROUP_COLOR,
+    },
     shell::{
         element::{window::CosmicWindowRenderElement, CosmicMapped, CosmicMappedRenderElement},
         focus::{
@@ -23,7 +26,10 @@ use cosmic_time::{Cubic, Ease, Tween};
 use id_tree::{InsertBehavior, MoveBehavior, Node, NodeId, NodeIdError, RemoveBehavior, Tree};
 use smithay::{
     backend::renderer::{
-        element::{utils::CropRenderElement, AsRenderElements, RenderElement},
+        element::{
+            utils::{CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement},
+            AsRenderElements, RenderElement,
+        },
         ImportAll, ImportMem, Renderer,
     },
     desktop::{layer_map_for_output, space::SpaceElement, PopupKind},
@@ -1432,6 +1438,8 @@ impl TilingLayout {
         renderer: &mut R,
         output: &Output,
         focused: Option<&CosmicMapped>,
+        non_exclusive_zone: Rectangle<i32, Logical>,
+        draw_groups: bool,
         indicator_thickness: u8,
     ) -> Result<Vec<CosmicMappedRenderElement<R>>, OutputNotMapped>
     where
@@ -1473,213 +1481,589 @@ impl TilingLayout {
 
         let mut elements = Vec::new();
 
-        // all old windows and fade them out
-        if let Some(reference_tree) = reference_tree.as_ref() {
-            if let Some(root) = reference_tree.root_node_id() {
-                elements.extend(
-                    reference_tree
-                        .traverse_pre_order(root)
-                        .unwrap()
-                        .filter(|node| node.data().is_mapped(None))
-                        .map(|node| match node.data() {
-                            Data::Mapped {
-                                mapped,
-                                last_geometry,
-                                ..
-                            } => (mapped, last_geometry),
-                            _ => unreachable!(),
-                        })
-                        .filter(|(mapped, _)| {
-                            if let Some(root) = target_tree.root_node_id() {
-                                !target_tree
-                                    .traverse_pre_order(root)
-                                    .unwrap()
-                                    .any(|node| node.data().is_mapped(Some(mapped)))
-                            } else {
-                                true
-                            }
-                        })
-                        .flat_map(|(mapped, geo)| {
-                            let crop_rect = geo.clone();
-                            AsRenderElements::<R>::render_elements::<CosmicMappedRenderElement<R>>(
-                                mapped,
-                                renderer,
-                                geo.loc.to_physical_precise_round(output_scale)
-                                    - mapped
-                                        .geometry()
-                                        .loc
-                                        .to_physical_precise_round(output_scale),
-                                Scale::from(output_scale),
-                                1.0 - percentage,
-                            )
-                            .into_iter()
-                            .flat_map(|element| match element {
-                                CosmicMappedRenderElement::Stack(elem) => {
-                                    CropRenderElement::from_element(
-                                        elem,
-                                        output_scale,
-                                        crop_rect.to_physical_precise_round(output_scale),
-                                    )
-                                    .map(CosmicMappedRenderElement::CroppedStack)
-                                }
-                                CosmicMappedRenderElement::Window(elem) => {
-                                    CropRenderElement::from_element(
-                                        elem,
-                                        output_scale,
-                                        crop_rect.to_physical_precise_round(output_scale),
-                                    )
-                                    .map(CosmicMappedRenderElement::CroppedWindow)
-                                }
-                                x => Some(x),
-                            })
-                            .collect::<Vec<_>>()
-                        }),
+        // all gone windows and fade them out
+        let old_geometries = if let Some(reference_tree) = reference_tree.as_ref() {
+            let (geometries, _) = if draw_groups {
+                geometries_for_groupview(
+                    reference_tree,
+                    renderer,
+                    non_exclusive_zone,
+                    focused, // TODO: Would be better to be an old focus,
+                    // but for that we have to associate focus with a tree (and animate focus changes properly)
+                    1.0 - percentage,
                 )
+            } else {
+                None
+            }
+            .unzip();
+
+            // all old windows we want to fade out
+            elements.extend(render_old_tree(
+                reference_tree,
+                target_tree,
+                renderer,
+                geometries.clone(),
+                output_scale,
+                percentage,
+            ));
+
+            geometries
+        } else {
+            None
+        };
+
+        let (geometries, group_elements) = if draw_groups {
+            geometries_for_groupview(
+                target_tree,
+                renderer,
+                non_exclusive_zone,
+                focused,
+                percentage,
+            )
+        } else {
+            None
+        }
+        .unzip();
+
+        // tiling hints
+        if let Some(group_elements) = group_elements {
+            elements.extend(group_elements);
+        }
+
+        // all alive windows
+        elements.extend(render_new_tree(
+            target_tree,
+            reference_tree,
+            renderer,
+            geometries,
+            old_geometries,
+            focused,
+            output_scale,
+            percentage,
+            if draw_groups { 3 } else { indicator_thickness },
+        ));
+
+        Ok(elements)
+    }
+}
+
+fn geometries_for_groupview<R>(
+    tree: &Tree<Data>,
+    renderer: &mut R,
+    non_exclusive_zone: Rectangle<i32, Logical>,
+    focused: Option<&CosmicMapped>,
+    alpha: f32,
+) -> Option<(
+    HashMap<NodeId, Rectangle<i32, Logical>>,
+    Vec<CosmicMappedRenderElement<R>>,
+)>
+where
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    <R as Renderer>::TextureId: 'static,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+    CosmicWindowRenderElement<R>: RenderElement<R>,
+{
+    // we need to recalculate geometry for all elements, if we are drawing groups
+    if let Some(root) = tree.root_node_id() {
+        let mut stack = vec![non_exclusive_zone];
+        let mut elements = Vec::new();
+        let mut geometries = HashMap::new();
+
+        const GAP: i32 = 16;
+        for node_id in tree.traverse_pre_order_ids(root).unwrap() {
+            if let Some(mut geo) = stack.pop() {
+                // zoom in windows
+                geo.loc += (GAP, GAP).into();
+                geo.size -= (GAP * 2, GAP * 2).into();
+
+                let node: &Node<Data> = tree.get(&node_id).unwrap();
+                let data = node.data();
+
+                let is_potential_group = if let Some(focused) = focused {
+                    // 1. focused can move into us directly
+                    if let Some(parent) = node.parent() {
+                        let parent_data = tree.get(parent).unwrap().data();
+
+                        let idx = tree
+                            .children_ids(parent)
+                            .unwrap()
+                            .position(|id| id == &node_id)
+                            .unwrap();
+                        if let Some((focused_idx, _focused_id)) = tree
+                            .children_ids(parent)
+                            .unwrap()
+                            .enumerate()
+                            .find(|(_, child_id)| {
+                                tree.get(child_id).unwrap().data().is_mapped(Some(focused))
+                            })
+                        {
+                            // only direct neighbors
+                            focused_idx.abs_diff(idx) == 1
+                            // skip neighbors, if this is a group of two windows
+                            && !(parent_data.len() == 2 && data.is_mapped(None))
+                            // skip groups of two in opposite orientation to indicate move between
+                            && !(parent_data.len() == 2 && if data.is_group() { parent_data.orientation() != data.orientation() } else { false } )
+                        } else {
+                            false
+                        }
+                    }
+                    // 2. focused can move out into us
+                    else {
+                        tree.children_ids(&node_id)
+                            .unwrap()
+                            .find(|child_id| {
+                                tree.children(child_id)
+                                    .unwrap()
+                                    .any(|child| child.data().is_mapped(Some(focused)))
+                            })
+                            .is_some()
+                    }
+                } else {
+                    false
+                };
+
+                match data {
+                    Data::Group {
+                        orientation,
+                        last_geometry,
+                        sizes,
+                        alive,
+                    } => {
+                        let has_active_child = if let Some(focused) = focused {
+                            tree.children(&node_id)
+                                .unwrap()
+                                .any(|child| child.data().is_mapped(Some(focused)))
+                        } else {
+                            false
+                        };
+
+                        if (is_potential_group || has_active_child) && &node_id != root {
+                            elements.push(
+                                IndicatorShader::element(
+                                    renderer,
+                                    Key::Group(Arc::downgrade(&alive)),
+                                    geo,
+                                    3,
+                                    alpha,
+                                    if has_active_child {
+                                        ACTIVE_GROUP_COLOR
+                                    } else {
+                                        GROUP_COLOR
+                                    },
+                                )
+                                .into(),
+                            )
+                        }
+
+                        geometries.insert(node_id.clone(), geo);
+
+                        let previous_length = match orientation {
+                            Orientation::Horizontal => last_geometry.size.h,
+                            Orientation::Vertical => last_geometry.size.w,
+                        };
+                        let new_length = match orientation {
+                            Orientation::Horizontal => geo.size.h,
+                            Orientation::Vertical => geo.size.w,
+                        };
+
+                        let mut sizes = sizes
+                            .iter()
+                            .map(|len| {
+                                (((*len as f64) / (previous_length as f64)) * (new_length as f64))
+                                    .round() as i32
+                            })
+                            .collect::<Vec<_>>();
+                        let sum: i32 = sizes.iter().sum();
+                        if sum < new_length {
+                            *sizes.last_mut().unwrap() += new_length - sum;
+                        }
+
+                        match orientation {
+                            Orientation::Horizontal => {
+                                let mut previous: i32 = sizes.iter().sum();
+                                for size in sizes.iter().rev() {
+                                    previous -= *size;
+                                    stack.push(Rectangle::from_loc_and_size(
+                                        (geo.loc.x, geo.loc.y + previous),
+                                        (geo.size.w, *size),
+                                    ));
+                                }
+                            }
+                            Orientation::Vertical => {
+                                let mut previous: i32 = sizes.iter().sum();
+                                for size in sizes.iter().rev() {
+                                    previous -= *size;
+                                    stack.push(Rectangle::from_loc_and_size(
+                                        (geo.loc.x + previous, geo.loc.y),
+                                        (*size, geo.size.h),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    Data::Mapped { mapped, .. } => {
+                        if is_potential_group {
+                            elements.push(
+                                IndicatorShader::element(
+                                    renderer,
+                                    mapped.clone(),
+                                    geo,
+                                    3,
+                                    alpha,
+                                    GROUP_COLOR,
+                                )
+                                .into(),
+                            );
+
+                            geo.loc += (GAP, GAP).into();
+                            geo.size -= (GAP * 2, GAP * 2).into();
+                        }
+
+                        geometries.insert(node_id.clone(), geo);
+                    }
+                }
             }
         }
 
-        if let Some(root) = target_tree.root_node_id() {
-            elements.extend(
-                target_tree
-                    .traverse_pre_order(root)
-                    .unwrap()
-                    .filter(|node| node.data().is_mapped(None))
-                    .filter(|node| match node.data() {
-                        Data::Mapped { mapped, .. } => mapped.is_activated(),
-                        _ => unreachable!(),
+        Some((geometries, elements))
+    } else {
+        None
+    }
+}
+
+fn render_old_tree<R>(
+    reference_tree: &Tree<Data>,
+    target_tree: &Tree<Data>,
+    renderer: &mut R,
+    geometries: Option<HashMap<NodeId, Rectangle<i32, Logical>>>,
+    output_scale: f64,
+    percentage: f32,
+) -> Vec<CosmicMappedRenderElement<R>>
+where
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    <R as Renderer>::TextureId: 'static,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+    CosmicWindowRenderElement<R>: RenderElement<R>,
+{
+    if let Some(root) = reference_tree.root_node_id() {
+        let geometries = geometries.unwrap_or_default();
+        reference_tree
+            .traverse_pre_order_ids(root)
+            .unwrap()
+            .filter(|node_id| reference_tree.get(node_id).unwrap().data().is_mapped(None))
+            .map(
+                |node_id| match reference_tree.get(&node_id).unwrap().data() {
+                    Data::Mapped {
+                        mapped,
+                        last_geometry,
+                        ..
+                    } => (mapped, last_geometry, geometries.get(&node_id)),
+                    _ => unreachable!(),
+                },
+            )
+            .filter(|(mapped, _, _)| {
+                if let Some(root) = target_tree.root_node_id() {
+                    !target_tree
+                        .traverse_pre_order(root)
+                        .unwrap()
+                        .any(|node| node.data().is_mapped(Some(mapped)))
+                } else {
+                    true
+                }
+            })
+            .flat_map(|(mapped, original_geo, scaled_geo)| {
+                let (scale, offset) = scaled_geo
+                    .map(|adapted_geo| scale_to_center(&original_geo, adapted_geo))
+                    .unwrap_or_else(|| (1.0.into(), (0, 0).into()));
+                let geo = scaled_geo
+                    .map(|adapted_geo| {
+                        Rectangle::from_loc_and_size(
+                            adapted_geo.loc + offset,
+                            (
+                                (original_geo.size.w as f64 * scale).round() as i32,
+                                (original_geo.size.h as f64 * scale).round() as i32,
+                            ),
+                        )
                     })
-                    .map(|node| match node.data() {
-                        Data::Mapped {
-                            mapped,
-                            last_geometry,
-                            ..
-                        } => (mapped, last_geometry),
-                        _ => unreachable!(),
-                    })
-                    .chain(
-                        target_tree
-                            .traverse_pre_order(root)
-                            .unwrap()
-                            .filter(|node| node.data().is_mapped(None))
-                            .filter(|node| match node.data() {
-                                Data::Mapped { mapped, .. } => !mapped.is_activated(),
-                                _ => unreachable!(),
-                            })
-                            .map(|node| match node.data() {
-                                Data::Mapped {
-                                    mapped,
-                                    last_geometry,
-                                    ..
-                                } => (mapped, last_geometry),
-                                _ => unreachable!(),
-                            }),
-                    )
-                    .flat_map(|(mapped, new_geo)| {
-                        let old_geo = if let Some(reference_tree) = reference_tree.as_ref() {
-                            if let Some(root) = reference_tree.root_node_id() {
-                                reference_tree
-                                    .traverse_pre_order(root)
-                                    .unwrap()
-                                    .find(|node| node.data().is_mapped(Some(mapped)))
-                                    .map(|node| match node.data() {
-                                        Data::Mapped { last_geometry, .. } => last_geometry,
+                    .unwrap_or(*original_geo);
+
+                let crop_rect = geo.clone();
+                let original_location = original_geo.loc.to_physical_precise_round(output_scale)
+                    - mapped
+                        .geometry()
+                        .loc
+                        .to_physical_precise_round(output_scale);
+                AsRenderElements::<R>::render_elements::<CosmicMappedRenderElement<R>>(
+                    mapped,
+                    renderer,
+                    original_location,
+                    Scale::from(output_scale),
+                    1.0 - percentage,
+                )
+                .into_iter()
+                .flat_map(|element| match element {
+                    CosmicMappedRenderElement::Stack(elem) => Some(
+                        CosmicMappedRenderElement::TiledStack(RelocateRenderElement::from_element(
+                            RescaleRenderElement::from_element(
+                                CropRenderElement::from_element(
+                                    elem,
+                                    output_scale,
+                                    crop_rect.to_physical_precise_round(output_scale),
+                                )?,
+                                original_location,
+                                scale,
+                            ),
+                            geo.loc.to_physical_precise_round(output_scale),
+                            Relocate::Absolute,
+                        )),
+                    ),
+                    CosmicMappedRenderElement::Window(elem) => {
+                        Some(CosmicMappedRenderElement::TiledWindow(
+                            RelocateRenderElement::from_element(
+                                RescaleRenderElement::from_element(
+                                    CropRenderElement::from_element(
+                                        elem,
+                                        output_scale,
+                                        crop_rect.to_physical_precise_round(output_scale),
+                                    )?,
+                                    (0, 0).into(),
+                                    scale,
+                                ),
+                                geo.loc.to_physical_precise_round(output_scale),
+                                Relocate::Absolute,
+                            ),
+                        ))
+                    }
+                    x => Some(x),
+                })
+                .collect::<Vec<_>>()
+            })
+            .collect()
+    } else {
+        Vec::new()
+    }
+}
+
+fn render_new_tree<R>(
+    target_tree: &Tree<Data>,
+    reference_tree: Option<&Tree<Data>>,
+    renderer: &mut R,
+    geometries: Option<HashMap<NodeId, Rectangle<i32, Logical>>>,
+    old_geometries: Option<HashMap<NodeId, Rectangle<i32, Logical>>>,
+    focused: Option<&CosmicMapped>,
+    output_scale: f64,
+    percentage: f32,
+    indicator_thickness: u8,
+) -> Vec<CosmicMappedRenderElement<R>>
+where
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    <R as Renderer>::TextureId: 'static,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+    CosmicWindowRenderElement<R>: RenderElement<R>,
+{
+    if let Some(root) = target_tree.root_node_id() {
+        let old_geometries = old_geometries.unwrap_or_default();
+        let geometries = geometries.unwrap_or_default();
+        target_tree
+            .traverse_pre_order_ids(root)
+            .unwrap()
+            .filter(|node_id| target_tree.get(node_id).unwrap().data().is_mapped(None))
+            .map(|node_id| match target_tree.get(&node_id).unwrap().data() {
+                Data::Mapped {
+                    mapped,
+                    last_geometry,
+                    ..
+                } => (mapped, last_geometry, geometries.get(&node_id)),
+                _ => unreachable!(),
+            })
+            .flat_map(|(mapped, original_geo, scaled_geo)| {
+                let (old_original_geo, old_scaled_geo) =
+                    if let Some(reference_tree) = reference_tree.as_ref() {
+                        if let Some(root) = reference_tree.root_node_id() {
+                            reference_tree
+                                .traverse_pre_order_ids(root)
+                                .unwrap()
+                                .find(|node_id| {
+                                    reference_tree
+                                        .get(node_id)
+                                        .unwrap()
+                                        .data()
+                                        .is_mapped(Some(mapped))
+                                })
+                                .map(
+                                    |node_id| match reference_tree.get(&node_id).unwrap().data() {
+                                        Data::Mapped { last_geometry, .. } => {
+                                            (last_geometry, old_geometries.get(&node_id))
+                                        }
                                         _ => unreachable!(),
-                                    })
-                            } else {
-                                None
-                            }
+                                    },
+                                )
                         } else {
                             None
-                        };
-
-                        let (geo, alpha) = if let Some(old_geo) = old_geo {
-                            (
-                                Rectangle::from_loc_and_size(
-                                    (
-                                        old_geo.loc.x
-                                            + ((new_geo.loc.x - old_geo.loc.x) as f32 * percentage)
-                                                .round()
-                                                as i32,
-                                        old_geo.loc.y
-                                            + ((new_geo.loc.y - old_geo.loc.y) as f32 * percentage)
-                                                .round()
-                                                as i32,
-                                    ),
-                                    (
-                                        old_geo.size.w
-                                            + ((new_geo.size.w - old_geo.size.w) as f32
-                                                * percentage)
-                                                .round()
-                                                as i32,
-                                        old_geo.size.h
-                                            + ((new_geo.size.h - old_geo.size.h) as f32
-                                                * percentage)
-                                                .round()
-                                                as i32,
-                                    ),
+                        }
+                    } else {
+                        None
+                    }
+                    .unzip();
+                let old_geo = old_original_geo.map(|original_geo| {
+                    let (scale, offset) = old_scaled_geo
+                        .unwrap()
+                        .map(|adapted_geo| scale_to_center(original_geo, adapted_geo))
+                        .unwrap_or_else(|| (1.0.into(), (0, 0).into()));
+                    old_scaled_geo
+                        .unwrap()
+                        .map(|adapted_geo| {
+                            Rectangle::from_loc_and_size(
+                                adapted_geo.loc + offset,
+                                (
+                                    (original_geo.size.w as f64 * scale).round() as i32,
+                                    (original_geo.size.h as f64 * scale).round() as i32,
                                 ),
-                                1.0,
                             )
-                        } else {
-                            // TODO: If old_geo.is_none() animate alpha - fade in
-                            (*new_geo, percentage)
-                        };
+                        })
+                        .unwrap_or(*original_geo)
+                });
 
-                        if alpha < 1.0 {
-                            dbg!(alpha);
-                        }
+                let crop_rect = original_geo;
+                let (scale, offset) = scaled_geo
+                    .map(|adapted_geo| scale_to_center(original_geo, adapted_geo))
+                    .unwrap_or_else(|| (1.0.into(), (0, 0).into()));
+                let new_geo = scaled_geo
+                    .map(|adapted_geo| {
+                        Rectangle::from_loc_and_size(
+                            adapted_geo.loc + offset,
+                            (
+                                (original_geo.size.w as f64 * scale).round() as i32,
+                                (original_geo.size.h as f64 * scale).round() as i32,
+                            ),
+                        )
+                    })
+                    .unwrap_or(*original_geo);
 
-                        let crop_rect = geo.clone();
-                        let mut elements =
-                            AsRenderElements::<R>::render_elements::<CosmicMappedRenderElement<R>>(
-                                mapped,
-                                renderer,
-                                geo.loc.to_physical_precise_round(output_scale)
-                                    - mapped
-                                        .geometry()
-                                        .loc
-                                        .to_physical_precise_round(output_scale),
-                                Scale::from(output_scale),
-                                alpha,
-                            )
-                            .into_iter()
-                            .flat_map(|element| match element {
-                                CosmicMappedRenderElement::Stack(elem) => {
+                let (geo, alpha) = if let Some(old_geo) = old_geo {
+                    (
+                        Rectangle::from_loc_and_size(
+                            (
+                                old_geo.loc.x
+                                    + ((new_geo.loc.x - old_geo.loc.x) as f32 * percentage).round()
+                                        as i32,
+                                old_geo.loc.y
+                                    + ((new_geo.loc.y - old_geo.loc.y) as f32 * percentage).round()
+                                        as i32,
+                            ),
+                            (
+                                old_geo.size.w
+                                    + ((new_geo.size.w - old_geo.size.w) as f32 * percentage)
+                                        .round() as i32,
+                                old_geo.size.h
+                                    + ((new_geo.size.h - old_geo.size.h) as f32 * percentage)
+                                        .round() as i32,
+                            ),
+                        ),
+                        1.0,
+                    )
+                } else {
+                    (new_geo, percentage)
+                };
+
+                let original_location = original_geo.loc.to_physical_precise_round(output_scale)
+                    - mapped
+                        .geometry()
+                        .loc
+                        .to_physical_precise_round(output_scale);
+                let mut elements = AsRenderElements::<R>::render_elements::<
+                    CosmicMappedRenderElement<R>,
+                >(
+                    mapped,
+                    renderer,
+                    original_location,
+                    Scale::from(output_scale),
+                    alpha,
+                )
+                .into_iter()
+                .flat_map(|element| match element {
+                    CosmicMappedRenderElement::Stack(elem) => Some(
+                        CosmicMappedRenderElement::TiledStack(RelocateRenderElement::from_element(
+                            RescaleRenderElement::from_element(
+                                CropRenderElement::from_element(
+                                    elem,
+                                    output_scale,
+                                    crop_rect.to_physical_precise_round(output_scale),
+                                )?,
+                                original_location,
+                                scale,
+                            ),
+                            geo.loc.to_physical_precise_round(output_scale),
+                            Relocate::Absolute,
+                        )),
+                    ),
+                    CosmicMappedRenderElement::Window(elem) => {
+                        Some(CosmicMappedRenderElement::TiledWindow(
+                            RelocateRenderElement::from_element(
+                                RescaleRenderElement::from_element(
                                     CropRenderElement::from_element(
                                         elem,
                                         output_scale,
                                         crop_rect.to_physical_precise_round(output_scale),
-                                    )
-                                    .map(CosmicMappedRenderElement::CroppedStack)
-                                }
-                                CosmicMappedRenderElement::Window(elem) => {
-                                    CropRenderElement::from_element(
-                                        elem,
-                                        output_scale,
-                                        crop_rect.to_physical_precise_round(output_scale),
-                                    )
-                                    .map(CosmicMappedRenderElement::CroppedWindow)
-                                }
-                                x => Some(x),
-                            })
-                            .collect::<Vec<_>>();
+                                    )?,
+                                    (0, 0).into(),
+                                    scale,
+                                ),
+                                geo.loc.to_physical_precise_round(output_scale),
+                                Relocate::Absolute,
+                            ),
+                        ))
+                    }
+                    x => Some(x),
+                })
+                .collect::<Vec<_>>();
 
-                        if focused == Some(mapped) {
-                            if indicator_thickness > 0 {
-                                let element = IndicatorShader::element(
-                                    renderer,
-                                    geo,
-                                    indicator_thickness,
-                                    1.0,
-                                );
-                                elements.insert(0, element.into());
-                            }
-                        }
-                        elements
-                    }),
+                if focused == Some(mapped) {
+                    if indicator_thickness > 0 {
+                        let element = IndicatorShader::element(
+                            renderer,
+                            mapped.clone(),
+                            geo,
+                            indicator_thickness,
+                            1.0,
+                            FOCUS_INDICATOR_COLOR,
+                        );
+                        elements.insert(0, element.into());
+                    }
+                }
+
+                elements
+            })
+            .collect()
+    } else {
+        Vec::new()
+    }
+}
+
+fn scale_to_center(
+    old_geo: &Rectangle<i32, Logical>,
+    new_geo: &Rectangle<i32, Logical>,
+) -> (f64, Point<i32, Logical>) {
+    let scale_w = new_geo.size.w as f64 / old_geo.size.w as f64;
+    let scale_h = new_geo.size.h as f64 / old_geo.size.h as f64;
+
+    if scale_w > scale_h {
+        (
+            scale_h,
+            (
+                ((new_geo.size.w as f64 - old_geo.size.w as f64 * scale_h) / 2.0).round() as i32,
+                0,
             )
-        }
-
-        Ok(elements)
+                .into(),
+        )
+    } else {
+        (
+            scale_w,
+            (
+                0,
+                ((new_geo.size.h as f64 - old_geo.size.h as f64 * scale_w) / 2.0).round() as i32,
+            )
+                .into(),
+        )
     }
 }

@@ -454,6 +454,7 @@ impl Workspace {
         override_redirect_windows: &[X11Surface],
         xwm_state: Option<&'a mut XWaylandState>,
         draw_focus_indicator: Option<&Seat<State>>,
+        draw_groups: bool,
         indicator_thickness: u8,
         exclude_workspace_overview: bool,
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
@@ -604,7 +605,14 @@ impl Workspace {
             //tiling surfaces
             render_elements.extend(
                 self.tiling_layer
-                    .render_output::<R>(renderer, output, focused.as_ref(), indicator_thickness)?
+                    .render_output::<R>(
+                        renderer,
+                        output,
+                        focused.as_ref(),
+                        layer_map.non_exclusive_zone(),
+                        draw_groups,
+                        indicator_thickness,
+                    )?
                     .into_iter()
                     .map(WorkspaceRenderElement::from),
             );

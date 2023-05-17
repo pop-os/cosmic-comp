@@ -52,9 +52,9 @@ impl From<KeyboardFocusTarget> for PointerFocusTarget {
 
 #[derive(Debug, Clone)]
 pub struct WindowGroup {
-    pub(in crate::shell) node: NodeId,
-    pub(in crate::shell) output: WeakOutput,
-    pub(in crate::shell) alive: Weak<()>,
+    pub node: NodeId,
+    pub output: WeakOutput,
+    pub alive: Weak<()>,
 }
 
 impl PartialEq for WindowGroup {

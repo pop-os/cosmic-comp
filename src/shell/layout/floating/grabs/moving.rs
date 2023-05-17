@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::render::{element::AsGlowRenderer, IndicatorShader},
+    backend::render::{element::AsGlowRenderer, IndicatorShader, FOCUS_INDICATOR_COLOR},
     shell::{
         element::{window::CosmicWindowRenderElement, CosmicMapped, CosmicMappedRenderElement},
         focus::target::{KeyboardFocusTarget, PointerFocusTarget},
@@ -66,9 +66,11 @@ impl MoveGrabState {
             elements.push(
                 CosmicMappedRenderElement::from(IndicatorShader::element(
                     renderer,
+                    self.window.clone(),
                     Rectangle::from_loc_and_size(render_location, self.window.geometry().size),
                     self.indicator_thickness,
                     1.0,
+                    FOCUS_INDICATOR_COLOR,
                 ))
                 .into(),
             );

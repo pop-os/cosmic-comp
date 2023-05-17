@@ -3,6 +3,8 @@
 use std::{
     borrow::{Borrow, BorrowMut},
     cell::RefCell,
+    collections::HashMap,
+    sync::Weak,
 };
 
 #[cfg(feature = "debug")]
@@ -12,8 +14,8 @@ use crate::{
 };
 use crate::{
     shell::{
-        element::window::CosmicWindowRenderElement, layout::floating::SeatMoveGrabState,
-        CosmicMappedRenderElement,
+        element::window::CosmicWindowRenderElement, focus::target::WindowGroup,
+        layout::floating::SeatMoveGrabState, CosmicMapped, CosmicMappedRenderElement,
     },
     state::{Common, Fps},
     utils::prelude::SeatExt,
@@ -47,7 +49,7 @@ use smithay::{
         },
     },
     output::Output,
-    utils::{Logical, Physical, Point, Rectangle, Size},
+    utils::{IsAlive, Logical, Physical, Point, Rectangle, Size},
     wayland::{
         dmabuf::get_dmabuf,
         shm::{shm_format_to_fourcc, with_buffer_contents},
@@ -66,11 +68,54 @@ pub type GlMultiFrame<'a, 'b, 'frame> =
     MultiFrame<'a, 'a, 'b, 'frame, GbmGlesBackend<GlowRenderer>, GbmGlesBackend<GlowRenderer>>;
 
 pub static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
+pub static ACTIVE_GROUP_COLOR: [f32; 3] = [0.678, 0.635, 0.619];
+pub static GROUP_COLOR: [f32; 3] = [0.431, 0.404, 0.396];
 pub static FOCUS_INDICATOR_COLOR: [f32; 3] = [0.580, 0.921, 0.921];
 pub static FOCUS_INDICATOR_SHADER: &str = include_str!("./shaders/focus_indicator.frag");
 
 pub struct IndicatorShader(pub GlesPixelProgram);
-struct IndicatorElement(pub RefCell<PixelShaderElement>);
+
+#[derive(Clone)]
+pub enum Key {
+    Group(Weak<()>),
+    Window(CosmicMapped),
+}
+impl std::hash::Hash for Key {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Key::Group(arc) => (arc.as_ptr() as usize).hash(state),
+            Key::Window(window) => window.hash(state),
+        }
+    }
+}
+impl PartialEq for Key {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Key::Group(g1), Key::Group(g2)) => Weak::ptr_eq(g1, g2),
+            (Key::Window(w1), Key::Window(w2)) => w1 == w2,
+            _ => false,
+        }
+    }
+}
+impl Eq for Key {}
+impl From<CosmicMapped> for Key {
+    fn from(window: CosmicMapped) -> Self {
+        Key::Window(window)
+    }
+}
+impl From<WindowGroup> for Key {
+    fn from(group: WindowGroup) -> Self {
+        Key::Group(group.alive.clone())
+    }
+}
+
+#[derive(PartialEq)]
+struct IndicatorSettings {
+    thickness: u8,
+    alpha: f32,
+    color: [f32; 3],
+}
+type IndicatorCache = RefCell<HashMap<Key, (IndicatorSettings, PixelShaderElement)>>;
 
 impl IndicatorShader {
     pub fn get<R: AsGlowRenderer>(renderer: &R) -> GlesPixelProgram {
@@ -85,50 +130,63 @@ impl IndicatorShader {
 
     pub fn element<R: AsGlowRenderer>(
         renderer: &R,
+        key: impl Into<Key>,
         geo: Rectangle<i32, Logical>,
         thickness: u8,
         alpha: f32,
+        color: [f32; 3],
     ) -> PixelShaderElement {
-        let thickness: f32 = thickness as f32;
-        let thickness_loc = (thickness as i32, thickness as i32);
-        let thickness_size = ((thickness * 2.0) as i32, (thickness * 2.0) as i32);
-        let geo = Rectangle::from_loc_and_size(
-            geo.loc - Point::from(thickness_loc),
-            geo.size + Size::from(thickness_size),
-        );
+        let settings = IndicatorSettings {
+            thickness,
+            alpha,
+            color,
+        };
 
         let user_data = Borrow::<GlesRenderer>::borrow(renderer.glow_renderer())
             .egl_context()
             .user_data();
 
-        match user_data.get::<IndicatorElement>() {
-            Some(elem) => {
-                let mut elem = elem.0.borrow_mut();
-                if elem.geometry(1.0.into()).to_logical(1) != geo {
-                    elem.resize(geo, None);
-                }
-                elem.clone()
-            }
-            None => {
-                let shader = Self::get(renderer);
+        user_data.insert_if_missing(|| IndicatorCache::new(HashMap::new()));
+        let mut cache = user_data.get::<IndicatorCache>().unwrap().borrow_mut();
+        cache.retain(|k, _| match k {
+            Key::Group(w) => w.upgrade().is_some(),
+            Key::Window(w) => w.alive(),
+        });
 
-                let elem = PixelShaderElement::new(
-                    shader,
-                    geo,
-                    None, //TODO
-                    alpha,
-                    vec![
-                        Uniform::new("color", FOCUS_INDICATOR_COLOR),
-                        Uniform::new("thickness", thickness),
-                        Uniform::new("radius", thickness * 2.0),
-                    ],
-                );
-                if !user_data.insert_if_missing(|| IndicatorElement(RefCell::new(elem.clone()))) {
-                    *user_data.get::<IndicatorElement>().unwrap().0.borrow_mut() = elem.clone();
-                }
-                elem
-            }
+        let key = key.into();
+        if cache
+            .get(&key)
+            .filter(|(old_settings, _)| &settings == old_settings)
+            .is_none()
+        {
+            let thickness: f32 = thickness as f32;
+            let thickness_loc = (thickness as i32, thickness as i32);
+            let thickness_size = ((thickness * 2.0) as i32, (thickness * 2.0) as i32);
+            let geo = Rectangle::from_loc_and_size(
+                geo.loc - Point::from(thickness_loc),
+                geo.size + Size::from(thickness_size),
+            );
+            let shader = Self::get(renderer);
+
+            let elem = PixelShaderElement::new(
+                shader,
+                geo,
+                None, //TODO
+                alpha,
+                vec![
+                    Uniform::new("color", color),
+                    Uniform::new("thickness", thickness),
+                    Uniform::new("radius", thickness * 2.0),
+                ],
+            );
+            cache.insert(key.clone(), (settings, elem));
         }
+
+        let elem = &mut cache.get_mut(&key).unwrap().1;
+        if elem.geometry(1.0.into()).to_logical(1) != geo {
+            elem.resize(geo, None);
+        }
+        elem.clone()
     }
 }
 
@@ -307,6 +365,7 @@ where
                 &state.shell.override_redirect_windows,
                 state.xwayland_state.as_mut(),
                 (!move_active && is_active_space).then_some(&last_active_seat),
+                true,
                 state.config.static_conf.active_hint,
                 exclude_workspace_overview,
             )
