@@ -13,7 +13,7 @@ use crate::{
         },
         grabs::ResizeEdge,
         layout::Orientation,
-        CosmicSurface, OutputNotMapped,
+        CosmicSurface, OutputNotMapped, OverviewMode,
     },
     utils::prelude::*,
     wayland::{
@@ -52,7 +52,7 @@ mod grabs;
 pub use self::blocker::*;
 pub use self::grabs::*;
 
-const ANIMATION_DURATION: Duration = Duration::from_millis(200);
+pub const ANIMATION_DURATION: Duration = Duration::from_millis(200);
 
 #[derive(Debug, Clone)]
 struct OutputData {
@@ -1439,7 +1439,7 @@ impl TilingLayout {
         output: &Output,
         focused: Option<&CosmicMapped>,
         non_exclusive_zone: Rectangle<i32, Logical>,
-        draw_groups: bool,
+        overview: OverviewMode,
         indicator_thickness: u8,
     ) -> Result<Vec<CosmicMappedRenderElement<R>>, OutputNotMapped>
     where
@@ -1478,12 +1478,32 @@ impl TilingLayout {
         } else {
             1.0
         };
+        let draw_groups = match overview {
+            OverviewMode::Started(_, start) => {
+                let percentage = (Instant::now().duration_since(start).as_millis() as f32
+                    / ANIMATION_DURATION.as_millis() as f32)
+                    .min(1.0);
+                Some(Ease::Cubic(Cubic::Out).tween(percentage))
+            }
+            OverviewMode::Ended(end) => {
+                let percentage = (1.0
+                    - Instant::now().duration_since(end).as_millis() as f32
+                        / ANIMATION_DURATION.as_millis() as f32)
+                    .max(0.0);
+                if percentage > 0.0 {
+                    Some(Ease::Cubic(Cubic::Out).tween(percentage))
+                } else {
+                    None
+                }
+            }
+            OverviewMode::None => None,
+        };
 
         let mut elements = Vec::new();
 
         // all gone windows and fade them out
         let old_geometries = if let Some(reference_tree) = reference_tree.as_ref() {
-            let (geometries, _) = if draw_groups {
+            let (geometries, _) = if let Some(transition) = draw_groups {
                 geometries_for_groupview(
                     reference_tree,
                     renderer,
@@ -1491,6 +1511,7 @@ impl TilingLayout {
                     focused, // TODO: Would be better to be an old focus,
                     // but for that we have to associate focus with a tree (and animate focus changes properly)
                     1.0 - percentage,
+                    transition,
                 )
             } else {
                 None
@@ -1512,13 +1533,14 @@ impl TilingLayout {
             None
         };
 
-        let (geometries, group_elements) = if draw_groups {
+        let (geometries, group_elements) = if let Some(transition) = draw_groups {
             geometries_for_groupview(
                 target_tree,
                 renderer,
                 non_exclusive_zone,
                 focused,
                 percentage,
+                transition,
             )
         } else {
             None
@@ -1540,7 +1562,16 @@ impl TilingLayout {
             focused,
             output_scale,
             percentage,
-            if draw_groups { 3 } else { indicator_thickness },
+            if let Some(transition) = draw_groups {
+                let diff = (3u8.abs_diff(indicator_thickness) as f32 * transition).round() as u8;
+                if 3 > indicator_thickness {
+                    indicator_thickness + diff
+                } else {
+                    indicator_thickness - diff
+                }
+            } else {
+                indicator_thickness
+            },
         ));
 
         Ok(elements)
@@ -1553,6 +1584,7 @@ fn geometries_for_groupview<R>(
     non_exclusive_zone: Rectangle<i32, Logical>,
     focused: Option<&CosmicMapped>,
     alpha: f32,
+    transition: f32,
 ) -> Option<(
     HashMap<NodeId, Rectangle<i32, Logical>>,
     Vec<CosmicMappedRenderElement<R>>,
@@ -1570,11 +1602,14 @@ where
         let mut geometries = HashMap::new();
 
         const GAP: i32 = 16;
+        let gap: i32 = (GAP as f32 * transition).round() as i32;
+        let alpha = alpha * transition;
+
         for node_id in tree.traverse_pre_order_ids(root).unwrap() {
             if let Some(mut geo) = stack.pop() {
                 // zoom in windows
-                geo.loc += (GAP, GAP).into();
-                geo.size -= (GAP * 2, GAP * 2).into();
+                geo.loc += (gap, gap).into();
+                geo.size -= (gap * 2, gap * 2).into();
 
                 let node: &Node<Data> = tree.get(&node_id).unwrap();
                 let data = node.data();
@@ -1715,8 +1750,8 @@ where
                                 .into(),
                             );
 
-                            geo.loc += (GAP, GAP).into();
-                            geo.size -= (GAP * 2, GAP * 2).into();
+                            geo.loc += (gap, gap).into();
+                            geo.size -= (gap * 2, gap * 2).into();
                         }
 
                         geometries.insert(node_id.clone(), geo);

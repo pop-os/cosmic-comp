@@ -1,6 +1,6 @@
 use calloop::LoopHandle;
 use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, collections::HashMap};
+use std::{cell::RefCell, collections::HashMap, time::Instant};
 use tracing::warn;
 
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State as WState;
@@ -29,7 +29,7 @@ use smithay::{
 };
 
 use crate::{
-    config::{Config, OutputConfig, WorkspaceMode as ConfigMode},
+    config::{Config, KeyModifiers, OutputConfig, WorkspaceMode as ConfigMode},
     utils::prelude::*,
     wayland::protocols::{
         toplevel_info::ToplevelInfoState,
@@ -52,8 +52,18 @@ use self::{
     element::CosmicWindow,
     focus::target::KeyboardFocusTarget,
     grabs::ResizeEdge,
-    layout::{floating::FloatingLayout, tiling::TilingLayout},
+    layout::{
+        floating::FloatingLayout,
+        tiling::{TilingLayout, ANIMATION_DURATION},
+    },
 };
+
+#[derive(Debug, Clone)]
+pub enum OverviewMode {
+    None,
+    Started(KeyModifiers, Instant),
+    Ended(Instant),
+}
 
 pub struct Shell {
     pub popups: PopupManager,
@@ -72,6 +82,7 @@ pub struct Shell {
     pub workspace_state: WorkspaceState<State>,
 
     gaps: (u8, u8),
+    overview_mode: OverviewMode,
 }
 
 #[derive(Debug)]
@@ -498,6 +509,7 @@ impl Shell {
             workspace_state,
 
             gaps: config.static_conf.gaps,
+            overview_mode: OverviewMode::None,
         }
     }
 
@@ -1038,15 +1050,39 @@ impl Shell {
     }
 
     pub fn animations_going(&self) -> bool {
-        self.workspaces
-            .spaces()
-            .any(|workspace| workspace.animations_going())
+        matches!(self.overview_mode, OverviewMode::None)
+            || self
+                .workspaces
+                .spaces()
+                .any(|workspace| workspace.animations_going())
     }
 
     pub fn update_animations(&mut self, handle: &LoopHandle<'static, crate::state::Data>) {
         for workspace in self.workspaces.spaces_mut() {
             workspace.update_animations(handle)
         }
+    }
+
+    pub fn set_overview_mode(&mut self, enabled: Option<KeyModifiers>) {
+        if let Some(modifiers) = enabled {
+            if !matches!(self.overview_mode, OverviewMode::Started(_, _)) {
+                self.overview_mode = OverviewMode::Started(modifiers, Instant::now());
+            }
+        } else {
+            if !matches!(self.overview_mode, OverviewMode::Ended(_)) {
+                self.overview_mode = OverviewMode::Ended(Instant::now());
+            }
+        }
+    }
+
+    pub fn overview_mode(&mut self) -> OverviewMode {
+        if let OverviewMode::Ended(timestamp) = self.overview_mode {
+            if Instant::now().duration_since(timestamp) > ANIMATION_DURATION {
+                self.overview_mode = OverviewMode::None;
+            }
+        }
+
+        self.overview_mode.clone()
     }
 
     pub fn refresh(&mut self) {
@@ -1235,7 +1271,7 @@ impl Shell {
             }
         }
         let elements = from_workspace.mapped().cloned().collect::<Vec<_>>();
-        std::mem::drop(from_workspace);
+
         for mapped in elements.into_iter() {
             state.common.shell.update_reactive_popups(&mapped);
         }

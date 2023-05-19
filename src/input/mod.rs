@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    config::{Action, Config},
+    config::{Action, Config, KeyModifiers},
     shell::{
         focus::{target::PointerFocusTarget, FocusDirection},
         layout::{
             floating::SeatMoveGrabState,
             tiling::{Direction, FocusResult},
         },
-        Workspace,
+        OverviewMode, Workspace,
     }, // shell::grabs::SeatMoveGrabState
     state::Common,
     utils::prelude::*,
@@ -219,7 +219,7 @@ impl State {
 
                         let serial = SERIAL_COUNTER.next_serial();
                         let time = Event::time_msec(&event);
-                        if let Some(action) = seat
+                        if let Some((action, mods)) = seat
                             .get_keyboard()
                             .unwrap()
                             .input(
@@ -229,6 +229,18 @@ impl State {
                                 serial,
                                 time,
                                 |data, modifiers, handle| {
+                                    if let OverviewMode::Started(action_modifiers, _) =
+                                        data.common.shell.overview_mode()
+                                    {
+                                        if !(action_modifiers.ctrl && modifiers.ctrl)
+                                            && !(action_modifiers.alt && modifiers.alt)
+                                            && !(action_modifiers.logo && modifiers.logo)
+                                            && !(action_modifiers.shift && modifiers.shift)
+                                        {
+                                            data.common.shell.set_overview_mode(None);
+                                        }
+                                    }
+
                                     if state == KeyState::Released
                                         && userdata.get::<SupressedKeys>().unwrap().filter(&handle)
                                     {
@@ -283,9 +295,10 @@ impl State {
                                                     .get::<SupressedKeys>()
                                                     .unwrap()
                                                     .add(&handle);
-                                                return FilterResult::Intercept(Some(
+                                                return FilterResult::Intercept(Some((
                                                     action.clone(),
-                                                ));
+                                                    binding.modifiers.clone(),
+                                                )));
                                             }
                                         }
                                     }
@@ -295,7 +308,7 @@ impl State {
                             )
                             .flatten()
                         {
-                            self.handle_action(action, seat, serial, time)
+                            self.handle_action(action, seat, serial, time, mods)
                         }
                         break;
                     }
@@ -640,7 +653,14 @@ impl State {
         }
     }
 
-    fn handle_action(&mut self, action: Action, seat: &Seat<State>, serial: Serial, time: u32) {
+    fn handle_action(
+        &mut self,
+        action: Action,
+        seat: &Seat<State>,
+        serial: Serial,
+        time: u32,
+        mods: KeyModifiers,
+    ) {
         match action {
             Action::Terminate => {
                 self.common.should_stop = true;
@@ -920,17 +940,21 @@ impl State {
                     FocusResult::None => {
                         // TODO: Handle Workspace orientation
                         match focus {
-                            FocusDirection::Left => {
-                                self.handle_action(Action::PreviousWorkspace, seat, serial, time)
-                            }
+                            FocusDirection::Left => self.handle_action(
+                                Action::PreviousWorkspace,
+                                seat,
+                                serial,
+                                time,
+                                mods,
+                            ),
                             FocusDirection::Right => {
-                                self.handle_action(Action::NextWorkspace, seat, serial, time)
+                                self.handle_action(Action::NextWorkspace, seat, serial, time, mods)
                             }
                             FocusDirection::Up => {
-                                self.handle_action(Action::PreviousOutput, seat, serial, time)
+                                self.handle_action(Action::PreviousOutput, seat, serial, time, mods)
                             }
                             FocusDirection::Down => {
-                                self.handle_action(Action::NextOutput, seat, serial, time)
+                                self.handle_action(Action::NextOutput, seat, serial, time, mods)
                             }
                             _ => {}
                         }
@@ -955,17 +979,36 @@ impl State {
                     // TODO: Handle Workspace orientation
                     // TODO: Being able to move Groups (move_further should be KeyboardFocusTarget instead)
                     match direction {
-                        Direction::Left => {
-                            self.handle_action(Action::MoveToPreviousWorkspace, seat, serial, time)
-                        }
-                        Direction::Right => {
-                            self.handle_action(Action::MoveToNextWorkspace, seat, serial, time)
-                        }
-                        Direction::Up => {
-                            self.handle_action(Action::MoveToPreviousOutput, seat, serial, time)
-                        }
+                        Direction::Left => self.handle_action(
+                            Action::MoveToPreviousWorkspace,
+                            seat,
+                            serial,
+                            time,
+                            mods,
+                        ),
+                        Direction::Right => self.handle_action(
+                            Action::MoveToNextWorkspace,
+                            seat,
+                            serial,
+                            time,
+                            mods,
+                        ),
+                        Direction::Up => self.handle_action(
+                            Action::MoveToPreviousOutput,
+                            seat,
+                            serial,
+                            time,
+                            mods,
+                        ),
                         Direction::Down => {
-                            self.handle_action(Action::MoveToNextOutput, seat, serial, time)
+                            self.handle_action(Action::MoveToNextOutput, seat, serial, time, mods)
+                        }
+                    }
+                } else {
+                    let focus_stack = workspace.focus_stack.get(seat);
+                    if let Some(focused_window) = focus_stack.last() {
+                        if workspace.is_tiled(focused_window) {
+                            self.common.shell.set_overview_mode(Some(mods));
                         }
                     }
                 }

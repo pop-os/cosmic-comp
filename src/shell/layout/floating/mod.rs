@@ -351,6 +351,7 @@ impl FloatingLayout {
         output: &Output,
         focused: Option<&CosmicMapped>,
         indicator_thickness: u8,
+        alpha: f32,
     ) -> Vec<CosmicMappedRenderElement<R>>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
@@ -374,7 +375,7 @@ impl FloatingLayout {
                     renderer,
                     render_location.to_physical_precise_round(output_scale),
                     output_scale.into(),
-                    1.0,
+                    alpha,
                 );
                 if focused == Some(elem) {
                     if indicator_thickness > 0 {
@@ -386,7 +387,7 @@ impl FloatingLayout {
                                 elem.geometry().size,
                             ),
                             indicator_thickness,
-                            1.0,
+                            alpha,
                             FOCUS_INDICATOR_COLOR,
                         );
                         elements.insert(0, element.into());

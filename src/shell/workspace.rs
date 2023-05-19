@@ -1,8 +1,14 @@
 use crate::{
-    backend::render::element::AsGlowRenderer,
-    shell::layout::{
-        floating::{FloatingLayout, MoveSurfaceGrab},
-        tiling::TilingLayout,
+    backend::render::{
+        element::{AsGlowFrame, AsGlowRenderer},
+        GlMultiError, GlMultiFrame, GlMultiRenderer,
+    },
+    shell::{
+        layout::{
+            floating::{FloatingLayout, MoveSurfaceGrab},
+            tiling::{TilingLayout, ANIMATION_DURATION},
+        },
+        OverviewMode,
     },
     state::State,
     utils::prelude::*,
@@ -20,19 +26,30 @@ use crate::{
 use calloop::LoopHandle;
 use indexmap::IndexSet;
 use smithay::{
-    backend::renderer::{
-        element::{surface::WaylandSurfaceRenderElement, AsRenderElements, Element, RenderElement},
-        ImportAll, ImportMem, Renderer,
+    backend::{
+        allocator::Fourcc,
+        renderer::{
+            element::{
+                surface::WaylandSurfaceRenderElement, texture::TextureRenderElement,
+                AsRenderElements, Element, Id, RenderElement,
+            },
+            gles::{GlesError, GlesTexture},
+            glow::{GlowFrame, GlowRenderer},
+            ImportAll, ImportMem, Renderer,
+        },
     },
     desktop::{layer_map_for_output, space::SpaceElement, LayerSurface},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::{Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Size},
+    utils::{
+        Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Size,
+        Transform,
+    },
     wayland::{seat::WaylandFocus, shell::wlr_layer::Layer},
     xwayland::X11Surface,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Instant};
 use tracing::warn;
 
 use super::{
@@ -454,7 +471,7 @@ impl Workspace {
         override_redirect_windows: &[X11Surface],
         xwm_state: Option<&'a mut XWaylandState>,
         draw_focus_indicator: Option<&Seat<State>>,
-        draw_groups: bool,
+        overview: OverviewMode,
         indicator_thickness: u8,
         exclude_workspace_overview: bool,
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
@@ -463,6 +480,7 @@ impl Workspace {
         <R as Renderer>::TextureId: 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
+        WorkspaceRenderElement<R>: RenderElement<R>,
     {
         #[cfg(feature = "debug")]
         puffin::profile_function!();
@@ -540,7 +558,7 @@ impl Workspace {
         } else {
             // TODO: Handle modes like
             // - keyboard window swapping
-            // - resizing / moving in tiling
+            // - resizing in tiling
 
             // overlay and top layer surfaces
             let lower = {
@@ -595,9 +613,31 @@ impl Workspace {
             let focused =
                 draw_focus_indicator.and_then(|seat| self.focus_stack.get(seat).last().cloned());
             // floating surfaces
+            let alpha = match &overview {
+                OverviewMode::Started(_, started) => {
+                    (1.0 - (Instant::now().duration_since(*started).as_millis()
+                        / ANIMATION_DURATION.as_millis()) as f32)
+                        .max(0.0)
+                        * 0.4
+                        + 0.6
+                }
+                OverviewMode::Ended(ended) => {
+                    ((Instant::now().duration_since(*ended).as_millis()
+                        / ANIMATION_DURATION.as_millis()) as f32)
+                        * 0.4
+                        + 0.6
+                }
+                OverviewMode::None => 1.0,
+            };
             render_elements.extend(
                 self.floating_layer
-                    .render_output::<R>(renderer, output, focused.as_ref(), indicator_thickness)
+                    .render_output::<R>(
+                        renderer,
+                        output,
+                        focused.as_ref(),
+                        indicator_thickness,
+                        alpha,
+                    )
                     .into_iter()
                     .map(WorkspaceRenderElement::from),
             );
@@ -610,7 +650,7 @@ impl Workspace {
                         output,
                         focused.as_ref(),
                         layer_map.non_exclusive_zone(),
-                        draw_groups,
+                        overview.clone(),
                         indicator_thickness,
                     )?
                     .into_iter()
@@ -627,6 +667,64 @@ impl Workspace {
                         "Failed to update Xwm stacking order.",
                     );
                 }
+            }
+
+            if let OverviewMode::Started(_, start) = overview {
+                let alpha = Instant::now().duration_since(start).as_millis() as f64 / 100.0;
+
+                #[derive(Clone)]
+                struct BackdropTexture(Id, GlesTexture);
+
+                if renderer
+                    .glow_renderer()
+                    .egl_context()
+                    .user_data()
+                    .get::<BackdropTexture>()
+                    .is_none()
+                {
+                    let tex = BackdropTexture(
+                        Id::new(),
+                        renderer
+                            .glow_renderer_mut()
+                            .import_memory(&[0, 0, 0, 255], Fourcc::Argb8888, (1, 1).into(), false)
+                            .unwrap(),
+                    );
+                    renderer
+                        .glow_renderer()
+                        .egl_context()
+                        .user_data()
+                        .insert_if_missing(|| tex);
+                };
+                let BackdropTexture(id, tex) = renderer
+                    .glow_renderer()
+                    .egl_context()
+                    .user_data()
+                    .get::<BackdropTexture>()
+                    .unwrap()
+                    .clone();
+
+                render_elements.push(
+                    TextureRenderElement::from_static_texture(
+                        id,
+                        renderer.id(),
+                        (0.0, 0.0),
+                        tex,
+                        1,
+                        smithay::utils::Transform::Normal,
+                        Some(alpha as f32),
+                        Some(Rectangle::from_loc_and_size((0., 0.), (1., 1.))),
+                        Some(output.geometry().size),
+                        if alpha >= 1.0 {
+                            Some(vec![Rectangle::from_loc_and_size(
+                                (0, 0),
+                                output.geometry().size.to_buffer(1, Transform::Normal),
+                            )])
+                        } else {
+                            None
+                        },
+                    )
+                    .into(),
+                )
             }
 
             // bottom and background layer surfaces
@@ -675,6 +773,7 @@ where
 {
     Wayland(WaylandSurfaceRenderElement<R>),
     Window(CosmicMappedRenderElement<R>),
+    Backdrop(TextureRenderElement<GlesTexture>),
 }
 
 impl<R> Element for WorkspaceRenderElement<R>
@@ -686,6 +785,7 @@ where
         match self {
             WorkspaceRenderElement::Wayland(elem) => elem.id(),
             WorkspaceRenderElement::Window(elem) => elem.id(),
+            WorkspaceRenderElement::Backdrop(elem) => elem.id(),
         }
     }
 
@@ -693,6 +793,7 @@ where
         match self {
             WorkspaceRenderElement::Wayland(elem) => elem.current_commit(),
             WorkspaceRenderElement::Window(elem) => elem.current_commit(),
+            WorkspaceRenderElement::Backdrop(elem) => elem.current_commit(),
         }
     }
 
@@ -700,6 +801,7 @@ where
         match self {
             WorkspaceRenderElement::Wayland(elem) => elem.src(),
             WorkspaceRenderElement::Window(elem) => elem.src(),
+            WorkspaceRenderElement::Backdrop(elem) => elem.src(),
         }
     }
 
@@ -707,6 +809,7 @@ where
         match self {
             WorkspaceRenderElement::Wayland(elem) => elem.geometry(scale),
             WorkspaceRenderElement::Window(elem) => elem.geometry(scale),
+            WorkspaceRenderElement::Backdrop(elem) => elem.geometry(scale),
         }
     }
 
@@ -714,6 +817,7 @@ where
         match self {
             WorkspaceRenderElement::Wayland(elem) => elem.location(scale),
             WorkspaceRenderElement::Window(elem) => elem.location(scale),
+            WorkspaceRenderElement::Backdrop(elem) => elem.location(scale),
         }
     }
 
@@ -721,6 +825,7 @@ where
         match self {
             WorkspaceRenderElement::Wayland(elem) => elem.transform(),
             WorkspaceRenderElement::Window(elem) => elem.transform(),
+            WorkspaceRenderElement::Backdrop(elem) => elem.transform(),
         }
     }
 
@@ -732,6 +837,7 @@ where
         match self {
             WorkspaceRenderElement::Wayland(elem) => elem.damage_since(scale, commit),
             WorkspaceRenderElement::Window(elem) => elem.damage_since(scale, commit),
+            WorkspaceRenderElement::Backdrop(elem) => elem.damage_since(scale, commit),
         }
     }
 
@@ -739,6 +845,7 @@ where
         match self {
             WorkspaceRenderElement::Wayland(elem) => elem.opaque_regions(scale),
             WorkspaceRenderElement::Window(elem) => elem.opaque_regions(scale),
+            WorkspaceRenderElement::Backdrop(elem) => elem.opaque_regions(scale),
         }
     }
 
@@ -746,36 +853,70 @@ where
         match self {
             WorkspaceRenderElement::Wayland(elem) => elem.alpha(),
             WorkspaceRenderElement::Window(elem) => elem.alpha(),
+            WorkspaceRenderElement::Backdrop(elem) => elem.alpha(),
         }
     }
 }
 
-impl<R> RenderElement<R> for WorkspaceRenderElement<R>
-where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
-    CosmicMappedRenderElement<R>: RenderElement<R>,
-{
+impl RenderElement<GlowRenderer> for WorkspaceRenderElement<GlowRenderer> {
     fn draw<'frame>(
         &self,
-        frame: &mut <R as Renderer>::Frame<'frame>,
+        frame: &mut GlowFrame<'frame>,
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, smithay::utils::Physical>],
-    ) -> Result<(), <R as Renderer>::Error> {
+    ) -> Result<(), GlesError> {
         match self {
             WorkspaceRenderElement::Wayland(elem) => elem.draw(frame, src, dst, damage),
             WorkspaceRenderElement::Window(elem) => elem.draw(frame, src, dst, damage),
+            WorkspaceRenderElement::Backdrop(elem) => {
+                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage)
+            }
         }
     }
 
     fn underlying_storage(
         &self,
-        renderer: &mut R,
+        renderer: &mut GlowRenderer,
     ) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
         match self {
             WorkspaceRenderElement::Wayland(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::Window(elem) => elem.underlying_storage(renderer),
+            WorkspaceRenderElement::Backdrop(elem) => elem.underlying_storage(renderer),
+        }
+    }
+}
+
+impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>>
+    for WorkspaceRenderElement<GlMultiRenderer<'a, 'b>>
+{
+    fn draw<'frame>(
+        &self,
+        frame: &mut GlMultiFrame<'a, 'b, 'frame>,
+        src: Rectangle<f64, BufferCoords>,
+        dst: Rectangle<i32, Physical>,
+        damage: &[Rectangle<i32, smithay::utils::Physical>],
+    ) -> Result<(), GlMultiError> {
+        match self {
+            WorkspaceRenderElement::Wayland(elem) => elem.draw(frame, src, dst, damage),
+            WorkspaceRenderElement::Window(elem) => elem.draw(frame, src, dst, damage),
+            WorkspaceRenderElement::Backdrop(elem) => {
+                RenderElement::<GlowRenderer>::draw(elem, frame.glow_frame_mut(), src, dst, damage)
+                    .map_err(GlMultiError::Render)
+            }
+        }
+    }
+
+    fn underlying_storage(
+        &self,
+        renderer: &mut GlMultiRenderer<'a, 'b>,
+    ) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
+        match self {
+            WorkspaceRenderElement::Wayland(elem) => elem.underlying_storage(renderer),
+            WorkspaceRenderElement::Window(elem) => elem.underlying_storage(renderer),
+            WorkspaceRenderElement::Backdrop(elem) => {
+                elem.underlying_storage(renderer.glow_renderer_mut())
+            }
         }
     }
 }
@@ -799,5 +940,16 @@ where
 {
     fn from(elem: CosmicMappedRenderElement<R>) -> Self {
         WorkspaceRenderElement::Window(elem)
+    }
+}
+
+impl<R> From<TextureRenderElement<GlesTexture>> for WorkspaceRenderElement<R>
+where
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    <R as Renderer>::TextureId: 'static,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+{
+    fn from(elem: TextureRenderElement<GlesTexture>) -> Self {
+        WorkspaceRenderElement::Backdrop(elem)
     }
 }
