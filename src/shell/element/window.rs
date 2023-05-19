@@ -1,7 +1,7 @@
 use crate::{
     backend::render::{
         element::{AsGlowFrame, AsGlowRenderer},
-        GlMultiFrame, GlMultiRenderer,
+        GlMultiError, GlMultiFrame, GlMultiRenderer,
     },
     shell::Shell,
     state::State,
@@ -24,7 +24,6 @@ use smithay::{
                 AsRenderElements, Element, Id, RenderElement,
             },
             glow::GlowRenderer,
-            multigpu::Error as MultiError,
             utils::CommitCounter,
             ImportAll, ImportMem, Renderer,
         },
@@ -683,11 +682,11 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>>
         src: Rectangle<f64, smithay::utils::Buffer>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
-    ) -> Result<(), <GlMultiRenderer<'a, 'b> as Renderer>::Error> {
+    ) -> Result<(), GlMultiError> {
         match self {
             CosmicWindowRenderElement::Header(h) => h
                 .draw(frame.glow_frame_mut(), src, dst, damage)
-                .map_err(|err| MultiError::Render(err)),
+                .map_err(|err| GlMultiError::Render(err)),
             CosmicWindowRenderElement::Window(w) => w.draw(frame, src, dst, damage),
         }
     }

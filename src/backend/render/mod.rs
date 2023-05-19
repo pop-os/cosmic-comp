@@ -16,6 +16,7 @@ use crate::{
     shell::{
         element::window::CosmicWindowRenderElement, focus::target::WindowGroup,
         layout::floating::SeatMoveGrabState, CosmicMapped, CosmicMappedRenderElement,
+        WorkspaceRenderElement,
     },
     state::{Common, Fps},
     utils::prelude::SeatExt,
@@ -44,7 +45,7 @@ use smithay::{
                 UniformName, UniformType,
             },
             glow::GlowRenderer,
-            multigpu::{gbm::GbmGlesBackend, MultiFrame, MultiRenderer},
+            multigpu::{gbm::GbmGlesBackend, Error as MultiError, MultiFrame, MultiRenderer},
             Bind, Blit, ExportMem, ImportAll, ImportMem, Offscreen, Renderer, TextureFilter,
         },
     },
@@ -66,6 +67,7 @@ pub type GlMultiRenderer<'a, 'b> =
     MultiRenderer<'a, 'a, 'b, GbmGlesBackend<GlowRenderer>, GbmGlesBackend<GlowRenderer>>;
 pub type GlMultiFrame<'a, 'b, 'frame> =
     MultiFrame<'a, 'a, 'b, 'frame, GbmGlesBackend<GlowRenderer>, GbmGlesBackend<GlowRenderer>>;
+pub type GlMultiError = MultiError<GbmGlesBackend<GlowRenderer>, GbmGlesBackend<GlowRenderer>>;
 
 pub static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
 pub static ACTIVE_GROUP_COLOR: [f32; 3] = [0.678, 0.635, 0.619];
@@ -298,6 +300,7 @@ where
     <R as Renderer>::Error: From<GlesError>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
+    WorkspaceRenderElement<R>: RenderElement<R>,
 {
     #[cfg(feature = "debug")]
     puffin::profile_function!();
@@ -346,6 +349,7 @@ where
         .space_for_handle_mut(&handle)
         .ok_or(OutputNoMode)?
         .update_animations(&state.event_loop_handle);
+    let overview = state.shell.overview_mode();
     let workspace = state.shell.space_for_handle(&handle).ok_or(OutputNoMode)?;
     let last_active_seat = state.last_active_seat().clone();
     let move_active = last_active_seat
@@ -365,7 +369,7 @@ where
                 &state.shell.override_redirect_windows,
                 state.xwayland_state.as_mut(),
                 (!move_active && is_active_space).then_some(&last_active_seat),
-                true,
+                overview,
                 state.config.static_conf.active_hint,
                 exclude_workspace_overview,
             )
@@ -377,7 +381,7 @@ where
     Ok(elements)
 }
 
-pub fn render_output<'frame, R, Target, OffTarget, Source>(
+pub fn render_output<R, Target, OffTarget, Source>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,
     target: Target,
@@ -404,6 +408,7 @@ where
     CosmicElement<R>: RenderElement<R>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
+    WorkspaceRenderElement<R>: RenderElement<R>,
     Source: Clone,
 {
     let handle = state.shell.workspaces.active(output).handle;
@@ -425,7 +430,7 @@ where
     result
 }
 
-pub fn render_workspace<'frame, R, Target, OffTarget, Source>(
+pub fn render_workspace<R, Target, OffTarget, Source>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,
     target: Target,
@@ -454,6 +459,7 @@ where
     CosmicElement<R>: RenderElement<R>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
+    WorkspaceRenderElement<R>: RenderElement<R>,
     Source: Clone,
 {
     #[cfg(feature = "debug")]

@@ -10,11 +10,9 @@ use smithay::{
 };
 
 #[cfg(feature = "debug")]
-use smithay::backend::renderer::{
-    element::texture::TextureRenderElement, gles::GlesTexture, multigpu::Error as MultiError,
-};
+use smithay::backend::renderer::{element::texture::TextureRenderElement, gles::GlesTexture};
 
-use super::{cursor::CursorRenderElement, GlMultiFrame, GlMultiRenderer};
+use super::{cursor::CursorRenderElement, GlMultiError, GlMultiFrame, GlMultiRenderer};
 
 pub enum CosmicElement<R>
 where
@@ -167,7 +165,7 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>> for CosmicElement<GlMultiRen
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
-    ) -> Result<(), <GlMultiRenderer<'a, 'b> as Renderer>::Error> {
+    ) -> Result<(), GlMultiError> {
         match self {
             CosmicElement::Workspace(elem) => elem.draw(frame, src, dst, damage),
             CosmicElement::Cursor(elem) => elem.draw(frame, src, dst, damage),

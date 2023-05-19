@@ -772,12 +772,12 @@ pub enum KeyModifier {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct KeyModifiers {
-    ctrl: bool,
-    alt: bool,
-    shift: bool,
-    logo: bool,
-    caps_lock: bool,
-    num_lock: bool,
+    pub ctrl: bool,
+    pub alt: bool,
+    pub shift: bool,
+    pub logo: bool,
+    pub caps_lock: bool,
+    pub num_lock: bool,
 }
 
 impl PartialEq<ModifiersState> for KeyModifiers {

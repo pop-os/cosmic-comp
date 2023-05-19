@@ -1,7 +1,7 @@
 use crate::{
     backend::render::{
         element::{AsGlowFrame, AsGlowRenderer},
-        GlMultiFrame, GlMultiRenderer,
+        GlMultiError, GlMultiFrame, GlMultiRenderer,
     },
     state::State,
     utils::prelude::SeatExt,
@@ -17,7 +17,6 @@ use smithay::{
             },
             gles::element::PixelShaderElement,
             glow::GlowRenderer,
-            multigpu::Error as MultiError,
             ImportAll, ImportMem, Renderer,
         },
     },
@@ -859,7 +858,7 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>>
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
-    ) -> Result<(), <GlMultiRenderer<'a, 'b> as Renderer>::Error> {
+    ) -> Result<(), GlMultiError> {
         match self {
             CosmicMappedRenderElement::Stack(elem) => elem.draw(frame, src, dst, damage),
             CosmicMappedRenderElement::Window(elem) => elem.draw(frame, src, dst, damage),
@@ -867,13 +866,13 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>>
             CosmicMappedRenderElement::TiledWindow(elem) => elem.draw(frame, src, dst, damage),
             CosmicMappedRenderElement::Indicator(elem) => {
                 RenderElement::<GlowRenderer>::draw(elem, frame.glow_frame_mut(), src, dst, damage)
-                    .map_err(|err| MultiError::Render(err))
+                    .map_err(|err| GlMultiError::Render(err))
             }
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => {
                 let glow_frame = frame.glow_frame_mut();
                 RenderElement::<GlowRenderer>::draw(elem, glow_frame, src, dst, damage)
-                    .map_err(|err| MultiError::Render(err))
+                    .map_err(|err| GlMultiError::Render(err))
             }
         }
     }
