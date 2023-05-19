@@ -1201,7 +1201,7 @@ impl KmsState {
             .values_mut()
             .find(|dev| dev.surfaces.values().any(|s| s.output == *output))
         {
-            let (crtc, mut surface) = device
+            let (crtc, surface) = device
                 .surfaces
                 .iter_mut()
                 .find(|(_, s)| s.output == *output)

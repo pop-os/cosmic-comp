@@ -48,7 +48,6 @@ impl ToplevelManagementHandler for State {
                     .unwrap()
                     .clone();
 
-                std::mem::drop(workspace);
                 self.common.shell.activate(&output, idx as usize);
                 mapped.focus_window(window);
                 Common::set_focus(self, Some(&mapped.clone().into()), &seat, None);

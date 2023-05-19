@@ -81,7 +81,7 @@ impl State {
                             );
                         }
 
-                        let mut xwayland_state = data.state.common.xwayland_state.as_mut().unwrap();
+                        let xwayland_state = data.state.common.xwayland_state.as_mut().unwrap();
                         xwayland_state.xwm = Some(wm);
                     }
                     XWaylandEvent::Exited => {
