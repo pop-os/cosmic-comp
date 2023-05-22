@@ -1837,37 +1837,47 @@ where
                 )
                 .into_iter()
                 .flat_map(|element| match element {
-                    CosmicMappedRenderElement::Stack(elem) => Some(
-                        CosmicMappedRenderElement::TiledStack(RelocateRenderElement::from_element(
-                            RescaleRenderElement::from_element(
-                                CropRenderElement::from_element(
-                                    elem,
-                                    output_scale,
-                                    crop_rect.to_physical_precise_round(output_scale),
-                                )?,
+                    CosmicMappedRenderElement::Stack(elem) => {
+                        Some(CosmicMappedRenderElement::TiledStack({
+                            let cropped = CropRenderElement::from_element(
+                                elem,
+                                output_scale,
+                                crop_rect.to_physical_precise_round(output_scale),
+                            )?;
+                            let rescaled = RescaleRenderElement::from_element(
+                                cropped,
                                 original_location,
                                 scale,
-                            ),
-                            geo.loc.to_physical_precise_round(output_scale),
-                            Relocate::Absolute,
-                        )),
-                    ),
+                            );
+                            let relocated = RelocateRenderElement::from_element(
+                                rescaled,
+                                (geo.loc - original_geo.loc)
+                                    .to_physical_precise_round(output_scale),
+                                Relocate::Relative,
+                            );
+                            relocated
+                        }))
+                    }
                     CosmicMappedRenderElement::Window(elem) => {
-                        Some(CosmicMappedRenderElement::TiledWindow(
-                            RelocateRenderElement::from_element(
-                                RescaleRenderElement::from_element(
-                                    CropRenderElement::from_element(
-                                        elem,
-                                        output_scale,
-                                        crop_rect.to_physical_precise_round(output_scale),
-                                    )?,
-                                    (0, 0).into(),
-                                    scale,
-                                ),
-                                geo.loc.to_physical_precise_round(output_scale),
-                                Relocate::Absolute,
-                            ),
-                        ))
+                        Some(CosmicMappedRenderElement::TiledWindow({
+                            let cropped = CropRenderElement::from_element(
+                                elem,
+                                output_scale,
+                                crop_rect.to_physical_precise_round(output_scale),
+                            )?;
+                            let rescaled = RescaleRenderElement::from_element(
+                                cropped,
+                                original_location,
+                                scale,
+                            );
+                            let relocated = RelocateRenderElement::from_element(
+                                rescaled,
+                                (geo.loc - original_geo.loc)
+                                    .to_physical_precise_round(output_scale),
+                                Relocate::Relative,
+                            );
+                            relocated
+                        }))
                     }
                     x => Some(x),
                 })
@@ -2001,57 +2011,64 @@ where
                     (new_geo, percentage)
                 };
 
-                let original_location = original_geo.loc.to_physical_precise_round(output_scale)
-                    - mapped
-                        .geometry()
-                        .loc
-                        .to_physical_precise_round(output_scale);
-                let mut elements = AsRenderElements::<R>::render_elements::<
-                    CosmicMappedRenderElement<R>,
-                >(
-                    mapped,
-                    renderer,
-                    original_location,
-                    Scale::from(output_scale),
-                    alpha,
-                )
-                .into_iter()
-                .flat_map(|element| match element {
-                    CosmicMappedRenderElement::Stack(elem) => Some(
-                        CosmicMappedRenderElement::TiledStack(RelocateRenderElement::from_element(
-                            RescaleRenderElement::from_element(
-                                CropRenderElement::from_element(
+                let original_location = (original_geo.loc - mapped.geometry().loc)
+                    .to_physical_precise_round(output_scale);
+
+                let mut elements =
+                    AsRenderElements::<R>::render_elements::<CosmicMappedRenderElement<R>>(
+                        mapped,
+                        renderer,
+                        original_location,
+                        Scale::from(output_scale),
+                        alpha,
+                    )
+                    .into_iter()
+                    .flat_map(|element| match element {
+                        CosmicMappedRenderElement::Stack(elem) => {
+                            Some(CosmicMappedRenderElement::TiledStack({
+                                let cropped = CropRenderElement::from_element(
                                     elem,
                                     output_scale,
                                     crop_rect.to_physical_precise_round(output_scale),
-                                )?,
-                                original_location,
-                                scale,
-                            ),
-                            geo.loc.to_physical_precise_round(output_scale),
-                            Relocate::Absolute,
-                        )),
-                    ),
-                    CosmicMappedRenderElement::Window(elem) => {
-                        Some(CosmicMappedRenderElement::TiledWindow(
-                            RelocateRenderElement::from_element(
-                                RescaleRenderElement::from_element(
-                                    CropRenderElement::from_element(
-                                        elem,
-                                        output_scale,
-                                        crop_rect.to_physical_precise_round(output_scale),
-                                    )?,
-                                    (0, 0).into(),
+                                )?;
+                                let rescaled = RescaleRenderElement::from_element(
+                                    cropped,
+                                    original_location,
                                     scale,
-                                ),
-                                geo.loc.to_physical_precise_round(output_scale),
-                                Relocate::Absolute,
-                            ),
-                        ))
-                    }
-                    x => Some(x),
-                })
-                .collect::<Vec<_>>();
+                                );
+                                let relocated = RelocateRenderElement::from_element(
+                                    rescaled,
+                                    (geo.loc - original_geo.loc)
+                                        .to_physical_precise_round(output_scale),
+                                    Relocate::Relative,
+                                );
+                                relocated
+                            }))
+                        }
+                        CosmicMappedRenderElement::Window(elem) => {
+                            Some(CosmicMappedRenderElement::TiledWindow({
+                                let cropped = CropRenderElement::from_element(
+                                    elem,
+                                    output_scale,
+                                    crop_rect.to_physical_precise_round(output_scale),
+                                )?;
+                                let rescaled = RescaleRenderElement::from_element(
+                                    cropped,
+                                    original_location,
+                                    scale,
+                                );
+                                let relocated = RelocateRenderElement::from_element(
+                                    rescaled,
+                                    (geo.loc - original_geo.loc)
+                                        .to_physical_precise_round(output_scale),
+                                    Relocate::Relative,
+                                );
+                                relocated
+                            }))
+                        }
+                        x => Some(x),
+                    })
+                    .collect::<Vec<_>>();
 
                 if focused == Some(mapped) {
                     if indicator_thickness > 0 {
