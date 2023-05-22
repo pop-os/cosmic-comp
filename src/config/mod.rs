@@ -49,6 +49,12 @@ pub enum WorkspaceMode {
     Global,
 }
 
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceLayout {
+    Vertical,
+    Horizontal,
+}
+
 pub struct DynamicConfig {
     outputs: (Option<PathBuf>, OutputsConfig),
     inputs: (Option<PathBuf>, InputsConfig),

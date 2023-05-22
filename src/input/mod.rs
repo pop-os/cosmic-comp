@@ -708,6 +708,7 @@ impl State {
                     .shell
                     .workspaces
                     .active_num(&current_output)
+                    .1
                     .saturating_add(1);
                 // TODO: Possibly move to next output, if idx to large
                 let _ = self.common.shell.activate(&current_output, workspace);
@@ -719,6 +720,7 @@ impl State {
                     .shell
                     .workspaces
                     .active_num(&current_output)
+                    .1
                     .saturating_sub(1);
                 // TODO: Possibly move to prev output, if idx < 0
                 let _ = self.common.shell.activate(&current_output, workspace);
@@ -756,6 +758,7 @@ impl State {
                     .shell
                     .workspaces
                     .active_num(&current_output)
+                    .1
                     .saturating_add(1);
                 // TODO: Possibly move to next output, if idx too large
                 Shell::move_current_window(
@@ -773,6 +776,7 @@ impl State {
                     .shell
                     .workspaces
                     .active_num(&current_output)
+                    .1
                     .saturating_sub(1);
                 // TODO: Possibly move to prev output, if idx < 0
                 Shell::move_current_window(
@@ -811,7 +815,7 @@ impl State {
                     .next()
                     .cloned()
                 {
-                    let idx = self.common.shell.workspaces.active_num(&next_output);
+                    let idx = self.common.shell.workspaces.active_num(&next_output).1;
                     if let Some(new_pos) = self.common.shell.activate(&next_output, idx) {
                         seat.set_active_output(&next_output);
                         if let Some(ptr) = seat.get_pointer() {
@@ -841,7 +845,7 @@ impl State {
                     .next()
                     .cloned()
                 {
-                    let idx = self.common.shell.workspaces.active_num(&prev_output);
+                    let idx = self.common.shell.workspaces.active_num(&prev_output).1;
                     if let Some(new_pos) = self.common.shell.activate(&prev_output, idx) {
                         seat.set_active_output(&prev_output);
                         if let Some(ptr) = seat.get_pointer() {

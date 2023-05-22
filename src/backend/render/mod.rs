@@ -5,23 +5,24 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     sync::Weak,
+    time::Instant,
 };
 
-#[cfg(feature = "debug")]
 use crate::{
-    debug::{fps_ui, profiler_ui},
-    utils::prelude::*,
-};
-use crate::{
+    config::WorkspaceLayout,
     shell::{
-        element::window::CosmicWindowRenderElement, focus::target::WindowGroup,
-        layout::floating::SeatMoveGrabState, CosmicMapped, CosmicMappedRenderElement,
-        WorkspaceRenderElement,
+        element::window::CosmicWindowRenderElement,
+        focus::target::WindowGroup,
+        layout::{floating::SeatMoveGrabState, tiling::ANIMATION_DURATION},
+        CosmicMapped, CosmicMappedRenderElement, WorkspaceRenderElement,
     },
     state::{Common, Fps},
-    utils::prelude::SeatExt,
+    utils::prelude::{OutputExt, SeatExt},
     wayland::{
-        handlers::{data_device::get_dnd_icon, screencopy::render_session},
+        handlers::{
+            data_device::get_dnd_icon,
+            screencopy::{render_session, WORKSPACE_OVERVIEW_NAMESPACE},
+        },
         protocols::{
             screencopy::{
                 BufferParams, CursorMode as ScreencopyCursorMode, Session as ScreencopySession,
@@ -30,8 +31,14 @@ use crate::{
         },
     },
 };
+#[cfg(feature = "debug")]
+use crate::{
+    debug::{fps_ui, profiler_ui},
+    utils::prelude::*,
+};
 
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::FailureReason;
+use cosmic_time::{Cubic, Ease, Tween};
 use smithay::{
     backend::{
         allocator::dmabuf::Dmabuf,
@@ -39,7 +46,10 @@ use smithay::{
         renderer::{
             buffer_dimensions,
             damage::{Error as RenderError, OutputDamageTracker, OutputNoMode},
-            element::{Element, RenderElement, RenderElementStates},
+            element::{
+                utils::{Relocate, RelocateRenderElement},
+                AsRenderElements, Element, RenderElement, RenderElementStates,
+            },
             gles::{
                 element::PixelShaderElement, GlesError, GlesPixelProgram, GlesRenderer, Uniform,
                 UniformName, UniformType,
@@ -49,10 +59,12 @@ use smithay::{
             Bind, Blit, ExportMem, ImportAll, ImportMem, Offscreen, Renderer, TextureFilter,
         },
     },
+    desktop::layer_map_for_output,
     output::Output,
-    utils::{IsAlive, Logical, Physical, Point, Rectangle, Size},
+    utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Size},
     wayland::{
         dmabuf::get_dmabuf,
+        shell::wlr_layer::Layer,
         shm::{shm_format_to_fourcc, with_buffer_contents},
     },
 };
@@ -289,7 +301,8 @@ pub fn workspace_elements<R>(
     renderer: &mut R,
     state: &mut Common,
     output: &Output,
-    handle: &WorkspaceHandle,
+    previous: Option<(WorkspaceHandle, usize, Instant)>,
+    current: (WorkspaceHandle, usize),
     cursor_mode: CursorMode,
     _fps: &mut Option<&mut Fps>,
     exclude_workspace_overview: bool,
@@ -346,11 +359,17 @@ where
 
     state
         .shell
-        .space_for_handle_mut(&handle)
+        .space_for_handle_mut(&current.0)
         .ok_or(OutputNoMode)?
         .update_animations(&state.event_loop_handle);
+    if let Some((previous, _, _)) = previous.as_ref() {
+        state
+            .shell
+            .space_for_handle_mut(&previous)
+            .ok_or(OutputNoMode)?
+            .update_animations(&state.event_loop_handle);
+    }
     let overview = state.shell.overview_mode();
-    let workspace = state.shell.space_for_handle(&handle).ok_or(OutputNoMode)?;
     let last_active_seat = state.last_active_seat().clone();
     let move_active = last_active_seat
         .user_data()
@@ -359,6 +378,96 @@ where
         .borrow()
         .is_some();
     let active_output = last_active_seat.active_output();
+    let output_size = output.geometry().size;
+    let output_scale = output.current_scale().fractional_scale();
+
+    let workspace = state
+        .shell
+        .space_for_handle(&current.0)
+        .ok_or(OutputNoMode)?;
+    let has_fullscreen = workspace.fullscreen.contains_key(output);
+
+    // foreground layers are static
+    elements.extend(
+        foreground_layer_elements(renderer, output, has_fullscreen, exclude_workspace_overview)
+            .into_iter()
+            .map(Into::into),
+    );
+
+    let offset = match previous.as_ref() {
+        Some((previous, previous_idx, start)) => {
+            let layout = WorkspaceLayout::Vertical;
+
+            let workspace = state
+                .shell
+                .space_for_handle(&previous)
+                .ok_or(OutputNoMode)?;
+            let is_active_space = workspace.outputs().any(|o| o == &active_output);
+
+            let percentage = {
+                let percentage = Instant::now().duration_since(*start).as_millis() as f32
+                    / ANIMATION_DURATION.as_millis() as f32;
+                Ease::Cubic(Cubic::InOut).tween(percentage)
+            };
+            let offset = Point::<i32, Logical>::from(match (layout, *previous_idx < current.1) {
+                (WorkspaceLayout::Vertical, true) => {
+                    (0, (-output_size.h as f32 * percentage).round() as i32)
+                }
+                (WorkspaceLayout::Vertical, false) => {
+                    (0, (output_size.h as f32 * percentage).round() as i32)
+                }
+                (WorkspaceLayout::Horizontal, true) => {
+                    ((-output_size.w as f32 * percentage).round() as i32, 0)
+                }
+                (WorkspaceLayout::Horizontal, false) => {
+                    ((output_size.w as f32 * percentage).round() as i32, 0)
+                }
+            });
+
+            elements.extend(
+                workspace
+                    .render_output::<R>(
+                        renderer,
+                        output,
+                        &state.shell.override_redirect_windows,
+                        state.xwayland_state.as_mut(),
+                        (!move_active && is_active_space).then_some(&last_active_seat),
+                        overview.clone(),
+                        state.config.static_conf.active_hint,
+                    )
+                    .map_err(|_| OutputNoMode)?
+                    .into_iter()
+                    .map(|w_element| {
+                        CosmicElement::Workspace(RelocateRenderElement::from_element(
+                            w_element,
+                            offset.to_physical_precise_round(output_scale),
+                            Relocate::Relative,
+                        ))
+                    }),
+            );
+
+            elements.extend(
+                background_layer_elements(renderer, output, exclude_workspace_overview)
+                    .into_iter()
+                    .map(|w_element| {
+                        CosmicElement::Workspace(RelocateRenderElement::from_element(
+                            w_element,
+                            offset.to_physical_precise_round(output_scale),
+                            Relocate::Relative,
+                        ))
+                    }),
+            );
+
+            Point::<i32, Logical>::from(match (layout, *previous_idx < current.1) {
+                (WorkspaceLayout::Vertical, true) => (0, output_size.h + offset.y),
+                (WorkspaceLayout::Vertical, false) => (0, -(output_size.h - offset.y)),
+                (WorkspaceLayout::Horizontal, true) => (output_size.w + offset.x, 0),
+                (WorkspaceLayout::Horizontal, false) => (-(output_size.w - offset.y), 0),
+            })
+        }
+        None => (0, 0).into(),
+    };
+
     let is_active_space = workspace.outputs().any(|o| o == &active_output);
 
     elements.extend(
@@ -371,14 +480,116 @@ where
                 (!move_active && is_active_space).then_some(&last_active_seat),
                 overview,
                 state.config.static_conf.active_hint,
-                exclude_workspace_overview,
             )
             .map_err(|_| OutputNoMode)?
             .into_iter()
-            .map(Into::into),
+            .map(|w_element| {
+                CosmicElement::Workspace(RelocateRenderElement::from_element(
+                    w_element,
+                    offset.to_physical_precise_round(output_scale),
+                    Relocate::Relative,
+                ))
+            }),
+    );
+
+    elements.extend(
+        background_layer_elements(renderer, output, exclude_workspace_overview)
+            .into_iter()
+            .map(|w_element| {
+                CosmicElement::Workspace(RelocateRenderElement::from_element(
+                    w_element,
+                    offset.to_physical_precise_round(output_scale),
+                    Relocate::Relative,
+                ))
+            }),
     );
 
     Ok(elements)
+}
+
+// bottom and background layer surfaces
+pub fn foreground_layer_elements<R>(
+    renderer: &mut R,
+    output: &Output,
+    has_fullscreen: bool,
+    exclude_workspace_overview: bool,
+) -> Vec<WorkspaceRenderElement<R>>
+where
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    <R as Renderer>::TextureId: Clone + 'static,
+    <R as Renderer>::Error: From<GlesError>,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+    CosmicWindowRenderElement<R>: RenderElement<R>,
+    WorkspaceRenderElement<R>: RenderElement<R>,
+{
+    let layer_map = layer_map_for_output(output);
+    let output_scale = output.current_scale().fractional_scale();
+
+    layer_map
+        .layers()
+        .rev()
+        .filter(|s| !(exclude_workspace_overview && s.namespace() == WORKSPACE_OVERVIEW_NAMESPACE))
+        .filter(|s| {
+            if has_fullscreen {
+                matches!(s.layer(), Layer::Overlay)
+            } else {
+                matches!(s.layer(), Layer::Top | Layer::Overlay)
+            }
+        })
+        .filter_map(|surface| {
+            layer_map
+                .layer_geometry(surface)
+                .map(|geo| (geo.loc, surface))
+        })
+        .flat_map(|(loc, surface)| {
+            AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
+                surface,
+                renderer,
+                loc.to_physical_precise_round(output_scale),
+                Scale::from(output_scale),
+                1.0,
+            )
+        })
+        .collect()
+}
+
+// bottom and background layer surfaces
+pub fn background_layer_elements<R>(
+    renderer: &mut R,
+    output: &Output,
+    exclude_workspace_overview: bool,
+) -> Vec<WorkspaceRenderElement<R>>
+where
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    <R as Renderer>::TextureId: Clone + 'static,
+    <R as Renderer>::Error: From<GlesError>,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+    CosmicWindowRenderElement<R>: RenderElement<R>,
+    WorkspaceRenderElement<R>: RenderElement<R>,
+{
+    let layer_map = layer_map_for_output(output);
+    let output_scale = output.current_scale().fractional_scale();
+
+    layer_map
+        .layers()
+        .rev()
+        .filter(|s| !(exclude_workspace_overview && s.namespace() == WORKSPACE_OVERVIEW_NAMESPACE))
+        .filter(|s| matches!(s.layer(), Layer::Background | Layer::Bottom))
+        .filter_map(|surface| {
+            layer_map
+                .layer_geometry(surface)
+                .map(|geo| (geo.loc, surface))
+        })
+        .flat_map(|(loc, surface)| {
+            AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
+                surface,
+                renderer,
+                loc.to_physical_precise_round(output_scale),
+                Scale::from(output_scale),
+                1.0,
+            )
+        })
+        .collect()
 }
 
 pub fn render_output<R, Target, OffTarget, Source>(
@@ -411,7 +622,13 @@ where
     WorkspaceRenderElement<R>: RenderElement<R>,
     Source: Clone,
 {
-    let handle = state.shell.workspaces.active(output).handle;
+    let (previous_workspace, workspace) = state.shell.workspaces.active(output);
+    let (previous_idx, idx) = state.shell.workspaces.active_num(output);
+    let previous_workspace = previous_workspace
+        .zip(previous_idx)
+        .map(|((w, start), idx)| (w.handle, idx, start));
+    let workspace = (workspace.handle, idx);
+
     let result = render_workspace(
         gpu,
         renderer,
@@ -420,7 +637,8 @@ where
         age,
         state,
         output,
-        &handle,
+        previous_workspace,
+        workspace,
         cursor_mode,
         screencopy,
         fps,
@@ -438,7 +656,8 @@ pub fn render_workspace<R, Target, OffTarget, Source>(
     age: usize,
     state: &mut Common,
     output: &Output,
-    handle: &WorkspaceHandle,
+    previous: Option<(WorkspaceHandle, usize, Instant)>,
+    current: (WorkspaceHandle, usize),
     mut cursor_mode: CursorMode,
     screencopy: Option<(Source, &[(ScreencopySession, BufferParams)])>,
     mut fps: Option<&mut Fps>,
@@ -496,7 +715,8 @@ where
         renderer,
         state,
         output,
-        handle,
+        previous,
+        current,
         cursor_mode,
         &mut fps,
         exclude_workspace_overview,

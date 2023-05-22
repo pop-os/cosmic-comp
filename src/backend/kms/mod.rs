@@ -1041,13 +1041,20 @@ impl Surface {
             );
         }
 
-        let handle = state.shell.workspaces.active(&self.output).handle;
+        let (previous_workspace, workspace) = state.shell.workspaces.active(&self.output);
+        let (previous_idx, idx) = state.shell.workspaces.active_num(&self.output);
+        let previous_workspace = previous_workspace
+            .zip(previous_idx)
+            .map(|((w, start), idx)| (w.handle, idx, start));
+        let workspace = (workspace.handle, idx);
+
         let elements = workspace_elements(
             Some(&render_node),
             &mut renderer,
             state,
             &self.output,
-            &handle,
+            previous_workspace,
+            workspace,
             CursorMode::All,
             &mut Some(&mut self.fps),
             false,

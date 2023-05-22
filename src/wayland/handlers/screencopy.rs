@@ -372,7 +372,13 @@ impl ScreencopyHandler for State {
                     render_output_to_buffer(self, &session, params, &output)
                 }
                 SessionType::Workspace(output, handle) => {
-                    render_workspace_to_buffer(self, &session, params, &output, &handle)
+                    render_workspace_to_buffer(
+                        self,
+                        &session,
+                        params,
+                        &output,
+                        (handle, 0), /* TODO: hack, we should have the index */
+                    )
                 }
                 SessionType::Window(window) => {
                     render_window_to_buffer(self, &session, params, &window)
@@ -764,7 +770,7 @@ pub fn render_workspace_to_buffer(
     session: &Session,
     params: BufferParams,
     output: &Output,
-    handle: &WorkspaceHandle,
+    handle: (WorkspaceHandle, usize),
 ) -> Result<bool, (FailureReason, anyhow::Error)> {
     let mode = output
         .current_mode()
@@ -783,7 +789,7 @@ pub fn render_workspace_to_buffer(
         common: &mut Common,
         session: &Session,
         output: &Output,
-        handle: &WorkspaceHandle,
+        handle: (WorkspaceHandle, usize),
     ) -> Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), DTError<R>>
     where
         R: Renderer
@@ -814,6 +820,7 @@ pub fn render_workspace_to_buffer(
                 age,
                 common,
                 &output,
+                None,
                 handle,
                 cursor_mode,
                 None,
@@ -837,6 +844,7 @@ pub fn render_workspace_to_buffer(
                 age,
                 common,
                 &output,
+                None,
                 handle,
                 cursor_mode,
                 None,
@@ -1304,7 +1312,7 @@ pub fn schedule_offscreen_workspace_session(
             &session,
             params.clone(),
             &output,
-            &handle,
+            (handle, 0), /* TODO: Hack, we should know the idx */
         ) {
             Ok(false) => {
                 // rendering yielded no new damage, buffer still pending

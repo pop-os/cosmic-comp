@@ -2,7 +2,10 @@ use crate::shell::{CosmicMappedRenderElement, WorkspaceRenderElement};
 
 use smithay::{
     backend::renderer::{
-        element::{Element, RenderElement, UnderlyingStorage},
+        element::{
+            utils::{Relocate, RelocateRenderElement},
+            Element, RenderElement, UnderlyingStorage,
+        },
         glow::{GlowFrame, GlowRenderer},
         Frame, ImportAll, ImportMem, Renderer,
     },
@@ -20,7 +23,7 @@ where
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
-    Workspace(WorkspaceRenderElement<R>),
+    Workspace(RelocateRenderElement<WorkspaceRenderElement<R>>),
     Cursor(CursorRenderElement<R>),
     MoveGrab(CosmicMappedRenderElement<R>),
     #[cfg(feature = "debug")]
@@ -211,7 +214,11 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: WorkspaceRenderElement<R>) -> Self {
-        Self::Workspace(elem)
+        Self::Workspace(RelocateRenderElement::from_element(
+            elem,
+            (0, 0),
+            Relocate::Relative,
+        ))
     }
 }
 

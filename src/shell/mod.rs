@@ -87,6 +87,7 @@ pub struct Shell {
 
 #[derive(Debug)]
 pub struct WorkspaceSet {
+    previously_active: Option<(usize, Instant)>,
     active: usize,
     amount: WorkspaceAmount,
     group: WorkspaceGroupHandle,
@@ -155,6 +156,7 @@ impl WorkspaceSet {
         };
 
         WorkspaceSet {
+            previously_active: None,
             active: 0,
             amount,
             group: group_handle,
@@ -170,6 +172,7 @@ impl WorkspaceSet {
             let old_active = self.active;
             state.remove_workspace_state(&self.workspaces[old_active].handle, WState::Active);
             state.add_workspace_state(&self.workspaces[idx].handle, WState::Active);
+            self.previously_active = Some((old_active, Instant::now()));
             self.active = idx;
         }
     }
@@ -180,12 +183,19 @@ impl WorkspaceSet {
         toplevel_info: &mut ToplevelInfoState<State, CosmicSurface>,
         outputs: impl Iterator<Item = (&'a Output, Point<i32, Logical>)>,
     ) {
+        if let Some((_, start)) = self.previously_active {
+            if Instant::now().duration_since(start).as_millis() >= ANIMATION_DURATION.as_millis() {
+                self.previously_active = None;
+            }
+        }
+
         match self.amount {
             WorkspaceAmount::Dynamic => self.ensure_last_empty(state, outputs),
             WorkspaceAmount::Static(len) => {
                 self.ensure_static(len as usize, state, toplevel_info, outputs)
             }
         }
+
         self.workspaces[self.active].refresh();
     }
 
@@ -371,12 +381,20 @@ impl WorkspaceMode {
         }
     }
 
-    pub fn active(&self, output: &Output) -> &Workspace {
+    pub fn active(&self, output: &Output) -> (Option<(&Workspace, Instant)>, &Workspace) {
         match self {
-            WorkspaceMode::Global(set) => &set.workspaces[set.active],
+            WorkspaceMode::Global(set) => (
+                set.previously_active
+                    .map(|(idx, start)| (&set.workspaces[idx], start)),
+                &set.workspaces[set.active],
+            ),
             WorkspaceMode::OutputBound(sets, _) => {
                 let set = sets.get(output).unwrap();
-                &set.workspaces[set.active]
+                (
+                    set.previously_active
+                        .map(|(idx, start)| (&set.workspaces[idx], start)),
+                    &set.workspaces[set.active],
+                )
             }
         }
     }
@@ -391,12 +409,12 @@ impl WorkspaceMode {
         }
     }
 
-    pub fn active_num(&self, output: &Output) -> usize {
+    pub fn active_num(&self, output: &Output) -> (Option<usize>, usize) {
         match self {
-            WorkspaceMode::Global(set) => set.active,
+            WorkspaceMode::Global(set) => (set.previously_active.map(|(idx, _)| idx), set.active),
             WorkspaceMode::OutputBound(sets, _) => {
                 let set = sets.get(output).unwrap();
-                set.active
+                (set.previously_active.map(|(idx, _)| idx), set.active)
             }
         }
     }
@@ -1050,7 +1068,12 @@ impl Shell {
     }
 
     pub fn animations_going(&self) -> bool {
-        matches!(self.overview_mode, OverviewMode::None)
+        (match &self.workspaces {
+            WorkspaceMode::Global(set) => set.previously_active.is_some(),
+            WorkspaceMode::OutputBound(sets, _) => {
+                sets.values().any(|set| set.previously_active.is_some())
+            }
+        }) || matches!(self.overview_mode, OverviewMode::None)
             || self
                 .workspaces
                 .spaces()
@@ -1233,7 +1256,7 @@ impl Shell {
         follow: bool,
     ) -> Option<Point<i32, Logical>> {
         let (to_output, to_idx) = to;
-        let to_idx = to_idx.unwrap_or(state.common.shell.workspaces.active_num(to_output));
+        let to_idx = to_idx.unwrap_or(state.common.shell.workspaces.active_num(to_output).1);
         if state
             .common
             .shell
@@ -1245,7 +1268,7 @@ impl Shell {
         }
 
         if from_output == to_output
-            && to_idx == state.common.shell.workspaces.active_num(from_output)
+            && to_idx == state.common.shell.workspaces.active_num(from_output).1
         {
             return None;
         }

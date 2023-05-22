@@ -13,7 +13,7 @@ use crate::{
     state::State,
     utils::prelude::*,
     wayland::{
-        handlers::screencopy::{DropableSession, WORKSPACE_OVERVIEW_NAMESPACE},
+        handlers::screencopy::DropableSession,
         protocols::{
             screencopy::{BufferParams, Session as ScreencopySession},
             toplevel_info::ToplevelInfoState,
@@ -38,12 +38,12 @@ use smithay::{
             ImportAll, ImportMem, Renderer,
         },
     },
-    desktop::{layer_map_for_output, space::SpaceElement, LayerSurface},
+    desktop::{layer_map_for_output, space::SpaceElement},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Size},
-    wayland::{seat::WaylandFocus, shell::wlr_layer::Layer},
+    wayland::seat::WaylandFocus,
     xwayland::X11Surface,
 };
 use std::{collections::HashMap, time::Instant};
@@ -470,7 +470,6 @@ impl Workspace {
         draw_focus_indicator: Option<&Seat<State>>,
         overview: OverviewMode,
         indicator_thickness: u8,
-        exclude_workspace_overview: bool,
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
@@ -488,32 +487,6 @@ impl Workspace {
         let layer_map = layer_map_for_output(output);
 
         if let Some(fullscreen) = self.fullscreen.get(output) {
-            // overlay layer surfaces
-            render_elements.extend(
-                layer_map
-                    .layers()
-                    .rev()
-                    .filter(|s| {
-                        s.layer() == Layer::Overlay
-                            && !(exclude_workspace_overview
-                                && s.namespace() == WORKSPACE_OVERVIEW_NAMESPACE)
-                    })
-                    .filter_map(|surface| {
-                        layer_map
-                            .layer_geometry(surface)
-                            .map(|geo| (geo.loc, surface))
-                    })
-                    .flat_map(|(loc, surface)| {
-                        AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
-                            surface,
-                            renderer,
-                            loc.to_physical_precise_round(output_scale),
-                            Scale::from(output_scale),
-                            1.0,
-                        )
-                    }),
-            );
-
             render_elements.extend(
                 override_redirect_windows
                     .iter()
@@ -557,39 +530,6 @@ impl Workspace {
             // - keyboard window swapping
             // - resizing in tiling
 
-            // overlay and top layer surfaces
-            let lower = {
-                let (lower, upper): (Vec<&LayerSurface>, Vec<&LayerSurface>) = layer_map
-                    .layers()
-                    .rev()
-                    .filter(|s| {
-                        !(exclude_workspace_overview
-                            && s.namespace() == "cosmic-workspace-overview")
-                    })
-                    .partition(|s| matches!(s.layer(), Layer::Background | Layer::Bottom));
-
-                render_elements.extend(
-                    upper
-                        .into_iter()
-                        .filter_map(|surface| {
-                            layer_map
-                                .layer_geometry(surface)
-                                .map(|geo| (geo.loc, surface))
-                        })
-                        .flat_map(|(loc, surface)| {
-                            AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
-                                surface,
-                                renderer,
-                                loc.to_physical_precise_round(output_scale),
-                                Scale::from(output_scale),
-                                1.0,
-                            )
-                        }),
-                );
-
-                lower
-            };
-
             // OR windows above all
             render_elements.extend(
                 override_redirect_windows
@@ -609,6 +549,7 @@ impl Workspace {
 
             let focused =
                 draw_focus_indicator.and_then(|seat| self.focus_stack.get(seat).last().cloned());
+
             // floating surfaces
             let alpha = match &overview {
                 OverviewMode::Started(_, started) => {
@@ -715,28 +656,6 @@ impl Workspace {
                     )
                     .into(),
                 )
-            }
-
-            // bottom and background layer surfaces
-            {
-                render_elements.extend(
-                    lower
-                        .into_iter()
-                        .filter_map(|surface| {
-                            layer_map
-                                .layer_geometry(surface)
-                                .map(|geo| (geo.loc, surface))
-                        })
-                        .flat_map(|(loc, surface)| {
-                            AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
-                                surface,
-                                renderer,
-                                loc.to_physical_precise_round(output_scale),
-                                Scale::from(output_scale),
-                                1.0,
-                            )
-                        }),
-                );
             }
         }
 
