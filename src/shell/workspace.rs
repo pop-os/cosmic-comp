@@ -42,10 +42,7 @@ use smithay::{
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::{
-        Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Size,
-        Transform,
-    },
+    utils::{Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Size},
     wayland::{seat::WaylandFocus, shell::wlr_layer::Layer},
     xwayland::X11Surface,
 };
@@ -686,7 +683,7 @@ impl Workspace {
                         Id::new(),
                         renderer
                             .glow_renderer_mut()
-                            .import_memory(&[0, 0, 0, 255], Fourcc::Argb8888, (1, 1).into(), false)
+                            .import_memory(&[0, 0, 0, 255], Fourcc::Abgr8888, (1, 1).into(), false)
                             .unwrap(),
                     );
                     renderer
@@ -711,17 +708,10 @@ impl Workspace {
                         tex,
                         1,
                         smithay::utils::Transform::Normal,
-                        Some(alpha as f32),
+                        Some(alpha.min(0.8) as f32),
                         Some(Rectangle::from_loc_and_size((0., 0.), (1., 1.))),
                         Some(output.geometry().size),
-                        if alpha >= 1.0 {
-                            Some(vec![Rectangle::from_loc_and_size(
-                                (0, 0),
-                                output.geometry().size.to_buffer(1, Transform::Normal),
-                            )])
-                        } else {
-                            None
-                        },
+                        None,
                     )
                     .into(),
                 )
