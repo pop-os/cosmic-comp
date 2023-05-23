@@ -1073,7 +1073,7 @@ impl Shell {
             WorkspaceMode::OutputBound(sets, _) => {
                 sets.values().any(|set| set.previously_active.is_some())
             }
-        }) || matches!(self.overview_mode, OverviewMode::None)
+        }) || !matches!(self.overview_mode, OverviewMode::None)
             || self
                 .workspaces
                 .spaces()
