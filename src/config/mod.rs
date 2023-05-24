@@ -36,6 +36,8 @@ pub struct StaticConfig {
     pub key_bindings: HashMap<KeyPattern, Action>,
     pub workspace_mode: WorkspaceMode,
     pub workspace_amount: WorkspaceAmount,
+    #[serde(default = "default_workspace_layout")]
+    pub workspace_layout: WorkspaceLayout,
     pub tiling_enabled: bool,
     #[serde(default = "default_active_hint")]
     pub active_hint: u8,
@@ -93,6 +95,10 @@ fn default_active_hint() -> u8 {
 
 fn default_gaps() -> (u8, u8) {
     (0, 4)
+}
+
+fn default_workspace_layout() -> WorkspaceLayout {
+    WorkspaceLayout::Vertical
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
@@ -232,8 +238,132 @@ impl Config {
             debug!("Trying config location: {}", path.display());
             if path.exists() {
                 info!("Using config at {}", path.display());
-                return ron::de::from_reader(OpenOptions::new().read(true).open(path).unwrap())
-                    .expect("Malformed config file");
+                let mut config: StaticConfig =
+                    ron::de::from_reader(OpenOptions::new().read(true).open(path).unwrap())
+                        .expect("Malformed config file");
+
+                let (workspace_previous, workspace_next, output_previous, output_next) =
+                    match config.workspace_layout {
+                        WorkspaceLayout::Horizontal => (
+                            [KeySyms::KEY_Left, KeySyms::KEY_h],
+                            [KeySyms::KEY_Right, KeySyms::KEY_j],
+                            [KeySyms::KEY_Up, KeySyms::KEY_k],
+                            [KeySyms::KEY_Down, KeySyms::KEY_j],
+                        ),
+                        WorkspaceLayout::Vertical => (
+                            [KeySyms::KEY_Up, KeySyms::KEY_k],
+                            [KeySyms::KEY_Down, KeySyms::KEY_j],
+                            [KeySyms::KEY_Left, KeySyms::KEY_h],
+                            [KeySyms::KEY_Right, KeySyms::KEY_j],
+                        ),
+                    };
+
+                fn insert_binding(
+                    key_bindings: &mut HashMap<KeyPattern, Action>,
+                    modifiers: KeyModifiers,
+                    keys: impl Iterator<Item = u32>,
+                    action: Action,
+                ) {
+                    if !key_bindings.values().any(|a| a == &action) {
+                        for key in keys {
+                            let pattern = KeyPattern {
+                                modifiers: modifiers.clone(),
+                                key,
+                            };
+                            if !key_bindings.contains_key(&pattern) {
+                                key_bindings.insert(pattern, action.clone());
+                            }
+                        }
+                    }
+                }
+
+                insert_binding(
+                    &mut config.key_bindings,
+                    KeyModifiers {
+                        logo: true,
+                        ctrl: true,
+                        ..Default::default()
+                    },
+                    workspace_previous.iter().copied(),
+                    Action::PreviousWorkspace,
+                );
+                insert_binding(
+                    &mut config.key_bindings,
+                    KeyModifiers {
+                        logo: true,
+                        ctrl: true,
+                        ..Default::default()
+                    },
+                    workspace_next.iter().copied(),
+                    Action::NextWorkspace,
+                );
+                insert_binding(
+                    &mut config.key_bindings,
+                    KeyModifiers {
+                        logo: true,
+                        ctrl: true,
+                        shift: true,
+                        ..Default::default()
+                    },
+                    workspace_previous.iter().copied(),
+                    Action::MoveToPreviousWorkspace,
+                );
+                insert_binding(
+                    &mut config.key_bindings,
+                    KeyModifiers {
+                        logo: true,
+                        ctrl: true,
+                        shift: true,
+                        ..Default::default()
+                    },
+                    workspace_next.iter().copied(),
+                    Action::MoveToNextWorkspace,
+                );
+
+                insert_binding(
+                    &mut config.key_bindings,
+                    KeyModifiers {
+                        logo: true,
+                        ctrl: true,
+                        ..Default::default()
+                    },
+                    output_previous.iter().copied(),
+                    Action::PreviousOutput,
+                );
+                insert_binding(
+                    &mut config.key_bindings,
+                    KeyModifiers {
+                        logo: true,
+                        ctrl: true,
+                        ..Default::default()
+                    },
+                    output_next.iter().copied(),
+                    Action::NextOutput,
+                );
+                insert_binding(
+                    &mut config.key_bindings,
+                    KeyModifiers {
+                        logo: true,
+                        ctrl: true,
+                        shift: true,
+                        ..Default::default()
+                    },
+                    output_previous.iter().copied(),
+                    Action::MoveToPreviousOutput,
+                );
+                insert_binding(
+                    &mut config.key_bindings,
+                    KeyModifiers {
+                        logo: true,
+                        ctrl: true,
+                        shift: true,
+                        ..Default::default()
+                    },
+                    output_next.iter().copied(),
+                    Action::MoveToNextOutput,
+                );
+
+                return config;
             }
         }
 
@@ -241,6 +371,7 @@ impl Config {
             key_bindings: HashMap::new(),
             workspace_mode: WorkspaceMode::Global,
             workspace_amount: WorkspaceAmount::Dynamic,
+            workspace_layout: WorkspaceLayout::Vertical,
             tiling_enabled: false,
             active_hint: default_active_hint(),
             gaps: default_gaps(),
@@ -776,7 +907,7 @@ pub enum KeyModifier {
     NumLock,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct KeyModifiers {
     pub ctrl: bool,
     pub alt: bool,
@@ -880,6 +1011,8 @@ pub enum Action {
     PreviousOutput,
     MoveToNextOutput,
     MoveToPreviousOutput,
+    SendToNextOutput,
+    SendToPreviousOutput,
 
     Focus(FocusDirection),
     Move(Direction),

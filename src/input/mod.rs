@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    config::{Action, Config, KeyModifiers},
+    config::{Action, Config, KeyModifiers, WorkspaceLayout},
     shell::{
         focus::{target::PointerFocusTarget, FocusDirection},
         layout::{
@@ -710,8 +710,14 @@ impl State {
                     .active_num(&current_output)
                     .1
                     .saturating_add(1);
-                // TODO: Possibly move to next output, if idx to large
-                let _ = self.common.shell.activate(&current_output, workspace);
+                if self
+                    .common
+                    .shell
+                    .activate(&current_output, workspace)
+                    .is_err()
+                {
+                    self.handle_action(Action::NextOutput, seat, serial, time, mods);
+                }
             }
             Action::PreviousWorkspace => {
                 let current_output = seat.active_output();
@@ -722,8 +728,14 @@ impl State {
                     .active_num(&current_output)
                     .1
                     .saturating_sub(1);
-                // TODO: Possibly move to prev output, if idx < 0
-                let _ = self.common.shell.activate(&current_output, workspace);
+                if self
+                    .common
+                    .shell
+                    .activate(&current_output, workspace)
+                    .is_err()
+                {
+                    self.handle_action(Action::PreviousOutput, seat, serial, time, mods);
+                }
             }
             Action::LastWorkspace => {
                 let current_output = seat.active_output();
@@ -743,7 +755,7 @@ impl State {
                     Action::MoveToWorkspace(x) | Action::SendToWorkspace(x) => x - 1,
                     _ => unreachable!(),
                 };
-                Shell::move_current_window(
+                let _ = Shell::move_current_window(
                     self,
                     seat,
                     &current_output,
@@ -760,14 +772,27 @@ impl State {
                     .active_num(&current_output)
                     .1
                     .saturating_add(1);
-                // TODO: Possibly move to next output, if idx too large
-                Shell::move_current_window(
+                if Shell::move_current_window(
                     self,
                     seat,
                     &current_output,
                     (&current_output, Some(workspace as usize)),
                     matches!(x, Action::MoveToNextWorkspace),
-                );
+                )
+                .is_err()
+                {
+                    self.handle_action(
+                        if matches!(x, Action::MoveToNextWorkspace) {
+                            Action::MoveToNextOutput
+                        } else {
+                            Action::SendToNextOutput
+                        },
+                        seat,
+                        serial,
+                        time,
+                        mods,
+                    )
+                }
             }
             x @ Action::MoveToPreviousWorkspace | x @ Action::SendToPreviousWorkspace => {
                 let current_output = seat.active_output();
@@ -779,13 +804,27 @@ impl State {
                     .1
                     .saturating_sub(1);
                 // TODO: Possibly move to prev output, if idx < 0
-                Shell::move_current_window(
+                if Shell::move_current_window(
                     self,
                     seat,
                     &current_output,
                     (&current_output, Some(workspace as usize)),
                     matches!(x, Action::MoveToPreviousWorkspace),
-                );
+                )
+                .is_err()
+                {
+                    self.handle_action(
+                        if matches!(x, Action::MoveToNextWorkspace) {
+                            Action::MoveToPreviousOutput
+                        } else {
+                            Action::SendToPreviousOutput
+                        },
+                        seat,
+                        serial,
+                        time,
+                        mods,
+                    )
+                }
             }
             x @ Action::MoveToLastWorkspace | x @ Action::SendToLastWorkspace => {
                 let current_output = seat.active_output();
@@ -795,7 +834,7 @@ impl State {
                     .workspaces
                     .len(&current_output)
                     .saturating_sub(1);
-                Shell::move_current_window(
+                let _ = Shell::move_current_window(
                     self,
                     seat,
                     &current_output,
@@ -816,7 +855,7 @@ impl State {
                     .cloned()
                 {
                     let idx = self.common.shell.workspaces.active_num(&next_output).1;
-                    if let Some(new_pos) = self.common.shell.activate(&next_output, idx) {
+                    if let Ok(Some(new_pos)) = self.common.shell.activate(&next_output, idx) {
                         seat.set_active_output(&next_output);
                         if let Some(ptr) = seat.get_pointer() {
                             ptr.motion(
@@ -846,7 +885,7 @@ impl State {
                     .cloned()
                 {
                     let idx = self.common.shell.workspaces.active_num(&prev_output).1;
-                    if let Some(new_pos) = self.common.shell.activate(&prev_output, idx) {
+                    if let Ok(Some(new_pos)) = self.common.shell.activate(&prev_output, idx) {
                         seat.set_active_output(&prev_output);
                         if let Some(ptr) = seat.get_pointer() {
                             ptr.motion(
@@ -862,7 +901,7 @@ impl State {
                     }
                 }
             }
-            Action::MoveToNextOutput => {
+            x @ Action::MoveToNextOutput | x @ Action::SendToNextOutput => {
                 let current_output = seat.active_output();
                 if let Some(next_output) = self
                     .common
@@ -874,12 +913,12 @@ impl State {
                     .next()
                     .cloned()
                 {
-                    if let Some(new_pos) = Shell::move_current_window(
+                    if let Ok(Some(new_pos)) = Shell::move_current_window(
                         self,
                         seat,
                         &current_output,
                         (&next_output, None),
-                        true,
+                        matches!(x, Action::MoveToNextOutput),
                     ) {
                         if let Some(ptr) = seat.get_pointer() {
                             ptr.motion(
@@ -895,7 +934,7 @@ impl State {
                     }
                 }
             }
-            Action::MoveToPreviousOutput => {
+            x @ Action::MoveToPreviousOutput | x @ Action::SendToPreviousOutput => {
                 let current_output = seat.active_output();
                 if let Some(prev_output) = self
                     .common
@@ -908,12 +947,12 @@ impl State {
                     .next()
                     .cloned()
                 {
-                    if let Some(new_pos) = Shell::move_current_window(
+                    if let Ok(Some(new_pos)) = Shell::move_current_window(
                         self,
                         seat,
                         &current_output,
                         (&prev_output, None),
-                        true,
+                        matches!(x, Action::MoveToPreviousOutput),
                     ) {
                         if let Some(ptr) = seat.get_pointer() {
                             ptr.motion(
@@ -942,22 +981,20 @@ impl State {
 
                 match result {
                     FocusResult::None => {
-                        // TODO: Handle Workspace orientation
-                        match focus {
-                            FocusDirection::Left => self.handle_action(
-                                Action::PreviousWorkspace,
-                                seat,
-                                serial,
-                                time,
-                                mods,
-                            ),
-                            FocusDirection::Right => {
+                        match (focus, self.common.config.static_conf.workspace_layout) {
+                            (FocusDirection::Left, WorkspaceLayout::Horizontal)
+                            | (FocusDirection::Up, WorkspaceLayout::Vertical) => self
+                                .handle_action(Action::PreviousWorkspace, seat, serial, time, mods),
+                            (FocusDirection::Right, WorkspaceLayout::Horizontal)
+                            | (FocusDirection::Down, WorkspaceLayout::Vertical) => {
                                 self.handle_action(Action::NextWorkspace, seat, serial, time, mods)
                             }
-                            FocusDirection::Up => {
+                            (FocusDirection::Left, WorkspaceLayout::Vertical)
+                            | (FocusDirection::Up, WorkspaceLayout::Horizontal) => {
                                 self.handle_action(Action::PreviousOutput, seat, serial, time, mods)
                             }
-                            FocusDirection::Down => {
+                            (FocusDirection::Right, WorkspaceLayout::Vertical)
+                            | (FocusDirection::Down, WorkspaceLayout::Horizontal) => {
                                 self.handle_action(Action::NextOutput, seat, serial, time, mods)
                             }
                             _ => {}
@@ -980,31 +1017,34 @@ impl State {
                 if let Some(_move_further) =
                     workspace.tiling_layer.move_current_window(direction, seat)
                 {
-                    // TODO: Handle Workspace orientation
                     // TODO: Being able to move Groups (move_further should be KeyboardFocusTarget instead)
-                    match direction {
-                        Direction::Left => self.handle_action(
+                    match (direction, self.common.config.static_conf.workspace_layout) {
+                        (Direction::Left, WorkspaceLayout::Horizontal)
+                        | (Direction::Up, WorkspaceLayout::Vertical) => self.handle_action(
                             Action::MoveToPreviousWorkspace,
                             seat,
                             serial,
                             time,
                             mods,
                         ),
-                        Direction::Right => self.handle_action(
+                        (Direction::Right, WorkspaceLayout::Horizontal)
+                        | (Direction::Down, WorkspaceLayout::Vertical) => self.handle_action(
                             Action::MoveToNextWorkspace,
                             seat,
                             serial,
                             time,
                             mods,
                         ),
-                        Direction::Up => self.handle_action(
+                        (Direction::Left, WorkspaceLayout::Vertical)
+                        | (Direction::Up, WorkspaceLayout::Horizontal) => self.handle_action(
                             Action::MoveToPreviousOutput,
                             seat,
                             serial,
                             time,
                             mods,
                         ),
-                        Direction::Down => {
+                        (Direction::Right, WorkspaceLayout::Vertical)
+                        | (Direction::Down, WorkspaceLayout::Horizontal) => {
                             self.handle_action(Action::MoveToNextOutput, seat, serial, time, mods)
                         }
                     }

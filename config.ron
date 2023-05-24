@@ -25,24 +25,10 @@
         (modifiers: [Super, Shift], key: "9"): MoveToWorkspace(9),
         (modifiers: [Super, Shift], key: "0"): MoveToLastWorkspace,
 
-        // TODO: Depends on workspace orientation
-        (modifiers: [Super, Ctrl], key: "Right"): NextWorkspace,
-        (modifiers: [Super, Ctrl], key: "Left"): PreviousWorkspace,
-        (modifiers: [Super, Ctrl, Shift], key: "Right"): MoveToNextWorkspace,
-        (modifiers: [Super, Ctrl, Shift], key: "Left"): MoveToPreviousWorkspace,
-        (modifiers: [Super, Ctrl], key: "l"): NextWorkspace,
-        (modifiers: [Super, Ctrl], key: "h"): PreviousWorkspace,
-        (modifiers: [Super, Ctrl, Shift], key: "l"): MoveToNextWorkspace,
-        (modifiers: [Super, Ctrl, Shift], key: "h"): MoveToPreviousWorkspace,
-
-        (modifiers: [Super, Ctrl], key: "Down"): NextOutput,
-        (modifiers: [Super, Ctrl], key: "Up"): PreviousOutput,
-        (modifiers: [Super, Ctrl, Alt], key: "Down"): NextOutput,
-        (modifiers: [Super, Ctrl, Alt], key: "Up"): PreviousOutput,
-        (modifiers: [Super, Ctrl], key: "j"): NextOutput,
-        (modifiers: [Super, Ctrl], key: "k"): PreviousOutput,
-        (modifiers: [Super, Ctrl, Alt], key: "j"): NextOutput,
-        (modifiers: [Super, Ctrl, Alt], key: "k"): PreviousOutput,
+        (modifiers: [Super, Ctrl, Alt], key: "Down"): MoveToNextOutput,
+        (modifiers: [Super, Ctrl, Alt], key: "Up"): MoveToPreviousOutput,
+        (modifiers: [Super, Ctrl, Alt], key: "j"): MoveToNextOutput,
+        (modifiers: [Super, Ctrl, Alt], key: "k"): MoveToPreviousOutput,
 
         (modifiers: [Super], key: "Period"): NextOutput,
         (modifiers: [Super], key: "Comma"): PreviousOutput,
@@ -93,5 +79,6 @@
     },
     workspace_mode: OutputBound,
     workspace_amount: Dynamic,
+    workspace_layout: Vertical,
     tiling_enabled: false,
 )

@@ -45,7 +45,7 @@ impl WorkspaceHandler for State {
                     };
 
                     if let Some((output, idx)) = maybe {
-                        self.common.shell.activate(&output, idx);
+                        let _ = self.common.shell.activate(&output, idx); // TODO: move cursor?
                     }
                 }
                 _ => {}

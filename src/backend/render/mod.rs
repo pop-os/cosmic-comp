@@ -396,7 +396,7 @@ where
 
     let offset = match previous.as_ref() {
         Some((previous, previous_idx, start)) => {
-            let layout = WorkspaceLayout::Vertical;
+            let layout = state.config.static_conf.workspace_layout;
 
             let workspace = state
                 .shell

@@ -167,13 +167,24 @@ impl WorkspaceSet {
         }
     }
 
-    fn activate(&mut self, idx: usize, state: &mut WorkspaceUpdateGuard<'_, State>) {
-        if idx < self.workspaces.len() && self.active != idx {
+    fn activate(
+        &mut self,
+        idx: usize,
+        state: &mut WorkspaceUpdateGuard<'_, State>,
+    ) -> Result<bool, InvalidWorkspaceIndex> {
+        if idx >= self.workspaces.len() {
+            return Err(InvalidWorkspaceIndex);
+        }
+
+        if self.active != idx {
             let old_active = self.active;
             state.remove_workspace_state(&self.workspaces[old_active].handle, WState::Active);
             state.add_workspace_state(&self.workspaces[idx].handle, WState::Active);
             self.previously_active = Some((old_active, Instant::now()));
             self.active = idx;
+            Ok(true)
+        } else {
+            Ok(false)
         }
     }
 
@@ -475,6 +486,8 @@ impl WorkspaceMode {
         }
     }
 }
+
+pub struct InvalidWorkspaceIndex;
 
 impl Shell {
     pub fn new(config: &Config, dh: &DisplayHandle) -> Self {
@@ -893,20 +906,28 @@ impl Shell {
         self.refresh(); // get rid of empty workspaces and enforce potential maximum
     }
 
-    pub fn activate(&mut self, output: &Output, idx: usize) -> Option<Point<i32, Logical>> {
-        match &mut self.workspaces {
+    pub fn activate(
+        &mut self,
+        output: &Output,
+        idx: usize,
+    ) -> Result<Option<Point<i32, Logical>>, InvalidWorkspaceIndex> {
+        if match &mut self.workspaces {
             WorkspaceMode::OutputBound(sets, _) => {
                 if let Some(set) = sets.get_mut(output) {
-                    set.activate(idx, &mut self.workspace_state.update());
+                    set.activate(idx, &mut self.workspace_state.update())?
+                } else {
+                    false
                 }
             }
-            WorkspaceMode::Global(set) => {
-                set.activate(idx, &mut self.workspace_state.update());
-            }
+            WorkspaceMode::Global(set) => set.activate(idx, &mut self.workspace_state.update())?,
+        } {
+            let output_geo = output.geometry();
+            Ok(Some(
+                output_geo.loc + Point::from((output_geo.size.w / 2, output_geo.size.h / 2)),
+            ))
+        } else {
+            Ok(None)
         }
-
-        let output_geo = output.geometry();
-        Some(output_geo.loc + Point::from((output_geo.size.w / 2, output_geo.size.h / 2)))
     }
 
     pub fn active_space(&self, output: &Output) -> &Workspace {
@@ -1254,7 +1275,7 @@ impl Shell {
         from_output: &Output,
         to: (&Output, Option<usize>),
         follow: bool,
-    ) -> Option<Point<i32, Logical>> {
+    ) -> Result<Option<Point<i32, Logical>>, InvalidWorkspaceIndex> {
         let (to_output, to_idx) = to;
         let to_idx = to_idx.unwrap_or(state.common.shell.workspaces.active_num(to_output).1);
         if state
@@ -1264,20 +1285,20 @@ impl Shell {
             .get(to_idx, to_output)
             .is_none()
         {
-            return None;
+            return Err(InvalidWorkspaceIndex);
         }
 
         if from_output == to_output
             && to_idx == state.common.shell.workspaces.active_num(from_output).1
         {
-            return None;
+            return Ok(None);
         }
 
         let from_workspace = state.common.shell.workspaces.active_mut(from_output);
         let maybe_window = from_workspace.focus_stack.get(seat).last().cloned();
 
-        let Some(mapped) = maybe_window else { return None; };
-        let Some(window_state) = from_workspace.unmap(&mapped) else { return None; };
+        let Some(mapped) = maybe_window else { return Ok(None); };
+        let Some(window_state) = from_workspace.unmap(&mapped) else { return Ok(None); };
 
         for (toplevel, _) in mapped.windows() {
             state
@@ -1300,7 +1321,7 @@ impl Shell {
         }
         let new_pos = if follow {
             seat.set_active_output(&to_output);
-            state.common.shell.activate(to_output, to_idx)
+            state.common.shell.activate(to_output, to_idx)?
         } else {
             None
         };
@@ -1345,7 +1366,7 @@ impl Shell {
         if follow {
             Common::set_focus(state, Some(&KeyboardFocusTarget::from(mapped)), &seat, None);
         }
-        new_pos
+        Ok(new_pos)
     }
 
     pub fn update_reactive_popups(&self, mapped: &CosmicMapped) {
