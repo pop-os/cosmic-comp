@@ -1051,24 +1051,33 @@ impl State {
                 workspace.toggle_floating_window(seat);
             }
             Action::Spawn(command) => {
-                if let Err(err) = std::process::Command::new("/bin/sh")
-                    .arg("-c")
-                    .arg(command.clone())
-                    .env("WAYLAND_DISPLAY", &self.common.socket)
-                    .env(
-                        "DISPLAY",
-                        &self
-                            .common
-                            .xwayland_state
-                            .as_ref()
-                            .map(|s| format!(":{}", s.display))
-                            .unwrap_or(String::new()),
-                    )
-                    .env_remove("COSMIC_SESSION_SOCK")
-                    .spawn()
-                {
-                    warn!(?err, "Failed to spawn \"{}\"", command);
-                }
+                let wayland_display = self.common.socket.clone();
+
+                let display = self
+                    .common
+                    .xwayland_state
+                    .as_ref()
+                    .map(|s| format!(":{}", s.display))
+                    .unwrap_or_default();
+
+                std::thread::spawn(move || {
+                    let mut cmd = std::process::Command::new("/bin/sh");
+
+                    cmd.arg("-c")
+                        .arg(command.clone())
+                        .env("WAYLAND_DISPLAY", &wayland_display)
+                        .env("DISPLAY", &display)
+                        .env_remove("COSMIC_SESSION_SOCK");
+
+                    match cmd.spawn() {
+                        Ok(mut child) => {
+                            let _res = child.wait();
+                        }
+                        Err(err) => {
+                            tracing::warn!(?err, "Failed to spawn \"{}\"", command);
+                        }
+                    }
+                });
             }
         }
     }
