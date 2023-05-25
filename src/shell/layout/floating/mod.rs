@@ -379,7 +379,7 @@ impl FloatingLayout {
                 );
                 if focused == Some(elem) {
                     if indicator_thickness > 0 {
-                        let element = IndicatorShader::element(
+                        let element = IndicatorShader::focus_element(
                             renderer,
                             elem.clone(),
                             Rectangle::from_loc_and_size(

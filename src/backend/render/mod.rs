@@ -142,6 +142,21 @@ impl IndicatorShader {
             .clone()
     }
 
+    pub fn focus_element<R: AsGlowRenderer>(
+        renderer: &R,
+        key: impl Into<Key>,
+        mut element_geo: Rectangle<i32, Logical>,
+        thickness: u8,
+        alpha: f32,
+        color: [f32; 3],
+    ) -> PixelShaderElement {
+        let t = thickness as i32;
+        element_geo.loc -= (t, t).into();
+        element_geo.size += (t * 2, t * 2).into();
+
+        IndicatorShader::element(renderer, key, element_geo, thickness, alpha, color)
+    }
+
     pub fn element<R: AsGlowRenderer>(
         renderer: &R,
         key: impl Into<Key>,
@@ -174,12 +189,6 @@ impl IndicatorShader {
             .is_none()
         {
             let thickness: f32 = thickness as f32;
-            let thickness_loc = (thickness as i32, thickness as i32);
-            let thickness_size = ((thickness * 2.0) as i32, (thickness * 2.0) as i32);
-            let geo = Rectangle::from_loc_and_size(
-                geo.loc - Point::from(thickness_loc),
-                geo.size + Size::from(thickness_size),
-            );
             let shader = Self::get(renderer);
 
             let elem = PixelShaderElement::new(

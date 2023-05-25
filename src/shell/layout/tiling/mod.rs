@@ -2148,7 +2148,7 @@ where
 
                 if focused == Some(mapped) {
                     if indicator_thickness > 0 {
-                        let element = IndicatorShader::element(
+                        let element = IndicatorShader::focus_element(
                             renderer,
                             mapped.clone(),
                             geo,
