@@ -1749,7 +1749,11 @@ where
                                 )
                                 .into(),
                             );
+                        }
 
+                        if is_potential_group
+                            || node.parent().map(|parent| parent == root).unwrap_or(false)
+                        {
                             geo.loc += (gap, gap).into();
                             geo.size -= (gap * 2, gap * 2).into();
                         }
