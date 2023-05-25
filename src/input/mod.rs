@@ -232,10 +232,10 @@ impl State {
                                     if let OverviewMode::Started(action_modifiers, _) =
                                         data.common.shell.overview_mode()
                                     {
-                                        if !(action_modifiers.ctrl && modifiers.ctrl)
-                                            && !(action_modifiers.alt && modifiers.alt)
-                                            && !(action_modifiers.logo && modifiers.logo)
-                                            && !(action_modifiers.shift && modifiers.shift)
+                                        if (!action_modifiers.ctrl || modifiers.ctrl)
+                                            && (!action_modifiers.alt || modifiers.alt)
+                                            && (!action_modifiers.logo || modifiers.logo)
+                                            && (!action_modifiers.shift || modifiers.shift)
                                         {
                                             data.common.shell.set_overview_mode(None);
                                         }
