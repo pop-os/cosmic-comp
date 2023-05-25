@@ -722,7 +722,7 @@ impl TilingLayout {
                 }
                 _ => None,
             } {
-                // if we can, we need to check the next element and move "into" it (down)
+                // if we can, we need to check the next element and move "into" it
                 let next_child_id = tree
                     .children_ids(&parent)
                     .unwrap()
@@ -777,9 +777,9 @@ impl TilingLayout {
                                 tree.make_nth_sibling(
                                     &node_id,
                                     if direction == Direction::Left || direction == Direction::Up {
-                                        0
-                                    } else {
                                         1
+                                    } else {
+                                        0
                                     },
                                 )
                                 .unwrap();
