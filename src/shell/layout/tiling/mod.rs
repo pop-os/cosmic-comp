@@ -597,7 +597,7 @@ impl TilingLayout {
                 .position(|id| id == &child_id)
                 .unwrap();
 
-            // if the orientation does not match, we want to create a new group with our parent.
+            // if the orientation does not match..
             if matches!(
                 (orientation, direction),
                 (Orientation::Horizontal, Direction::Right)
@@ -605,6 +605,51 @@ impl TilingLayout {
                     | (Orientation::Vertical, Direction::Up)
                     | (Orientation::Vertical, Direction::Down)
             ) {
+                if parent_data.len() == 2 {
+                    if let Some(sibling) = tree
+                        .children_ids(&parent)
+                        .unwrap()
+                        .find(|id| *id != &child_id)
+                        .cloned()
+                    {
+                        let sibling_data = tree.get(&sibling).unwrap().data();
+                        if sibling_data.is_group() {
+                            let sibling_orientation = sibling_data.orientation();
+                            if matches!(
+                                (sibling_orientation, direction),
+                                (Orientation::Vertical, Direction::Right)
+                                    | (Orientation::Vertical, Direction::Left)
+                                    | (Orientation::Horizontal, Direction::Up)
+                                    | (Orientation::Horizontal, Direction::Down)
+                            ) {
+                                // ..lets move into our sibling group instead
+
+                                let idx =
+                                    if direction == Direction::Left || direction == Direction::Up {
+                                        0
+                                    } else {
+                                        sibling_data.len()
+                                    };
+                                tree.move_node(&node_id, MoveBehavior::ToParent(&sibling))
+                                    .unwrap();
+                                tree.make_nth_sibling(&node_id, idx).unwrap();
+
+                                tree.get_mut(&sibling).unwrap().data_mut().add_window(idx);
+                                tree.get_mut(&og_parent)
+                                    .unwrap()
+                                    .data_mut()
+                                    .remove_window(og_idx);
+
+                                let blocker =
+                                    TilingLayout::update_positions(&output, &mut tree, self.gaps);
+                                queue.push_tree(tree, blocker);
+                                return None;
+                            }
+                        }
+                    }
+                }
+
+                // or create a new group with our parent (cleanup will remove any one-child-groups afterwards)
                 TilingLayout::new_group(
                     &mut tree,
                     &parent,
