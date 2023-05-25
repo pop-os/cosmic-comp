@@ -15,9 +15,6 @@ ifeq ($(VENDOR),1)
 	ischroot || make vendor
 endif
 
-override_dh_auto_build:
-	CARGO_HOME="$$(pwd)/target/cargo" make
-
 override_dh_installinit:
 	dh_installinit -r
 
