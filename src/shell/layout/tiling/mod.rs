@@ -217,9 +217,11 @@ impl Data {
                     Orientation::Vertical => last_geometry.size.w,
                 };
                 let old_size = sizes.remove(idx);
+                let remaining_size: i32 = sizes.iter().sum();
+
                 for size in sizes.iter_mut() {
                     *size +=
-                        ((old_size as f64 / last_length as f64) * (*size as f64)).round() as i32;
+                        ((*size as f64 / remaining_size as f64) * old_size as f64).round() as i32;
                 }
                 let used_size: i32 = sizes.iter().sum();
                 let overflow = last_length - used_size;
