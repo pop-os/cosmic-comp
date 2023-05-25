@@ -308,7 +308,7 @@ impl State {
                             )
                             .flatten()
                         {
-                            self.handle_action(action, seat, serial, time, mods)
+                            self.handle_action(action, seat, serial, time, mods, None)
                         }
                         break;
                     }
@@ -660,6 +660,7 @@ impl State {
         serial: Serial,
         time: u32,
         mods: KeyModifiers,
+        direction: Option<Direction>,
     ) {
         match action {
             Action::Terminate => {
@@ -716,7 +717,7 @@ impl State {
                     .activate(&current_output, workspace)
                     .is_err()
                 {
-                    self.handle_action(Action::NextOutput, seat, serial, time, mods);
+                    self.handle_action(Action::NextOutput, seat, serial, time, mods, direction);
                 }
             }
             Action::PreviousWorkspace => {
@@ -734,7 +735,7 @@ impl State {
                     .activate(&current_output, workspace)
                     .is_err()
                 {
-                    self.handle_action(Action::PreviousOutput, seat, serial, time, mods);
+                    self.handle_action(Action::PreviousOutput, seat, serial, time, mods, direction);
                 }
             }
             Action::LastWorkspace => {
@@ -761,6 +762,7 @@ impl State {
                     &current_output,
                     (&current_output, Some(workspace as usize)),
                     follow,
+                    None,
                 );
             }
             x @ Action::MoveToNextWorkspace | x @ Action::SendToNextWorkspace => {
@@ -778,6 +780,7 @@ impl State {
                     &current_output,
                     (&current_output, Some(workspace as usize)),
                     matches!(x, Action::MoveToNextWorkspace),
+                    direction,
                 )
                 .is_err()
                 {
@@ -791,6 +794,7 @@ impl State {
                         serial,
                         time,
                         mods,
+                        direction,
                     )
                 }
             }
@@ -810,6 +814,7 @@ impl State {
                     &current_output,
                     (&current_output, Some(workspace as usize)),
                     matches!(x, Action::MoveToPreviousWorkspace),
+                    direction,
                 )
                 .is_err()
                 {
@@ -823,6 +828,7 @@ impl State {
                         serial,
                         time,
                         mods,
+                        direction,
                     )
                 }
             }
@@ -840,6 +846,7 @@ impl State {
                     &current_output,
                     (&current_output, Some(workspace as usize)),
                     matches!(x, Action::MoveToLastWorkspace),
+                    None,
                 );
             }
             Action::NextOutput => {
@@ -919,6 +926,7 @@ impl State {
                         &current_output,
                         (&next_output, None),
                         matches!(x, Action::MoveToNextOutput),
+                        direction,
                     ) {
                         if let Some(ptr) = seat.get_pointer() {
                             ptr.motion(
@@ -953,6 +961,7 @@ impl State {
                         &current_output,
                         (&prev_output, None),
                         matches!(x, Action::MoveToPreviousOutput),
+                        direction,
                     ) {
                         if let Some(ptr) = seat.get_pointer() {
                             ptr.motion(
@@ -984,19 +993,44 @@ impl State {
                         match (focus, self.common.config.static_conf.workspace_layout) {
                             (FocusDirection::Left, WorkspaceLayout::Horizontal)
                             | (FocusDirection::Up, WorkspaceLayout::Vertical) => self
-                                .handle_action(Action::PreviousWorkspace, seat, serial, time, mods),
+                                .handle_action(
+                                    Action::PreviousWorkspace,
+                                    seat,
+                                    serial,
+                                    time,
+                                    mods,
+                                    direction,
+                                ),
                             (FocusDirection::Right, WorkspaceLayout::Horizontal)
-                            | (FocusDirection::Down, WorkspaceLayout::Vertical) => {
-                                self.handle_action(Action::NextWorkspace, seat, serial, time, mods)
-                            }
+                            | (FocusDirection::Down, WorkspaceLayout::Vertical) => self
+                                .handle_action(
+                                    Action::NextWorkspace,
+                                    seat,
+                                    serial,
+                                    time,
+                                    mods,
+                                    direction,
+                                ),
                             (FocusDirection::Left, WorkspaceLayout::Vertical)
-                            | (FocusDirection::Up, WorkspaceLayout::Horizontal) => {
-                                self.handle_action(Action::PreviousOutput, seat, serial, time, mods)
-                            }
+                            | (FocusDirection::Up, WorkspaceLayout::Horizontal) => self
+                                .handle_action(
+                                    Action::PreviousOutput,
+                                    seat,
+                                    serial,
+                                    time,
+                                    mods,
+                                    direction,
+                                ),
                             (FocusDirection::Right, WorkspaceLayout::Vertical)
-                            | (FocusDirection::Down, WorkspaceLayout::Horizontal) => {
-                                self.handle_action(Action::NextOutput, seat, serial, time, mods)
-                            }
+                            | (FocusDirection::Down, WorkspaceLayout::Horizontal) => self
+                                .handle_action(
+                                    Action::NextOutput,
+                                    seat,
+                                    serial,
+                                    time,
+                                    mods,
+                                    direction,
+                                ),
                             _ => {}
                         }
                     }
@@ -1026,6 +1060,7 @@ impl State {
                             serial,
                             time,
                             mods,
+                            Some(direction),
                         ),
                         (Direction::Right, WorkspaceLayout::Horizontal)
                         | (Direction::Down, WorkspaceLayout::Vertical) => self.handle_action(
@@ -1034,6 +1069,7 @@ impl State {
                             serial,
                             time,
                             mods,
+                            Some(direction),
                         ),
                         (Direction::Left, WorkspaceLayout::Vertical)
                         | (Direction::Up, WorkspaceLayout::Horizontal) => self.handle_action(
@@ -1042,11 +1078,17 @@ impl State {
                             serial,
                             time,
                             mods,
+                            Some(direction),
                         ),
                         (Direction::Right, WorkspaceLayout::Vertical)
-                        | (Direction::Down, WorkspaceLayout::Horizontal) => {
-                            self.handle_action(Action::MoveToNextOutput, seat, serial, time, mods)
-                        }
+                        | (Direction::Down, WorkspaceLayout::Horizontal) => self.handle_action(
+                            Action::MoveToNextOutput,
+                            seat,
+                            serial,
+                            time,
+                            mods,
+                            Some(direction),
+                        ),
                     }
                 } else {
                     let focus_stack = workspace.focus_stack.get(seat);

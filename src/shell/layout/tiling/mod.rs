@@ -374,11 +374,12 @@ impl TilingLayout {
         window: CosmicMapped,
         seat: &Seat<State>,
         focus_stack: impl Iterator<Item = &'a CosmicMapped> + 'a,
+        direction: Option<Direction>,
     ) {
         let output = seat.active_output();
         window.output_enter(&output, window.bbox());
         window.set_bounds(output.geometry().size);
-        self.map_internal(window, &output, Some(focus_stack));
+        self.map_internal(window, &output, Some(focus_stack), direction);
     }
 
     fn map_internal<'a>(
@@ -386,6 +387,7 @@ impl TilingLayout {
         window: impl Into<CosmicMapped>,
         output: &Output,
         focus_stack: Option<impl Iterator<Item = &'a CosmicMapped> + 'a>,
+        direction: Option<Direction>,
     ) {
         let queue = self.queues.get_mut(output).expect("Output not mapped?");
         let mut tree = queue.trees.back().unwrap().0.copy_clone();
@@ -396,37 +398,60 @@ impl TilingLayout {
             last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
         });
 
-        let last_active = focus_stack
-            .and_then(|focus_stack| TilingLayout::last_active_window(&mut tree, focus_stack));
-
-        let window_id = if let Some((_last_active_window, ref node_id)) = last_active {
-            let orientation = {
-                let window_size = tree.get(node_id).unwrap().data().geometry().size;
-                if window_size.w > window_size.h {
-                    Orientation::Vertical
-                } else {
-                    Orientation::Horizontal
-                }
-            };
-            let new_id = tree.insert(new_window, InsertBehavior::AsRoot).unwrap();
-            TilingLayout::new_group(&mut tree, &node_id, &new_id, orientation).unwrap();
-            new_id
-        } else {
-            // nothing? then we add to the root
+        let window_id = if let Some(direction) = direction {
             if let Some(root_id) = tree.root_node_id().cloned() {
+                let orientation = match direction {
+                    Direction::Left | Direction::Right => Orientation::Vertical,
+                    Direction::Up | Direction::Down => Orientation::Horizontal,
+                };
+
+                let new_id = tree.insert(new_window, InsertBehavior::AsRoot).unwrap();
+                TilingLayout::new_group(&mut tree, &root_id, &new_id, orientation).unwrap();
+                tree.make_nth_sibling(
+                    &new_id,
+                    match direction {
+                        Direction::Left | Direction::Up => 1,
+                        Direction::Right | Direction::Down => 0,
+                    },
+                )
+                .unwrap();
+                new_id
+            } else {
+                tree.insert(new_window, InsertBehavior::AsRoot).unwrap()
+            }
+        } else {
+            let last_active = focus_stack
+                .and_then(|focus_stack| TilingLayout::last_active_window(&mut tree, focus_stack));
+
+            if let Some((_last_active_window, ref node_id)) = last_active {
                 let orientation = {
-                    let output_size = output.geometry().size;
-                    if output_size.w > output_size.h {
+                    let window_size = tree.get(node_id).unwrap().data().geometry().size;
+                    if window_size.w > window_size.h {
                         Orientation::Vertical
                     } else {
                         Orientation::Horizontal
                     }
                 };
                 let new_id = tree.insert(new_window, InsertBehavior::AsRoot).unwrap();
-                TilingLayout::new_group(&mut tree, &root_id, &new_id, orientation).unwrap();
+                TilingLayout::new_group(&mut tree, &node_id, &new_id, orientation).unwrap();
                 new_id
             } else {
-                tree.insert(new_window, InsertBehavior::AsRoot).unwrap()
+                // nothing? then we add to the root
+                if let Some(root_id) = tree.root_node_id().cloned() {
+                    let orientation = {
+                        let output_size = output.geometry().size;
+                        if output_size.w > output_size.h {
+                            Orientation::Vertical
+                        } else {
+                            Orientation::Horizontal
+                        }
+                    };
+                    let new_id = tree.insert(new_window, InsertBehavior::AsRoot).unwrap();
+                    TilingLayout::new_group(&mut tree, &root_id, &new_id, orientation).unwrap();
+                    new_id
+                } else {
+                    tree.insert(new_window, InsertBehavior::AsRoot).unwrap()
+                }
             }
         };
 

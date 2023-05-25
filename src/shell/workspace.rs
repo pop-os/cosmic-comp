@@ -402,7 +402,8 @@ impl Workspace {
                 .into_iter()
             {
                 self.floating_layer.unmap(&window);
-                self.tiling_layer.map(window, seat, focus_stack.iter())
+                self.tiling_layer
+                    .map(window, seat, focus_stack.iter(), None)
             }
             self.tiling_enabled = true;
         }
@@ -417,7 +418,8 @@ impl Workspace {
                 } else if self.floating_layer.mapped().any(|w| w == &window) {
                     let focus_stack = self.focus_stack.get(seat);
                     self.floating_layer.unmap(&window);
-                    self.tiling_layer.map(window, seat, focus_stack.iter())
+                    self.tiling_layer
+                        .map(window, seat, focus_stack.iter(), None)
                 }
             }
         }

@@ -54,7 +54,7 @@ use self::{
     grabs::ResizeEdge,
     layout::{
         floating::FloatingLayout,
-        tiling::{TilingLayout, ANIMATION_DURATION},
+        tiling::{Direction, TilingLayout, ANIMATION_DURATION},
     },
 };
 
@@ -1204,7 +1204,7 @@ impl Shell {
             let focus_stack = workspace.focus_stack.get(&seat);
             workspace
                 .tiling_layer
-                .map(mapped.clone(), &seat, focus_stack.iter());
+                .map(mapped.clone(), &seat, focus_stack.iter(), None);
         }
 
         if let CosmicSurface::X11(_) = window {
@@ -1275,6 +1275,7 @@ impl Shell {
         from_output: &Output,
         to: (&Output, Option<usize>),
         follow: bool,
+        direction: Option<Direction>,
     ) -> Result<Option<Point<i32, Logical>>, InvalidWorkspaceIndex> {
         let (to_output, to_idx) = to;
         let to_idx = to_idx.unwrap_or(state.common.shell.workspaces.active_num(to_output).1);
@@ -1338,7 +1339,7 @@ impl Shell {
         } else {
             to_workspace
                 .tiling_layer
-                .map(mapped.clone(), &seat, focus_stack.iter());
+                .map(mapped.clone(), &seat, focus_stack.iter(), direction);
         }
         for (toplevel, _) in mapped.windows() {
             if from_output != to_output {
