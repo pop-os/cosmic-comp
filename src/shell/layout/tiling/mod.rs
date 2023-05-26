@@ -754,7 +754,7 @@ impl TilingLayout {
                     .nth(next_idx)
                     .unwrap()
                     .clone();
-                if tree.get(&next_child_id).unwrap().data().is_group() {
+                if tree.get(&next_child_id).unwrap().data().is_group() && len == 2 {
                     // if it is a group, we want to move into the group
                     tree.move_node(&node_id, MoveBehavior::ToParent(&next_child_id))
                         .unwrap();
