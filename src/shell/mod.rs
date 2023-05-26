@@ -1207,14 +1207,14 @@ impl Shell {
                 .map(mapped.clone(), &seat, focus_stack.iter(), None);
         }
 
-        if let CosmicSurface::X11(_) = window {
+        if let CosmicSurface::X11(surface) = window {
             if let Some(xwm) = state
                 .common
                 .xwayland_state
                 .as_mut()
                 .and_then(|state| state.xwm.as_mut())
             {
-                if let Err(err) = xwm.update_stacking_order_downwards(workspace.mapped()) {
+                if let Err(err) = xwm.raise_window(&surface) {
                     warn!(?err, "Failed to update Xwayland stacking order.");
                 }
             }

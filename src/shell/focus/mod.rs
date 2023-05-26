@@ -147,12 +147,12 @@ impl Shell {
         for output in self.outputs.iter() {
             let workspace = self.workspaces.active_mut(output);
             for focused in focused_windows.iter() {
-                if workspace.floating_layer.mapped().any(|m| m == focused) {
-                    if let CosmicSurface::X11(window) = focused.active_window() {
-                        if let Some(xwm) = xwm.as_mut().and_then(|state| state.xwm.as_mut()) {
-                            let _ = xwm.raise_window(&window);
-                        }
+                if let CosmicSurface::X11(window) = focused.active_window() {
+                    if let Some(xwm) = xwm.as_mut().and_then(|state| state.xwm.as_mut()) {
+                        let _ = xwm.raise_window(&window);
                     }
+                }
+                if workspace.floating_layer.mapped().any(|m| m == focused) {
                     workspace.floating_layer.space.raise_element(focused, true);
                 }
             }
