@@ -2109,7 +2109,7 @@ where
                                 )?;
                                 let rescaled = RescaleRenderElement::from_element(
                                     cropped,
-                                    original_location,
+                                    original_geo.loc.to_physical_precise_round(output_scale),
                                     scale,
                                 );
                                 let relocated = RelocateRenderElement::from_element(
@@ -2130,7 +2130,7 @@ where
                                 )?;
                                 let rescaled = RescaleRenderElement::from_element(
                                     cropped,
-                                    original_location,
+                                    original_geo.loc.to_physical_precise_round(output_scale),
                                     scale,
                                 );
                                 let relocated = RelocateRenderElement::from_element(
