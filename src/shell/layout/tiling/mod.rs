@@ -1619,11 +1619,6 @@ impl TilingLayout {
         }
         .unzip();
 
-        // tiling hints
-        if let Some(group_elements) = group_elements {
-            elements.extend(group_elements);
-        }
-
         // all alive windows
         elements.extend(render_new_tree(
             target_tree,
@@ -1645,6 +1640,11 @@ impl TilingLayout {
                 indicator_thickness
             },
         ));
+
+        // tiling hints
+        if let Some(group_elements) = group_elements {
+            elements.extend(group_elements);
+        }
 
         Ok(elements)
     }
