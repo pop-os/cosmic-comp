@@ -1,7 +1,7 @@
 use crate::{
     backend::render::{
         element::{AsGlowFrame, AsGlowRenderer},
-        GlMultiError, GlMultiFrame, GlMultiRenderer,
+        BackdropShader, GlMultiError, GlMultiFrame, GlMultiRenderer,
     },
     shell::{
         layout::{
@@ -26,17 +26,14 @@ use crate::{
 use calloop::LoopHandle;
 use indexmap::IndexSet;
 use smithay::{
-    backend::{
-        allocator::Fourcc,
-        renderer::{
-            element::{
-                surface::WaylandSurfaceRenderElement, texture::TextureRenderElement,
-                AsRenderElements, Element, Id, RenderElement,
-            },
-            gles::{GlesError, GlesTexture},
-            glow::{GlowFrame, GlowRenderer},
-            ImportAll, ImportMem, Renderer,
+    backend::renderer::{
+        element::{
+            surface::WaylandSurfaceRenderElement, texture::TextureRenderElement, AsRenderElements,
+            Element, Id, RenderElement,
         },
+        gles::{GlesError, GlesTexture},
+        glow::{GlowFrame, GlowRenderer},
+        ImportAll, ImportMem, Renderer,
     },
     desktop::{layer_map_for_output, space::SpaceElement},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
@@ -66,6 +63,7 @@ pub struct Workspace {
     pub focus_stack: FocusStacks,
     pub pending_buffers: Vec<(ScreencopySession, BufferParams)>,
     pub screencopy_sessions: Vec<DropableSession>,
+    pub(super) backdrop_id: Id,
 }
 
 #[derive(Debug, Default)]
@@ -88,6 +86,7 @@ impl Workspace {
             focus_stack: FocusStacks::default(),
             pending_buffers: Vec::new(),
             screencopy_sessions: Vec::new(),
+            backdrop_id: Id::new(),
         }
     }
 
@@ -487,6 +486,7 @@ impl Workspace {
 
         let output_scale = output.current_scale().fractional_scale();
         let layer_map = layer_map_for_output(output);
+        let zone = layer_map.non_exclusive_zone();
 
         if let Some(fullscreen) = self.fullscreen.get(output) {
             render_elements.extend(
@@ -609,53 +609,28 @@ impl Workspace {
                 }
             }
 
-            if let OverviewMode::Started(_, start) = overview {
-                let alpha = Instant::now().duration_since(start).as_millis() as f64 / 100.0;
+            let alpha = match overview {
+                OverviewMode::Started(_, start) => Some(
+                    (Instant::now().duration_since(start).as_millis() as f64 / 100.0).min(1.0)
+                        as f32,
+                ),
+                OverviewMode::Ended(ended) => Some(
+                    1.0 - (Instant::now().duration_since(ended).as_millis() as f64 / 100.0).min(1.0)
+                        as f32,
+                ),
+                _ => None,
+            };
 
-                #[derive(Clone)]
-                struct BackdropTexture(Id, GlesTexture);
-
-                if renderer
-                    .glow_renderer()
-                    .egl_context()
-                    .user_data()
-                    .get::<BackdropTexture>()
-                    .is_none()
-                {
-                    let tex = BackdropTexture(
-                        Id::new(),
-                        renderer
-                            .glow_renderer_mut()
-                            .import_memory(&[0, 0, 0, 255], Fourcc::Abgr8888, (1, 1).into(), false)
-                            .unwrap(),
-                    );
-                    renderer
-                        .glow_renderer()
-                        .egl_context()
-                        .user_data()
-                        .insert_if_missing(|| tex);
-                };
-                let BackdropTexture(id, tex) = renderer
-                    .glow_renderer()
-                    .egl_context()
-                    .user_data()
-                    .get::<BackdropTexture>()
-                    .unwrap()
-                    .clone();
-
+            if let Some(alpha) = alpha {
                 render_elements.push(
-                    TextureRenderElement::from_static_texture(
-                        id,
-                        renderer.id(),
-                        (0.0, 0.0),
-                        tex,
-                        1,
-                        smithay::utils::Transform::Normal,
-                        Some(alpha.min(0.8) as f32),
-                        Some(Rectangle::from_loc_and_size((0., 0.), (1., 1.))),
-                        Some(output.geometry().size),
-                        None,
-                    )
+                    Into::<CosmicMappedRenderElement<R>>::into(BackdropShader::element(
+                        renderer,
+                        self.backdrop_id.clone(),
+                        zone,
+                        0.,
+                        alpha * 0.65,
+                        [0.0, 0.0, 0.0],
+                    ))
                     .into(),
                 )
             }

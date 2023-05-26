@@ -48,7 +48,7 @@ use smithay::{
             damage::{Error as RenderError, OutputDamageTracker, OutputNoMode},
             element::{
                 utils::{Relocate, RelocateRenderElement},
-                AsRenderElements, Element, RenderElement, RenderElementStates,
+                AsRenderElements, Element, Id, RenderElement, RenderElementStates,
             },
             gles::{
                 element::PixelShaderElement, GlesError, GlesPixelProgram, GlesRenderer, Uniform,
@@ -61,7 +61,7 @@ use smithay::{
     },
     desktop::layer_map_for_output,
     output::Output,
-    utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Size},
+    utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale},
     wayland::{
         dmabuf::get_dmabuf,
         shell::wlr_layer::Layer,
@@ -85,41 +85,43 @@ pub static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
 pub static ACTIVE_GROUP_COLOR: [f32; 3] = [0.678, 0.635, 0.619];
 pub static GROUP_COLOR: [f32; 3] = [0.431, 0.404, 0.396];
 pub static FOCUS_INDICATOR_COLOR: [f32; 3] = [0.580, 0.921, 0.921];
-pub static FOCUS_INDICATOR_SHADER: &str = include_str!("./shaders/focus_indicator.frag");
+
+pub static OUTLINE_SHADER: &str = include_str!("./shaders/rounded_outline.frag");
+pub static RECTANGLE_SHADER: &str = include_str!("./shaders/rounded_rectangle.frag");
 
 pub struct IndicatorShader(pub GlesPixelProgram);
 
 #[derive(Clone)]
-pub enum Key {
+pub enum IndicatorKey {
     Group(Weak<()>),
     Window(CosmicMapped),
 }
-impl std::hash::Hash for Key {
+impl std::hash::Hash for IndicatorKey {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
-            Key::Group(arc) => (arc.as_ptr() as usize).hash(state),
-            Key::Window(window) => window.hash(state),
+            IndicatorKey::Group(arc) => (arc.as_ptr() as usize).hash(state),
+            IndicatorKey::Window(window) => window.hash(state),
         }
     }
 }
-impl PartialEq for Key {
+impl PartialEq for IndicatorKey {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Key::Group(g1), Key::Group(g2)) => Weak::ptr_eq(g1, g2),
-            (Key::Window(w1), Key::Window(w2)) => w1 == w2,
+            (IndicatorKey::Group(g1), IndicatorKey::Group(g2)) => Weak::ptr_eq(g1, g2),
+            (IndicatorKey::Window(w1), IndicatorKey::Window(w2)) => w1 == w2,
             _ => false,
         }
     }
 }
-impl Eq for Key {}
-impl From<CosmicMapped> for Key {
+impl Eq for IndicatorKey {}
+impl From<CosmicMapped> for IndicatorKey {
     fn from(window: CosmicMapped) -> Self {
-        Key::Window(window)
+        IndicatorKey::Window(window)
     }
 }
-impl From<WindowGroup> for Key {
+impl From<WindowGroup> for IndicatorKey {
     fn from(group: WindowGroup) -> Self {
-        Key::Group(group.alive.clone())
+        IndicatorKey::Group(group.alive.clone())
     }
 }
 
@@ -129,7 +131,7 @@ struct IndicatorSettings {
     alpha: f32,
     color: [f32; 3],
 }
-type IndicatorCache = RefCell<HashMap<Key, (IndicatorSettings, PixelShaderElement)>>;
+type IndicatorCache = RefCell<HashMap<IndicatorKey, (IndicatorSettings, PixelShaderElement)>>;
 
 impl IndicatorShader {
     pub fn get<R: AsGlowRenderer>(renderer: &R) -> GlesPixelProgram {
@@ -144,7 +146,7 @@ impl IndicatorShader {
 
     pub fn focus_element<R: AsGlowRenderer>(
         renderer: &R,
-        key: impl Into<Key>,
+        key: impl Into<IndicatorKey>,
         mut element_geo: Rectangle<i32, Logical>,
         thickness: u8,
         alpha: f32,
@@ -159,7 +161,7 @@ impl IndicatorShader {
 
     pub fn element<R: AsGlowRenderer>(
         renderer: &R,
-        key: impl Into<Key>,
+        key: impl Into<IndicatorKey>,
         geo: Rectangle<i32, Logical>,
         thickness: u8,
         alpha: f32,
@@ -178,8 +180,8 @@ impl IndicatorShader {
         user_data.insert_if_missing(|| IndicatorCache::new(HashMap::new()));
         let mut cache = user_data.get::<IndicatorCache>().unwrap().borrow_mut();
         cache.retain(|k, _| match k {
-            Key::Group(w) => w.upgrade().is_some(),
-            Key::Window(w) => w.alive(),
+            IndicatorKey::Group(w) => w.upgrade().is_some(),
+            IndicatorKey::Window(w) => w.alive(),
         });
 
         let key = key.into();
@@ -213,15 +215,128 @@ impl IndicatorShader {
     }
 }
 
+pub struct BackdropShader(pub GlesPixelProgram);
+
+#[derive(Clone)]
+pub enum BackdropKey {
+    Static(Id),
+    Window(CosmicMapped),
+}
+impl std::hash::Hash for BackdropKey {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            BackdropKey::Static(id) => id.hash(state),
+            BackdropKey::Window(window) => window.hash(state),
+        }
+    }
+}
+impl PartialEq for BackdropKey {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (BackdropKey::Static(s1), BackdropKey::Static(s2)) => s1 == s2,
+            (BackdropKey::Window(w1), BackdropKey::Window(w2)) => w1 == w2,
+            _ => false,
+        }
+    }
+}
+impl Eq for BackdropKey {}
+impl From<CosmicMapped> for BackdropKey {
+    fn from(window: CosmicMapped) -> Self {
+        BackdropKey::Window(window)
+    }
+}
+impl From<Id> for BackdropKey {
+    fn from(id: Id) -> Self {
+        BackdropKey::Static(id)
+    }
+}
+
+#[derive(PartialEq)]
+struct BackdropSettings {
+    radius: f32,
+    alpha: f32,
+    color: [f32; 3],
+}
+type BackdropCache = RefCell<HashMap<BackdropKey, (BackdropSettings, PixelShaderElement)>>;
+
+impl BackdropShader {
+    pub fn get<R: AsGlowRenderer>(renderer: &R) -> GlesPixelProgram {
+        Borrow::<GlesRenderer>::borrow(renderer.glow_renderer())
+            .egl_context()
+            .user_data()
+            .get::<BackdropShader>()
+            .expect("Custom Shaders not initialized")
+            .0
+            .clone()
+    }
+
+    pub fn element<R: AsGlowRenderer>(
+        renderer: &R,
+        key: impl Into<BackdropKey>,
+        geo: Rectangle<i32, Logical>,
+        radius: f32,
+        alpha: f32,
+        color: [f32; 3],
+    ) -> PixelShaderElement {
+        let settings = BackdropSettings {
+            radius,
+            alpha,
+            color,
+        };
+
+        let user_data = Borrow::<GlesRenderer>::borrow(renderer.glow_renderer())
+            .egl_context()
+            .user_data();
+
+        user_data.insert_if_missing(|| BackdropCache::new(HashMap::new()));
+        let mut cache = user_data.get::<BackdropCache>().unwrap().borrow_mut();
+        cache.retain(|k, _| match k {
+            BackdropKey::Static(_) => true,
+            BackdropKey::Window(w) => w.alive(),
+        });
+
+        let key = key.into();
+        if cache
+            .get(&key)
+            .filter(|(old_settings, _)| &settings == old_settings)
+            .is_none()
+        {
+            let shader = Self::get(renderer);
+
+            let elem = PixelShaderElement::new(
+                shader,
+                geo,
+                None, // TODO
+                alpha,
+                vec![Uniform::new("color", color), Uniform::new("radius", radius)],
+            );
+            cache.insert(key.clone(), (settings, elem));
+        }
+
+        let elem = &mut cache.get_mut(&key).unwrap().1;
+        if elem.geometry(1.0.into()).to_logical(1) != geo {
+            elem.resize(geo, None);
+        }
+        elem.clone()
+    }
+}
+
 pub fn init_shaders<R: AsGlowRenderer>(renderer: &mut R) -> Result<(), GlesError> {
     let glow_renderer = renderer.glow_renderer_mut();
     let gles_renderer: &mut GlesRenderer = glow_renderer.borrow_mut();
 
-    let indicator_shader = gles_renderer.compile_custom_pixel_shader(
-        FOCUS_INDICATOR_SHADER,
+    let outline_shader = gles_renderer.compile_custom_pixel_shader(
+        OUTLINE_SHADER,
         &[
             UniformName::new("color", UniformType::_3f),
             UniformName::new("thickness", UniformType::_1f),
+            UniformName::new("radius", UniformType::_1f),
+        ],
+    )?;
+    let rectangle_shader = gles_renderer.compile_custom_pixel_shader(
+        RECTANGLE_SHADER,
+        &[
+            UniformName::new("color", UniformType::_3f),
             UniformName::new("radius", UniformType::_1f),
         ],
     )?;
@@ -229,7 +344,10 @@ pub fn init_shaders<R: AsGlowRenderer>(renderer: &mut R) -> Result<(), GlesError
     let egl_context = gles_renderer.egl_context();
     egl_context
         .user_data()
-        .insert_if_missing(|| IndicatorShader(indicator_shader));
+        .insert_if_missing(|| IndicatorShader(outline_shader));
+    egl_context
+        .user_data()
+        .insert_if_missing(|| BackdropShader(rectangle_shader));
 
     Ok(())
 }
