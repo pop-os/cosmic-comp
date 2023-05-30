@@ -13,7 +13,7 @@ use smithay::{
 use std::collections::HashMap;
 
 use crate::{
-    backend::render::{element::AsGlowRenderer, IndicatorShader, FOCUS_INDICATOR_COLOR},
+    backend::render::{element::AsGlowRenderer, IndicatorShader},
     shell::{
         element::{window::CosmicWindowRenderElement, CosmicMapped, CosmicMappedRenderElement},
         grabs::ResizeEdge,
@@ -388,7 +388,6 @@ impl FloatingLayout {
                             ),
                             indicator_thickness,
                             alpha,
-                            FOCUS_INDICATOR_COLOR,
                         );
                         elements.insert(0, element.into());
                     }

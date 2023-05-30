@@ -2,8 +2,8 @@
 
 use crate::{
     backend::render::{
-        element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, ACTIVE_GROUP_COLOR,
-        FOCUS_INDICATOR_COLOR, GROUP_COLOR,
+        element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, FOCUS_INDICATOR_COLOR,
+        GROUP_COLOR,
     },
     shell::{
         element::{window::CosmicWindowRenderElement, CosmicMapped, CosmicMappedRenderElement},
@@ -1651,7 +1651,7 @@ impl TilingLayout {
                     non_exclusive_zone,
                     seat, // TODO: Would be better to be an old focus,
                     // but for that we have to associate focus with a tree (and animate focus changes properly)
-                    1.0 - percentage,
+                    1.0 - transition,
                     transition,
                 )
             } else {
@@ -1680,7 +1680,7 @@ impl TilingLayout {
                 renderer,
                 non_exclusive_zone,
                 seat,
-                percentage,
+                transition,
                 transition,
             )
         } else {
@@ -1699,7 +1699,7 @@ impl TilingLayout {
             output_scale,
             percentage,
             if let Some(transition) = draw_groups {
-                let diff = (3u8.abs_diff(indicator_thickness) as f32 * transition).round() as u8;
+                let diff = (4u8.abs_diff(indicator_thickness) as f32 * transition).round() as u8;
                 if 3 > indicator_thickness {
                     indicator_thickness + diff
                 } else {
@@ -1738,63 +1738,76 @@ where
 {
     // we need to recalculate geometry for all elements, if we are drawing groups
     if let Some(root) = tree.root_node_id() {
-        let mut stack = vec![non_exclusive_zone];
+        const OUTER_GAP: i32 = 8;
+        let outer_gap: i32 = (OUTER_GAP as f32 * transition).round() as i32;
+        const INNER_GAP: i32 = 16;
+        let inner_gap: i32 = (INNER_GAP as f32 * transition).round() as i32;
+
+        let mut stack = vec![Rectangle::from_loc_and_size(
+            non_exclusive_zone.loc + Point::from((outer_gap, outer_gap)),
+            (non_exclusive_zone.size.to_point() - Point::from((outer_gap * 2, outer_gap * 2)))
+                .to_size(),
+        )];
         let mut elements = Vec::new();
         let mut geometries = HashMap::new();
-
-        const GAP: i32 = 16;
-        let gap: i32 = (GAP as f32 * transition).round() as i32;
         let alpha = alpha * transition;
 
         let focused = seat
             .and_then(|seat| TilingLayout::currently_focused_node(&tree, seat))
             .map(|(id, _)| id);
 
+        let has_potential_groups = if let Some(focused_id) = focused.as_ref() {
+            let focused_node = tree.get(focused_id).unwrap();
+            if let Some(parent) = focused_node.parent() {
+                let parent_node = tree.get(parent).unwrap();
+                parent_node.children().len() > 2
+                    || parent_node.children().iter().any(|id| {
+                        let data = tree.get(id).unwrap().data();
+                        data.is_group() && data.orientation() == parent_node.data().orientation()
+                    })
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
         for node_id in tree.traverse_pre_order_ids(root).unwrap() {
             if let Some(mut geo) = stack.pop() {
-                // zoom in windows
-                geo.loc += (gap, gap).into();
-                geo.size -= (gap * 2, gap * 2).into();
-
                 let node: &Node<Data> = tree.get(&node_id).unwrap();
                 let data = node.data();
 
-                let is_potential_group = if let Some(focused_id) = focused.as_ref() {
-                    // 1. focused can move into us directly
-                    if let Some(parent) = node.parent() {
-                        let parent_data = tree.get(parent).unwrap().data();
+                let render_potential_group = has_potential_groups
+                    && (if let Some(focused_id) = focused.as_ref() {
+                        // `focused` can move into us directly
+                        if let Some(parent) = node.parent() {
+                            let parent_data = tree.get(parent).unwrap().data();
 
-                        let idx = tree
-                            .children_ids(parent)
-                            .unwrap()
-                            .position(|id| id == &node_id)
-                            .unwrap();
-                        if let Some(focused_idx) = tree
-                            .children_ids(parent)
-                            .unwrap()
-                            .position(|id| id == focused_id)
-                        {
-                            // only direct neighbors
-                            focused_idx.abs_diff(idx) == 1
+                            let idx = tree
+                                .children_ids(parent)
+                                .unwrap()
+                                .position(|id| id == &node_id)
+                                .unwrap();
+                            if let Some(focused_idx) = tree
+                                .children_ids(parent)
+                                .unwrap()
+                                .position(|id| id == focused_id)
+                            {
+                                // only direct neighbors
+                                focused_idx.abs_diff(idx) == 1
                             // skip neighbors, if this is a group of two windows
                             && !(parent_data.len() == 2 && data.is_mapped(None))
                             // skip groups of two in opposite orientation to indicate move between
                             && !(parent_data.len() == 2 && if data.is_group() { parent_data.orientation() != data.orientation() } else { false } )
+                            } else {
+                                false
+                            }
                         } else {
                             false
                         }
-                    }
-                    // 2. focused can move out into us
-                    else {
-                        tree.children_ids(&node_id).unwrap().any(|child_id| {
-                            tree.children_ids(child_id)
-                                .unwrap()
-                                .any(|child_id| child_id == focused_id)
-                        })
-                    }
-                } else {
-                    false
-                };
+                    } else {
+                        false
+                    });
 
                 match data {
                     Data::Group {
@@ -1803,30 +1816,29 @@ where
                         sizes,
                         alive,
                     } => {
-                        let has_active_child = if let Some(focused_id) = focused.as_ref() {
-                            tree.children_ids(&node_id)
-                                .unwrap()
-                                .any(|child_id| child_id == focused_id)
+                        let render_active_child = if let Some(focused_id) = focused.as_ref() {
+                            !has_potential_groups
+                                && tree
+                                    .children_ids(&node_id)
+                                    .unwrap()
+                                    .any(|child_id| child_id == focused_id)
                         } else {
                             false
                         };
 
-                        if (is_potential_group || has_active_child) && &node_id != root {
+                        if (render_potential_group || render_active_child) && &node_id != root {
                             elements.push(
                                 IndicatorShader::element(
                                     renderer,
                                     Key::Group(Arc::downgrade(&alive)),
                                     geo,
-                                    3,
-                                    alpha,
-                                    if has_active_child {
-                                        ACTIVE_GROUP_COLOR
-                                    } else {
-                                        GROUP_COLOR
-                                    },
+                                    4,
+                                    if render_active_child { 16 } else { 8 },
+                                    alpha * if render_potential_group { 0.14 } else { 1.0 },
+                                    GROUP_COLOR,
                                 )
                                 .into(),
-                            )
+                            );
                         }
 
                         geometries.insert(node_id.clone(), geo);
@@ -1876,26 +1888,50 @@ where
                         }
                     }
                     Data::Mapped { mapped, .. } => {
-                        if is_potential_group {
+                        geo.loc += (outer_gap, outer_gap).into();
+                        geo.size -= (outer_gap * 2, outer_gap * 2).into();
+
+                        if render_potential_group {
                             elements.push(
                                 IndicatorShader::element(
                                     renderer,
                                     mapped.clone(),
                                     geo,
-                                    3,
-                                    alpha,
+                                    4,
+                                    8,
+                                    alpha * if render_potential_group { 0.4 } else { 1.0 },
                                     GROUP_COLOR,
                                 )
                                 .into(),
                             );
+
+                            geo.loc += (outer_gap, outer_gap).into();
+                            geo.size -= (outer_gap * 2, outer_gap * 2).into();
                         }
 
-                        if is_potential_group
-                            || node.parent().map(|parent| parent == root).unwrap_or(false)
-                        {
-                            geo.loc += (gap, gap).into();
-                            geo.size -= (gap * 2, gap * 2).into();
-                        }
+                        elements.push(
+                            BackdropShader::element(
+                                renderer,
+                                mapped.clone(),
+                                geo,
+                                8.,
+                                alpha
+                                    * if focused
+                                        .as_ref()
+                                        .map(|focused_id| focused_id == &node_id)
+                                        .unwrap_or(false)
+                                    {
+                                        0.4
+                                    } else {
+                                        0.15
+                                    },
+                                GROUP_COLOR,
+                            )
+                            .into(),
+                        );
+
+                        geo.loc += (inner_gap, inner_gap).into();
+                        geo.size -= (inner_gap * 2, inner_gap * 2).into();
 
                         geometries.insert(node_id.clone(), geo);
                     }
@@ -2157,7 +2193,6 @@ where
                             geo,
                             indicator_thickness,
                             1.0,
-                            FOCUS_INDICATOR_COLOR,
                         );
                         elements.push(element.into());
                     }

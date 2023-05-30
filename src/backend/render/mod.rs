@@ -82,8 +82,7 @@ pub type GlMultiFrame<'a, 'b, 'frame> =
 pub type GlMultiError = MultiError<GbmGlesBackend<GlowRenderer>, GbmGlesBackend<GlowRenderer>>;
 
 pub static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
-pub static ACTIVE_GROUP_COLOR: [f32; 3] = [0.678, 0.635, 0.619];
-pub static GROUP_COLOR: [f32; 3] = [0.431, 0.404, 0.396];
+pub static GROUP_COLOR: [f32; 3] = [0.788, 0.788, 0.788];
 pub static FOCUS_INDICATOR_COLOR: [f32; 3] = [0.580, 0.921, 0.921];
 
 pub static OUTLINE_SHADER: &str = include_str!("./shaders/rounded_outline.frag");
@@ -136,6 +135,7 @@ impl From<Id> for Key {
 #[derive(PartialEq)]
 struct IndicatorSettings {
     thickness: u8,
+    radius: u8,
     alpha: f32,
     color: [f32; 3],
 }
@@ -158,13 +158,20 @@ impl IndicatorShader {
         mut element_geo: Rectangle<i32, Logical>,
         thickness: u8,
         alpha: f32,
-        color: [f32; 3],
     ) -> PixelShaderElement {
         let t = thickness as i32;
         element_geo.loc -= (t, t).into();
         element_geo.size += (t * 2, t * 2).into();
 
-        IndicatorShader::element(renderer, key, element_geo, thickness, alpha, color)
+        IndicatorShader::element(
+            renderer,
+            key,
+            element_geo,
+            thickness,
+            thickness * 2,
+            alpha,
+            FOCUS_INDICATOR_COLOR,
+        )
     }
 
     pub fn element<R: AsGlowRenderer>(
@@ -172,11 +179,13 @@ impl IndicatorShader {
         key: impl Into<Key>,
         geo: Rectangle<i32, Logical>,
         thickness: u8,
+        radius: u8,
         alpha: f32,
         color: [f32; 3],
     ) -> PixelShaderElement {
         let settings = IndicatorSettings {
             thickness,
+            radius,
             alpha,
             color,
         };
@@ -210,7 +219,7 @@ impl IndicatorShader {
                 vec![
                     Uniform::new("color", color),
                     Uniform::new("thickness", thickness),
-                    Uniform::new("radius", thickness * 2.0),
+                    Uniform::new("radius", radius as f32),
                 ],
             );
             cache.insert(key.clone(), (settings, elem));
