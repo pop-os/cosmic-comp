@@ -1049,7 +1049,7 @@ impl State {
                 }
 
                 if let Some(_move_further) =
-                    workspace.tiling_layer.move_current_window(direction, seat)
+                    workspace.tiling_layer.move_current_node(direction, seat)
                 {
                     // TODO: Being able to move Groups (move_further should be KeyboardFocusTarget instead)
                     match (direction, self.common.config.static_conf.workspace_layout) {
@@ -1111,20 +1111,14 @@ impl State {
             Action::ToggleOrientation => {
                 let output = seat.active_output();
                 let workspace = self.common.shell.active_space_mut(&output);
-                let focus_stack = workspace.focus_stack.get(seat);
-                workspace
-                    .tiling_layer
-                    .update_orientation(None, &seat, focus_stack.iter());
+                workspace.tiling_layer.update_orientation(None, &seat);
             }
             Action::Orientation(orientation) => {
                 let output = seat.active_output();
                 let workspace = self.common.shell.active_space_mut(&output);
-                let focus_stack = workspace.focus_stack.get(seat);
-                workspace.tiling_layer.update_orientation(
-                    Some(orientation),
-                    &seat,
-                    focus_stack.iter(),
-                );
+                workspace
+                    .tiling_layer
+                    .update_orientation(Some(orientation), &seat);
             }
             Action::ToggleTiling => {
                 let output = seat.active_output();

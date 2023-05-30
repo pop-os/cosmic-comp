@@ -594,7 +594,7 @@ impl Workspace {
                     .render_output::<R>(
                         renderer,
                         output,
-                        focused.as_ref(),
+                        draw_focus_indicator,
                         layer_map.non_exclusive_zone(),
                         overview.clone(),
                         indicator_thickness,

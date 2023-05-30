@@ -55,6 +55,7 @@ pub struct WindowGroup {
     pub node: NodeId,
     pub output: WeakOutput,
     pub alive: Weak<()>,
+    pub focus_stack: Vec<NodeId>,
 }
 
 impl PartialEq for WindowGroup {

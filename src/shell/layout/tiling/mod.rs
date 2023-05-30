@@ -42,7 +42,7 @@ use std::{
     borrow::Borrow,
     collections::{HashMap, VecDeque},
     hash::Hash,
-    sync::Arc,
+    sync::{Arc, Weak},
     time::{Duration, Instant},
 };
 use tracing::trace;
@@ -281,6 +281,12 @@ impl Data {
     }
 }
 
+#[derive(Debug, Clone)]
+enum FocusedNodeData {
+    Group(Vec<NodeId>, Weak<()>),
+    Window(CosmicMapped),
+}
+
 impl TilingLayout {
     pub fn new(gaps: (u8, u8)) -> TilingLayout {
         TilingLayout {
@@ -290,9 +296,7 @@ impl TilingLayout {
             pending_blockers: Vec::new(),
         }
     }
-}
 
-impl TilingLayout {
     pub fn map_output(&mut self, output: &Output, location: Point<i32, Logical>) {
         if !self.queues.contains_key(output) {
             self.queues.insert(
@@ -423,7 +427,7 @@ impl TilingLayout {
             let last_active = focus_stack
                 .and_then(|focus_stack| TilingLayout::last_active_window(&mut tree, focus_stack));
 
-            if let Some((_last_active_window, ref node_id)) = last_active {
+            if let Some((ref node_id, _last_active_window)) = last_active {
                 let orientation = {
                     let window_size = tree.get(node_id).unwrap().data().geometry().size;
                     if window_size.w > window_size.h {
@@ -577,31 +581,29 @@ impl TilingLayout {
         None
     }
 
-    pub fn move_current_window<'a>(
+    pub fn move_current_node<'a>(
         &mut self,
         direction: Direction,
         seat: &Seat<State>,
-    ) -> Option<CosmicMapped /*TODO move window groups across screens?*/> {
+    ) -> Option<KeyboardFocusTarget> {
         let output = seat.active_output();
         let queue = self.queues.get_mut(&output).unwrap();
         let mut tree = queue.trees.back().unwrap().0.copy_clone();
 
-        let node_id = match TilingLayout::currently_focused_node(&mut tree, seat) {
-            Some(node_id) => node_id,
-            None => {
-                return None;
-            }
-        };
+        let (node_id, data) = TilingLayout::currently_focused_node(&mut tree, seat)?;
 
         let mut child_id = node_id.clone();
         // Without a parent to start with, just return
         let Some(og_parent) = tree.get(&node_id).unwrap().parent().cloned() else {
-            let data = tree.get(&node_id).unwrap().data();
-            assert!(data.is_mapped(None));
             return match data {
-                Data::Mapped { mapped, .. } => Some(mapped.clone()),
-                _ => unreachable!(),
-            };
+                FocusedNodeData::Window(window) => Some(window.into()),
+                FocusedNodeData::Group(focus_stack, alive) => Some(WindowGroup {
+                    node: node_id,
+                    output: output.downgrade(),
+                    alive,
+                    focus_stack,
+                }.into()),
+            }
         };
         let og_idx = tree
             .children_ids(&og_parent)
@@ -852,9 +854,17 @@ impl TilingLayout {
             child_id = parent.clone();
         }
 
-        match tree.get(&node_id).unwrap().data() {
-            Data::Mapped { mapped, .. } => Some(mapped.clone()),
-            Data::Group { .. } => None, // TODO move groups to other screens
+        match data {
+            FocusedNodeData::Window(window) => Some(window.into()),
+            FocusedNodeData::Group(focus_stack, alive) => Some(
+                WindowGroup {
+                    node: node_id,
+                    output: output.downgrade(),
+                    alive,
+                    focus_stack,
+                }
+                .into(),
+            ),
         }
     }
 
@@ -867,14 +877,47 @@ impl TilingLayout {
         let output = seat.active_output();
         let tree = &self.queues.get(&output).unwrap().trees.back().unwrap().0;
 
-        // TODO: Rather use something like seat.current_keyboard_focus
-        // TODO https://github.com/Smithay/smithay/pull/777
-        if let Some(last_active) = TilingLayout::last_active_window(tree, focus_stack) {
-            let (last_window, last_node_id) = last_active;
+        if let Some(focused) = TilingLayout::currently_focused_node(tree, seat).or_else(|| {
+            TilingLayout::last_active_window(tree, focus_stack)
+                .map(|(id, mapped)| (id, FocusedNodeData::Window(mapped)))
+        }) {
+            let (last_node_id, data) = focused;
 
             // stacks may handle focus internally
-            if last_window.handle_focus(direction) {
-                return FocusResult::Handled;
+            if let FocusedNodeData::Window(window) = data.clone() {
+                if window.handle_focus(direction) {
+                    return FocusResult::Handled;
+                }
+            }
+
+            if direction == FocusDirection::In {
+                if let FocusedNodeData::Group(mut stack, _) = data.clone() {
+                    let maybe_id = stack.pop().unwrap();
+                    let id = if tree
+                        .children_ids(&last_node_id)
+                        .unwrap()
+                        .any(|id| id == &maybe_id)
+                    {
+                        Some(maybe_id)
+                    } else {
+                        tree.children_ids(&last_node_id).unwrap().next().cloned()
+                    };
+
+                    if let Some(id) = id {
+                        return match tree.get(&id).unwrap().data() {
+                            Data::Mapped { mapped, .. } => FocusResult::Some(mapped.clone().into()),
+                            Data::Group { alive, .. } => FocusResult::Some(
+                                WindowGroup {
+                                    node: id,
+                                    output: output.downgrade(),
+                                    alive: Arc::downgrade(alive),
+                                    focus_stack: stack,
+                                }
+                                .into(),
+                            ),
+                        };
+                    }
+                }
             }
 
             let mut node_id = last_node_id.clone();
@@ -892,6 +935,13 @@ impl TilingLayout {
                             alive: match group_data {
                                 &Data::Group { ref alive, .. } => Arc::downgrade(alive),
                                 _ => unreachable!(),
+                            },
+                            focus_stack: match data {
+                                FocusedNodeData::Group(mut stack, _) => {
+                                    stack.push(child);
+                                    stack
+                                }
+                                _ => vec![child],
                             },
                         }
                         .into(),
@@ -1007,13 +1057,12 @@ impl TilingLayout {
         &mut self,
         new_orientation: Option<Orientation>,
         seat: &Seat<State>,
-        focus_stack: impl Iterator<Item = &'a CosmicMapped> + 'a,
     ) {
         let output = seat.active_output();
         let Some(queue) = self.queues.get_mut(&output) else { return };
         let mut tree = queue.trees.back().unwrap().0.copy_clone();
 
-        if let Some((_, last_active)) = TilingLayout::last_active_window(&tree, focus_stack) {
+        if let Some((last_active, _)) = TilingLayout::currently_focused_node(&tree, seat) {
             if let Some(group) = tree.get(&last_active).unwrap().parent().cloned() {
                 if let &mut Data::Group {
                     ref mut orientation,
@@ -1169,16 +1218,19 @@ impl TilingLayout {
     fn last_active_window<'a>(
         tree: &Tree<Data>,
         mut focus_stack: impl Iterator<Item = &'a CosmicMapped>,
-    ) -> Option<(CosmicMapped, NodeId)> {
+    ) -> Option<(NodeId, CosmicMapped)> {
         focus_stack
             .find_map(|mapped| tree.root_node_id()
                 .and_then(|root| tree.traverse_pre_order_ids(root).unwrap()
                     .find(|id| matches!(tree.get(id).map(|n| n.data()), Ok(Data::Mapped { mapped: m, .. }) if m == mapped))
-                ).map(|id| (mapped.clone(), id))
+                ).map(|id| (id, mapped.clone()))
             )
     }
 
-    fn currently_focused_node(tree: &mut Tree<Data>, seat: &Seat<State>) -> Option<NodeId> {
+    fn currently_focused_node(
+        tree: &Tree<Data>,
+        seat: &Seat<State>,
+    ) -> Option<(NodeId, FocusedNodeData)> {
         let mut target = seat.get_keyboard().unwrap().current_focus()?;
 
         // if the focus is currently on a popup, treat it's toplevel as the target
@@ -1209,14 +1261,17 @@ impl TilingLayout {
                 let node = tree.get(&node_id).ok()?;
                 let data = node.data();
                 if data.is_mapped(Some(&mapped)) {
-                    return Some(node_id);
+                    return Some((node_id, FocusedNodeData::Window(mapped)));
                 }
             }
             KeyboardFocusTarget::Group(window_group) => {
                 if window_group.output == seat.active_output() {
                     let node = tree.get(&window_group.node).ok()?;
                     if node.data().is_group() {
-                        return Some(window_group.node);
+                        return Some((
+                            window_group.node,
+                            FocusedNodeData::Group(window_group.focus_stack, window_group.alive),
+                        ));
                     }
                 }
             }
@@ -1523,7 +1578,7 @@ impl TilingLayout {
         &self,
         renderer: &mut R,
         output: &Output,
-        focused: Option<&CosmicMapped>,
+        seat: Option<&Seat<State>>,
         non_exclusive_zone: Rectangle<i32, Logical>,
         overview: OverviewMode,
         indicator_thickness: u8,
@@ -1594,7 +1649,7 @@ impl TilingLayout {
                     reference_tree,
                     renderer,
                     non_exclusive_zone,
-                    focused, // TODO: Would be better to be an old focus,
+                    seat, // TODO: Would be better to be an old focus,
                     // but for that we have to associate focus with a tree (and animate focus changes properly)
                     1.0 - percentage,
                     transition,
@@ -1624,7 +1679,7 @@ impl TilingLayout {
                 target_tree,
                 renderer,
                 non_exclusive_zone,
-                focused,
+                seat,
                 percentage,
                 transition,
             )
@@ -1640,7 +1695,7 @@ impl TilingLayout {
             renderer,
             geometries,
             old_geometries,
-            focused,
+            seat,
             output_scale,
             percentage,
             if let Some(transition) = draw_groups {
@@ -1668,7 +1723,7 @@ fn geometries_for_groupview<R>(
     tree: &Tree<Data>,
     renderer: &mut R,
     non_exclusive_zone: Rectangle<i32, Logical>,
-    focused: Option<&CosmicMapped>,
+    seat: Option<&Seat<State>>,
     alpha: f32,
     transition: f32,
 ) -> Option<(
@@ -1691,6 +1746,10 @@ where
         let gap: i32 = (GAP as f32 * transition).round() as i32;
         let alpha = alpha * transition;
 
+        let focused = seat
+            .and_then(|seat| TilingLayout::currently_focused_node(&tree, seat))
+            .map(|(id, _)| id);
+
         for node_id in tree.traverse_pre_order_ids(root).unwrap() {
             if let Some(mut geo) = stack.pop() {
                 // zoom in windows
@@ -1700,7 +1759,7 @@ where
                 let node: &Node<Data> = tree.get(&node_id).unwrap();
                 let data = node.data();
 
-                let is_potential_group = if let Some(focused) = focused {
+                let is_potential_group = if let Some(focused_id) = focused.as_ref() {
                     // 1. focused can move into us directly
                     if let Some(parent) = node.parent() {
                         let parent_data = tree.get(parent).unwrap().data();
@@ -1710,13 +1769,10 @@ where
                             .unwrap()
                             .position(|id| id == &node_id)
                             .unwrap();
-                        if let Some((focused_idx, _focused_id)) = tree
+                        if let Some(focused_idx) = tree
                             .children_ids(parent)
                             .unwrap()
-                            .enumerate()
-                            .find(|(_, child_id)| {
-                                tree.get(child_id).unwrap().data().is_mapped(Some(focused))
-                            })
+                            .position(|id| id == focused_id)
                         {
                             // only direct neighbors
                             focused_idx.abs_diff(idx) == 1
@@ -1730,14 +1786,11 @@ where
                     }
                     // 2. focused can move out into us
                     else {
-                        tree.children_ids(&node_id)
-                            .unwrap()
-                            .find(|child_id| {
-                                tree.children(child_id)
-                                    .unwrap()
-                                    .any(|child| child.data().is_mapped(Some(focused)))
-                            })
-                            .is_some()
+                        tree.children_ids(&node_id).unwrap().any(|child_id| {
+                            tree.children_ids(child_id)
+                                .unwrap()
+                                .any(|child_id| child_id == focused_id)
+                        })
                     }
                 } else {
                     false
@@ -1750,10 +1803,10 @@ where
                         sizes,
                         alive,
                     } => {
-                        let has_active_child = if let Some(focused) = focused {
-                            tree.children(&node_id)
+                        let has_active_child = if let Some(focused_id) = focused.as_ref() {
+                            tree.children_ids(&node_id)
                                 .unwrap()
-                                .any(|child| child.data().is_mapped(Some(focused)))
+                                .any(|child_id| child_id == focused_id)
                         } else {
                             false
                         };
@@ -1985,7 +2038,7 @@ fn render_new_tree<R>(
     renderer: &mut R,
     geometries: Option<HashMap<NodeId, Rectangle<i32, Logical>>>,
     old_geometries: Option<HashMap<NodeId, Rectangle<i32, Logical>>>,
-    focused: Option<&CosmicMapped>,
+    seat: Option<&Seat<State>>,
     output_scale: f64,
     percentage: f32,
     indicator_thickness: u8,
@@ -1996,43 +2049,33 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
 {
+    let focused = seat
+        .and_then(|seat| TilingLayout::currently_focused_node(&target_tree, seat))
+        .map(|(id, _)| id);
+
     if let Some(root) = target_tree.root_node_id() {
         let old_geometries = old_geometries.unwrap_or_default();
         let geometries = geometries.unwrap_or_default();
         target_tree
             .traverse_pre_order_ids(root)
             .unwrap()
-            .filter(|node_id| target_tree.get(node_id).unwrap().data().is_mapped(None))
-            .map(|node_id| match target_tree.get(&node_id).unwrap().data() {
-                Data::Mapped {
-                    mapped,
-                    last_geometry,
-                    ..
-                } => (mapped, last_geometry, geometries.get(&node_id)),
-                _ => unreachable!(),
-            })
-            .flat_map(|(mapped, original_geo, scaled_geo)| {
+            .flat_map(|node_id| {
+                let data = target_tree.get(&node_id).unwrap().data();
+                let (original_geo, scaled_geo) = (data.geometry(), geometries.get(&node_id));
+
                 let (old_original_geo, old_scaled_geo) =
                     if let Some(reference_tree) = reference_tree.as_ref() {
                         if let Some(root) = reference_tree.root_node_id() {
                             reference_tree
                                 .traverse_pre_order_ids(root)
                                 .unwrap()
-                                .find(|node_id| {
-                                    reference_tree
-                                        .get(node_id)
-                                        .unwrap()
-                                        .data()
-                                        .is_mapped(Some(mapped))
+                                .find(|id| &node_id == id)
+                                .map(|node_id| {
+                                    (
+                                        reference_tree.get(&node_id).unwrap().data().geometry(),
+                                        old_geometries.get(&node_id),
+                                    )
                                 })
-                                .map(
-                                    |node_id| match reference_tree.get(&node_id).unwrap().data() {
-                                        Data::Mapped { last_geometry, .. } => {
-                                            (last_geometry, old_geometries.get(&node_id))
-                                        }
-                                        _ => unreachable!(),
-                                    },
-                                )
                         } else {
                             None
                         }
@@ -2101,77 +2144,86 @@ where
                     (new_geo, percentage)
                 };
 
-                let original_location = (original_geo.loc - mapped.geometry().loc)
-                    .to_physical_precise_round(output_scale);
+                let mut elements = Vec::new();
 
-                let mut elements =
-                    AsRenderElements::<R>::render_elements::<CosmicMappedRenderElement<R>>(
-                        mapped,
-                        renderer,
-                        original_location,
-                        Scale::from(output_scale),
-                        alpha,
-                    )
-                    .into_iter()
-                    .flat_map(|element| match element {
-                        CosmicMappedRenderElement::Stack(elem) => {
-                            Some(CosmicMappedRenderElement::TiledStack({
-                                let cropped = CropRenderElement::from_element(
-                                    elem,
-                                    output_scale,
-                                    crop_rect.to_physical_precise_round(output_scale),
-                                )?;
-                                let rescaled = RescaleRenderElement::from_element(
-                                    cropped,
-                                    original_geo.loc.to_physical_precise_round(output_scale),
-                                    scale,
-                                );
-                                let relocated = RelocateRenderElement::from_element(
-                                    rescaled,
-                                    (geo.loc - original_geo.loc)
-                                        .to_physical_precise_round(output_scale),
-                                    Relocate::Relative,
-                                );
-                                relocated
-                            }))
-                        }
-                        CosmicMappedRenderElement::Window(elem) => {
-                            Some(CosmicMappedRenderElement::TiledWindow({
-                                let cropped = CropRenderElement::from_element(
-                                    elem,
-                                    output_scale,
-                                    crop_rect.to_physical_precise_round(output_scale),
-                                )?;
-                                let rescaled = RescaleRenderElement::from_element(
-                                    cropped,
-                                    original_geo.loc.to_physical_precise_round(output_scale),
-                                    scale,
-                                );
-                                let relocated = RelocateRenderElement::from_element(
-                                    rescaled,
-                                    (geo.loc - original_geo.loc)
-                                        .to_physical_precise_round(output_scale),
-                                    Relocate::Relative,
-                                );
-                                relocated
-                            }))
-                        }
-                        x => Some(x),
-                    })
-                    .collect::<Vec<_>>();
-
-                if focused == Some(mapped) {
+                if focused == Some(node_id) {
                     if indicator_thickness > 0 {
                         let element = IndicatorShader::focus_element(
                             renderer,
-                            mapped.clone(),
+                            match data {
+                                Data::Mapped { mapped, .. } => mapped.clone().into(),
+                                Data::Group { alive, .. } => {
+                                    IndicatorKey::Group(Arc::downgrade(alive))
+                                }
+                            },
                             geo,
                             indicator_thickness,
                             1.0,
                             FOCUS_INDICATOR_COLOR,
                         );
-                        elements.insert(0, element.into());
+                        elements.push(element.into());
                     }
+                }
+
+                if let Data::Mapped { mapped, .. } = data {
+                    let original_location = (original_geo.loc - mapped.geometry().loc)
+                        .to_physical_precise_round(output_scale);
+
+                    elements.extend(
+                        AsRenderElements::<R>::render_elements::<CosmicMappedRenderElement<R>>(
+                            mapped,
+                            renderer,
+                            original_location,
+                            Scale::from(output_scale),
+                            alpha,
+                        )
+                        .into_iter()
+                        .flat_map(|element| match element {
+                            CosmicMappedRenderElement::Stack(elem) => {
+                                Some(CosmicMappedRenderElement::TiledStack({
+                                    let cropped = CropRenderElement::from_element(
+                                        elem,
+                                        output_scale,
+                                        crop_rect.to_physical_precise_round(output_scale),
+                                    )?;
+                                    let rescaled = RescaleRenderElement::from_element(
+                                        cropped,
+                                        original_geo.loc.to_physical_precise_round(output_scale),
+                                        scale,
+                                    );
+                                    let relocated = RelocateRenderElement::from_element(
+                                        rescaled,
+                                        (geo.loc - original_geo.loc)
+                                            .to_physical_precise_round(output_scale),
+                                        Relocate::Relative,
+                                    );
+                                    relocated
+                                }))
+                            }
+                            CosmicMappedRenderElement::Window(elem) => {
+                                Some(CosmicMappedRenderElement::TiledWindow({
+                                    let cropped = CropRenderElement::from_element(
+                                        elem,
+                                        output_scale,
+                                        crop_rect.to_physical_precise_round(output_scale),
+                                    )?;
+                                    let rescaled = RescaleRenderElement::from_element(
+                                        cropped,
+                                        original_geo.loc.to_physical_precise_round(output_scale),
+                                        scale,
+                                    );
+                                    let relocated = RelocateRenderElement::from_element(
+                                        rescaled,
+                                        (geo.loc - original_geo.loc)
+                                            .to_physical_precise_round(output_scale),
+                                        Relocate::Relative,
+                                    );
+                                    relocated
+                                }))
+                            }
+                            x => Some(x),
+                        }),
+                    );
                 }
 
                 elements
