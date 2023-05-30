@@ -1050,6 +1050,13 @@ impl TilingLayout {
         }
     }
 
+    pub fn recalculate(&mut self, output: &Output) {
+        let Some(queue) = self.queues.get_mut(output) else { return };
+        let mut tree = queue.trees.back().unwrap().0.copy_clone();
+        let blocker = TilingLayout::update_positions(&output, &mut tree, self.gaps);
+        queue.push_tree(tree, blocker);
+    }
+
     pub fn refresh(&mut self) {
         #[cfg(feature = "debug")]
         puffin::profile_function!();

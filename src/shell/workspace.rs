@@ -294,10 +294,11 @@ impl Workspace {
     }
 
     pub fn unfullscreen_request(&mut self, window: &CosmicSurface) {
-        if self.fullscreen.values().any(|w| w == window) {
+        if let Some((output, _)) = self.fullscreen.iter().find(|(_, w)| *w == window) {
             window.set_maximized(false);
             window.set_fullscreen(false);
             self.floating_layer.refresh();
+            self.tiling_layer.recalculate(output);
             self.tiling_layer.refresh();
             window.send_configure();
             self.fullscreen.retain(|_, w| w != window);
