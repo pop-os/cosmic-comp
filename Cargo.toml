@@ -48,7 +48,7 @@ branch = "feature/copy_clone"
 [dependencies.smithay]
 version = "0.3"
 git = "https://github.com/smithay/smithay.git"
-rev = "9459ddd14e"
+rev = "138921bff4"
 default-features = false
 features = ["backend_drm", "backend_gbm", "backend_egl", "backend_libinput", "backend_session_libseat", "backend_udev", "backend_winit", "backend_vulkan", "backend_x11", "desktop", "use_system_lib", "renderer_glow", "renderer_multi", "wayland_frontend", "xwayland"]
 
