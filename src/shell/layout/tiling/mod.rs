@@ -2,8 +2,8 @@
 
 use crate::{
     backend::render::{
-        element::AsGlowRenderer, IndicatorShader, Key, ACTIVE_GROUP_COLOR, FOCUS_INDICATOR_COLOR,
-        GROUP_COLOR,
+        element::AsGlowRenderer, IndicatorKey, IndicatorShader, ACTIVE_GROUP_COLOR,
+        FOCUS_INDICATOR_COLOR, GROUP_COLOR,
     },
     shell::{
         element::{window::CosmicWindowRenderElement, CosmicMapped, CosmicMappedRenderElement},
@@ -1140,7 +1140,7 @@ impl TilingLayout {
                 .position(|id| id == &node_id)
                 .unwrap();
             let idx = match edges {
-                x if x.intersects(ResizeEdge::TOP_LEFT) => node_idx - 1,
+                x if x.intersects(ResizeEdge::TOP_LEFT) => node_idx.checked_sub(1)?,
                 _ => node_idx,
             };
             if idx > tree.get(&group_id).unwrap().data().len() {
@@ -1384,7 +1384,9 @@ impl TilingLayout {
         None
     }
 
-    pub fn mapped(&self) -> impl Iterator<Item = (&Output, &CosmicMapped, Point<i32, Logical>)> {
+    pub fn mapped(
+        &self,
+    ) -> impl Iterator<Item = (&Output, &CosmicMapped, Rectangle<i32, Logical>)> {
         self.queues
             .iter()
             .flat_map(|(output_data, queue)| {
@@ -1403,11 +1405,11 @@ impl TilingLayout {
                                     mapped,
                                     last_geometry,
                                     ..
-                                } => (
-                                    &output_data.output,
-                                    mapped,
-                                    output_data.location + last_geometry.loc,
-                                ),
+                                } => (&output_data.output, mapped, {
+                                    let mut geo = last_geometry.clone();
+                                    geo.loc += output_data.location;
+                                    geo
+                                }),
                                 _ => unreachable!(),
                             })
                             .chain(
@@ -1423,11 +1425,11 @@ impl TilingLayout {
                                             mapped,
                                             last_geometry,
                                             ..
-                                        } => (
-                                            &output_data.output,
-                                            mapped,
-                                            output_data.location + last_geometry.loc,
-                                        ),
+                                        } => (&output_data.output, mapped, {
+                                            let mut geo = last_geometry.clone();
+                                            geo.loc += output_data.location;
+                                            geo
+                                        }),
                                         _ => unreachable!(),
                                     }),
                             ),
@@ -1441,11 +1443,16 @@ impl TilingLayout {
 
     pub fn windows(
         &self,
-    ) -> impl Iterator<Item = (Output, CosmicSurface, Point<i32, Logical>)> + '_ {
-        self.mapped().flat_map(|(output, mapped, loc)| {
-            mapped
-                .windows()
-                .map(move |(w, p)| (output.clone(), w, p + loc))
+    ) -> impl Iterator<Item = (Output, CosmicSurface, Rectangle<i32, Logical>)> + '_ {
+        self.mapped().flat_map(|(output, mapped, geo)| {
+            mapped.windows().map(move |(w, p)| {
+                (output.clone(), w, {
+                    let mut geo = geo.clone();
+                    geo.loc += p;
+                    geo.size -= p.to_size();
+                    geo
+                })
+            })
         })
     }
 
@@ -1748,7 +1755,7 @@ where
                             elements.push(
                                 IndicatorShader::element(
                                     renderer,
-                                    Key::Group(Arc::downgrade(&alive)),
+                                    IndicatorKey::Group(Arc::downgrade(&alive)),
                                     geo,
                                     3,
                                     alpha,

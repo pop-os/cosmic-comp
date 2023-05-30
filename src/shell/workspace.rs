@@ -202,11 +202,16 @@ impl Workspace {
             .space
             .element_under(location)
             .or_else(|| {
-                self.tiling_layer.mapped().find_map(|(_, mapped, loc)| {
-                    let test_point = location - loc.to_f64() + mapped.geometry().loc.to_f64();
-                    mapped
-                        .is_in_input_region(&test_point)
-                        .then_some((mapped, loc - mapped.geometry().loc))
+                self.tiling_layer.mapped().find_map(|(_, mapped, geo)| {
+                    geo.contains(location.to_i32_round())
+                        .then(|| {
+                            let test_point =
+                                location - geo.loc.to_f64() + mapped.geometry().loc.to_f64();
+                            mapped
+                                .is_in_input_region(&test_point)
+                                .then_some((mapped, geo.loc - mapped.geometry().loc))
+                        })
+                        .flatten()
                 })
             })
     }
