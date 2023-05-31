@@ -2,7 +2,7 @@
 
 use crate::{
     backend::render::{
-        element::AsGlowRenderer, IndicatorKey, IndicatorShader, ACTIVE_GROUP_COLOR,
+        element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, ACTIVE_GROUP_COLOR,
         FOCUS_INDICATOR_COLOR, GROUP_COLOR,
     },
     shell::{
@@ -1815,7 +1815,7 @@ where
                             elements.push(
                                 IndicatorShader::element(
                                     renderer,
-                                    IndicatorKey::Group(Arc::downgrade(&alive)),
+                                    Key::Group(Arc::downgrade(&alive)),
                                     geo,
                                     3,
                                     alpha,
@@ -2152,13 +2152,26 @@ where
                             renderer,
                             match data {
                                 Data::Mapped { mapped, .. } => mapped.clone().into(),
-                                Data::Group { alive, .. } => {
-                                    IndicatorKey::Group(Arc::downgrade(alive))
-                                }
+                                Data::Group { alive, .. } => Key::Group(Arc::downgrade(alive)),
                             },
                             geo,
                             indicator_thickness,
                             1.0,
+                            FOCUS_INDICATOR_COLOR,
+                        );
+                        elements.push(element.into());
+                    }
+
+                    if data.is_group() {
+                        let element = BackdropShader::element(
+                            renderer,
+                            match data {
+                                Data::Mapped { mapped, .. } => mapped.clone().into(),
+                                Data::Group { alive, .. } => Key::Group(Arc::downgrade(alive)),
+                            },
+                            geo,
+                            (indicator_thickness * 2) as f32,
+                            0.25,
                             FOCUS_INDICATOR_COLOR,
                         );
                         elements.push(element.into());

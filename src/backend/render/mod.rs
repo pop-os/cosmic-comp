@@ -92,36 +92,44 @@ pub static RECTANGLE_SHADER: &str = include_str!("./shaders/rounded_rectangle.fr
 pub struct IndicatorShader(pub GlesPixelProgram);
 
 #[derive(Clone)]
-pub enum IndicatorKey {
+pub enum Key {
+    Static(Id),
     Group(Weak<()>),
     Window(CosmicMapped),
 }
-impl std::hash::Hash for IndicatorKey {
+impl std::hash::Hash for Key {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
-            IndicatorKey::Group(arc) => (arc.as_ptr() as usize).hash(state),
-            IndicatorKey::Window(window) => window.hash(state),
+            Key::Static(id) => id.hash(state),
+            Key::Group(arc) => (arc.as_ptr() as usize).hash(state),
+            Key::Window(window) => window.hash(state),
         }
     }
 }
-impl PartialEq for IndicatorKey {
+impl PartialEq for Key {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (IndicatorKey::Group(g1), IndicatorKey::Group(g2)) => Weak::ptr_eq(g1, g2),
-            (IndicatorKey::Window(w1), IndicatorKey::Window(w2)) => w1 == w2,
+            (Key::Static(s1), Key::Static(s2)) => s1 == s2,
+            (Key::Group(g1), Key::Group(g2)) => Weak::ptr_eq(g1, g2),
+            (Key::Window(w1), Key::Window(w2)) => w1 == w2,
             _ => false,
         }
     }
 }
-impl Eq for IndicatorKey {}
-impl From<CosmicMapped> for IndicatorKey {
+impl Eq for Key {}
+impl From<CosmicMapped> for Key {
     fn from(window: CosmicMapped) -> Self {
-        IndicatorKey::Window(window)
+        Key::Window(window)
     }
 }
-impl From<WindowGroup> for IndicatorKey {
+impl From<WindowGroup> for Key {
     fn from(group: WindowGroup) -> Self {
-        IndicatorKey::Group(group.alive.clone())
+        Key::Group(group.alive.clone())
+    }
+}
+impl From<Id> for Key {
+    fn from(id: Id) -> Self {
+        Key::Static(id)
     }
 }
 
@@ -131,7 +139,7 @@ struct IndicatorSettings {
     alpha: f32,
     color: [f32; 3],
 }
-type IndicatorCache = RefCell<HashMap<IndicatorKey, (IndicatorSettings, PixelShaderElement)>>;
+type IndicatorCache = RefCell<HashMap<Key, (IndicatorSettings, PixelShaderElement)>>;
 
 impl IndicatorShader {
     pub fn get<R: AsGlowRenderer>(renderer: &R) -> GlesPixelProgram {
@@ -146,7 +154,7 @@ impl IndicatorShader {
 
     pub fn focus_element<R: AsGlowRenderer>(
         renderer: &R,
-        key: impl Into<IndicatorKey>,
+        key: impl Into<Key>,
         mut element_geo: Rectangle<i32, Logical>,
         thickness: u8,
         alpha: f32,
@@ -161,7 +169,7 @@ impl IndicatorShader {
 
     pub fn element<R: AsGlowRenderer>(
         renderer: &R,
-        key: impl Into<IndicatorKey>,
+        key: impl Into<Key>,
         geo: Rectangle<i32, Logical>,
         thickness: u8,
         alpha: f32,
@@ -180,8 +188,9 @@ impl IndicatorShader {
         user_data.insert_if_missing(|| IndicatorCache::new(HashMap::new()));
         let mut cache = user_data.get::<IndicatorCache>().unwrap().borrow_mut();
         cache.retain(|k, _| match k {
-            IndicatorKey::Group(w) => w.upgrade().is_some(),
-            IndicatorKey::Window(w) => w.alive(),
+            Key::Static(_) => true,
+            Key::Group(w) => w.upgrade().is_some(),
+            Key::Window(w) => w.alive(),
         });
 
         let key = key.into();
@@ -217,47 +226,13 @@ impl IndicatorShader {
 
 pub struct BackdropShader(pub GlesPixelProgram);
 
-#[derive(Clone)]
-pub enum BackdropKey {
-    Static(Id),
-    Window(CosmicMapped),
-}
-impl std::hash::Hash for BackdropKey {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self {
-            BackdropKey::Static(id) => id.hash(state),
-            BackdropKey::Window(window) => window.hash(state),
-        }
-    }
-}
-impl PartialEq for BackdropKey {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (BackdropKey::Static(s1), BackdropKey::Static(s2)) => s1 == s2,
-            (BackdropKey::Window(w1), BackdropKey::Window(w2)) => w1 == w2,
-            _ => false,
-        }
-    }
-}
-impl Eq for BackdropKey {}
-impl From<CosmicMapped> for BackdropKey {
-    fn from(window: CosmicMapped) -> Self {
-        BackdropKey::Window(window)
-    }
-}
-impl From<Id> for BackdropKey {
-    fn from(id: Id) -> Self {
-        BackdropKey::Static(id)
-    }
-}
-
 #[derive(PartialEq)]
 struct BackdropSettings {
     radius: f32,
     alpha: f32,
     color: [f32; 3],
 }
-type BackdropCache = RefCell<HashMap<BackdropKey, (BackdropSettings, PixelShaderElement)>>;
+type BackdropCache = RefCell<HashMap<Key, (BackdropSettings, PixelShaderElement)>>;
 
 impl BackdropShader {
     pub fn get<R: AsGlowRenderer>(renderer: &R) -> GlesPixelProgram {
@@ -272,7 +247,7 @@ impl BackdropShader {
 
     pub fn element<R: AsGlowRenderer>(
         renderer: &R,
-        key: impl Into<BackdropKey>,
+        key: impl Into<Key>,
         geo: Rectangle<i32, Logical>,
         radius: f32,
         alpha: f32,
@@ -291,8 +266,9 @@ impl BackdropShader {
         user_data.insert_if_missing(|| BackdropCache::new(HashMap::new()));
         let mut cache = user_data.get::<BackdropCache>().unwrap().borrow_mut();
         cache.retain(|k, _| match k {
-            BackdropKey::Static(_) => true,
-            BackdropKey::Window(w) => w.alive(),
+            Key::Static(_) => true,
+            Key::Group(a) => a.upgrade().is_some(),
+            Key::Window(w) => w.alive(),
         });
 
         let key = key.into();
