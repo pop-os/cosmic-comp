@@ -30,8 +30,11 @@ libsystemd = { version = "0.5", optional = true }
 wayland-backend = "0.1.0"
 wayland-scanner = "0.30.0"
 cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", branch = "main", default-features = false, features = ["server"] }
-libcosmic = { git = "https://github.com/pop-os/libcosmic", rev = "24709e9c3b", default-features = false, features = ["softbuffer"] }
-iced_softbuffer = { git = "https://github.com/pop-os/libcosmic", rev = "24709e9c3b" }
+libcosmic = { git = "https://github.com/pop-os/libcosmic", rev = "31f7e97d5b", default-features = false, features = ["tiny_skia"] }
+iced_core = { git = "https://github.com/pop-os/libcosmic", rev = "31f7e97d5b" }
+iced_renderer = { git = "https://github.com/pop-os/libcosmic", rev = "31f7e97d5b" }
+iced_tiny_skia = { git = "https://github.com/pop-os/libcosmic", rev = "31f7e97d5b" }
+tiny-skia = "0.9"
 ordered-float = "3.0"
 glow = "0.11.2"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter", "tracing-log"] }

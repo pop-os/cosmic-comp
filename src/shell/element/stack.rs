@@ -60,6 +60,7 @@ pub struct CosmicStackInternal {
     pointer_entered: Option<Arc<AtomicU8>>,
     previous_pointer: Arc<AtomicUsize>,
     last_location: Arc<Mutex<Option<(Point<f64, Logical>, Serial, u32)>>>,
+    mask: Arc<Mutex<Option<tiny_skia::Mask>>>,
 }
 
 impl CosmicStackInternal {
@@ -110,6 +111,7 @@ impl CosmicStack {
                 pointer_entered: None,
                 previous_pointer: Arc::new(AtomicUsize::new(0)),
                 last_location: Arc::new(Mutex::new(None)),
+                mask: Arc::new(Mutex::new(None)),
             },
             (width, TAB_HEIGHT),
             handle,
@@ -272,6 +274,50 @@ impl Program for CosmicStackInternal {
 
     fn view(&self) -> Element<'_, Self::Message> {
         cosmic::iced::widget::text("TODO").into()
+    }
+
+    fn clip_mask(&self, size: Size<i32, smithay::utils::Buffer>, scale: f32) -> tiny_skia::Mask {
+        let mut mask = self.mask.lock().unwrap();
+        if mask.is_none() {
+            let mut new_mask = tiny_skia::Mask::new(size.w as u32, size.h as u32).unwrap();
+
+            let mut pb = tiny_skia::PathBuilder::new();
+            let radius = 8. * scale;
+            let (w, h) = (size.w as f32, size.h as f32);
+
+            pb.move_to(0., h); // lower-left
+
+            // upper-left rounded corner
+            pb.line_to(0., radius);
+            pb.quad_to(0., 0., radius, 0.);
+
+            // upper-right rounded corner
+            pb.line_to(w - radius, 0.);
+            pb.quad_to(w, 0., w, radius);
+
+            pb.line_to(w, h); // lower-right
+
+            let path = pb.finish().unwrap();
+            new_mask.fill_path(
+                &path,
+                tiny_skia::FillRule::EvenOdd,
+                true,
+                Default::default(),
+            );
+
+            *mask = Some(new_mask);
+        }
+
+        mask.clone().unwrap()
+    }
+
+    fn background_color(&self) -> iced_core::Color {
+        iced_core::Color {
+            r: 0.1176,
+            g: 0.1176,
+            b: 0.1176,
+            a: 1.0,
+        }
     }
 }
 

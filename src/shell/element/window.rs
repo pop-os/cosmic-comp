@@ -12,9 +12,8 @@ use crate::{
     wayland::handlers::screencopy::ScreencopySessions,
 };
 use calloop::LoopHandle;
-use cosmic::iced_native::Command;
+use cosmic::iced::Command;
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
-use iced_softbuffer::native::raqote::{DrawOptions, DrawTarget, PathBuilder, SolidSource, Source};
 use smithay::{
     backend::{
         input::KeyState,
@@ -35,7 +34,10 @@ use smithay::{
         Seat,
     },
     output::Output,
-    utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size, Transform},
+    utils::{
+        Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
+        Transform,
+    },
     wayland::seat::WaylandFocus,
 };
 use std::{
@@ -65,6 +67,7 @@ impl fmt::Debug for CosmicWindow {
 #[derive(Clone)]
 pub struct CosmicWindowInternal {
     pub(super) window: CosmicSurface,
+    mask: Arc<Mutex<Option<tiny_skia::Mask>>>,
     /// TODO: This needs to be per seat
     pointer_entered: Arc<AtomicU8>,
     last_seat: Arc<Mutex<Option<(Seat<State>, Serial)>>>,
@@ -119,6 +122,7 @@ impl CosmicWindow {
         CosmicWindow(IcedElement::new(
             CosmicWindowInternal {
                 window,
+                mask: Arc::new(Mutex::new(None)),
                 pointer_entered: Arc::new(AtomicU8::new(Focus::None as u8)),
                 last_seat: Arc::new(Mutex::new(None)),
                 last_title: Arc::new(Mutex::new(last_title)),
@@ -141,6 +145,7 @@ impl CosmicWindow {
             p.window
                 .set_geometry(Rectangle::from_loc_and_size(loc, size));
         });
+        self.0.with_program(|p| p.mask.lock().unwrap().take());
         self.0.resize(Size::from((geo.size.w, SSD_HEIGHT)));
     }
 
@@ -218,12 +223,15 @@ impl Program for CosmicWindowInternal {
         Command::none()
     }
 
-    fn background(&self, target: &mut DrawTarget<&mut [u32]>) {
-        let radius = 8.;
-        let (w, h) = (target.width() as f32, target.height() as f32);
+    fn clip_mask(&self, size: Size<i32, smithay::utils::Buffer>, scale: f32) -> tiny_skia::Mask {
+        let mut mask = self.mask.lock().unwrap();
+        if mask.is_none() {
+            let mut new_mask = tiny_skia::Mask::new(size.w as u32, size.h as u32).unwrap();
 
-        if !(self.window.is_maximized() || self.window.is_fullscreen()) {
-            let mut pb = PathBuilder::new();
+            let mut pb = tiny_skia::PathBuilder::new();
+            let radius = 8. * scale;
+            let (w, h) = (size.w as f32, size.h as f32);
+
             pb.move_to(0., h); // lower-left
 
             // upper-left rounded corner
@@ -236,17 +244,63 @@ impl Program for CosmicWindowInternal {
 
             pb.line_to(w, h); // lower-right
 
-            let path = pb.finish();
-            target.push_clip(&path);
+            let path = pb.finish().unwrap();
+            new_mask.fill_path(
+                &path,
+                tiny_skia::FillRule::EvenOdd,
+                true,
+                Default::default(),
+            );
+
+            *mask = Some(new_mask);
         }
 
+        mask.clone().unwrap()
+    }
+
+    fn background_color(&self) -> iced_core::Color {
         if self.window.is_activated() {
-            target.clear(SolidSource::from_unpremultiplied_argb(u8::MAX, 30, 30, 30));
+            iced_core::Color {
+                r: 0.1176,
+                g: 0.1176,
+                b: 0.1176,
+                a: 1.0,
+            }
         } else {
-            target.clear(SolidSource::from_unpremultiplied_argb(u8::MAX, 39, 39, 39));
+            iced_core::Color {
+                r: 0.153,
+                g: 0.153,
+                b: 0.153,
+                a: 1.0,
+            }
         }
+    }
 
-        target.pop_clip();
+    fn foreground(
+        &self,
+        pixels: &mut tiny_skia::PixmapMut<'_>,
+        damage: &[Rectangle<i32, BufferCoords>],
+    ) {
+        if !self.window.is_activated() {
+            let mask = self.mask.lock().unwrap();
+            let mut paint = tiny_skia::Paint::default();
+            paint.set_color_rgba8(0, 0, 0, 102);
+
+            for rect in damage {
+                pixels.fill_rect(
+                    tiny_skia::Rect::from_xywh(
+                        rect.loc.x as f32,
+                        rect.loc.y as f32,
+                        rect.size.w as f32,
+                        rect.size.h as f32,
+                    )
+                    .unwrap(),
+                    &paint,
+                    Default::default(),
+                    mask.as_ref(),
+                );
+            }
+        }
     }
 
     fn view(&self) -> cosmic::Element<'_, Self::Message> {
@@ -256,42 +310,6 @@ impl Program for CosmicWindowInternal {
             .on_maximize(Message::Maximize)
             .on_close(Message::Close)
             .into_element()
-    }
-
-    fn foreground(&self, target: &mut DrawTarget<&mut [u32]>) {
-        if !self.window.is_activated() {
-            let radius = 8.;
-            let (w, h) = (target.width() as f32, target.height() as f32);
-
-            if !(self.window.is_maximized() || self.window.is_fullscreen()) {
-                let mut pb = PathBuilder::new();
-                pb.move_to(0., h); // lower-left
-
-                // upper-left rounded corner
-                pb.line_to(0., radius);
-                pb.quad_to(0., 0., radius, 0.);
-
-                // upper-right rounded corner
-                pb.line_to(w - radius, 0.);
-                pb.quad_to(w, 0., w, radius);
-
-                pb.line_to(w, h); // lower-right
-
-                let path = pb.finish();
-                target.push_clip(&path);
-            }
-
-            let mut options = DrawOptions::new();
-            options.alpha = 0.4;
-            target.fill_rect(
-                0.,
-                0.,
-                w,
-                h,
-                &Source::Solid(SolidSource::from_unpremultiplied_argb(u8::MAX, 0, 0, 0)),
-                &options,
-            );
-        }
     }
 }
 
@@ -329,6 +347,7 @@ impl SpaceElement for CosmicWindow {
     }
     fn set_activate(&self, activated: bool) {
         SpaceElement::set_activate(&self.0, activated);
+        self.0.force_redraw();
         self.0
             .with_program(|p| SpaceElement::set_activate(&p.window, activated));
     }

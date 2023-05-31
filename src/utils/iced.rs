@@ -5,25 +5,28 @@ use std::{
     sync::{mpsc::Receiver, Arc, Mutex},
 };
 
-pub use cosmic::Renderer as IcedRenderer;
-use cosmic::Theme;
 use cosmic::{
-    iced_native::{
-        command::Action,
+    iced::{
         event::Event,
         keyboard::{Event as KeyboardEvent, Modifiers as IcedModifiers},
         mouse::{Button as MouseButton, Event as MouseEvent, ScrollDelta},
-        program::{Program as IcedProgram, State},
-        renderer::Style,
         window::{Event as WindowEvent, Id},
-        Command, Debug, Point as IcedPoint, Size as IcedSize,
+        Command, Point as IcedPoint, Rectangle as IcedRectangle, Size as IcedSize,
     },
-    Element,
+    iced_runtime::{
+        command::Action,
+        program::{Program as IcedProgram, State},
+        Debug,
+    },
+    Renderer as IcedRenderer, Theme,
 };
-use iced_softbuffer::{
-    native::{raqote::DrawTarget, *},
+use iced_core::{renderer::Style, Color};
+use iced_renderer::Backend as BackendWrapper;
+use iced_tiny_skia::{
+    graphics::{damage, Primitive, Viewport},
     Backend,
 };
+pub type Element<'a, Message> = cosmic::iced::Element<'a, Message, IcedRenderer>;
 
 use ordered_float::OrderedFloat;
 use smithay::{
@@ -47,7 +50,10 @@ use smithay::{
     output::Output,
     reexports::calloop::RegistrationToken,
     reexports::calloop::{self, futures::Scheduler, LoopHandle},
-    utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size, Transform},
+    utils::{
+        Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
+        Transform,
+    },
 };
 
 #[derive(Debug)]
@@ -88,11 +94,15 @@ pub trait Program {
     }
     fn view(&self) -> Element<'_, Self::Message>;
 
-    fn background(&self, target: &mut DrawTarget<&mut [u32]>) {
-        let _ = target;
-    }
-    fn foreground(&self, target: &mut DrawTarget<&mut [u32]>) {
-        let _ = target;
+    fn clip_mask(&self, size: Size<i32, BufferCoords>, scale: f32) -> tiny_skia::Mask;
+    fn background_color(&self) -> Color;
+
+    fn foreground(
+        &self,
+        pixels: &mut tiny_skia::PixmapMut<'_>,
+        damage: &[Rectangle<i32, BufferCoords>],
+    ) {
+        let _ = (pixels, damage);
     }
 }
 
@@ -105,7 +115,7 @@ impl<P: Program> IcedProgram for ProgramWrapper<P> {
         self.0.update(message, &self.1)
     }
 
-    fn view(&self) -> Element<'_, Self::Message> {
+    fn view(&self, _id: Id) -> Element<'_, Self::Message> {
         self.0.view()
     }
 }
@@ -113,7 +123,7 @@ impl<P: Program> IcedProgram for ProgramWrapper<P> {
 struct IcedElementInternal<P: Program + Send + 'static> {
     // draw buffer
     outputs: Vec<Output>,
-    buffers: HashMap<OrderedFloat<f64>, (MemoryRenderBuffer, bool)>,
+    buffers: HashMap<OrderedFloat<f64>, (MemoryRenderBuffer, Option<(Vec<Primitive>, Color)>)>,
 
     // state
     size: Size<i32, Logical>,
@@ -163,10 +173,12 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         handle: LoopHandle<'static, crate::state::Data>,
     ) -> IcedElement<P> {
         let size = size.into();
-        let mut renderer = IcedRenderer::new(Backend::new());
+        let mut renderer =
+            IcedRenderer::new(BackendWrapper::TinySkia(Backend::new(Default::default())));
         let mut debug = Debug::new();
 
         let state = State::new(
+            Id(0),
             ProgramWrapper(program, handle.clone()),
             IcedSize::new(size.w as f32, size.h as f32),
             &mut renderer,
@@ -217,7 +229,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         }
 
         internal_ref.size = size;
-        for (scale, (buffer, needs_redraw)) in internal_ref.buffers.iter_mut() {
+        for (scale, (buffer, old_primitives)) in internal_ref.buffers.iter_mut() {
             let buffer_size = internal_ref
                 .size
                 .to_f64()
@@ -225,15 +237,19 @@ impl<P: Program + Send + 'static> IcedElement<P> {
                 .to_i32_round();
             *buffer =
                 MemoryRenderBuffer::new(Fourcc::Argb8888, buffer_size, 1, Transform::Normal, None);
-            *needs_redraw = true;
+            *old_primitives = None;
         }
         internal_ref.update(true);
     }
 
     pub fn force_update(&self) {
+        self.0.lock().unwrap().update(true);
+    }
+
+    pub fn force_redraw(&self) {
         let mut internal = self.0.lock().unwrap();
-        for (_buffer, ref mut needs_redraw) in internal.buffers.values_mut() {
-            *needs_redraw = true;
+        for (_buffer, ref mut old_primitives) in internal.buffers.values_mut() {
+            *old_primitives = None;
         }
         internal.update(true);
     }
@@ -255,6 +271,7 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
         let actions = self
             .state
             .update(
+                Id(0),
                 IcedSize::new(self.size.w as f32, self.size.h as f32),
                 IcedPoint::new(cursor_pos.x as f32, cursor_pos.y as f32),
                 &mut self.renderer,
@@ -262,17 +279,12 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
                 &Style {
                     text_color: self.theme.cosmic().on_bg_color().into(),
                 },
-                &mut cosmic::iced_native::clipboard::Null,
+                &mut iced_core::clipboard::Null,
                 &mut self.debug,
             )
             .1
             .map(|command| command.actions());
 
-        if actions.is_some() {
-            for (_buffer, ref mut needs_redraw) in self.buffers.values_mut() {
-                *needs_redraw = true;
-            }
-        }
         let actions = actions.unwrap_or_default();
         actions
             .into_iter()
@@ -468,7 +480,7 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
     fn set_activate(&self, activated: bool) {
         let mut internal = self.0.lock().unwrap();
         internal.state.queue_event(Event::Window(
-            Id::MAIN,
+            Id(0),
             if activated {
                 WindowEvent::Focused
             } else {
@@ -497,7 +509,7 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
                         Transform::Normal,
                         None,
                     ),
-                    true,
+                    None,
                 ),
             );
         }
@@ -547,7 +559,7 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
                         Transform::Normal,
                         None,
                     ),
-                    true,
+                    None,
                 ),
             );
         }
@@ -570,64 +582,80 @@ where
         alpha: f32,
     ) -> Vec<C> {
         let mut internal = self.0.lock().unwrap();
-
-        let _ = internal.update(false); // TODO
+        let _ = internal.update(false);
 
         // makes partial borrows easier
         let internal_ref = &mut *internal;
-        if let Some((buffer, ref mut needs_redraw)) =
+        if let Some((buffer, ref mut old_primitives)) =
             internal_ref.buffers.get_mut(&OrderedFloat(scale.x))
         {
-            let size = internal_ref
+            let size: Size<i32, BufferCoords> = internal_ref
                 .size
                 .to_f64()
                 .to_buffer(scale.x, Transform::Normal)
                 .to_i32_round();
 
-            if *needs_redraw && size.w > 0 && size.h > 0 {
+            if size.w > 0 && size.h > 0 {
                 let renderer = &mut internal_ref.renderer;
                 let state_ref = &internal_ref.state;
+                let mut clip_mask = state_ref.program().0.clip_mask(size, scale.x as f32);
+                let overlay = internal_ref.debug.overlay();
+
                 buffer
                     .render()
                     .draw(move |buf| {
-                        let mut target = raqote::DrawTarget::from_backing(
-                            size.w,
-                            size.h,
-                            bytemuck::cast_slice_mut::<_, u32>(buf),
-                        );
-
-                        target.clear(raqote::SolidSource::from_unpremultiplied_argb(0, 0, 0, 0));
-                        state_ref.program().0.background(&mut target);
-
-                        let draw_options = raqote::DrawOptions {
-                            // Default to antialiasing off for now
-                            antialias: raqote::AntialiasMode::None,
-                            ..Default::default()
-                        };
-
-                        // Having at least one clip fixes some font rendering issues
-                        target.push_clip_rect(raqote::IntRect::new(
-                            raqote::IntPoint::new(0, 0),
-                            raqote::IntPoint::new(size.w, size.h),
-                        ));
+                        let mut pixels =
+                            tiny_skia::PixmapMut::from_bytes(buf, size.w as u32, size.h as u32)
+                                .expect("Failed to create pixel map");
 
                         renderer.with_primitives(|backend, primitives| {
-                            for primitive in primitives.iter() {
-                                draw_primitive(
-                                    &mut target,
-                                    &draw_options,
-                                    backend,
-                                    scale.x as f32,
-                                    primitive,
-                                );
-                            }
-                        });
+                            let BackendWrapper::TinySkia(ref mut backend) = backend;
+                            let background_color = state_ref.program().0.background_color();
+                            let bounds = IcedSize::new(size.w as u32, size.h as u32);
+                            let viewport = Viewport::with_physical_size(bounds, scale.x);
 
-                        state_ref.program().0.foreground(&mut target);
-                        Result::<_, ()>::Ok(vec![Rectangle::from_loc_and_size((0, 0), size)])
+                            let mut damage = old_primitives
+                                .as_ref()
+                                .and_then(|(last_primitives, last_color)| {
+                                    (last_color == &background_color)
+                                        .then(|| damage::list(last_primitives, primitives))
+                                })
+                                .unwrap_or_else(|| {
+                                    vec![IcedRectangle::with_size(viewport.logical_size())]
+                                });
+                            damage = damage::group(damage, scale.x as f32, bounds);
+
+                            if !damage.is_empty() {
+                                backend.draw(
+                                    &mut pixels,
+                                    &mut clip_mask,
+                                    primitives,
+                                    &viewport,
+                                    &damage,
+                                    background_color,
+                                    &overlay,
+                                );
+
+                                *old_primitives = Some((primitives.to_vec(), background_color));
+                            }
+
+                            let damage = damage
+                                .into_iter()
+                                .map(|x| x.snap())
+                                .map(|damage_rect| {
+                                    Rectangle::from_loc_and_size(
+                                        (damage_rect.x as i32, damage_rect.y as i32),
+                                        (damage_rect.width as i32, damage_rect.height as i32),
+                                    )
+                                })
+                                .collect::<Vec<_>>();
+
+                            state_ref.program().0.foreground(&mut pixels, &damage);
+
+                            Result::<_, ()>::Ok(damage)
+                        })
                     })
                     .unwrap();
-                *needs_redraw = false;
             }
 
             if let Ok(buffer) = MemoryRenderBufferRenderElement::from_buffer(
