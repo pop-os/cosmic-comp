@@ -95,15 +95,16 @@ pub enum Focus {
 }
 
 impl CosmicStack {
-    pub fn new(
-        window: impl Into<CosmicSurface>,
+    pub fn new<I: Into<CosmicSurface>>(
+        windows: impl Iterator<Item = I>,
         handle: LoopHandle<'static, crate::state::Data>,
     ) -> CosmicStack {
-        let window = window.into();
-        let width = window.geometry().size.w;
+        let windows = windows.map(Into::into).collect::<Vec<_>>();
+        assert!(!windows.is_empty());
+        let width = windows[0].geometry().size.w;
         CosmicStack(IcedElement::new(
             CosmicStackInternal {
-                windows: Arc::new(Mutex::new(vec![window])),
+                windows: Arc::new(Mutex::new(windows)),
                 active: Arc::new(AtomicUsize::new(0)),
                 previous_keyboard: Arc::new(AtomicUsize::new(0)),
                 pointer_entered: None,
@@ -115,9 +116,34 @@ impl CosmicStack {
         ))
     }
 
-    //pub fn add_window()
-    //pub fn remove_window()
-    //pub fn len
+    pub fn add_window(&self, window: CosmicSurface) {
+        self.0
+            .with_program(|p| p.windows.lock().unwrap().push(window));
+    }
+
+    pub fn remove_window(&self, window: &CosmicSurface) {
+        self.0.with_program(|p| {
+            let mut windows = p.windows.lock().unwrap();
+            let Some(idx) = windows.iter().position(|w| w == window) else { return };
+            windows.remove(idx);
+            p.active.fetch_min(windows.len() - 1, Ordering::SeqCst);
+        })
+    }
+
+    pub fn remove_idx(&self, idx: usize) {
+        self.0.with_program(|p| {
+            let mut windows = p.windows.lock().unwrap();
+            if windows.len() >= idx {
+                return;
+            }
+            windows.remove(idx);
+            p.active.fetch_min(windows.len(), Ordering::SeqCst);
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.with_program(|p| p.windows.lock().unwrap().len())
+    }
 
     pub fn active(&self) -> CosmicSurface {
         self.0
