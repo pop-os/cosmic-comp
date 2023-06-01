@@ -217,7 +217,10 @@ impl IndicatorShader {
                 None, //TODO
                 alpha,
                 vec![
-                    Uniform::new("color", color),
+                    Uniform::new(
+                        "color",
+                        [color[0] * alpha, color[1] * alpha, color[2] * alpha],
+                    ),
                     Uniform::new("thickness", thickness),
                     Uniform::new("radius", radius as f32),
                 ],
@@ -293,7 +296,13 @@ impl BackdropShader {
                 geo,
                 None, // TODO
                 alpha,
-                vec![Uniform::new("color", color), Uniform::new("radius", radius)],
+                vec![
+                    Uniform::new(
+                        "color",
+                        [color[0] * alpha, color[1] * alpha, color[2] * alpha],
+                    ),
+                    Uniform::new("radius", radius),
+                ],
             );
             cache.insert(key.clone(), (settings, elem));
         }

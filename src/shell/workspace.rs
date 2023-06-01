@@ -634,7 +634,7 @@ impl Workspace {
                         self.backdrop_id.clone(),
                         zone,
                         0.,
-                        alpha * 0.65,
+                        alpha * 0.85,
                         [0.0, 0.0, 0.0],
                     ))
                     .into(),
