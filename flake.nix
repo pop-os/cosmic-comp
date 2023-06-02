@@ -31,7 +31,11 @@
               ./resources
             ];
           };
-          nativeBuildInputs = with pkgs; [ pkg-config autoPatchelfHook ];
+          nativeBuildInputs = with pkgs; [
+            pkg-config
+            autoPatchelfHook
+            cmake
+          ];
           buildInputs = with pkgs; [
             wayland
             systemd # For libudev
@@ -39,8 +43,12 @@
             libxkbcommon
             libinput
             mesa # For libgbm
+            fontconfig
+            stdenv.cc.cc.lib
           ];
-          runtimeDependencies = with pkgs; [ libglvnd ]; # For libEGL
+          runtimeDependencies = with pkgs; [
+            libglvnd # For libEGL
+          ];
         };
 
         cargoArtifacts = craneLib.buildDepsOnly pkgDef;
