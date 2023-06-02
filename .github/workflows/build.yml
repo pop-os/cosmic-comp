@@ -14,6 +14,5 @@ jobs:
     - uses: cachix/install-nix-action@v21
       with:
         nix_path: nixpkgs=channel:nixpkgs-unstable
-    - run: nix build --accept-flake-config
-    - run: git lfs logs last
+    - run: nix build --accept-flake-config; git lfs logs last
     - run: nix flake check
