@@ -13,6 +13,8 @@ use cosmic::{
         window::{Event as WindowEvent, Id},
         Command, Point as IcedPoint, Rectangle as IcedRectangle, Size as IcedSize,
     },
+    iced_core::{clipboard::Null as NullClipboard, renderer::Style, Color},
+    iced_renderer::Backend as BackendWrapper,
     iced_runtime::{
         command::Action,
         program::{Program as IcedProgram, State},
@@ -20,8 +22,6 @@ use cosmic::{
     },
     Renderer as IcedRenderer, Theme,
 };
-use iced_core::{renderer::Style, Color};
-use iced_renderer::Backend as BackendWrapper;
 use iced_tiny_skia::{
     graphics::{damage, Primitive, Viewport},
     Backend,
@@ -279,7 +279,7 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
                 &Style {
                     text_color: self.theme.cosmic().on_bg_color().into(),
                 },
-                &mut iced_core::clipboard::Null,
+                &mut NullClipboard,
                 &mut self.debug,
             )
             .1

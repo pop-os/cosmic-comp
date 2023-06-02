@@ -5,7 +5,7 @@ use crate::{
     wayland::handlers::screencopy::ScreencopySessions,
 };
 use calloop::LoopHandle;
-use cosmic::Element;
+use cosmic::{iced_core::Color, Element};
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
 use smithay::{
     backend::{
@@ -311,8 +311,8 @@ impl Program for CosmicStackInternal {
         mask.clone().unwrap()
     }
 
-    fn background_color(&self) -> iced_core::Color {
-        iced_core::Color {
+    fn background_color(&self) -> Color {
+        Color {
             r: 0.1176,
             g: 0.1176,
             b: 0.1176,
