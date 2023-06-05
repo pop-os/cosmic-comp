@@ -54,6 +54,7 @@
         (modifiers: [Super, Shift], key: "l"): Move(Right),
 
         (modifiers: [Super], key: "o"): ToggleOrientation,
+        (modifiers: [Super], key: "s"): ToggleStacking,
         
         (modifiers: [Super], key: "y"): ToggleTiling,
         (modifiers: [Super], key: "g"): ToggleWindowFloating,

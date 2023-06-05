@@ -1010,6 +1010,8 @@ pub enum Action {
     ToggleOrientation,
     Orientation(crate::shell::layout::Orientation),
 
+    ToggleStacking,
+
     ToggleTiling,
     ToggleWindowFloating,
 

@@ -6,6 +6,7 @@ use crate::{
     state::State,
     utils::prelude::SeatExt,
 };
+use calloop::LoopHandle;
 use id_tree::NodeId;
 use smithay::{
     backend::{
@@ -228,8 +229,7 @@ impl CosmicMapped {
 
     pub fn handle_focus(&self, direction: FocusDirection) -> bool {
         if let CosmicMappedInternal::Stack(stack) = &self.element {
-            //TODO: stack.handle_focus(direction)
-            false
+            stack.handle_focus(direction)
         } else {
             false
         }
@@ -455,6 +455,62 @@ impl CosmicMapped {
         match &self.element {
             CosmicMappedInternal::Stack(_) => true,
             _ => false,
+        }
+    }
+
+    pub fn convert_to_stack<'a>(
+        &mut self,
+        outputs: impl Iterator<Item = (&'a Output, Rectangle<i32, Logical>)>,
+    ) {
+        match &self.element {
+            CosmicMappedInternal::Window(window) => {
+                let surface = window.surface();
+                let activated = surface.is_activated();
+                let handle = window.loop_handle();
+
+                let stack = CosmicStack::new(std::iter::once(surface), handle);
+                if let Some(geo) = self.last_geometry.lock().unwrap().clone() {
+                    stack.set_geometry(geo);
+                }
+                for (output, overlap) in outputs {
+                    stack.output_enter(output, overlap);
+                }
+                stack.set_activate(activated);
+                stack.active().send_configure();
+                stack.refresh();
+
+                self.element = CosmicMappedInternal::Stack(stack);
+            }
+            _ => {}
+        }
+    }
+
+    pub fn convert_to_surface<'a>(
+        &mut self,
+        surface: CosmicSurface,
+        outputs: impl Iterator<Item = (&'a Output, Rectangle<i32, Logical>)>,
+    ) {
+        let handle = self.loop_handle();
+        let window = CosmicWindow::new(surface, handle);
+
+        if let Some(geo) = self.last_geometry.lock().unwrap().clone() {
+            window.set_geometry(geo);
+        }
+        for (output, overlap) in outputs {
+            window.output_enter(output, overlap);
+        }
+        window.set_activate(self.is_activated());
+        window.surface().send_configure();
+        window.refresh();
+
+        self.element = CosmicMappedInternal::Window(window);
+    }
+
+    pub(super) fn loop_handle(&self) -> LoopHandle<'static, crate::state::Data> {
+        match &self.element {
+            CosmicMappedInternal::Stack(stack) => stack.loop_handle(),
+            CosmicMappedInternal::Window(window) => window.loop_handle(),
+            _ => unreachable!(),
         }
     }
 

@@ -3,10 +3,13 @@
 use crate::{
     backend::render::{element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, GROUP_COLOR},
     shell::{
-        element::{window::CosmicWindowRenderElement, CosmicMapped, CosmicMappedRenderElement},
+        element::{
+            window::CosmicWindowRenderElement, CosmicMapped, CosmicMappedRenderElement,
+            CosmicStack, CosmicWindow,
+        },
         focus::{
             target::{KeyboardFocusTarget, WindowGroup},
-            FocusDirection,
+            FocusDirection, FocusStackMut,
         },
         grabs::ResizeEdge,
         layout::Orientation,
@@ -393,6 +396,19 @@ impl TilingLayout {
         let queue = self.queues.get_mut(output).expect("Output not mapped?");
         let mut tree = queue.trees.back().unwrap().0.copy_clone();
 
+        TilingLayout::map_to_tree(&mut tree, window, output, focus_stack, direction);
+
+        let blocker = TilingLayout::update_positions(output, &mut tree, self.gaps);
+        queue.push_tree(tree, blocker);
+    }
+
+    fn map_to_tree<'a>(
+        mut tree: &mut Tree<Data>,
+        window: impl Into<CosmicMapped>,
+        output: &Output,
+        focus_stack: Option<impl Iterator<Item = &'a CosmicMapped> + 'a>,
+        direction: Option<Direction>,
+    ) {
         let window = window.into();
         let new_window = Node::new(Data::Mapped {
             mapped: window.clone(),
@@ -457,9 +473,6 @@ impl TilingLayout {
         };
 
         *window.tiling_node_id.lock().unwrap() = Some(window_id);
-
-        let blocker = TilingLayout::update_positions(output, &mut tree, self.gaps);
-        queue.push_tree(tree, blocker);
     }
 
     pub fn unmap(&mut self, window: &CosmicMapped) -> Option<Output> {
@@ -1049,6 +1062,120 @@ impl TilingLayout {
                     queue.push_tree(tree, blocker);
                 }
             }
+        }
+    }
+
+    pub fn toggle_stacking<'a>(&mut self, seat: &Seat<State>, mut focus_stack: FocusStackMut) {
+        let output = seat.active_output();
+        let Some(queue) = self.queues.get_mut(&output) else { return };
+        let mut tree = queue.trees.back().unwrap().0.copy_clone();
+
+        if let Some((last_active, last_active_data)) =
+            TilingLayout::currently_focused_node(&tree, seat)
+        {
+            match last_active_data {
+                FocusedNodeData::Window(mapped) => {
+                    if mapped.is_window() {
+                        // if it is just a window
+                        match tree.get_mut(&last_active).unwrap().data_mut() {
+                            Data::Mapped { mapped, .. } => {
+                                mapped.convert_to_stack(std::iter::once((&output, mapped.bbox())));
+                                focus_stack.append(&mapped);
+                            }
+                            _ => unreachable!(),
+                        };
+                    } else {
+                        // if we have a stack
+                        let mut surfaces = mapped.windows().map(|(s, _)| s);
+                        let first = surfaces.next().expect("Stack without a window?");
+
+                        let handle = match tree.get_mut(&last_active).unwrap().data_mut() {
+                            Data::Mapped { mapped, .. } => {
+                                let handle = mapped.loop_handle();
+                                mapped.convert_to_surface(
+                                    first,
+                                    std::iter::once((&output, mapped.bbox())),
+                                );
+                                focus_stack.append(&mapped);
+                                handle
+                            }
+                            _ => unreachable!(),
+                        };
+
+                        // map the rest
+                        for other in surfaces {
+                            let window =
+                                CosmicMapped::from(CosmicWindow::new(other, handle.clone()));
+                            window.output_enter(&output, window.bbox());
+                            window.set_bounds(output.geometry().size);
+
+                            TilingLayout::map_to_tree(
+                                &mut tree,
+                                window,
+                                &output,
+                                Some(focus_stack.iter()),
+                                None,
+                            )
+                        }
+
+                        // TODO: Focus the new group
+                    }
+                }
+                FocusedNodeData::Group(_, _) => {
+                    let mut handle = None;
+                    let surfaces = tree
+                        .traverse_pre_order(&last_active)
+                        .unwrap()
+                        .flat_map(|node| match node.data() {
+                            Data::Mapped { mapped, .. } => {
+                                if handle.is_none() {
+                                    handle = Some(mapped.loop_handle());
+                                }
+                                Some(mapped.windows().map(|(s, _)| s))
+                            }
+                            Data::Group { .. } => None,
+                        })
+                        .flatten()
+                        .collect::<Vec<_>>();
+
+                    if surfaces.is_empty() {
+                        return;
+                    }
+                    let handle = handle.unwrap();
+                    let stack = CosmicStack::new(surfaces.into_iter(), handle);
+
+                    for child in tree
+                        .children_ids(&last_active)
+                        .unwrap()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                    {
+                        tree.remove_node(child, RemoveBehavior::DropChildren)
+                            .unwrap();
+                    }
+                    let data = tree.get_mut(&last_active).unwrap().data_mut();
+
+                    let geo = *data.geometry();
+                    stack.set_geometry(geo);
+                    stack.output_enter(&output, stack.bbox());
+                    stack.set_activate(true);
+                    stack.active().send_configure();
+                    stack.refresh();
+
+                    let mapped = CosmicMapped::from(stack);
+                    *mapped.last_geometry.lock().unwrap() = Some(geo);
+                    *mapped.tiling_node_id.lock().unwrap() = Some(last_active);
+                    focus_stack.append(&mapped);
+                    *data = Data::Mapped {
+                        mapped,
+                        last_geometry: geo,
+                    };
+                }
+            }
+
+            let blocker = TilingLayout::update_positions(&output, &mut tree, self.gaps);
+            queue.push_tree(tree, blocker);
         }
     }
 

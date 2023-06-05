@@ -1120,6 +1120,12 @@ impl State {
                     .tiling_layer
                     .update_orientation(Some(orientation), &seat);
             }
+            Action::ToggleStacking => {
+                let output = seat.active_output();
+                let workspace = self.common.shell.active_space_mut(&output);
+                let focus_stack = workspace.focus_stack.get_mut(seat);
+                workspace.tiling_layer.toggle_stacking(seat, focus_stack);
+            }
             Action::ToggleTiling => {
                 let output = seat.active_output();
                 let workspace = self.common.shell.active_space_mut(&output);

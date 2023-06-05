@@ -1,4 +1,5 @@
 use crate::{
+    shell::focus::FocusDirection,
     state::State,
     utils::iced::{IcedElement, Program},
     utils::prelude::SeatExt,
@@ -126,6 +127,10 @@ impl CosmicStack {
     pub fn remove_window(&self, window: &CosmicSurface) {
         self.0.with_program(|p| {
             let mut windows = p.windows.lock().unwrap();
+            if windows.len() == 1 {
+                return;
+            }
+
             let Some(idx) = windows.iter().position(|w| w == window) else { return };
             windows.remove(idx);
             p.active.fetch_min(windows.len() - 1, Ordering::SeqCst);
@@ -135,16 +140,45 @@ impl CosmicStack {
     pub fn remove_idx(&self, idx: usize) {
         self.0.with_program(|p| {
             let mut windows = p.windows.lock().unwrap();
+            if windows.len() == 1 {
+                return;
+            }
             if windows.len() >= idx {
                 return;
             }
             windows.remove(idx);
-            p.active.fetch_min(windows.len(), Ordering::SeqCst);
+            p.active.fetch_min(windows.len() - 1, Ordering::SeqCst);
         })
     }
 
     pub fn len(&self) -> usize {
         self.0.with_program(|p| p.windows.lock().unwrap().len())
+    }
+
+    pub fn handle_focus(&self, direction: FocusDirection) -> bool {
+        self.0.with_program(|p| {
+            match direction {
+                FocusDirection::Left => p
+                    .active
+                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| val.checked_sub(1))
+                    .is_ok(),
+                FocusDirection::Right => {
+                    let max = p.windows.lock().unwrap().len();
+                    p.active
+                        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
+                            if val < max - 1 {
+                                Some(val + 1)
+                            } else {
+                                None
+                            }
+                        })
+                        .is_ok()
+                }
+                FocusDirection::Out => false, //TODO
+                FocusDirection::In => false,  //TODO
+                _ => false,
+            }
+        })
     }
 
     pub fn active(&self) -> CosmicSurface {
@@ -266,6 +300,10 @@ impl CosmicStack {
             }
             active
         })
+    }
+
+    pub(super) fn loop_handle(&self) -> LoopHandle<'static, crate::state::Data> {
+        self.0.loop_handle()
     }
 }
 
@@ -396,12 +434,19 @@ impl SpaceElement for CosmicStack {
     fn refresh(&self) {
         self.0.with_program(|p| {
             let mut windows = p.windows.lock().unwrap();
-            windows.retain(IsAlive::alive); // TODO: We don't handle empty stacks properly
+
+            // don't let the stack become empty
+            let active = windows[p.active.load(Ordering::SeqCst)].clone();
+            windows.retain(IsAlive::alive);
+            if windows.is_empty() {
+                windows.push(active);
+            }
+
             let len = windows.len();
             let _ = p
                 .active
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |active| {
-                    (active > len).then_some(len - 1)
+                    (active >= len).then_some(len - 1)
                 });
             windows.iter().for_each(|w| SpaceElement::refresh(w))
         })
@@ -490,11 +535,9 @@ impl PointerTarget<State> for CosmicStack {
 
             if event.location.y < TAB_HEIGHT as f64 {
                 let focus = p.swap_focus(Focus::Header);
-                assert_eq!(focus, Focus::None);
                 true
             } else {
                 let focus = p.swap_focus(Focus::Window);
-                assert_eq!(focus, Focus::None);
 
                 *p.last_location.lock().unwrap() = Some((event.location, event.serial, event.time));
                 let active = p.active.load(Ordering::SeqCst);

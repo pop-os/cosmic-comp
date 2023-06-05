@@ -165,6 +165,10 @@ impl CosmicWindow {
             Point::from((0, 0))
         }
     }
+
+    pub(super) fn loop_handle(&self) -> LoopHandle<'static, crate::state::Data> {
+        self.0.loop_handle()
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
