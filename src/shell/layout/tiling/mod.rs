@@ -1819,9 +1819,9 @@ where
                     } => {
                         let render_active_child = if let Some(focused_id) = focused.as_ref() {
                             !has_potential_groups
-                                && tree
-                                    .children_ids(&node_id)
-                                    .unwrap()
+                                && node
+                                    .children()
+                                    .iter()
                                     .any(|child_id| child_id == focused_id)
                         } else {
                             false
@@ -1835,7 +1835,7 @@ where
                                     geo,
                                     4,
                                     if render_active_child { 16 } else { 8 },
-                                    alpha * if render_potential_group { 0.14 } else { 1.0 },
+                                    alpha * if render_potential_group { 0.40 } else { 1.0 },
                                     GROUP_COLOR,
                                 )
                                 .into(),
@@ -1900,7 +1900,7 @@ where
                                     geo,
                                     4,
                                     8,
-                                    alpha * if render_potential_group { 0.4 } else { 1.0 },
+                                    alpha * if render_potential_group { 0.40 } else { 1.0 },
                                     GROUP_COLOR,
                                 )
                                 .into(),
