@@ -632,7 +632,7 @@ impl TilingLayout {
                     | (Orientation::Vertical, Direction::Up)
                     | (Orientation::Vertical, Direction::Down)
             ) {
-                if parent_data.len() == 2 {
+                if len == 2 {
                     if let Some(sibling) = tree
                         .children_ids(&parent)
                         .unwrap()
@@ -648,7 +648,8 @@ impl TilingLayout {
                                     | (Orientation::Vertical, Direction::Left)
                                     | (Orientation::Horizontal, Direction::Up)
                                     | (Orientation::Horizontal, Direction::Down)
-                            ) {
+                            ) && child_id == node_id
+                            {
                                 // ..lets move into our sibling group instead
 
                                 let idx =
