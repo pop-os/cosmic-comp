@@ -300,6 +300,9 @@ impl Workspace {
             self.floating_layer.refresh();
             self.tiling_layer.recalculate(output);
             self.tiling_layer.refresh();
+            if let Some((_, _, rect)) = self.tiling_layer.windows().find(|(_, w, _)| w == window) {
+              window.set_geometry(rect);
+            };
             window.send_configure();
             self.fullscreen.retain(|_, w| w != window);
         }
