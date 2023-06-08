@@ -1,8 +1,4 @@
 use crate::{
-    backend::render::{
-        element::{AsGlowFrame, AsGlowRenderer},
-        GlMultiError, GlMultiFrame, GlMultiRenderer,
-    },
     shell::Shell,
     state::State,
     utils::{
@@ -20,10 +16,8 @@ use smithay::{
         renderer::{
             element::{
                 memory::MemoryRenderBufferRenderElement, surface::WaylandSurfaceRenderElement,
-                AsRenderElements, Element, Id, RenderElement,
+                AsRenderElements,
             },
-            glow::GlowRenderer,
-            utils::CommitCounter,
             ImportAll, ImportMem, Renderer,
         },
     },
@@ -34,9 +28,9 @@ use smithay::{
         Seat,
     },
     output::Output,
+    render_elements,
     utils::{
         Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
-        Transform,
     },
     wayland::seat::WaylandFocus,
 };
@@ -570,169 +564,16 @@ impl PointerTarget<State> for CosmicWindow {
     }
 }
 
-pub enum CosmicWindowRenderElement<R>
-where
-    R: ImportAll + ImportMem + AsGlowRenderer + Renderer,
-    <R as Renderer>::TextureId: 'static,
-{
-    Header(MemoryRenderBufferRenderElement<GlowRenderer>),
-    Window(WaylandSurfaceRenderElement<R>),
-}
-
-impl<R> From<WaylandSurfaceRenderElement<R>> for CosmicWindowRenderElement<R>
-where
-    R: ImportAll + ImportMem + AsGlowRenderer + Renderer,
-    <R as Renderer>::TextureId: 'static,
-{
-    fn from(elem: WaylandSurfaceRenderElement<R>) -> Self {
-        CosmicWindowRenderElement::Window(elem)
-    }
-}
-
-impl<R> From<MemoryRenderBufferRenderElement<GlowRenderer>> for CosmicWindowRenderElement<R>
-where
-    R: ImportAll + ImportMem + AsGlowRenderer + Renderer,
-    <R as Renderer>::TextureId: 'static,
-{
-    fn from(elem: MemoryRenderBufferRenderElement<GlowRenderer>) -> Self {
-        CosmicWindowRenderElement::Header(elem)
-    }
-}
-
-impl<R> Element for CosmicWindowRenderElement<R>
-where
-    R: AsGlowRenderer + Renderer + ImportAll + ImportMem,
-    <R as Renderer>::TextureId: 'static,
-{
-    fn id(&self) -> &Id {
-        match self {
-            CosmicWindowRenderElement::Header(h) => h.id(),
-            CosmicWindowRenderElement::Window(w) => w.id(),
-        }
-    }
-
-    fn current_commit(&self) -> CommitCounter {
-        match self {
-            CosmicWindowRenderElement::Header(h) => h.current_commit(),
-            CosmicWindowRenderElement::Window(w) => w.current_commit(),
-        }
-    }
-
-    fn src(&self) -> Rectangle<f64, smithay::utils::Buffer> {
-        match self {
-            CosmicWindowRenderElement::Header(h) => h.src(),
-            CosmicWindowRenderElement::Window(w) => w.src(),
-        }
-    }
-
-    fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
-        match self {
-            CosmicWindowRenderElement::Header(h) => h.geometry(scale),
-            CosmicWindowRenderElement::Window(w) => w.geometry(scale),
-        }
-    }
-
-    fn location(&self, scale: Scale<f64>) -> Point<i32, Physical> {
-        match self {
-            CosmicWindowRenderElement::Header(h) => h.location(scale),
-            CosmicWindowRenderElement::Window(w) => w.location(scale),
-        }
-    }
-
-    fn transform(&self) -> Transform {
-        match self {
-            CosmicWindowRenderElement::Header(h) => h.transform(),
-            CosmicWindowRenderElement::Window(w) => w.transform(),
-        }
-    }
-
-    fn damage_since(
-        &self,
-        scale: Scale<f64>,
-        commit: Option<CommitCounter>,
-    ) -> Vec<Rectangle<i32, Physical>> {
-        match self {
-            CosmicWindowRenderElement::Header(h) => h.damage_since(scale, commit),
-            CosmicWindowRenderElement::Window(w) => w.damage_since(scale, commit),
-        }
-    }
-
-    fn opaque_regions(&self, scale: Scale<f64>) -> Vec<Rectangle<i32, Physical>> {
-        match self {
-            CosmicWindowRenderElement::Header(h) => h.opaque_regions(scale),
-            CosmicWindowRenderElement::Window(w) => w.opaque_regions(scale),
-        }
-    }
-
-    fn alpha(&self) -> f32 {
-        match self {
-            CosmicWindowRenderElement::Header(h) => h.alpha(),
-            CosmicWindowRenderElement::Window(w) => w.alpha(),
-        }
-    }
-}
-
-impl RenderElement<GlowRenderer> for CosmicWindowRenderElement<GlowRenderer> {
-    fn draw<'a>(
-        &self,
-        frame: &mut <GlowRenderer as Renderer>::Frame<'a>,
-        src: Rectangle<f64, smithay::utils::Buffer>,
-        dst: Rectangle<i32, Physical>,
-        damage: &[Rectangle<i32, Physical>],
-    ) -> Result<(), <GlowRenderer as Renderer>::Error> {
-        match self {
-            CosmicWindowRenderElement::Header(h) => h.draw(frame, src, dst, damage),
-            CosmicWindowRenderElement::Window(w) => w.draw(frame, src, dst, damage),
-        }
-    }
-
-    fn underlying_storage(
-        &self,
-        renderer: &mut GlowRenderer,
-    ) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
-        match self {
-            CosmicWindowRenderElement::Header(h) => h.underlying_storage(renderer),
-            CosmicWindowRenderElement::Window(w) => w.underlying_storage(renderer),
-        }
-    }
-}
-
-impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>>
-    for CosmicWindowRenderElement<GlMultiRenderer<'a, 'b>>
-{
-    fn draw<'c>(
-        &self,
-        frame: &mut GlMultiFrame<'a, 'b, 'c>,
-        src: Rectangle<f64, smithay::utils::Buffer>,
-        dst: Rectangle<i32, Physical>,
-        damage: &[Rectangle<i32, Physical>],
-    ) -> Result<(), GlMultiError> {
-        match self {
-            CosmicWindowRenderElement::Header(h) => h
-                .draw(frame.glow_frame_mut(), src, dst, damage)
-                .map_err(|err| GlMultiError::Render(err)),
-            CosmicWindowRenderElement::Window(w) => w.draw(frame, src, dst, damage),
-        }
-    }
-
-    fn underlying_storage(
-        &self,
-        renderer: &mut GlMultiRenderer<'a, 'b>,
-    ) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
-        match self {
-            CosmicWindowRenderElement::Header(h) => {
-                h.underlying_storage(renderer.glow_renderer_mut())
-            }
-            CosmicWindowRenderElement::Window(w) => w.underlying_storage(renderer),
-        }
-    }
+render_elements! {
+    pub CosmicWindowRenderElement<R> where R: ImportAll + ImportMem;
+    Header = MemoryRenderBufferRenderElement<R>,
+    Window = WaylandSurfaceRenderElement<R>,
 }
 
 impl<R> AsRenderElements<R> for CosmicWindow
 where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R: Renderer + ImportAll + ImportMem,
     <R as Renderer>::TextureId: 'static,
-    CosmicWindowRenderElement<R>: RenderElement<R>,
 {
     type RenderElement = CosmicWindowRenderElement<R>;
     fn render_elements<C: From<Self::RenderElement>>(
@@ -761,15 +602,9 @@ where
                     .0
                     .with_program(|p| p.window.geometry().loc)
                     .to_physical_precise_round(scale);
-            elements.extend(AsRenderElements::<GlowRenderer>::render_elements::<
+            elements.extend(AsRenderElements::<R>::render_elements::<
                 CosmicWindowRenderElement<R>,
-            >(
-                &self.0,
-                renderer.glow_renderer_mut(),
-                ssd_loc,
-                scale,
-                alpha,
-            ))
+            >(&self.0, renderer, ssd_loc, scale, alpha))
         }
 
         elements.into_iter().map(C::from).collect()

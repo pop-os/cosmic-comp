@@ -11,7 +11,6 @@ use std::{
 use crate::{
     config::WorkspaceLayout,
     shell::{
-        element::{stack::CosmicStackRenderElement, window::CosmicWindowRenderElement},
         focus::target::WindowGroup,
         layout::{floating::SeatMoveGrabState, tiling::ANIMATION_DURATION},
         CosmicMapped, CosmicMappedRenderElement, WorkspaceRenderElement,
@@ -363,8 +362,6 @@ where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
-    CosmicWindowRenderElement<R>: RenderElement<R>,
-    CosmicStackRenderElement<R>: RenderElement<R>,
     E: From<CursorRenderElement<R>> + From<CosmicMappedRenderElement<R>>,
 {
     #[cfg(feature = "debug")]
@@ -434,8 +431,6 @@ where
     <R as Renderer>::TextureId: Clone + 'static,
     <R as Renderer>::Error: From<GlesError>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
-    CosmicWindowRenderElement<R>: RenderElement<R>,
-    CosmicStackRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
     #[cfg(feature = "debug")]
@@ -642,7 +637,6 @@ where
     <R as Renderer>::TextureId: Clone + 'static,
     <R as Renderer>::Error: From<GlesError>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
-    CosmicWindowRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
     let layer_map = layer_map_for_output(output);
@@ -687,7 +681,6 @@ where
     <R as Renderer>::TextureId: Clone + 'static,
     <R as Renderer>::Error: From<GlesError>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
-    CosmicWindowRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
     let layer_map = layer_map_for_output(output);
@@ -741,8 +734,6 @@ where
     <R as Renderer>::Error: From<GlesError>,
     CosmicElement<R>: RenderElement<R>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
-    CosmicWindowRenderElement<R>: RenderElement<R>,
-    CosmicStackRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
     Source: Clone,
 {
@@ -801,8 +792,6 @@ where
     <R as Renderer>::Error: From<GlesError>,
     CosmicElement<R>: RenderElement<R>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
-    CosmicWindowRenderElement<R>: RenderElement<R>,
-    CosmicStackRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
     Source: Clone,
 {

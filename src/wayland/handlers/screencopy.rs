@@ -48,10 +48,7 @@ use crate::{
         element::{AsGlowRenderer, CosmicElement},
         render_output, render_workspace, CursorMode, CLEAR_COLOR,
     },
-    shell::{
-        element::{stack::CosmicStackRenderElement, window::CosmicWindowRenderElement},
-        CosmicMappedRenderElement, CosmicSurface, WorkspaceRenderElement,
-    },
+    shell::{CosmicMappedRenderElement, CosmicSurface, WorkspaceRenderElement},
     state::{BackendData, ClientState, Common, Data, State},
     utils::prelude::OutputExt,
     wayland::protocols::{
@@ -671,8 +668,6 @@ pub fn render_output_to_buffer(
         <R as Renderer>::Error: From<GlesError>,
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
-        CosmicWindowRenderElement<R>: RenderElement<R>,
-        CosmicStackRenderElement<R>: RenderElement<R>,
         WorkspaceRenderElement<R>: RenderElement<R>,
     {
         let cursor_mode = match session.cursor_mode() {
@@ -805,8 +800,6 @@ pub fn render_workspace_to_buffer(
         <R as Renderer>::Error: From<GlesError>,
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
-        CosmicWindowRenderElement<R>: RenderElement<R>,
-        CosmicStackRenderElement<R>: RenderElement<R>,
         WorkspaceRenderElement<R>: RenderElement<R>,
     {
         let cursor_mode = match session.cursor_mode() {

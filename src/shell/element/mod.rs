@@ -53,7 +53,6 @@ pub mod stack;
 pub use self::stack::CosmicStack;
 pub mod window;
 pub use self::window::CosmicWindow;
-use self::{stack::CosmicStackRenderElement, window::CosmicWindowRenderElement};
 
 #[cfg(feature = "debug")]
 use egui::plot::{Corner, Legend, Plot, PlotPoints, Polygon};
@@ -727,7 +726,7 @@ impl From<CosmicStack> for CosmicMapped {
 
 pub enum CosmicMappedRenderElement<R>
 where
-    R: AsGlowRenderer + Renderer + ImportAll + ImportMem,
+    R: Renderer + ImportAll + ImportMem,
     <R as Renderer>::TextureId: 'static,
 {
     Stack(self::stack::CosmicStackRenderElement<R>),
@@ -749,7 +748,7 @@ where
 
 impl<R> Element for CosmicMappedRenderElement<R>
 where
-    R: AsGlowRenderer + Renderer + ImportAll + ImportMem,
+    R: Renderer + ImportAll + ImportMem,
     <R as Renderer>::TextureId: 'static,
 {
     fn id(&self) -> &smithay::backend::renderer::element::Id {
@@ -1004,8 +1003,6 @@ where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
-    CosmicWindowRenderElement<R>: RenderElement<R>,
-    CosmicStackRenderElement<R>: RenderElement<R>,
 {
     type RenderElement = CosmicMappedRenderElement<R>;
     fn render_elements<C: From<Self::RenderElement>>(
