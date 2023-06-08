@@ -284,6 +284,7 @@ impl Program for CosmicWindowInternal {
         &self,
         pixels: &mut tiny_skia::PixmapMut<'_>,
         damage: &[Rectangle<i32, BufferCoords>],
+        _scale: f32,
     ) {
         if !self.window.is_activated(false) {
             let mask = self.mask.lock().unwrap();
@@ -755,12 +756,17 @@ where
             )
         });
         if has_ssd {
+            let ssd_loc = location
+                + self
+                    .0
+                    .with_program(|p| p.window.geometry().loc)
+                    .to_physical_precise_round(scale);
             elements.extend(AsRenderElements::<GlowRenderer>::render_elements::<
                 CosmicWindowRenderElement<R>,
             >(
                 &self.0,
                 renderer.glow_renderer_mut(),
-                location,
+                ssd_loc,
                 scale,
                 alpha,
             ))

@@ -47,7 +47,7 @@ use std::{collections::HashMap, time::Instant};
 use tracing::warn;
 
 use super::{
-    element::{window::CosmicWindowRenderElement, CosmicMapped},
+    element::{stack::CosmicStackRenderElement, window::CosmicWindowRenderElement, CosmicMapped},
     focus::{FocusStack, FocusStackMut},
     grabs::{ResizeEdge, ResizeGrab},
     CosmicMappedRenderElement, CosmicSurface,
@@ -483,6 +483,7 @@ impl Workspace {
         <R as Renderer>::TextureId: 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
+        CosmicStackRenderElement<R>: RenderElement<R>,
         WorkspaceRenderElement<R>: RenderElement<R>,
     {
         #[cfg(feature = "debug")]

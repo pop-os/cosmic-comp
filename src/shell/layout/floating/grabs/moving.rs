@@ -3,7 +3,10 @@
 use crate::{
     backend::render::{element::AsGlowRenderer, IndicatorShader},
     shell::{
-        element::{window::CosmicWindowRenderElement, CosmicMapped, CosmicMappedRenderElement},
+        element::{
+            stack::CosmicStackRenderElement, window::CosmicWindowRenderElement, CosmicMapped,
+            CosmicMappedRenderElement,
+        },
         focus::target::{KeyboardFocusTarget, PointerFocusTarget},
         CosmicSurface,
     },
@@ -45,6 +48,7 @@ impl MoveGrabState {
         <R as Renderer>::TextureId: 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
+        CosmicStackRenderElement<R>: RenderElement<R>,
         I: From<CosmicMappedRenderElement<R>>,
     {
         #[cfg(feature = "debug")]

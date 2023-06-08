@@ -189,6 +189,19 @@ impl CosmicSurface {
         }
     }
 
+    pub fn try_force_undecorated(&self, enable: bool) {
+        match self {
+            CosmicSurface::Wayland(window) => window.toplevel().with_pending_state(|pending| {
+                pending.decoration_mode = if enable {
+                    Some(DecorationMode::ServerSide)
+                } else {
+                    None
+                };
+            }),
+            _ => {}
+        }
+    }
+
     pub fn is_resizing(&self, pending: bool) -> Option<bool> {
         match self {
             CosmicSurface::Wayland(window) => {

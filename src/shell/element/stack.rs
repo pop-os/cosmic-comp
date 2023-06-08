@@ -1,12 +1,22 @@
 use crate::{
+    backend::render::{
+        element::{AsGlowFrame, AsGlowRenderer},
+        GlMultiError, GlMultiFrame, GlMultiRenderer,
+    },
     shell::focus::FocusDirection,
     state::State,
     utils::iced::{IcedElement, Program},
     utils::prelude::SeatExt,
     wayland::handlers::screencopy::ScreencopySessions,
 };
+use apply::Apply;
 use calloop::LoopHandle;
-use cosmic::{iced_core::Color, Element};
+use cosmic::{
+    iced::widget as iced_widget,
+    iced_core::{alignment, Color, Length},
+    iced_widget::rule::FillMode,
+    theme, widget as cosmic_widget, Element as CosmicElement,
+};
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
 use smithay::{
     backend::{
@@ -14,8 +24,10 @@ use smithay::{
         renderer::{
             element::{
                 memory::MemoryRenderBufferRenderElement, surface::WaylandSurfaceRenderElement,
-                AsRenderElements,
+                AsRenderElements, Element, Id, RenderElement,
             },
+            glow::GlowRenderer,
+            utils::CommitCounter,
             ImportAll, ImportMem, Renderer,
         },
     },
@@ -26,14 +38,13 @@ use smithay::{
         Seat,
     },
     output::Output,
-    render_elements,
-    utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size},
+    utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size, Transform},
 };
 use std::{
     fmt,
     hash::Hash,
     sync::{
-        atomic::{AtomicU8, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
         Arc, Mutex,
     },
 };
@@ -57,10 +68,13 @@ impl fmt::Debug for CosmicStack {
 pub struct CosmicStackInternal {
     windows: Arc<Mutex<Vec<CosmicSurface>>>,
     active: Arc<AtomicUsize>,
+    activated: Arc<AtomicBool>,
+    group_focused: Arc<AtomicBool>,
     previous_keyboard: Arc<AtomicUsize>,
     pointer_entered: Option<Arc<AtomicU8>>,
     previous_pointer: Arc<AtomicUsize>,
     last_location: Arc<Mutex<Option<(Point<f64, Logical>, Serial, u32)>>>,
+    geometry: Arc<Mutex<Option<Rectangle<i32, Logical>>>>,
     mask: Arc<Mutex<Option<tiny_skia::Mask>>>,
 }
 
@@ -103,15 +117,24 @@ impl CosmicStack {
     ) -> CosmicStack {
         let windows = windows.map(Into::into).collect::<Vec<_>>();
         assert!(!windows.is_empty());
+
+        for window in &windows {
+            window.try_force_undecorated(true);
+            window.set_tiled(true);
+        }
+
         let width = windows[0].geometry().size.w;
         CosmicStack(IcedElement::new(
             CosmicStackInternal {
                 windows: Arc::new(Mutex::new(windows)),
                 active: Arc::new(AtomicUsize::new(0)),
+                activated: Arc::new(AtomicBool::new(false)),
+                group_focused: Arc::new(AtomicBool::new(false)),
                 previous_keyboard: Arc::new(AtomicUsize::new(0)),
                 pointer_entered: None,
                 previous_pointer: Arc::new(AtomicUsize::new(0)),
                 last_location: Arc::new(Mutex::new(None)),
+                geometry: Arc::new(Mutex::new(None)),
                 mask: Arc::new(Mutex::new(None)),
             },
             (width, TAB_HEIGHT),
@@ -119,9 +142,13 @@ impl CosmicStack {
         ))
     }
 
-    pub fn add_window(&self, window: CosmicSurface) {
+    pub fn add_window(&self, window: impl Into<CosmicSurface>) {
+        let window = window.into();
+        window.try_force_undecorated(true);
+        window.set_tiled(true);
         self.0
             .with_program(|p| p.windows.lock().unwrap().push(window));
+        self.0.force_redraw()
     }
 
     pub fn remove_window(&self, window: &CosmicSurface) {
@@ -132,9 +159,13 @@ impl CosmicStack {
             }
 
             let Some(idx) = windows.iter().position(|w| w == window) else { return };
-            windows.remove(idx);
+            let window = windows.remove(idx);
+            window.try_force_undecorated(false);
+            window.set_tiled(false);
+
             p.active.fetch_min(windows.len() - 1, Ordering::SeqCst);
-        })
+        });
+        self.0.force_redraw()
     }
 
     pub fn remove_idx(&self, idx: usize) {
@@ -146,9 +177,13 @@ impl CosmicStack {
             if windows.len() >= idx {
                 return;
             }
-            windows.remove(idx);
+            let window = windows.remove(idx);
+            window.try_force_undecorated(false);
+            window.set_tiled(false);
+
             p.active.fetch_min(windows.len() - 1, Ordering::SeqCst);
-        })
+        });
+        self.0.force_redraw()
     }
 
     pub fn len(&self) -> usize {
@@ -156,13 +191,18 @@ impl CosmicStack {
     }
 
     pub fn handle_focus(&self, direction: FocusDirection) -> bool {
-        self.0.with_program(|p| {
-            match direction {
-                FocusDirection::Left => p
-                    .active
-                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| val.checked_sub(1))
-                    .is_ok(),
-                FocusDirection::Right => {
+        let result = self.0.with_program(|p| match direction {
+            FocusDirection::Left => {
+                if !p.group_focused.load(Ordering::SeqCst) {
+                    p.active
+                        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| val.checked_sub(1))
+                        .is_ok()
+                } else {
+                    false
+                }
+            }
+            FocusDirection::Right => {
+                if !p.group_focused.load(Ordering::SeqCst) {
                     let max = p.windows.lock().unwrap().len();
                     p.active
                         .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
@@ -173,12 +213,40 @@ impl CosmicStack {
                             }
                         })
                         .is_ok()
+                } else {
+                    false
                 }
-                FocusDirection::Out => false, //TODO
-                FocusDirection::In => false,  //TODO
-                _ => false,
             }
-        })
+            FocusDirection::Out => {
+                if !p.group_focused.swap(true, Ordering::SeqCst) {
+                    p.windows.lock().unwrap().iter().for_each(|w| {
+                        w.set_activated(false);
+                        w.send_configure();
+                    });
+                    true
+                } else {
+                    false
+                }
+            }
+            FocusDirection::In => {
+                if !p.group_focused.swap(false, Ordering::SeqCst) {
+                    p.windows.lock().unwrap().iter().for_each(|w| {
+                        w.set_activated(true);
+                        w.send_configure();
+                    });
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        });
+
+        if result {
+            self.0.force_update();
+        }
+
+        result
     }
 
     pub fn active(&self) -> CosmicSurface {
@@ -198,7 +266,8 @@ impl CosmicStack {
                 p.previous_keyboard.store(old, Ordering::SeqCst);
                 p.previous_pointer.store(old, Ordering::SeqCst);
             }
-        })
+        });
+        self.0.force_redraw()
     }
 
     pub fn surfaces(&self) -> impl Iterator<Item = CosmicSurface> {
@@ -222,9 +291,13 @@ impl CosmicStack {
             let loc = (geo.loc.x, geo.loc.y + TAB_HEIGHT);
             let size = (geo.size.w, geo.size.h - TAB_HEIGHT);
 
+            let win_geo = Rectangle::from_loc_and_size(loc, size);
             for window in p.windows.lock().unwrap().iter() {
-                window.set_geometry(Rectangle::from_loc_and_size(loc, size));
+                window.set_geometry(win_geo);
             }
+
+            *p.geometry.lock().unwrap() = Some(geo);
+            p.mask.lock().unwrap().take();
         });
         self.0.resize(Size::from((geo.size.w, TAB_HEIGHT)));
     }
@@ -239,14 +312,13 @@ impl CosmicStack {
             let active = p.active.load(Ordering::SeqCst);
             let previous = p.previous_keyboard.swap(active, Ordering::SeqCst);
             if previous != active {
-                KeyboardTarget::leave(&p.windows.lock().unwrap()[previous], seat, data, serial);
-                KeyboardTarget::enter(
-                    &p.windows.lock().unwrap()[active],
-                    seat,
-                    data,
-                    Vec::new(), //seat.keys(),
-                    serial,
-                )
+                let windows = p.windows.lock().unwrap();
+                if let Some(previous) = windows.get(previous) {
+                    KeyboardTarget::leave(previous, seat, data, serial);
+                }
+                seat.get_keyboard().unwrap().with_pressed_keysyms(|syms| {
+                    KeyboardTarget::enter(&windows[active], seat, data, syms, serial)
+                })
             }
             active
         })
@@ -264,31 +336,23 @@ impl CosmicStack {
             let active = p.active.load(Ordering::SeqCst);
             let previous = p.previous_pointer.swap(active, Ordering::SeqCst);
             if previous != active {
-                if let Some(sessions) = p.windows.lock().unwrap()[previous]
-                    .user_data()
-                    .get::<ScreencopySessions>()
-                {
-                    for session in &*sessions.0.borrow() {
-                        session.cursor_leave(seat, InputType::Pointer)
+                let windows = p.windows.lock().unwrap();
+                if let Some(previous) = windows.get(previous) {
+                    if let Some(sessions) = previous.user_data().get::<ScreencopySessions>() {
+                        for session in &*sessions.0.borrow() {
+                            session.cursor_leave(seat, InputType::Pointer)
+                        }
                     }
+                    PointerTarget::leave(previous, seat, data, serial, time);
                 }
-                PointerTarget::leave(
-                    &p.windows.lock().unwrap()[previous],
-                    seat,
-                    data,
-                    serial,
-                    time,
-                );
-                if let Some(sessions) = p.windows.lock().unwrap()[active]
-                    .user_data()
-                    .get::<ScreencopySessions>()
-                {
+
+                if let Some(sessions) = windows[active].user_data().get::<ScreencopySessions>() {
                     for session in &*sessions.0.borrow() {
                         session.cursor_enter(seat, InputType::Pointer)
                     }
                 }
                 PointerTarget::enter(
-                    &p.windows.lock().unwrap()[active],
+                    &windows[active],
                     seat,
                     data,
                     &MotionEvent {
@@ -310,8 +374,240 @@ impl CosmicStack {
 impl Program for CosmicStackInternal {
     type Message = ();
 
-    fn view(&self) -> Element<'_, Self::Message> {
-        cosmic::iced::widget::text("TODO").into()
+    fn view(&self) -> CosmicElement<'_, Self::Message> {
+        let windows = self.windows.lock().unwrap();
+        let Some(width) = self
+            .geometry
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|r| r.size.w)
+        else {
+            return iced_widget::row(Vec::new()).into();
+        };
+        let tab_region = width - 128 - 8; // 64 left, 64 right + last rule with padding
+        let active = self.active.load(Ordering::SeqCst);
+        let activated = self.activated.load(Ordering::SeqCst);
+        let group_focused = self.group_focused.load(Ordering::SeqCst);
+
+        let mut elements = vec![cosmic_widget::icon("view-paged-symbolic", 16)
+            .force_svg(true)
+            .style(if group_focused {
+                theme::Svg::custom(|theme| iced_widget::svg::Appearance {
+                    color: Some(if theme.cosmic().is_dark {
+                        Color::BLACK
+                    } else {
+                        Color::WHITE
+                    }),
+                })
+            } else {
+                theme::Svg::Symbolic
+            })
+            .apply(iced_widget::container)
+            .padding([4, 24])
+            .center_y()
+            .into()];
+
+        const ACTIVE_TAB_WIDTH: i32 = 140;
+        const MIN_TAB_WIDTH: i32 = 36;
+        let tab_width = if windows.len() == 1 {
+            tab_region
+        } else {
+            let potential_width = tab_region / windows.len() as i32;
+            if potential_width < ACTIVE_TAB_WIDTH {
+                (tab_region - ACTIVE_TAB_WIDTH) / (windows.len() - 1) as i32
+            } else {
+                potential_width
+            }
+        };
+        let scrolling = tab_width < MIN_TAB_WIDTH;
+
+        let mut tabs = Vec::new();
+        for (i, window) in windows.iter().enumerate() {
+            let mut tab_elements = Vec::new();
+
+            let app_id = window.app_id();
+            let title = window.title();
+            let is_active = i == active;
+            let was_previous_active = i.checked_sub(1).map(|i| i == active).unwrap_or(false);
+            let tab_width = tab_width.max(if is_active {
+                ACTIVE_TAB_WIDTH
+            } else {
+                MIN_TAB_WIDTH
+            });
+
+            tabs.push(
+                iced_widget::vertical_rule(4)
+                    .style(
+                        if is_active || was_previous_active || (i == 0 && group_focused) {
+                            if activated {
+                                theme::Rule::custom(|theme| iced_widget::rule::Appearance {
+                                    color: theme.cosmic().accent_color().into(),
+                                    width: 4,
+                                    radius: 0.,
+                                    fill_mode: FillMode::Full,
+                                })
+                            } else {
+                                theme::Rule::custom(|theme| iced_widget::rule::Appearance {
+                                    color: theme.cosmic().palette.neutral_5.into(),
+                                    width: 4,
+                                    radius: 0.,
+                                    fill_mode: FillMode::Full,
+                                })
+                            }
+                        } else {
+                            theme::Rule::custom(|theme| iced_widget::rule::Appearance {
+                                color: theme.cosmic().palette.neutral_5.into(),
+                                width: 4,
+                                radius: 8.,
+                                fill_mode: FillMode::Padded(4),
+                            })
+                        },
+                    )
+                    .into(),
+            );
+
+            tab_elements.push(
+                cosmic_widget::icon(app_id, 12)
+                    .apply(iced_widget::container)
+                    .height(Length::Fill)
+                    .center_y()
+                    .into(),
+            );
+
+            let text_width = tab_width - if tab_width > 125 { 64 } else { 40 };
+            if text_width > 0 {
+                tab_elements.push(
+                    cosmic_widget::text(title)
+                        .size(14)
+                        .font(if is_active && self.activated.load(Ordering::SeqCst) {
+                            cosmic::font::FONT_SEMIBOLD
+                        } else {
+                            cosmic::font::FONT
+                        })
+                        .horizontal_alignment(alignment::Horizontal::Left)
+                        .vertical_alignment(alignment::Vertical::Center)
+                        .height(Length::Fill)
+                        .width(text_width as u16)
+                        .into(),
+                );
+            }
+
+            if tab_width > 125 {
+                tab_elements.push(
+                    cosmic_widget::icon("window-close-symbolic", 16)
+                        .force_svg(true)
+                        .style(theme::Svg::Symbolic)
+                        .apply(iced_widget::container)
+                        .height(Length::Fill)
+                        .center_y()
+                        .into(),
+                );
+            }
+
+            tabs.push(
+                iced_widget::row(tab_elements)
+                    .height(Length::Fill)
+                    .width(tab_width as u16 - 22)
+                    .spacing(8)
+                    .apply(iced_widget::container)
+                    .padding([2, 10])
+                    .center_y()
+                    .style(if is_active {
+                        if activated {
+                            theme::Container::custom(|theme| iced_widget::container::Appearance {
+                                text_color: Some(Color::from(theme.cosmic().accent_text_color())),
+                                background: Some(cosmic::iced::Background::Color(
+                                    Color::from_rgba(1.0, 1.0, 1.0, 0.1),
+                                )),
+                                border_radius: 0.0.into(),
+                                border_width: 0.0,
+                                border_color: Color::TRANSPARENT,
+                            })
+                        } else {
+                            theme::Container::custom(|_theme| iced_widget::container::Appearance {
+                                text_color: None,
+                                background: Some(cosmic::iced::Background::Color(
+                                    Color::from_rgba(1.0, 1.0, 1.0, 0.1),
+                                )),
+                                border_radius: 0.0.into(),
+                                border_width: 0.0,
+                                border_color: Color::TRANSPARENT,
+                            })
+                        }
+                    } else {
+                        theme::Container::Transparent
+                    })
+                    .into(),
+            )
+        }
+
+        let last_was_active = active == windows.len() - 1;
+        let group_focused_clone = self.group_focused.clone();
+        tabs.push(
+            iced_widget::vertical_rule(4)
+                .style(
+                    if last_was_active || group_focused_clone.load(Ordering::SeqCst) {
+                        if activated {
+                            theme::Rule::custom(|theme| iced_widget::rule::Appearance {
+                                color: theme.cosmic().accent_color().into(),
+                                width: 4,
+                                radius: 0.,
+                                fill_mode: FillMode::Full,
+                            })
+                        } else {
+                            theme::Rule::custom(|theme| iced_widget::rule::Appearance {
+                                color: theme.cosmic().palette.neutral_5.into(),
+                                width: 4,
+                                radius: 0.,
+                                fill_mode: FillMode::Full,
+                            })
+                        }
+                    } else {
+                        theme::Rule::custom(|theme| iced_widget::rule::Appearance {
+                            color: theme.cosmic().palette.neutral_5.into(),
+                            width: 4,
+                            radius: 8.,
+                            fill_mode: FillMode::Padded(4),
+                        })
+                    },
+                )
+                .into(),
+        );
+
+        let tabs =
+            iced_widget::row(tabs)
+                .apply(iced_widget::container)
+                .style(theme::Container::custom(|theme| {
+                    iced_widget::container::Appearance {
+                        text_color: None,
+                        background: Some(cosmic::iced::Background::Color(Color::from(
+                            theme.cosmic().palette.neutral_3,
+                        ))),
+                        border_radius: 0.0.into(),
+                        border_width: 0.0,
+                        border_color: Color::TRANSPARENT,
+                    }
+                }));
+        if scrolling {
+            elements.push(
+                iced_widget::Scrollable::new(tabs)
+                    .height(Length::Fill)
+                    .width(tab_region as u16)
+                    .into(),
+            )
+        } else {
+            elements.push(tabs.into());
+        }
+
+        elements.push(iced_widget::horizontal_space(64).into());
+
+        iced_widget::row(elements)
+            .height(TAB_HEIGHT as u16)
+            .width(width as u16)
+            .apply(iced_widget::container)
+            .center_y()
+            .into()
     }
 
     fn clip_mask(&self, size: Size<i32, smithay::utils::Buffer>, scale: f32) -> tiny_skia::Mask {
@@ -350,11 +646,46 @@ impl Program for CosmicStackInternal {
     }
 
     fn background_color(&self) -> Color {
-        Color {
-            r: 0.1176,
-            g: 0.1176,
-            b: 0.1176,
-            a: 1.0,
+        if self.group_focused.load(Ordering::SeqCst) {
+            Color::from(cosmic::theme::COSMIC_DARK.accent_color())
+        } else {
+            Color::from(cosmic::theme::COSMIC_DARK.palette.neutral_3)
+        }
+    }
+
+    fn foreground(
+        &self,
+        pixels: &mut tiny_skia::PixmapMut<'_>,
+        damage: &[Rectangle<i32, smithay::utils::Buffer>],
+        scale: f32,
+    ) {
+        if self.group_focused.load(Ordering::SeqCst) {
+            let border = Rectangle::from_loc_and_size(
+                (0, TAB_HEIGHT - scale as i32),
+                (pixels.width() as i32, scale as i32),
+            );
+            let mask = self.mask.lock().unwrap();
+
+            let mut paint = tiny_skia::Paint::default();
+            let (b, g, r, a) = theme::COSMIC_DARK.accent_color().into_components();
+            paint.set_color(tiny_skia::Color::from_rgba(r, g, b, a).unwrap());
+
+            for rect in damage {
+                if let Some(overlap) = rect.intersection(border) {
+                    pixels.fill_rect(
+                        tiny_skia::Rect::from_xywh(
+                            overlap.loc.x as f32,
+                            overlap.loc.y as f32,
+                            overlap.size.w as f32,
+                            overlap.size.h as f32,
+                        )
+                        .unwrap(),
+                        &paint,
+                        Default::default(),
+                        mask.as_ref(),
+                    )
+                }
+            }
         }
     }
 }
@@ -390,13 +721,17 @@ impl SpaceElement for CosmicStack {
     }
     fn set_activate(&self, activated: bool) {
         SpaceElement::set_activate(&self.0, activated);
+        self.0.force_redraw();
         self.0.with_program(|p| {
-            p.windows
-                .lock()
-                .unwrap()
-                .iter()
-                .for_each(|w| SpaceElement::set_activate(w, activated))
-        })
+            p.activated.store(activated, Ordering::SeqCst);
+            if !p.group_focused.load(Ordering::SeqCst) {
+                p.windows
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .for_each(|w| SpaceElement::set_activate(w, activated))
+            }
+        });
     }
     fn output_enter(&self, output: &Output, overlap: Rectangle<i32, Logical>) {
         SpaceElement::output_enter(&self.0, output, overlap);
@@ -432,6 +767,7 @@ impl SpaceElement for CosmicStack {
         })
     }
     fn refresh(&self) {
+        SpaceElement::refresh(&self.0);
         self.0.with_program(|p| {
             let mut windows = p.windows.lock().unwrap();
 
@@ -448,8 +784,8 @@ impl SpaceElement for CosmicStack {
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |active| {
                     (active >= len).then_some(len - 1)
                 });
-            windows.iter().for_each(|w| SpaceElement::refresh(w))
-        })
+            windows.iter().for_each(|w| SpaceElement::refresh(w));
+        });
     }
 }
 
@@ -475,7 +811,9 @@ impl KeyboardTarget<State> for CosmicStack {
     }
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial) {
         let active = self.keyboard_leave_if_previous(seat, data, serial);
+        self.0.force_redraw();
         self.0.with_program(|p| {
+            p.group_focused.store(false, Ordering::SeqCst);
             KeyboardTarget::leave(&p.windows.lock().unwrap()[active], seat, data, serial)
         })
     }
@@ -490,15 +828,17 @@ impl KeyboardTarget<State> for CosmicStack {
     ) {
         let active = self.keyboard_leave_if_previous(seat, data, serial);
         self.0.with_program(|p| {
-            KeyboardTarget::key(
-                &p.windows.lock().unwrap()[active],
-                seat,
-                data,
-                key,
-                state,
-                serial,
-                time,
-            )
+            if !p.group_focused.load(Ordering::SeqCst) {
+                KeyboardTarget::key(
+                    &p.windows.lock().unwrap()[active],
+                    seat,
+                    data,
+                    key,
+                    state,
+                    serial,
+                    time,
+                )
+            }
         })
     }
     fn modifiers(
@@ -510,13 +850,15 @@ impl KeyboardTarget<State> for CosmicStack {
     ) {
         let active = self.keyboard_leave_if_previous(seat, data, serial);
         self.0.with_program(|p| {
-            KeyboardTarget::modifiers(
-                &p.windows.lock().unwrap()[active],
-                seat,
-                data,
-                modifiers,
-                serial,
-            )
+            if !p.group_focused.load(Ordering::SeqCst) {
+                KeyboardTarget::modifiers(
+                    &p.windows.lock().unwrap()[active],
+                    seat,
+                    data,
+                    modifiers,
+                    serial,
+                )
+            }
         })
     }
 }
@@ -630,14 +972,27 @@ impl PointerTarget<State> for CosmicStack {
 
         match self.0.with_program(|p| p.current_focus()) {
             Focus::Header => PointerTarget::button(&self.0, seat, data, event),
-            Focus::Window => self.0.with_program(|p| {
-                PointerTarget::button(
-                    &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)],
-                    seat,
-                    data,
-                    event,
-                )
-            }),
+            Focus::Window => {
+                if self.0.with_program(|p| {
+                    PointerTarget::button(
+                        &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)],
+                        seat,
+                        data,
+                        event,
+                    );
+                    if p.group_focused.swap(false, Ordering::SeqCst) {
+                        p.windows.lock().unwrap().iter().for_each(|w| {
+                            SpaceElement::set_activate(w, true);
+                            w.send_configure();
+                        });
+                        true
+                    } else {
+                        false
+                    }
+                }) {
+                    self.0.force_redraw();
+                }
+            }
             _ => {}
         }
     }
@@ -702,39 +1057,206 @@ impl PointerTarget<State> for CosmicStack {
     }
 }
 
-render_elements! {
-    pub CosmicStackRenderElement<R> where R: ImportAll + ImportMem;
-    Header=MemoryRenderBufferRenderElement<R>,
-    Window=WaylandSurfaceRenderElement<R>,
+pub enum CosmicStackRenderElement<R>
+where
+    R: ImportAll + ImportMem + AsGlowRenderer + Renderer,
+    <R as Renderer>::TextureId: 'static,
+{
+    Header(MemoryRenderBufferRenderElement<GlowRenderer>),
+    Window(WaylandSurfaceRenderElement<R>),
+}
+
+impl<R> From<WaylandSurfaceRenderElement<R>> for CosmicStackRenderElement<R>
+where
+    R: ImportAll + ImportMem + AsGlowRenderer + Renderer,
+    <R as Renderer>::TextureId: 'static,
+{
+    fn from(elem: WaylandSurfaceRenderElement<R>) -> Self {
+        CosmicStackRenderElement::Window(elem)
+    }
+}
+
+impl<R> From<MemoryRenderBufferRenderElement<GlowRenderer>> for CosmicStackRenderElement<R>
+where
+    R: ImportAll + ImportMem + AsGlowRenderer + Renderer,
+    <R as Renderer>::TextureId: 'static,
+{
+    fn from(elem: MemoryRenderBufferRenderElement<GlowRenderer>) -> Self {
+        CosmicStackRenderElement::Header(elem)
+    }
+}
+
+impl<R> Element for CosmicStackRenderElement<R>
+where
+    R: AsGlowRenderer + Renderer + ImportAll + ImportMem,
+    <R as Renderer>::TextureId: 'static,
+{
+    fn id(&self) -> &Id {
+        match self {
+            CosmicStackRenderElement::Header(h) => h.id(),
+            CosmicStackRenderElement::Window(w) => w.id(),
+        }
+    }
+
+    fn current_commit(&self) -> CommitCounter {
+        match self {
+            CosmicStackRenderElement::Header(h) => h.current_commit(),
+            CosmicStackRenderElement::Window(w) => w.current_commit(),
+        }
+    }
+
+    fn src(&self) -> Rectangle<f64, smithay::utils::Buffer> {
+        match self {
+            CosmicStackRenderElement::Header(h) => h.src(),
+            CosmicStackRenderElement::Window(w) => w.src(),
+        }
+    }
+
+    fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
+        match self {
+            CosmicStackRenderElement::Header(h) => h.geometry(scale),
+            CosmicStackRenderElement::Window(w) => w.geometry(scale),
+        }
+    }
+
+    fn location(&self, scale: Scale<f64>) -> Point<i32, Physical> {
+        match self {
+            CosmicStackRenderElement::Header(h) => h.location(scale),
+            CosmicStackRenderElement::Window(w) => w.location(scale),
+        }
+    }
+
+    fn transform(&self) -> Transform {
+        match self {
+            CosmicStackRenderElement::Header(h) => h.transform(),
+            CosmicStackRenderElement::Window(w) => w.transform(),
+        }
+    }
+
+    fn damage_since(
+        &self,
+        scale: Scale<f64>,
+        commit: Option<CommitCounter>,
+    ) -> Vec<Rectangle<i32, Physical>> {
+        match self {
+            CosmicStackRenderElement::Header(h) => h.damage_since(scale, commit),
+            CosmicStackRenderElement::Window(w) => w.damage_since(scale, commit),
+        }
+    }
+
+    fn opaque_regions(&self, scale: Scale<f64>) -> Vec<Rectangle<i32, Physical>> {
+        match self {
+            CosmicStackRenderElement::Header(h) => h.opaque_regions(scale),
+            CosmicStackRenderElement::Window(w) => w.opaque_regions(scale),
+        }
+    }
+
+    fn alpha(&self) -> f32 {
+        match self {
+            CosmicStackRenderElement::Header(h) => h.alpha(),
+            CosmicStackRenderElement::Window(w) => w.alpha(),
+        }
+    }
+}
+
+impl RenderElement<GlowRenderer> for CosmicStackRenderElement<GlowRenderer> {
+    fn draw<'a>(
+        &self,
+        frame: &mut <GlowRenderer as Renderer>::Frame<'a>,
+        src: Rectangle<f64, smithay::utils::Buffer>,
+        dst: Rectangle<i32, Physical>,
+        damage: &[Rectangle<i32, Physical>],
+    ) -> Result<(), <GlowRenderer as Renderer>::Error> {
+        match self {
+            CosmicStackRenderElement::Header(h) => h.draw(frame, src, dst, damage),
+            CosmicStackRenderElement::Window(w) => w.draw(frame, src, dst, damage),
+        }
+    }
+
+    fn underlying_storage(
+        &self,
+        renderer: &mut GlowRenderer,
+    ) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
+        match self {
+            CosmicStackRenderElement::Header(h) => h.underlying_storage(renderer),
+            CosmicStackRenderElement::Window(w) => w.underlying_storage(renderer),
+        }
+    }
+}
+
+impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>>
+    for CosmicStackRenderElement<GlMultiRenderer<'a, 'b>>
+{
+    fn draw<'c>(
+        &self,
+        frame: &mut GlMultiFrame<'a, 'b, 'c>,
+        src: Rectangle<f64, smithay::utils::Buffer>,
+        dst: Rectangle<i32, Physical>,
+        damage: &[Rectangle<i32, Physical>],
+    ) -> Result<(), GlMultiError> {
+        match self {
+            CosmicStackRenderElement::Header(h) => h
+                .draw(frame.glow_frame_mut(), src, dst, damage)
+                .map_err(|err| GlMultiError::Render(err)),
+            CosmicStackRenderElement::Window(w) => w.draw(frame, src, dst, damage),
+        }
+    }
+
+    fn underlying_storage(
+        &self,
+        renderer: &mut GlMultiRenderer<'a, 'b>,
+    ) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
+        match self {
+            CosmicStackRenderElement::Header(h) => {
+                h.underlying_storage(renderer.glow_renderer_mut())
+            }
+            CosmicStackRenderElement::Window(w) => w.underlying_storage(renderer),
+        }
+    }
 }
 
 impl<R> AsRenderElements<R> for CosmicStack
 where
-    R: Renderer + ImportAll + ImportMem,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
+    CosmicStackRenderElement<R>: RenderElement<R>,
 {
     type RenderElement = CosmicStackRenderElement<R>;
     fn render_elements<C: From<Self::RenderElement>>(
         &self,
         renderer: &mut R,
-        mut location: Point<i32, Physical>,
+        location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
     ) -> Vec<C> {
-        let mut elements = AsRenderElements::<R>::render_elements::<CosmicStackRenderElement<R>>(
-            &self.0, renderer, location, scale, alpha,
-        );
-        location.y += TAB_HEIGHT;
+        let stack_loc = location
+            + self
+                .0
+                .with_program(|p| {
+                    p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)]
+                        .geometry()
+                        .loc
+                })
+                .to_physical_precise_round(scale);
+        let window_loc = location + Point::from((0, (TAB_HEIGHT as f64 * scale.y) as i32));
 
-        elements.extend(self.0.with_program(|p| {
-            let elements = AsRenderElements::<R>::render_elements::<CosmicStackRenderElement<R>>(
-                &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)],
-                renderer,
-                location,
+        let mut elements =
+            AsRenderElements::<GlowRenderer>::render_elements::<CosmicStackRenderElement<R>>(
+                &self.0,
+                renderer.glow_renderer_mut(),
+                stack_loc,
                 scale,
                 alpha,
             );
-            elements
+
+        elements.extend(self.0.with_program(|p| {
+            AsRenderElements::<R>::render_elements::<CosmicStackRenderElement<R>>(
+                &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)],
+                renderer,
+                window_loc,
+                scale,
+                alpha,
+            )
         }));
 
         elements.into_iter().map(C::from).collect()

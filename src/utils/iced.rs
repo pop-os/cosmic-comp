@@ -101,8 +101,9 @@ pub trait Program {
         &self,
         pixels: &mut tiny_skia::PixmapMut<'_>,
         damage: &[Rectangle<i32, BufferCoords>],
+        scale: f32,
     ) {
-        let _ = (pixels, damage);
+        let _ = (pixels, damage, scale);
     }
 }
 
@@ -563,6 +564,7 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
                 ),
             );
         }
+        internal.update(true);
     }
 }
 
@@ -650,7 +652,10 @@ where
                                 })
                                 .collect::<Vec<_>>();
 
-                            state_ref.program().0.foreground(&mut pixels, &damage);
+                            state_ref
+                                .program()
+                                .0
+                                .foreground(&mut pixels, &damage, scale.x as f32);
 
                             Result::<_, ()>::Ok(damage)
                         })

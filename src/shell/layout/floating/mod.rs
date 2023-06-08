@@ -15,7 +15,10 @@ use std::collections::HashMap;
 use crate::{
     backend::render::{element::AsGlowRenderer, IndicatorShader},
     shell::{
-        element::{window::CosmicWindowRenderElement, CosmicMapped, CosmicMappedRenderElement},
+        element::{
+            stack::CosmicStackRenderElement, window::CosmicWindowRenderElement, CosmicMapped,
+            CosmicMappedRenderElement,
+        },
         grabs::ResizeEdge,
         CosmicSurface,
     },
@@ -358,6 +361,7 @@ impl FloatingLayout {
         <R as Renderer>::TextureId: 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
+        CosmicStackRenderElement<R>: RenderElement<R>,
     {
         #[cfg(feature = "debug")]
         puffin::profile_function!();

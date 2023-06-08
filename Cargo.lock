@@ -477,6 +477,7 @@ name = "cosmic-comp"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "apply",
  "bitflags 1.3.2",
  "bytemuck",
  "calloop",

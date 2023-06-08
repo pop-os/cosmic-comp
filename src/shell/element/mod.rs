@@ -53,7 +53,7 @@ pub mod stack;
 pub use self::stack::CosmicStack;
 pub mod window;
 pub use self::window::CosmicWindow;
-use self::window::CosmicWindowRenderElement;
+use self::{stack::CosmicStackRenderElement, window::CosmicWindowRenderElement};
 
 #[cfg(feature = "debug")]
 use egui::plot::{Corner, Legend, Plot, PlotPoints, Polygon};
@@ -323,14 +323,10 @@ impl CosmicMapped {
     }
 
     pub fn set_activated(&self, activated: bool) {
-        for window in match &self.element {
-            CosmicMappedInternal::Stack(s) => {
-                Box::new(s.surfaces()) as Box<dyn Iterator<Item = CosmicSurface>>
-            }
-            CosmicMappedInternal::Window(w) => Box::new(std::iter::once(w.surface())),
+        match &self.element {
+            CosmicMappedInternal::Stack(s) => s.set_activate(activated),
+            CosmicMappedInternal::Window(w) => w.set_activate(activated),
             _ => unreachable!(),
-        } {
-            window.set_activated(activated)
         }
     }
 
@@ -1009,6 +1005,7 @@ where
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
+    CosmicStackRenderElement<R>: RenderElement<R>,
 {
     type RenderElement = CosmicMappedRenderElement<R>;
     fn render_elements<C: From<Self::RenderElement>>(

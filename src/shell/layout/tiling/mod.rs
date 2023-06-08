@@ -4,8 +4,8 @@ use crate::{
     backend::render::{element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, GROUP_COLOR},
     shell::{
         element::{
-            window::CosmicWindowRenderElement, CosmicMapped, CosmicMappedRenderElement,
-            CosmicStack, CosmicWindow,
+            stack::CosmicStackRenderElement, window::CosmicWindowRenderElement, CosmicMapped,
+            CosmicMappedRenderElement, CosmicStack, CosmicWindow,
         },
         focus::{
             target::{KeyboardFocusTarget, WindowGroup},
@@ -1668,6 +1668,7 @@ impl TilingLayout {
         <R as Renderer>::TextureId: 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
+        CosmicStackRenderElement<R>: RenderElement<R>,
     {
         #[cfg(feature = "debug")]
         puffin::profile_function!();
@@ -2044,6 +2045,7 @@ where
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
+    CosmicStackRenderElement<R>: RenderElement<R>,
 {
     if let Some(root) = reference_tree.root_node_id() {
         let geometries = geometries.unwrap_or_default();
@@ -2170,6 +2172,7 @@ where
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
+    CosmicStackRenderElement<R>: RenderElement<R>,
 {
     let focused = seat
         .and_then(|seat| TilingLayout::currently_focused_node(&target_tree, seat))
