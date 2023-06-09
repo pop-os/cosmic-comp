@@ -226,7 +226,7 @@ impl ResizeSurfaceGrab {
 
             // Finish resizing.
             if let Some(ResizeState::WaitingForCommit(_)) = *resize_state {
-                if !window.is_resizing().unwrap_or(false) {
+                if !window.is_resizing(false).unwrap_or(false) {
                     *resize_state = None;
                 }
             }

@@ -129,13 +129,21 @@ impl CosmicSurface {
         }
     }
 
-    pub fn is_activated(&self) -> bool {
+    pub fn is_activated(&self, pending: bool) -> bool {
         match self {
-            CosmicSurface::Wayland(window) => window
-                .toplevel()
-                .current_state()
-                .states
-                .contains(ToplevelState::Activated),
+            CosmicSurface::Wayland(window) => {
+                if pending {
+                    window.toplevel().with_pending_state(|pending| {
+                        pending.states.contains(ToplevelState::Activated)
+                    })
+                } else {
+                    window
+                        .toplevel()
+                        .current_state()
+                        .states
+                        .contains(ToplevelState::Activated)
+                }
+            }
             CosmicSurface::X11(surface) => surface.is_activated(),
             _ => unreachable!(),
         }
@@ -157,29 +165,46 @@ impl CosmicSurface {
         }
     }
 
-    pub fn is_decorated(&self) -> bool {
+    pub fn is_decorated(&self, pending: bool) -> bool {
         match self {
-            CosmicSurface::Wayland(window) => window
-                .toplevel()
-                .current_state()
-                .decoration_mode
-                .map(|mode| mode == DecorationMode::ClientSide)
-                .unwrap_or(true),
+            CosmicSurface::Wayland(window) => {
+                if pending {
+                    window.toplevel().with_pending_state(|pending| {
+                        pending
+                            .decoration_mode
+                            .map(|mode| mode == DecorationMode::ClientSide)
+                            .unwrap_or(true)
+                    })
+                } else {
+                    window
+                        .toplevel()
+                        .current_state()
+                        .decoration_mode
+                        .map(|mode| mode == DecorationMode::ClientSide)
+                        .unwrap_or(true)
+                }
+            }
             CosmicSurface::X11(surface) => surface.is_decorated(),
             _ => unreachable!(),
         }
     }
 
-    pub fn is_resizing(&self) -> Option<bool> {
+    pub fn is_resizing(&self, pending: bool) -> Option<bool> {
         match self {
             CosmicSurface::Wayland(window) => {
-                let xdg = window.toplevel();
-                Some(
-                    xdg.current_state().states.contains(ToplevelState::Resizing)
-                        || xdg.with_pending_state(|states| {
-                            states.states.contains(ToplevelState::Resizing)
-                        }),
-                )
+                if pending {
+                    Some(window.toplevel().with_pending_state(|pending| {
+                        pending.states.contains(ToplevelState::Resizing)
+                    }))
+                } else {
+                    Some(
+                        window
+                            .toplevel()
+                            .current_state()
+                            .states
+                            .contains(ToplevelState::Resizing),
+                    )
+                }
             }
             _ => None,
         }
@@ -198,15 +223,23 @@ impl CosmicSurface {
         }
     }
 
-    pub fn is_tiled(&self) -> Option<bool> {
+    pub fn is_tiled(&self, pending: bool) -> Option<bool> {
         match self {
-            CosmicSurface::Wayland(window) => Some(
-                window
-                    .toplevel()
-                    .current_state()
-                    .states
-                    .contains(ToplevelState::TiledLeft),
-            ),
+            CosmicSurface::Wayland(window) => {
+                if pending {
+                    Some(window.toplevel().with_pending_state(|pending| {
+                        pending.states.contains(ToplevelState::TiledLeft)
+                    }))
+                } else {
+                    Some(
+                        window
+                            .toplevel()
+                            .current_state()
+                            .states
+                            .contains(ToplevelState::TiledLeft),
+                    )
+                }
+            }
             _ => None,
         }
     }
@@ -230,16 +263,20 @@ impl CosmicSurface {
         }
     }
 
-    pub fn is_fullscreen(&self) -> bool {
+    pub fn is_fullscreen(&self, pending: bool) -> bool {
         match self {
             CosmicSurface::Wayland(window) => {
-                let xdg = window.toplevel();
-                xdg.current_state()
-                    .states
-                    .contains(ToplevelState::Fullscreen)
-                    || xdg.with_pending_state(|state| {
-                        state.states.contains(ToplevelState::Fullscreen)
+                if pending {
+                    window.toplevel().with_pending_state(|pending| {
+                        pending.states.contains(ToplevelState::Fullscreen)
                     })
+                } else {
+                    window
+                        .toplevel()
+                        .current_state()
+                        .states
+                        .contains(ToplevelState::Fullscreen)
+                }
             }
             CosmicSurface::X11(surface) => surface.is_fullscreen(),
             _ => unreachable!(),
@@ -262,15 +299,20 @@ impl CosmicSurface {
         }
     }
 
-    pub fn is_maximized(&self) -> bool {
+    pub fn is_maximized(&self, pending: bool) -> bool {
         match self {
             CosmicSurface::Wayland(window) => {
-                let xdg = window.toplevel();
-                xdg.current_state()
-                    .states
-                    .contains(ToplevelState::Maximized)
-                    || xdg
-                        .with_pending_state(|state| state.states.contains(ToplevelState::Maximized))
+                if pending {
+                    window.toplevel().with_pending_state(|pending| {
+                        pending.states.contains(ToplevelState::Maximized)
+                    })
+                } else {
+                    window
+                        .toplevel()
+                        .current_state()
+                        .states
+                        .contains(ToplevelState::Maximized)
+                }
             }
             CosmicSurface::X11(surface) => surface.is_maximized(),
             _ => unreachable!(),
@@ -311,7 +353,7 @@ impl CosmicSurface {
             _ => unreachable!(),
         }
         .map(|size| {
-            if self.is_decorated() {
+            if self.is_decorated(false) {
                 size + (0, SSD_HEIGHT).into()
             } else {
                 size
@@ -337,7 +379,7 @@ impl CosmicSurface {
             _ => unreachable!(),
         }
         .map(|size| {
-            if self.is_decorated() {
+            if self.is_decorated(false) {
                 size + (0, SSD_HEIGHT).into()
             } else {
                 size

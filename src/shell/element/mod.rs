@@ -247,14 +247,14 @@ impl CosmicMapped {
         }
     }
 
-    pub fn is_resizing(&self) -> Option<bool> {
+    pub fn is_resizing(&self, pending: bool) -> Option<bool> {
         let window = match &self.element {
             CosmicMappedInternal::Stack(s) => s.active(),
             CosmicMappedInternal::Window(w) => w.surface(),
             _ => unreachable!(),
         };
 
-        window.is_resizing()
+        window.is_resizing(pending)
     }
 
     pub fn set_tiled(&self, tiled: bool) {
@@ -268,14 +268,14 @@ impl CosmicMapped {
         }
     }
 
-    pub fn is_tiled(&self) -> Option<bool> {
+    pub fn is_tiled(&self, pending: bool) -> Option<bool> {
         let window = match &self.element {
             CosmicMappedInternal::Stack(s) => s.active(),
             CosmicMappedInternal::Window(w) => w.surface(),
             _ => unreachable!(),
         };
 
-        window.is_tiled()
+        window.is_tiled(pending)
     }
 
     pub fn set_fullscreen(&self, fullscreen: bool) {
@@ -290,14 +290,14 @@ impl CosmicMapped {
         }
     }
 
-    pub fn is_fullscreen(&self) -> bool {
+    pub fn is_fullscreen(&self, pending: bool) -> bool {
         let window = match &self.element {
             CosmicMappedInternal::Stack(s) => s.active(),
             CosmicMappedInternal::Window(w) => w.surface(),
             _ => unreachable!(),
         };
 
-        window.is_fullscreen()
+        window.is_fullscreen(pending)
     }
 
     pub fn set_maximized(&self, maximized: bool) {
@@ -312,14 +312,14 @@ impl CosmicMapped {
         }
     }
 
-    pub fn is_maximized(&self) -> bool {
+    pub fn is_maximized(&self, pending: bool) -> bool {
         let window = match &self.element {
             CosmicMappedInternal::Stack(s) => s.active(),
             CosmicMappedInternal::Window(w) => w.surface(),
             _ => unreachable!(),
         };
 
-        window.is_maximized()
+        window.is_maximized(pending)
     }
 
     pub fn set_activated(&self, activated: bool) {
@@ -334,14 +334,14 @@ impl CosmicMapped {
         }
     }
 
-    pub fn is_activated(&self) -> bool {
+    pub fn is_activated(&self, pending: bool) -> bool {
         let window = match &self.element {
             CosmicMappedInternal::Stack(s) => s.active(),
             CosmicMappedInternal::Window(w) => w.surface(),
             _ => unreachable!(),
         };
 
-        window.is_activated()
+        window.is_activated(pending)
     }
 
     pub fn set_geometry(&self, geo: Rectangle<i32, Logical>) {

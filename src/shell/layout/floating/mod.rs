@@ -158,7 +158,7 @@ impl FloatingLayout {
 
     pub fn unmap(&mut self, window: &CosmicMapped) -> bool {
         #[allow(irrefutable_let_patterns)]
-        let is_maximized = window.is_maximized();
+        let is_maximized = window.is_maximized(true);
 
         if !is_maximized {
             if let Some(location) = self.space.element_location(window) {
