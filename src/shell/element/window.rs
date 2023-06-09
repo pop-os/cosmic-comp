@@ -107,7 +107,7 @@ impl CosmicWindowInternal {
     }
 
     pub fn has_ssd(&self) -> bool {
-        !self.window.is_decorated()
+        !self.window.is_decorated(false)
     }
 }
 
@@ -259,7 +259,7 @@ impl Program for CosmicWindowInternal {
     }
 
     fn background_color(&self) -> Color {
-        if self.window.is_activated() {
+        if self.window.is_activated(false) {
             Color {
                 r: 0.1176,
                 g: 0.1176,
@@ -281,7 +281,7 @@ impl Program for CosmicWindowInternal {
         pixels: &mut tiny_skia::PixmapMut<'_>,
         damage: &[Rectangle<i32, BufferCoords>],
     ) {
-        if !self.window.is_activated() {
+        if !self.window.is_activated(false) {
             let mask = self.mask.lock().unwrap();
             let mut paint = tiny_skia::Paint::default();
             paint.set_color_rgba8(0, 0, 0, 102);

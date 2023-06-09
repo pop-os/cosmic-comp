@@ -143,7 +143,7 @@ impl Workspace {
             assert!(was_floating != was_tiling);
         }
 
-        if mapped.is_maximized() || mapped.is_fullscreen() {
+        if mapped.is_maximized(true) || mapped.is_fullscreen(true) {
             self.unmaximize_request(&mapped.active_window());
         }
 
@@ -324,7 +324,7 @@ impl Workspace {
         start_data: PointerGrabStartData<State>,
         edges: ResizeEdge,
     ) -> Option<ResizeGrab> {
-        if mapped.is_fullscreen() || mapped.is_maximized() {
+        if mapped.is_fullscreen(true) || mapped.is_maximized(true) {
             return None;
         }
 
@@ -355,7 +355,7 @@ impl Workspace {
         let mapped = self.element_for_surface(&window)?.clone();
         let mut initial_window_location = self.element_geometry(&mapped).unwrap().loc;
 
-        if mapped.is_fullscreen() || mapped.is_maximized() {
+        if mapped.is_fullscreen(true) || mapped.is_maximized(true) {
             // If surface is maximized then unmaximize it
             let new_size = self.unmaximize_request(window);
             let ratio = pos.x / output.geometry().size.w as f64;

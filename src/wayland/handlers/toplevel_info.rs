@@ -31,15 +31,15 @@ impl Window for CosmicSurface {
     }
 
     fn is_activated(&self) -> bool {
-        CosmicSurface::is_activated(self)
+        CosmicSurface::is_activated(self, false)
     }
 
     fn is_maximized(&self) -> bool {
-        CosmicSurface::is_maximized(self)
+        CosmicSurface::is_maximized(self, false)
     }
 
     fn is_fullscreen(&self) -> bool {
-        CosmicSurface::is_fullscreen(self)
+        CosmicSurface::is_fullscreen(self, false)
     }
 
     fn is_minimized(&self) -> bool {

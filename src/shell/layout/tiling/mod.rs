@@ -1415,7 +1415,7 @@ impl TilingLayout {
                             }
                         },
                         Data::Mapped { mapped, .. } => {
-                            if !(mapped.is_fullscreen() || mapped.is_maximized()) {
+                            if !(mapped.is_fullscreen(true) || mapped.is_maximized(true)) {
                                 mapped.set_tiled(true);
                                 let internal_geometry = Rectangle::from_loc_and_size(
                                     geo.loc + output.geometry().loc,
@@ -1460,7 +1460,7 @@ impl TilingLayout {
                             .unwrap()
                             .filter(|node| node.data().is_mapped(None))
                             .filter(|node| match node.data() {
-                                Data::Mapped { mapped, .. } => mapped.is_activated(),
+                                Data::Mapped { mapped, .. } => mapped.is_activated(false),
                                 _ => unreachable!(),
                             })
                             .map(|node| match node.data() {
@@ -1480,7 +1480,7 @@ impl TilingLayout {
                                     .unwrap()
                                     .filter(|node| node.data().is_mapped(None))
                                     .filter(|node| match node.data() {
-                                        Data::Mapped { mapped, .. } => !mapped.is_activated(),
+                                        Data::Mapped { mapped, .. } => !mapped.is_activated(false),
                                         _ => unreachable!(),
                                     })
                                     .map(|node| match node.data() {
