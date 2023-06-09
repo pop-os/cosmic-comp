@@ -136,12 +136,20 @@ impl Shell {
         // update activate status
         let focused_windows = seats
             .flat_map(|seat| {
-                self.outputs.iter().flat_map(|o| {
+                if matches!(
+                    seat.get_keyboard().unwrap().current_focus(),
+                    Some(KeyboardFocusTarget::Group(_))
+                ) {
+                    return None;
+                }
+
+                Some(self.outputs.iter().flat_map(|o| {
                     let space = self.active_space(o);
                     let stack = space.focus_stack.get(seat);
                     stack.last().cloned()
-                })
+                }))
             })
+            .flatten()
             .collect::<Vec<_>>();
 
         for output in self.outputs.iter() {
