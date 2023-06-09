@@ -1717,10 +1717,6 @@ where
             if let Some(parent) = focused_node.parent() {
                 let parent_node = tree.get(parent).unwrap();
                 parent_node.children().len() > 2
-                    || parent_node.children().iter().any(|id| {
-                        let data = tree.get(id).unwrap().data();
-                        data.is_group() && data.orientation() == parent_node.data().orientation()
-                    })
             } else {
                 false
             }
@@ -1751,10 +1747,8 @@ where
                             {
                                 // only direct neighbors
                                 focused_idx.abs_diff(idx) == 1
-                            // skip neighbors, if this is a group of two windows
-                            && !(parent_data.len() == 2 && data.is_mapped(None))
-                            // skip groups of two in opposite orientation to indicate move between
-                            && !(parent_data.len() == 2 && if data.is_group() { parent_data.orientation() != data.orientation() } else { false } )
+                                // skip neighbors, if this is a group of two
+                                && parent_data.len() > 2
                             } else {
                                 false
                             }
