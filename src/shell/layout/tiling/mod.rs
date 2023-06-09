@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::render::{
-        element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, FOCUS_INDICATOR_COLOR,
-        GROUP_COLOR,
-    },
+    backend::render::{element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, GROUP_COLOR},
     shell::{
         element::{window::CosmicWindowRenderElement, CosmicMapped, CosmicMappedRenderElement},
         focus::{
@@ -1675,6 +1672,9 @@ impl TilingLayout {
     }
 }
 
+const OUTER_GAP: i32 = 8;
+const INNER_GAP: i32 = 16;
+
 fn geometries_for_groupview<R>(
     tree: &Tree<Data>,
     renderer: &mut R,
@@ -1694,9 +1694,7 @@ where
 {
     // we need to recalculate geometry for all elements, if we are drawing groups
     if let Some(root) = tree.root_node_id() {
-        const OUTER_GAP: i32 = 8;
         let outer_gap: i32 = (OUTER_GAP as f32 * transition).round() as i32;
-        const INNER_GAP: i32 = 16;
         let inner_gap: i32 = (INNER_GAP as f32 * transition).round() as i32;
 
         let mut stack = vec![Rectangle::from_loc_and_size(
@@ -1780,7 +1778,7 @@ where
                             elements.push(
                                 IndicatorShader::element(
                                     renderer,
-                                    Key::Group(Arc::downgrade(&alive)),
+                                    Key::Group(Arc::downgrade(alive)),
                                     geo,
                                     4,
                                     if render_active_child { 16 } else { 8 },
@@ -1859,26 +1857,37 @@ where
                             geo.size -= (outer_gap * 2, outer_gap * 2).into();
                         }
 
-                        elements.push(
-                            BackdropShader::element(
-                                renderer,
-                                mapped.clone(),
-                                geo,
-                                8.,
-                                alpha
-                                    * if focused
-                                        .as_ref()
-                                        .map(|focused_id| focused_id == &node_id)
-                                        .unwrap_or(false)
-                                    {
-                                        0.4
-                                    } else {
-                                        0.15
-                                    },
-                                GROUP_COLOR,
-                            )
-                            .into(),
-                        );
+                        if focused
+                            .as_ref()
+                            .map(|focused_id| {
+                                !tree
+                                    .ancestor_ids(&node_id)
+                                    .unwrap()
+                                    .any(|id| id == focused_id)
+                            })
+                            .unwrap_or(false)
+                        {
+                            elements.push(
+                                BackdropShader::element(
+                                    renderer,
+                                    mapped.clone(),
+                                    geo,
+                                    8.,
+                                    alpha
+                                        * if focused
+                                            .as_ref()
+                                            .map(|focused_id| focused_id == &node_id)
+                                            .unwrap_or(false)
+                                        {
+                                            0.4
+                                        } else {
+                                            0.15
+                                        },
+                                    GROUP_COLOR,
+                                )
+                                .into(),
+                            );
+                        }
 
                         geo.loc += (inner_gap, inner_gap).into();
                         geo.size -= (inner_gap * 2, inner_gap * 2).into();
@@ -2039,10 +2048,12 @@ where
         .and_then(|seat| TilingLayout::currently_focused_node(&target_tree, seat))
         .map(|(id, _)| id);
 
+    let mut group_backdrop = None;
+
     if let Some(root) = target_tree.root_node_id() {
         let old_geometries = old_geometries.unwrap_or_default();
         let geometries = geometries.unwrap_or_default();
-        target_tree
+        let mut elements: Vec<CosmicMappedRenderElement<R>> = target_tree
             .traverse_pre_order_ids(root)
             .unwrap()
             .flat_map(|node_id| {
@@ -2133,7 +2144,31 @@ where
                 let mut elements = Vec::new();
 
                 if focused == Some(node_id) {
-                    if indicator_thickness > 0 {
+                    if indicator_thickness > 0 || data.is_group() {
+                        let mut geo = geo.clone();
+                        if data.is_group() {
+                            let outer_gap: i32 = (OUTER_GAP as f32 * percentage).round() as i32;
+                            geo.loc += (outer_gap, outer_gap).into();
+                            geo.size -= (outer_gap * 2, outer_gap * 2).into();
+
+                            group_backdrop = Some(
+                                BackdropShader::element(
+                                    renderer,
+                                    match data {
+                                        Data::Group { alive, .. } => {
+                                            Key::Group(Arc::downgrade(alive))
+                                        }
+                                        _ => unreachable!(),
+                                    },
+                                    geo,
+                                    8.,
+                                    0.4,
+                                    GROUP_COLOR,
+                                )
+                                .into(),
+                            );
+                        }
+
                         let element = IndicatorShader::focus_element(
                             renderer,
                             match data {
@@ -2141,23 +2176,12 @@ where
                                 Data::Group { alive, .. } => Key::Group(Arc::downgrade(alive)),
                             },
                             geo,
-                            indicator_thickness,
-                            1.0,
-                        );
-                        elements.push(element.into());
-                    }
-
-                    if data.is_group() {
-                        let element = BackdropShader::element(
-                            renderer,
-                            match data {
-                                Data::Mapped { mapped, .. } => mapped.clone().into(),
-                                Data::Group { alive, .. } => Key::Group(Arc::downgrade(alive)),
+                            if data.is_group() {
+                                4
+                            } else {
+                                indicator_thickness
                             },
-                            geo,
-                            (indicator_thickness * 2) as f32,
-                            0.25,
-                            FOCUS_INDICATOR_COLOR,
+                            1.0,
                         );
                         elements.push(element.into());
                     }
@@ -2226,7 +2250,9 @@ where
 
                 elements
             })
-            .collect()
+            .collect();
+        elements.extend(group_backdrop);
+        elements
     } else {
         Vec::new()
     }
