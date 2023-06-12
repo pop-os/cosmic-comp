@@ -790,6 +790,7 @@ impl TilingLayout {
                 let result = if tree.get(&next_child_id).unwrap().data().is_stack()
                     && tree.get(&node_id).unwrap().data().is_mapped(None)
                     && !tree.get(&node_id).unwrap().data().is_stack()
+                    && len == 2
                 {
                     let node = tree
                         .remove_node(node_id, RemoveBehavior::DropChildren)
