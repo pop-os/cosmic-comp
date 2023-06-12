@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{cell::RefCell, time::Duration};
 
 use smithay::{
     backend::renderer::{
@@ -191,13 +191,31 @@ impl CosmicSurface {
 
     pub fn try_force_undecorated(&self, enable: bool) {
         match self {
-            CosmicSurface::Wayland(window) => window.toplevel().with_pending_state(|pending| {
-                pending.decoration_mode = if enable {
-                    Some(DecorationMode::ServerSide)
+            CosmicSurface::Wayland(window) => {
+                if enable {
+                    let previous_decoration_state =
+                        window.toplevel().current_state().decoration_mode.clone();
+                    window
+                        .user_data()
+                        .insert_if_missing(|| RefCell::new(Option::<DecorationMode>::None));
+                    *window
+                        .user_data()
+                        .get::<RefCell<Option<DecorationMode>>>()
+                        .unwrap()
+                        .borrow_mut() = previous_decoration_state;
+                    window.toplevel().with_pending_state(|pending| {
+                        pending.decoration_mode = Some(DecorationMode::ServerSide);
+                    });
                 } else {
-                    None
-                };
-            }),
+                    let previous_mode = window
+                        .user_data()
+                        .get::<RefCell<Option<DecorationMode>>>()
+                        .and_then(|m| m.borrow().clone());
+                    window.toplevel().with_pending_state(|pending| {
+                        pending.decoration_mode = previous_mode;
+                    });
+                }
+            }
             _ => {}
         }
     }

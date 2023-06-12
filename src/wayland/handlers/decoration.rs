@@ -55,7 +55,7 @@ impl State {
             .find(|(window, _)| window.wl_surface().as_ref() == Some(surface))
         {
             window.toplevel().with_pending_state(|state| {
-                state.decoration_mode = dbg!(Some(mode));
+                state.decoration_mode = Some(mode);
             });
             window.toplevel().send_configure();
         }
