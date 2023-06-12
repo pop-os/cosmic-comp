@@ -100,8 +100,8 @@ impl CosmicWindowInternal {
         unsafe { std::mem::transmute::<u8, Focus>(self.pointer_entered.load(Ordering::SeqCst)) }
     }
 
-    pub fn has_ssd(&self) -> bool {
-        !self.window.is_decorated(false)
+    pub fn has_ssd(&self, pending: bool) -> bool {
+        !self.window.is_decorated(pending)
     }
 }
 
@@ -130,11 +130,11 @@ impl CosmicWindow {
         self.0.with_program(|p| {
             let loc = (
                 geo.loc.x,
-                geo.loc.y + if p.has_ssd() { SSD_HEIGHT } else { 0 },
+                geo.loc.y + if p.has_ssd(true) { SSD_HEIGHT } else { 0 },
             );
             let size = (
                 geo.size.w,
-                std::cmp::max(geo.size.h - if p.has_ssd() { SSD_HEIGHT } else { 0 }, 0),
+                std::cmp::max(geo.size.h - if p.has_ssd(true) { SSD_HEIGHT } else { 0 }, 0),
             );
             p.window
                 .set_geometry(Rectangle::from_loc_and_size(loc, size));
@@ -152,7 +152,7 @@ impl CosmicWindow {
     }
 
     pub fn offset(&self) -> Point<i32, Logical> {
-        let has_ssd = self.0.with_program(|p| p.has_ssd());
+        let has_ssd = self.0.with_program(|p| p.has_ssd(false));
         if has_ssd {
             Point::from((0, SSD_HEIGHT))
         } else {
@@ -300,7 +300,7 @@ impl SpaceElement for CosmicWindow {
     fn bbox(&self) -> Rectangle<i32, Logical> {
         self.0.with_program(|p| {
             let mut bbox = SpaceElement::bbox(&p.window);
-            if p.has_ssd() {
+            if p.has_ssd(false) {
                 bbox.size.h += SSD_HEIGHT;
             }
             bbox
@@ -312,7 +312,7 @@ impl SpaceElement for CosmicWindow {
             return false;
         }
         self.0.with_program(|p| {
-            if p.has_ssd() {
+            if p.has_ssd(false) {
                 if point.y < SSD_HEIGHT as f64 {
                     return true;
                 } else {
@@ -341,7 +341,7 @@ impl SpaceElement for CosmicWindow {
     fn geometry(&self) -> Rectangle<i32, Logical> {
         self.0.with_program(|p| {
             let mut geo = SpaceElement::geometry(&p.window);
-            if p.has_ssd() {
+            if p.has_ssd(false) {
                 geo.size.h += SSD_HEIGHT;
             }
             geo
@@ -416,7 +416,7 @@ impl PointerTarget<State> for CosmicWindow {
                 }
             }
 
-            if p.has_ssd() {
+            if p.has_ssd(false) {
                 if event.location.y < SSD_HEIGHT as f64 {
                     let focus = p.swap_focus(Focus::Header);
                     assert_eq!(focus, Focus::None);
@@ -452,7 +452,7 @@ impl PointerTarget<State> for CosmicWindow {
                 }
             }
 
-            if p.has_ssd() {
+            if p.has_ssd(false) {
                 if event.location.y < SSD_HEIGHT as f64 {
                     let previous = p.swap_focus(Focus::Header);
                     if previous == Focus::Window {
@@ -491,7 +491,7 @@ impl PointerTarget<State> for CosmicWindow {
 
     fn relative_motion(&self, seat: &Seat<State>, data: &mut State, event: &RelativeMotionEvent) {
         self.0.with_program(|p| {
-            if !p.has_ssd() || p.current_focus() == Focus::Window {
+            if !p.has_ssd(false) || p.current_focus() == Focus::Window {
                 PointerTarget::relative_motion(&p.window, seat, data, event)
             }
         })
@@ -561,7 +561,7 @@ where
         scale: Scale<f64>,
         alpha: f32,
     ) -> Vec<C> {
-        let has_ssd = self.0.with_program(|p| p.has_ssd());
+        let has_ssd = self.0.with_program(|p| p.has_ssd(false));
 
         let window_loc = if has_ssd {
             location + Point::from((0, (SSD_HEIGHT as f64 * scale.y) as i32))
