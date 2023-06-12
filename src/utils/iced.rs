@@ -94,8 +94,9 @@ pub trait Program {
     }
     fn view(&self) -> Element<'_, Self::Message>;
 
-    fn clip_mask(&self, size: Size<i32, BufferCoords>, scale: f32) -> tiny_skia::Mask;
-    fn background_color(&self) -> Color;
+    fn background_color(&self) -> Color {
+        Color::TRANSPARENT
+    }
 
     fn foreground(
         &self,
@@ -600,7 +601,7 @@ where
             if size.w > 0 && size.h > 0 {
                 let renderer = &mut internal_ref.renderer;
                 let state_ref = &internal_ref.state;
-                let mut clip_mask = state_ref.program().0.clip_mask(size, scale.x as f32);
+                let mut clip_mask = tiny_skia::Mask::new(size.w as u32, size.h as u32).unwrap();
                 let overlay = internal_ref.debug.overlay();
 
                 buffer

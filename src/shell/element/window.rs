@@ -8,7 +8,7 @@ use crate::{
     wayland::handlers::screencopy::ScreencopySessions,
 };
 use calloop::LoopHandle;
-use cosmic::{iced::Command, iced_core::Color};
+use cosmic::iced::Command;
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
 use smithay::{
     backend::{
@@ -138,8 +138,8 @@ impl CosmicWindow {
             );
             p.window
                 .set_geometry(Rectangle::from_loc_and_size(loc, size));
+            p.mask.lock().unwrap().take();
         });
-        self.0.with_program(|p| p.mask.lock().unwrap().take());
         self.0.resize(Size::from((geo.size.w, SSD_HEIGHT)));
     }
 
@@ -221,67 +221,45 @@ impl Program for CosmicWindowInternal {
         Command::none()
     }
 
-    fn clip_mask(&self, size: Size<i32, smithay::utils::Buffer>, scale: f32) -> tiny_skia::Mask {
-        let mut mask = self.mask.lock().unwrap();
-        if mask.is_none() {
-            let mut new_mask = tiny_skia::Mask::new(size.w as u32, size.h as u32).unwrap();
-
-            let mut pb = tiny_skia::PathBuilder::new();
-            let radius = 8. * scale;
-            let (w, h) = (size.w as f32, size.h as f32);
-
-            pb.move_to(0., h); // lower-left
-
-            // upper-left rounded corner
-            pb.line_to(0., radius);
-            pb.quad_to(0., 0., radius, 0.);
-
-            // upper-right rounded corner
-            pb.line_to(w - radius, 0.);
-            pb.quad_to(w, 0., w, radius);
-
-            pb.line_to(w, h); // lower-right
-
-            let path = pb.finish().unwrap();
-            new_mask.fill_path(
-                &path,
-                tiny_skia::FillRule::EvenOdd,
-                true,
-                Default::default(),
-            );
-
-            *mask = Some(new_mask);
-        }
-
-        mask.clone().unwrap()
-    }
-
-    fn background_color(&self) -> Color {
-        if self.window.is_activated(false) {
-            Color {
-                r: 0.1176,
-                g: 0.1176,
-                b: 0.1176,
-                a: 1.0,
-            }
-        } else {
-            Color {
-                r: 0.153,
-                g: 0.153,
-                b: 0.153,
-                a: 1.0,
-            }
-        }
-    }
-
     fn foreground(
         &self,
         pixels: &mut tiny_skia::PixmapMut<'_>,
         damage: &[Rectangle<i32, BufferCoords>],
-        _scale: f32,
+        scale: f32,
     ) {
         if !self.window.is_activated(false) {
-            let mask = self.mask.lock().unwrap();
+            let mut mask = self.mask.lock().unwrap();
+            if mask.is_none() {
+                let (w, h) = (pixels.width(), pixels.height());
+                let mut new_mask = tiny_skia::Mask::new(w, h).unwrap();
+
+                let mut pb = tiny_skia::PathBuilder::new();
+                let radius = 8. * scale;
+                let (w, h) = (w as f32, h as f32);
+
+                pb.move_to(0., h); // lower-left
+
+                // upper-left rounded corner
+                pb.line_to(0., radius);
+                pb.quad_to(0., 0., radius, 0.);
+
+                // upper-right rounded corner
+                pb.line_to(w - radius, 0.);
+                pb.quad_to(w, 0., w, radius);
+
+                pb.line_to(w, h); // lower-right
+
+                let path = pb.finish().unwrap();
+                new_mask.fill_path(
+                    &path,
+                    tiny_skia::FillRule::EvenOdd,
+                    true,
+                    Default::default(),
+                );
+
+                *mask = Some(new_mask);
+            }
+
             let mut paint = tiny_skia::Paint::default();
             paint.set_color_rgba8(0, 0, 0, 102);
 

@@ -1,5 +1,5 @@
 use crate::{
-    shell::{focus::FocusDirection, Shell},
+    shell::{focus::FocusDirection, layout::tiling::Direction, Shell},
     state::State,
     utils::iced::{IcedElement, Program},
     utils::prelude::SeatExt,
@@ -9,7 +9,7 @@ use apply::Apply;
 use calloop::LoopHandle;
 use cosmic::{
     iced::widget as iced_widget,
-    iced_core::{alignment, Color, Length},
+    iced_core::{alignment, renderer::BorderRadius, Background, Color, Length},
     iced_runtime::Command,
     iced_widget::rule::FillMode,
     theme, widget as cosmic_widget, Element as CosmicElement,
@@ -723,50 +723,24 @@ impl Program for CosmicStackInternal {
             .width(width as u16)
             .apply(iced_widget::container)
             .center_y()
+            .style(if self.group_focused.load(Ordering::SeqCst) {
+                theme::Container::custom(|theme| iced_widget::container::Appearance {
+                    text_color: Some(Color::from(theme.cosmic().background.on)),
+                    background: Some(Background::Color(theme.cosmic().accent_color().into())),
+                    border_radius: BorderRadius::from([8.0, 8.0, 0.0, 0.0]),
+                    border_width: 0.0,
+                    border_color: Color::TRANSPARENT,
+                })
+            } else {
+                theme::Container::custom(|theme| iced_widget::container::Appearance {
+                    text_color: Some(Color::from(theme.cosmic().background.on)),
+                    background: Some(Background::Color(theme.cosmic().palette.neutral_3.into())),
+                    border_radius: BorderRadius::from([8.0, 8.0, 0.0, 0.0]),
+                    border_width: 0.0,
+                    border_color: Color::TRANSPARENT,
+                })
+            })
             .into()
-    }
-
-    fn clip_mask(&self, size: Size<i32, smithay::utils::Buffer>, scale: f32) -> tiny_skia::Mask {
-        let mut mask = self.mask.lock().unwrap();
-        if mask.is_none() {
-            let mut new_mask = tiny_skia::Mask::new(size.w as u32, size.h as u32).unwrap();
-
-            let mut pb = tiny_skia::PathBuilder::new();
-            let radius = 8. * scale;
-            let (w, h) = (size.w as f32, size.h as f32);
-
-            pb.move_to(0., h); // lower-left
-
-            // upper-left rounded corner
-            pb.line_to(0., radius);
-            pb.quad_to(0., 0., radius, 0.);
-
-            // upper-right rounded corner
-            pb.line_to(w - radius, 0.);
-            pb.quad_to(w, 0., w, radius);
-
-            pb.line_to(w, h); // lower-right
-
-            let path = pb.finish().unwrap();
-            new_mask.fill_path(
-                &path,
-                tiny_skia::FillRule::EvenOdd,
-                true,
-                Default::default(),
-            );
-
-            *mask = Some(new_mask);
-        }
-
-        mask.clone().unwrap()
-    }
-
-    fn background_color(&self) -> Color {
-        if self.group_focused.load(Ordering::SeqCst) {
-            Color::from(cosmic::theme::COSMIC_DARK.accent_color())
-        } else {
-            Color::from(cosmic::theme::COSMIC_DARK.palette.neutral_3)
-        }
     }
 
     fn foreground(
@@ -780,7 +754,6 @@ impl Program for CosmicStackInternal {
                 (0, TAB_HEIGHT - scale as i32),
                 (pixels.width() as i32, scale as i32),
             );
-            let mask = self.mask.lock().unwrap();
 
             let mut paint = tiny_skia::Paint::default();
             let (b, g, r, a) = theme::COSMIC_DARK.accent_color().into_components();
@@ -798,7 +771,7 @@ impl Program for CosmicStackInternal {
                         .unwrap(),
                         &paint,
                         Default::default(),
-                        mask.as_ref(),
+                        None,
                     )
                 }
             }
