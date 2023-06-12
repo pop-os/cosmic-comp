@@ -100,6 +100,12 @@ pub enum Focus {
     Window,
 }
 
+pub enum MoveResult {
+    Handled,
+    MoveOut(CosmicSurface, LoopHandle<'static, crate::state::Data>),
+    Default,
+}
+
 impl CosmicStack {
     pub fn new<I: Into<CosmicSurface>>(
         windows: impl Iterator<Item = I>,
@@ -133,12 +139,20 @@ impl CosmicStack {
         ))
     }
 
-    pub fn add_window(&self, window: impl Into<CosmicSurface>) {
+    pub fn add_window(&self, window: impl Into<CosmicSurface>, idx: Option<usize>) {
         let window = window.into();
         window.try_force_undecorated(true);
         window.set_tiled(true);
-        self.0
-            .with_program(|p| p.windows.lock().unwrap().push(window));
+        self.0.with_program(|p| {
+            if let Some(idx) = idx {
+                p.windows.lock().unwrap().insert(idx, window);
+                p.active.store(idx, Ordering::SeqCst);
+            } else {
+                let mut windows = p.windows.lock().unwrap();
+                windows.push(window);
+                p.active.store(windows.len() - 1, Ordering::SeqCst);
+            }
+        });
         self.0.force_redraw()
     }
 
@@ -254,6 +268,44 @@ impl CosmicStack {
         }
 
         result
+    }
+
+    pub fn handle_move(&self, direction: Direction) -> MoveResult {
+        let loop_handle = self.0.loop_handle();
+        self.0.with_program(|p| {
+            if p.group_focused.load(Ordering::SeqCst) {
+                return MoveResult::Default;
+            }
+
+            let active = p.active.load(Ordering::SeqCst);
+            let mut windows = p.windows.lock().unwrap();
+
+            let next = match direction {
+                Direction::Left => active.checked_sub(1),
+                Direction::Right => (active + 1 < windows.len()).then_some(active + 1),
+                Direction::Down | Direction::Up => None,
+            };
+
+            if let Some(val) = next {
+                let old = p.active.swap(val, Ordering::SeqCst);
+                windows.swap(old, val);
+                p.previous_keyboard.store(old, Ordering::SeqCst);
+                p.previous_pointer.store(old, Ordering::SeqCst);
+                MoveResult::Handled
+            } else {
+                if windows.len() == 1 {
+                    return MoveResult::Default;
+                }
+                let window = windows.remove(active);
+                if active == windows.len() {
+                    p.active.store(active - 1, Ordering::SeqCst);
+                }
+                window.try_force_undecorated(false);
+                window.set_tiled(false);
+
+                MoveResult::MoveOut(window, loop_handle)
+            }
+        })
     }
 
     pub fn active(&self) -> CosmicSurface {
