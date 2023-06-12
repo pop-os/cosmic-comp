@@ -48,6 +48,7 @@ use std::{
 };
 
 pub mod surface;
+use self::stack::MoveResult;
 pub use self::surface::CosmicSurface;
 pub mod stack;
 pub use self::stack::CosmicStack;
@@ -61,7 +62,10 @@ use smithay::backend::renderer::{element::texture::TextureRenderElement, gles::G
 #[cfg(feature = "debug")]
 use tracing::debug;
 
-use super::{focus::FocusDirection, layout::floating::ResizeState};
+use super::{
+    focus::FocusDirection,
+    layout::{floating::ResizeState, tiling::Direction},
+};
 
 space_elements! {
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -224,6 +228,14 @@ impl CosmicMapped {
                 false
             }
         })
+    }
+
+    pub fn handle_move(&self, direction: Direction) -> MoveResult {
+        if let CosmicMappedInternal::Stack(stack) = &self.element {
+            stack.handle_move(direction)
+        } else {
+            MoveResult::Default
+        }
     }
 
     pub fn handle_focus(&self, direction: FocusDirection) -> bool {
@@ -453,6 +465,13 @@ impl CosmicMapped {
         }
     }
 
+    pub fn stack_ref_mut(&mut self) -> Option<&mut CosmicStack> {
+        match &mut self.element {
+            CosmicMappedInternal::Stack(stack) => Some(stack),
+            _ => None,
+        }
+    }
+
     pub fn convert_to_stack<'a>(
         &mut self,
         outputs: impl Iterator<Item = (&'a Output, Rectangle<i32, Logical>)>,
@@ -460,7 +479,7 @@ impl CosmicMapped {
         match &self.element {
             CosmicMappedInternal::Window(window) => {
                 let surface = window.surface();
-                let activated = surface.is_activated();
+                let activated = surface.is_activated(true);
                 let handle = window.loop_handle();
 
                 let stack = CosmicStack::new(std::iter::once(surface), handle);
@@ -494,7 +513,7 @@ impl CosmicMapped {
         for (output, overlap) in outputs {
             window.output_enter(output, overlap);
         }
-        window.set_activate(self.is_activated());
+        window.set_activate(self.is_activated(true));
         window.surface().send_configure();
         window.refresh();
 

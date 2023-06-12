@@ -4,8 +4,9 @@ use crate::{
     backend::render::{element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, GROUP_COLOR},
     shell::{
         element::{
-            stack::CosmicStackRenderElement, window::CosmicWindowRenderElement, CosmicMapped,
-            CosmicMappedRenderElement, CosmicStack, CosmicWindow,
+            stack::{CosmicStackRenderElement, MoveResult as StackMoveResult},
+            window::CosmicWindowRenderElement,
+            CosmicMapped, CosmicMappedRenderElement, CosmicStack, CosmicWindow,
         },
         focus::{
             target::{KeyboardFocusTarget, WindowGroup},
@@ -101,6 +102,13 @@ pub enum FocusResult {
     Some(KeyboardFocusTarget),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum MoveResult {
+    Done,
+    MoveFurther(KeyboardFocusTarget),
+    ShiftFocus(KeyboardFocusTarget),
+}
+
 #[derive(Debug, Clone, Default)]
 struct TreeQueue {
     trees: VecDeque<(Tree<Data>, Option<TilingBlocker>)>,
@@ -158,6 +166,12 @@ impl Data {
         match mapped {
             Some(m) => matches!(self, Data::Mapped { mapped, .. } if m == mapped),
             None => matches!(self, Data::Mapped { .. }),
+        }
+    }
+    fn is_stack(&self) -> bool {
+        match self {
+            Data::Mapped { mapped, .. } => mapped.is_stack(),
+            _ => false,
         }
     }
 
@@ -595,19 +609,57 @@ impl TilingLayout {
         &mut self,
         direction: Direction,
         seat: &Seat<State>,
-    ) -> Option<KeyboardFocusTarget> {
+    ) -> MoveResult {
         let output = seat.active_output();
         let queue = self.queues.get_mut(&output).unwrap();
         let mut tree = queue.trees.back().unwrap().0.copy_clone();
 
-        let (node_id, data) = TilingLayout::currently_focused_node(&mut tree, seat)?;
+        let Some((node_id, data)) = TilingLayout::currently_focused_node(&mut tree, seat) else {
+            return MoveResult::Done
+        };
+
+        // stacks may handle movement internally
+        if let FocusedNodeData::Window(window) = data.clone() {
+            match window.handle_move(direction) {
+                StackMoveResult::Handled => return MoveResult::Done,
+                StackMoveResult::MoveOut(surface, loop_handle) => {
+                    let mapped: CosmicMapped = CosmicWindow::new(surface, loop_handle).into();
+                    mapped.output_enter(&output, mapped.bbox());
+                    let orientation = match direction {
+                        Direction::Left | Direction::Right => Orientation::Vertical,
+                        Direction::Up | Direction::Down => Orientation::Horizontal,
+                    };
+
+                    let new_node = Node::new(Data::Mapped {
+                        mapped: mapped.clone(),
+                        last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
+                    });
+                    let new_id = tree.insert(new_node, InsertBehavior::AsRoot).unwrap();
+                    TilingLayout::new_group(&mut tree, &node_id, &new_id, orientation).unwrap();
+                    tree.make_nth_sibling(
+                        &new_id,
+                        match direction {
+                            Direction::Left | Direction::Up => 0,
+                            Direction::Right | Direction::Down => 1,
+                        },
+                    )
+                    .unwrap();
+                    *mapped.tiling_node_id.lock().unwrap() = Some(new_id);
+
+                    let blocker = TilingLayout::update_positions(&output, &mut tree, self.gaps);
+                    queue.push_tree(tree, blocker);
+                    return MoveResult::ShiftFocus(mapped.into());
+                }
+                StackMoveResult::Default => {} // continue normally
+            }
+        }
 
         let mut child_id = node_id.clone();
         // Without a parent to start with, just return
         let Some(og_parent) = tree.get(&node_id).unwrap().parent().cloned() else {
             return match data {
-                FocusedNodeData::Window(window) => Some(window.into()),
-                FocusedNodeData::Group(focus_stack, alive) => Some(WindowGroup {
+                FocusedNodeData::Window(window) => MoveResult::MoveFurther(window.into()),
+                FocusedNodeData::Group(focus_stack, alive) => MoveResult::MoveFurther(WindowGroup {
                     node: node_id,
                     output: output.downgrade(),
                     alive,
@@ -670,7 +722,7 @@ impl TilingLayout {
 
                 let blocker = TilingLayout::update_positions(&output, &mut tree, self.gaps);
                 queue.push_tree(tree, blocker);
-                return None;
+                return MoveResult::Done;
             }
 
             // now if the orientation matches
@@ -696,7 +748,7 @@ impl TilingLayout {
 
                 let blocker = TilingLayout::update_positions(&output, &mut tree, self.gaps);
                 queue.push_tree(tree, blocker);
-                return None;
+                return MoveResult::Done;
             }
 
             // we can maybe move inside the group, if we don't run out of elements
@@ -722,7 +774,40 @@ impl TilingLayout {
                     .nth(next_idx)
                     .unwrap()
                     .clone();
-                if tree.get(&next_child_id).unwrap().data().is_group() && len == 2 {
+
+                let result = if tree.get(&next_child_id).unwrap().data().is_stack()
+                    && tree.get(&node_id).unwrap().data().is_mapped(None)
+                    && !tree.get(&node_id).unwrap().data().is_stack()
+                {
+                    let node = tree
+                        .remove_node(node_id, RemoveBehavior::DropChildren)
+                        .unwrap();
+
+                    let stack_data = tree.get_mut(&next_child_id).unwrap().data_mut();
+                    let mut mapped = match stack_data {
+                        Data::Mapped { mapped, .. } => mapped.clone(),
+                        _ => unreachable!(),
+                    };
+                    let stack = mapped.stack_ref_mut().unwrap();
+
+                    let surface = match node.data() {
+                        Data::Mapped { mapped, .. } => mapped.active_window(),
+                        _ => unreachable!(),
+                    };
+                    stack.add_window(
+                        surface,
+                        match direction {
+                            Direction::Right => Some(0),
+                            _ => None,
+                        },
+                    );
+                    tree.get_mut(&og_parent)
+                        .unwrap()
+                        .data_mut()
+                        .remove_window(og_idx);
+
+                    MoveResult::ShiftFocus(mapped.into())
+                } else if tree.get(&next_child_id).unwrap().data().is_group() && len == 2 {
                     // if it is a group, we want to move into the group
                     tree.move_node(&node_id, MoveBehavior::ToParent(&next_child_id))
                         .unwrap();
@@ -783,6 +868,8 @@ impl TilingLayout {
                         .unwrap()
                         .data_mut()
                         .remove_window(og_idx);
+
+                    MoveResult::Done
                 } else if len == 2 && child_id == node_id {
                     // if we are just us two in the group, lets swap
                     tree.make_nth_sibling(&node_id, next_idx).unwrap();
@@ -791,6 +878,8 @@ impl TilingLayout {
                         .unwrap()
                         .data_mut()
                         .swap_windows(idx, next_idx);
+
+                    MoveResult::Done
                 } else {
                     // else we make a new fork
                     TilingLayout::new_group(&mut tree, &next_child_id, &node_id, orientation)
@@ -808,11 +897,13 @@ impl TilingLayout {
                         .unwrap()
                         .data_mut()
                         .remove_window(og_idx);
-                }
+
+                    MoveResult::Done
+                };
 
                 let blocker = TilingLayout::update_positions(&output, &mut tree, self.gaps);
                 queue.push_tree(tree, blocker);
-                return None;
+                return result;
             }
 
             // We have reached the end of our parent group, try to move out even higher.
@@ -821,8 +912,8 @@ impl TilingLayout {
         }
 
         match data {
-            FocusedNodeData::Window(window) => Some(window.into()),
-            FocusedNodeData::Group(focus_stack, alive) => Some(
+            FocusedNodeData::Window(window) => MoveResult::MoveFurther(window.into()),
+            FocusedNodeData::Group(focus_stack, alive) => MoveResult::MoveFurther(
                 WindowGroup {
                     node: node_id,
                     output: output.downgrade(),

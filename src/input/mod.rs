@@ -6,7 +6,7 @@ use crate::{
         focus::{target::PointerFocusTarget, FocusDirection},
         layout::{
             floating::SeatMoveGrabState,
-            tiling::{Direction, FocusResult},
+            tiling::{Direction, FocusResult, MoveResult},
         },
         OverviewMode, Workspace,
     }, // shell::grabs::SeatMoveGrabState
@@ -1048,53 +1048,55 @@ impl State {
                     return; // TODO, is this what we want? How do we indicate the switch?
                 }
 
-                if let Some(_move_further) =
-                    workspace.tiling_layer.move_current_node(direction, seat)
-                {
-                    // TODO: Being able to move Groups (move_further should be KeyboardFocusTarget instead)
-                    match (direction, self.common.config.static_conf.workspace_layout) {
-                        (Direction::Left, WorkspaceLayout::Horizontal)
-                        | (Direction::Up, WorkspaceLayout::Vertical) => self.handle_action(
-                            Action::MoveToPreviousWorkspace,
-                            seat,
-                            serial,
-                            time,
-                            mods,
-                            Some(direction),
-                        ),
-                        (Direction::Right, WorkspaceLayout::Horizontal)
-                        | (Direction::Down, WorkspaceLayout::Vertical) => self.handle_action(
-                            Action::MoveToNextWorkspace,
-                            seat,
-                            serial,
-                            time,
-                            mods,
-                            Some(direction),
-                        ),
-                        (Direction::Left, WorkspaceLayout::Vertical)
-                        | (Direction::Up, WorkspaceLayout::Horizontal) => self.handle_action(
-                            Action::MoveToPreviousOutput,
-                            seat,
-                            serial,
-                            time,
-                            mods,
-                            Some(direction),
-                        ),
-                        (Direction::Right, WorkspaceLayout::Vertical)
-                        | (Direction::Down, WorkspaceLayout::Horizontal) => self.handle_action(
-                            Action::MoveToNextOutput,
-                            seat,
-                            serial,
-                            time,
-                            mods,
-                            Some(direction),
-                        ),
+                match workspace.tiling_layer.move_current_node(direction, seat) {
+                    MoveResult::MoveFurther(_move_further) => {
+                        match (direction, self.common.config.static_conf.workspace_layout) {
+                            (Direction::Left, WorkspaceLayout::Horizontal)
+                            | (Direction::Up, WorkspaceLayout::Vertical) => self.handle_action(
+                                Action::MoveToPreviousWorkspace,
+                                seat,
+                                serial,
+                                time,
+                                mods,
+                                Some(direction),
+                            ),
+                            (Direction::Right, WorkspaceLayout::Horizontal)
+                            | (Direction::Down, WorkspaceLayout::Vertical) => self.handle_action(
+                                Action::MoveToNextWorkspace,
+                                seat,
+                                serial,
+                                time,
+                                mods,
+                                Some(direction),
+                            ),
+                            (Direction::Left, WorkspaceLayout::Vertical)
+                            | (Direction::Up, WorkspaceLayout::Horizontal) => self.handle_action(
+                                Action::MoveToPreviousOutput,
+                                seat,
+                                serial,
+                                time,
+                                mods,
+                                Some(direction),
+                            ),
+                            (Direction::Right, WorkspaceLayout::Vertical)
+                            | (Direction::Down, WorkspaceLayout::Horizontal) => self.handle_action(
+                                Action::MoveToNextOutput,
+                                seat,
+                                serial,
+                                time,
+                                mods,
+                                Some(direction),
+                            ),
+                        }
                     }
-                } else {
-                    let focus_stack = workspace.focus_stack.get(seat);
-                    if let Some(focused_window) = focus_stack.last() {
-                        if workspace.is_tiled(focused_window) {
-                            self.common.shell.set_overview_mode(Some(mods));
+                    MoveResult::ShiftFocus(shift) => {
+                        Common::set_focus(self, Some(&shift), seat, None);
+                    }
+                    MoveResult::Done => {
+                        if let Some(focused_window) = workspace.focus_stack.get(seat).last() {
+                            if workspace.is_tiled(focused_window) {
+                                self.common.shell.set_overview_mode(Some(mods));
+                            }
                         }
                     }
                 }
