@@ -466,7 +466,16 @@ impl TilingLayout {
             let last_active = focus_stack
                 .and_then(|focus_stack| TilingLayout::last_active_window(&mut tree, focus_stack));
 
-            if let Some((ref node_id, _last_active_window)) = last_active {
+            if let Some((ref node_id, mut last_active_window)) = last_active {
+                if window.is_window() && last_active_window.is_stack() {
+                    let surface = window.active_window();
+                    last_active_window
+                        .stack_ref_mut()
+                        .unwrap()
+                        .add_window(surface, None);
+                    return;
+                }
+
                 let orientation = {
                     let window_size = tree.get(node_id).unwrap().data().geometry().size;
                     if window_size.w > window_size.h {
