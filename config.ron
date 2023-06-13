@@ -43,6 +43,8 @@
         (modifiers: [Super], key: "j"): Focus(Down),
         (modifiers: [Super], key: "k"): Focus(Up),
         (modifiers: [Super], key: "l"): Focus(Right),
+        (modifiers: [Super], key: "u"): Focus(Out),
+        (modifiers: [Super], key: "i"): Focus(In),
 
         (modifiers: [Super, Shift], key: "Left"): Move(Left),
         (modifiers: [Super, Shift], key: "Right"): Move(Right),
