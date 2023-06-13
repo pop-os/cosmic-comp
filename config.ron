@@ -58,6 +58,7 @@
         
         (modifiers: [Super], key: "y"): ToggleTiling,
         (modifiers: [Super], key: "g"): ToggleWindowFloating,
+        (modifiers: [Super], key: "s"): ToggleStacking,
         
         (modifiers: [Super], key: "m"): Maximize,
 
