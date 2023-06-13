@@ -42,6 +42,7 @@ tracing = { version = "0.1.37", features = ["max_level_debug", "release_max_leve
 puffin = { version = "0.14.3", optional = true }
 puffin_egui = { version = "0.21.0", optional = true }
 cosmic-time = { git = "https://github.com/pop-os/cosmic-time", rev = "35dd0b8", default-features = false, features = ["libcosmic"] }
+once_cell = "1.18.0"
 
 [dependencies.id_tree]
 git = "https://github.com/Drakulix/id-tree.git"
@@ -77,3 +78,18 @@ lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
 smithay = { git = "https://github.com/smithay//smithay", rev = "43ce6b4372" }
+
+[patch."https://github.com/pop-os/libcosmic.git"]
+iced = { git = "https://github.com/pop-os/iced.git", branch = "runtime-state-operate" }
+iced_accessibility = { git = "https://github.com/pop-os/iced.git", branch = "runtime-state-operate" }
+iced_core = { git = "https://github.com/pop-os/iced.git", branch = "runtime-state-operate" }
+iced_futures = { git = "https://github.com/pop-os/iced.git", branch = "runtime-state-operate" }
+iced_graphics = { git = "https://github.com/pop-os/iced.git", branch = "runtime-state-operate" }
+iced_renderer = { git = "https://github.com/pop-os/iced.git", branch = "runtime-state-operate" }
+iced_runtime = { git = "https://github.com/pop-os/iced.git", branch = "runtime-state-operate" }
+iced_sctk = { git = "https://github.com/pop-os/iced.git", branch = "runtime-state-operate" }
+iced_style = { git = "https://github.com/pop-os/iced.git", branch = "runtime-state-operate" }
+iced_tiny_skia = { git = "https://github.com/pop-os/iced.git", branch = "runtime-state-operate" }
+iced_wgpu = { git = "https://github.com/pop-os/iced.git", branch = "runtime-state-operate" } 
+iced_widget = { git = "https://github.com/pop-os/iced.git", branch = "runtime-state-operate" } 
+iced_winit = { git = "https://github.com/pop-os/iced.git", branch = "runtime-state-operate" } 
