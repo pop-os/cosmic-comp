@@ -1,20 +1,25 @@
+use super::CosmicSurface;
 use crate::{
     shell::{focus::FocusDirection, layout::tiling::Direction, Shell},
     state::State,
-    utils::iced::{IcedElement, Program},
+    utils::iced::{tab_text::tab_text, IcedElement, Program},
     utils::prelude::SeatExt,
     wayland::handlers::screencopy::ScreencopySessions,
 };
 use apply::Apply;
 use calloop::LoopHandle;
 use cosmic::{
-    iced::widget as iced_widget,
-    iced_core::{alignment, renderer::BorderRadius, Background, Color, Length},
+    iced::{id::Id, widget as iced_widget},
+    iced_core::{alignment, renderer::BorderRadius, Background, Color, Length, Size as IcedSize},
     iced_runtime::Command,
-    iced_widget::rule::FillMode,
+    iced_widget::{
+        rule::FillMode,
+        scrollable::{AbsoluteOffset, Viewport},
+    },
     theme, widget as cosmic_widget, Element as CosmicElement,
 };
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
+use once_cell::sync::Lazy;
 use smithay::{
     backend::{
         input::KeyState,
@@ -46,18 +51,16 @@ use std::{
     },
 };
 
-use super::CosmicSurface;
+static SCROLLABLE_ID: Lazy<Id> = Lazy::new(|| Id::new("scrollable"));
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct CosmicStack(IcedElement<CosmicStackInternal>);
 
 impl fmt::Debug for CosmicStack {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.with_program(|stack| {
-            f.debug_struct("CosmicStack")
-                .field("internal", stack)
-                .finish_non_exhaustive()
-        })
+        f.debug_struct("CosmicStack")
+            .field("internal", &self.0)
+            .finish_non_exhaustive()
     }
 }
 
@@ -74,6 +77,7 @@ pub struct CosmicStackInternal {
     last_location: Arc<Mutex<Option<(Point<f64, Logical>, Serial, u32)>>>,
     geometry: Arc<Mutex<Option<Rectangle<i32, Logical>>>>,
     mask: Arc<Mutex<Option<tiny_skia::Mask>>>,
+    scrollable_offset: Arc<Mutex<Option<AbsoluteOffset>>>,
 }
 
 impl CosmicStackInternal {
@@ -88,6 +92,8 @@ impl CosmicStackInternal {
     pub fn current_focus(&self) -> Focus {
         unsafe { std::mem::transmute::<u8, Focus>(self.pointer_entered.load(Ordering::SeqCst)) }
     }
+
+    //pub fn offsets_for_tabs(&self) -> Vec<
 }
 
 const TAB_HEIGHT: i32 = 24;
@@ -133,6 +139,7 @@ impl CosmicStack {
                 last_location: Arc::new(Mutex::new(None)),
                 geometry: Arc::new(Mutex::new(None)),
                 mask: Arc::new(Mutex::new(None)),
+                scrollable_offset: Arc::new(Mutex::new(None)),
             },
             (width, TAB_HEIGHT),
             handle,
@@ -437,8 +444,11 @@ impl CosmicStack {
 #[derive(Debug, Clone, Copy)]
 pub enum Message {
     DragStart,
-    Activate(usize),
+    Activate(usize, Option<(f32, f32, f32)>),
     Close(usize),
+    ScrollForward(IcedSize),
+    ScrollBack,
+    Scrolled(Viewport),
 }
 
 impl Program for CosmicStackInternal {
@@ -462,17 +472,82 @@ impl Program for CosmicStackInternal {
                     }
                 }
             }
-            Message::Activate(idx) => {
+            Message::Activate(idx, offsets) => {
                 if self.windows.lock().unwrap().get(idx).is_some() {
                     let old = self.active.swap(idx, Ordering::SeqCst);
                     self.previous_keyboard.store(old, Ordering::SeqCst);
                     self.previous_pointer.store(old, Ordering::SeqCst);
+                }
+                if let Some((left_offset, right_offset, scroll_width)) = offsets {
+                    let current_offset = self
+                        .scrollable_offset
+                        .lock()
+                        .unwrap()
+                        .unwrap_or(AbsoluteOffset::default());
+                    let current_start = current_offset.x;
+                    let current_end = current_start + scroll_width;
+                    assert!((right_offset - left_offset) <= (current_end - current_start));
+                    if (left_offset - current_start).is_sign_negative()
+                        || (current_end - right_offset).is_sign_negative()
+                    {
+                        if (left_offset - current_start).abs() < (right_offset - current_end).abs()
+                        {
+                            let offset = AbsoluteOffset {
+                                x: left_offset,
+                                y: current_offset.y,
+                            };
+                            *self.scrollable_offset.lock().unwrap() = Some(offset);
+                            return iced_widget::scrollable::scroll_to::<Message>(
+                                SCROLLABLE_ID.clone(),
+                                offset,
+                            );
+                        } else {
+                            let offset = AbsoluteOffset {
+                                x: right_offset - scroll_width,
+                                y: current_offset.y,
+                            };
+                            *self.scrollable_offset.lock().unwrap() = Some(offset);
+                            return iced_widget::scrollable::scroll_to::<Message>(
+                                SCROLLABLE_ID.clone(),
+                                offset,
+                            );
+                        }
+                    }
                 }
             }
             Message::Close(idx) => {
                 if let Some(val) = self.windows.lock().unwrap().get(idx) {
                     val.close()
                 }
+            }
+            Message::Scrolled(viewport) => {
+                *self.scrollable_offset.lock().unwrap() = Some(viewport.absolute_offset());
+            }
+            Message::ScrollForward(bounds) => {
+                let mut offset = self
+                    .scrollable_offset
+                    .lock()
+                    .unwrap()
+                    .unwrap_or(AbsoluteOffset::default());
+                offset.x = (offset.x + 10.).min(bounds.width);
+                *self.scrollable_offset.lock().unwrap() = Some(offset);
+                return iced_widget::scrollable::scroll_to::<Message>(
+                    SCROLLABLE_ID.clone(),
+                    offset,
+                );
+            }
+            Message::ScrollBack => {
+                let mut offset = self
+                    .scrollable_offset
+                    .lock()
+                    .unwrap()
+                    .unwrap_or(AbsoluteOffset::default());
+                offset.x = (offset.x - 10.).max(0.0);
+                *self.scrollable_offset.lock().unwrap() = Some(offset);
+                return iced_widget::scrollable::scroll_to::<Message>(
+                    SCROLLABLE_ID.clone(),
+                    offset,
+                );
             }
         }
         Command::none()
@@ -489,7 +564,7 @@ impl Program for CosmicStackInternal {
         else {
             return iced_widget::row(Vec::new()).into();
         };
-        let tab_region = width - 128 - 8; // 64 left, 64 right + last rule with padding
+        let tab_region = width - 128 - 4; // 64 left, 64 right + last rule
         let active = self.active.load(Ordering::SeqCst);
         let activated = self.activated.load(Ordering::SeqCst);
         let group_focused = self.group_focused.load(Ordering::SeqCst);
@@ -515,7 +590,7 @@ impl Program for CosmicStackInternal {
             .into()];
 
         const ACTIVE_TAB_WIDTH: i32 = 140;
-        const MIN_TAB_WIDTH: i32 = 36;
+        const MIN_TAB_WIDTH: i32 = 38;
         let tab_width = if windows.len() == 1 {
             tab_region
         } else {
@@ -527,8 +602,11 @@ impl Program for CosmicStackInternal {
             }
         };
         let scrolling = tab_width < MIN_TAB_WIDTH;
+        let full_width = ACTIVE_TAB_WIDTH + (windows.len() as i32 - 1) * MIN_TAB_WIDTH;
+        let scroll_region = tab_region - 40;
 
         let mut tabs = Vec::new();
+        let mut offset = 0;
         for (i, window) in windows.iter().enumerate() {
             let mut tab_elements = Vec::new();
 
@@ -593,6 +671,7 @@ impl Program for CosmicStackInternal {
                         })
                         .horizontal_alignment(alignment::Horizontal::Left)
                         .vertical_alignment(alignment::Vertical::Center)
+                        .apply(tab_text)
                         .height(Length::Fill)
                         .width(text_width as u16)
                         .into(),
@@ -648,9 +727,18 @@ impl Program for CosmicStackInternal {
                         theme::Container::Transparent
                     })
                     .apply(iced_widget::mouse_area)
-                    .on_press(Message::Activate(i))
+                    .on_press(Message::Activate(
+                        i,
+                        scrolling.then_some((
+                            offset as f32,
+                            (offset + tab_width + 4) as f32,
+                            scroll_region as f32,
+                        )),
+                    ))
                     .into(),
-            )
+            );
+
+            offset += tab_width;
         }
 
         let last_was_active = active == windows.len() - 1;
@@ -686,29 +774,84 @@ impl Program for CosmicStackInternal {
                 .into(),
         );
 
-        let tabs =
-            iced_widget::row(tabs)
-                .apply(iced_widget::container)
-                .style(theme::Container::custom(|theme| {
-                    iced_widget::container::Appearance {
-                        text_color: None,
-                        background: Some(cosmic::iced::Background::Color(Color::from(
-                            theme.cosmic().palette.neutral_3,
-                        ))),
-                        border_radius: 0.0.into(),
-                        border_width: 0.0,
-                        border_color: Color::TRANSPARENT,
-                    }
-                }));
+        let tabs = iced_widget::row(tabs)
+            .apply(iced_widget::container)
+            .style(theme::Container::custom(|theme| {
+                iced_widget::container::Appearance {
+                    text_color: None,
+                    background: Some(cosmic::iced::Background::Color(Color::from(
+                        theme.cosmic().palette.neutral_3,
+                    ))),
+                    border_radius: 0.0.into(),
+                    border_width: 0.0,
+                    border_color: Color::TRANSPARENT,
+                }
+            }))
+            .height((TAB_HEIGHT - 1) as u16);
         if scrolling {
             elements.push(
-                iced_widget::Scrollable::new(tabs)
-                    .height(Length::Fill)
-                    .width(tab_region as u16)
+                iced_widget::vertical_rule(4)
+                    .style(theme::Rule::custom(|theme| iced_widget::rule::Appearance {
+                        color: theme.cosmic().palette.neutral_5.into(),
+                        width: 4,
+                        radius: 8.,
+                        fill_mode: FillMode::Padded(4),
+                    }))
                     .into(),
-            )
+            );
+            elements.push(
+                cosmic_widget::icon("go-previous-symbolic", 16)
+                    .force_svg(true)
+                    .style(theme::Svg::Symbolic)
+                    .apply(iced_widget::button)
+                    .style(theme::Button::Text)
+                    .on_press(Message::ScrollBack)
+                    .apply(iced_widget::container)
+                    .height(Length::Fill)
+                    .center_y()
+                    .into(),
+            );
+            elements.push(
+                iced_widget::Scrollable::new(tabs)
+                    .horizontal_scroll(
+                        iced_widget::scrollable::Properties::new()
+                            .margin(0.0)
+                            .scroller_width(1.0)
+                            .width(1.0),
+                    )
+                    .height(Length::Fill)
+                    .width(Length::Fill)
+                    .id(SCROLLABLE_ID.clone())
+                    .on_scroll(Message::Scrolled)
+                    .into(),
+            );
+            elements.push(
+                cosmic_widget::icon("go-next-symbolic", 16)
+                    .force_svg(true)
+                    .style(theme::Svg::Symbolic)
+                    .apply(iced_widget::button)
+                    .style(theme::Button::Text)
+                    .on_press(Message::ScrollForward(IcedSize {
+                        width: full_width as f32,
+                        height: TAB_HEIGHT as f32,
+                    }))
+                    .apply(iced_widget::container)
+                    .height(Length::Fill)
+                    .center_y()
+                    .into(),
+            );
+            elements.push(
+                iced_widget::vertical_rule(4)
+                    .style(theme::Rule::custom(|theme| iced_widget::rule::Appearance {
+                        color: theme.cosmic().palette.neutral_5.into(),
+                        width: 4,
+                        radius: 8.,
+                        fill_mode: FillMode::Padded(4),
+                    }))
+                    .into(),
+            );
         } else {
-            elements.push(tabs.into());
+            elements.push(tabs.width(tab_region as u16).into());
         }
 
         elements.push(

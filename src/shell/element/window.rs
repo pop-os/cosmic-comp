@@ -50,11 +50,9 @@ pub struct CosmicWindow(IcedElement<CosmicWindowInternal>);
 
 impl fmt::Debug for CosmicWindow {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.with_program(|window| {
-            f.debug_struct("CosmicWindow")
-                .field("internal", window)
-                .finish_non_exhaustive()
-        })
+        f.debug_struct("CosmicWindow")
+            .field("internal", &self.0)
+            .finish_non_exhaustive()
     }
 }
 
