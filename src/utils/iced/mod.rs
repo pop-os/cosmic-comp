@@ -28,6 +28,8 @@ use iced_tiny_skia::{
 };
 pub type Element<'a, Message> = cosmic::iced::Element<'a, Message, IcedRenderer>;
 
+pub mod tab_text;
+
 use ordered_float::OrderedFloat;
 use smithay::{
     backend::{
@@ -284,10 +286,8 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
                 &mut NullClipboard,
                 &mut self.debug,
             )
-            .1
-            .map(|command| command.actions());
+            .1;
 
-        let actions = actions.unwrap_or_default();
         actions
             .into_iter()
             .filter_map(|action| {
