@@ -1,4 +1,4 @@
-use std::{cell::RefCell, time::Duration};
+use std::time::Duration;
 
 use smithay::{
     backend::renderer::{
@@ -38,7 +38,7 @@ use smithay::{
     xwayland::{xwm::X11Relatable, X11Surface},
 };
 
-use crate::state::SurfaceDmabufFeedback;
+use crate::{state::SurfaceDmabufFeedback, wayland::handlers::decoration::PreferredDecorationMode};
 
 space_elements! {
     #[derive(Debug, Clone, PartialEq)]
@@ -195,22 +195,14 @@ impl CosmicSurface {
                 if enable {
                     let previous_decoration_state =
                         window.toplevel().current_state().decoration_mode.clone();
-                    window
-                        .user_data()
-                        .insert_if_missing(|| RefCell::new(Option::<DecorationMode>::None));
-                    *window
-                        .user_data()
-                        .get::<RefCell<Option<DecorationMode>>>()
-                        .unwrap()
-                        .borrow_mut() = previous_decoration_state;
+                    if PreferredDecorationMode::is_unset(window) {
+                        PreferredDecorationMode::update(window, previous_decoration_state);
+                    }
                     window.toplevel().with_pending_state(|pending| {
                         pending.decoration_mode = Some(DecorationMode::ServerSide);
                     });
                 } else {
-                    let previous_mode = window
-                        .user_data()
-                        .get::<RefCell<Option<DecorationMode>>>()
-                        .and_then(|m| m.borrow().clone());
+                    let previous_mode = PreferredDecorationMode::mode(window);
                     window.toplevel().with_pending_state(|pending| {
                         pending.decoration_mode = previous_mode;
                     });

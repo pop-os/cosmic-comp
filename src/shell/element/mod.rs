@@ -505,6 +505,8 @@ impl CosmicMapped {
         outputs: impl Iterator<Item = (&'a Output, Rectangle<i32, Logical>)>,
     ) {
         let handle = self.loop_handle();
+        surface.try_force_undecorated(false);
+        surface.set_tiled(false);
         let window = CosmicWindow::new(surface, handle);
 
         if let Some(geo) = self.last_geometry.lock().unwrap().clone() {

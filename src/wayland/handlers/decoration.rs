@@ -1,5 +1,8 @@
+use std::cell::RefCell;
+
 use smithay::{
     delegate_kde_decoration, delegate_xdg_decoration,
+    desktop::Window,
     reexports::{
         wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as XdgMode,
         wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration::{
@@ -21,6 +24,38 @@ use crate::{
     shell::{CosmicMapped, CosmicSurface},
     state::State,
 };
+
+pub struct PreferredDecorationMode(RefCell<Option<XdgMode>>);
+
+impl PreferredDecorationMode {
+    pub fn is_unset(window: &Window) -> bool {
+        window
+            .user_data()
+            .get::<PreferredDecorationMode>()
+            .is_none()
+    }
+
+    pub fn mode(window: &Window) -> Option<XdgMode> {
+        let user_data = window.user_data();
+        user_data.insert_if_missing(|| PreferredDecorationMode(RefCell::new(None)));
+        user_data
+            .get::<PreferredDecorationMode>()
+            .unwrap()
+            .0
+            .borrow()
+            .clone()
+    }
+
+    pub fn update(window: &Window, update: Option<XdgMode>) {
+        let user_data = window.user_data();
+        user_data.insert_if_missing(|| PreferredDecorationMode(RefCell::new(None)));
+        *user_data
+            .get::<PreferredDecorationMode>()
+            .unwrap()
+            .0
+            .borrow_mut() = update;
+    }
+}
 
 impl State {
     pub fn new_decoration(mapped: &CosmicMapped, surface: &WlSurface) -> KdeMode {
@@ -54,6 +89,7 @@ impl State {
             .windows()
             .find(|(window, _)| window.wl_surface().as_ref() == Some(surface))
         {
+            PreferredDecorationMode::update(&window, Some(mode));
             window.toplevel().with_pending_state(|state| {
                 state.decoration_mode = Some(mode);
             });
@@ -66,6 +102,7 @@ impl State {
             .windows()
             .find(|(window, _)| window.wl_surface().as_ref() == Some(surface))
         {
+            PreferredDecorationMode::update(&window, None);
             window.toplevel().with_pending_state(|state| {
                 state.decoration_mode = None;
             });

@@ -1217,6 +1217,8 @@ impl TilingLayout {
 
                         // map the rest
                         for other in surfaces {
+                            other.try_force_undecorated(false);
+                            other.set_tiled(false);
                             let window =
                                 CosmicMapped::from(CosmicWindow::new(other, handle.clone()));
                             window.output_enter(&output, window.bbox());
