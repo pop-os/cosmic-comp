@@ -657,14 +657,14 @@ impl Program for CosmicStackInternal {
             );
 
             tab_elements.push(
-                cosmic_widget::icon(app_id, 12)
+                cosmic_widget::icon(app_id, 16)
                     .apply(iced_widget::container)
                     .height(Length::Fill)
                     .center_y()
                     .into(),
             );
 
-            let text_width = tab_width - if tab_width > 125 { 72 } else { 40 };
+            let text_width = tab_width - if tab_width > 125 { 76 } else { 44 };
             if text_width > 0 {
                 tab_elements.push(
                     cosmic_widget::text(title)
@@ -690,6 +690,7 @@ impl Program for CosmicStackInternal {
                         .style(theme::Svg::Symbolic)
                         .apply(iced_widget::button)
                         .style(theme::Button::Text)
+                        .padding(0)
                         .on_press(Message::Close(i))
                         .apply(iced_widget::container)
                         .height(Length::Fill)
