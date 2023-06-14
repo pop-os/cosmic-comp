@@ -436,6 +436,11 @@ impl CosmicStack {
         })
     }
 
+    pub(in super::super) fn focus_stack(&self) {
+        self.0
+            .with_program(|p| p.group_focused.store(true, Ordering::SeqCst));
+    }
+
     pub(super) fn loop_handle(&self) -> LoopHandle<'static, crate::state::Data> {
         self.0.loop_handle()
     }

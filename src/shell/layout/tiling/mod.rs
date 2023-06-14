@@ -984,7 +984,12 @@ impl TilingLayout {
 
                     if let Some(id) = id {
                         return match tree.get(&id).unwrap().data() {
-                            Data::Mapped { mapped, .. } => FocusResult::Some(mapped.clone().into()),
+                            Data::Mapped { mapped, .. } => {
+                                if mapped.is_stack() {
+                                    mapped.stack_ref().unwrap().focus_stack();
+                                }
+                                FocusResult::Some(mapped.clone().into())
+                            }
                             Data::Group { alive, .. } => FocusResult::Some(
                                 WindowGroup {
                                     node: id,

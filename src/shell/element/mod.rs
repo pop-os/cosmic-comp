@@ -465,6 +465,13 @@ impl CosmicMapped {
         }
     }
 
+    pub fn stack_ref(&self) -> Option<&CosmicStack> {
+        match &self.element {
+            CosmicMappedInternal::Stack(stack) => Some(stack),
+            _ => None,
+        }
+    }
+
     pub fn stack_ref_mut(&mut self) -> Option<&mut CosmicStack> {
         match &mut self.element {
             CosmicMappedInternal::Stack(stack) => Some(stack),
