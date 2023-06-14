@@ -53,6 +53,7 @@ use smithay::{
         compositor::{CompositorClientState, CompositorState},
         data_device::DataDeviceState,
         dmabuf::{DmabufFeedback, DmabufState},
+        fractional_scale::{with_fractional_scale, FractionalScaleManagerState},
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState,
         output::OutputManagerState,
         presentation::PresentationState,
@@ -113,6 +114,7 @@ pub struct Common {
     pub compositor_state: CompositorState,
     pub data_device_state: DataDeviceState,
     pub dmabuf_state: DmabufState,
+    pub fractional_scale_state: FractionalScaleManagerState,
     pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
     pub output_state: OutputManagerState,
     pub output_configuration_state: OutputConfigurationState<State>,
@@ -244,6 +246,7 @@ impl State {
         let compositor_state = CompositorState::new::<Self>(dh);
         let data_device_state = DataDeviceState::new::<Self>(dh);
         let dmabuf_state = DmabufState::new();
+        let fractional_scale_state = FractionalScaleManagerState::new::<State>(dh);
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<Self>(dh);
         let output_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
         let output_configuration_state = OutputConfigurationState::new(dh, |_| true);
@@ -292,6 +295,7 @@ impl State {
                 compositor_state,
                 data_device_state,
                 dmabuf_state,
+                fractional_scale_state,
                 screencopy_state,
                 shm_state,
                 seat_state,
@@ -450,7 +454,7 @@ impl Common {
             if outputs_for_element.contains(&output) {
                 let window = mapped.active_window();
                 window.with_surfaces(|surface, states| {
-                    update_surface_primary_scanout_output(
+                    let primary_scanout_output = update_surface_primary_scanout_output(
                         surface,
                         output,
                         states,
@@ -468,6 +472,12 @@ impl Common {
                             }
                         },
                     );
+                    if let Some(output) = primary_scanout_output {
+                        with_fractional_scale(states, |fraction_scale| {
+                            fraction_scale
+                                .set_preferred_scale(output.current_scale().fractional_scale());
+                        });
+                    }
                 });
                 window.send_frame(output, time, throttle, surface_primary_scanout_output);
                 if let Some(feedback) = window
@@ -504,13 +514,19 @@ impl Common {
         self.shell.override_redirect_windows.iter().for_each(|or| {
             if let Some(wl_surface) = or.wl_surface() {
                 with_surfaces_surface_tree(&wl_surface, |surface, states| {
-                    update_surface_primary_scanout_output(
+                    let primary_scanout_output = update_surface_primary_scanout_output(
                         surface,
                         output,
                         states,
                         render_element_states,
                         default_primary_scanout_output_compare,
                     );
+                    if let Some(output) = primary_scanout_output {
+                        with_fractional_scale(states, |fraction_scale| {
+                            fraction_scale
+                                .set_preferred_scale(output.current_scale().fractional_scale());
+                        });
+                    }
                 });
                 send_frames_surface_tree(
                     &wl_surface,
@@ -542,13 +558,19 @@ impl Common {
         let map = smithay::desktop::layer_map_for_output(output);
         for layer_surface in map.layers() {
             layer_surface.with_surfaces(|surface, states| {
-                update_surface_primary_scanout_output(
+                let primary_scanout_output = update_surface_primary_scanout_output(
                     surface,
                     output,
                     states,
                     render_element_states,
                     default_primary_scanout_output_compare,
                 );
+                if let Some(output) = primary_scanout_output {
+                    with_fractional_scale(states, |fraction_scale| {
+                        fraction_scale
+                            .set_preferred_scale(output.current_scale().fractional_scale());
+                    });
+                }
             });
             layer_surface.send_frame(output, time, throttle, surface_primary_scanout_output);
             if let Some(feedback) =
