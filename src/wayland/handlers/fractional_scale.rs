@@ -22,34 +22,35 @@ impl FractionalScaleHandler for State {
         // If all the above tests do not lead to a output we just use the active output
         // of the last active seat (which will also be the output a toplevel will
         // initially be placed on)
-        let mut root = surface.clone();
-        while let Some(parent) = get_parent(&root) {
-            root = parent;
-        }
+        let output = with_states(&surface, |states| {
+            surface_primary_scanout_output(&surface, states)
+        })
+        .or_else(|| {
+            let mut root = surface.clone();
+            while let Some(parent) = get_parent(&root) {
+                root = parent;
+            }
+
+            (root != surface)
+                .then(|| {
+                    with_states(&root, |states| {
+                        surface_primary_scanout_output(&root, states)
+                    })
+                })
+                .flatten()
+                .or_else(|| {
+                    self.common
+                        .shell
+                        .visible_outputs_for_surface(&surface)
+                        .next()
+                })
+        })
+        .unwrap_or_else(|| {
+            let seat = self.common.last_active_seat();
+            seat.active_output()
+        });
 
         with_states(&surface, |states| {
-            let output = surface_primary_scanout_output(&surface, states)
-                .or_else(|| {
-                    if root != surface {
-                        with_states(&root, |states| {
-                            surface_primary_scanout_output(&root, states).or_else(|| {
-                                self.common
-                                    .shell
-                                    .visible_outputs_for_surface(&surface)
-                                    .next()
-                            })
-                        })
-                    } else {
-                        self.common
-                            .shell
-                            .visible_outputs_for_surface(&surface)
-                            .next()
-                    }
-                })
-                .unwrap_or_else(|| {
-                    let seat = self.common.last_active_seat();
-                    seat.active_output()
-                });
             with_fractional_scale(states, |fractional_scale| {
                 fractional_scale.set_preferred_scale(output.current_scale().fractional_scale());
             });
