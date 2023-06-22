@@ -78,10 +78,11 @@ where
     fn layout(&self, renderer: &Renderer, limits: &Limits) -> Node {
         let limits = limits.width(self.width).height(self.height);
         let child_limits = Limits::new(
-            Size::new(limits.min().width, limits.min().height),
-            Size::new(limits.max().width * 2., limits.max().height),
+            Size::new(limits.min().width, limits.min().height - 4.),
+            Size::new(limits.max().width * 2., limits.max().height - 4.),
         );
-        let content = self.text.as_widget().layout(renderer, &child_limits);
+        let mut content = self.text.as_widget().layout(renderer, &child_limits);
+        content.move_to(Point::new(0., 2.));
         let size = limits.resolve(content.size());
 
         Node::with_children(size, vec![content])

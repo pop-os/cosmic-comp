@@ -28,8 +28,6 @@ use iced_tiny_skia::{
 };
 pub type Element<'a, Message> = cosmic::iced::Element<'a, Message, IcedRenderer>;
 
-pub mod tab_text;
-
 use ordered_float::OrderedFloat;
 use smithay::{
     backend::{
