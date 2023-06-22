@@ -10,7 +10,7 @@ use apply::Apply;
 use calloop::LoopHandle;
 use cosmic::{
     iced::{id::Id, widget as iced_widget},
-    iced_core::{renderer::BorderRadius, Background, Color, Length},
+    iced_core::{Background, BorderRadius, Color, Length},
     iced_runtime::Command,
     iced_widget::scrollable::AbsoluteOffset,
     theme, widget as cosmic_widget, Element as CosmicElement,

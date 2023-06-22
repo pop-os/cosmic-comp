@@ -16,7 +16,7 @@ use cosmic::{
             tree::Tree,
             Widget,
         },
-        Clipboard, Color, Length, Point, Rectangle, Shell, Size,
+        Clipboard, Color, Length, Rectangle, Shell, Size,
     },
     iced_style::{
         button::StyleSheet as ButtonStyleSheet, container::StyleSheet as ContainerStyleSheet,
@@ -41,19 +41,19 @@ impl Into<theme::Rule> for TabRuleTheme {
             Self::ActiveActivated => theme::Rule::custom(|theme| widget::rule::Appearance {
                 color: theme.cosmic().accent_color().into(),
                 width: 4,
-                radius: 0.,
+                radius: 0.0.into(),
                 fill_mode: FillMode::Full,
             }),
             Self::ActiveDeactivated => theme::Rule::custom(|theme| widget::rule::Appearance {
                 color: theme.cosmic().palette.neutral_5.into(),
                 width: 4,
-                radius: 0.,
+                radius: 0.0.into(),
                 fill_mode: FillMode::Full,
             }),
             Self::Default => theme::Rule::custom(|theme| widget::rule::Appearance {
                 color: theme.cosmic().palette.neutral_5.into(),
                 width: 4,
-                radius: 8.,
+                radius: 8.0.into(),
                 fill_mode: FillMode::Padded(4),
             }),
         }
@@ -322,7 +322,7 @@ where
         tree: &mut Tree,
         event: event::Event,
         layout: Layout<'_>,
-        cursor_position: Point,
+        cursor: mouse::Cursor,
         renderer: &Renderer,
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
@@ -337,7 +337,7 @@ where
                     state,
                     event.clone(),
                     layout,
-                    cursor_position,
+                    cursor,
                     renderer,
                     clipboard,
                     shell,
@@ -346,7 +346,7 @@ where
             .fold(event::Status::Ignored, event::Status::merge);
 
         if status == event::Status::Ignored
-            && layout.bounds().contains(cursor_position)
+            && cursor.is_over(layout.bounds())
             && matches!(
                 event,
                 event::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
@@ -363,7 +363,7 @@ where
         &self,
         tree: &Tree,
         layout: Layout<'_>,
-        cursor_position: Point,
+        cursor: mouse::Cursor,
         viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
@@ -372,13 +372,9 @@ where
             .zip(&tree.children)
             .zip(layout.children())
             .map(|((child, state), layout)| {
-                child.as_widget().mouse_interaction(
-                    state,
-                    layout,
-                    cursor_position,
-                    viewport,
-                    renderer,
-                )
+                child
+                    .as_widget()
+                    .mouse_interaction(state, layout, cursor, viewport, renderer)
             })
             .max()
             .unwrap_or_default()
@@ -391,7 +387,7 @@ where
         theme: &Renderer::Theme,
         renderer_style: &renderer::Style,
         layout: Layout<'_>,
-        cursor_position: Point,
+        cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
         let style = theme.appearance(&self.background);
@@ -412,7 +408,7 @@ where
                     text_color: style.text_color.unwrap_or(renderer_style.text_color),
                 },
                 layout,
-                cursor_position,
+                cursor,
                 viewport,
             );
         }

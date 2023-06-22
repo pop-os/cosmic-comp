@@ -9,7 +9,7 @@ use cosmic::{
     iced::{
         event::Event,
         keyboard::{Event as KeyboardEvent, Modifiers as IcedModifiers},
-        mouse::{Button as MouseButton, Event as MouseEvent, ScrollDelta},
+        mouse::{Button as MouseButton, Cursor, Event as MouseEvent, ScrollDelta},
         window::{Event as WindowEvent, Id},
         Command, Point as IcedPoint, Rectangle as IcedRectangle, Size as IcedSize,
     },
@@ -268,14 +268,18 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
             return Vec::new();
         }
 
-        let cursor_pos = self.cursor_pos.unwrap_or(Point::from((-1.0, -1.0)));
+        let cursor = self
+            .cursor_pos
+            .map(|p| IcedPoint::new(p.x as f32, p.y as f32))
+            .map(Cursor::Available)
+            .unwrap_or(Cursor::Unavailable);
 
         let actions = self
             .state
             .update(
                 Id(0),
                 IcedSize::new(self.size.w as f32, self.size.h as f32),
-                IcedPoint::new(cursor_pos.x as f32, cursor_pos.y as f32),
+                cursor,
                 &mut self.renderer,
                 &self.theme,
                 &Style {
@@ -353,7 +357,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
             0x110 => MouseButton::Left,
             0x111 => MouseButton::Right,
             0x112 => MouseButton::Middle,
-            x => MouseButton::Other(x as u8),
+            x => MouseButton::Other(x as u16),
         };
         internal.state.queue_event(Event::Mouse(match event.state {
             ButtonState::Pressed => MouseEvent::ButtonPressed(button),

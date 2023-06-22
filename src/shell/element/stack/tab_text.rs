@@ -2,6 +2,7 @@ use cosmic::{
     iced::Element,
     iced_core::{
         layout::{Layout, Limits, Node},
+        mouse::Cursor,
         renderer,
         widget::{Tree, Widget},
         Length, Point, Rectangle, Size,
@@ -95,7 +96,7 @@ where
         theme: &Renderer::Theme,
         style: &renderer::Style,
         layout: Layout<'_>,
-        cursor_position: Point,
+        cursor: Cursor,
         _viewport: &Rectangle,
     ) {
         let bounds = layout.bounds();
@@ -108,7 +109,7 @@ where
                 theme,
                 style,
                 content_layout,
-                cursor_position,
+                cursor,
                 &bounds,
             );
         });

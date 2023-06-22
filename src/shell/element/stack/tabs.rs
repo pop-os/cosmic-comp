@@ -398,7 +398,7 @@ where
         theme: &<Renderer as cosmic::iced_core::Renderer>::Theme,
         style: &renderer::Style,
         layout: Layout<'_>,
-        cursor_position: Point,
+        cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
         let state = tree.state.downcast_ref::<State>();
@@ -448,15 +448,9 @@ where
                 .zip(&tree.children)
                 .zip(layout.children())
             {
-                scroll.as_widget().draw(
-                    state,
-                    renderer,
-                    theme,
-                    style,
-                    layout,
-                    cursor_position,
-                    viewport,
-                );
+                scroll
+                    .as_widget()
+                    .draw(state, renderer, theme, style, layout, cursor, viewport);
             }
         }
 
@@ -467,13 +461,18 @@ where
                     .zip(tree.children.iter().skip(2))
                     .zip(layout.children().skip(2))
                 {
+                    let cursor = match cursor {
+                        mouse::Cursor::Available(point) => mouse::Cursor::Available(point + offset),
+                        mouse::Cursor::Unavailable => mouse::Cursor::Unavailable,
+                    };
+
                     tab.as_widget().draw(
                         state,
                         renderer,
                         theme,
                         style,
                         layout,
-                        cursor_position + offset,
+                        cursor,
                         &offset_viewport,
                     );
                 }
@@ -485,7 +484,7 @@ where
             theme,
             style,
             layout.children().nth(self.elements.len() - 3).unwrap(),
-            cursor_position,
+            cursor,
             viewport,
         );
 
@@ -497,7 +496,7 @@ where
                 theme,
                 style,
                 layout.children().nth(2).unwrap().children().nth(0).unwrap(),
-                cursor_position,
+                cursor,
                 viewport,
             );
             self.elements[self.elements.len() - 1].as_widget().draw(
@@ -506,7 +505,7 @@ where
                 theme,
                 style,
                 layout.children().nth(self.elements.len() - 3).unwrap(),
-                cursor_position,
+                cursor,
                 viewport,
             );
         }
@@ -519,15 +518,9 @@ where
                 .zip(tree.children.iter().skip(self.elements.len() - 2))
                 .zip(layout.children().skip(self.elements.len() - 2))
             {
-                scroll.as_widget().draw(
-                    state,
-                    renderer,
-                    theme,
-                    style,
-                    layout,
-                    cursor_position,
-                    viewport,
-                );
+                scroll
+                    .as_widget()
+                    .draw(state, renderer, theme, style, layout, cursor, viewport);
             }
         }
     }
@@ -561,7 +554,7 @@ where
         tree: &mut Tree,
         event: event::Event,
         layout: Layout<'_>,
-        cursor_position: Point,
+        cursor: mouse::Cursor,
         renderer: &Renderer,
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
@@ -621,7 +614,12 @@ where
         let mut internal_shell = Shell::new(&mut messages);
 
         let len = self.elements.len();
-        let result = if scrolling && cursor_position.x < bounds.x {
+        let result = if scrolling
+            && cursor
+                .position()
+                .map(|pos| pos.x < bounds.x)
+                .unwrap_or(false)
+        {
             self.elements[0..2]
                 .iter_mut()
                 .zip(&mut tree.children)
@@ -631,14 +629,19 @@ where
                         state,
                         event.clone(),
                         layout,
-                        cursor_position,
+                        cursor,
                         renderer,
                         clipboard,
                         &mut internal_shell,
                     )
                 })
                 .fold(event::Status::Ignored, event::Status::merge)
-        } else if scrolling && cursor_position.x >= bounds.x + bounds.width {
+        } else if scrolling
+            && cursor
+                .position()
+                .map(|pos| pos.x >= bounds.x + bounds.width)
+                .unwrap_or(false)
+        {
             self.elements[len - 3..len]
                 .iter_mut()
                 .zip(tree.children.iter_mut().skip(len - 3))
@@ -648,7 +651,7 @@ where
                         state,
                         event.clone(),
                         layout,
-                        cursor_position,
+                        cursor,
                         renderer,
                         clipboard,
                         &mut internal_shell,
@@ -661,11 +664,16 @@ where
                 .zip(tree.children.iter_mut().skip(2))
                 .zip(layout.children().skip(2))
                 .map(|((child, state), layout)| {
+                    let cursor = match cursor {
+                        mouse::Cursor::Available(point) => mouse::Cursor::Available(point + offset),
+                        mouse::Cursor::Unavailable => mouse::Cursor::Unavailable,
+                    };
+
                     child.as_widget_mut().on_event(
                         state,
                         event.clone(),
                         layout,
-                        cursor_position + offset,
+                        cursor,
                         renderer,
                         clipboard,
                         &mut internal_shell,
@@ -694,7 +702,7 @@ where
         &self,
         tree: &Tree,
         layout: Layout<'_>,
-        cursor_position: Point,
+        cursor: mouse::Cursor,
         viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
@@ -718,34 +726,36 @@ where
             ..bounds
         };
 
-        if scrolling && cursor_position.x < bounds.x {
+        if scrolling
+            && cursor
+                .position()
+                .map(|pos| pos.x < bounds.x)
+                .unwrap_or(false)
+        {
             self.elements[0..2]
                 .iter()
                 .zip(&tree.children)
                 .zip(layout.children())
                 .map(|((child, state), layout)| {
-                    child.as_widget().mouse_interaction(
-                        state,
-                        layout,
-                        cursor_position,
-                        viewport,
-                        renderer,
-                    )
+                    child
+                        .as_widget()
+                        .mouse_interaction(state, layout, cursor, viewport, renderer)
                 })
                 .max()
-        } else if scrolling && cursor_position.x >= bounds.x + bounds.width {
+        } else if scrolling
+            && cursor
+                .position()
+                .map(|pos| pos.x >= bounds.x + bounds.width)
+                .unwrap_or(false)
+        {
             self.elements[self.elements.len() - 3..self.elements.len()]
                 .iter()
                 .zip(tree.children.iter().skip(self.elements.len() - 3))
                 .zip(layout.children().skip(self.elements.len() - 3))
                 .map(|((child, state), layout)| {
-                    child.as_widget().mouse_interaction(
-                        state,
-                        layout,
-                        cursor_position,
-                        viewport,
-                        renderer,
-                    )
+                    child
+                        .as_widget()
+                        .mouse_interaction(state, layout, cursor, viewport, renderer)
                 })
                 .max()
         } else {
@@ -754,10 +764,15 @@ where
                 .zip(tree.children.iter().skip(2))
                 .zip(layout.children().skip(2))
                 .map(|((child, state), layout)| {
+                    let cursor = match cursor {
+                        mouse::Cursor::Available(point) => mouse::Cursor::Available(point + offset),
+                        mouse::Cursor::Unavailable => mouse::Cursor::Unavailable,
+                    };
+
                     child.as_widget().mouse_interaction(
                         state,
                         layout,
-                        cursor_position + offset,
+                        cursor,
                         offset_viewport,
                         renderer,
                     )
