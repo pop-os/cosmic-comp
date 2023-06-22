@@ -1,6 +1,11 @@
 use calloop::LoopHandle;
 use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, collections::HashMap, time::Instant};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    sync::atomic::{AtomicBool, Ordering},
+    time::Instant,
+};
 use tracing::warn;
 
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State as WState;
@@ -954,11 +959,23 @@ impl Shell {
         &'a self,
         surface: &'a WlSurface,
     ) -> impl Iterator<Item = Output> + 'a {
-        match self.outputs.iter().find(|o| {
-            let map = layer_map_for_output(o);
-            map.layer_for_surface(surface, WindowSurfaceType::ALL)
-                .is_some()
-        }) {
+        match self
+            .outputs
+            .iter()
+            .find(|o| {
+                let map = layer_map_for_output(o);
+                map.layer_for_surface(surface, WindowSurfaceType::ALL)
+                    .is_some()
+            })
+            .or_else(|| {
+                self.pending_layers.iter().find_map(|(l, output, _)| {
+                    let found = AtomicBool::new(false);
+                    l.with_surfaces(|s, _| {
+                        found.fetch_or(s == surface, Ordering::SeqCst);
+                    });
+                    found.load(Ordering::SeqCst).then_some(output)
+                })
+            }) {
             Some(output) => {
                 Box::new(std::iter::once(output.clone())) as Box<dyn Iterator<Item = Output>>
             }
