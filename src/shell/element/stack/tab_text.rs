@@ -1,11 +1,12 @@
 use cosmic::{
     iced::Element,
     iced_core::{
+        gradient,
         layout::{Layout, Limits, Node},
         mouse::Cursor,
         renderer,
         widget::{Tree, Widget},
-        Length, Point, Rectangle, Size,
+        Background, Color, Degrees, Gradient, Length, Point, Rectangle, Size,
     },
     iced_widget::text::StyleSheet as TextStyleSheet,
 };
@@ -16,6 +17,7 @@ where
     Renderer::Theme: TextStyleSheet,
 {
     text: Element<'a, Message, Renderer>,
+    background: Color,
     height: Length,
     width: Length,
 }
@@ -27,7 +29,7 @@ where
     Renderer: cosmic::iced_core::Renderer,
     Renderer::Theme: TextStyleSheet,
 {
-    TabText::new(text)
+    TabText::new(text, Color::TRANSPARENT)
 }
 
 impl<'a, Message, Renderer> TabText<'a, Message, Renderer>
@@ -35,12 +37,18 @@ where
     Renderer: cosmic::iced_core::Renderer,
     Renderer::Theme: TextStyleSheet,
 {
-    pub fn new(text: impl Into<Element<'a, Message, Renderer>>) -> Self {
+    pub fn new(text: impl Into<Element<'a, Message, Renderer>>, background: Color) -> Self {
         TabText {
             width: Length::Shrink,
             height: Length::Shrink,
+            background,
             text: text.into(),
         }
+    }
+
+    pub fn background(mut self, background: Color) -> Self {
+        self.background = background;
+        self
     }
 
     pub fn width(mut self, width: impl Into<Length>) -> Self {
@@ -113,6 +121,28 @@ where
                 &bounds,
             );
         });
+
+        let gradient_bounds = Rectangle {
+            x: (bounds.x + bounds.width - 24.).max(bounds.x),
+            width: 24.0_f32.min(bounds.width),
+            ..bounds
+        };
+
+        let mut transparent_background = self.background.clone();
+        transparent_background.a = 0.0;
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds: gradient_bounds,
+                border_radius: 0.0.into(),
+                border_width: 0.0,
+                border_color: Color::TRANSPARENT,
+            },
+            Background::Gradient(Gradient::Linear(
+                gradient::Linear::new(Degrees(180.))
+                    .add_stop(0.0, transparent_background)
+                    .add_stop(1.0, self.background),
+            )),
+        );
     }
 }
 

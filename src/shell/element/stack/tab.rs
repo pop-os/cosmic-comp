@@ -66,26 +66,33 @@ pub(super) enum TabBackgroundTheme {
     Default,
 }
 
+impl TabBackgroundTheme {
+    fn background_color(&self) -> Color {
+        match self {
+            TabBackgroundTheme::ActiveActivated => Color::from_rgba(0.365, 0.365, 0.365, 1.0),
+            TabBackgroundTheme::ActiveDeactivated => Color::from_rgba(0.365, 0.365, 0.365, 1.0),
+            TabBackgroundTheme::Default => Color::from_rgba(0.26, 0.26, 0.26, 1.0),
+        }
+    }
+}
+
 impl Into<theme::Container> for TabBackgroundTheme {
     fn into(self) -> theme::Container {
+        let background_color = cosmic::iced::Background::Color(self.background_color());
         match self {
             Self::ActiveActivated => {
-                theme::Container::custom(|theme| widget::container::Appearance {
+                theme::Container::custom(move |theme| widget::container::Appearance {
                     text_color: Some(Color::from(theme.cosmic().accent_text_color())),
-                    background: Some(cosmic::iced::Background::Color(Color::from_rgba(
-                        1.0, 1.0, 1.0, 0.1,
-                    ))),
+                    background: Some(background_color),
                     border_radius: 0.0.into(),
                     border_width: 0.0,
                     border_color: Color::TRANSPARENT,
                 })
             }
             Self::ActiveDeactivated => {
-                theme::Container::custom(|_theme| widget::container::Appearance {
+                theme::Container::custom(move |_theme| widget::container::Appearance {
                     text_color: None,
-                    background: Some(cosmic::iced::Background::Color(Color::from_rgba(
-                        1.0, 1.0, 1.0, 0.1,
-                    ))),
+                    background: Some(background_color),
                     border_radius: 0.0.into(),
                     border_width: 0.0,
                     border_color: Color::TRANSPARENT,
@@ -199,6 +206,7 @@ impl<'a, Message: TabMessage> Tab<'a, Message> {
                 .horizontal_alignment(alignment::Horizontal::Left)
                 .vertical_alignment(alignment::Vertical::Center)
                 .apply(tab_text)
+                .background(self.background_theme.background_color())
                 .height(Length::Fill)
                 .width(Length::Fill)
                 .into(),
