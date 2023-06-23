@@ -157,6 +157,12 @@ impl CosmicStack {
         window.try_force_undecorated(true);
         window.set_tiled(true);
         self.0.with_program(|p| {
+            if let Some(mut geo) = p.geometry.lock().unwrap().clone() {
+                geo.loc.y += TAB_HEIGHT;
+                geo.size.h -= TAB_HEIGHT;
+                window.set_geometry(geo);
+            }
+            window.send_configure();
             if let Some(idx) = idx {
                 p.windows.lock().unwrap().insert(idx, window);
                 p.active.store(idx, Ordering::SeqCst);
