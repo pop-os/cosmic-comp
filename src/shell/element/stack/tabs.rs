@@ -26,6 +26,8 @@ use cosmic::{
     theme,
     widget::{icon, Icon},
 };
+use cosmic_time::{Cubic, Ease, Tween};
+use std::time::{Duration, Instant};
 
 pub struct Tabs<'a, Message, Renderer>
 where
@@ -40,10 +42,18 @@ where
     scroll_to: Option<usize>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ScrollAnimationState {
+    start_time: Instant,
+    start: Offset,
+    end: Offset,
+}
+
 /// The local state of [`Tabs`].
 #[derive(Debug, Clone, Copy)]
 pub struct State {
     offset_x: Offset,
+    scroll_animation: Option<ScrollAnimationState>,
     scroll_to: Option<usize>,
 }
 
@@ -53,7 +63,13 @@ impl Scrollable for State {
     }
 
     fn scroll_to(&mut self, offset: AbsoluteOffset) {
-        self.offset_x = Offset::Absolute(offset.x.max(0.0));
+        let new_offset = Offset::Absolute(offset.x.max(0.0));
+        self.scroll_animation = Some(ScrollAnimationState {
+            start_time: Instant::now(),
+            start: self.offset_x,
+            end: new_offset,
+        });
+        self.offset_x = new_offset;
     }
 }
 
@@ -61,6 +77,7 @@ impl Default for State {
     fn default() -> Self {
         State {
             offset_x: Offset::Absolute(0.),
+            scroll_animation: None,
             scroll_to: None,
         }
     }
@@ -80,6 +97,8 @@ impl Offset {
         }
     }
 }
+
+const ANIMATION_DURATION: Duration = Duration::from_millis(200);
 
 impl<'a, Message, Renderer> Tabs<'a, Message, Renderer>
 where
@@ -210,10 +229,38 @@ where
 
 impl State {
     pub fn offset(&self, bounds: Rectangle, content_bounds: Size) -> Vector {
-        Vector::new(
-            self.offset_x.absolute(bounds.width, content_bounds.width),
-            0.,
-        )
+        if let Some(animation) = self.scroll_animation {
+            let percentage = {
+                let percentage = (Instant::now()
+                    .duration_since(animation.start_time)
+                    .as_millis() as f32
+                    / ANIMATION_DURATION.as_millis() as f32)
+                    .min(1.0);
+
+                Ease::Cubic(Cubic::InOut).tween(percentage)
+            };
+
+            Vector::new(
+                animation.start.absolute(bounds.width, content_bounds.width)
+                    + (animation.end.absolute(bounds.width, content_bounds.width)
+                        - animation.start.absolute(bounds.width, content_bounds.width))
+                        * percentage,
+                0.,
+            )
+        } else {
+            Vector::new(
+                self.offset_x.absolute(bounds.width, content_bounds.width),
+                0.,
+            )
+        }
+    }
+
+    pub fn cleanup_old_animations(&mut self) {
+        if let Some(animation) = self.scroll_animation.as_ref() {
+            if Instant::now().duration_since(animation.start_time) > ANIMATION_DURATION {
+                self.scroll_animation.take();
+            }
+        }
     }
 }
 
@@ -533,6 +580,7 @@ where
         operation: &mut dyn Operation<OperationOutputWrapper<Message>>,
     ) {
         let state = tree.state.downcast_mut::<State>();
+        state.cleanup_old_animations();
 
         operation.scrollable(state, self.id.as_ref());
 
@@ -560,6 +608,7 @@ where
         shell: &mut Shell<'_, Message>,
     ) -> event::Status {
         let state = tree.state.downcast_mut::<State>();
+        state.cleanup_old_animations();
 
         let mut bounds = layout.bounds();
         let content_bounds = layout.children().fold(Size::new(0., 0.), |a, b| Size {
@@ -590,7 +639,7 @@ where
                 if (left_offset - current_start).is_sign_negative()
                     || (current_end - right_offset).is_sign_negative()
                 {
-                    let offset = if (left_offset - current_start).abs()
+                    let new_offset = if (left_offset - current_start).abs()
                         < (right_offset - current_end).abs()
                     {
                         AbsoluteOffset {
@@ -604,7 +653,12 @@ where
                         }
                     };
 
-                    state.offset_x = Offset::Absolute(offset.x);
+                    state.scroll_animation = Some(ScrollAnimationState {
+                        start_time: Instant::now(),
+                        start: Offset::Absolute(offset.x),
+                        end: Offset::Absolute(new_offset.x),
+                    });
+                    state.offset_x = Offset::Absolute(new_offset.x);
                 }
             }
             shell.publish(Message::scrolled());
