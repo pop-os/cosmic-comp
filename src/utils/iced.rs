@@ -144,6 +144,48 @@ struct IcedElementInternal<P: Program + Send + 'static> {
     rx: Receiver<<P as Program>::Message>,
 }
 
+impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
+    fn clone(&self) -> Self {
+        let handle = self.handle.clone();
+        let (executor, scheduler) = calloop::futures::executor().expect("Out of file descriptors");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let executor_token = handle
+            .insert_source(executor, move |message, _, _| {
+                let _ = tx.send(message);
+            })
+            .ok();
+
+        if !self.state.is_queue_empty() {
+            tracing::warn!("Missing force_update call");
+        }
+        let mut renderer =
+            IcedRenderer::new(BackendWrapper::TinySkia(Backend::new(Default::default())));
+        let mut debug = Debug::new();
+        let state = State::new(
+            Id(0),
+            ProgramWrapper(self.state.program().0.clone(), handle.clone()),
+            IcedSize::new(self.size.w as f32, self.size.h as f32),
+            &mut renderer,
+            &mut debug,
+        );
+
+        IcedElementInternal {
+            outputs: self.outputs.clone(),
+            buffers: self.buffers.clone(),
+            size: self.size.clone(),
+            cursor_pos: self.cursor_pos.clone(),
+            theme: self.theme.clone(),
+            renderer,
+            state,
+            debug,
+            handle,
+            scheduler,
+            executor_token,
+            rx,
+        }
+    }
+}
+
 impl<P: Program + Send + 'static> fmt::Debug for IcedElementInternal<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("IcedElementInternal")
@@ -254,6 +296,16 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             *old_primitives = None;
         }
         internal.update(true);
+    }
+}
+
+impl<P: Program + Send + 'static + Clone> IcedElement<P> {
+    pub fn deep_clone(&self) -> Self {
+        let internal = self.0.lock().unwrap();
+        if !internal.state.is_queue_empty() {
+            self.force_update();
+        }
+        IcedElement(Arc::new(Mutex::new(internal.clone())))
     }
 }
 
