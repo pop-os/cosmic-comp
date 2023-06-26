@@ -590,10 +590,16 @@ impl Program for CosmicStackInternal {
                 .into(),
             CosmicElement::new(
                 Tabs::new(
-                    windows
-                        .iter()
-                        .enumerate()
-                        .map(|(i, w)| Tab::new(w.title(), w.app_id()).on_close(Message::Close(i))),
+                    windows.iter().enumerate().map(|(i, w)| {
+                        let user_data = w.user_data();
+                        user_data.insert_if_missing(Id::unique);
+                        Tab::new(
+                            w.title(),
+                            w.app_id(),
+                            user_data.get::<Id>().unwrap().clone(),
+                        )
+                        .on_close(Message::Close(i))
+                    }),
                     active,
                     windows[active].is_activated(false),
                     group_focused,

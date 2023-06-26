@@ -27,7 +27,10 @@ use cosmic::{
     widget::{icon, Icon},
 };
 use cosmic_time::{Cubic, Ease, Tween};
-use std::time::{Duration, Instant};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    time::{Duration, Instant},
+};
 
 pub struct Tabs<'a, Message, Renderer>
 where
@@ -49,12 +52,21 @@ struct ScrollAnimationState {
     end: Offset,
 }
 
+#[derive(Debug, Clone)]
+struct TabAnimationState {
+    previous_bounds: HashMap<Id, Rectangle>,
+    next_bounds: HashMap<Id, Rectangle>,
+    start_time: Instant,
+}
+
 /// The local state of [`Tabs`].
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct State {
     offset_x: Offset,
     scroll_animation: Option<ScrollAnimationState>,
     scroll_to: Option<usize>,
+    last_state: Option<HashMap<Id, Rectangle>>,
+    tab_animations: VecDeque<TabAnimationState>,
 }
 
 impl Scrollable for State {
@@ -79,6 +91,8 @@ impl Default for State {
             offset_x: Offset::Absolute(0.),
             scroll_animation: None,
             scroll_to: None,
+            last_state: None,
+            tab_animations: VecDeque::new(),
         }
     }
 }
@@ -98,7 +112,8 @@ impl Offset {
     }
 }
 
-const ANIMATION_DURATION: Duration = Duration::from_millis(200);
+const SCROLL_ANIMATION_DURATION: Duration = Duration::from_millis(200);
+const TAB_ANIMATION_DURATION: Duration = Duration::from_millis(150);
 
 impl<'a, Message, Renderer> Tabs<'a, Message, Renderer>
 where
@@ -234,7 +249,7 @@ impl State {
                 let percentage = (Instant::now()
                     .duration_since(animation.start_time)
                     .as_millis() as f32
-                    / ANIMATION_DURATION.as_millis() as f32)
+                    / SCROLL_ANIMATION_DURATION.as_millis() as f32)
                     .min(1.0);
 
                 Ease::Cubic(Cubic::InOut).tween(percentage)
@@ -257,8 +272,17 @@ impl State {
 
     pub fn cleanup_old_animations(&mut self) {
         if let Some(animation) = self.scroll_animation.as_ref() {
-            if Instant::now().duration_since(animation.start_time) > ANIMATION_DURATION {
+            if Instant::now().duration_since(animation.start_time) > SCROLL_ANIMATION_DURATION {
                 self.scroll_animation.take();
+            }
+        }
+
+        if let Some(animation) = self.tab_animations.front() {
+            if Instant::now().duration_since(animation.start_time) > TAB_ANIMATION_DURATION {
+                self.tab_animations.pop_front();
+                if let Some(next_animation) = self.tab_animations.front_mut() {
+                    next_animation.start_time = Instant::now();
+                }
             }
         }
     }
@@ -503,25 +527,79 @@ where
 
         renderer.with_layer(bounds, |renderer| {
             renderer.with_translation(Vector::new(-offset.x, -offset.y), |renderer| {
-                for ((tab, state), layout) in self.elements[2..self.elements.len() - 3]
+                let percentage = if let Some(animation) = state.tab_animations.front() {
+                    let percentage = (Instant::now()
+                        .duration_since(animation.start_time)
+                        .as_millis() as f32
+                        / TAB_ANIMATION_DURATION.as_millis() as f32)
+                        .min(1.0);
+                    Ease::Cubic(Cubic::Out).tween(percentage)
+                } else {
+                    1.0
+                };
+
+                for ((tab, wstate), layout) in self.elements[2..self.elements.len() - 3]
                     .iter()
                     .zip(tree.children.iter().skip(2))
                     .zip(layout.children().skip(2))
                 {
+                    let bounds = if let Some(animation) = state.tab_animations.front() {
+                        let id = tab.as_widget().id().unwrap();
+                        let previous =
+                            animation
+                                .previous_bounds
+                                .get(&id)
+                                .copied()
+                                .unwrap_or(Rectangle {
+                                    x: layout.position().x,
+                                    y: layout.position().y,
+                                    width: 0.,
+                                    height: layout.bounds().height,
+                                });
+                        let next = animation
+                            .next_bounds
+                            .get(&id)
+                            .copied()
+                            .unwrap_or(Rectangle {
+                                x: layout.position().x,
+                                y: layout.position().y,
+                                width: 0.,
+                                height: layout.bounds().height,
+                            });
+                        Rectangle {
+                            x: previous.x + (next.x - previous.x) * percentage,
+                            y: previous.y + (next.y - previous.y) * percentage,
+                            width: previous.width + (next.width - previous.width) * percentage,
+                            height: next.height,
+                        }
+                    } else {
+                        layout.bounds()
+                    };
+
                     let cursor = match cursor {
                         mouse::Cursor::Available(point) => mouse::Cursor::Available(point + offset),
                         mouse::Cursor::Unavailable => mouse::Cursor::Unavailable,
                     };
 
-                    tab.as_widget().draw(
-                        state,
-                        renderer,
-                        theme,
-                        style,
-                        layout,
-                        cursor,
-                        &offset_viewport,
-                    );
+                    renderer.with_layer(bounds, |renderer| {
+                        renderer.with_translation(
+                            Vector {
+                                x: bounds.x - layout.position().x,
+                                y: bounds.y - layout.position().y,
+                            },
+                            |renderer| {
+                                tab.as_widget().draw(
+                                    wstate,
+                                    renderer,
+                                    theme,
+                                    style,
+                                    layout,
+                                    cursor,
+                                    &offset_viewport,
+                                );
+                            },
+                        )
+                    })
                 }
             });
         });
@@ -609,6 +687,39 @@ where
     ) -> event::Status {
         let state = tree.state.downcast_mut::<State>();
         state.cleanup_old_animations();
+
+        let current_state = self.elements[2..self.elements.len() - 3]
+            .iter()
+            .zip(layout.children().skip(2))
+            .map(|(element, layout)| (element.as_widget().id().unwrap(), layout.bounds()))
+            .collect::<HashMap<Id, Rectangle>>();
+
+        if state.last_state.is_none() {
+            state.last_state = Some(current_state.clone());
+        }
+        let last_state = state.last_state.as_mut().unwrap();
+        let unknown_keys = current_state
+            .keys()
+            .collect::<HashSet<_>>()
+            .symmetric_difference(&last_state.keys().collect::<HashSet<_>>())
+            .next()
+            .is_some();
+        if unknown_keys
+            || current_state.iter().any(|(a_id, a_bounds)| {
+                let Some(b_bounds) = last_state.get(a_id) else { return true };
+                a_bounds != b_bounds
+            })
+        {
+            // new tab_animation
+            state.tab_animations.push_back(TabAnimationState {
+                previous_bounds: last_state.clone(),
+                next_bounds: current_state.clone(),
+                start_time: Instant::now(),
+            });
+
+            // update last_state
+            *last_state = current_state;
+        }
 
         let mut bounds = layout.bounds();
         let content_bounds = layout.children().fold(Size::new(0., 0.), |a, b| Size {

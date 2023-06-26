@@ -14,7 +14,7 @@ use cosmic::{
         widget::{
             operation::{Operation, OperationOutputWrapper},
             tree::Tree,
-            Widget,
+            Id, Widget,
         },
         Clipboard, Color, Length, Rectangle, Shell, Size,
     },
@@ -114,6 +114,7 @@ pub trait TabMessage {
 }
 
 pub struct Tab<'a, Message: TabMessage> {
+    id: Id,
     app_icon: Icon<'a>,
     title: String,
     font: Font,
@@ -124,8 +125,9 @@ pub struct Tab<'a, Message: TabMessage> {
 }
 
 impl<'a, Message: TabMessage> Tab<'a, Message> {
-    pub fn new(title: impl Into<String>, app_id: impl Into<String>) -> Self {
+    pub fn new(title: impl Into<String>, app_id: impl Into<String>, id: Id) -> Self {
         Tab {
+            id,
             app_icon: icon(app_id.into(), 16),
             title: title.into(),
             font: cosmic::font::FONT,
@@ -223,6 +225,7 @@ impl<'a, Message: TabMessage> Tab<'a, Message> {
         );
 
         TabInternal {
+            id: self.id,
             idx,
             active: self.active,
             background: self.background_theme.into(),
@@ -239,6 +242,7 @@ const TEXT_BREAKPOINT: i32 = 44;
 const CLOSE_BREAKPOINT: i32 = 125;
 
 pub(super) struct TabInternal<'a, Message: TabMessage, Renderer> {
+    id: Id,
     idx: usize,
     active: bool,
     background: theme::Container,
@@ -251,6 +255,10 @@ where
     Renderer::Theme: ContainerStyleSheet<Style = theme::Container>,
     Message: TabMessage,
 {
+    fn id(&self) -> Option<Id> {
+        Some(self.id.clone())
+    }
+
     fn children(&self) -> Vec<Tree> {
         self.elements.iter().map(Tree::new).collect()
     }
