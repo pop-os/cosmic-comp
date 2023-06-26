@@ -38,7 +38,7 @@ use std::{
     fmt,
     hash::Hash,
     sync::{
-        atomic::{AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
         Arc, Mutex,
     },
 };
@@ -60,6 +60,7 @@ impl fmt::Debug for CosmicWindow {
 pub struct CosmicWindowInternal {
     pub(super) window: CosmicSurface,
     mask: Arc<Mutex<Option<tiny_skia::Mask>>>,
+    activated: Arc<AtomicBool>,
     /// TODO: This needs to be per seat
     pointer_entered: Arc<AtomicU8>,
     last_seat: Arc<Mutex<Option<(Seat<State>, Serial)>>>,
@@ -70,6 +71,7 @@ impl fmt::Debug for CosmicWindowInternal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CosmicWindowInternal")
             .field("window", &self.window)
+            .field("activated", &self.activated.load(Ordering::SeqCst))
             .field("pointer_entered", &self.pointer_entered)
             // skip seat to avoid loop
             .field("last_seat", &"...")
@@ -115,6 +117,7 @@ impl CosmicWindow {
             CosmicWindowInternal {
                 window,
                 mask: Arc::new(Mutex::new(None)),
+                activated: Arc::new(AtomicBool::new(false)),
                 pointer_entered: Arc::new(AtomicU8::new(Focus::None as u8)),
                 last_seat: Arc::new(Mutex::new(None)),
                 last_title: Arc::new(Mutex::new(last_title)),
@@ -321,10 +324,17 @@ impl SpaceElement for CosmicWindow {
         })
     }
     fn set_activate(&self, activated: bool) {
-        SpaceElement::set_activate(&self.0, activated);
-        self.0.force_redraw();
-        self.0
-            .with_program(|p| SpaceElement::set_activate(&p.window, activated));
+        if self
+            .0
+            .with_program(|p| p.activated.load(Ordering::SeqCst) != activated)
+        {
+            SpaceElement::set_activate(&self.0, activated);
+            self.0.force_redraw();
+            self.0.with_program(|p| {
+                p.activated.store(activated, Ordering::SeqCst);
+                SpaceElement::set_activate(&p.window, activated);
+            });
+        }
     }
     fn output_enter(&self, output: &Output, overlap: Rectangle<i32, Logical>) {
         SpaceElement::output_enter(&self.0, output, overlap);
