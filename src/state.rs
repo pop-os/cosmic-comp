@@ -17,7 +17,14 @@ use crate::{
     },
     xwayland::XWaylandState,
 };
+use anyhow::Context;
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_manager_v1::CursorMode;
+use i18n_embed::{
+    fluent::{fluent_language_loader, FluentLanguageLoader},
+    DesktopLanguageRequester,
+};
+use once_cell::sync::Lazy;
+use rust_embed::RustEmbed;
 #[cfg(feature = "debug")]
 use smithay::utils::Rectangle;
 use smithay::{
@@ -68,6 +75,23 @@ use tracing::error;
 
 use std::{cell::RefCell, ffi::OsString, time::Duration};
 use std::{collections::VecDeque, time::Instant};
+
+#[derive(RustEmbed)]
+#[folder = "resources/i18n"]
+struct Localizations;
+
+pub static LANG_LOADER: Lazy<FluentLanguageLoader> = Lazy::new(|| fluent_language_loader!());
+
+#[macro_export]
+macro_rules! fl {
+    ($message_id:literal) => {{
+        i18n_embed_fl::fl!($crate::state::LANG_LOADER, $message_id)
+    }};
+
+    ($message_id:literal, $($args:expr),*) => {{
+        i18n_embed_fl::fl!($crate::state::LANG_LOADER, $message_id, $($args), *)
+    }};
+}
 
 pub struct ClientState {
     pub compositor_client_state: CompositorClientState,
@@ -241,6 +265,11 @@ impl State {
         handle: LoopHandle<'static, Data>,
         signal: LoopSignal,
     ) -> State {
+        let requested_languages = DesktopLanguageRequester::requested_languages();
+        i18n_embed::select(&*LANG_LOADER, &Localizations, &requested_languages)
+            .with_context(|| "Failed to load languages")
+            .unwrap();
+
         let clock = Clock::new().expect("Failed to initialize clock");
         let config = Config::load();
         let compositor_state = CompositorState::new::<Self>(dh);
