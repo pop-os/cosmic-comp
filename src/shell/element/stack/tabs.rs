@@ -688,6 +688,13 @@ where
         let state = tree.state.downcast_mut::<State>();
         state.cleanup_old_animations();
 
+        let mut bounds = layout.bounds();
+        let content_bounds = layout.children().fold(Size::new(0., 0.), |a, b| Size {
+            width: a.width + b.bounds().width,
+            height: b.bounds().height,
+        });
+        let scrolling = content_bounds.width.floor() > bounds.width;
+
         let current_state = self.elements[2..self.elements.len() - 3]
             .iter()
             .zip(layout.children().skip(2))
@@ -704,29 +711,38 @@ where
             .symmetric_difference(&last_state.keys().collect::<HashSet<_>>())
             .next()
             .is_some();
-        if unknown_keys
-            || current_state.iter().any(|(a_id, a_bounds)| {
-                let Some(b_bounds) = last_state.get(a_id) else { return true };
-                a_bounds != b_bounds
+
+        enum Difference {
+            NewOrRemoved,
+            Movement,
+            Focus,
+        }
+
+        let changes = if unknown_keys {
+            Some(Difference::NewOrRemoved)
+        } else {
+            current_state.iter().filter_map(|(a_id, a_bounds)| {
+                let Some(b_bounds) = last_state.get(a_id) else { return Some(Difference::Movement) };
+                (a_bounds != b_bounds).then(|| if a_bounds.position() != b_bounds.position() { Difference::Movement } else { Difference::Focus })
+            }).fold(None, |a, b| match (a, b) {
+                (None | Some(Difference::Movement), x) => Some(x),
+                (a, _) => a,
             })
-        {
-            // new tab_animation
-            state.tab_animations.push_back(TabAnimationState {
-                previous_bounds: last_state.clone(),
-                next_bounds: current_state.clone(),
-                start_time: Instant::now(),
-            });
+        };
+
+        if unknown_keys || changes.is_some() {
+            if !scrolling || !matches!(changes, Some(Difference::Focus)) {
+                // new tab_animation
+                state.tab_animations.push_back(TabAnimationState {
+                    previous_bounds: last_state.clone(),
+                    next_bounds: current_state.clone(),
+                    start_time: Instant::now(),
+                });
+            }
 
             // update last_state
             *last_state = current_state;
         }
-
-        let mut bounds = layout.bounds();
-        let content_bounds = layout.children().fold(Size::new(0., 0.), |a, b| Size {
-            width: a.width + b.bounds().width,
-            height: b.bounds().height,
-        });
-        let scrolling = content_bounds.width.floor() > bounds.width;
 
         if scrolling {
             bounds.x += 30.;
