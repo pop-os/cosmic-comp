@@ -4,11 +4,12 @@ use crate::{
     config::{Action, Config, KeyPattern, WorkspaceLayout},
     shell::{
         focus::{target::PointerFocusTarget, FocusDirection},
+        grabs::ResizeEdge,
         layout::{
             floating::SeatMoveGrabState,
             tiling::{Direction, FocusResult, MoveResult},
         },
-        OverviewMode, Workspace,
+        OverviewMode, ResizeMode, Workspace,
     }, // shell::grabs::SeatMoveGrabState
     state::Common,
     utils::prelude::*,
@@ -229,6 +230,7 @@ impl State {
                                 serial,
                                 time,
                                 |data, modifiers, handle| {
+                                    // Leave overview mode, if any modifier was released
                                     if let OverviewMode::Started(action_modifiers, _) =
                                         data.common.shell.overview_mode()
                                     {
@@ -241,12 +243,66 @@ impl State {
                                         }
                                     }
 
+                                    // Leave or update resize mode, if modifiers changed or initial key was released
+                                    if let ResizeMode::Started(action_pattern, _, _) =
+                                        data.common.shell.resize_mode()
+                                    {
+                                        if state == KeyState::Released
+                                            && handle.raw_syms().contains(&action_pattern.key)
+                                        {
+                                            data.common.shell.set_resize_mode(None);
+                                            return FilterResult::Intercept(None);
+                                        } else if action_pattern.modifiers != *modifiers {
+                                            let mut new_pattern = action_pattern.clone();
+                                            new_pattern.modifiers = modifiers.clone().into();
+                                            let enabled = data
+                                                .common
+                                                .config
+                                                .static_conf
+                                                .key_bindings
+                                                .iter()
+                                                .find_map(move |(binding, action)| {
+                                                    if binding == &new_pattern
+                                                        && matches!(action, Action::Resizing(_))
+                                                    {
+                                                        let Action::Resizing(direction) = action else { unreachable!() };
+                                                        Some((new_pattern.clone(), *direction))
+                                                    } else {
+                                                        None
+                                                    }
+                                                });
+                                            data.common.shell.set_resize_mode(enabled);
+                                        }
+                                    }
+
+                                    // Special case resizing with regards to arrow keys
+                                    if let ResizeMode::Started(_, _, direction) =
+                                        data.common.shell.resize_mode()
+                                    {
+                                        if state == KeyState::Pressed {
+                                            let resize_edge = match handle.modified_sym() {
+                                                keysyms::KEY_Left | keysyms::KEY_H => Some(ResizeEdge::LEFT),
+                                                keysyms::KEY_Down | keysyms::KEY_J => Some(ResizeEdge::BOTTOM),
+                                                keysyms::KEY_Up | keysyms::KEY_K => Some(ResizeEdge::TOP),
+                                                keysyms::KEY_Right | keysyms::KEY_L => Some(ResizeEdge::RIGHT),
+                                                _ => None,
+                                            };
+
+                                            if let Some(edge) = resize_edge {
+                                                data.common.shell.resize_active_window(seat, direction, edge);
+                                                return FilterResult::Intercept(None);
+                                            }
+                                        }
+                                    }
+
+                                    // Skip released events for initially surpressed keys
                                     if state == KeyState::Released
                                         && userdata.get::<SupressedKeys>().unwrap().filter(&handle)
                                     {
                                         return FilterResult::Intercept(None);
                                     }
 
+                                    // Pass keys to debug interface, if it has focus
                                     #[cfg(feature = "debug")]
                                     {
                                         if data.common.seats().position(|x| x == seat).unwrap() == 0
@@ -267,6 +323,7 @@ impl State {
                                         }
                                     }
 
+                                    // Handle VT switches
                                     if state == KeyState::Pressed
                                         && (keysyms::KEY_XF86Switch_VT_1..=KEY_XF86Switch_VT_12)
                                             .contains(&handle.modified_sym())
@@ -282,7 +339,7 @@ impl State {
                                         return FilterResult::Intercept(None);
                                     }
 
-                                    // here we can handle global shortcuts and the like
+                                    // handle the rest of the global shortcuts
                                     if !shortcuts_inhibited {
                                         for (binding, action) in
                                             data.common.config.static_conf.key_bindings.iter()
@@ -303,6 +360,7 @@ impl State {
                                         }
                                     }
 
+                                    // keys are passed through to apps
                                     FilterResult::Forward
                                 },
                             )

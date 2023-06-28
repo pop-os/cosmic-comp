@@ -48,9 +48,9 @@ use tracing::warn;
 
 use super::{
     element::{stack::CosmicStackRenderElement, window::CosmicWindowRenderElement, CosmicMapped},
-    focus::{FocusStack, FocusStackMut},
+    focus::{target::KeyboardFocusTarget, FocusStack, FocusStackMut},
     grabs::{ResizeEdge, ResizeGrab},
-    CosmicMappedRenderElement, CosmicSurface,
+    CosmicMappedRenderElement, CosmicSurface, ResizeDirection,
 };
 
 #[derive(Debug)]
@@ -338,6 +338,18 @@ impl Workspace {
                 .map(Into::into)
         } else {
             None
+        }
+    }
+
+    pub fn resize(&mut self, seat: &Seat<State>, direction: ResizeDirection, edge: ResizeEdge) {
+        if let Some(KeyboardFocusTarget::Fullscreen(_)) =
+            seat.get_keyboard().unwrap().current_focus()
+        {
+            return;
+        }
+
+        if !self.floating_layer.resize(seat, direction, edge) {
+            self.tiling_layer.resize(seat, direction, edge);
         }
     }
 

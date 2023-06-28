@@ -924,6 +924,17 @@ impl PartialEq<ModifiersState> for KeyModifiers {
     }
 }
 
+impl Into<KeyModifiers> for ModifiersState {
+    fn into(self) -> KeyModifiers {
+        KeyModifiers {
+            ctrl: self.ctrl,
+            alt: self.alt,
+            shift: self.shift,
+            logo: self.logo,
+        }
+    }
+}
+
 impl std::ops::AddAssign<KeyModifier> for KeyModifiers {
     fn add_assign(&mut self, rhs: KeyModifier) {
         match rhs {

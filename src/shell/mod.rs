@@ -1187,6 +1187,17 @@ impl Shell {
         self.resize_mode.clone()
     }
 
+    pub fn resize_active_window(
+        &mut self,
+        seat: &Seat<State>,
+        direction: ResizeDirection,
+        edge: ResizeEdge,
+    ) {
+        self.workspaces
+            .active_mut(&seat.active_output())
+            .resize(seat, direction, edge);
+    }
+
     pub fn refresh(&mut self) {
         #[cfg(feature = "debug")]
         puffin::profile_function!();
