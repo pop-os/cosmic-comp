@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    shell::{focus::FocusDirection, layout::tiling::Direction, Shell, WorkspaceAmount},
+    shell::{
+        focus::FocusDirection, layout::tiling::Direction, ResizeDirection, Shell, WorkspaceAmount,
+    },
     state::{BackendData, Data, State},
     wayland::protocols::output_configuration::OutputConfigurationState,
 };
@@ -1015,6 +1017,7 @@ pub enum Action {
     ToggleTiling,
     ToggleWindowFloating,
 
+    Resizing(ResizeDirection),
     Maximize,
     Spawn(String),
 }

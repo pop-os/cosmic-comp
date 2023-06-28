@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    config::{Action, Config, KeyModifiers, WorkspaceLayout},
+    config::{Action, Config, KeyPattern, WorkspaceLayout},
     shell::{
         focus::{target::PointerFocusTarget, FocusDirection},
         layout::{
@@ -219,7 +219,7 @@ impl State {
 
                         let serial = SERIAL_COUNTER.next_serial();
                         let time = Event::time_msec(&event);
-                        if let Some((action, mods)) = seat
+                        if let Some((action, pattern)) = seat
                             .get_keyboard()
                             .unwrap()
                             .input(
@@ -297,7 +297,7 @@ impl State {
                                                     .add(&handle);
                                                 return FilterResult::Intercept(Some((
                                                     action.clone(),
-                                                    binding.modifiers.clone(),
+                                                    binding.clone(),
                                                 )));
                                             }
                                         }
@@ -308,7 +308,7 @@ impl State {
                             )
                             .flatten()
                         {
-                            self.handle_action(action, seat, serial, time, mods, None)
+                            self.handle_action(action, seat, serial, time, pattern, None)
                         }
                         break;
                     }
@@ -659,7 +659,7 @@ impl State {
         seat: &Seat<State>,
         serial: Serial,
         time: u32,
-        mods: KeyModifiers,
+        pattern: KeyPattern,
         direction: Option<Direction>,
     ) {
         match action {
@@ -717,7 +717,7 @@ impl State {
                     .activate(&current_output, workspace)
                     .is_err()
                 {
-                    self.handle_action(Action::NextOutput, seat, serial, time, mods, direction);
+                    self.handle_action(Action::NextOutput, seat, serial, time, pattern, direction);
                 }
             }
             Action::PreviousWorkspace => {
@@ -735,7 +735,14 @@ impl State {
                     .activate(&current_output, workspace)
                     .is_err()
                 {
-                    self.handle_action(Action::PreviousOutput, seat, serial, time, mods, direction);
+                    self.handle_action(
+                        Action::PreviousOutput,
+                        seat,
+                        serial,
+                        time,
+                        pattern,
+                        direction,
+                    );
                 }
             }
             Action::LastWorkspace => {
@@ -793,7 +800,7 @@ impl State {
                         seat,
                         serial,
                         time,
-                        mods,
+                        pattern,
                         direction,
                     )
                 }
@@ -827,7 +834,7 @@ impl State {
                         seat,
                         serial,
                         time,
-                        mods,
+                        pattern,
                         direction,
                     )
                 }
@@ -998,7 +1005,7 @@ impl State {
                                     seat,
                                     serial,
                                     time,
-                                    mods,
+                                    pattern,
                                     direction,
                                 ),
                             (FocusDirection::Right, WorkspaceLayout::Horizontal)
@@ -1008,7 +1015,7 @@ impl State {
                                     seat,
                                     serial,
                                     time,
-                                    mods,
+                                    pattern,
                                     direction,
                                 ),
                             (FocusDirection::Left, WorkspaceLayout::Vertical)
@@ -1018,7 +1025,7 @@ impl State {
                                     seat,
                                     serial,
                                     time,
-                                    mods,
+                                    pattern,
                                     direction,
                                 ),
                             (FocusDirection::Right, WorkspaceLayout::Vertical)
@@ -1028,7 +1035,7 @@ impl State {
                                     seat,
                                     serial,
                                     time,
-                                    mods,
+                                    pattern,
                                     direction,
                                 ),
                             _ => {}
@@ -1057,7 +1064,7 @@ impl State {
                                 seat,
                                 serial,
                                 time,
-                                mods,
+                                pattern,
                                 Some(direction),
                             ),
                             (Direction::Right, WorkspaceLayout::Horizontal)
@@ -1066,7 +1073,7 @@ impl State {
                                 seat,
                                 serial,
                                 time,
-                                mods,
+                                pattern,
                                 Some(direction),
                             ),
                             (Direction::Left, WorkspaceLayout::Vertical)
@@ -1075,7 +1082,7 @@ impl State {
                                 seat,
                                 serial,
                                 time,
-                                mods,
+                                pattern,
                                 Some(direction),
                             ),
                             (Direction::Right, WorkspaceLayout::Vertical)
@@ -1084,7 +1091,7 @@ impl State {
                                 seat,
                                 serial,
                                 time,
-                                mods,
+                                pattern,
                                 Some(direction),
                             ),
                         }
@@ -1095,7 +1102,7 @@ impl State {
                     MoveResult::Done => {
                         if let Some(focused_window) = workspace.focus_stack.get(seat).last() {
                             if workspace.is_tiled(focused_window) {
-                                self.common.shell.set_overview_mode(Some(mods));
+                                self.common.shell.set_overview_mode(Some(pattern.modifiers));
                             }
                         }
                     }
@@ -1110,6 +1117,10 @@ impl State {
                     workspace.maximize_toggle(&window, &current_output);
                 }
             }
+            Action::Resizing(direction) => self
+                .common
+                .shell
+                .set_resize_mode(Some((pattern, direction))),
             Action::ToggleOrientation => {
                 let output = seat.active_output();
                 let workspace = self.common.shell.active_space_mut(&output);

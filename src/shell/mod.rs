@@ -34,7 +34,7 @@ use smithay::{
 };
 
 use crate::{
-    config::{Config, KeyModifiers, OutputConfig, WorkspaceMode as ConfigMode},
+    config::{Config, KeyModifiers, KeyPattern, OutputConfig, WorkspaceMode as ConfigMode},
     utils::prelude::*,
     wayland::protocols::{
         toplevel_info::ToplevelInfoState,
@@ -70,6 +70,19 @@ pub enum OverviewMode {
     Ended(Instant),
 }
 
+#[derive(Debug, Clone, Copy, serde::Deserialize, PartialEq, Eq, Hash)]
+pub enum ResizeDirection {
+    Inwards,
+    Outwards,
+}
+
+#[derive(Debug, Clone)]
+pub enum ResizeMode {
+    None,
+    Started(KeyPattern, Instant, ResizeDirection),
+    Ended(Instant, ResizeDirection),
+}
+
 pub struct Shell {
     pub popups: PopupManager,
     pub outputs: Vec<Output>,
@@ -88,6 +101,7 @@ pub struct Shell {
 
     gaps: (u8, u8),
     overview_mode: OverviewMode,
+    resize_mode: ResizeMode,
 }
 
 #[derive(Debug)]
@@ -546,6 +560,7 @@ impl Shell {
 
             gaps: config.static_conf.gaps,
             overview_mode: OverviewMode::None,
+            resize_mode: ResizeMode::None,
         }
     }
 
@@ -1112,6 +1127,7 @@ impl Shell {
                 sets.values().any(|set| set.previously_active.is_some())
             }
         }) || !matches!(self.overview_mode, OverviewMode::None)
+            || !matches!(self.resize_mode, ResizeMode::None)
             || self
                 .workspaces
                 .spaces()
@@ -1144,6 +1160,31 @@ impl Shell {
         }
 
         self.overview_mode.clone()
+    }
+
+    pub fn set_resize_mode(&mut self, enabled: Option<(KeyPattern, ResizeDirection)>) {
+        if let Some((pattern, direction)) = enabled {
+            if let ResizeMode::Started(old_pattern, _, old_direction) = &mut self.resize_mode {
+                *old_pattern = pattern;
+                *old_direction = direction;
+            } else {
+                self.resize_mode = ResizeMode::Started(pattern, Instant::now(), direction);
+            }
+        } else {
+            if let ResizeMode::Started(_, _, direction) = &self.resize_mode {
+                self.resize_mode = ResizeMode::Ended(Instant::now(), *direction);
+            }
+        }
+    }
+
+    pub fn resize_mode(&mut self) -> ResizeMode {
+        if let ResizeMode::Ended(timestamp, _) = self.resize_mode {
+            if Instant::now().duration_since(timestamp) > ANIMATION_DURATION {
+                self.resize_mode = ResizeMode::None;
+            }
+        }
+
+        self.resize_mode.clone()
     }
 
     pub fn refresh(&mut self) {
