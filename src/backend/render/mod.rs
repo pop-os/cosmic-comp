@@ -44,10 +44,10 @@ use smithay::{
         drm::DrmNode,
         renderer::{
             buffer_dimensions,
-            damage::{Error as RenderError, OutputDamageTracker, OutputNoMode},
+            damage::{Error as RenderError, OutputDamageTracker, OutputNoMode, RenderOutputResult},
             element::{
                 utils::{Relocate, RelocateRenderElement},
-                AsRenderElements, Element, Id, RenderElement, RenderElementStates,
+                AsRenderElements, Element, Id, RenderElement,
             },
             gles::{
                 element::PixelShaderElement, GlesError, GlesPixelProgram, GlesRenderer, Uniform,
@@ -55,12 +55,13 @@ use smithay::{
             },
             glow::GlowRenderer,
             multigpu::{gbm::GbmGlesBackend, Error as MultiError, MultiFrame, MultiRenderer},
+            sync::SyncPoint,
             Bind, Blit, ExportMem, ImportAll, ImportMem, Offscreen, Renderer, TextureFilter,
         },
     },
     desktop::layer_map_for_output,
     output::Output,
-    utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale},
+    utils::{IsAlive, Logical, Point, Rectangle, Scale},
     wayland::{
         dmabuf::get_dmabuf,
         shell::wlr_layer::Layer,
@@ -719,7 +720,7 @@ pub fn render_output<R, Target, OffTarget, Source>(
     cursor_mode: CursorMode,
     screencopy: Option<(Source, &[(ScreencopySession, BufferParams)])>,
     fps: Option<&mut Fps>,
-) -> Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), RenderError<R>>
+) -> Result<RenderOutputResult, RenderError<R>>
 where
     R: Renderer
         + ImportAll
@@ -777,7 +778,7 @@ pub fn render_workspace<R, Target, OffTarget, Source>(
     screencopy: Option<(Source, &[(ScreencopySession, BufferParams)])>,
     mut fps: Option<&mut Fps>,
     exclude_workspace_overview: bool,
-) -> Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), RenderError<R>>
+) -> Result<RenderOutputResult, RenderError<R>>
 where
     R: Renderer
         + ImportAll
@@ -881,7 +882,11 @@ where
                             }
                         }
 
-                        Ok(res)
+                        Ok(RenderOutputResult {
+                            damage: res.0,
+                            sync: SyncPoint::default(),
+                            states: res.1,
+                        })
                     },
                 ) {
                     Ok(true) => {} // success

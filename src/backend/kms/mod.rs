@@ -33,11 +33,12 @@ use smithay::{
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
             buffer_dimensions,
-            damage::{Error as RenderError, OutputNoMode},
+            damage::{Error as RenderError, OutputNoMode, RenderOutputResult},
             element::Element,
             gles::{GlesRenderbuffer, GlesTexture},
             glow::GlowRenderer,
             multigpu::{gbm::GbmGlesBackend, Error as MultiError, GpuManager},
+            sync::SyncPoint,
             Bind, ImportDma, Offscreen,
         },
         session::{libseat::LibSeatSession, Event as SessionEvent, Session},
@@ -1094,6 +1095,7 @@ impl Surface {
                             |_node, buffer, renderer, dt, age| {
                                 let res = dt.damage_output(age, &elements)?;
 
+                                let mut sync = SyncPoint::default();
                                 if let (Some(ref damage), _) = &res {
                                     if let Ok(dmabuf) = get_dmabuf(buffer) {
                                         renderer.bind(dmabuf).map_err(RenderError::Rendering)?;
@@ -1120,7 +1122,7 @@ impl Surface {
                                         self.output.current_scale().fractional_scale(),
                                         self.output.current_transform(),
                                     );
-                                    frame_result
+                                    sync = frame_result
                                         .blit_frame_result(
                                             output_size,
                                             output_transform,
@@ -1140,7 +1142,11 @@ impl Surface {
                                         })?;
                                 }
 
-                                Ok(res)
+                                Ok(RenderOutputResult {
+                                    damage: res.0,
+                                    states: res.1,
+                                    sync,
+                                })
                             },
                         ) {
                             Ok(true) => {} // success

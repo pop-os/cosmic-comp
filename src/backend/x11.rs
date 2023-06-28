@@ -20,8 +20,10 @@ use smithay::{
         egl::{EGLContext, EGLDevice, EGLDisplay},
         input::{Event, InputEvent},
         renderer::{
-            damage::OutputDamageTracker, gles::GlesRenderbuffer, glow::GlowRenderer, Bind,
-            ImportDma, ImportEgl,
+            damage::{OutputDamageTracker, RenderOutputResult},
+            gles::GlesRenderbuffer,
+            glow::GlowRenderer,
+            Bind, ImportDma, ImportEgl,
         },
         vulkan::{version::Version, Instance, PhysicalDevice},
         x11::{Window, WindowBuilder, X11Backend, X11Event, X11Handle, X11Input, X11Surface},
@@ -240,7 +242,7 @@ impl Surface {
             #[cfg(feature = "debug")]
             Some(&mut self.fps),
         ) {
-            Ok((damage, states)) => {
+            Ok(RenderOutputResult { damage, states, .. }) => {
                 self.screencopy.clear();
                 self.surface
                     .submit()

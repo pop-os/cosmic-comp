@@ -17,11 +17,8 @@ use smithay::{
         egl::EGLDevice,
         renderer::{
             buffer_dimensions, buffer_type,
-            damage::{Error as DTError, OutputDamageTracker, OutputNoMode},
-            element::{
-                surface::WaylandSurfaceRenderElement, AsRenderElements, RenderElement,
-                RenderElementStates,
-            },
+            damage::{Error as DTError, OutputDamageTracker, OutputNoMode, RenderOutputResult},
+            element::{surface::WaylandSurfaceRenderElement, AsRenderElements, RenderElement},
             gles::{Capability, GlesError, GlesRenderbuffer, GlesRenderer},
             Bind, Blit, BufferType, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
         },
@@ -606,8 +603,7 @@ where
         &mut R,
         &mut OutputDamageTracker,
         usize,
-    )
-        -> Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), DTError<R>>,
+    ) -> Result<RenderOutputResult, DTError<R>>,
 {
     #[cfg(feature = "debug")]
     puffin::profile_function!();
@@ -622,7 +618,11 @@ where
         params.age as usize,
     )?;
 
-    if let (Some(damage), _) = res {
+    if let RenderOutputResult {
+        damage: Some(damage),
+        ..
+    } = res
+    {
         submit_buffer(session, &params.buffer, renderer, transform, damage)
             .map_err(DTError::Rendering)?;
         Ok(true)
@@ -654,7 +654,7 @@ pub fn render_output_to_buffer(
         common: &mut Common,
         session: &Session,
         output: &Output,
-    ) -> Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), DTError<R>>
+    ) -> Result<RenderOutputResult, DTError<R>>
     where
         R: Renderer
             + ImportAll
@@ -786,7 +786,7 @@ pub fn render_workspace_to_buffer(
         session: &Session,
         output: &Output,
         handle: (WorkspaceHandle, usize),
-    ) -> Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), DTError<R>>
+    ) -> Result<RenderOutputResult, DTError<R>>
     where
         R: Renderer
             + ImportAll
@@ -934,7 +934,7 @@ pub fn render_window_to_buffer(
         common: &mut Common,
         window: &CosmicSurface,
         geometry: Rectangle<i32, Logical>,
-    ) -> Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), DTError<R>>
+    ) -> Result<RenderOutputResult, DTError<R>>
     where
         R: Renderer
             + ImportAll

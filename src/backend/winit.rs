@@ -13,8 +13,10 @@ use smithay::{
     backend::{
         egl::EGLDevice,
         renderer::{
-            damage::OutputDamageTracker, gles::GlesRenderbuffer, glow::GlowRenderer, ImportDma,
-            ImportEgl,
+            damage::{OutputDamageTracker, RenderOutputResult},
+            gles::GlesRenderbuffer,
+            glow::GlowRenderer,
+            ImportDma, ImportEgl,
         },
         winit::{self, WinitEvent, WinitGraphicsBackend, WinitVirtualDevice},
     },
@@ -73,7 +75,7 @@ impl WinitState {
             #[cfg(feature = "debug")]
             Some(&mut self.fps),
         ) {
-            Ok((damage, states)) => {
+            Ok(RenderOutputResult { damage, states, .. }) => {
                 self.backend
                     .bind()
                     .with_context(|| "Failed to bind display")?;

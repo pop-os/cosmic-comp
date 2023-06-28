@@ -77,7 +77,7 @@ debug = true
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/smithay//smithay", rev = "43ce6b4372" }
+smithay = { git = "https://github.com/smithay//smithay", rev = "8d239c79ae" }
 
 [patch."https://github.com/pop-os/libcosmic/"]
 libcosmic = { git = "https://github.com/pop-os/libcosmic//", rev = "42d7baf" }
