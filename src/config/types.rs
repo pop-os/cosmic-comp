@@ -212,9 +212,7 @@ impl From<KeyModifiersDef> for KeyModifiers {
                 ctrl: false,
                 alt: false,
                 shift: false,
-                caps_lock: false,
                 logo: false,
-                num_lock: false,
             },
             |mut modis, modi: KeyModifier| {
                 modis += modi;
