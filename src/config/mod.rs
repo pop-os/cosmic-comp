@@ -903,8 +903,6 @@ pub enum KeyModifier {
     Alt,
     Shift,
     Super,
-    CapsLock,
-    NumLock,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -913,8 +911,6 @@ pub struct KeyModifiers {
     pub alt: bool,
     pub shift: bool,
     pub logo: bool,
-    pub caps_lock: bool,
-    pub num_lock: bool,
 }
 
 impl PartialEq<ModifiersState> for KeyModifiers {
@@ -923,8 +919,6 @@ impl PartialEq<ModifiersState> for KeyModifiers {
             && self.alt == other.alt
             && self.shift == other.shift
             && self.logo == other.logo
-            && self.caps_lock == other.caps_lock
-            && self.num_lock == other.num_lock
     }
 }
 
@@ -935,8 +929,6 @@ impl std::ops::AddAssign<KeyModifier> for KeyModifiers {
             KeyModifier::Alt => self.alt = true,
             KeyModifier::Shift => self.shift = true,
             KeyModifier::Super => self.logo = true,
-            KeyModifier::CapsLock => self.caps_lock = true,
-            KeyModifier::NumLock => self.num_lock = true,
         };
     }
 }
@@ -957,9 +949,7 @@ impl Into<KeyModifiers> for KeyModifier {
             ctrl: false,
             alt: false,
             shift: false,
-            caps_lock: false,
             logo: false,
-            num_lock: false,
         };
         modifiers += self;
         modifiers
