@@ -7,6 +7,7 @@ use std::{
     time::Instant,
 };
 use tracing::warn;
+use wayland_backend::server::ClientId;
 
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State as WState;
 use smithay::{
@@ -18,7 +19,7 @@ use smithay::{
         Seat,
     },
     output::Output,
-    reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
+    reexports::wayland_server::{protocol::wl_surface::WlSurface, Client, DisplayHandle},
     utils::{Logical, Point, Rectangle, Serial, SERIAL_COUNTER},
     wayland::{
         compositor::with_states,
@@ -1134,10 +1135,12 @@ impl Shell {
                 .any(|workspace| workspace.animations_going())
     }
 
-    pub fn update_animations(&mut self, handle: &LoopHandle<'static, crate::state::Data>) {
+    pub fn update_animations(&mut self) -> HashMap<ClientId, Client> {
+        let mut clients = HashMap::new();
         for workspace in self.workspaces.spaces_mut() {
-            workspace.update_animations(handle)
+            clients.extend(workspace.update_animations());
         }
+        clients
     }
 
     pub fn set_overview_mode(&mut self, enabled: Option<KeyModifiers>) {

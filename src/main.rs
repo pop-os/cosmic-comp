@@ -12,6 +12,8 @@ use anyhow::{Context, Result};
 use std::{ffi::OsString, os::unix::prelude::AsRawFd, sync::Arc};
 use tracing::{error, info, warn};
 
+use crate::wayland::handlers::compositor::client_compositor_state;
+
 pub mod backend;
 pub mod config;
 #[cfg(feature = "debug")]
@@ -66,10 +68,13 @@ fn main() -> Result<()> {
         }
 
         // trigger routines
-        data.state
-            .common
-            .shell
-            .update_animations(&data.state.common.event_loop_handle);
+        let clients = data.state.common.shell.update_animations();
+        {
+            let dh = data.display.handle();
+            for client in clients.values() {
+                client_compositor_state(&client).blocker_cleared(&mut data.state, &dh);
+            }
+        }
         data.state.common.shell.refresh();
         state::Common::refresh_focus(&mut data.state);
 

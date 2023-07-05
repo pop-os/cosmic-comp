@@ -22,7 +22,6 @@ use crate::{
     },
 };
 
-use calloop::LoopHandle;
 use cosmic_time::{Cubic, Ease, Tween};
 use id_tree::{InsertBehavior, MoveBehavior, Node, NodeId, NodeIdError, RemoveBehavior, Tree};
 use smithay::{
@@ -36,6 +35,7 @@ use smithay::{
     desktop::{layer_map_for_output, space::SpaceElement, PopupKind},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
+    reexports::wayland_server::Client,
     utils::{IsAlive, Logical, Point, Rectangle, Scale},
     wayland::{compositor::add_blocker, seat::WaylandFocus},
 };
@@ -47,6 +47,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::trace;
+use wayland_backend::server::ClientId;
 
 mod blocker;
 mod grabs;
@@ -1330,10 +1331,12 @@ impl TilingLayout {
             .any(|queue| queue.animation_start.is_some())
     }
 
-    pub fn update_animation_state(&mut self, handle: &LoopHandle<'static, crate::state::Data>) {
+    pub fn update_animation_state(&mut self) -> HashMap<ClientId, Client> {
+        let mut clients = HashMap::new();
         for blocker in self.pending_blockers.drain(..) {
-            blocker.signal_ready(handle);
+            clients.extend(blocker.signal_ready());
         }
+
         for queue in self.queues.values_mut() {
             if let Some(start) = queue.animation_start {
                 let duration_since_start = Instant::now().duration_since(start);
@@ -1346,19 +1349,19 @@ impl TilingLayout {
                     continue;
                 }
             }
-            if let Some((_, blocker)) = queue.trees.get(1) {
-                if blocker
-                    .as_ref()
-                    .map(TilingBlocker::is_ready)
-                    .unwrap_or(true)
-                {
-                    queue.animation_start = Some(Instant::now());
-                    if let Some(blocker) = blocker.as_ref() {
-                        blocker.signal_ready(handle)
+            if let Some((_, _, blocker)) = queue.trees.get(1) {
+                if let Some(blocker) = blocker {
+                    if blocker.is_ready() && blocker.is_signaled() {
+                        clients.extend(blocker.signal_ready());
+                        queue.animation_start = Some(Instant::now());
                     }
+                } else {
+                    queue.animation_start = Some(Instant::now());
                 }
             }
         }
+
+        clients
     }
 
     pub fn resize_request(

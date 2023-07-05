@@ -38,7 +38,7 @@ use smithay::{
     desktop::{layer_map_for_output, space::SpaceElement},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
-    reexports::wayland_server::protocol::wl_surface::WlSurface,
+    reexports::wayland_server::{protocol::wl_surface::WlSurface, Client},
     utils::{Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Size},
     wayland::seat::WaylandFocus,
     xwayland::X11Surface,
@@ -103,8 +103,8 @@ impl Workspace {
         self.tiling_layer.animations_going()
     }
 
-    pub fn update_animations(&mut self, handle: &LoopHandle<'static, crate::state::Data>) {
-        self.tiling_layer.update_animation_state(handle)
+    pub fn update_animations(&mut self) -> HashMap<ClientId, Client> {
+        self.tiling_layer.update_animation_state()
     }
 
     pub fn commit(&mut self, surface: &WlSurface) {
