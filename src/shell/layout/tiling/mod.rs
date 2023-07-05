@@ -124,13 +124,19 @@ pub enum MoveResult {
 
 #[derive(Debug, Clone, Default)]
 struct TreeQueue {
-    trees: VecDeque<(Tree<Data>, Option<TilingBlocker>)>,
+    trees: VecDeque<(Tree<Data>, Duration, Option<TilingBlocker>)>,
     animation_start: Option<Instant>,
 }
 
 impl TreeQueue {
-    pub fn push_tree(&mut self, tree: Tree<Data>, blocker: Option<TilingBlocker>) {
-        self.trees.push_back((tree, blocker))
+    pub fn push_tree(
+        &mut self,
+        tree: Tree<Data>,
+        duration: impl Into<Option<Duration>>,
+        blocker: Option<TilingBlocker>,
+    ) {
+        self.trees
+            .push_back((tree, duration.into().unwrap_or(Duration::ZERO), blocker))
     }
 }
 
@@ -334,7 +340,11 @@ impl TilingLayout {
                 TreeQueue {
                     trees: {
                         let mut queue = VecDeque::new();
-                        queue.push_back((self.standby_tree.take().unwrap_or_else(Tree::new), None));
+                        queue.push_back((
+                            self.standby_tree.take().unwrap_or_else(Tree::new),
+                            Duration::ZERO,
+                            None,
+                        ));
                         queue
                     },
                     animation_start: None,
@@ -359,10 +369,14 @@ impl TilingLayout {
     ) {
         if let Some(mut src) = self.queues.remove(output) {
             // Operate on last pending tree & unblock queue
-            for blocker in src.trees.iter_mut().flat_map(|(_, blocker)| blocker.take()) {
+            for blocker in src
+                .trees
+                .iter_mut()
+                .flat_map(|(_, _, blocker)| blocker.take())
+            {
                 self.pending_blockers.push(blocker);
             }
-            let (src, _) = src.trees.pop_back().expect("No tree in queue");
+            let (src, _, _) = src.trees.pop_back().expect("No tree in queue");
 
             let Some((new_output, dst_queue)) = self.queues.iter_mut().next() else {
                 self.standby_tree = Some(src);
@@ -396,7 +410,7 @@ impl TilingLayout {
             TilingLayout::merge_trees(src, &mut dst, orientation);
 
             let blocker = TilingLayout::update_positions(output, &mut dst, self.gaps);
-            dst_queue.push_tree(dst, blocker);
+            dst_queue.push_tree(dst, ANIMATION_DURATION, blocker);
         }
     }
 
@@ -426,7 +440,7 @@ impl TilingLayout {
         TilingLayout::map_to_tree(&mut tree, window, output, focus_stack, direction);
 
         let blocker = TilingLayout::update_positions(output, &mut tree, self.gaps);
-        queue.push_tree(tree, blocker);
+        queue.push_tree(tree, ANIMATION_DURATION, blocker);
     }
 
     fn map_to_tree<'a>(
@@ -602,7 +616,7 @@ impl TilingLayout {
                 }
 
                 let blocker = TilingLayout::update_positions(&output.output, &mut tree, self.gaps);
-                queue.push_tree(tree, blocker);
+                queue.push_tree(tree, ANIMATION_DURATION, blocker);
             }
         }
     }
@@ -669,7 +683,7 @@ impl TilingLayout {
                     *mapped.tiling_node_id.lock().unwrap() = Some(new_id);
 
                     let blocker = TilingLayout::update_positions(&output, &mut tree, self.gaps);
-                    queue.push_tree(tree, blocker);
+                    queue.push_tree(tree, ANIMATION_DURATION, blocker);
                     return MoveResult::ShiftFocus(mapped.into());
                 }
                 StackMoveResult::Default => {} // continue normally
@@ -743,7 +757,7 @@ impl TilingLayout {
                     .remove_window(og_idx);
 
                 let blocker = TilingLayout::update_positions(&output, &mut tree, self.gaps);
-                queue.push_tree(tree, blocker);
+                queue.push_tree(tree, ANIMATION_DURATION, blocker);
                 return MoveResult::Done;
             }
 
@@ -769,7 +783,7 @@ impl TilingLayout {
                     .remove_window(og_idx);
 
                 let blocker = TilingLayout::update_positions(&output, &mut tree, self.gaps);
-                queue.push_tree(tree, blocker);
+                queue.push_tree(tree, ANIMATION_DURATION, blocker);
                 return MoveResult::Done;
             }
 
@@ -925,7 +939,7 @@ impl TilingLayout {
                 };
 
                 let blocker = TilingLayout::update_positions(&output, &mut tree, self.gaps);
-                queue.push_tree(tree, blocker);
+                queue.push_tree(tree, ANIMATION_DURATION, blocker);
                 return result;
             }
 
@@ -1178,7 +1192,7 @@ impl TilingLayout {
                     *orientation = new_orientation;
 
                     let blocker = TilingLayout::update_positions(&output, &mut tree, self.gaps);
-                    queue.push_tree(tree, blocker);
+                    queue.push_tree(tree, ANIMATION_DURATION, blocker);
                 }
             }
         }
@@ -1296,7 +1310,7 @@ impl TilingLayout {
             }
 
             let blocker = TilingLayout::update_positions(&output, &mut tree, self.gaps);
-            queue.push_tree(tree, blocker);
+            queue.push_tree(tree, ANIMATION_DURATION, blocker);
         }
     }
 
@@ -1304,7 +1318,7 @@ impl TilingLayout {
         let Some(queue) = self.queues.get_mut(output) else { return };
         let mut tree = queue.trees.back().unwrap().0.copy_clone();
         let blocker = TilingLayout::update_positions(&output, &mut tree, self.gaps);
-        queue.push_tree(tree, blocker);
+        queue.push_tree(tree, ANIMATION_DURATION, blocker);
     }
 
     pub fn refresh(&mut self) {
@@ -1340,11 +1354,16 @@ impl TilingLayout {
         for queue in self.queues.values_mut() {
             if let Some(start) = queue.animation_start {
                 let duration_since_start = Instant::now().duration_since(start);
-                if duration_since_start > ANIMATION_DURATION {
-                    assert!(queue.trees.len() >= 2);
+                if duration_since_start
+                    >= queue
+                        .trees
+                        .get(1)
+                        .expect("Animation going without second tree?")
+                        .1
+                {
                     let _ = queue.animation_start.take();
                     let _ = queue.trees.pop_front();
-                    let _ = queue.trees.front_mut().unwrap().1.take();
+                    let _ = queue.trees.front_mut().unwrap().2.take();
                 } else {
                     continue;
                 }
@@ -1734,7 +1753,7 @@ impl TilingLayout {
             TilingLayout::merge_trees(src, &mut dst, orientation);
 
             let blocker = TilingLayout::update_positions(&output_data.output, &mut dst, self.gaps);
-            dst_queue.push_tree(dst, blocker);
+            dst_queue.push_tree(dst, ANIMATION_DURATION, blocker);
         }
     }
 
@@ -1803,7 +1822,7 @@ impl TilingLayout {
         }
 
         let queue = self.queues.get(output).unwrap();
-        let (target_tree, _) = if queue.animation_start.is_some() {
+        let (target_tree, duration, _) = if queue.animation_start.is_some() {
             queue
                 .trees
                 .get(1)
@@ -1817,8 +1836,9 @@ impl TilingLayout {
             .then(|| &queue.trees.front().unwrap().0);
 
         let percentage = if let Some(animation_start) = queue.animation_start {
-            let percentage = Instant::now().duration_since(animation_start).as_millis() as f32
-                / ANIMATION_DURATION.as_millis() as f32;
+            let percentage = (Instant::now().duration_since(animation_start).as_millis() as f32
+                / duration.as_millis() as f32)
+                .min(1.0);
             Ease::Cubic(Cubic::Out).tween(percentage)
         } else {
             1.0
