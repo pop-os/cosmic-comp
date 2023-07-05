@@ -8,7 +8,7 @@ use crate::{
     wayland::protocols::output_configuration::OutputConfigurationState,
 };
 use serde::{Deserialize, Serialize};
-use smithay::input::Seat;
+use smithay::input::{keyboard::xkb::keysym_get_name, Seat};
 pub use smithay::{
     backend::input::KeyState,
     input::keyboard::{keysyms as KeySyms, Keysym, ModifiersState},
@@ -988,6 +988,26 @@ impl KeyPattern {
             modifiers: modifiers.into(),
             key,
         }
+    }
+}
+
+impl ToString for KeyPattern {
+    fn to_string(&self) -> String {
+        let mut result = String::new();
+        if self.modifiers.logo {
+            result += "Super+";
+        }
+        if self.modifiers.ctrl {
+            result += "Ctrl+";
+        }
+        if self.modifiers.alt {
+            result += "Alt+";
+        }
+        if self.modifiers.shift {
+            result += "Shift+";
+        }
+        result += &keysym_get_name(self.key);
+        result
     }
 }
 
