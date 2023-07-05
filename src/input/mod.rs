@@ -9,7 +9,7 @@ use crate::{
             floating::SeatMoveGrabState,
             tiling::{Direction, FocusResult, MoveResult},
         },
-        OverviewMode, ResizeMode, Workspace,
+        OverviewMode, ResizeDirection, ResizeMode, Workspace,
     }, // shell::grabs::SeatMoveGrabState
     state::Common,
     utils::prelude::*,
@@ -244,13 +244,13 @@ impl State {
                                     }
 
                                     // Leave or update resize mode, if modifiers changed or initial key was released
-                                    if let ResizeMode::Started(action_pattern, _, _) =
+                                    if let (ResizeMode::Started(action_pattern, _, _), _) =
                                         data.common.shell.resize_mode()
                                     {
                                         if state == KeyState::Released
                                             && handle.raw_syms().contains(&action_pattern.key)
                                         {
-                                            data.common.shell.set_resize_mode(None);
+                                            data.common.shell.set_resize_mode(None, &data.common.config, data.common.event_loop_handle.clone());
                                             return FilterResult::Intercept(None);
                                         } else if action_pattern.modifiers != *modifiers {
                                             let mut new_pattern = action_pattern.clone();
@@ -271,27 +271,33 @@ impl State {
                                                         None
                                                     }
                                                 });
-                                            data.common.shell.set_resize_mode(enabled);
+                                            data.common.shell.set_resize_mode(enabled, &data.common.config, data.common.event_loop_handle.clone());
                                         }
                                     }
 
                                     // Special case resizing with regards to arrow keys
-                                    if let ResizeMode::Started(_, _, direction) =
+                                    if let (ResizeMode::Started(_, _, direction), _) =
                                         data.common.shell.resize_mode()
                                     {
-                                        if state == KeyState::Pressed {
-                                            let resize_edge = match handle.modified_sym() {
-                                                keysyms::KEY_Left | keysyms::KEY_H => Some(ResizeEdge::LEFT),
-                                                keysyms::KEY_Down | keysyms::KEY_J => Some(ResizeEdge::BOTTOM),
-                                                keysyms::KEY_Up | keysyms::KEY_K => Some(ResizeEdge::TOP),
-                                                keysyms::KEY_Right | keysyms::KEY_L => Some(ResizeEdge::RIGHT),
-                                                _ => None,
-                                            };
+                                        let resize_edge = match handle.modified_sym() {
+                                            keysyms::KEY_Left | keysyms::KEY_H => Some(ResizeEdge::LEFT),
+                                            keysyms::KEY_Down | keysyms::KEY_J => Some(ResizeEdge::BOTTOM),
+                                            keysyms::KEY_Up | keysyms::KEY_K => Some(ResizeEdge::TOP),
+                                            keysyms::KEY_Right | keysyms::KEY_L => Some(ResizeEdge::RIGHT),
+                                            _ => None,
+                                        };
 
-                                            if let Some(edge) = resize_edge {
-                                                data.common.shell.resize_active_window(seat, direction, edge);
-                                                return FilterResult::Intercept(None);
+                                        if let Some(mut edge) = resize_edge {
+                                            if direction == ResizeDirection::Inwards {
+                                                edge.flip_direction();
                                             }
+                                            return FilterResult::Intercept(Some((
+                                                Action::_ResizingInternal(direction, edge, state),
+                                                KeyPattern {
+                                                    modifiers: modifiers.clone().into(),
+                                                    key: handle.raw_code(),
+                                                },
+                                            )));
                                         }
                                     }
 
@@ -1175,10 +1181,18 @@ impl State {
                     workspace.maximize_toggle(&window, &current_output);
                 }
             }
-            Action::Resizing(direction) => self
-                .common
-                .shell
-                .set_resize_mode(Some((pattern, direction))),
+            Action::Resizing(direction) => self.common.shell.set_resize_mode(
+                Some((pattern, direction)),
+                &self.common.config,
+                self.common.event_loop_handle.clone(),
+            ),
+            Action::_ResizingInternal(direction, edge, state) => {
+                if state == KeyState::Pressed {
+                    self.common.shell.start_resize(seat, direction, edge);
+                } else {
+                    self.common.shell.stop_resize(seat, direction, edge);
+                }
+            }
             Action::ToggleOrientation => {
                 let output = seat.active_output();
                 let workspace = self.common.shell.active_space_mut(&output);

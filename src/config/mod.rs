@@ -2,7 +2,8 @@
 
 use crate::{
     shell::{
-        focus::FocusDirection, layout::tiling::Direction, ResizeDirection, Shell, WorkspaceAmount,
+        focus::FocusDirection, grabs::ResizeEdge, layout::tiling::Direction, ResizeDirection,
+        Shell, WorkspaceAmount,
     },
     state::{BackendData, Data, State},
     wayland::protocols::output_configuration::OutputConfigurationState,
@@ -1049,6 +1050,8 @@ pub enum Action {
     ToggleWindowFloating,
 
     Resizing(ResizeDirection),
+    #[serde(skip)]
+    _ResizingInternal(ResizeDirection, ResizeEdge, KeyState),
     Maximize,
     Spawn(String),
 }

@@ -19,11 +19,11 @@ use smithay::{
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct ResizeData {
     /// The edges the surface is being resized with.
-    edges: ResizeEdge,
+    pub edges: ResizeEdge,
     /// The initial window location.
-    initial_window_location: Point<i32, Logical>,
+    pub initial_window_location: Point<i32, Logical>,
     /// The initial window size (geometry width and height).
-    initial_window_size: Size<i32, Logical>,
+    pub initial_window_size: Size<i32, Logical>,
 }
 
 /// State of the resize operation.

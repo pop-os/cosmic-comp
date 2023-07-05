@@ -55,11 +55,14 @@ mod workspace;
 pub use self::element::{CosmicMapped, CosmicMappedRenderElement, CosmicSurface};
 pub use self::workspace::*;
 use self::{
-    element::CosmicWindow,
+    element::{
+        resize_indicator::{resize_indicator, ResizeIndicator},
+        CosmicWindow,
+    },
     focus::target::KeyboardFocusTarget,
     grabs::ResizeEdge,
     layout::{
-        floating::FloatingLayout,
+        floating::{FloatingLayout, ResizeState},
         tiling::{Direction, TilingLayout, ANIMATION_DURATION},
     },
 };
@@ -103,6 +106,14 @@ pub struct Shell {
     gaps: (u8, u8),
     overview_mode: OverviewMode,
     resize_mode: ResizeMode,
+    resize_state: Option<(
+        KeyboardFocusTarget,
+        ResizeDirection,
+        ResizeEdge,
+        i32,
+        usize,
+        Output,
+    )>,
 }
 
 #[derive(Debug)]
@@ -562,6 +573,7 @@ impl Shell {
             gaps: config.static_conf.gaps,
             overview_mode: OverviewMode::None,
             resize_mode: ResizeMode::None,
+            resize_state: None,
         }
     }
 
@@ -1523,6 +1535,55 @@ impl Shell {
                             Focus::Clear,
                         );
                     }
+                }
+            }
+        }
+    }
+
+    pub fn start_resize(
+        &mut self,
+        seat: &Seat<State>,
+        direction: ResizeDirection,
+        edge: ResizeEdge,
+    ) {
+        let output = seat.active_output();
+        let (_, idx) = self.workspaces.active_num(&output);
+        let Some(focused) = seat.get_keyboard().unwrap().current_focus() else { return };
+
+        if let Some(workspace) = self.workspaces.get_mut(idx, &output) {
+            let amount = (self
+                .resize_state
+                .take()
+                .map(|(_, _, _, amount, _, _)| amount)
+                .unwrap_or(10)
+                + 2)
+            .min(20);
+            if workspace.resize(&focused, direction, edge, amount) {
+                self.resize_state = Some((focused, direction, edge, amount, idx, output));
+            }
+        }
+    }
+
+    pub fn stop_resize(
+        &mut self,
+        _seat: &Seat<State>,
+        direction: ResizeDirection,
+        edge: ResizeEdge,
+    ) {
+        if let Some((old_focused, old_direction, old_edge, _, idx, output)) =
+            self.resize_state.take()
+        {
+            let workspace = self.workspaces.get(idx, &output).unwrap();
+            if old_direction == direction && old_edge == edge {
+                let Some(toplevel) = old_focused.toplevel() else { return };
+                let Some(mapped) = workspace
+                    .mapped()
+                    .find(|m| m.has_surface(&toplevel, WindowSurfaceType::TOPLEVEL))
+                    .cloned()
+                else { return };
+                let mut resize_state = mapped.resize_state.lock().unwrap();
+                if let Some(ResizeState::Resizing(data)) = *resize_state {
+                    *resize_state = Some(ResizeState::WaitingForCommit(data));
                 }
             }
         }
