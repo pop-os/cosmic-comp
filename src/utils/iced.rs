@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt,
     hash::{Hash, Hasher},
     sync::{mpsc::Receiver, Arc, Mutex},
@@ -124,7 +124,7 @@ impl<P: Program> IcedProgram for ProgramWrapper<P> {
 
 struct IcedElementInternal<P: Program + Send + 'static> {
     // draw buffer
-    outputs: Vec<Output>,
+    outputs: HashSet<Output>,
     buffers: HashMap<OrderedFloat<f64>, (MemoryRenderBuffer, Option<(Vec<Primitive>, Color)>)>,
 
     // state
@@ -238,7 +238,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             .ok();
 
         let mut internal = IcedElementInternal {
-            outputs: Vec::new(),
+            outputs: HashSet::new(),
             buffers: HashMap::new(),
             size,
             cursor_pos: None,
@@ -569,11 +569,11 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
                 ),
             );
         }
-        internal.outputs.push(output.clone());
+        internal.outputs.insert(output.clone());
     }
 
     fn output_leave(&self, output: &Output) {
-        self.0.lock().unwrap().outputs.retain(|o| o != output);
+        self.0.lock().unwrap().outputs.remove(output);
         self.refresh();
     }
 
