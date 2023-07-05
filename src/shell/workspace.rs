@@ -23,7 +23,6 @@ use crate::{
     xwayland::XWaylandState,
 };
 
-use calloop::LoopHandle;
 use indexmap::IndexSet;
 use smithay::{
     backend::renderer::{
@@ -45,12 +44,13 @@ use smithay::{
 };
 use std::{collections::HashMap, time::Instant};
 use tracing::warn;
+use wayland_backend::server::ClientId;
 
 use super::{
     element::{stack::CosmicStackRenderElement, window::CosmicWindowRenderElement, CosmicMapped},
     focus::{target::KeyboardFocusTarget, FocusStack, FocusStackMut},
     grabs::{ResizeEdge, ResizeGrab},
-    CosmicMappedRenderElement, CosmicSurface, ResizeDirection,
+    CosmicMappedRenderElement, CosmicSurface, ResizeDirection, ResizeMode,
 };
 
 #[derive(Debug)]
@@ -341,15 +341,27 @@ impl Workspace {
         }
     }
 
-    pub fn resize(&mut self, seat: &Seat<State>, direction: ResizeDirection, edge: ResizeEdge) {
-        if let Some(KeyboardFocusTarget::Fullscreen(_)) =
-            seat.get_keyboard().unwrap().current_focus()
-        {
-            return;
+    pub fn resize(
+        &mut self,
+        focused: &KeyboardFocusTarget,
+        direction: ResizeDirection,
+        edge: ResizeEdge,
+        amount: i32,
+    ) -> bool {
+        if let Some(toplevel) = focused.toplevel() {
+            if self
+                .fullscreen
+                .values()
+                .any(|surface| surface.wl_surface().as_ref() == Some(&toplevel))
+            {
+                return false;
+            }
         }
 
-        if !self.floating_layer.resize(seat, direction, edge) {
-            self.tiling_layer.resize(seat, direction, edge);
+        if !self.floating_layer.resize(focused, direction, edge, amount) {
+            self.tiling_layer.resize(focused, direction, edge, amount)
+        } else {
+            true
         }
     }
 

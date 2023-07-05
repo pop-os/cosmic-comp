@@ -14,7 +14,7 @@ use crate::{
         },
         grabs::ResizeEdge,
         layout::Orientation,
-        CosmicSurface, OutputNotMapped, OverviewMode,
+        CosmicSurface, OutputNotMapped, OverviewMode, ResizeDirection, ResizeMode,
     },
     utils::prelude::*,
     wayland::{
@@ -650,7 +650,8 @@ impl TilingLayout {
         let queue = self.queues.get_mut(&output).unwrap();
         let mut tree = queue.trees.back().unwrap().0.copy_clone();
 
-        let Some((node_id, data)) = TilingLayout::currently_focused_node(&mut tree, seat) else {
+        let Some(target) = seat.get_keyboard().unwrap().current_focus() else { return MoveResult::Done };
+        let Some((node_id, data)) = TilingLayout::currently_focused_node(&mut tree, &seat.active_output(), target) else {
             return MoveResult::Done
         };
 
@@ -971,181 +972,181 @@ impl TilingLayout {
         let output = seat.active_output();
         let tree = &self.queues.get(&output).unwrap().trees.back().unwrap().0;
 
-        if let Some(focused) = TilingLayout::currently_focused_node(tree, seat).or_else(|| {
+        let Some(target) = seat.get_keyboard().unwrap().current_focus() else { return FocusResult::None };
+        let Some(focused) = TilingLayout::currently_focused_node(tree, &seat.active_output(), target).or_else(|| {
             TilingLayout::last_active_window(tree, focus_stack)
                 .map(|(id, mapped)| (id, FocusedNodeData::Window(mapped)))
-        }) {
-            let (last_node_id, data) = focused;
+        }) else { return FocusResult::None };
 
-            // stacks may handle focus internally
-            if let FocusedNodeData::Window(window) = data.clone() {
-                if window.handle_focus(direction) {
-                    return FocusResult::Handled;
-                }
+        let (last_node_id, data) = focused;
+
+        // stacks may handle focus internally
+        if let FocusedNodeData::Window(window) = data.clone() {
+            if window.handle_focus(direction) {
+                return FocusResult::Handled;
             }
+        }
 
-            if direction == FocusDirection::In {
-                if let FocusedNodeData::Group(mut stack, _) = data.clone() {
-                    let maybe_id = stack.pop().unwrap();
-                    let id = if tree
-                        .children_ids(&last_node_id)
-                        .unwrap()
-                        .any(|id| id == &maybe_id)
-                    {
-                        Some(maybe_id)
-                    } else {
-                        tree.children_ids(&last_node_id).unwrap().next().cloned()
-                    };
-
-                    if let Some(id) = id {
-                        return match tree.get(&id).unwrap().data() {
-                            Data::Mapped { mapped, .. } => {
-                                if mapped.is_stack() {
-                                    mapped.stack_ref().unwrap().focus_stack();
-                                }
-                                FocusResult::Some(mapped.clone().into())
-                            }
-                            Data::Group { alive, .. } => FocusResult::Some(
-                                WindowGroup {
-                                    node: id,
-                                    output: output.downgrade(),
-                                    alive: Arc::downgrade(alive),
-                                    focus_stack: stack,
-                                }
-                                .into(),
-                            ),
-                        };
-                    }
-                }
-            }
-
-            let mut node_id = last_node_id.clone();
-            while let Some(group) = tree.get(&node_id).unwrap().parent() {
-                let child = node_id.clone();
-                let group_data = tree.get(&group).unwrap().data();
-                let main_orientation = group_data.orientation();
-                assert!(group_data.is_group());
-
-                if direction == FocusDirection::Out {
-                    return FocusResult::Some(
-                        WindowGroup {
-                            node: group.clone(),
-                            output: output.downgrade(),
-                            alive: match group_data {
-                                &Data::Group { ref alive, .. } => Arc::downgrade(alive),
-                                _ => unreachable!(),
-                            },
-                            focus_stack: match data {
-                                FocusedNodeData::Group(mut stack, _) => {
-                                    stack.push(child);
-                                    stack
-                                }
-                                _ => vec![child],
-                            },
-                        }
-                        .into(),
-                    );
-                }
-
-                // which child are we?
-                let idx = tree
-                    .children_ids(&group)
+        if direction == FocusDirection::In {
+            if let FocusedNodeData::Group(mut stack, _) = data.clone() {
+                let maybe_id = stack.pop().unwrap();
+                let id = if tree
+                    .children_ids(&last_node_id)
                     .unwrap()
-                    .position(|id| id == &child)
-                    .unwrap();
-                let len = group_data.len();
-
-                let focus_subtree = match (main_orientation, direction) {
-                    (Orientation::Horizontal, FocusDirection::Down)
-                    | (Orientation::Vertical, FocusDirection::Right)
-                        if idx < (len - 1) =>
-                    {
-                        tree.children_ids(&group).unwrap().skip(idx + 1).next()
-                    }
-                    (Orientation::Horizontal, FocusDirection::Up)
-                    | (Orientation::Vertical, FocusDirection::Left)
-                        if idx > 0 =>
-                    {
-                        tree.children_ids(&group).unwrap().skip(idx - 1).next()
-                    }
-                    _ => None, // continue iterating
+                    .any(|id| id == &maybe_id)
+                {
+                    Some(maybe_id)
+                } else {
+                    tree.children_ids(&last_node_id).unwrap().next().cloned()
                 };
 
-                if focus_subtree.is_some() {
-                    let mut node_id = focus_subtree;
-                    while node_id.is_some() {
-                        match tree.get(node_id.unwrap()).unwrap().data() {
-                            Data::Group { orientation, .. } if orientation == &main_orientation => {
-                                // if the group is layed out in the direction we care about,
-                                // we can just use the first or last element (depending on the direction)
-                                match direction {
-                                    FocusDirection::Down | FocusDirection::Right => {
-                                        node_id = tree
-                                            .children_ids(node_id.as_ref().unwrap())
-                                            .unwrap()
-                                            .next();
-                                    }
-                                    FocusDirection::Up | FocusDirection::Left => {
-                                        node_id = tree
-                                            .children_ids(node_id.as_ref().unwrap())
-                                            .unwrap()
-                                            .last();
-                                    }
-                                    _ => unreachable!(),
+                if let Some(id) = id {
+                    return match tree.get(&id).unwrap().data() {
+                        Data::Mapped { mapped, .. } => {
+                            if mapped.is_stack() {
+                                mapped.stack_ref().unwrap().focus_stack();
+                            }
+                            FocusResult::Some(mapped.clone().into())
+                        }
+                        Data::Group { alive, .. } => FocusResult::Some(
+                            WindowGroup {
+                                node: id,
+                                output: output.downgrade(),
+                                alive: Arc::downgrade(alive),
+                                focus_stack: stack,
+                            }
+                            .into(),
+                        ),
+                    };
+                }
+            }
+        }
+
+        let mut node_id = last_node_id.clone();
+        while let Some(group) = tree.get(&node_id).unwrap().parent() {
+            let child = node_id.clone();
+            let group_data = tree.get(&group).unwrap().data();
+            let main_orientation = group_data.orientation();
+            assert!(group_data.is_group());
+
+            if direction == FocusDirection::Out {
+                return FocusResult::Some(
+                    WindowGroup {
+                        node: group.clone(),
+                        output: output.downgrade(),
+                        alive: match group_data {
+                            &Data::Group { ref alive, .. } => Arc::downgrade(alive),
+                            _ => unreachable!(),
+                        },
+                        focus_stack: match data {
+                            FocusedNodeData::Group(mut stack, _) => {
+                                stack.push(child);
+                                stack
+                            }
+                            _ => vec![child],
+                        },
+                    }
+                    .into(),
+                );
+            }
+
+            // which child are we?
+            let idx = tree
+                .children_ids(&group)
+                .unwrap()
+                .position(|id| id == &child)
+                .unwrap();
+            let len = group_data.len();
+
+            let focus_subtree = match (main_orientation, direction) {
+                (Orientation::Horizontal, FocusDirection::Down)
+                | (Orientation::Vertical, FocusDirection::Right)
+                    if idx < (len - 1) =>
+                {
+                    tree.children_ids(&group).unwrap().skip(idx + 1).next()
+                }
+                (Orientation::Horizontal, FocusDirection::Up)
+                | (Orientation::Vertical, FocusDirection::Left)
+                    if idx > 0 =>
+                {
+                    tree.children_ids(&group).unwrap().skip(idx - 1).next()
+                }
+                _ => None, // continue iterating
+            };
+
+            if focus_subtree.is_some() {
+                let mut node_id = focus_subtree;
+                while node_id.is_some() {
+                    match tree.get(node_id.unwrap()).unwrap().data() {
+                        Data::Group { orientation, .. } if orientation == &main_orientation => {
+                            // if the group is layed out in the direction we care about,
+                            // we can just use the first or last element (depending on the direction)
+                            match direction {
+                                FocusDirection::Down | FocusDirection::Right => {
+                                    node_id = tree
+                                        .children_ids(node_id.as_ref().unwrap())
+                                        .unwrap()
+                                        .next();
                                 }
-                            }
-                            Data::Group { .. } => {
-                                let center = {
-                                    let geo = tree.get(&last_node_id).unwrap().data().geometry();
-                                    let mut point = geo.loc;
-                                    match direction {
-                                        FocusDirection::Down => {
-                                            point += Point::from((geo.size.w / 2 - 1, geo.size.h))
-                                        }
-                                        FocusDirection::Up => point.x += geo.size.w / 2 - 1,
-                                        FocusDirection::Left => point.y += geo.size.h / 2 - 1,
-                                        FocusDirection::Right => {
-                                            point += Point::from((geo.size.w, geo.size.h / 2 - 1))
-                                        }
-                                        _ => unreachable!(),
-                                    };
-                                    point.to_f64()
-                                };
-
-                                let distance = |candidate: &&NodeId| -> f64 {
-                                    let geo = tree.get(candidate).unwrap().data().geometry();
-                                    let mut point = geo.loc;
-                                    match direction {
-                                        FocusDirection::Up => {
-                                            point += Point::from((geo.size.w / 2, geo.size.h))
-                                        }
-                                        FocusDirection::Down => point.x += geo.size.w,
-                                        FocusDirection::Right => point.y += geo.size.h / 2,
-                                        FocusDirection::Left => {
-                                            point += Point::from((geo.size.w, geo.size.h / 2))
-                                        }
-                                        _ => unreachable!(),
-                                    };
-                                    let point = point.to_f64();
-                                    ((point.x - center.x).powi(2) + (point.y - center.y).powi(2))
-                                        .sqrt()
-                                };
-
-                                node_id = tree
-                                    .children_ids(node_id.as_ref().unwrap())
-                                    .unwrap()
-                                    .min_by(|node1, node2| {
-                                        distance(node1).abs().total_cmp(&distance(node2).abs())
-                                    });
-                            }
-                            Data::Mapped { mapped, .. } => {
-                                return FocusResult::Some(mapped.clone().into());
+                                FocusDirection::Up | FocusDirection::Left => {
+                                    node_id = tree
+                                        .children_ids(node_id.as_ref().unwrap())
+                                        .unwrap()
+                                        .last();
+                                }
+                                _ => unreachable!(),
                             }
                         }
+                        Data::Group { .. } => {
+                            let center = {
+                                let geo = tree.get(&last_node_id).unwrap().data().geometry();
+                                let mut point = geo.loc;
+                                match direction {
+                                    FocusDirection::Down => {
+                                        point += Point::from((geo.size.w / 2 - 1, geo.size.h))
+                                    }
+                                    FocusDirection::Up => point.x += geo.size.w / 2 - 1,
+                                    FocusDirection::Left => point.y += geo.size.h / 2 - 1,
+                                    FocusDirection::Right => {
+                                        point += Point::from((geo.size.w, geo.size.h / 2 - 1))
+                                    }
+                                    _ => unreachable!(),
+                                };
+                                point.to_f64()
+                            };
+
+                            let distance = |candidate: &&NodeId| -> f64 {
+                                let geo = tree.get(candidate).unwrap().data().geometry();
+                                let mut point = geo.loc;
+                                match direction {
+                                    FocusDirection::Up => {
+                                        point += Point::from((geo.size.w / 2, geo.size.h))
+                                    }
+                                    FocusDirection::Down => point.x += geo.size.w,
+                                    FocusDirection::Right => point.y += geo.size.h / 2,
+                                    FocusDirection::Left => {
+                                        point += Point::from((geo.size.w, geo.size.h / 2))
+                                    }
+                                    _ => unreachable!(),
+                                };
+                                let point = point.to_f64();
+                                ((point.x - center.x).powi(2) + (point.y - center.y).powi(2)).sqrt()
+                            };
+
+                            node_id = tree
+                                .children_ids(node_id.as_ref().unwrap())
+                                .unwrap()
+                                .min_by(|node1, node2| {
+                                    distance(node1).abs().total_cmp(&distance(node2).abs())
+                                });
+                        }
+                        Data::Mapped { mapped, .. } => {
+                            return FocusResult::Some(mapped.clone().into());
+                        }
                     }
-                } else {
-                    node_id = group.clone();
                 }
+            } else {
+                node_id = group.clone();
             }
         }
 
@@ -1161,7 +1162,10 @@ impl TilingLayout {
         let Some(queue) = self.queues.get_mut(&output) else { return };
         let mut tree = queue.trees.back().unwrap().0.copy_clone();
 
-        if let Some((last_active, _)) = TilingLayout::currently_focused_node(&tree, seat) {
+        let Some(target) = seat.get_keyboard().unwrap().current_focus() else { return };
+        if let Some((last_active, _)) =
+            TilingLayout::currently_focused_node(&tree, &seat.active_output(), target)
+        {
             if let Some(group) = tree.get(&last_active).unwrap().parent().cloned() {
                 if let &mut Data::Group {
                     ref mut orientation,
@@ -1203,8 +1207,9 @@ impl TilingLayout {
         let Some(queue) = self.queues.get_mut(&output) else { return };
         let mut tree = queue.trees.back().unwrap().0.copy_clone();
 
+        let Some(target) = seat.get_keyboard().unwrap().current_focus() else { return };
         if let Some((last_active, last_active_data)) =
-            TilingLayout::currently_focused_node(&tree, seat)
+            TilingLayout::currently_focused_node(&tree, &seat.active_output(), target)
         {
             match last_active_data {
                 FocusedNodeData::Window(mapped) => {
@@ -1437,6 +1442,114 @@ impl TilingLayout {
         None
     }
 
+    pub fn possible_resizes(tree: &Tree<Data>, mut node_id: NodeId) -> ResizeEdge {
+        let mut edges = ResizeEdge::empty();
+
+        while let Some(group_id) = tree.get(&node_id).unwrap().parent().cloned() {
+            let orientation = tree.get(&group_id).unwrap().data().orientation();
+
+            let node_idx = tree
+                .children_ids(&group_id)
+                .unwrap()
+                .position(|id| id == &node_id)
+                .unwrap();
+            let total = tree.children_ids(&group_id).unwrap().count();
+            if orientation == Orientation::Vertical {
+                if node_idx > 0 {
+                    edges.insert(ResizeEdge::LEFT);
+                }
+                if node_idx < total - 1 {
+                    edges.insert(ResizeEdge::RIGHT);
+                }
+            } else {
+                if node_idx > 0 {
+                    edges.insert(ResizeEdge::TOP);
+                }
+                if node_idx < total - 1 {
+                    edges.insert(ResizeEdge::BOTTOM);
+                }
+            }
+
+            node_id = group_id;
+        }
+
+        edges
+    }
+
+    pub fn resize(
+        &mut self,
+        focused: &KeyboardFocusTarget,
+        direction: ResizeDirection,
+        edges: ResizeEdge,
+        amount: i32,
+    ) -> bool {
+        let Some((output, mut node_id)) = self.queues.iter().find_map(|(output, queue)| {
+            let tree = &queue.trees.back().unwrap().0;
+            let root_id = tree.root_node_id()?;
+            let id = match TilingLayout::currently_focused_node(tree, &output.output, focused.clone()) {
+                Some((_id, FocusedNodeData::Window(mapped))) => // we need to make sure the id belongs to this tree..
+                    tree.traverse_pre_order_ids(root_id)
+                        .unwrap()
+                        .find(|id| tree.get(id).unwrap().data().is_mapped(Some(&mapped))),
+                Some((id, FocusedNodeData::Group(_, _))) => Some(id), // in this case the output was already matched, so the id is to be trusted
+                _ => None,
+            };
+            id.map(|id| (output.output.clone(), id))
+        }) else { return false };
+
+        let queue = self.queues.get_mut(&output).unwrap();
+        let mut tree = queue.trees.back().unwrap().0.copy_clone();
+
+        while let Some(group_id) = tree.get(&node_id).unwrap().parent().cloned() {
+            let orientation = tree.get(&group_id).unwrap().data().orientation();
+            if !((orientation == Orientation::Vertical
+                && (edges.contains(ResizeEdge::LEFT) || edges.contains(ResizeEdge::RIGHT)))
+                || (orientation == Orientation::Horizontal
+                    && (edges.contains(ResizeEdge::TOP) || edges.contains(ResizeEdge::BOTTOM))))
+            {
+                node_id = group_id.clone();
+                continue;
+            }
+
+            let node_idx = tree
+                .children_ids(&group_id)
+                .unwrap()
+                .position(|id| id == &node_id)
+                .unwrap();
+            let Some(other_idx) = (match edges {
+                x if x.intersects(ResizeEdge::TOP_LEFT) => node_idx.checked_sub(1),
+                _ => if tree.children_ids(&group_id).unwrap().count() - 1 > node_idx { Some(node_idx + 1) } else { None },
+            }) else {
+                node_id = group_id.clone();
+                continue;
+            };
+
+            let data = tree.get_mut(&group_id).unwrap().data_mut();
+
+            match data {
+                Data::Group { sizes, .. } => {
+                    let (shrink_idx, grow_idx) = if direction == ResizeDirection::Inwards {
+                        (node_idx, other_idx)
+                    } else {
+                        (other_idx, node_idx)
+                    };
+
+                    let old_size = sizes[shrink_idx];
+                    sizes[shrink_idx] = (old_size - amount).max(10);
+                    let diff = old_size - sizes[shrink_idx];
+                    sizes[grow_idx] += diff;
+                }
+                _ => unreachable!(),
+            }
+            let blocker = TilingLayout::update_positions(&output, &mut tree, self.gaps);
+            queue.push_tree(tree, Duration::ZERO, blocker);
+
+            return true;
+        }
+
+        true
+    }
+
     fn last_active_window<'a>(
         tree: &Tree<Data>,
         mut focus_stack: impl Iterator<Item = &'a CosmicMapped>,
@@ -1451,10 +1564,9 @@ impl TilingLayout {
 
     fn currently_focused_node(
         tree: &Tree<Data>,
-        seat: &Seat<State>,
+        output: &Output,
+        mut target: KeyboardFocusTarget,
     ) -> Option<(NodeId, FocusedNodeData)> {
-        let mut target = seat.get_keyboard().unwrap().current_focus()?;
-
         // if the focus is currently on a popup, treat it's toplevel as the target
         if let KeyboardFocusTarget::Popup(popup) = target {
             let toplevel_surface = match popup {
@@ -1487,7 +1599,7 @@ impl TilingLayout {
                 }
             }
             KeyboardFocusTarget::Group(window_group) => {
-                if window_group.output == seat.active_output() {
+                if window_group.output == *output {
                     let node = tree.get(&window_group.node).ok()?;
                     if node.data().is_group() {
                         return Some((
@@ -1978,7 +2090,14 @@ where
         let alpha = alpha * transition;
 
         let focused = seat
-            .and_then(|seat| TilingLayout::currently_focused_node(&tree, seat))
+            .and_then(|seat| {
+                seat.get_keyboard()
+                    .unwrap()
+                    .current_focus()
+                    .and_then(|target| {
+                        TilingLayout::currently_focused_node(&tree, &seat.active_output(), target)
+                    })
+            })
             .map(|(id, _)| id);
 
         let has_potential_groups = if let Some(focused_id) = focused.as_ref() {
@@ -2318,7 +2437,18 @@ where
     CosmicStackRenderElement<R>: RenderElement<R>,
 {
     let focused = seat
-        .and_then(|seat| TilingLayout::currently_focused_node(&target_tree, seat))
+        .and_then(|seat| {
+            seat.get_keyboard()
+                .unwrap()
+                .current_focus()
+                .and_then(|target| {
+                    TilingLayout::currently_focused_node(
+                        &target_tree,
+                        &seat.active_output(),
+                        target,
+                    )
+                })
+        })
         .map(|(id, _)| id);
 
     let mut group_backdrop = None;

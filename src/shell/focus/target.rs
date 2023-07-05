@@ -3,6 +3,7 @@ use std::sync::Weak;
 use crate::{
     shell::{element::CosmicMapped, CosmicSurface},
     utils::prelude::*,
+    wayland::handlers::xdg_shell::popup::get_popup_toplevel,
 };
 use id_tree::NodeId;
 use smithay::{
@@ -46,6 +47,16 @@ impl From<KeyboardFocusTarget> for PointerFocusTarget {
             KeyboardFocusTarget::LayerSurface(layer) => PointerFocusTarget::LayerSurface(layer),
             KeyboardFocusTarget::Popup(popup) => PointerFocusTarget::Popup(popup),
             _ => unreachable!("A window grab cannot start a popup grab"),
+        }
+    }
+}
+
+impl KeyboardFocusTarget {
+    pub fn toplevel(&self) -> Option<WlSurface> {
+        match self {
+            KeyboardFocusTarget::Element(mapped) => mapped.wl_surface(),
+            KeyboardFocusTarget::Popup(PopupKind::Xdg(xdg)) => get_popup_toplevel(&xdg),
+            _ => None,
         }
     }
 }

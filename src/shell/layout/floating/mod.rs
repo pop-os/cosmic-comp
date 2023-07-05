@@ -5,7 +5,7 @@ use smithay::{
         element::{AsRenderElements, RenderElement},
         ImportAll, ImportMem, Renderer,
     },
-    desktop::{layer_map_for_output, space::SpaceElement, Space},
+    desktop::{layer_map_for_output, space::SpaceElement, Space, WindowSurfaceType},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
     utils::{Logical, Point, Rectangle, Size},
@@ -19,8 +19,9 @@ use crate::{
             stack::CosmicStackRenderElement, window::CosmicWindowRenderElement, CosmicMapped,
             CosmicMappedRenderElement,
         },
+        focus::target::KeyboardFocusTarget,
         grabs::ResizeEdge,
-        CosmicSurface,
+        CosmicSurface, ResizeDirection, ResizeMode,
     },
     state::State,
     utils::prelude::*,
@@ -250,6 +251,73 @@ impl FloatingLayout {
         } else {
             None
         }
+    }
+
+    pub fn resize(
+        &mut self,
+        focused: &KeyboardFocusTarget,
+        direction: ResizeDirection,
+        edge: ResizeEdge,
+        amount: i32,
+    ) -> bool {
+        let Some(toplevel) = focused.toplevel() else { return false };
+        let Some(mapped) = self.space.elements().find(|m| m.has_surface(&toplevel, WindowSurfaceType::TOPLEVEL)) else { return false };
+
+        let Some(original_geo) = self.space.element_geometry(mapped) else {
+            return false // we don't have that window
+        };
+        let mut geo = original_geo.clone();
+
+        if edge.contains(ResizeEdge::RIGHT) || edge.contains(ResizeEdge::LEFT) {
+            if direction == ResizeDirection::Inwards {
+                geo.size.w -= amount;
+            } else {
+                geo.size.w += amount;
+            }
+            if edge.contains(ResizeEdge::LEFT) {
+                if direction == ResizeDirection::Inwards {
+                    geo.loc.x += amount;
+                } else {
+                    geo.loc.x -= amount;
+                }
+            }
+        }
+        if edge.contains(ResizeEdge::BOTTOM) || edge.contains(ResizeEdge::TOP) {
+            if direction == ResizeDirection::Inwards {
+                geo.size.h -= amount;
+            } else {
+                geo.size.h += amount;
+            }
+            if edge.contains(ResizeEdge::TOP) {
+                if direction == ResizeDirection::Inwards {
+                    geo.loc.y += amount;
+                } else {
+                    geo.loc.y -= amount;
+                }
+            }
+        }
+
+        let Some(bounding_box) = self.space.outputs()
+            .map(|o| self.space.output_geometry(o).unwrap())
+            .filter(|output_geo| output_geo.overlaps(geo))
+            .fold(None, |res, output_geo| match res {
+                None => Some(output_geo),
+                Some(other) => Some(other.merge(output_geo)),
+            }) else { return true };
+
+        geo = geo.intersection(bounding_box).unwrap();
+
+        *mapped.resize_state.lock().unwrap() = Some(ResizeState::Resizing(ResizeData {
+            edges: edge,
+            initial_window_location: original_geo.loc,
+            initial_window_size: original_geo.size,
+        }));
+
+        mapped.set_resizing(true);
+        mapped.set_geometry(geo);
+        mapped.configure();
+
+        true
     }
 
     pub fn mapped(&self) -> impl Iterator<Item = &CosmicMapped> {
