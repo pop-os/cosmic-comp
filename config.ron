@@ -60,7 +60,8 @@
         (modifiers: [Super], key: "y"): ToggleTiling,
         (modifiers: [Super], key: "g"): ToggleWindowFloating,
         
-        (modifiers: [Super], key: "m"): Maximize,
+        (modifiers: [Super], key: "r"): Resizing(Outwards),
+        (modifiers: [Super, Shift], key: "r"): Resizing(Inwards),
 
         //TODO: ability to select default web browser
         (modifiers: [Super], key: "b"): Spawn("firefox"),
