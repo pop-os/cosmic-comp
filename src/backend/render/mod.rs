@@ -476,19 +476,10 @@ where
         }
     }
 
-    state
-        .shell
-        .space_for_handle_mut(&current.0)
-        .ok_or(OutputNoMode)?
-        .update_animations(&state.event_loop_handle);
-    if let Some((previous, _, _)) = previous.as_ref() {
-        state
-            .shell
-            .space_for_handle_mut(&previous)
-            .ok_or(OutputNoMode)?
-            .update_animations(&state.event_loop_handle);
-    }
     let overview = state.shell.overview_mode();
+    let (resize_mode, resize_indicator) = state.shell.resize_mode();
+    let resize_indicator = resize_indicator.map(|indicator| (resize_mode, indicator));
+
     let last_active_seat = state.last_active_seat().clone();
     let move_active = last_active_seat
         .user_data()
@@ -552,6 +543,7 @@ where
                         state.xwayland_state.as_mut(),
                         (!move_active && is_active_space).then_some(&last_active_seat),
                         overview.clone(),
+                        resize_indicator.clone(),
                         state.config.static_conf.active_hint,
                     )
                     .map_err(|_| OutputNoMode)?
@@ -598,6 +590,7 @@ where
                 state.xwayland_state.as_mut(),
                 (!move_active && is_active_space).then_some(&last_active_seat),
                 overview,
+                resize_indicator,
                 state.config.static_conf.active_hint,
             )
             .map_err(|_| OutputNoMode)?

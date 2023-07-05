@@ -4,6 +4,7 @@ use crate::{
     backend::render::{element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, GROUP_COLOR},
     shell::{
         element::{
+            resize_indicator::ResizeIndicator,
             stack::{CosmicStackRenderElement, MoveResult as StackMoveResult},
             window::CosmicWindowRenderElement,
             CosmicMapped, CosmicMappedRenderElement, CosmicStack, CosmicWindow,
@@ -1915,6 +1916,7 @@ impl TilingLayout {
         seat: Option<&Seat<State>>,
         non_exclusive_zone: Rectangle<i32, Logical>,
         overview: OverviewMode,
+        resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
         indicator_thickness: u8,
     ) -> Result<Vec<CosmicMappedRenderElement<R>>, OutputNotMapped>
     where
@@ -1955,26 +1957,7 @@ impl TilingLayout {
         } else {
             1.0
         };
-        let draw_groups = match overview {
-            OverviewMode::Started(_, start) => {
-                let percentage = (Instant::now().duration_since(start).as_millis() as f32
-                    / ANIMATION_DURATION.as_millis() as f32)
-                    .min(1.0);
-                Some(Ease::Cubic(Cubic::Out).tween(percentage))
-            }
-            OverviewMode::Ended(end) => {
-                let percentage = (1.0
-                    - Instant::now().duration_since(end).as_millis() as f32
-                        / ANIMATION_DURATION.as_millis() as f32)
-                    .max(0.0);
-                if percentage > 0.0 {
-                    Some(Ease::Cubic(Cubic::Out).tween(percentage))
-                } else {
-                    None
-                }
-            }
-            OverviewMode::None => None,
-        };
+        let draw_groups = overview.alpha();
 
         let mut elements = Vec::new();
 
@@ -2032,7 +2015,7 @@ impl TilingLayout {
             geometries,
             old_geometries,
             seat,
-            output_scale,
+            output,
             percentage,
             if let Some(transition) = draw_groups {
                 let diff = (4u8.abs_diff(indicator_thickness) as f32 * transition).round() as u8;
@@ -2044,6 +2027,7 @@ impl TilingLayout {
             } else {
                 indicator_thickness
             },
+            resize_indicator,
         ));
 
         // tiling hints
@@ -2425,9 +2409,10 @@ fn render_new_tree<R>(
     geometries: Option<HashMap<NodeId, Rectangle<i32, Logical>>>,
     old_geometries: Option<HashMap<NodeId, Rectangle<i32, Logical>>>,
     seat: Option<&Seat<State>>,
-    output_scale: f64,
+    output: &Output,
     percentage: f32,
     indicator_thickness: u8,
+    mut resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
 ) -> Vec<CosmicMappedRenderElement<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
@@ -2452,11 +2437,16 @@ where
         .map(|(id, _)| id);
 
     let mut group_backdrop = None;
+    let mut indicator = None;
+    let mut resize_elements = None;
+
+    let output_geo = output.geometry();
+    let output_scale = output.current_scale().fractional_scale();
 
     if let Some(root) = target_tree.root_node_id() {
         let old_geometries = old_geometries.unwrap_or_default();
         let geometries = geometries.unwrap_or_default();
-        let mut elements: Vec<CosmicMappedRenderElement<R>> = target_tree
+        let elements: Vec<CosmicMappedRenderElement<R>> = target_tree
             .traverse_pre_order_ids(root)
             .unwrap()
             .flat_map(|node_id| {
@@ -2546,7 +2536,7 @@ where
 
                 let mut elements = Vec::new();
 
-                if focused == Some(node_id) {
+                if focused.as_ref() == Some(&node_id) {
                     if indicator_thickness > 0 || data.is_group() {
                         let mut geo = geo.clone();
                         if data.is_group() {
@@ -2554,25 +2544,56 @@ where
                             geo.loc += (outer_gap, outer_gap).into();
                             geo.size -= (outer_gap * 2, outer_gap * 2).into();
 
-                            group_backdrop = Some(
-                                BackdropShader::element(
-                                    renderer,
-                                    match data {
-                                        Data::Group { alive, .. } => {
-                                            Key::Group(Arc::downgrade(alive))
-                                        }
-                                        _ => unreachable!(),
-                                    },
-                                    geo,
-                                    8.,
-                                    0.4,
-                                    GROUP_COLOR,
-                                )
-                                .into(),
-                            );
+                            group_backdrop = Some(BackdropShader::element(
+                                renderer,
+                                match data {
+                                    Data::Group { alive, .. } => Key::Group(Arc::downgrade(alive)),
+                                    _ => unreachable!(),
+                                },
+                                geo,
+                                8.,
+                                0.4,
+                                GROUP_COLOR,
+                            ));
                         }
 
-                        let element = IndicatorShader::focus_element(
+                        if let Some((mode, resize)) = resize_indicator.as_mut() {
+                            let mut geo = geo.clone();
+                            geo.loc -= (18, 18).into();
+                            geo.size += (36, 36).into();
+
+                            resize.resize(geo.size);
+                            resize.output_enter(output, output_geo);
+                            let possible_edges =
+                                TilingLayout::possible_resizes(target_tree, node_id);
+                            if !possible_edges.is_empty() {
+                                if resize.with_program(|internal| {
+                                    let mut edges = internal.edges.lock().unwrap();
+                                    if *edges != possible_edges {
+                                        *edges = possible_edges;
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                }) {
+                                    resize.force_update();
+                                }
+                                resize_elements = Some(
+                                    resize
+                                        .render_elements::<CosmicWindowRenderElement<R>>(
+                                            renderer,
+                                            geo.loc.to_physical_precise_round(output_scale),
+                                            output_scale.into(),
+                                            alpha * mode.alpha().unwrap_or(1.0),
+                                        )
+                                        .into_iter()
+                                        .map(CosmicMappedRenderElement::from)
+                                        .collect::<Vec<_>>(),
+                                );
+                            }
+                        }
+
+                        indicator = Some(IndicatorShader::focus_element(
                             renderer,
                             match data {
                                 Data::Mapped { mapped, .. } => mapped.clone().into(),
@@ -2585,8 +2606,7 @@ where
                                 indicator_thickness
                             },
                             1.0,
-                        );
-                        elements.push(element.into());
+                        ));
                     }
                 }
 
@@ -2654,8 +2674,14 @@ where
                 elements
             })
             .collect();
-        elements.extend(group_backdrop);
-        elements
+
+        resize_elements
+            .into_iter()
+            .flatten()
+            .chain(indicator.into_iter().map(Into::into))
+            .chain(elements)
+            .chain(group_backdrop.into_iter().map(Into::into))
+            .collect()
     } else {
         Vec::new()
     }

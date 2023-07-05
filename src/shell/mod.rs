@@ -4,12 +4,13 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     sync::atomic::{AtomicBool, Ordering},
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tracing::warn;
 use wayland_backend::server::ClientId;
 
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State as WState;
+use cosmic_time::{Cubic, Ease, Tween};
 use smithay::{
     desktop::{
         layer_map_for_output, space::SpaceElement, LayerSurface, PopupManager, WindowSurfaceType,
@@ -63,15 +64,42 @@ use self::{
     grabs::ResizeEdge,
     layout::{
         floating::{FloatingLayout, ResizeState},
-        tiling::{Direction, TilingLayout, ANIMATION_DURATION},
+        tiling::{Direction, TilingLayout},
     },
 };
+
+const ANIMATION_DURATION: Duration = Duration::from_millis(200);
 
 #[derive(Debug, Clone)]
 pub enum OverviewMode {
     None,
     Started(KeyModifiers, Instant),
     Ended(Instant),
+}
+
+impl OverviewMode {
+    pub fn alpha(&self) -> Option<f32> {
+        match self {
+            OverviewMode::Started(_, start) => {
+                let percentage = (Instant::now().duration_since(*start).as_millis() as f32
+                    / ANIMATION_DURATION.as_millis() as f32)
+                    .min(1.0);
+                Some(Ease::Cubic(Cubic::Out).tween(percentage))
+            }
+            OverviewMode::Ended(end) => {
+                let percentage = (1.0
+                    - Instant::now().duration_since(*end).as_millis() as f32
+                        / ANIMATION_DURATION.as_millis() as f32)
+                    .max(0.0);
+                if percentage > 0.0 {
+                    Some(Ease::Cubic(Cubic::Out).tween(percentage))
+                } else {
+                    None
+                }
+            }
+            OverviewMode::None => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, serde::Deserialize, PartialEq, Eq, Hash)]
@@ -85,6 +113,31 @@ pub enum ResizeMode {
     None,
     Started(KeyPattern, Instant, ResizeDirection),
     Ended(Instant, ResizeDirection),
+}
+
+impl ResizeMode {
+    pub fn alpha(&self) -> Option<f32> {
+        match self {
+            ResizeMode::Started(_, start, _) => {
+                let percentage = (Instant::now().duration_since(*start).as_millis() as f32
+                    / ANIMATION_DURATION.as_millis() as f32)
+                    .min(1.0);
+                Some(Ease::Cubic(Cubic::Out).tween(percentage))
+            }
+            ResizeMode::Ended(end, _) => {
+                let percentage = (1.0
+                    - Instant::now().duration_since(*end).as_millis() as f32
+                        / ANIMATION_DURATION.as_millis() as f32)
+                    .max(0.0);
+                if percentage > 0.0 {
+                    Some(Ease::Cubic(Cubic::Out).tween(percentage))
+                } else {
+                    None
+                }
+            }
+            ResizeMode::None => None,
+        }
+    }
 }
 
 pub struct Shell {
@@ -114,6 +167,7 @@ pub struct Shell {
         usize,
         Output,
     )>,
+    resize_indicator: Option<ResizeIndicator>,
 }
 
 #[derive(Debug)]
@@ -574,6 +628,7 @@ impl Shell {
             overview_mode: OverviewMode::None,
             resize_mode: ResizeMode::None,
             resize_state: None,
+            resize_indicator: None,
         }
     }
 
@@ -1177,7 +1232,12 @@ impl Shell {
         self.overview_mode.clone()
     }
 
-    pub fn set_resize_mode(&mut self, enabled: Option<(KeyPattern, ResizeDirection)>) {
+    pub fn set_resize_mode(
+        &mut self,
+        enabled: Option<(KeyPattern, ResizeDirection)>,
+        config: &Config,
+        evlh: LoopHandle<'static, crate::state::Data>,
+    ) {
         if let Some((pattern, direction)) = enabled {
             if let ResizeMode::Started(old_pattern, _, old_direction) = &mut self.resize_mode {
                 *old_pattern = pattern;
@@ -1185,6 +1245,7 @@ impl Shell {
             } else {
                 self.resize_mode = ResizeMode::Started(pattern, Instant::now(), direction);
             }
+            self.resize_indicator = Some(resize_indicator(direction, config, evlh));
         } else {
             if let ResizeMode::Started(_, _, direction) = &self.resize_mode {
                 self.resize_mode = ResizeMode::Ended(Instant::now(), *direction);
@@ -1192,25 +1253,15 @@ impl Shell {
         }
     }
 
-    pub fn resize_mode(&mut self) -> ResizeMode {
+    pub fn resize_mode(&mut self) -> (ResizeMode, Option<ResizeIndicator>) {
         if let ResizeMode::Ended(timestamp, _) = self.resize_mode {
             if Instant::now().duration_since(timestamp) > ANIMATION_DURATION {
                 self.resize_mode = ResizeMode::None;
+                self.resize_indicator = None;
             }
         }
 
-        self.resize_mode.clone()
-    }
-
-    pub fn resize_active_window(
-        &mut self,
-        seat: &Seat<State>,
-        direction: ResizeDirection,
-        edge: ResizeEdge,
-    ) {
-        self.workspaces
-            .active_mut(&seat.active_output())
-            .resize(seat, direction, edge);
+        (self.resize_mode.clone(), self.resize_indicator.clone())
     }
 
     pub fn refresh(&mut self) {

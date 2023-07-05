@@ -54,6 +54,7 @@ pub mod stack;
 pub use self::stack::CosmicStack;
 pub mod window;
 pub use self::window::CosmicWindow;
+pub mod resize_indicator;
 
 #[cfg(feature = "debug")]
 use egui::plot::{Corner, Legend, Plot, PlotPoints, Polygon};

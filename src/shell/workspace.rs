@@ -47,7 +47,10 @@ use tracing::warn;
 use wayland_backend::server::ClientId;
 
 use super::{
-    element::{stack::CosmicStackRenderElement, window::CosmicWindowRenderElement, CosmicMapped},
+    element::{
+        resize_indicator::ResizeIndicator, stack::CosmicStackRenderElement,
+        window::CosmicWindowRenderElement, CosmicMapped,
+    },
     focus::{target::KeyboardFocusTarget, FocusStack, FocusStackMut},
     grabs::{ResizeEdge, ResizeGrab},
     CosmicMappedRenderElement, CosmicSurface, ResizeDirection, ResizeMode,
@@ -500,6 +503,7 @@ impl Workspace {
         xwm_state: Option<&'a mut XWaylandState>,
         draw_focus_indicator: Option<&Seat<State>>,
         overview: OverviewMode,
+        resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
         indicator_thickness: u8,
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
     where
@@ -606,6 +610,7 @@ impl Workspace {
                         renderer,
                         output,
                         focused.as_ref(),
+                        resize_indicator.clone(),
                         indicator_thickness,
                         alpha,
                     )
@@ -622,6 +627,7 @@ impl Workspace {
                         draw_focus_indicator,
                         layer_map.non_exclusive_zone(),
                         overview.clone(),
+                        resize_indicator,
                         indicator_thickness,
                     )?
                     .into_iter()

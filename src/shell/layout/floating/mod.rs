@@ -16,8 +16,8 @@ use crate::{
     backend::render::{element::AsGlowRenderer, IndicatorShader},
     shell::{
         element::{
-            stack::CosmicStackRenderElement, window::CosmicWindowRenderElement, CosmicMapped,
-            CosmicMappedRenderElement,
+            resize_indicator::ResizeIndicator, stack::CosmicStackRenderElement,
+            window::CosmicWindowRenderElement, CosmicMapped, CosmicMappedRenderElement,
         },
         focus::target::KeyboardFocusTarget,
         grabs::ResizeEdge,
@@ -421,6 +421,7 @@ impl FloatingLayout {
         renderer: &mut R,
         output: &Output,
         focused: Option<&CosmicMapped>,
+        mut resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
         indicator_thickness: u8,
         alpha: f32,
     ) -> Vec<CosmicMappedRenderElement<R>>
@@ -435,14 +436,15 @@ impl FloatingLayout {
         puffin::profile_function!();
 
         let output_scale = output.current_scale().fractional_scale();
-        let output_loc = self.space.output_geometry(output).unwrap().loc;
+        let output_geo = self.space.output_geometry(output).unwrap();
 
         self.space
             .elements_for_output(output)
             .rev()
             .flat_map(|elem| {
-                let render_location =
-                    self.space.element_location(elem).unwrap() - output_loc - elem.geometry().loc;
+                let render_location = self.space.element_location(elem).unwrap()
+                    - output_geo.loc
+                    - elem.geometry().loc;
                 let mut elements = elem.render_elements(
                     renderer,
                     render_location.to_physical_precise_round(output_scale),
@@ -450,18 +452,40 @@ impl FloatingLayout {
                     alpha,
                 );
                 if focused == Some(elem) {
+                    let mut indicator_geometry = Rectangle::from_loc_and_size(
+                        self.space.element_location(elem).unwrap() - output_geo.loc,
+                        elem.geometry().size,
+                    );
+
                     if indicator_thickness > 0 {
                         let element = IndicatorShader::focus_element(
                             renderer,
                             elem.clone(),
-                            Rectangle::from_loc_and_size(
-                                self.space.element_location(elem).unwrap() - output_loc,
-                                elem.geometry().size,
-                            ),
+                            indicator_geometry,
                             indicator_thickness,
                             alpha,
                         );
                         elements.insert(0, element.into());
+                    }
+
+                    if let Some((mode, resize)) = resize_indicator.as_mut() {
+                        indicator_geometry.loc -= (18, 18).into();
+                        indicator_geometry.size += (36, 36).into();
+                        resize.resize(indicator_geometry.size);
+                        resize.output_enter(output, output_geo);
+                        elements = resize
+                            .render_elements::<CosmicWindowRenderElement<R>>(
+                                renderer,
+                                indicator_geometry
+                                    .loc
+                                    .to_physical_precise_round(output_scale),
+                                output_scale.into(),
+                                alpha * mode.alpha().unwrap_or(1.0),
+                            )
+                            .into_iter()
+                            .map(CosmicMappedRenderElement::Window)
+                            .chain(elements.into_iter())
+                            .collect();
                     }
                 }
                 elements
