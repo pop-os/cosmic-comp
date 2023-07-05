@@ -30,6 +30,25 @@ bitflags::bitflags! {
     }
 }
 
+impl ResizeEdge {
+    pub fn flip_direction(&mut self) {
+        let mut new_edge = ResizeEdge::empty();
+        if self.contains(ResizeEdge::TOP) {
+            new_edge.insert(ResizeEdge::BOTTOM);
+        }
+        if self.contains(ResizeEdge::BOTTOM) {
+            new_edge.insert(ResizeEdge::TOP);
+        }
+        if self.contains(ResizeEdge::LEFT) {
+            new_edge.insert(ResizeEdge::RIGHT);
+        }
+        if self.contains(ResizeEdge::RIGHT) {
+            new_edge.insert(ResizeEdge::LEFT);
+        }
+        *self = new_edge;
+    }
+}
+
 impl From<xdg_toplevel::ResizeEdge> for ResizeEdge {
     #[inline]
     fn from(x: xdg_toplevel::ResizeEdge) -> Self {
