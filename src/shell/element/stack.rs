@@ -129,6 +129,7 @@ impl CosmicStack {
         for window in &windows {
             window.try_force_undecorated(true);
             window.set_tiled(true);
+            window.send_configure();
         }
 
         let width = windows[0].geometry().size.w;

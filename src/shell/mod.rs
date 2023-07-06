@@ -1249,6 +1249,9 @@ impl Shell {
         } else {
             if let ResizeMode::Started(_, _, direction) = &self.resize_mode {
                 self.resize_mode = ResizeMode::Ended(Instant::now(), *direction);
+                if let Some((_, direction, edge, _, _, _)) = self.resize_state.as_ref() {
+                    self.finish_resize(*direction, *edge);
+                }
             }
         }
     }
@@ -1591,12 +1594,7 @@ impl Shell {
         }
     }
 
-    pub fn start_resize(
-        &mut self,
-        seat: &Seat<State>,
-        direction: ResizeDirection,
-        edge: ResizeEdge,
-    ) {
+    pub fn resize(&mut self, seat: &Seat<State>, direction: ResizeDirection, edge: ResizeEdge) {
         let output = seat.active_output();
         let (_, idx) = self.workspaces.active_num(&output);
         let Some(focused) = seat.get_keyboard().unwrap().current_focus() else { return };
@@ -1615,12 +1613,7 @@ impl Shell {
         }
     }
 
-    pub fn stop_resize(
-        &mut self,
-        _seat: &Seat<State>,
-        direction: ResizeDirection,
-        edge: ResizeEdge,
-    ) {
+    pub fn finish_resize(&mut self, direction: ResizeDirection, edge: ResizeEdge) {
         if let Some((old_focused, old_direction, old_edge, _, idx, output)) =
             self.resize_state.take()
         {

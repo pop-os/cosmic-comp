@@ -155,7 +155,7 @@ pub fn init_backend(
             if let &mut InputEvent::DeviceAdded { ref mut device } = &mut event {
                 data.state.common.config.read_device(device);
             }
-            data.state.process_input_event(event);
+            data.state.process_input_event(event, true);
             for output in data.state.common.shell.outputs() {
                 if let Err(err) = data.state.backend.kms().schedule_render(
                     &data.state.common.event_loop_handle,

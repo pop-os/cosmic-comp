@@ -15,6 +15,7 @@ use crate::{
     utils::prelude::*,
     wayland::{handlers::screencopy::ScreencopySessions, protocols::screencopy::Session},
 };
+use calloop::{timer::Timer, RegistrationToken};
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
 use smithay::{
     backend::input::{
@@ -40,7 +41,11 @@ use smithay::{
 use tracing::info;
 use tracing::{error, trace, warn};
 
-use std::{cell::RefCell, collections::HashMap};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 use xkbcommon::xkb::KEY_XF86Switch_VT_12;
 
 crate::utils::id_gen!(next_seat_id, SEAT_ID, SEAT_IDS);
@@ -49,7 +54,7 @@ crate::utils::id_gen!(next_seat_id, SEAT_ID, SEAT_IDS);
 pub struct SeatId(pub usize);
 pub struct ActiveOutput(pub RefCell<Output>);
 #[derive(Default)]
-pub struct SupressedKeys(RefCell<Vec<u32>>);
+pub struct SupressedKeys(RefCell<Vec<(u32, Option<RegistrationToken>)>>);
 #[derive(Default)]
 pub struct Devices(RefCell<HashMap<String, Vec<DeviceCapability>>>);
 
@@ -66,17 +71,26 @@ impl Drop for SeatId {
 }
 
 impl SupressedKeys {
-    fn add(&self, keysym: &KeysymHandle) {
-        self.0.borrow_mut().push(keysym.raw_code());
+    fn add(&self, keysym: &KeysymHandle, token: impl Into<Option<RegistrationToken>>) {
+        self.0.borrow_mut().push((keysym.raw_code(), token.into()));
     }
 
-    fn filter(&self, keysym: &KeysymHandle) -> bool {
+    fn filter(&self, keysym: &KeysymHandle) -> Option<Vec<RegistrationToken>> {
         let mut keys = self.0.borrow_mut();
-        if let Some(i) = keys.iter().position(|x| *x == keysym.raw_code()) {
-            keys.remove(i);
-            true
+        let (removed, remaining) = keys
+            .drain(..)
+            .partition(|(key, _)| *key == keysym.raw_code());
+        *keys = remaining;
+
+        let removed = removed
+            .into_iter()
+            .map(|(_, token)| token)
+            .flatten()
+            .collect::<Vec<_>>();
+        if removed.is_empty() {
+            None
         } else {
-            false
+            Some(removed)
         }
     }
 }
@@ -154,7 +168,11 @@ pub fn add_seat(
 }
 
 impl State {
-    pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>) {
+    pub fn process_input_event<B: InputBackend>(
+        &mut self,
+        event: InputEvent<B>,
+        needs_key_repetition: bool,
+    ) {
         use smithay::backend::input::Event;
 
         match event {
@@ -195,7 +213,9 @@ impl State {
             InputEvent::Keyboard { event, .. } => {
                 use smithay::backend::input::KeyboardKeyEvent;
 
+                let loop_handle = self.common.event_loop_handle.clone();
                 let device = event.device();
+
                 for seat in self.common.seats().cloned().collect::<Vec<_>>().iter() {
                     let current_output = seat.active_output();
                     let workspace = self.common.shell.active_space_mut(&current_output);
@@ -251,7 +271,6 @@ impl State {
                                             && handle.raw_syms().contains(&action_pattern.key)
                                         {
                                             data.common.shell.set_resize_mode(None, &data.common.config, data.common.event_loop_handle.clone());
-                                            return FilterResult::Intercept(None);
                                         } else if action_pattern.modifiers != *modifiers {
                                             let mut new_pattern = action_pattern.clone();
                                             new_pattern.modifiers = modifiers.clone().into();
@@ -280,10 +299,10 @@ impl State {
                                         data.common.shell.resize_mode()
                                     {
                                         let resize_edge = match handle.modified_sym() {
-                                            keysyms::KEY_Left | keysyms::KEY_H => Some(ResizeEdge::LEFT),
-                                            keysyms::KEY_Down | keysyms::KEY_J => Some(ResizeEdge::BOTTOM),
-                                            keysyms::KEY_Up | keysyms::KEY_K => Some(ResizeEdge::TOP),
-                                            keysyms::KEY_Right | keysyms::KEY_L => Some(ResizeEdge::RIGHT),
+                                            keysyms::KEY_Left | keysyms::KEY_h | keysyms::KEY_H => Some(ResizeEdge::LEFT),
+                                            keysyms::KEY_Down | keysyms::KEY_j | keysyms::KEY_J => Some(ResizeEdge::BOTTOM),
+                                            keysyms::KEY_Up | keysyms::KEY_k | keysyms::KEY_K => Some(ResizeEdge::TOP),
+                                            keysyms::KEY_Right | keysyms::KEY_l | keysyms::KEY_L => Some(ResizeEdge::RIGHT),
                                             _ => None,
                                         };
 
@@ -291,21 +310,51 @@ impl State {
                                             if direction == ResizeDirection::Inwards {
                                                 edge.flip_direction();
                                             }
+                                            let action = Action::_ResizingInternal(direction, edge, state);
+                                            let key_pattern = KeyPattern {
+                                                modifiers: modifiers.clone().into(),
+                                                key: handle.raw_code(),
+                                            };
+                                            
+                                            if state == KeyState::Released {
+                                                if let Some(tokens) = userdata.get::<SupressedKeys>().unwrap().filter(&handle) {
+                                                    for token in tokens {
+                                                        loop_handle.remove(token);
+                                                    }
+                                                }
+                                            } else {
+                                                let token = if needs_key_repetition {
+                                                    let seat_clone = seat.clone();
+                                                    let action_clone = action.clone();
+                                                    let key_pattern_clone = key_pattern.clone();
+                                                    let start = Instant::now();
+                                                    loop_handle.insert_source(Timer::from_duration(Duration::from_millis(200)), move |current, _, data| {
+                                                        let duration = current.duration_since(start).as_millis();
+                                                        data.state.handle_action(action_clone.clone(), &seat_clone, serial, time.overflowing_add(duration as u32).0, key_pattern_clone.clone(), None);
+                                                        calloop::timer::TimeoutAction::ToDuration(Duration::from_millis(25))
+                                                    }).ok()
+                                                } else { None };
+                                    
+                                               userdata
+                                                        .get::<SupressedKeys>()
+                                                        .unwrap()
+                                                        .add(&handle, token);
+                                            }
                                             return FilterResult::Intercept(Some((
-                                                Action::_ResizingInternal(direction, edge, state),
-                                                KeyPattern {
-                                                    modifiers: modifiers.clone().into(),
-                                                    key: handle.raw_code(),
-                                                },
+                                                action,
+                                                key_pattern
                                             )));
                                         }
                                     }
 
                                     // Skip released events for initially surpressed keys
-                                    if state == KeyState::Released
-                                        && userdata.get::<SupressedKeys>().unwrap().filter(&handle)
-                                    {
-                                        return FilterResult::Intercept(None);
+                                    if state == KeyState::Released {
+                                        if let Some(tokens) = userdata.get::<SupressedKeys>().unwrap().filter(&handle) {
+                                            for token in tokens {
+                                                loop_handle.remove(token);
+                                            }
+                                            return FilterResult::Intercept(None);
+                                        }
                                     }
 
                                     // Pass keys to debug interface, if it has focus
@@ -341,7 +390,7 @@ impl State {
                                         ) {
                                             error!(?err, "Failed switching virtual terminal.");
                                         }
-                                        userdata.get::<SupressedKeys>().unwrap().add(&handle);
+                                        userdata.get::<SupressedKeys>().unwrap().add(&handle, None);
                                         return FilterResult::Intercept(None);
                                     }
 
@@ -357,7 +406,7 @@ impl State {
                                                 userdata
                                                     .get::<SupressedKeys>()
                                                     .unwrap()
-                                                    .add(&handle);
+                                                    .add(&handle, None);
                                                 return FilterResult::Intercept(Some((
                                                     action.clone(),
                                                     binding.clone(),
@@ -1188,9 +1237,9 @@ impl State {
             ),
             Action::_ResizingInternal(direction, edge, state) => {
                 if state == KeyState::Pressed {
-                    self.common.shell.start_resize(seat, direction, edge);
+                    self.common.shell.resize(seat, direction, edge);
                 } else {
-                    self.common.shell.stop_resize(seat, direction, edge);
+                    self.common.shell.finish_resize(direction, edge);
                 }
             }
             Action::ToggleOrientation => {
