@@ -2557,42 +2557,6 @@ where
                             ));
                         }
 
-                        if let Some((mode, resize)) = resize_indicator.as_mut() {
-                            let mut geo = geo.clone();
-                            geo.loc -= (18, 18).into();
-                            geo.size += (36, 36).into();
-
-                            resize.resize(geo.size);
-                            resize.output_enter(output, output_geo);
-                            let possible_edges =
-                                TilingLayout::possible_resizes(target_tree, node_id);
-                            if !possible_edges.is_empty() {
-                                if resize.with_program(|internal| {
-                                    let mut edges = internal.edges.lock().unwrap();
-                                    if *edges != possible_edges {
-                                        *edges = possible_edges;
-                                        true
-                                    } else {
-                                        false
-                                    }
-                                }) {
-                                    resize.force_update();
-                                }
-                                resize_elements = Some(
-                                    resize
-                                        .render_elements::<CosmicWindowRenderElement<R>>(
-                                            renderer,
-                                            geo.loc.to_physical_precise_round(output_scale),
-                                            output_scale.into(),
-                                            alpha * mode.alpha().unwrap_or(1.0),
-                                        )
-                                        .into_iter()
-                                        .map(CosmicMappedRenderElement::from)
-                                        .collect::<Vec<_>>(),
-                                );
-                            }
-                        }
-
                         indicator = Some(IndicatorShader::focus_element(
                             renderer,
                             match data {
@@ -2607,6 +2571,41 @@ where
                             },
                             1.0,
                         ));
+                    }
+
+                    if let Some((mode, resize)) = resize_indicator.as_mut() {
+                        let mut geo = geo.clone();
+                        geo.loc -= (18, 18).into();
+                        geo.size += (36, 36).into();
+
+                        resize.resize(geo.size);
+                        resize.output_enter(output, output_geo);
+                        let possible_edges = TilingLayout::possible_resizes(target_tree, node_id);
+                        if !possible_edges.is_empty() {
+                            if resize.with_program(|internal| {
+                                let mut edges = internal.edges.lock().unwrap();
+                                if *edges != possible_edges {
+                                    *edges = possible_edges;
+                                    true
+                                } else {
+                                    false
+                                }
+                            }) {
+                                resize.force_update();
+                            }
+                            resize_elements = Some(
+                                resize
+                                    .render_elements::<CosmicWindowRenderElement<R>>(
+                                        renderer,
+                                        geo.loc.to_physical_precise_round(output_scale),
+                                        output_scale.into(),
+                                        alpha * mode.alpha().unwrap_or(1.0),
+                                    )
+                                    .into_iter()
+                                    .map(CosmicMappedRenderElement::from)
+                                    .collect::<Vec<_>>(),
+                            );
+                        }
                     }
                 }
 
