@@ -305,6 +305,14 @@ impl FloatingLayout {
                 Some(other) => Some(other.merge(output_geo)),
             }) else { return true };
 
+        let (min_size, max_size) = (mapped.min_size(), mapped.max_size());
+        let min_width = min_size.map(|s| s.w).unwrap_or(360);
+        let min_height = min_size.map(|s| s.h).unwrap_or(240);
+        let max_width = max_size.map(|s| s.w).unwrap_or(i32::max_value());
+        let max_height = max_size.map(|s| s.h).unwrap_or(i32::max_value());
+
+        geo.size.w = min_width.max(geo.size.w).min(max_width);
+        geo.size.h = min_height.max(geo.size.h).min(max_height);
         geo = geo.intersection(bounding_box).unwrap();
 
         *mapped.resize_state.lock().unwrap() = Some(ResizeState::Resizing(ResizeData {
@@ -314,7 +322,13 @@ impl FloatingLayout {
         }));
 
         mapped.set_resizing(true);
-        mapped.set_geometry(geo);
+        mapped.set_geometry(Rectangle::from_loc_and_size(
+            match mapped.active_window() {
+                CosmicSurface::X11(s) => s.geometry().loc,
+                _ => (0, 0).into(),
+            },
+            geo.size,
+        ));
         mapped.configure();
 
         true

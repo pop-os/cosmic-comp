@@ -1536,7 +1536,12 @@ impl TilingLayout {
                     };
 
                     let old_size = sizes[shrink_idx];
-                    sizes[shrink_idx] = (old_size - amount).max(10);
+                    sizes[shrink_idx] =
+                        (old_size - amount).max(if orientation == Orientation::Vertical {
+                            360
+                        } else {
+                            240
+                        });
                     let diff = old_size - sizes[shrink_idx];
                     sizes[grow_idx] += diff;
                 }
