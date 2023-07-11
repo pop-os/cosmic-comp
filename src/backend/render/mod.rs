@@ -37,7 +37,7 @@ use crate::{
 };
 
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::FailureReason;
-use cosmic_time::{Cubic, Ease, Tween};
+use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     backend::{
         allocator::dmabuf::Dmabuf,
@@ -517,7 +517,7 @@ where
             let percentage = {
                 let percentage = Instant::now().duration_since(*start).as_millis() as f32
                     / ANIMATION_DURATION.as_millis() as f32;
-                Ease::Cubic(Cubic::InOut).tween(percentage)
+                ease(EaseInOutCubic, 0.0, 1.0, percentage)
             };
             let offset = Point::<i32, Logical>::from(match (layout, *previous_idx < current.1) {
                 (WorkspaceLayout::Vertical, true) => {

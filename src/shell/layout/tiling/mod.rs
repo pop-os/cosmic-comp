@@ -23,8 +23,8 @@ use crate::{
     },
 };
 
-use cosmic_time::{Cubic, Ease, Tween};
 use id_tree::{InsertBehavior, MoveBehavior, Node, NodeId, NodeIdError, RemoveBehavior, Tree};
+use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     backend::renderer::{
         element::{
@@ -2006,10 +2006,9 @@ impl TilingLayout {
             .then(|| &queue.trees.front().unwrap().0);
 
         let percentage = if let Some(animation_start) = queue.animation_start {
-            let percentage = (Instant::now().duration_since(animation_start).as_millis() as f32
-                / duration.as_millis() as f32)
-                .min(1.0);
-            Ease::Cubic(Cubic::Out).tween(percentage)
+            let percentage = Instant::now().duration_since(animation_start).as_millis() as f32
+                / duration.as_millis() as f32;
+            ease(EaseInOutCubic, 0.0, 1.0, percentage)
         } else {
             1.0
         };

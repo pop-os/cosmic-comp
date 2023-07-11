@@ -10,7 +10,7 @@ use tracing::warn;
 use wayland_backend::server::ClientId;
 
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State as WState;
-use cosmic_time::{Cubic, Ease, Tween};
+use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     desktop::{
         layer_map_for_output, space::SpaceElement, LayerSurface, PopupManager, WindowSurfaceType,
@@ -81,18 +81,15 @@ impl OverviewMode {
     pub fn alpha(&self) -> Option<f32> {
         match self {
             OverviewMode::Started(_, start) => {
-                let percentage = (Instant::now().duration_since(*start).as_millis() as f32
-                    / ANIMATION_DURATION.as_millis() as f32)
-                    .min(1.0);
-                Some(Ease::Cubic(Cubic::Out).tween(percentage))
+                let percentage = Instant::now().duration_since(*start).as_millis() as f32
+                    / ANIMATION_DURATION.as_millis() as f32;
+                Some(ease(EaseInOutCubic, 0.0, 1.0, percentage))
             }
             OverviewMode::Ended(end) => {
-                let percentage = (1.0
-                    - Instant::now().duration_since(*end).as_millis() as f32
-                        / ANIMATION_DURATION.as_millis() as f32)
-                    .max(0.0);
-                if percentage > 0.0 {
-                    Some(Ease::Cubic(Cubic::Out).tween(percentage))
+                let percentage = Instant::now().duration_since(*end).as_millis() as f32
+                    / ANIMATION_DURATION.as_millis() as f32;
+                if percentage < 1.0 {
+                    Some(ease(EaseInOutCubic, 1.0, 0.0, percentage))
                 } else {
                     None
                 }
@@ -119,18 +116,15 @@ impl ResizeMode {
     pub fn alpha(&self) -> Option<f32> {
         match self {
             ResizeMode::Started(_, start, _) => {
-                let percentage = (Instant::now().duration_since(*start).as_millis() as f32
-                    / ANIMATION_DURATION.as_millis() as f32)
-                    .min(1.0);
-                Some(Ease::Cubic(Cubic::Out).tween(percentage))
+                let percentage = Instant::now().duration_since(*start).as_millis() as f32
+                    / ANIMATION_DURATION.as_millis() as f32;
+                Some(ease(EaseInOutCubic, 0.0, 1.0, percentage))
             }
             ResizeMode::Ended(end, _) => {
-                let percentage = (1.0
-                    - Instant::now().duration_since(*end).as_millis() as f32
-                        / ANIMATION_DURATION.as_millis() as f32)
-                    .max(0.0);
-                if percentage > 0.0 {
-                    Some(Ease::Cubic(Cubic::Out).tween(percentage))
+                let percentage = Instant::now().duration_since(*end).as_millis() as f32
+                    / ANIMATION_DURATION.as_millis() as f32;
+                if percentage < 1.0 {
+                    Some(ease(EaseInOutCubic, 1.0, 0.0, percentage))
                 } else {
                     None
                 }

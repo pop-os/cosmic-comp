@@ -26,7 +26,10 @@ use cosmic::{
     theme,
     widget::{icon, Icon},
 };
-use cosmic_time::{Cubic, Ease, Tween};
+use keyframe::{
+    ease,
+    functions::{EaseInOutCubic, EaseOutCubic},
+};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     time::{Duration, Instant},
@@ -246,13 +249,12 @@ impl State {
     pub fn offset(&self, bounds: Rectangle, content_bounds: Size) -> Vector {
         if let Some(animation) = self.scroll_animation {
             let percentage = {
-                let percentage = (Instant::now()
+                let percentage = Instant::now()
                     .duration_since(animation.start_time)
                     .as_millis() as f32
-                    / SCROLL_ANIMATION_DURATION.as_millis() as f32)
-                    .min(1.0);
+                    / SCROLL_ANIMATION_DURATION.as_millis() as f32;
 
-                Ease::Cubic(Cubic::InOut).tween(percentage)
+                ease(EaseInOutCubic, 0.0, 1.0, percentage)
             };
 
             Vector::new(
@@ -528,12 +530,11 @@ where
         renderer.with_layer(bounds, |renderer| {
             renderer.with_translation(Vector::new(-offset.x, -offset.y), |renderer| {
                 let percentage = if let Some(animation) = state.tab_animations.front() {
-                    let percentage = (Instant::now()
+                    let percentage = Instant::now()
                         .duration_since(animation.start_time)
                         .as_millis() as f32
-                        / TAB_ANIMATION_DURATION.as_millis() as f32)
-                        .min(1.0);
-                    Ease::Cubic(Cubic::Out).tween(percentage)
+                        / TAB_ANIMATION_DURATION.as_millis() as f32;
+                    ease(EaseOutCubic, 0.0, 1.0, percentage)
                 } else {
                     1.0
                 };
