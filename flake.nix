@@ -26,6 +26,7 @@
               root = ./.;
               include = [
                 ./src
+                ./i18n.toml
                 ./Cargo.toml
                 ./Cargo.lock
                 ./resources
