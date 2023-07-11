@@ -37,6 +37,24 @@ use xcursor::{
 
 static FALLBACK_CURSOR_DATA: &[u8] = include_bytes!("../../../resources/cursor.rgba");
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CursorShape {
+    Default,
+    ColResize,
+    RowResize,
+}
+
+impl ToString for CursorShape {
+    fn to_string(&self) -> String {
+        match self {
+            CursorShape::Default => "default",
+            CursorShape::ColResize => "col-resize",
+            CursorShape::RowResize => "row-resize",
+        }
+        .to_string()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Cursor {
     icons: Vec<Image>,
@@ -44,17 +62,8 @@ pub struct Cursor {
 }
 
 impl Cursor {
-    pub fn load() -> Cursor {
-        let name = std::env::var("XCURSOR_THEME")
-            .ok()
-            .unwrap_or_else(|| "default".into());
-        let size = std::env::var("XCURSOR_SIZE")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(24);
-
-        let theme = CursorTheme::load(&name);
-        let icons = load_icon(&theme)
+    pub fn load(theme: &CursorTheme, shape: CursorShape, size: u32) -> Cursor {
+        let icons = load_icon(&theme, shape)
             .map_err(|err| warn!(?err, "Unable to load xcursor, using fallback cursor"))
             .unwrap_or_else(|_| {
                 vec![Image {
@@ -75,12 +84,6 @@ impl Cursor {
     pub fn get_image(&self, scale: u32, millis: u32) -> Image {
         let size = self.size * scale;
         frame(millis, size, &self.icons)
-    }
-}
-
-impl Default for Cursor {
-    fn default() -> Cursor {
-        Cursor::load()
     }
 }
 
@@ -120,8 +123,10 @@ enum Error {
     Parse,
 }
 
-fn load_icon(theme: &CursorTheme) -> Result<Vec<Image>, Error> {
-    let icon_path = theme.load_icon("default").ok_or(Error::NoDefaultCursor)?;
+fn load_icon(theme: &CursorTheme, shape: CursorShape) -> Result<Vec<Image>, Error> {
+    let icon_path = theme
+        .load_icon(&shape.to_string())
+        .ok_or(Error::NoDefaultCursor)?;
     let mut cursor_file = std::fs::File::open(&icon_path)?;
     let mut cursor_data = Vec::new();
     cursor_file.read_to_end(&mut cursor_data)?;
@@ -196,15 +201,50 @@ where
 }
 
 pub struct CursorState {
-    pub cursor: Cursor,
+    current_cursor: RefCell<CursorShape>,
+    pub cursors: HashMap<CursorShape, Cursor>,
     current_image: RefCell<Option<Image>>,
     image_cache: RefCell<HashMap<(TypeId, usize), Vec<(Image, Box<dyn Any + 'static>)>>>,
 }
 
+impl CursorState {
+    pub fn set_shape(&self, shape: CursorShape) {
+        *self.current_cursor.borrow_mut() = shape;
+    }
+}
+
+pub fn load_cursor_theme() -> (CursorTheme, u32) {
+    let name = std::env::var("XCURSOR_THEME")
+        .ok()
+        .unwrap_or_else(|| "default".into());
+    let size = std::env::var("XCURSOR_SIZE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(24);
+    (CursorTheme::load(&name), size)
+}
+
 impl Default for CursorState {
     fn default() -> CursorState {
+        let (theme, size) = load_cursor_theme();
         CursorState {
-            cursor: Cursor::default(),
+            current_cursor: RefCell::new(CursorShape::Default),
+            cursors: {
+                let mut map = HashMap::new();
+                map.insert(
+                    CursorShape::Default,
+                    Cursor::load(&theme, CursorShape::Default, size),
+                );
+                map.insert(
+                    CursorShape::ColResize,
+                    Cursor::load(&theme, CursorShape::ColResize, size),
+                );
+                map.insert(
+                    CursorShape::RowResize,
+                    Cursor::load(&theme, CursorShape::RowResize, size),
+                );
+                map
+            },
             current_image: RefCell::new(None),
             image_cache: RefCell::new(HashMap::new()),
         }
@@ -247,12 +287,15 @@ where
         let integer_scale = scale.x.max(scale.y).ceil() as u32;
 
         let seat_userdata = seat.user_data();
-        seat_userdata.insert_if_missing(CursorState::default);
         let state = seat_userdata.get::<CursorState>().unwrap();
-        let frame = state.cursor.get_image(
-            integer_scale,
-            Into::<Duration>::into(time).as_millis() as u32,
-        );
+        let frame = state
+            .cursors
+            .get(&*state.current_cursor.borrow())
+            .unwrap()
+            .get_image(
+                integer_scale,
+                Into::<Duration>::into(time).as_millis() as u32,
+            );
 
         let mut cache = state.image_cache.borrow_mut();
         let pointer_images = cache

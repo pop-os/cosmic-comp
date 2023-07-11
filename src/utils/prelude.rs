@@ -1,7 +1,7 @@
 use std::{cell::RefCell, sync::Mutex, time::Duration};
 
 use crate::{
-    backend::render::cursor::CursorState,
+    backend::render::cursor::{CursorShape, CursorState},
     input::{ActiveOutput, SeatId},
 };
 use smithay::{
@@ -116,7 +116,9 @@ impl SeatExt for Seat<State> {
                 seat_userdata.insert_if_missing(CursorState::default);
                 let state = seat_userdata.get::<CursorState>().unwrap();
                 let frame = state
-                    .cursor
+                    .cursors
+                    .get(&CursorShape::Default)
+                    .unwrap()
                     .get_image(1, Into::<Duration>::into(time).as_millis() as u32);
 
                 Some((

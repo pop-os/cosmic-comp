@@ -1,52 +1,113 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
+    backend::render::cursor::{CursorShape, CursorState},
     shell::{focus::target::PointerFocusTarget, layout::Orientation},
     utils::prelude::*,
 };
 use id_tree::NodeId;
 use smithay::{
-    input::pointer::{
-        AxisFrame, ButtonEvent, GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab,
-        PointerInnerHandle, RelativeMotionEvent,
+    backend::input::ButtonState,
+    input::{
+        pointer::{
+            AxisFrame, ButtonEvent, Focus, GrabStartData as PointerGrabStartData, MotionEvent,
+            PointerGrab, PointerInnerHandle, PointerTarget, RelativeMotionEvent,
+        },
+        Seat,
     },
-    output::{Output, WeakOutput},
-    utils::{Logical, Point},
+    output::WeakOutput,
+    utils::{IsAlive, Logical, Point},
 };
 
-use super::Data;
+use super::{Data, TilingLayout};
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResizeForkTarget {
+    pub node: NodeId,
+    pub output: WeakOutput,
+    pub left_up_idx: usize,
+    pub orientation: Orientation,
+}
+
+impl IsAlive for ResizeForkTarget {
+    fn alive(&self) -> bool {
+        self.output.upgrade().is_some()
+    }
+}
+
+impl PointerTarget<State> for ResizeForkTarget {
+    fn enter(&self, seat: &Seat<State>, _data: &mut State, _event: &MotionEvent) {
+        let user_data = seat.user_data();
+        let cursor_state = user_data.get::<CursorState>().unwrap();
+        cursor_state.set_shape(match self.orientation {
+            Orientation::Horizontal => CursorShape::RowResize,
+            Orientation::Vertical => CursorShape::ColResize,
+        });
+    }
+
+    fn leave(
+        &self,
+        seat: &Seat<State>,
+        _data: &mut State,
+        _serial: smithay::utils::Serial,
+        _time: u32,
+    ) {
+        let user_data = seat.user_data();
+        let cursor_state = user_data.get::<CursorState>().unwrap();
+        cursor_state.set_shape(CursorShape::Default)
+    }
+
+    fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
+        if event.button == 0x110 && event.state == ButtonState::Pressed {
+            let seat = seat.clone();
+            let node = self.node.clone();
+            let output = self.output.clone();
+            let left_up_idx = self.left_up_idx;
+            let orientation = self.orientation;
+            let serial = event.serial;
+            let button = event.button;
+            data.common.event_loop_handle.insert_idle(move |data| {
+                let pointer = seat.get_pointer().unwrap();
+                let location = pointer.current_location();
+                pointer.set_grab(
+                    &mut data.state,
+                    ResizeForkGrab {
+                        start_data: PointerGrabStartData {
+                            focus: None,
+                            button,
+                            location,
+                        },
+                        last_loc: location,
+                        node,
+                        output,
+                        left_up_idx,
+                        orientation,
+                    },
+                    serial,
+                    Focus::Clear,
+                )
+            });
+        }
+    }
+
+    fn motion(&self, _seat: &Seat<State>, _data: &mut State, _event: &MotionEvent) {}
+    fn relative_motion(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _event: &RelativeMotionEvent,
+    ) {
+    }
+    fn axis(&self, _seat: &Seat<State>, _data: &mut State, _frame: AxisFrame) {}
+}
 
 pub struct ResizeForkGrab {
     start_data: PointerGrabStartData<State>,
-    idx: usize,
-    initial_size_upleft: i32,
-    initial_size_downright: i32,
+    last_loc: Point<f64, Logical>,
     node: NodeId,
     output: WeakOutput,
-}
-
-impl ResizeForkGrab {
-    pub fn new(
-        start_data: PointerGrabStartData<State>,
-        node: NodeId,
-        output: &Output,
-        data: &Data,
-        idx: usize,
-    ) -> ResizeForkGrab {
-        let sizes = match data {
-            Data::Group { ref sizes, .. } => sizes,
-            _ => panic!("Resizing without a group?!?"),
-        };
-
-        ResizeForkGrab {
-            start_data,
-            idx,
-            initial_size_upleft: sizes.iter().take(idx + 1).sum(),
-            initial_size_downright: sizes.iter().skip(idx + 1).sum(),
-            node,
-            output: output.downgrade(),
-        }
-    }
+    left_up_idx: usize,
+    orientation: Orientation,
 }
 
 impl PointerGrab<State> for ResizeForkGrab {
@@ -60,131 +121,70 @@ impl PointerGrab<State> for ResizeForkGrab {
         // While the grab is active, no client has pointer focus
         handle.motion(data, None, event);
 
-        let delta = event.location - self.start_data.location;
+        let delta = event.location - self.last_loc;
 
         if let Some(output) = self.output.upgrade() {
             let tiling_layer = &mut data.common.shell.active_space_mut(&output).tiling_layer;
             if let Some(queue) = tiling_layer.queues.get_mut(&output) {
                 let tree = &mut queue.trees.back_mut().unwrap().0;
                 if tree.get(&self.node).is_ok() {
-                    let orientation = tree.get(&self.node).unwrap().data().orientation();
-                    let delta = match orientation {
+                    let delta = match self.orientation {
                         Orientation::Vertical => delta.x,
                         Orientation::Horizontal => delta.y,
                     }
                     .round() as i32;
 
-                    let upleft_node_id =
-                        match tree.children_ids(&self.node).unwrap().skip(self.idx).next() {
-                            Some(elem) => elem,
-                            None => {
-                                return;
-                            }
-                        };
-                    let downright_node_id = match tree
+                    // check that we are still alive
+                    let mut iter = tree
                         .children_ids(&self.node)
                         .unwrap()
-                        .skip(self.idx + 1)
-                        .next()
-                    {
-                        Some(elem) => elem,
-                        None => {
-                            return;
-                        }
+                        .skip(self.left_up_idx);
+                    let first_elem = iter.next();
+                    let second_elem = iter.next();
+                    if first_elem.is_none() || second_elem.is_none() {
+                        return handle.unset_grab(data, event.serial, event.time);
                     };
 
-                    let next_mapped = |mut node| loop {
-                        if let Some(node_id) = node {
-                            match tree.get(&node_id).unwrap().data() {
-                                Data::Group { orientation: o, .. } if o == &orientation => {
-                                    node = tree.children_ids(&node_id).unwrap().last().cloned();
+                    match tree.get_mut(&self.node).unwrap().data_mut() {
+                        Data::Group {
+                            sizes, orientation, ..
+                        } => {
+                            if sizes[self.left_up_idx] + sizes[self.left_up_idx + 1]
+                                < match orientation {
+                                    Orientation::Vertical => 720,
+                                    Orientation::Horizontal => 480,
                                 }
-                                _ => {
-                                    break node_id;
-                                }
-                            }
-                        } else {
-                            unreachable!()
-                        }
-                    };
-                    let upleft_mapped_id = next_mapped(Some(upleft_node_id.clone()));
-                    let downright_mapped_id = next_mapped(Some(downright_node_id.clone()));
-
-                    let new_upleft_size = self.initial_size_upleft + delta;
-                    let new_downright_size = self.initial_size_downright - delta;
-                    let new_upleft_mapped_size = match orientation {
-                        Orientation::Horizontal => {
-                            tree.get(&upleft_mapped_id)
-                                .unwrap()
-                                .data()
-                                .geometry()
-                                .size
-                                .h
-                        }
-                        Orientation::Vertical => {
-                            tree.get(&upleft_mapped_id)
-                                .unwrap()
-                                .data()
-                                .geometry()
-                                .size
-                                .w
-                        }
-                    } + delta;
-                    let new_downright_mapped_size = match orientation {
-                        Orientation::Horizontal => {
-                            tree.get(&downright_mapped_id)
-                                .unwrap()
-                                .data()
-                                .geometry()
-                                .size
-                                .h
-                        }
-                        Orientation::Vertical => {
-                            tree.get(&downright_mapped_id)
-                                .unwrap()
-                                .data()
-                                .geometry()
-                                .size
-                                .w
-                        }
-                    } - delta;
-
-                    if new_upleft_mapped_size > 100 && new_downright_mapped_size > 100 {
-                        // lets update
-                        {
-                            let node = tree.get_mut(&self.node).unwrap();
-                            let data = node.data_mut();
-                            match data {
-                                Data::Group { sizes, .. } => {
-                                    sizes[self.idx] = new_upleft_size;
-                                    sizes[self.idx + 1] = new_downright_size;
-                                }
-                                _ => unreachable!(),
+                            {
+                                return;
                             };
+
+                            let old_size = sizes[self.left_up_idx];
+                            sizes[self.left_up_idx] = (old_size + delta).max(
+                                if self.orientation == Orientation::Vertical {
+                                    360
+                                } else {
+                                    240
+                                },
+                            );
+                            let diff = old_size - sizes[self.left_up_idx];
+                            let next_size = sizes[self.left_up_idx + 1] + diff;
+                            sizes[self.left_up_idx + 1] =
+                                next_size.max(if self.orientation == Orientation::Vertical {
+                                    360
+                                } else {
+                                    240
+                                });
+                            let next_diff = next_size - sizes[self.left_up_idx + 1];
+                            sizes[self.left_up_idx] += next_diff;
                         }
-                        for (mapped_id, mapped_size) in &[
-                            (upleft_mapped_id, new_upleft_mapped_size),
-                            (downright_mapped_id, new_downright_mapped_size),
-                        ] {
-                            let parent = tree.get(mapped_id).unwrap().parent().cloned().unwrap();
-                            if parent != self.node {
-                                let idx = tree
-                                    .children_ids(&parent)
-                                    .unwrap()
-                                    .position(|id| id == mapped_id)
-                                    .unwrap();
-                                let node = tree.get_mut(&parent).unwrap();
-                                let data = node.data_mut();
-                                match data {
-                                    Data::Group { sizes, .. } => {
-                                        sizes[idx] = *mapped_size;
-                                    }
-                                    _ => unreachable!(),
-                                };
-                            }
-                        }
-                        return tiling_layer.refresh();
+                        _ => unreachable!(),
                     }
+
+                    self.last_loc = event.location;
+                    let blocker = TilingLayout::update_positions(&output, tree, tiling_layer.gaps);
+                    tiling_layer.pending_blockers.extend(blocker);
+                } else {
+                    handle.unset_grab(data, event.serial, event.time);
                 }
             }
         }

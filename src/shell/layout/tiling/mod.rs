@@ -10,7 +10,7 @@ use crate::{
             CosmicMapped, CosmicMappedRenderElement, CosmicStack, CosmicWindow,
         },
         focus::{
-            target::{KeyboardFocusTarget, WindowGroup},
+            target::{KeyboardFocusTarget, PointerFocusTarget, WindowGroup},
             FocusDirection, FocusStackMut,
         },
         grabs::ResizeEdge,
@@ -34,7 +34,7 @@ use smithay::{
         ImportAll, ImportMem, Renderer,
     },
     desktop::{layer_map_for_output, space::SpaceElement, PopupKind},
-    input::{pointer::GrabStartData as PointerGrabStartData, Seat},
+    input::Seat,
     output::Output,
     reexports::wayland_server::Client,
     utils::{IsAlive, Logical, Point, Rectangle, Scale},
@@ -1389,60 +1389,6 @@ impl TilingLayout {
         clients
     }
 
-    pub fn resize_request(
-        &self,
-        mapped: &CosmicMapped,
-        _seat: &Seat<State>,
-        start_data: PointerGrabStartData<State>,
-        edges: ResizeEdge,
-    ) -> Option<ResizeForkGrab> {
-        let (output, mut node_id) = self.queues.iter().find_map(|(output, queue)| {
-            let tree = &queue.trees.back().unwrap().0;
-            let root_id = tree.root_node_id()?;
-            tree.traverse_pre_order_ids(root_id)
-                .unwrap()
-                .find(|id| tree.get(id).unwrap().data().is_mapped(Some(mapped)))
-                .map(|id| (&output.output, id))
-        })?;
-
-        let queue = self.queues.get(output).unwrap();
-        let tree = &queue.trees.back().unwrap().0;
-        while let Some(group_id) = tree.get(&node_id).unwrap().parent() {
-            let orientation = tree.get(group_id).unwrap().data().orientation();
-            if !((orientation == Orientation::Vertical
-                && (edges.contains(ResizeEdge::LEFT) || edges.contains(ResizeEdge::RIGHT)))
-                || (orientation == Orientation::Horizontal
-                    && (edges.contains(ResizeEdge::TOP) || edges.contains(ResizeEdge::BOTTOM))))
-            {
-                node_id = group_id.clone();
-                continue;
-            }
-
-            let node_idx = tree
-                .children_ids(group_id)
-                .unwrap()
-                .position(|id| id == &node_id)
-                .unwrap();
-            let idx = match edges {
-                x if x.intersects(ResizeEdge::TOP_LEFT) => node_idx.checked_sub(1)?,
-                _ => node_idx,
-            };
-            if idx > tree.get(&group_id).unwrap().data().len() {
-                return None;
-            }
-
-            return Some(ResizeForkGrab::new(
-                start_data,
-                group_id.clone(),
-                output,
-                tree.get(&group_id).unwrap().data(),
-                idx,
-            ));
-        }
-
-        None
-    }
-
     pub fn possible_resizes(tree: &Tree<Data>, mut node_id: NodeId) -> ResizeEdge {
         let mut edges = ResizeEdge::empty();
 
@@ -1533,6 +1479,15 @@ impl TilingLayout {
                         (node_idx, other_idx)
                     } else {
                         (other_idx, node_idx)
+                    };
+
+                    if sizes[shrink_idx] + sizes[grow_idx]
+                        < match orientation {
+                            Orientation::Vertical => 720,
+                            Orientation::Horizontal => 480,
+                        }
+                    {
+                        return true;
                     };
 
                     let old_size = sizes[shrink_idx];
@@ -1784,6 +1739,102 @@ impl TilingLayout {
         }
 
         None
+    }
+
+    pub fn element_under(
+        &self,
+        location: Point<f64, Logical>,
+    ) -> Option<(PointerFocusTarget, Point<i32, Logical>)> {
+        self.queues.iter().find_map(|(output_data, queue)| {
+            let tree = &queue.trees.back().unwrap().0;
+            let root = tree.root_node_id()?;
+            let location = (location - output_data.location.to_f64()).to_i32_round();
+
+            let mut result = None;
+            let mut lookup = Some(root.clone());
+            while let Some(node) = lookup {
+                let data = tree.get(&node).unwrap().data();
+                if data.geometry().contains(location) {
+                    result = Some(node.clone());
+                }
+
+                lookup = None;
+                if result.is_some() && data.is_group() {
+                    for child_id in tree.children_ids(&node).unwrap() {
+                        if tree
+                            .get(child_id)
+                            .unwrap()
+                            .data()
+                            .geometry()
+                            .contains(location)
+                        {
+                            lookup = Some(child_id.clone());
+                            break;
+                        }
+                    }
+                }
+            }
+
+            match result.map(|id| (id.clone(), tree.get(&id).unwrap().data().clone())) {
+                Some((
+                    _,
+                    Data::Mapped {
+                        mapped,
+                        last_geometry,
+                    },
+                )) => {
+                    let test_point = location.to_f64() - last_geometry.loc.to_f64()
+                        + mapped.geometry().loc.to_f64();
+                    mapped.is_in_input_region(&test_point).then(|| {
+                        (
+                            mapped.clone().into(),
+                            last_geometry.loc - output_data.location - mapped.geometry().loc,
+                        )
+                    })
+                }
+                Some((
+                    id,
+                    Data::Group {
+                        orientation,
+                        last_geometry,
+                        ..
+                    },
+                )) => {
+                    let idx = tree
+                        .children(&id)
+                        .unwrap()
+                        .position(|node| {
+                            let data = node.data();
+                            match orientation {
+                                Orientation::Vertical => location.x < data.geometry().loc.x,
+                                Orientation::Horizontal => location.y < data.geometry().loc.y,
+                            }
+                        })
+                        .and_then(|x| x.checked_sub(1))?;
+                    Some((
+                        ResizeForkTarget {
+                            node: id.clone(),
+                            output: output_data.output.downgrade(),
+                            left_up_idx: idx,
+                            orientation,
+                        }
+                        .into(),
+                        last_geometry.loc - output_data.location
+                            + tree
+                                .children(&id)
+                                .unwrap()
+                                .skip(idx)
+                                .next()
+                                .map(|node| {
+                                    let geo = node.data().geometry();
+                                    geo.loc + geo.size
+                                })
+                                .unwrap(),
+                    ))
+                }
+                _ => None,
+            }
+        })
     }
 
     pub fn mapped(

@@ -13,7 +13,7 @@ use crate::{
     }, // shell::grabs::SeatMoveGrabState
     state::Common,
     utils::prelude::*,
-    wayland::{handlers::screencopy::ScreencopySessions, protocols::screencopy::Session},
+    wayland::{handlers::screencopy::ScreencopySessions, protocols::screencopy::Session}, backend::render::cursor::CursorState,
 };
 use calloop::{timer::Timer, RegistrationToken};
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
@@ -141,6 +141,7 @@ pub fn add_seat(
     userdata.insert_if_missing(Devices::default);
     userdata.insert_if_missing(SupressedKeys::default);
     userdata.insert_if_missing(SeatMoveGrabState::default);
+    userdata.insert_if_missing(CursorState::default);
     userdata.insert_if_missing(|| ActiveOutput(RefCell::new(output.clone())));
     userdata.insert_if_missing(|| RefCell::new(CursorImageStatus::Default));
 
@@ -664,10 +665,10 @@ impl State {
                                         {
                                             under = Some(layer.clone().into());
                                         }
-                                    } else if let Some((window, _)) =
+                                    } else if let Some((target, _)) =
                                         workspace.element_under(relative_pos)
                                     {
-                                        under = Some(window.clone().into());
+                                        under = Some(target);
                                     } else if let Some(layer) = layers
                                         .layer_under(WlrLayer::Bottom, pos)
                                         .or_else(|| layers.layer_under(WlrLayer::Background, pos))
@@ -685,8 +686,7 @@ impl State {
                                         }
                                     };
                                 }
-
-                                Common::set_focus(self, under.as_ref(), seat, Some(serial));
+                                Common::set_focus(self, under.and_then(|target| target.try_into().ok()).as_ref(), seat, Some(serial));
                             }
                         };
                         seat.get_pointer().unwrap().button(
@@ -1347,9 +1347,9 @@ impl State {
             {
                 return Some((or.clone().into(), or.geometry().loc));
             }
-            if let Some((mapped, loc)) = workspace.element_under(relative_pos) {
+            if let Some((target, loc)) = workspace.element_under(relative_pos) {
                 return Some((
-                    mapped.clone().into(),
+                    target,
                     loc + (global_pos - relative_pos).to_i32_round(),
                 ));
             }

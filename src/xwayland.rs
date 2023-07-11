@@ -1,7 +1,7 @@
 use std::{ffi::OsString, os::unix::io::OwnedFd};
 
 use crate::{
-    backend::render::cursor::Cursor,
+    backend::render::cursor::{load_cursor_theme, Cursor, CursorShape},
     shell::{focus::target::KeyboardFocusTarget, CosmicSurface, Shell},
     state::{Data, State},
     utils::prelude::*,
@@ -67,7 +67,8 @@ impl State {
                             }
                         };
 
-                        let cursor = Cursor::load();
+                        let (theme, size) = load_cursor_theme();
+                        let cursor = Cursor::load(&theme, CursorShape::Default, size);
                         let image = cursor.get_image(1, 0);
                         if let Err(err) = wm.set_cursor(
                             &image.pixels_rgba,

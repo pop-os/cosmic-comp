@@ -51,7 +51,10 @@ use super::{
         resize_indicator::ResizeIndicator, stack::CosmicStackRenderElement,
         window::CosmicWindowRenderElement, CosmicMapped,
     },
-    focus::{target::KeyboardFocusTarget, FocusStack, FocusStackMut},
+    focus::{
+        target::{KeyboardFocusTarget, PointerFocusTarget},
+        FocusStack, FocusStackMut,
+    },
     grabs::{ResizeEdge, ResizeGrab},
     CosmicMappedRenderElement, CosmicSurface, ResizeDirection, ResizeMode,
 };
@@ -200,23 +203,12 @@ impl Workspace {
     pub fn element_under(
         &self,
         location: Point<f64, Logical>,
-    ) -> Option<(&CosmicMapped, Point<i32, Logical>)> {
+    ) -> Option<(PointerFocusTarget, Point<i32, Logical>)> {
         self.floating_layer
             .space
             .element_under(location)
-            .or_else(|| {
-                self.tiling_layer.mapped().find_map(|(_, mapped, geo)| {
-                    geo.contains(location.to_i32_round())
-                        .then(|| {
-                            let test_point =
-                                location - geo.loc.to_f64() + mapped.geometry().loc.to_f64();
-                            mapped
-                                .is_in_input_region(&test_point)
-                                .then_some((mapped, geo.loc - mapped.geometry().loc))
-                        })
-                        .flatten()
-                })
-            })
+            .map(|(mapped, p)| (mapped.clone().into(), p))
+            .or_else(|| self.tiling_layer.element_under(location))
     }
 
     pub fn element_geometry(&self, elem: &CosmicMapped) -> Option<Rectangle<i32, Logical>> {
@@ -334,10 +326,6 @@ impl Workspace {
         if self.floating_layer.mapped().any(|m| m == mapped) {
             self.floating_layer
                 .resize_request(mapped, seat, start_data.clone(), edges)
-                .map(Into::into)
-        } else if self.tiling_layer.mapped().any(|(_, m, _)| m == mapped) {
-            self.tiling_layer
-                .resize_request(mapped, seat, start_data, edges)
                 .map(Into::into)
         } else {
             None

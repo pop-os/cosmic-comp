@@ -1,7 +1,7 @@
 use std::sync::Weak;
 
 use crate::{
-    shell::{element::CosmicMapped, CosmicSurface},
+    shell::{element::CosmicMapped, layout::tiling::ResizeForkTarget, CosmicSurface},
     utils::prelude::*,
     wayland::handlers::xdg_shell::popup::get_popup_toplevel,
 };
@@ -28,6 +28,7 @@ pub enum PointerFocusTarget {
     LayerSurface(LayerSurface),
     Popup(PopupKind),
     OverrideRedirect(X11Surface),
+    ResizeFork(ResizeForkTarget),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -39,6 +40,7 @@ pub enum KeyboardFocusTarget {
     Popup(PopupKind),
 }
 
+// TODO: This should be TryFrom, but PopupGrab needs to be able to convert. Fix this in smithay
 impl From<KeyboardFocusTarget> for PointerFocusTarget {
     fn from(target: KeyboardFocusTarget) -> Self {
         match target {
@@ -47,6 +49,19 @@ impl From<KeyboardFocusTarget> for PointerFocusTarget {
             KeyboardFocusTarget::LayerSurface(layer) => PointerFocusTarget::LayerSurface(layer),
             KeyboardFocusTarget::Popup(popup) => PointerFocusTarget::Popup(popup),
             _ => unreachable!("A window grab cannot start a popup grab"),
+        }
+    }
+}
+
+impl TryFrom<PointerFocusTarget> for KeyboardFocusTarget {
+    type Error = ();
+    fn try_from(target: PointerFocusTarget) -> Result<Self, Self::Error> {
+        match target {
+            PointerFocusTarget::Element(mapped) => Ok(KeyboardFocusTarget::Element(mapped)),
+            PointerFocusTarget::Fullscreen(surf) => Ok(KeyboardFocusTarget::Fullscreen(surf)),
+            PointerFocusTarget::LayerSurface(layer) => Ok(KeyboardFocusTarget::LayerSurface(layer)),
+            PointerFocusTarget::Popup(popup) => Ok(KeyboardFocusTarget::Popup(popup)),
+            _ => Err(()),
         }
     }
 }
@@ -85,6 +100,7 @@ impl IsAlive for PointerFocusTarget {
             PointerFocusTarget::LayerSurface(l) => l.alive(),
             PointerFocusTarget::Popup(p) => p.alive(),
             PointerFocusTarget::OverrideRedirect(s) => s.alive(),
+            PointerFocusTarget::ResizeFork(f) => f.alive(),
         }
     }
 }
@@ -109,6 +125,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::LayerSurface(l) => PointerTarget::enter(l, seat, data, event),
             PointerFocusTarget::Popup(p) => PointerTarget::enter(p.wl_surface(), seat, data, event),
             PointerFocusTarget::OverrideRedirect(s) => PointerTarget::enter(s, seat, data, event),
+            PointerFocusTarget::ResizeFork(f) => PointerTarget::enter(f, seat, data, event),
         }
     }
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
@@ -120,6 +137,7 @@ impl PointerTarget<State> for PointerFocusTarget {
                 PointerTarget::motion(p.wl_surface(), seat, data, event)
             }
             PointerFocusTarget::OverrideRedirect(s) => PointerTarget::motion(s, seat, data, event),
+            PointerFocusTarget::ResizeFork(f) => PointerTarget::motion(f, seat, data, event),
         }
     }
     fn relative_motion(&self, seat: &Seat<State>, data: &mut State, event: &RelativeMotionEvent) {
@@ -137,6 +155,9 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::OverrideRedirect(s) => {
                 PointerTarget::relative_motion(s, seat, data, event)
             }
+            PointerFocusTarget::ResizeFork(f) => {
+                PointerTarget::relative_motion(f, seat, data, event)
+            }
         }
     }
     fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
@@ -148,6 +169,7 @@ impl PointerTarget<State> for PointerFocusTarget {
                 PointerTarget::button(p.wl_surface(), seat, data, event)
             }
             PointerFocusTarget::OverrideRedirect(s) => PointerTarget::button(s, seat, data, event),
+            PointerFocusTarget::ResizeFork(f) => PointerTarget::button(f, seat, data, event),
         }
     }
     fn axis(&self, seat: &Seat<State>, data: &mut State, frame: AxisFrame) {
@@ -157,6 +179,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::LayerSurface(l) => PointerTarget::axis(l, seat, data, frame),
             PointerFocusTarget::Popup(p) => PointerTarget::axis(p.wl_surface(), seat, data, frame),
             PointerFocusTarget::OverrideRedirect(s) => PointerTarget::axis(s, seat, data, frame),
+            PointerFocusTarget::ResizeFork(f) => PointerTarget::axis(f, seat, data, frame),
         }
     }
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
@@ -172,6 +195,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::OverrideRedirect(s) => {
                 PointerTarget::leave(s, seat, data, serial, time)
             }
+            PointerFocusTarget::ResizeFork(f) => PointerTarget::leave(f, seat, data, serial, time),
         }
     }
 }
@@ -290,6 +314,9 @@ impl WaylandFocus for PointerFocusTarget {
             PointerFocusTarget::OverrideRedirect(s) => {
                 return s.wl_surface();
             }
+            PointerFocusTarget::ResizeFork(_) => {
+                return None;
+            }
         })
     }
     fn same_client_as(&self, object_id: &ObjectId) -> bool {
@@ -299,6 +326,7 @@ impl WaylandFocus for PointerFocusTarget {
             PointerFocusTarget::LayerSurface(l) => l.wl_surface().id().same_client_as(object_id),
             PointerFocusTarget::Popup(p) => p.wl_surface().id().same_client_as(object_id),
             PointerFocusTarget::OverrideRedirect(s) => WaylandFocus::same_client_as(s, object_id),
+            PointerFocusTarget::ResizeFork(_) => false,
         }
     }
 }
@@ -330,6 +358,12 @@ impl From<PopupKind> for PointerFocusTarget {
 impl From<X11Surface> for PointerFocusTarget {
     fn from(s: X11Surface) -> Self {
         PointerFocusTarget::OverrideRedirect(s)
+    }
+}
+
+impl From<ResizeForkTarget> for PointerFocusTarget {
+    fn from(f: ResizeForkTarget) -> Self {
+        PointerFocusTarget::ResizeFork(f)
     }
 }
 
