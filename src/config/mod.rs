@@ -29,6 +29,7 @@ use tracing::{debug, error, info, warn};
 mod types;
 pub use self::types::*;
 
+#[derive(Debug)]
 pub struct Config {
     pub static_conf: StaticConfig,
     pub dynamic_conf: DynamicConfig,
@@ -60,6 +61,7 @@ pub enum WorkspaceLayout {
     Horizontal,
 }
 
+#[derive(Debug)]
 pub struct DynamicConfig {
     outputs: (Option<PathBuf>, OutputsConfig),
     inputs: (Option<PathBuf>, InputsConfig),

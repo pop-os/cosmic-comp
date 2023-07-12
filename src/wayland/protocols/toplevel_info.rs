@@ -29,6 +29,7 @@ pub trait Window: IsAlive + Clone + Send {
     fn user_data(&self) -> &UserDataMap;
 }
 
+#[derive(Debug)]
 pub struct ToplevelInfoState<D, W: Window> {
     dh: DisplayHandle,
     pub(super) toplevels: Vec<W>,

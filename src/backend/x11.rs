@@ -47,11 +47,13 @@ use crate::state::Fps;
 
 use super::render::init_shaders;
 
+#[derive(Debug)]
 enum Allocator {
     Gbm(GbmAllocator<DrmDeviceFd>),
     Vulkan(PhysicalDevice),
 }
 
+#[derive(Debug)]
 pub struct X11State {
     allocator: Allocator,
     _egl: EGLDisplay,
@@ -204,6 +206,7 @@ impl X11State {
     }
 }
 
+#[derive(Debug)]
 pub struct Surface {
     window: Window,
     damage_tracker: OutputDamageTracker,

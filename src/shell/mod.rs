@@ -134,6 +134,7 @@ impl ResizeMode {
     }
 }
 
+#[derive(Debug)]
 pub struct Shell {
     pub popups: PopupManager,
     pub outputs: Vec<Output>,

@@ -21,6 +21,7 @@ pub use cosmic_protocols::workspace::v1::server::{
     zcosmic_workspace_handle_v1::ZcosmicWorkspaceCapabilitiesV1 as WorkspaceCapabilities,
 };
 
+#[derive(Debug)]
 pub struct WorkspaceState<D>
 where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
@@ -50,7 +51,7 @@ where
 crate::utils::id_gen!(next_group_id, GROUP_ID, GROUP_IDS);
 crate::utils::id_gen!(next_workspace_id, WORKSPACE_ID, WORKSPACE_IDS);
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct WorkspaceGroup {
     id: usize,
     instances: Vec<ZcosmicWorkspaceGroupHandleV1>,
@@ -72,7 +73,7 @@ pub struct WorkspaceGroupDataInner {
 }
 pub type WorkspaceGroupData = Mutex<WorkspaceGroupDataInner>;
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Workspace {
     id: usize,
     instances: Vec<ZcosmicWorkspaceHandleV1>,

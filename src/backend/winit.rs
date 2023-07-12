@@ -38,6 +38,7 @@ use crate::state::Fps;
 
 use super::render::{init_shaders, CursorMode};
 
+#[derive(Debug)]
 pub struct WinitState {
     // The winit backend currently has no notion of multiple windows
     pub backend: WinitGraphicsBackend<GlowRenderer>,

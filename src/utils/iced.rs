@@ -56,8 +56,13 @@ use smithay::{
     },
 };
 
-#[derive(Debug)]
 pub struct IcedElement<P: Program + Send + 'static>(Arc<Mutex<IcedElementInternal<P>>>);
+
+impl<P: Program + Send + 'static> fmt::Debug for IcedElement<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.0, f)
+    }
+}
 
 // SAFETY: We cannot really be sure about `iced_native::program::State` sadly,
 // but the rest should be fine.

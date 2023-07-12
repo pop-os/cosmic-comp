@@ -80,6 +80,7 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     ffi::CStr,
+    fmt,
     os::unix::io::FromRawFd,
     path::PathBuf,
     time::Duration,
@@ -93,6 +94,7 @@ use super::render::{init_shaders, CursorMode, GlMultiRenderer};
 // for now we assume we need at least 3ms
 const MIN_RENDER_TIME: Duration = Duration::from_millis(3);
 
+#[derive(Debug)]
 pub struct KmsState {
     devices: HashMap<DrmNode, Device>,
     pub api: GpuManager<GbmGlesBackend<GlowRenderer>>,
@@ -113,6 +115,23 @@ pub struct Device {
     socket: Option<Socket>,
 }
 
+impl fmt::Debug for Device {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Device")
+            .field("render_node", &self.render_node)
+            .field("surfaces", &self.surfaces)
+            .field("drm", &self.drm)
+            .field("gbm", &self.gbm)
+            .field("allocator", &"...")
+            .field("formats", &self.formats)
+            .field("supports_atomic", &self.supports_atomic)
+            .field("event_token", &self.event_token)
+            .field("socket", &self.socket)
+            .finish()
+    }
+}
+
+#[derive(Debug)]
 pub struct Surface {
     surface: Option<GbmDrmCompositor>,
     connector: connector::Handle,

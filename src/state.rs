@@ -109,11 +109,13 @@ pub struct Data {
     pub state: State,
 }
 
+#[derive(Debug)]
 pub struct State {
     pub backend: BackendData,
     pub common: Common,
 }
 
+#[derive(Debug)]
 pub struct Common {
     pub config: Config,
 
@@ -156,6 +158,7 @@ pub struct Common {
     pub xwayland_state: Option<XWaylandState>,
 }
 
+#[derive(Debug)]
 pub enum BackendData {
     X11(X11State),
     Winit(WinitState),
@@ -677,6 +680,7 @@ pub struct Egui {
     pub state: smithay_egui::EguiState,
 }
 
+#[derive(Debug)]
 pub struct Fps {
     #[cfg(feature = "debug")]
     pub rd: Option<renderdoc::RenderDoc<renderdoc::V110>>,

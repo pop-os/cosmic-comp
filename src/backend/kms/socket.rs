@@ -24,6 +24,7 @@ use crate::{
     utils::prelude::*,
 };
 
+#[derive(Debug)]
 pub struct Socket {
     pub token: RegistrationToken,
     pub drm_global: GlobalId,

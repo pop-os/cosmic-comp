@@ -18,6 +18,7 @@ use cosmic_protocols::toplevel_management::v1::server::zcosmic_toplevel_manager_
 
 use super::toplevel_info::{window_from_handle, ToplevelInfoHandler, ToplevelState, Window};
 
+#[derive(Debug)]
 pub struct ToplevelManagementState {
     instances: Vec<ZcosmicToplevelManagerV1>,
     capabilities: Vec<ManagementCapabilities>,

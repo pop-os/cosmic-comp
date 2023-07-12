@@ -29,6 +29,7 @@ use smithay::{
 };
 use tracing::{error, trace, warn};
 
+#[derive(Debug)]
 pub struct XWaylandState {
     pub xwm: Option<X11Wm>,
     pub display: u32,

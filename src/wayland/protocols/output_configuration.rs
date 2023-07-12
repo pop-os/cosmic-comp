@@ -27,6 +27,7 @@ use std::{
     },
 };
 
+#[derive(Debug)]
 pub struct OutputConfigurationState<D> {
     outputs: Vec<Output>,
     removed_outputs: Vec<Output>,
@@ -48,12 +49,14 @@ pub struct OutputMngrGlobalData {
     filter: Box<dyn for<'a> Fn(&'a Client) -> bool + Send + Sync>,
 }
 
+#[derive(Debug)]
 struct OutputMngrInstance {
     obj: ZwlrOutputManagerV1,
     active: Arc<AtomicBool>,
     heads: Vec<OutputHeadInstance>,
 }
 
+#[derive(Debug)]
 struct OutputHeadInstance {
     output: Output,
     head: ZwlrOutputHeadV1,

@@ -38,6 +38,7 @@ use super::{
 };
 
 /// Screencopy global state
+#[derive(Debug)]
 pub struct ScreencopyState {
     global: GlobalId,
 }
