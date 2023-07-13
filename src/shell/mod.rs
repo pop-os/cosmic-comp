@@ -1394,8 +1394,13 @@ impl Shell {
             })
         };
 
-        let mut map = layer_map_for_output(&output);
-        map.map_layer(&layer_surface).unwrap();
+        {
+            let mut map = layer_map_for_output(&output);
+            map.map_layer(&layer_surface).unwrap();
+        }
+        for workspace in state.common.shell.workspaces.spaces_mut() {
+            workspace.tiling_layer.recalculate(&output);
+        }
 
         if wants_focus {
             Shell::set_focus(state, Some(&layer_surface.into()), &seat, None)

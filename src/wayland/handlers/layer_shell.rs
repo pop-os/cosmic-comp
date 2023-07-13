@@ -75,6 +75,10 @@ impl WlrLayerShellHandler for State {
                 map.unmap_layer(&layer);
             }
 
+            for workspace in self.common.shell.workspaces.spaces_mut() {
+                workspace.tiling_layer.recalculate(&output);
+            }
+
             // collect screencopy sessions needing an update
             let mut scheduled_sessions = self.schedule_workspace_sessions(surface.wl_surface());
             if let Some(sessions) = output.user_data().get::<PendingScreencopyBuffers>() {

@@ -237,12 +237,23 @@ impl CompositorHandler for State {
         self.common.shell.popups.commit(surface);
 
         // re-arrange layer-surfaces (commits may change size and positioning)
-        if let Some(output) = self.common.shell.outputs().find(|o| {
-            let map = layer_map_for_output(o);
-            map.layer_for_surface(surface, WindowSurfaceType::ALL)
-                .is_some()
-        }) {
-            layer_map_for_output(output).arrange();
+        let layer_output = self
+            .common
+            .shell
+            .outputs()
+            .find(|o| {
+                let map = layer_map_for_output(o);
+                map.layer_for_surface(surface, WindowSurfaceType::ALL)
+                    .is_some()
+            })
+            .cloned();
+        if let Some(output) = layer_output {
+            let changed = layer_map_for_output(&output).arrange();
+            if changed {
+                for workspace in self.common.shell.workspaces.spaces_mut() {
+                    workspace.tiling_layer.recalculate(&output);
+                }
+            }
         }
 
         let mut scheduled_sessions = self.schedule_workspace_sessions(surface);
