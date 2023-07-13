@@ -1283,7 +1283,9 @@ impl KmsState {
                                 output_config.vrr,
                             )?;
                         }
-                        compositor.use_mode(*mode).unwrap();
+                        compositor
+                            .use_mode(*mode)
+                            .context("Failed to apply new mode")?;
                         false
                     } else {
                         surface.vrr = drm_helpers::set_vrr(drm, *crtc, conn, output_config.vrr)
