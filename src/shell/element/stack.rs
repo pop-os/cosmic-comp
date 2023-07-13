@@ -36,7 +36,7 @@ use smithay::{
     },
     output::Output,
     render_elements,
-    utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size},
+    utils::{IsAlive, Logical, Point, Rectangle, Serial, Size},
     wayland::seat::WaylandFocus,
 };
 use std::{
@@ -461,6 +461,50 @@ impl CosmicStack {
 
     pub(super) fn loop_handle(&self) -> LoopHandle<'static, crate::state::Data> {
         self.0.loop_handle()
+    }
+
+    pub fn split_render_elements<R, C>(
+        &self,
+        renderer: &mut R,
+        location: smithay::utils::Point<i32, smithay::utils::Physical>,
+        scale: smithay::utils::Scale<f64>,
+        alpha: f32,
+    ) -> (Vec<C>, Vec<C>)
+    where
+        R: Renderer + ImportAll + ImportMem,
+        <R as Renderer>::TextureId: 'static,
+        C: From<CosmicStackRenderElement<R>>,
+    {
+        let stack_loc = location
+            + self
+                .0
+                .with_program(|p| {
+                    p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)]
+                        .geometry()
+                        .loc
+                })
+                .to_physical_precise_round(scale);
+        let window_loc = location + Point::from((0, (TAB_HEIGHT as f64 * scale.y) as i32));
+
+        let elements = AsRenderElements::<R>::render_elements::<CosmicStackRenderElement<R>>(
+            &self.0, renderer, stack_loc, scale, alpha,
+        );
+
+        let (window_elements, popup_elements) = self.0.with_program(|p| {
+            p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)]
+                .split_render_elements::<R, CosmicStackRenderElement<R>>(
+                    renderer, window_loc, scale, alpha,
+                )
+        });
+
+        (
+            elements
+                .into_iter()
+                .map(C::from)
+                .chain(window_elements.into_iter().map(C::from))
+                .collect(),
+            popup_elements.into_iter().map(C::from).collect(),
+        )
     }
 }
 
@@ -1060,46 +1104,4 @@ render_elements! {
     pub CosmicStackRenderElement<R> where R: ImportAll + ImportMem;
     Header = MemoryRenderBufferRenderElement<R>,
     Window = WaylandSurfaceRenderElement<R>,
-}
-
-impl<R> AsRenderElements<R> for CosmicStack
-where
-    R: Renderer + ImportAll + ImportMem,
-    <R as Renderer>::TextureId: 'static,
-{
-    type RenderElement = CosmicStackRenderElement<R>;
-    fn render_elements<C: From<Self::RenderElement>>(
-        &self,
-        renderer: &mut R,
-        location: Point<i32, Physical>,
-        scale: Scale<f64>,
-        alpha: f32,
-    ) -> Vec<C> {
-        let stack_loc = location
-            + self
-                .0
-                .with_program(|p| {
-                    p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)]
-                        .geometry()
-                        .loc
-                })
-                .to_physical_precise_round(scale);
-        let window_loc = location + Point::from((0, (TAB_HEIGHT as f64 * scale.y) as i32));
-
-        let mut elements = AsRenderElements::<R>::render_elements::<CosmicStackRenderElement<R>>(
-            &self.0, renderer, stack_loc, scale, alpha,
-        );
-
-        elements.extend(self.0.with_program(|p| {
-            AsRenderElements::<R>::render_elements::<CosmicStackRenderElement<R>>(
-                &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)],
-                renderer,
-                window_loc,
-                scale,
-                alpha,
-            )
-        }));
-
-        elements.into_iter().map(C::from).collect()
-    }
 }

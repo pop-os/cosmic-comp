@@ -438,7 +438,10 @@ impl FloatingLayout {
         mut resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
         indicator_thickness: u8,
         alpha: f32,
-    ) -> Vec<CosmicMappedRenderElement<R>>
+    ) -> (
+        Vec<CosmicMappedRenderElement<R>>,
+        Vec<CosmicMappedRenderElement<R>>,
+    )
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         <R as Renderer>::TextureId: 'static,
@@ -452,24 +455,48 @@ impl FloatingLayout {
         let output_scale = output.current_scale().fractional_scale();
         let output_geo = self.space.output_geometry(output).unwrap();
 
+        let mut window_elements = Vec::new();
+        let mut popup_elements = Vec::new();
+
         self.space
             .elements_for_output(output)
             .rev()
-            .flat_map(|elem| {
+            .for_each(|elem| {
                 let render_location = self.space.element_location(elem).unwrap()
                     - output_geo.loc
                     - elem.geometry().loc;
-                let mut elements = elem.render_elements(
+                let (w_elements, p_elements) = elem.split_render_elements(
                     renderer,
                     render_location.to_physical_precise_round(output_scale),
                     output_scale.into(),
                     alpha,
                 );
+
                 if focused == Some(elem) {
                     let mut indicator_geometry = Rectangle::from_loc_and_size(
                         self.space.element_location(elem).unwrap() - output_geo.loc,
                         elem.geometry().size,
                     );
+
+                    if let Some((mode, resize)) = resize_indicator.as_mut() {
+                        indicator_geometry.loc -= (18, 18).into();
+                        indicator_geometry.size += (36, 36).into();
+                        resize.resize(indicator_geometry.size);
+                        resize.output_enter(output, output_geo);
+                        window_elements.extend(
+                            resize
+                                .render_elements::<CosmicWindowRenderElement<R>>(
+                                    renderer,
+                                    indicator_geometry
+                                        .loc
+                                        .to_physical_precise_round(output_scale),
+                                    output_scale.into(),
+                                    alpha * mode.alpha().unwrap_or(1.0),
+                                )
+                                .into_iter()
+                                .map(CosmicMappedRenderElement::Window),
+                        );
+                    }
 
                     if indicator_thickness > 0 {
                         let element = IndicatorShader::focus_element(
@@ -479,31 +506,14 @@ impl FloatingLayout {
                             indicator_thickness,
                             alpha,
                         );
-                        elements.insert(0, element.into());
-                    }
-
-                    if let Some((mode, resize)) = resize_indicator.as_mut() {
-                        indicator_geometry.loc -= (18, 18).into();
-                        indicator_geometry.size += (36, 36).into();
-                        resize.resize(indicator_geometry.size);
-                        resize.output_enter(output, output_geo);
-                        elements = resize
-                            .render_elements::<CosmicWindowRenderElement<R>>(
-                                renderer,
-                                indicator_geometry
-                                    .loc
-                                    .to_physical_precise_round(output_scale),
-                                output_scale.into(),
-                                alpha * mode.alpha().unwrap_or(1.0),
-                            )
-                            .into_iter()
-                            .map(CosmicMappedRenderElement::Window)
-                            .chain(elements.into_iter())
-                            .collect();
+                        window_elements.push(element.into());
                     }
                 }
-                elements
-            })
-            .collect()
+
+                window_elements.extend(w_elements);
+                popup_elements.extend(p_elements);
+            });
+
+        (window_elements, popup_elements)
     }
 }

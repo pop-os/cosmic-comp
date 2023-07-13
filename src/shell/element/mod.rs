@@ -14,7 +14,7 @@ use smithay::{
         renderer::{
             element::{
                 utils::{CropRenderElement, RelocateRenderElement, RescaleRenderElement},
-                AsRenderElements, Element, RenderElement, UnderlyingStorage,
+                Element, RenderElement, UnderlyingStorage,
             },
             gles::element::PixelShaderElement,
             glow::GlowRenderer,
@@ -550,6 +550,206 @@ impl CosmicMapped {
             debug.take();
         }
     }
+
+    pub fn split_render_elements<R, C>(
+        &self,
+        renderer: &mut R,
+        location: smithay::utils::Point<i32, smithay::utils::Physical>,
+        scale: smithay::utils::Scale<f64>,
+        alpha: f32,
+    ) -> (Vec<C>, Vec<C>)
+    where
+        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+        <R as Renderer>::TextureId: 'static,
+        CosmicMappedRenderElement<R>: RenderElement<R>,
+        C: From<CosmicMappedRenderElement<R>>,
+    {
+        #[cfg(feature = "debug")]
+        let mut debug_elements = if let Some(debug) = self.debug.lock().unwrap().as_mut() {
+            let window = self.active_window();
+            let window_geo = window.geometry();
+            let (min_size, max_size, size) =
+                (window.min_size(), window.max_size(), window.geometry().size);
+
+            let area = Rectangle::<i32, Logical>::from_loc_and_size(
+                location.to_f64().to_logical(scale).to_i32_round(),
+                self.bbox().size,
+            );
+
+            let glow_renderer = renderer.glow_renderer_mut();
+            match debug.render(
+                |ctx| {
+                    egui::Area::new("window")
+                        .anchor(
+                            egui::Align2::RIGHT_TOP,
+                            [
+                                -window_geo.loc.x as f32 - 10.0,
+                                window_geo.loc.y as f32 - 10.0,
+                            ],
+                        )
+                        .show(ctx, |ui| {
+                            egui::Frame::none()
+                                .fill(egui::Color32::BLACK)
+                                .rounding(5.0)
+                                .inner_margin(10.0)
+                                .show(ui, |ui| {
+                                    ui.heading(window.title());
+                                    ui.horizontal(|ui| {
+                                        ui.label("App ID: ");
+                                        ui.label(window.app_id());
+                                    });
+                                    ui.label(match window {
+                                        CosmicSurface::Wayland(_) => "Protocol: Wayland",
+                                        CosmicSurface::X11(_) => "Protocol: X11",
+                                        _ => unreachable!(),
+                                    });
+                                    ui.horizontal(|ui| {
+                                        ui.label("States: ");
+                                        if window.is_maximized() {
+                                            ui.label("🗖");
+                                        }
+                                        if window.is_fullscreen() {
+                                            ui.label("⬜");
+                                        }
+                                        if window.is_activated() {
+                                            ui.label("🖱");
+                                        }
+                                        if window.is_resizing().is_some() {
+                                            ui.label("↔");
+                                        }
+                                    });
+
+                                    let plot = Plot::new("Sizes")
+                                        .legend(Legend::default().position(Corner::RightBottom))
+                                        .data_aspect(1.0)
+                                        .view_aspect(1.0)
+                                        .show_x(false)
+                                        .show_y(false)
+                                        .width(200.0)
+                                        .height(200.0);
+                                    plot.show(ui, |plot_ui| {
+                                        let center = if let Some(max_size) = max_size {
+                                            ((max_size.w + 20) / 2, (max_size.h + 20) / 2)
+                                        } else {
+                                            (100, 100)
+                                        };
+
+                                        if let Some(max_size) = max_size {
+                                            let max_size_rect =
+                                                Polygon::new(PlotPoints::new(vec![
+                                                    [10.0, 10.0],
+                                                    [max_size.w as f64 + 10.0, 10.0],
+                                                    [
+                                                        max_size.w as f64 + 10.0,
+                                                        max_size.h as f64 + 10.0,
+                                                    ],
+                                                    [10.0, max_size.h as f64 + 10.0],
+                                                    [10.0, 10.0],
+                                                ]));
+                                            plot_ui.polygon(
+                                                max_size_rect
+                                                    .name(format!("{}x{}", max_size.w, max_size.h)),
+                                            );
+                                        }
+
+                                        let size_rect = Polygon::new(PlotPoints::new(vec![
+                                            [
+                                                (center.0 - size.w / 2) as f64,
+                                                (center.1 - size.h / 2) as f64,
+                                            ],
+                                            [
+                                                (center.0 + size.w / 2) as f64,
+                                                (center.1 - size.h / 2) as f64,
+                                            ],
+                                            [
+                                                (center.0 + size.w / 2) as f64,
+                                                (center.1 + size.h / 2) as f64,
+                                            ],
+                                            [
+                                                (center.0 - size.w / 2) as f64,
+                                                (center.1 + size.h / 2) as f64,
+                                            ],
+                                            [
+                                                (center.0 - size.w / 2) as f64,
+                                                (center.1 - size.h / 2) as f64,
+                                            ],
+                                        ]));
+                                        plot_ui.polygon(
+                                            size_rect.name(format!("{}x{}", size.w, size.h)),
+                                        );
+
+                                        if let Some(min_size) = min_size {
+                                            let min_size_rect =
+                                                Polygon::new(PlotPoints::new(vec![
+                                                    [
+                                                        (center.0 - min_size.w / 2) as f64,
+                                                        (center.1 - min_size.h / 2) as f64,
+                                                    ],
+                                                    [
+                                                        (center.0 + min_size.w / 2) as f64,
+                                                        (center.1 - min_size.h / 2) as f64,
+                                                    ],
+                                                    [
+                                                        (center.0 + min_size.w / 2) as f64,
+                                                        (center.1 + min_size.h / 2) as f64,
+                                                    ],
+                                                    [
+                                                        (center.0 - min_size.w / 2) as f64,
+                                                        (center.1 + min_size.h / 2) as f64,
+                                                    ],
+                                                    [
+                                                        (center.0 - min_size.w / 2) as f64,
+                                                        (center.1 - min_size.h / 2) as f64,
+                                                    ],
+                                                ]));
+                                            plot_ui.polygon(
+                                                min_size_rect
+                                                    .name(format!("{}x{}", min_size.w, min_size.h)),
+                                            );
+                                        }
+                                    })
+                                })
+                        });
+                },
+                glow_renderer,
+                area,
+                scale.x,
+                0.8,
+            ) {
+                Ok(element) => vec![element.into()],
+                Err(err) => {
+                    debug!(?err, "Error rendering debug overlay.");
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+        #[cfg(not(feature = "debug"))]
+        let debug_elements = Vec::new();
+
+        #[cfg_attr(not(feature = "debug"), allow(unused_mut))]
+        let (window_elements, popup_elements) = match &self.element {
+            CosmicMappedInternal::Stack(s) => s
+                .split_render_elements::<R, CosmicMappedRenderElement<R>>(
+                    renderer, location, scale, alpha,
+                ),
+            CosmicMappedInternal::Window(w) => w
+                .split_render_elements::<R, CosmicMappedRenderElement<R>>(
+                    renderer, location, scale, alpha,
+                ),
+            _ => unreachable!(),
+        };
+
+        (
+            debug_elements
+                .into_iter()
+                .map(C::from)
+                .chain(window_elements.into_iter().map(C::from))
+                .collect(),
+            popup_elements.into_iter().map(C::from).collect(),
+        )
+    }
 }
 
 impl IsAlive for CosmicMapped {
@@ -1024,202 +1224,5 @@ where
 {
     fn from(elem: TextureRenderElement<GlesTexture>) -> Self {
         CosmicMappedRenderElement::Egui(elem)
-    }
-}
-
-impl<R> AsRenderElements<R> for CosmicMapped
-where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
-    CosmicMappedRenderElement<R>: RenderElement<R>,
-{
-    type RenderElement = CosmicMappedRenderElement<R>;
-    fn render_elements<C: From<Self::RenderElement>>(
-        &self,
-        renderer: &mut R,
-        location: Point<i32, Physical>,
-        scale: Scale<f64>,
-        alpha: f32,
-    ) -> Vec<C> {
-        #[cfg(feature = "debug")]
-        let mut elements = if let Some(debug) = self.debug.lock().unwrap().as_mut() {
-            let window = self.active_window();
-            let window_geo = window.geometry();
-            let (min_size, max_size, size) =
-                (window.min_size(), window.max_size(), window.geometry().size);
-
-            let area = Rectangle::<i32, Logical>::from_loc_and_size(
-                location.to_f64().to_logical(scale).to_i32_round(),
-                self.bbox().size,
-            );
-
-            let glow_renderer = renderer.glow_renderer_mut();
-            match debug.render(
-                |ctx| {
-                    egui::Area::new("window")
-                        .anchor(
-                            egui::Align2::RIGHT_TOP,
-                            [
-                                -window_geo.loc.x as f32 - 10.0,
-                                window_geo.loc.y as f32 - 10.0,
-                            ],
-                        )
-                        .show(ctx, |ui| {
-                            egui::Frame::none()
-                                .fill(egui::Color32::BLACK)
-                                .rounding(5.0)
-                                .inner_margin(10.0)
-                                .show(ui, |ui| {
-                                    ui.heading(window.title());
-                                    ui.horizontal(|ui| {
-                                        ui.label("App ID: ");
-                                        ui.label(window.app_id());
-                                    });
-                                    ui.label(match window {
-                                        CosmicSurface::Wayland(_) => "Protocol: Wayland",
-                                        CosmicSurface::X11(_) => "Protocol: X11",
-                                        _ => unreachable!(),
-                                    });
-                                    ui.horizontal(|ui| {
-                                        ui.label("States: ");
-                                        if window.is_maximized() {
-                                            ui.label("🗖");
-                                        }
-                                        if window.is_fullscreen() {
-                                            ui.label("⬜");
-                                        }
-                                        if window.is_activated() {
-                                            ui.label("🖱");
-                                        }
-                                        if window.is_resizing().is_some() {
-                                            ui.label("↔");
-                                        }
-                                    });
-
-                                    let plot = Plot::new("Sizes")
-                                        .legend(Legend::default().position(Corner::RightBottom))
-                                        .data_aspect(1.0)
-                                        .view_aspect(1.0)
-                                        .show_x(false)
-                                        .show_y(false)
-                                        .width(200.0)
-                                        .height(200.0);
-                                    plot.show(ui, |plot_ui| {
-                                        let center = if let Some(max_size) = max_size {
-                                            ((max_size.w + 20) / 2, (max_size.h + 20) / 2)
-                                        } else {
-                                            (100, 100)
-                                        };
-
-                                        if let Some(max_size) = max_size {
-                                            let max_size_rect =
-                                                Polygon::new(PlotPoints::new(vec![
-                                                    [10.0, 10.0],
-                                                    [max_size.w as f64 + 10.0, 10.0],
-                                                    [
-                                                        max_size.w as f64 + 10.0,
-                                                        max_size.h as f64 + 10.0,
-                                                    ],
-                                                    [10.0, max_size.h as f64 + 10.0],
-                                                    [10.0, 10.0],
-                                                ]));
-                                            plot_ui.polygon(
-                                                max_size_rect
-                                                    .name(format!("{}x{}", max_size.w, max_size.h)),
-                                            );
-                                        }
-
-                                        let size_rect = Polygon::new(PlotPoints::new(vec![
-                                            [
-                                                (center.0 - size.w / 2) as f64,
-                                                (center.1 - size.h / 2) as f64,
-                                            ],
-                                            [
-                                                (center.0 + size.w / 2) as f64,
-                                                (center.1 - size.h / 2) as f64,
-                                            ],
-                                            [
-                                                (center.0 + size.w / 2) as f64,
-                                                (center.1 + size.h / 2) as f64,
-                                            ],
-                                            [
-                                                (center.0 - size.w / 2) as f64,
-                                                (center.1 + size.h / 2) as f64,
-                                            ],
-                                            [
-                                                (center.0 - size.w / 2) as f64,
-                                                (center.1 - size.h / 2) as f64,
-                                            ],
-                                        ]));
-                                        plot_ui.polygon(
-                                            size_rect.name(format!("{}x{}", size.w, size.h)),
-                                        );
-
-                                        if let Some(min_size) = min_size {
-                                            let min_size_rect =
-                                                Polygon::new(PlotPoints::new(vec![
-                                                    [
-                                                        (center.0 - min_size.w / 2) as f64,
-                                                        (center.1 - min_size.h / 2) as f64,
-                                                    ],
-                                                    [
-                                                        (center.0 + min_size.w / 2) as f64,
-                                                        (center.1 - min_size.h / 2) as f64,
-                                                    ],
-                                                    [
-                                                        (center.0 + min_size.w / 2) as f64,
-                                                        (center.1 + min_size.h / 2) as f64,
-                                                    ],
-                                                    [
-                                                        (center.0 - min_size.w / 2) as f64,
-                                                        (center.1 + min_size.h / 2) as f64,
-                                                    ],
-                                                    [
-                                                        (center.0 - min_size.w / 2) as f64,
-                                                        (center.1 - min_size.h / 2) as f64,
-                                                    ],
-                                                ]));
-                                            plot_ui.polygon(
-                                                min_size_rect
-                                                    .name(format!("{}x{}", min_size.w, min_size.h)),
-                                            );
-                                        }
-                                    })
-                                })
-                        });
-                },
-                glow_renderer,
-                area,
-                scale.x,
-                0.8,
-            ) {
-                Ok(element) => vec![element.into()],
-                Err(err) => {
-                    debug!(?err, "Error rendering debug overlay.");
-                    Vec::new()
-                }
-            }
-        } else {
-            Vec::new()
-        };
-        #[cfg(not(feature = "debug"))]
-        let mut elements = Vec::new();
-
-        #[cfg_attr(not(feature = "debug"), allow(unused_mut))]
-        match &self.element {
-            CosmicMappedInternal::Stack(s) => {
-                elements.extend(AsRenderElements::<R>::render_elements::<
-                    CosmicMappedRenderElement<R>,
-                >(s, renderer, location, scale, alpha))
-            }
-            CosmicMappedInternal::Window(w) => {
-                elements.extend(AsRenderElements::<R>::render_elements::<
-                    CosmicMappedRenderElement<R>,
-                >(w, renderer, location, scale, alpha))
-            }
-            _ => {}
-        };
-
-        elements.into_iter().map(C::from).collect()
     }
 }

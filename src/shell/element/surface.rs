@@ -3,8 +3,9 @@ use std::time::Duration;
 use smithay::{
     backend::renderer::{
         element::{
-            surface::WaylandSurfaceRenderElement, utils::select_dmabuf_feedback, AsRenderElements,
-            RenderElementStates,
+            surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
+            utils::select_dmabuf_feedback,
+            AsRenderElements, RenderElementStates,
         },
         ImportAll, Renderer,
     },
@@ -14,7 +15,7 @@ use smithay::{
             take_presentation_feedback_surface_tree, with_surfaces_surface_tree,
             OutputPresentationFeedback,
         },
-        Window,
+        PopupManager, Window,
     },
     input::{keyboard::KeyboardTarget, pointer::PointerTarget},
     output::Output,
@@ -591,6 +592,50 @@ impl CosmicSurface {
             _ => unreachable!(),
         }
     }
+
+    pub fn split_render_elements<R, C>(
+        &self,
+        renderer: &mut R,
+        location: smithay::utils::Point<i32, smithay::utils::Physical>,
+        scale: smithay::utils::Scale<f64>,
+        alpha: f32,
+    ) -> (Vec<C>, Vec<C>)
+    where
+        R: Renderer + ImportAll,
+        <R as Renderer>::TextureId: 'static,
+        C: From<WaylandSurfaceRenderElement<R>>,
+    {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                let surface = window.toplevel().wl_surface();
+
+                let popup_render_elements = PopupManager::popups_for_surface(surface)
+                    .flat_map(|(popup, popup_offset)| {
+                        let offset = (window.geometry().loc + popup_offset - popup.geometry().loc)
+                            .to_physical_precise_round(scale);
+
+                        render_elements_from_surface_tree(
+                            renderer,
+                            popup.wl_surface(),
+                            location + offset,
+                            scale,
+                            alpha,
+                        )
+                    })
+                    .collect();
+
+                let window_render_elements =
+                    render_elements_from_surface_tree(renderer, surface, location, scale, alpha);
+
+                (window_render_elements, popup_render_elements)
+            }
+            CosmicSurface::X11(surface) => (
+                surface.render_elements(renderer, location, scale, alpha),
+                Vec::new(),
+            ),
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl KeyboardTarget<crate::state::State> for CosmicSurface {
@@ -761,6 +806,15 @@ impl WaylandFocus for CosmicSurface {
     }
 }
 
+impl X11Relatable for CosmicSurface {
+    fn is_window(&self, window: &X11Surface) -> bool {
+        match self {
+            CosmicSurface::X11(surface) => surface == window,
+            _ => false,
+        }
+    }
+}
+
 impl<R> AsRenderElements<R> for CosmicSurface
 where
     R: Renderer + ImportAll,
@@ -783,15 +837,6 @@ where
                 surface.render_elements(renderer, location, scale, alpha)
             }
             _ => unreachable!(),
-        }
-    }
-}
-
-impl X11Relatable for CosmicSurface {
-    fn is_window(&self, window: &X11Surface) -> bool {
-        match self {
-            CosmicSurface::X11(surface) => surface == window,
-            _ => false,
         }
     }
 }

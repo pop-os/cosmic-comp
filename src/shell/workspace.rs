@@ -493,7 +493,13 @@ impl Workspace {
         overview: OverviewMode,
         resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
         indicator_thickness: u8,
-    ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
+    ) -> Result<
+        (
+            Vec<WorkspaceRenderElement<R>>,
+            Vec<WorkspaceRenderElement<R>>,
+        ),
+        OutputNotMapped,
+    >
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         <R as Renderer>::TextureId: 'static,
@@ -505,14 +511,15 @@ impl Workspace {
         #[cfg(feature = "debug")]
         puffin::profile_function!();
 
-        let mut render_elements = Vec::new();
+        let mut window_elements = Vec::new();
+        let mut popup_elements = Vec::new();
 
         let output_scale = output.current_scale().fractional_scale();
         let layer_map = layer_map_for_output(output);
         let zone = layer_map.non_exclusive_zone();
 
         if let Some(fullscreen) = self.fullscreen.get(output) {
-            render_elements.extend(
+            popup_elements.extend(
                 override_redirect_windows
                     .iter()
                     .filter(|or| or.geometry().intersection(output.geometry()).is_some())
@@ -529,7 +536,7 @@ impl Workspace {
             );
 
             // fullscreen window
-            render_elements.extend(AsRenderElements::<R>::render_elements::<
+            window_elements.extend(AsRenderElements::<R>::render_elements::<
                 WorkspaceRenderElement<R>,
             >(
                 fullscreen,
@@ -540,9 +547,13 @@ impl Workspace {
             ));
 
             if let Some(xwm) = xwm_state.and_then(|state| state.xwm.as_mut()) {
-                if let Err(err) =
-                    xwm.update_stacking_order_upwards(render_elements.iter().rev().map(|e| e.id()))
-                {
+                if let Err(err) = xwm.update_stacking_order_upwards(
+                    popup_elements
+                        .iter()
+                        .rev()
+                        .map(|e| e.id())
+                        .chain(window_elements.iter().rev().map(|e| e.id())),
+                ) {
                     warn!(
                         wm_id = ?xwm.id(),
                         ?err,
@@ -556,7 +567,7 @@ impl Workspace {
             // - resizing in tiling
 
             // OR windows above all
-            render_elements.extend(
+            popup_elements.extend(
                 override_redirect_windows
                     .iter()
                     .filter(|or| or.geometry().intersection(output.geometry()).is_some())
@@ -592,40 +603,39 @@ impl Workspace {
                 }
                 OverviewMode::None => 1.0,
             };
-            render_elements.extend(
-                self.floating_layer
-                    .render_output::<R>(
-                        renderer,
-                        output,
-                        focused.as_ref(),
-                        resize_indicator.clone(),
-                        indicator_thickness,
-                        alpha,
-                    )
-                    .into_iter()
-                    .map(WorkspaceRenderElement::from),
+
+            let (w_elements, p_elements) = self.floating_layer.render_output::<R>(
+                renderer,
+                output,
+                focused.as_ref(),
+                resize_indicator.clone(),
+                indicator_thickness,
+                alpha,
             );
+            popup_elements.extend(p_elements.into_iter().map(WorkspaceRenderElement::from));
+            window_elements.extend(w_elements.into_iter().map(WorkspaceRenderElement::from));
 
             //tiling surfaces
-            render_elements.extend(
-                self.tiling_layer
-                    .render_output::<R>(
-                        renderer,
-                        output,
-                        draw_focus_indicator,
-                        layer_map.non_exclusive_zone(),
-                        overview.clone(),
-                        resize_indicator,
-                        indicator_thickness,
-                    )?
-                    .into_iter()
-                    .map(WorkspaceRenderElement::from),
-            );
+            let (w_elements, p_elements) = self.tiling_layer.render_output::<R>(
+                renderer,
+                output,
+                draw_focus_indicator,
+                layer_map.non_exclusive_zone(),
+                overview.clone(),
+                resize_indicator,
+                indicator_thickness,
+            )?;
+            popup_elements.extend(p_elements.into_iter().map(WorkspaceRenderElement::from));
+            window_elements.extend(w_elements.into_iter().map(WorkspaceRenderElement::from));
 
             if let Some(xwm) = xwm_state.and_then(|state| state.xwm.as_mut()) {
-                if let Err(err) =
-                    xwm.update_stacking_order_upwards(render_elements.iter().rev().map(|e| e.id()))
-                {
+                if let Err(err) = xwm.update_stacking_order_upwards(
+                    popup_elements
+                        .iter()
+                        .rev()
+                        .map(|e| e.id())
+                        .chain(window_elements.iter().rev().map(|e| e.id())),
+                ) {
                     warn!(
                         wm_id = ?xwm.id(),
                         ?err,
@@ -647,7 +657,7 @@ impl Workspace {
             };
 
             if let Some(alpha) = alpha {
-                render_elements.push(
+                window_elements.push(
                     Into::<CosmicMappedRenderElement<R>>::into(BackdropShader::element(
                         renderer,
                         self.backdrop_id.clone(),
@@ -661,7 +671,7 @@ impl Workspace {
             }
         }
 
-        Ok(render_elements)
+        Ok((window_elements, popup_elements))
     }
 }
 

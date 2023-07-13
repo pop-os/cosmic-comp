@@ -29,9 +29,7 @@ use smithay::{
     },
     output::Output,
     render_elements,
-    utils::{
-        Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
-    },
+    utils::{Buffer as BufferCoords, IsAlive, Logical, Point, Rectangle, Serial, Size},
     wayland::seat::WaylandFocus,
 };
 use std::{
@@ -163,6 +161,50 @@ impl CosmicWindow {
 
     pub(super) fn loop_handle(&self) -> LoopHandle<'static, crate::state::Data> {
         self.0.loop_handle()
+    }
+
+    pub fn split_render_elements<R, C>(
+        &self,
+        renderer: &mut R,
+        location: smithay::utils::Point<i32, smithay::utils::Physical>,
+        scale: smithay::utils::Scale<f64>,
+        alpha: f32,
+    ) -> (Vec<C>, Vec<C>)
+    where
+        R: Renderer + ImportAll + ImportMem,
+        <R as Renderer>::TextureId: 'static,
+        C: From<CosmicWindowRenderElement<R>>,
+    {
+        let has_ssd = self.0.with_program(|p| p.has_ssd(false));
+
+        let window_loc = if has_ssd {
+            location + Point::from((0, (SSD_HEIGHT as f64 * scale.y) as i32))
+        } else {
+            location
+        };
+
+        let (mut window_elements, popup_elements) = self.0.with_program(|p| {
+            p.window
+                .split_render_elements::<R, CosmicWindowRenderElement<R>>(
+                    renderer, window_loc, scale, alpha,
+                )
+        });
+
+        if has_ssd {
+            let ssd_loc = location
+                + self
+                    .0
+                    .with_program(|p| p.window.geometry().loc)
+                    .to_physical_precise_round(scale);
+            window_elements.extend(AsRenderElements::<R>::render_elements::<
+                CosmicWindowRenderElement<R>,
+            >(&self.0, renderer, ssd_loc, scale, alpha))
+        }
+
+        (
+            window_elements.into_iter().map(C::from).collect(),
+            popup_elements.into_iter().map(C::from).collect(),
+        )
     }
 }
 
@@ -554,45 +596,4 @@ render_elements! {
     pub CosmicWindowRenderElement<R> where R: ImportAll + ImportMem;
     Header = MemoryRenderBufferRenderElement<R>,
     Window = WaylandSurfaceRenderElement<R>,
-}
-
-impl<R> AsRenderElements<R> for CosmicWindow
-where
-    R: Renderer + ImportAll + ImportMem,
-    <R as Renderer>::TextureId: 'static,
-{
-    type RenderElement = CosmicWindowRenderElement<R>;
-    fn render_elements<C: From<Self::RenderElement>>(
-        &self,
-        renderer: &mut R,
-        location: Point<i32, Physical>,
-        scale: Scale<f64>,
-        alpha: f32,
-    ) -> Vec<C> {
-        let has_ssd = self.0.with_program(|p| p.has_ssd(false));
-
-        let window_loc = if has_ssd {
-            location + Point::from((0, (SSD_HEIGHT as f64 * scale.y) as i32))
-        } else {
-            location
-        };
-
-        let mut elements = self.0.with_program(|p| {
-            AsRenderElements::<R>::render_elements::<CosmicWindowRenderElement<R>>(
-                &p.window, renderer, window_loc, scale, alpha,
-            )
-        });
-        if has_ssd {
-            let ssd_loc = location
-                + self
-                    .0
-                    .with_program(|p| p.window.geometry().loc)
-                    .to_physical_precise_round(scale);
-            elements.extend(AsRenderElements::<R>::render_elements::<
-                CosmicWindowRenderElement<R>,
-            >(&self.0, renderer, ssd_loc, scale, alpha))
-        }
-
-        elements.into_iter().map(C::from).collect()
-    }
 }

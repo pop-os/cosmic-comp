@@ -11,10 +11,7 @@ use crate::{
 };
 
 use smithay::{
-    backend::renderer::{
-        element::{AsRenderElements, RenderElement},
-        ImportAll, ImportMem, Renderer,
-    },
+    backend::renderer::{element::RenderElement, ImportAll, ImportMem, Renderer},
     desktop::space::SpaceElement,
     input::{
         pointer::{
@@ -60,9 +57,8 @@ impl MoveGrabState {
         let scale = output.current_scale().fractional_scale().into();
         let render_location = cursor_at.to_i32_round() - output.geometry().loc + self.window_offset;
 
-        let mut elements: Vec<I> = Vec::new();
-        if self.indicator_thickness > 0 {
-            elements.push(
+        let focus_element = if self.indicator_thickness > 0 {
+            Some(
                 CosmicMappedRenderElement::from(IndicatorShader::focus_element(
                     renderer,
                     self.window.clone(),
@@ -71,16 +67,23 @@ impl MoveGrabState {
                     1.0,
                 ))
                 .into(),
-            );
-        }
-        elements.extend(AsRenderElements::<R>::render_elements::<I>(
-            &self.window,
+            )
+        } else {
+            None
+        };
+
+        let (window_elements, popup_elements) = self.window.split_render_elements::<R, I>(
             renderer,
             (render_location - self.window.geometry().loc).to_physical_precise_round(scale),
             scale,
             1.0,
-        ));
-        elements
+        );
+
+        popup_elements
+            .into_iter()
+            .chain(focus_element)
+            .chain(window_elements)
+            .collect()
     }
 
     pub fn send_frames(

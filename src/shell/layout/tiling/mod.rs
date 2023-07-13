@@ -1974,7 +1974,13 @@ impl TilingLayout {
         overview: OverviewMode,
         resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
         indicator_thickness: u8,
-    ) -> Result<Vec<CosmicMappedRenderElement<R>>, OutputNotMapped>
+    ) -> Result<
+        (
+            Vec<CosmicMappedRenderElement<R>>,
+            Vec<CosmicMappedRenderElement<R>>,
+        ),
+        OutputNotMapped,
+    >
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         <R as Renderer>::TextureId: 'static,
@@ -2014,7 +2020,8 @@ impl TilingLayout {
         };
         let draw_groups = overview.alpha();
 
-        let mut elements = Vec::new();
+        let mut window_elements = Vec::new();
+        let mut popup_elements = Vec::new();
 
         // all gone windows and fade them out
         let old_geometries = if let Some(reference_tree) = reference_tree.as_ref() {
@@ -2034,14 +2041,16 @@ impl TilingLayout {
             .unzip();
 
             // all old windows we want to fade out
-            elements.extend(render_old_tree(
+            let (w_elements, p_elements) = render_old_tree(
                 reference_tree,
                 target_tree,
                 renderer,
                 geometries.clone(),
                 output_scale,
                 percentage,
-            ));
+            );
+            window_elements.extend(w_elements);
+            popup_elements.extend(p_elements);
 
             geometries
         } else {
@@ -2063,7 +2072,7 @@ impl TilingLayout {
         .unzip();
 
         // all alive windows
-        elements.extend(render_new_tree(
+        let (w_elements, p_elements) = render_new_tree(
             target_tree,
             reference_tree,
             renderer,
@@ -2083,14 +2092,16 @@ impl TilingLayout {
                 indicator_thickness
             },
             resize_indicator,
-        ));
+        );
+        window_elements.extend(w_elements);
+        popup_elements.extend(p_elements);
 
         // tiling hints
         if let Some(group_elements) = group_elements {
-            elements.extend(group_elements);
+            window_elements.extend(group_elements);
         }
 
-        Ok(elements)
+        Ok((window_elements, popup_elements))
     }
 }
 
@@ -2340,7 +2351,10 @@ fn render_old_tree<R>(
     geometries: Option<HashMap<NodeId, Rectangle<i32, Logical>>>,
     output_scale: f64,
     percentage: f32,
-) -> Vec<CosmicMappedRenderElement<R>>
+) -> (
+    Vec<CosmicMappedRenderElement<R>>,
+    Vec<CosmicMappedRenderElement<R>>,
+)
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
@@ -2348,6 +2362,9 @@ where
     CosmicWindowRenderElement<R>: RenderElement<R>,
     CosmicStackRenderElement<R>: RenderElement<R>,
 {
+    let mut window_elements = Vec::new();
+    let mut popup_elements = Vec::new();
+
     if let Some(root) = reference_tree.root_node_id() {
         let geometries = geometries.unwrap_or_default();
         reference_tree
@@ -2374,7 +2391,7 @@ where
                     true
                 }
             })
-            .flat_map(|(mapped, original_geo, scaled_geo)| {
+            .for_each(|(mapped, original_geo, scaled_geo)| {
                 let (scale, offset) = scaled_geo
                     .map(|adapted_geo| scale_to_center(&original_geo, adapted_geo))
                     .unwrap_or_else(|| (1.0.into(), (0, 0).into()));
@@ -2396,15 +2413,16 @@ where
                         .geometry()
                         .loc
                         .to_physical_precise_round(output_scale);
-                AsRenderElements::<R>::render_elements::<CosmicMappedRenderElement<R>>(
-                    mapped,
-                    renderer,
-                    original_location,
-                    Scale::from(output_scale),
-                    1.0 - percentage,
-                )
-                .into_iter()
-                .flat_map(|element| match element {
+
+                let (w_elements, p_elements) = mapped
+                    .split_render_elements::<R, CosmicMappedRenderElement<R>>(
+                        renderer,
+                        original_location,
+                        Scale::from(output_scale),
+                        1.0 - percentage,
+                    );
+
+                window_elements.extend(w_elements.into_iter().flat_map(|element| match element {
                     CosmicMappedRenderElement::Stack(elem) => {
                         Some(CosmicMappedRenderElement::TiledStack({
                             let cropped = CropRenderElement::from_element(
@@ -2448,13 +2466,12 @@ where
                         }))
                     }
                     x => Some(x),
-                })
-                .collect::<Vec<_>>()
-            })
-            .collect()
-    } else {
-        Vec::new()
+                }));
+                popup_elements.extend(p_elements);
+            });
     }
+
+    (window_elements, popup_elements)
 }
 
 fn render_new_tree<R>(
@@ -2468,7 +2485,10 @@ fn render_new_tree<R>(
     percentage: f32,
     indicator_thickness: u8,
     mut resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
-) -> Vec<CosmicMappedRenderElement<R>>
+) -> (
+    Vec<CosmicMappedRenderElement<R>>,
+    Vec<CosmicMappedRenderElement<R>>,
+)
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
@@ -2491,6 +2511,9 @@ where
         })
         .map(|(id, _)| id);
 
+    let mut window_elements = Vec::new();
+    let mut popup_elements = Vec::new();
+
     let mut group_backdrop = None;
     let mut indicator = None;
     let mut resize_elements = None;
@@ -2501,10 +2524,10 @@ where
     if let Some(root) = target_tree.root_node_id() {
         let old_geometries = old_geometries.unwrap_or_default();
         let geometries = geometries.unwrap_or_default();
-        let elements: Vec<CosmicMappedRenderElement<R>> = target_tree
+        target_tree
             .traverse_pre_order_ids(root)
             .unwrap()
-            .flat_map(|node_id| {
+            .for_each(|node_id| {
                 let data = target_tree.get(&node_id).unwrap().data();
                 let (original_geo, scaled_geo) = (data.geometry(), geometries.get(&node_id));
 
@@ -2589,8 +2612,6 @@ where
                     (new_geo, percentage)
                 };
 
-                let mut elements = Vec::new();
-
                 if focused.as_ref() == Some(&node_id) {
                     if indicator_thickness > 0 || data.is_group() {
                         let mut geo = geo.clone();
@@ -2668,16 +2689,16 @@ where
                     let original_location = (original_geo.loc - mapped.geometry().loc)
                         .to_physical_precise_round(output_scale);
 
-                    elements.extend(
-                        AsRenderElements::<R>::render_elements::<CosmicMappedRenderElement<R>>(
-                            mapped,
+                    let (w_elements, p_elements) = mapped
+                        .split_render_elements::<R, CosmicMappedRenderElement<R>>(
                             renderer,
                             original_location,
                             Scale::from(output_scale),
                             alpha,
-                        )
-                        .into_iter()
-                        .flat_map(|element| match element {
+                        );
+
+                    window_elements.extend(w_elements.into_iter().flat_map(
+                        |element| match element {
                             CosmicMappedRenderElement::Stack(elem) => {
                                 Some(CosmicMappedRenderElement::TiledStack({
                                     let cropped = CropRenderElement::from_element(
@@ -2721,24 +2742,22 @@ where
                                 }))
                             }
                             x => Some(x),
-                        }),
-                    );
+                        },
+                    ));
+                    popup_elements.extend(p_elements)
                 }
+            });
 
-                elements
-            })
-            .collect();
-
-        resize_elements
+        window_elements = resize_elements
             .into_iter()
             .flatten()
             .chain(indicator.into_iter().map(Into::into))
-            .chain(elements)
+            .chain(window_elements)
             .chain(group_backdrop.into_iter().map(Into::into))
-            .collect()
-    } else {
-        Vec::new()
+            .collect();
     }
+
+    (window_elements, popup_elements)
 }
 
 fn scale_to_center(
