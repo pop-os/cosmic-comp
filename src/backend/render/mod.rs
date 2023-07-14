@@ -505,7 +505,7 @@ where
     elements.extend(overlay_popups.into_iter().map(Into::into));
     elements.extend(overlay_elements.into_iter().map(Into::into));
 
-    let mut window_elements = if has_fullscreen {
+    let mut window_elements = if !has_fullscreen {
         let (top_elements, top_popups) =
             split_layer_elements(renderer, output, Layer::Top, exclude_workspace_overview);
         elements.extend(top_popups.into_iter().map(Into::into));
