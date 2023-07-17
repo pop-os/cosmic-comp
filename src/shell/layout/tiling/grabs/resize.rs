@@ -19,7 +19,7 @@ use smithay::{
     utils::{IsAlive, Logical, Point},
 };
 
-use super::{Data, TilingLayout};
+use super::super::{Data, TilingLayout};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResizeForkTarget {

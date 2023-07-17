@@ -4,9 +4,8 @@ use crate::{
     config::{Action, Config, KeyPattern, WorkspaceLayout},
     shell::{
         focus::{target::PointerFocusTarget, FocusDirection},
-        grabs::ResizeEdge,
+        grabs::{ResizeEdge, SeatMoveGrabState},
         layout::{
-            floating::SeatMoveGrabState,
             tiling::{Direction, FocusResult, MoveResult},
         },
         OverviewMode, ResizeDirection, ResizeMode, Workspace,

@@ -103,14 +103,15 @@ impl MoveGrabState {
     }
 }
 
-pub struct MoveSurfaceGrab {
+pub struct MoveGrab {
     window: CosmicMapped,
     start_data: PointerGrabStartData<State>,
     seat: Seat<State>,
     outputs: HashSet<Output>,
+    tiling: bool,
 }
 
-impl PointerGrab<State> for MoveSurfaceGrab {
+impl PointerGrab<State> for MoveGrab {
     fn motion(
         &mut self,
         state: &mut State,
@@ -182,7 +183,7 @@ impl PointerGrab<State> for MoveSurfaceGrab {
     }
 }
 
-impl MoveSurfaceGrab {
+impl MoveGrab {
     pub fn new(
         start_data: PointerGrabStartData<State>,
         window: CosmicMapped,
@@ -190,7 +191,8 @@ impl MoveSurfaceGrab {
         initial_cursor_location: Point<f64, Logical>,
         initial_window_location: Point<i32, Logical>,
         indicator_thickness: u8,
-    ) -> MoveSurfaceGrab {
+        was_tiled: bool,
+    ) -> MoveGrab {
         let output = seat.active_output();
         let mut outputs = HashSet::new();
         outputs.insert(output.clone());
@@ -198,8 +200,7 @@ impl MoveSurfaceGrab {
 
         let grab_state = MoveGrabState {
             window: window.clone(),
-            window_offset: dbg!(initial_window_location)
-                - dbg!(initial_cursor_location.to_i32_round()),
+            window_offset: initial_window_location - initial_cursor_location.to_i32_round(),
             indicator_thickness,
         };
 
@@ -209,12 +210,17 @@ impl MoveSurfaceGrab {
             .unwrap()
             .borrow_mut() = Some(grab_state);
 
-        MoveSurfaceGrab {
+        MoveGrab {
             window,
             start_data,
             seat: seat.clone(),
             outputs,
+            tiling: was_tiled,
         }
+    }
+
+    pub fn is_tiling_grab(&self) -> bool {
+        self.tiling
     }
 
     fn ungrab(
@@ -239,6 +245,9 @@ impl MoveSurfaceGrab {
                     + grab_state.window_offset;
 
                 let workspace_handle = state.common.shell.active_space(&output).handle;
+                for old_output in self.outputs.iter().filter(|o| *o != &output) {
+                    grab_state.window.output_leave(old_output);
+                }
                 for (window, _) in grab_state.window.windows() {
                     state
                         .common
@@ -252,29 +261,40 @@ impl MoveSurfaceGrab {
                         .toplevel_enter_output(&window, &output);
                 }
 
-                let offset = state
-                    .common
-                    .shell
-                    .active_space(&output)
-                    .floating_layer
-                    .space
-                    .output_geometry(&output)
-                    .unwrap()
-                    .loc;
-                grab_state.window.set_geometry(Rectangle::from_loc_and_size(
-                    window_location + offset,
-                    grab_state.window.geometry().size,
-                ));
-                state
-                    .common
-                    .shell
-                    .active_space_mut(&output)
-                    .floating_layer
-                    .map_internal(grab_state.window, &output, Some(window_location + offset));
+                if self.tiling {
+                    Some(
+                        state
+                            .common
+                            .shell
+                            .active_space_mut(&output)
+                            .tiling_layer
+                            .drop_window(grab_state.window, &output, handle.current_location()),
+                    )
+                } else {
+                    let offset = state
+                        .common
+                        .shell
+                        .active_space(&output)
+                        .floating_layer
+                        .space
+                        .output_geometry(&output)
+                        .unwrap()
+                        .loc;
+                    grab_state.window.set_geometry(Rectangle::from_loc_and_size(
+                        window_location + offset,
+                        grab_state.window.geometry().size,
+                    ));
+                    state
+                        .common
+                        .shell
+                        .active_space_mut(&output)
+                        .floating_layer
+                        .map_internal(grab_state.window, &output, Some(window_location + offset));
 
-                let pointer_pos = handle.current_location();
-                let relative_pos = state.common.shell.map_global_to_space(pointer_pos, &output);
-                Some(window_location + offset + (pointer_pos - relative_pos).to_i32_round())
+                    let pointer_pos = handle.current_location();
+                    let relative_pos = state.common.shell.map_global_to_space(pointer_pos, &output);
+                    Some(window_location + offset + (pointer_pos - relative_pos).to_i32_round())
+                }
             } else {
                 None
             }

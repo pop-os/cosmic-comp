@@ -11,8 +11,7 @@ use std::{
 use crate::{
     config::WorkspaceLayout,
     shell::{
-        focus::target::WindowGroup,
-        layout::{floating::SeatMoveGrabState, tiling::ANIMATION_DURATION},
+        focus::target::WindowGroup, grabs::SeatMoveGrabState, layout::tiling::ANIMATION_DURATION,
         CosmicMapped, CosmicMappedRenderElement, WorkspaceRenderElement,
     },
     state::{Common, Fps},

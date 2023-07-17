@@ -4,8 +4,9 @@ use crate::{
         BackdropShader, GlMultiError, GlMultiFrame, GlMultiRenderer,
     },
     shell::{
+        grabs::MoveGrab,
         layout::{
-            floating::{FloatingLayout, MoveSurfaceGrab},
+            floating::FloatingLayout,
             tiling::{TilingLayout, ANIMATION_DURATION},
         },
         OverviewMode,
@@ -363,7 +364,7 @@ impl Workspace {
         output: &Output,
         start_data: PointerGrabStartData<State>,
         indicator_thickness: u8,
-    ) -> Option<MoveSurfaceGrab> {
+    ) -> Option<MoveGrab> {
         let pointer = seat.get_pointer().unwrap();
         let pos = pointer.current_location();
 
@@ -382,21 +383,18 @@ impl Workspace {
         }
 
         let was_floating = self.floating_layer.unmap(&mapped);
-        //let was_tiled = self.tiling_layer.unmap(&mapped);
-        //assert!(was_floating != was_tiled);
+        let was_tiled = self.tiling_layer.unmap_as_placeholder(&mapped);
+        assert!(was_floating != was_tiled.is_some());
 
-        if was_floating {
-            Some(MoveSurfaceGrab::new(
-                start_data,
-                mapped,
-                seat,
-                pos,
-                initial_window_location,
-                indicator_thickness,
-            ))
-        } else {
-            None // TODO
-        }
+        Some(MoveGrab::new(
+            start_data,
+            mapped,
+            seat,
+            pos,
+            initial_window_location,
+            indicator_thickness,
+            was_tiled.is_some(),
+        ))
     }
 
     pub fn toggle_tiling(&mut self, seat: &Seat<State>) {

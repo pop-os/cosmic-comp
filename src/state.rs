@@ -7,7 +7,7 @@ use crate::{
         x11::X11State,
     },
     config::{Config, OutputConfig},
-    shell::{layout::floating::SeatMoveGrabState, Shell},
+    shell::{grabs::SeatMoveGrabState, Shell},
     utils::prelude::*,
     wayland::protocols::{
         drm::WlDrmState,

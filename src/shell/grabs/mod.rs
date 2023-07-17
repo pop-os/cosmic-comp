@@ -15,6 +15,9 @@ use super::{
     layout::{floating::ResizeSurfaceGrab, tiling::ResizeForkGrab},
 };
 
+mod moving;
+pub use self::moving::*;
+
 bitflags::bitflags! {
     pub struct ResizeEdge: u32 {
         const TOP          = 0b0001;
