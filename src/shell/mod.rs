@@ -1212,7 +1212,13 @@ impl Shell {
             }
         } else {
             if !matches!(self.overview_mode, OverviewMode::Ended(_)) {
-                self.overview_mode = OverviewMode::Ended(Instant::now());
+                let reverse_duration = if let OverviewMode::Started(_, start) = self.overview_mode {
+                    ANIMATION_DURATION
+                        - Instant::now().duration_since(start).min(ANIMATION_DURATION)
+                } else {
+                    Duration::ZERO
+                };
+                self.overview_mode = OverviewMode::Ended(Instant::now() - reverse_duration);
             }
         }
     }
