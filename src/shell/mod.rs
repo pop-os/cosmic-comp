@@ -71,9 +71,15 @@ use self::{
 const ANIMATION_DURATION: Duration = Duration::from_millis(200);
 
 #[derive(Debug, Clone)]
+pub enum Trigger {
+    Keyboard(KeyModifiers),
+    Pointer(u32),
+}
+
+#[derive(Debug, Clone)]
 pub enum OverviewMode {
     None,
-    Started(KeyModifiers, Instant),
+    Started(Trigger, Instant),
     Ended(Instant),
 }
 
@@ -1205,10 +1211,10 @@ impl Shell {
         clients
     }
 
-    pub fn set_overview_mode(&mut self, enabled: Option<KeyModifiers>) {
-        if let Some(modifiers) = enabled {
+    pub fn set_overview_mode(&mut self, enabled: Option<Trigger>) {
+        if let Some(trigger) = enabled {
             if !matches!(self.overview_mode, OverviewMode::Started(_, _)) {
-                self.overview_mode = OverviewMode::Started(modifiers, Instant::now());
+                self.overview_mode = OverviewMode::Started(trigger, Instant::now());
             }
         } else {
             if !matches!(self.overview_mode, OverviewMode::Ended(_)) {
@@ -1545,6 +1551,7 @@ impl Shell {
                         .windows()
                         .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
                         .unwrap();
+                    let button = start_data.button;
                     if let Some(grab) = workspace.move_request(
                         &window,
                         &seat,
@@ -1563,6 +1570,12 @@ impl Shell {
                             .shell
                             .toplevel_info_state
                             .toplevel_leave_output(&window, &output);
+                        if grab.is_tiling_grab() {
+                            state
+                                .common
+                                .shell
+                                .set_overview_mode(Some(Trigger::Pointer(button)));
+                        }
                         seat.get_pointer().unwrap().set_grab(
                             state,
                             grab,

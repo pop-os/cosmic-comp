@@ -8,7 +8,7 @@ use crate::{
         layout::{
             tiling::{Direction, FocusResult, MoveResult},
         },
-        OverviewMode, ResizeDirection, ResizeMode, Workspace,
+        OverviewMode, ResizeDirection, ResizeMode, Workspace, Trigger,
     }, // shell::grabs::SeatMoveGrabState
     state::Common,
     utils::prelude::*,
@@ -251,7 +251,7 @@ impl State {
                                 time,
                                 |data, modifiers, handle| {
                                     // Leave overview mode, if any modifier was released
-                                    if let OverviewMode::Started(action_modifiers, _) =
+                                    if let OverviewMode::Started(Trigger::Keyboard(action_modifiers), _) =
                                         data.common.shell.overview_mode()
                                     {
                                         if (action_modifiers.ctrl && !modifiers.ctrl)
@@ -686,6 +686,14 @@ impl State {
                                     };
                                 }
                                 Common::set_focus(self, under.and_then(|target| target.try_into().ok()).as_ref(), seat, Some(serial));
+                            }
+                        } else {
+                            if let OverviewMode::Started(Trigger::Pointer(action_button), _) =
+                                self.common.shell.overview_mode()
+                            {
+                                if action_button == button {
+                                    self.common.shell.set_overview_mode(None);
+                                }
                             }
                         };
                         seat.get_pointer().unwrap().button(
@@ -1214,7 +1222,7 @@ impl State {
                     MoveResult::Done => {
                         if let Some(focused_window) = workspace.focus_stack.get(seat).last() {
                             if workspace.is_tiled(focused_window) {
-                                self.common.shell.set_overview_mode(Some(pattern.modifiers));
+                                self.common.shell.set_overview_mode(Some(Trigger::Keyboard(pattern.modifiers)));
                             }
                         }
                     }
