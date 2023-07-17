@@ -15,7 +15,7 @@ use crate::{
         },
         grabs::ResizeEdge,
         layout::Orientation,
-        CosmicSurface, OutputNotMapped, OverviewMode, ResizeDirection, ResizeMode,
+        CosmicSurface, OutputNotMapped, OverviewMode, ResizeDirection, ResizeMode, Trigger,
     },
     utils::prelude::*,
     wayland::{
@@ -29,7 +29,7 @@ use smithay::{
     backend::renderer::{
         element::{
             utils::{CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement},
-            AsRenderElements, RenderElement,
+            AsRenderElements, Id, RenderElement,
         },
         ImportAll, ImportMem, Renderer,
     },
@@ -147,6 +147,7 @@ pub struct TilingLayout {
     queues: HashMap<OutputData, TreeQueue>,
     standby_tree: Option<Tree<Data>>,
     pending_blockers: Vec<TilingBlocker>,
+    placeholder_id: Id,
 }
 
 #[derive(Debug, Clone)]
@@ -159,6 +160,9 @@ pub enum Data {
     },
     Mapped {
         mapped: CosmicMapped,
+        last_geometry: Rectangle<i32, Logical>,
+    },
+    Placeholder {
         last_geometry: Rectangle<i32, Logical>,
     },
 }
@@ -194,6 +198,12 @@ impl Data {
             _ => false,
         }
     }
+    fn is_placeholder(&self) -> bool {
+        match self {
+            Data::Placeholder { .. } => true,
+            _ => false,
+        }
+    }
 
     fn orientation(&self) -> Orientation {
         match self {
@@ -225,7 +235,7 @@ impl Data {
 
                 sizes.insert(idx, new_size);
             }
-            Data::Mapped { .. } => panic!("Adding window to leaf?"),
+            _ => panic!("Adding window to leaf?"),
         }
     }
 
@@ -234,7 +244,7 @@ impl Data {
             Data::Group { sizes, .. } => {
                 sizes.swap(i, j);
             }
-            Data::Mapped { .. } => panic!("Swapping windows to a leaf?"),
+            _ => panic!("Swapping windows to a leaf?"),
         }
     }
 
@@ -263,7 +273,7 @@ impl Data {
                     *sizes.last_mut().unwrap() += overflow;
                 }
             }
-            Data::Mapped { .. } => panic!("Added window to leaf?"),
+            _ => panic!("Added window to leaf?"),
         }
     }
 
@@ -271,6 +281,7 @@ impl Data {
         match self {
             Data::Group { last_geometry, .. } => last_geometry,
             Data::Mapped { last_geometry, .. } => last_geometry,
+            Data::Placeholder { last_geometry } => last_geometry,
         }
     }
 
@@ -301,7 +312,7 @@ impl Data {
                 }
                 *last_geometry = geo;
             }
-            Data::Mapped { last_geometry, .. } => {
+            Data::Mapped { last_geometry, .. } | Data::Placeholder { last_geometry } => {
                 *last_geometry = geo;
             }
         }
@@ -310,7 +321,7 @@ impl Data {
     fn len(&self) -> usize {
         match self {
             Data::Group { sizes, .. } => sizes.len(),
-            Data::Mapped { .. } => 1,
+            _ => 1,
         }
     }
 }
@@ -328,6 +339,7 @@ impl TilingLayout {
             queues: HashMap::new(),
             standby_tree: None,
             pending_blockers: Vec::new(),
+            placeholder_id: Id::new(),
         }
     }
 
@@ -549,6 +561,44 @@ impl TilingLayout {
         window.output_leave(&output);
         window.set_tiled(false);
         Some(output)
+    }
+
+    pub fn unmap_as_placeholder(&mut self, window: &CosmicMapped) -> Option<(Output, NodeId)> {
+        let node_id = window.tiling_node_id.lock().unwrap().clone()?;
+        let output = {
+            self.queues
+                .iter()
+                .find(|(_, queue)| {
+                    queue
+                        .trees
+                        .back()
+                        .unwrap()
+                        .0
+                        .get(&node_id)
+                        .map(|node| node.data().is_mapped(Some(window)))
+                        .unwrap_or(false)
+                })
+                .map(|(o, _)| o.output.clone())?
+        };
+
+        let data = self
+            .queues
+            .get_mut(&output)
+            .unwrap()
+            .trees
+            .back_mut()
+            .unwrap()
+            .0
+            .get_mut(&node_id)
+            .unwrap()
+            .data_mut();
+        *data = Data::Placeholder {
+            last_geometry: data.geometry().clone(),
+        };
+
+        window.output_leave(&output);
+        window.set_tiled(false);
+        Some((output, node_id))
     }
 
     fn unmap_window_internal(&mut self, mapped: &CosmicMapped) {
@@ -1018,6 +1068,7 @@ impl TilingLayout {
                             }
                             .into(),
                         ),
+                        Data::Placeholder { .. } => return FocusResult::None,
                     };
                 }
             }
@@ -1144,6 +1195,7 @@ impl TilingLayout {
                         Data::Mapped { mapped, .. } => {
                             return FocusResult::Some(mapped.clone().into());
                         }
+                        Data::Placeholder { .. } => return FocusResult::None,
                     }
                 }
             } else {
@@ -1274,7 +1326,7 @@ impl TilingLayout {
                                 }
                                 Some(mapped.windows().map(|(s, _)| s))
                             }
-                            Data::Group { .. } => None,
+                            _ => None,
                         })
                         .flatten()
                         .collect::<Vec<_>>();
@@ -1511,6 +1563,52 @@ impl TilingLayout {
         true
     }
 
+    pub fn drop_window(
+        &mut self,
+        window: CosmicMapped,
+        output: &Output,
+        _cursor_pos: Point<f64, Logical>,
+    ) -> Point<i32, Logical> {
+        // TODO: placeholder until we have proper logic in `element_under` to utilize
+        let queue = if self.queues.contains_key(output) {
+            self.queues.get_mut(output)
+        } else {
+            self.queues.values_mut().next()
+        };
+        let tree = if let Some(queue) = queue {
+            queue.trees.back_mut().map(|x| &mut x.0)
+        } else {
+            self.standby_tree.as_mut()
+        }
+        .unwrap();
+
+        window.output_enter(&output, window.bbox());
+        window.set_bounds(output.geometry().size);
+
+        if let Some(id) = tree.root_node_id().and_then(|root_id| {
+            tree.traverse_pre_order_ids(root_id)
+                .unwrap()
+                .find(|id| tree.get(id).unwrap().data().is_placeholder())
+        }) {
+            let data = tree.get_mut(&id).unwrap().data_mut();
+            let geo = data.geometry().clone();
+
+            *data = Data::Mapped {
+                mapped: window,
+                last_geometry: geo,
+            };
+            output.geometry().loc + geo.loc
+        } else {
+            self.map_internal(
+                window.clone(),
+                output,
+                Option::<std::iter::Empty<_>>::None,
+                None,
+            );
+            output.geometry().loc + self.element_geometry(&window).unwrap().loc
+        }
+    }
+
     fn last_active_window<'a>(
         tree: &Tree<Data>,
         mut focus_stack: impl Iterator<Item = &'a CosmicMapped>,
@@ -1723,6 +1821,7 @@ impl TilingLayout {
                                 }
                             }
                         }
+                        Data::Placeholder { .. } => {}
                     }
                 }
             }
@@ -2023,6 +2122,8 @@ impl TilingLayout {
         let mut window_elements = Vec::new();
         let mut popup_elements = Vec::new();
 
+        let is_mouse_tiling = matches!(overview, OverviewMode::Started(Trigger::Pointer(_), _));
+
         // all gone windows and fade them out
         let old_geometries = if let Some(reference_tree) = reference_tree.as_ref() {
             let (geometries, _) = if let Some(transition) = draw_groups {
@@ -2034,6 +2135,8 @@ impl TilingLayout {
                     // but for that we have to associate focus with a tree (and animate focus changes properly)
                     1.0 - transition,
                     transition,
+                    &self.placeholder_id,
+                    is_mouse_tiling,
                 )
             } else {
                 None
@@ -2065,6 +2168,8 @@ impl TilingLayout {
                 seat,
                 transition,
                 transition,
+                &self.placeholder_id,
+                is_mouse_tiling,
             )
         } else {
             None
@@ -2105,8 +2210,11 @@ impl TilingLayout {
     }
 }
 
-const OUTER_GAP: i32 = 8;
-const INNER_GAP: i32 = 16;
+const OUTER_GAP_KEYBOARD: i32 = 8;
+const INNER_GAP_KEYBOARD: i32 = 16;
+
+const OUTER_GAP_MOUSE: i32 = 32;
+const INNER_GAP_MOUSE: i32 = 16;
 
 fn geometries_for_groupview<R>(
     tree: &Tree<Data>,
@@ -2115,6 +2223,8 @@ fn geometries_for_groupview<R>(
     seat: Option<&Seat<State>>,
     alpha: f32,
     transition: f32,
+    placeholder_id: &Id,
+    mouse_tiling: bool,
 ) -> Option<(
     HashMap<NodeId, Rectangle<i32, Logical>>,
     Vec<CosmicMappedRenderElement<R>>,
@@ -2127,8 +2237,20 @@ where
 {
     // we need to recalculate geometry for all elements, if we are drawing groups
     if let Some(root) = tree.root_node_id() {
-        let outer_gap: i32 = (OUTER_GAP as f32 * transition).round() as i32;
-        let inner_gap: i32 = (INNER_GAP as f32 * transition).round() as i32;
+        let outer_gap: i32 = (if mouse_tiling {
+            OUTER_GAP_MOUSE
+        } else {
+            OUTER_GAP_KEYBOARD
+        } as f32
+            * transition)
+            .round() as i32;
+        let inner_gap: i32 = (if mouse_tiling {
+            INNER_GAP_MOUSE
+        } else {
+            INNER_GAP_KEYBOARD
+        } as f32
+            * transition)
+            .round() as i32;
 
         let mut stack = vec![Rectangle::from_loc_and_size(
             non_exclusive_zone.loc + Point::from((outer_gap, outer_gap)),
@@ -2227,6 +2349,19 @@ where
                                 )
                                 .into(),
                             );
+                        } else if mouse_tiling && node.parent() == Some(&root) {
+                            elements.push(
+                                IndicatorShader::element(
+                                    renderer,
+                                    Key::Group(Arc::downgrade(alive)),
+                                    geo,
+                                    4,
+                                    8,
+                                    alpha * 0.40,
+                                    GROUP_COLOR,
+                                )
+                                .into(),
+                            );
                         }
 
                         geometries.insert(node_id.clone(), geo);
@@ -2305,7 +2440,7 @@ where
                                     .unwrap()
                                     .any(|id| id == focused_id)
                             })
-                            .unwrap_or(false)
+                            .unwrap_or(mouse_tiling)
                         {
                             elements.push(
                                 BackdropShader::element(
@@ -2331,6 +2466,26 @@ where
 
                         geo.loc += (inner_gap, inner_gap).into();
                         geo.size -= (inner_gap * 2, inner_gap * 2).into();
+
+                        geometries.insert(node_id.clone(), geo);
+                    }
+                    Data::Placeholder { .. } => {
+                        geo.loc += (outer_gap, outer_gap).into();
+                        geo.size -= (outer_gap * 2, outer_gap * 2).into();
+                        geo.loc += (inner_gap, inner_gap).into();
+                        geo.size -= (inner_gap * 2, inner_gap * 2).into();
+
+                        elements.push(
+                            BackdropShader::element(
+                                renderer,
+                                placeholder_id.clone(),
+                                geo,
+                                8.,
+                                alpha * 0.4,
+                                GROUP_COLOR,
+                            )
+                            .into(),
+                        );
 
                         geometries.insert(node_id.clone(), geo);
                     }
@@ -2616,7 +2771,8 @@ where
                     if indicator_thickness > 0 || data.is_group() {
                         let mut geo = geo.clone();
                         if data.is_group() {
-                            let outer_gap: i32 = (OUTER_GAP as f32 * percentage).round() as i32;
+                            let outer_gap: i32 =
+                                (OUTER_GAP_KEYBOARD as f32 * percentage).round() as i32;
                             geo.loc += (outer_gap, outer_gap).into();
                             geo.size -= (outer_gap * 2, outer_gap * 2).into();
 
@@ -2638,6 +2794,7 @@ where
                             match data {
                                 Data::Mapped { mapped, .. } => mapped.clone().into(),
                                 Data::Group { alive, .. } => Key::Group(Arc::downgrade(alive)),
+                                _ => unreachable!(),
                             },
                             geo,
                             if data.is_group() {
