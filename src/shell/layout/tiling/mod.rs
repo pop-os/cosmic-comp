@@ -1426,15 +1426,47 @@ impl TilingLayout {
                     continue;
                 }
             }
-            if let Some((_, _, blocker)) = queue.trees.get(1) {
+
+            let ready_trees = queue
+                .trees
+                .iter()
+                .skip(1)
+                .take_while(|(_, _, blocker)| {
+                    blocker
+                        .as_ref()
+                        .map(|blocker| blocker.is_ready() && blocker.is_signaled())
+                        .unwrap_or(true)
+                })
+                .count();
+
+            // merge
+            let other_duration = if ready_trees > 1 {
+                queue
+                    .trees
+                    .drain(1..ready_trees)
+                    .fold(None, |res, (_, duration, blocker)| {
+                        if let Some(blocker) = blocker {
+                            clients.extend(blocker.signal_ready());
+                        }
+                        Some(
+                            res.map(|old_duration: Duration| old_duration.max(duration))
+                                .unwrap_or(duration),
+                        )
+                    })
+            } else {
+                None
+            };
+
+            // start
+            if ready_trees > 0 {
+                let (_, duration, blocker) = queue.trees.get_mut(1).unwrap();
+                *duration = other_duration
+                    .map(|other| other.max(*duration))
+                    .unwrap_or(*duration);
                 if let Some(blocker) = blocker {
-                    if blocker.is_ready() && blocker.is_signaled() {
-                        clients.extend(blocker.signal_ready());
-                        queue.animation_start = Some(Instant::now());
-                    }
-                } else {
-                    queue.animation_start = Some(Instant::now());
+                    clients.extend(blocker.signal_ready());
                 }
+                queue.animation_start = Some(Instant::now());
             }
         }
 
