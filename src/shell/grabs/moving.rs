@@ -15,7 +15,10 @@ use crate::{
 };
 
 use smithay::{
-    backend::renderer::{element::RenderElement, ImportAll, ImportMem, Renderer},
+    backend::renderer::{
+        element::{utils::RescaleRenderElement, RenderElement},
+        ImportAll, ImportMem, Renderer,
+    },
     desktop::space::SpaceElement,
     input::{
         pointer::{
@@ -29,14 +32,21 @@ use smithay::{
     utils::{IsAlive, Logical, Point, Rectangle, Serial},
     wayland::compositor::SurfaceData,
 };
-use std::{cell::RefCell, collections::HashSet, time::Duration};
+use std::{
+    cell::RefCell,
+    collections::HashSet,
+    time::{Duration, Instant},
+};
 
 pub type SeatMoveGrabState = RefCell<Option<MoveGrabState>>;
+
+const RESCALE_ANIMATION_DURATION: f64 = 150.0;
 
 pub struct MoveGrabState {
     window: CosmicMapped,
     window_offset: Point<i32, Logical>,
     indicator_thickness: u8,
+    start: Instant,
 }
 
 impl MoveGrabState {
@@ -50,6 +60,13 @@ impl MoveGrabState {
         #[cfg(feature = "debug")]
         puffin::profile_function!();
 
+        let scale = 0.6
+            + ((1.0
+                - (Instant::now().duration_since(self.start).as_millis() as f64
+                    / RESCALE_ANIMATION_DURATION)
+                    .min(1.0))
+                * 0.4);
+
         let cursor_at = seat.get_pointer().unwrap().current_location();
 
         let mut window_geo = self.window.geometry();
@@ -58,15 +75,26 @@ impl MoveGrabState {
             return Vec::new();
         }
 
-        let scale = output.current_scale().fractional_scale().into();
-        let render_location = cursor_at.to_i32_round() - output.geometry().loc + self.window_offset;
+        let output_scale = output.current_scale().fractional_scale().into();
+        let scaling_offset =
+            self.window_offset - self.window_offset.to_f64().upscale(scale).to_i32_round();
+        let render_location =
+            cursor_at.to_i32_round() - output.geometry().loc + self.window_offset - scaling_offset;
 
         let focus_element = if self.indicator_thickness > 0 {
             Some(
                 CosmicMappedRenderElement::from(IndicatorShader::focus_element(
                     renderer,
                     self.window.clone(),
-                    Rectangle::from_loc_and_size(render_location, self.window.geometry().size),
+                    Rectangle::from_loc_and_size(
+                        render_location,
+                        self.window
+                            .geometry()
+                            .size
+                            .to_f64()
+                            .upscale(scale)
+                            .to_i32_round(),
+                    ),
                     self.indicator_thickness,
                     1.0,
                 ))
@@ -76,17 +104,45 @@ impl MoveGrabState {
             None
         };
 
-        let (window_elements, popup_elements) = self.window.split_render_elements::<R, I>(
-            renderer,
-            (render_location - self.window.geometry().loc).to_physical_precise_round(scale),
-            scale,
-            1.0,
-        );
+        let (window_elements, popup_elements) = self
+            .window
+            .split_render_elements::<R, CosmicMappedRenderElement<R>>(
+                renderer,
+                (render_location - self.window.geometry().loc)
+                    .to_physical_precise_round(output_scale),
+                output_scale,
+                1.0,
+            );
 
         popup_elements
             .into_iter()
             .chain(focus_element)
-            .chain(window_elements)
+            .chain(window_elements.into_iter().map(|elem| match elem {
+                CosmicMappedRenderElement::Stack(stack) => {
+                    CosmicMappedRenderElement::GrabbedStack(
+                        RescaleRenderElement::from_element(
+                            stack,
+                            render_location.to_physical_precise_round(
+                                output.current_scale().fractional_scale(),
+                            ),
+                            scale,
+                        ),
+                    )
+                }
+                CosmicMappedRenderElement::Window(window) => {
+                    CosmicMappedRenderElement::GrabbedWindow(
+                        RescaleRenderElement::from_element(
+                            window,
+                            render_location.to_physical_precise_round(
+                                output.current_scale().fractional_scale(),
+                            ),
+                            scale,
+                        ),
+                    )
+                }
+                x => x,
+            }))
+            .map(I::from)
             .collect()
     }
 
@@ -206,6 +262,7 @@ impl MoveGrab {
             window: window.clone(),
             window_offset: initial_window_location - initial_cursor_location.to_i32_round(),
             indicator_thickness,
+            start: Instant::now(),
         };
 
         *seat
