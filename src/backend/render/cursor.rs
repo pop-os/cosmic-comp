@@ -42,6 +42,7 @@ pub enum CursorShape {
     Default,
     ColResize,
     RowResize,
+    Grab,
 }
 
 impl ToString for CursorShape {
@@ -50,6 +51,7 @@ impl ToString for CursorShape {
             CursorShape::Default => "default",
             CursorShape::ColResize => "col-resize",
             CursorShape::RowResize => "row-resize",
+            CursorShape::Grab => "grabbing",
         }
         .to_string()
     }
@@ -242,6 +244,10 @@ impl Default for CursorState {
                 map.insert(
                     CursorShape::RowResize,
                     Cursor::load(&theme, CursorShape::RowResize, size),
+                );
+                map.insert(
+                    CursorShape::Grab,
+                    Cursor::load(&theme, CursorShape::Grab, size),
                 );
                 map
             },

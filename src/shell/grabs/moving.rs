@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::render::{element::AsGlowRenderer, IndicatorShader},
+    backend::render::{
+        cursor::{CursorShape, CursorState},
+        element::AsGlowRenderer,
+        IndicatorShader,
+    },
     shell::{
         element::CosmicMappedRenderElement,
         focus::target::{KeyboardFocusTarget, PointerFocusTarget},
@@ -210,6 +214,11 @@ impl MoveGrab {
             .unwrap()
             .borrow_mut() = Some(grab_state);
 
+        {
+            let cursor_state = seat.user_data().get::<CursorState>().unwrap();
+            cursor_state.set_shape(CursorShape::Grab);
+        }
+
         MoveGrab {
             window,
             start_data,
@@ -303,6 +312,12 @@ impl MoveGrab {
         };
 
         handle.unset_grab(state, serial, time);
+
+        {
+            let cursor_state = self.seat.user_data().get::<CursorState>().unwrap();
+            cursor_state.set_shape(CursorShape::Default);
+        }
+
         if self.window.alive() {
             if let Some(position) = position {
                 handle.motion(
