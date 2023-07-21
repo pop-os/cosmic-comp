@@ -1020,23 +1020,11 @@ impl Shell {
     }
 
     pub fn active_space(&self, output: &Output) -> &Workspace {
-        match &self.workspaces {
-            WorkspaceMode::OutputBound(sets, _) => {
-                let set = sets.get(output).unwrap();
-                &set.workspaces[set.active]
-            }
-            WorkspaceMode::Global(set) => &set.workspaces[set.active],
-        }
+        self.workspaces.active(output).1
     }
 
     pub fn active_space_mut(&mut self, output: &Output) -> &mut Workspace {
-        match &mut self.workspaces {
-            WorkspaceMode::OutputBound(sets, _) => {
-                let set = sets.get_mut(output).unwrap();
-                &mut set.workspaces[set.active]
-            }
-            WorkspaceMode::Global(set) => &mut set.workspaces[set.active],
-        }
+        self.workspaces.active_mut(output)
     }
 
     pub fn visible_outputs_for_surface<'a>(

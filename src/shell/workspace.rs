@@ -202,14 +202,15 @@ impl Workspace {
     }
 
     pub fn element_under(
-        &self,
+        &mut self,
         location: Point<f64, Logical>,
+        overview: OverviewMode,
     ) -> Option<(PointerFocusTarget, Point<i32, Logical>)> {
         self.floating_layer
             .space
             .element_under(location)
             .map(|(mapped, p)| (mapped.clone().into(), p))
-            .or_else(|| self.tiling_layer.element_under(location))
+            .or_else(|| self.tiling_layer.element_under(location, overview))
     }
 
     pub fn element_geometry(&self, elem: &CosmicMapped) -> Option<Rectangle<i32, Logical>> {

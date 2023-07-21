@@ -469,14 +469,16 @@ impl State {
 
                         let serial = SERIAL_COUNTER.next_serial();
                         let relative_pos = self.common.shell.map_global_to_space(position, &output);
-                        let workspace = self.common.shell.active_space(&output);
+                        let overview = self.common.shell.overview_mode();
+                        let workspace = self.common.shell.workspaces.active_mut(&output);
                         let under = State::surface_under(
                             position,
                             relative_pos,
                             &output,
                             output_geometry,
                             &self.common.shell.override_redirect_windows,
-                            &workspace,
+                            overview,
+                            workspace,
                         );
 
                         for session in sessions_for_output(&self.common, &output) {
@@ -540,7 +542,8 @@ impl State {
                                 geometry.size,
                             );
                         let relative_pos = self.common.shell.map_global_to_space(position, &output);
-                        let workspace = self.common.shell.active_space(&output);
+                        let overview = self.common.shell.overview_mode();
+                        let workspace = self.common.shell.workspaces.active_mut(&output);
                         let serial = SERIAL_COUNTER.next_serial();
                         let under = State::surface_under(
                             position,
@@ -548,7 +551,8 @@ impl State {
                             &output,
                             geometry,
                             &self.common.shell.override_redirect_windows,
-                            &workspace,
+                            overview,
+                            workspace,
                         );
 
                         for session in sessions_for_output(&self.common, &output) {
@@ -626,11 +630,12 @@ impl State {
                                 let pos = seat.get_pointer().unwrap().current_location();
                                 let relative_pos =
                                     self.common.shell.map_global_to_space(pos, &output);
+                                let overview = self.common.shell.overview_mode();
                                 let workspace = self.common.shell.active_space_mut(&output);
-                                let layers = layer_map_for_output(&output);
                                 let mut under = None;
 
                                 if let Some(window) = workspace.get_fullscreen(&output) {
+                                    let layers = layer_map_for_output(&output);
                                     if let Some(layer) =
                                         layers.layer_under(WlrLayer::Overlay, relative_pos)
                                     {
@@ -649,41 +654,53 @@ impl State {
                                         under = Some(window.clone().into());
                                     }
                                 } else {
-                                    if let Some(layer) = layers
-                                        .layer_under(WlrLayer::Overlay, relative_pos)
-                                        .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos))
-                                    {
-                                        let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                                        if layer.can_receive_keyboard_focus()
-                                            && layer
-                                                .surface_under(
-                                                    relative_pos - layer_loc.to_f64(),
-                                                    WindowSurfaceType::ALL,
-                                                )
-                                                .is_some()
+                                    let done = {
+                                        let layers = layer_map_for_output(&output);
+                                        if let Some(layer) = layers
+                                            .layer_under(WlrLayer::Overlay, relative_pos)
+                                            .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos))
                                         {
-                                            under = Some(layer.clone().into());
-                                        }
-                                    } else if let Some((target, _)) =
-                                        workspace.element_under(relative_pos)
-                                    {
-                                        under = Some(target);
-                                    } else if let Some(layer) = layers
-                                        .layer_under(WlrLayer::Bottom, pos)
-                                        .or_else(|| layers.layer_under(WlrLayer::Background, pos))
-                                    {
-                                        let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                                        if layer.can_receive_keyboard_focus()
-                                            && layer
-                                                .surface_under(
-                                                    relative_pos - layer_loc.to_f64(),
-                                                    WindowSurfaceType::ALL,
-                                                )
-                                                .is_some()
-                                        {
-                                            under = Some(layer.clone().into());
+                                            let layer_loc = layers.layer_geometry(layer).unwrap().loc;
+                                            if layer.can_receive_keyboard_focus()
+                                                && layer
+                                                    .surface_under(
+                                                        relative_pos - layer_loc.to_f64(),
+                                                        WindowSurfaceType::ALL,
+                                                    )
+                                                    .is_some()
+                                            {
+                                                under = Some(layer.clone().into());
+                                            }
+                                            true
+                                        } else {
+                                            false
                                         }
                                     };
+                                    if !done {
+                                        if let Some((target, _)) =
+                                            workspace.element_under(relative_pos, overview)
+                                        {
+                                            under = Some(target);
+                                        } else {
+                                            let layers = layer_map_for_output(&output);
+                                            if let Some(layer) = layers
+                                                .layer_under(WlrLayer::Bottom, pos)
+                                                .or_else(|| layers.layer_under(WlrLayer::Background, pos))
+                                            {
+                                                let layer_loc = layers.layer_geometry(layer).unwrap().loc;
+                                                if layer.can_receive_keyboard_focus()
+                                                    && layer
+                                                        .surface_under(
+                                                            relative_pos - layer_loc.to_f64(),
+                                                            WindowSurfaceType::ALL,
+                                                        )
+                                                        .is_some()
+                                                {
+                                                    under = Some(layer.clone().into());
+                                                }
+                                            };
+                                        }
+                                    }
                                 }
                                 Common::set_focus(self, under.and_then(|target| target.try_into().ok()).as_ref(), seat, Some(serial));
                             }
@@ -1315,10 +1332,11 @@ impl State {
         output: &Output,
         output_geo: Rectangle<i32, Logical>,
         override_redirect_windows: &[X11Surface],
-        workspace: &Workspace,
+        overview: OverviewMode,
+        workspace: &mut Workspace,
     ) -> Option<(PointerFocusTarget, Point<i32, Logical>)> {
-        let layers = layer_map_for_output(output);
         if let Some(window) = workspace.get_fullscreen(output) {
+            let layers = layer_map_for_output(output);
             if let Some(layer) = layers.layer_under(WlrLayer::Overlay, relative_pos) {
                 let layer_loc = layers.layer_geometry(layer).unwrap().loc;
                 if layer
@@ -1336,16 +1354,19 @@ impl State {
             }
             Some((window.clone().into(), output_geo.loc))
         } else {
-            if let Some(layer) = layers
-                .layer_under(WlrLayer::Overlay, relative_pos)
-                .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos))
             {
-                let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                if layer
-                    .surface_under(relative_pos - layer_loc.to_f64(), WindowSurfaceType::ALL)
-                    .is_some()
+                let layers = layer_map_for_output(output);
+                if let Some(layer) = layers
+                    .layer_under(WlrLayer::Overlay, relative_pos)
+                    .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos))
                 {
-                    return Some((layer.clone().into(), output_geo.loc + layer_loc));
+                    let layer_loc = layers.layer_geometry(layer).unwrap().loc;
+                    if layer
+                        .surface_under(relative_pos - layer_loc.to_f64(), WindowSurfaceType::ALL)
+                        .is_some()
+                    {
+                        return Some((layer.clone().into(), output_geo.loc + layer_loc));
+                    }
                 }
             }
             if let Some(or) = override_redirect_windows
@@ -1354,22 +1375,25 @@ impl State {
             {
                 return Some((or.clone().into(), or.geometry().loc));
             }
-            if let Some((target, loc)) = workspace.element_under(relative_pos) {
+            if let Some((target, loc)) = workspace.element_under(relative_pos, overview) {
                 return Some((
                     target,
                     loc + (global_pos - relative_pos).to_i32_round(),
                 ));
             }
-            if let Some(layer) = layers
-                .layer_under(WlrLayer::Bottom, relative_pos)
-                .or_else(|| layers.layer_under(WlrLayer::Background, relative_pos))
             {
-                let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                if layer
-                    .surface_under(relative_pos - layer_loc.to_f64(), WindowSurfaceType::ALL)
-                    .is_some()
+                let layers = layer_map_for_output(output);
+                if let Some(layer) = layers
+                    .layer_under(WlrLayer::Bottom, relative_pos)
+                    .or_else(|| layers.layer_under(WlrLayer::Background, relative_pos))
                 {
-                    return Some((layer.clone().into(), output_geo.loc + layer_loc));
+                    let layer_loc = layers.layer_geometry(layer).unwrap().loc;
+                    if layer
+                        .surface_under(relative_pos - layer_loc.to_f64(), WindowSurfaceType::ALL)
+                        .is_some()
+                    {
+                        return Some((layer.clone().into(), output_geo.loc + layer_loc));
+                    }
                 }
             }
             None
