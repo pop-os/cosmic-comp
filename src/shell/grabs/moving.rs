@@ -7,7 +7,10 @@ use crate::{
         IndicatorShader,
     },
     shell::{
-        element::CosmicMappedRenderElement,
+        element::{
+            stack_hover::{stack_hover, StackHover},
+            CosmicMappedRenderElement,
+        },
         focus::target::{KeyboardFocusTarget, PointerFocusTarget},
         CosmicMapped, CosmicSurface,
     },
@@ -16,7 +19,7 @@ use crate::{
 
 use smithay::{
     backend::renderer::{
-        element::{utils::RescaleRenderElement, RenderElement},
+        element::{utils::RescaleRenderElement, AsRenderElements, RenderElement},
         ImportAll, ImportMem, Renderer,
     },
     desktop::space::SpaceElement,
@@ -47,6 +50,7 @@ pub struct MoveGrabState {
     window_offset: Point<i32, Logical>,
     indicator_thickness: u8,
     start: Instant,
+    stacking_indicator: Option<(StackHover, Point<i32, Logical>)>,
 }
 
 impl MoveGrabState {
@@ -114,8 +118,17 @@ impl MoveGrabState {
                 1.0,
             );
 
-        popup_elements
-            .into_iter()
+        self.stacking_indicator
+            .iter()
+            .flat_map(|(indicator, location)| {
+                indicator.render_elements(
+                    renderer,
+                    location.to_physical_precise_round(output_scale),
+                    output_scale,
+                    1.0,
+                )
+            })
+            .chain(popup_elements)
             .chain(focus_element)
             .chain(window_elements.into_iter().map(|elem| match elem {
                 CosmicMappedRenderElement::Stack(stack) => {
@@ -179,21 +192,49 @@ impl PointerGrab<State> for MoveGrab {
         _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
         event: &MotionEvent,
     ) {
-        let borrow = self
+        let mut borrow = self
             .seat
             .user_data()
             .get::<SeatMoveGrabState>()
-            .map(|s| s.borrow());
-        if let Some(grab_state) = borrow.as_ref().and_then(|s| s.as_ref()) {
+            .map(|s| s.borrow_mut());
+        if let Some(grab_state) = borrow.as_mut().and_then(|s| s.as_mut()) {
             let mut window_geo = self.window.geometry();
             window_geo.loc += event.location.to_i32_round() + grab_state.window_offset;
             for output in state.common.shell.outputs() {
                 if let Some(overlap) = output.geometry().intersection(window_geo) {
                     if self.outputs.insert(output.clone()) {
                         self.window.output_enter(output, overlap);
+                        if let Some(indicator) =
+                            grab_state.stacking_indicator.as_ref().map(|x| &x.0)
+                        {
+                            indicator.output_enter(output, overlap);
+                        }
                     }
                 } else if self.outputs.remove(&output) {
                     self.window.output_leave(output);
+                    if let Some(indicator) = grab_state.stacking_indicator.as_ref().map(|x| &x.0) {
+                        indicator.output_leave(output);
+                    }
+                }
+            }
+
+            let output = state.common.last_active_seat().active_output();
+            if self.tiling {
+                let indicator_location = state
+                    .common
+                    .shell
+                    .active_space(&output)
+                    .tiling_layer
+                    .stacking_indicator();
+
+                if indicator_location.is_some() != grab_state.stacking_indicator.is_some() {
+                    grab_state.stacking_indicator = indicator_location.map(|geo| {
+                        let element = stack_hover(state.common.event_loop_handle.clone(), geo.size);
+                        for output in &self.outputs {
+                            element.output_enter(output, output.geometry());
+                        }
+                        (element, geo.loc)
+                    });
                 }
             }
         }
@@ -263,6 +304,7 @@ impl MoveGrab {
             window_offset: initial_window_location - initial_cursor_location.to_i32_round(),
             indicator_thickness,
             start: Instant::now(),
+            stacking_indicator: None,
         };
 
         *seat

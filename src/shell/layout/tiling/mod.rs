@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::render::{element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, GROUP_COLOR},
+    backend::render::{
+        element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, ACTIVE_GROUP_COLOR,
+        GROUP_COLOR,
+    },
     shell::{
         element::{
             resize_indicator::ResizeIndicator,
@@ -127,7 +130,7 @@ pub enum MoveResult {
 #[derive(Debug, Clone, PartialEq)]
 enum TargetZone {
     InitialPlaceholder(NodeId),
-    WindowStack(NodeId),
+    WindowStack(NodeId, Rectangle<i32, Logical>),
     WindowSplit(NodeId, Direction),
     GroupEdge(NodeId, Direction),
     GroupInterior(NodeId, usize),
@@ -137,7 +140,7 @@ impl TargetZone {
     fn is_window_zone(&self) -> bool {
         matches!(
             self,
-            TargetZone::WindowStack(_) | TargetZone::WindowSplit(_, _)
+            TargetZone::WindowStack(..) | TargetZone::WindowSplit(_, _)
         )
     }
 }
@@ -1625,6 +1628,16 @@ impl TilingLayout {
         true
     }
 
+    pub fn stacking_indicator(&self) -> Option<Rectangle<i32, Logical>> {
+        if let Some(TargetZone::WindowStack(_, geo)) =
+            self.last_overview_hover.as_ref().map(|(_, zone)| zone)
+        {
+            Some(*geo)
+        } else {
+            None
+        }
+    }
+
     pub fn drop_window(
         &mut self,
         window: CosmicMapped,
@@ -2082,7 +2095,7 @@ impl TilingLayout {
                     1.0,
                     overview.alpha().unwrap(),
                     placeholder_id,
-                    true,
+                    Some(None),
                 )
                 .map(|x| x.0)
                 .unwrap_or_default();
@@ -2182,7 +2195,7 @@ impl TilingLayout {
                             );
 
                             if stack_region.contains(location) {
-                                TargetZone::WindowStack(res_id)
+                                TargetZone::WindowStack(res_id, last_geometry)
                             } else {
                                 let left_right = {
                                     let relative_loc = (location.x - last_geometry.loc.x) as f64;
@@ -2703,7 +2716,8 @@ impl TilingLayout {
         let mut window_elements = Vec::new();
         let mut popup_elements = Vec::new();
 
-        let is_mouse_tiling = matches!(overview, OverviewMode::Started(Trigger::Pointer(_), _));
+        let is_mouse_tiling = (matches!(overview, OverviewMode::Started(Trigger::Pointer(_), _)))
+            .then(|| self.last_overview_hover.as_ref().map(|x| &x.1));
 
         // all gone windows and fade them out
         let old_geometries = if let Some(reference_tree) = reference_tree.as_ref() {
@@ -2805,7 +2819,7 @@ fn geometries_for_groupview<'a, R>(
     alpha: f32,
     transition: f32,
     placeholder_id: &Id,
-    mouse_tiling: bool,
+    mouse_tiling: Option<Option<&TargetZone>>,
 ) -> Option<(
     HashMap<NodeId, Rectangle<i32, Logical>>,
     Vec<CosmicMappedRenderElement<R>>,
@@ -2818,14 +2832,14 @@ where
 {
     // we need to recalculate geometry for all elements, if we are drawing groups
     if let Some(root) = tree.root_node_id() {
-        let outer_gap: i32 = (if mouse_tiling {
+        let outer_gap: i32 = (if mouse_tiling.is_some() {
             OUTER_GAP_MOUSE
         } else {
             OUTER_GAP_KEYBOARD
         } as f32
             * transition)
             .round() as i32;
-        let inner_gap: i32 = (if mouse_tiling {
+        let inner_gap: i32 = (if mouse_tiling.is_some() {
             INNER_GAP_MOUSE
         } else {
             INNER_GAP_KEYBOARD
@@ -2967,7 +2981,7 @@ where
                                     )
                                     .into(),
                                 );
-                            } else if mouse_tiling && node.parent() == Some(&root) {
+                            } else if mouse_tiling.is_some() && node.parent() == Some(&root) {
                                 elements.push(
                                     IndicatorShader::element(
                                         *renderer,
@@ -3185,8 +3199,16 @@ where
                                         .unwrap()
                                         .any(|id| id == focused_id)
                                 })
-                                .unwrap_or(mouse_tiling)
+                                .unwrap_or(mouse_tiling.is_some())
                             {
+                                let color = match mouse_tiling {
+                                    Some(Some(TargetZone::WindowStack(stack_id, _)))
+                                        if *stack_id == node_id =>
+                                    {
+                                        ACTIVE_GROUP_COLOR
+                                    }
+                                    _ => GROUP_COLOR,
+                                };
                                 elements.push(
                                     BackdropShader::element(
                                         *renderer,
@@ -3197,13 +3219,13 @@ where
                                             * if focused
                                                 .as_ref()
                                                 .map(|focused_id| focused_id == &node_id)
-                                                .unwrap_or(false)
+                                                .unwrap_or(color == ACTIVE_GROUP_COLOR)
                                             {
                                                 0.4
                                             } else {
                                                 0.15
                                             },
-                                        GROUP_COLOR,
+                                        color,
                                     )
                                     .into(),
                                 );
