@@ -1643,15 +1643,16 @@ impl TilingLayout {
         window: CosmicMapped,
         output: &Output,
         _cursor_pos: Point<f64, Logical>,
-    ) -> Point<i32, Logical> {
-        // TODO: placeholder until we have proper logic in `element_under` to utilize
-        let queue = if self.queues.contains_key(output) {
+    ) -> (CosmicMapped, Point<i32, Logical>) {
+        let mut queue = if self.queues.contains_key(output) {
             self.queues.get_mut(output)
         } else {
             self.queues.values_mut().next()
         };
-        let tree = if let Some(queue) = queue {
-            queue.trees.back_mut().map(|x| &mut x.0)
+        let mut owned_tree = None;
+        let mut tree = if let Some(queue) = queue.as_mut() {
+            owned_tree = queue.trees.back().map(|x| x.0.copy_clone());
+            owned_tree.as_mut()
         } else {
             self.standby_tree.as_mut()
         }
@@ -1660,28 +1661,151 @@ impl TilingLayout {
         window.output_enter(&output, window.bbox());
         window.set_bounds(output.geometry().size);
 
-        if let Some(id) = tree.root_node_id().and_then(|root_id| {
-            tree.traverse_pre_order_ids(root_id)
-                .unwrap()
-                .find(|id| tree.get(id).unwrap().data().is_placeholder())
-        }) {
-            let data = tree.get_mut(&id).unwrap().data_mut();
-            let geo = data.geometry().clone();
+        let mapped = match self.last_overview_hover.as_ref().map(|x| &x.1) {
+            Some(TargetZone::GroupEdge(group_id, direction)) if tree.get(&group_id).is_ok() => {
+                let new_id = tree
+                    .insert(
+                        Node::new(Data::Mapped {
+                            mapped: window.clone(),
+                            last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
+                        }),
+                        InsertBehavior::UnderNode(group_id),
+                    )
+                    .unwrap();
 
-            *data = Data::Mapped {
-                mapped: window,
-                last_geometry: geo,
-            };
-            output.geometry().loc + geo.loc
-        } else {
-            self.map_internal(
-                window.clone(),
-                output,
-                Option::<std::iter::Empty<_>>::None,
-                None,
-            );
-            output.geometry().loc + self.element_geometry(&window).unwrap().loc
+                let orientation = if matches!(direction, Direction::Left | Direction::Right) {
+                    Orientation::Vertical
+                } else {
+                    Orientation::Horizontal
+                };
+                if tree.get(group_id).unwrap().data().orientation() != orientation {
+                    TilingLayout::new_group(&mut tree, &group_id, &new_id, orientation).unwrap();
+                } else {
+                    let data = tree.get_mut(group_id).unwrap().data_mut();
+                    let len = data.len();
+                    data.add_window(if matches!(direction, Direction::Left | Direction::Up) {
+                        0
+                    } else {
+                        len
+                    });
+                }
+                if matches!(direction, Direction::Left | Direction::Up) {
+                    tree.make_first_sibling(&new_id).unwrap();
+                } else {
+                    tree.make_last_sibling(&new_id).unwrap();
+                }
+                *window.tiling_node_id.lock().unwrap() = Some(new_id);
+                window
+            }
+            Some(TargetZone::GroupInterior(group_id, idx)) if tree.get(&group_id).is_ok() => {
+                let new_id = tree
+                    .insert(
+                        Node::new(Data::Mapped {
+                            mapped: window.clone(),
+                            last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
+                        }),
+                        InsertBehavior::UnderNode(group_id),
+                    )
+                    .unwrap();
+                let idx = {
+                    let data = tree.get_mut(group_id).unwrap().data_mut();
+                    let bound_idx = data.len().min(*idx + 1);
+                    data.add_window(bound_idx);
+                    bound_idx
+                };
+                tree.make_nth_sibling(&new_id, dbg!(idx)).unwrap();
+                *window.tiling_node_id.lock().unwrap() = Some(new_id);
+                window
+            }
+            Some(TargetZone::InitialPlaceholder(node_id)) if tree.get(&node_id).is_ok() => {
+                let data = tree.get_mut(&node_id).unwrap().data_mut();
+                let geo = data.geometry().clone();
+
+                *data = Data::Mapped {
+                    mapped: window.clone(),
+                    last_geometry: geo,
+                };
+                *window.tiling_node_id.lock().unwrap() = Some(node_id.clone());
+                window
+            }
+            Some(TargetZone::WindowSplit(window_id, direction)) if tree.get(&window_id).is_ok() => {
+                if let Some(children) = tree
+                    .get(&window_id)
+                    .ok()
+                    .and_then(|node| node.parent())
+                    .and_then(|parent_id| tree.get(parent_id).ok())
+                    .map(|node| node.children().clone())
+                {
+                    for id in children {
+                        let matches = matches!(
+                            tree.get(&id).unwrap().data(),
+                            Data::Placeholder {
+                                initial_placeholder: false,
+                                ..
+                            }
+                        );
+
+                        if matches {
+                            TilingLayout::unmap_internal(&mut tree, &id);
+                            break;
+                        }
+                    }
+                }
+
+                let new_id = tree
+                    .insert(
+                        Node::new(Data::Mapped {
+                            mapped: window.clone(),
+                            last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
+                        }),
+                        InsertBehavior::UnderNode(&window_id),
+                    )
+                    .unwrap();
+                let orientation = if matches!(direction, Direction::Left | Direction::Right) {
+                    Orientation::Vertical
+                } else {
+                    Orientation::Horizontal
+                };
+                TilingLayout::new_group(&mut tree, &window_id, &new_id, orientation).unwrap();
+                if matches!(direction, Direction::Left | Direction::Up) {
+                    tree.make_first_sibling(&new_id).unwrap();
+                }
+                *window.tiling_node_id.lock().unwrap() = Some(new_id.clone());
+                window
+            }
+            Some(TargetZone::WindowStack(window_id, _)) if tree.get(&window_id).is_ok() => {
+                match tree.get_mut(window_id).unwrap().data_mut() {
+                    Data::Mapped { mapped, .. } => {
+                        mapped.convert_to_stack(std::iter::once((output, mapped.bbox())));
+                        let Some(stack) = mapped.stack_ref_mut() else { unreachable!() };
+                        for surface in window.windows().map(|s| s.0) {
+                            stack.add_window(surface, None);
+                        }
+                        mapped.clone()
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            _ => {
+                // shouldn't happen, but lets not loose the window
+                TilingLayout::map_to_tree(
+                    &mut tree,
+                    window.clone(),
+                    output,
+                    Option::<std::iter::Empty<_>>::None,
+                    None,
+                );
+                window
+            }
+        };
+
+        if let Some(mut tree) = owned_tree {
+            let blocker = TilingLayout::update_positions(output, &mut tree, self.gaps);
+            queue.unwrap().push_tree(tree, ANIMATION_DURATION, blocker);
         }
+
+        let location = output.geometry().loc + self.element_geometry(&mapped).unwrap().loc;
+        (mapped, location)
     }
 
     fn last_active_window<'a>(

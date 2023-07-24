@@ -401,7 +401,10 @@ impl MoveGrab {
 
                     let pointer_pos = handle.current_location();
                     let relative_pos = state.common.shell.map_global_to_space(pointer_pos, &output);
-                    Some(window_location + offset + (pointer_pos - relative_pos).to_i32_round())
+                    Some((
+                        self.window.clone(),
+                        window_location + offset + (pointer_pos - relative_pos).to_i32_round(),
+                    ))
                 }
             } else {
                 None
@@ -417,24 +420,22 @@ impl MoveGrab {
             cursor_state.set_shape(CursorShape::Default);
         }
 
-        if self.window.alive() {
-            if let Some(position) = position {
-                handle.motion(
-                    state,
-                    Some((
-                        PointerFocusTarget::from(self.window.clone()),
-                        position - self.window.geometry().loc,
-                    )),
-                    &MotionEvent {
-                        location: handle.current_location(),
-                        serial: serial,
-                        time: time,
-                    },
-                );
-            }
+        if let Some((mapped, position)) = position {
+            handle.motion(
+                state,
+                Some((
+                    PointerFocusTarget::from(mapped.clone()),
+                    position - self.window.geometry().loc,
+                )),
+                &MotionEvent {
+                    location: handle.current_location(),
+                    serial,
+                    time,
+                },
+            );
             Common::set_focus(
                 state,
-                Some(&KeyboardFocusTarget::from(self.window.clone())),
+                Some(&KeyboardFocusTarget::from(mapped)),
                 &self.seat,
                 Some(serial),
             )
