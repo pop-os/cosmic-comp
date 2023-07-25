@@ -33,7 +33,7 @@ impl Program for StackHoverInternal {
                 .force_svg(true)
                 .style(theme::Svg::Symbolic)
                 .apply(container)
-                .padding(8)
+                .padding([0, 8, 0, 0])
                 .width(Length::Shrink)
                 .apply(container)
                 .center_y()
@@ -42,9 +42,8 @@ impl Program for StackHoverInternal {
             text(fl!("stack-windows"))
                 .font(cosmic::font::FONT)
                 .size(24)
-                .line_height(24.)
+                .line_height(1.3)
                 .apply(container)
-                .padding(8)
                 .width(Length::Shrink)
                 .apply(container)
                 .center_y()
@@ -54,7 +53,7 @@ impl Program for StackHoverInternal {
         .width(Length::Shrink)
         .height(Length::Shrink)
         .apply(container)
-        .padding(4)
+        .padding([8, 16])
         .style(theme::Container::custom(|theme| container::Appearance {
             text_color: Some(Color::from(theme.cosmic().palette.neutral_9)),
             background: Some(Background::Color(theme.cosmic().palette.neutral_3.into())),
