@@ -50,6 +50,7 @@ pub struct MoveGrabState {
     window_offset: Point<i32, Logical>,
     indicator_thickness: u8,
     start: Instant,
+    tiling: bool,
     stacking_indicator: Option<(StackHover, Point<i32, Logical>)>,
 }
 
@@ -64,12 +65,15 @@ impl MoveGrabState {
         #[cfg(feature = "debug")]
         puffin::profile_function!();
 
-        let scale = 0.6
-            + ((1.0
+        let scale = if self.tiling {
+            0.6 + ((1.0
                 - (Instant::now().duration_since(self.start).as_millis() as f64
                     / RESCALE_ANIMATION_DURATION)
                     .min(1.0))
-                * 0.4);
+                * 0.4)
+        } else {
+            1.0
+        };
 
         let cursor_at = seat.get_pointer().unwrap().current_location();
 
@@ -309,6 +313,7 @@ impl MoveGrab {
             indicator_thickness,
             start: Instant::now(),
             stacking_indicator: None,
+            tiling: was_tiled,
         };
 
         *seat
