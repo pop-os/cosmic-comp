@@ -1729,29 +1729,6 @@ impl TilingLayout {
                 window
             }
             Some(TargetZone::WindowSplit(window_id, direction)) if tree.get(&window_id).is_ok() => {
-                if let Some(children) = tree
-                    .get(&window_id)
-                    .ok()
-                    .and_then(|node| node.parent())
-                    .and_then(|parent_id| tree.get(parent_id).ok())
-                    .map(|node| node.children().clone())
-                {
-                    for id in children {
-                        let matches = matches!(
-                            tree.get(&id).unwrap().data(),
-                            Data::Placeholder {
-                                initial_placeholder: false,
-                                ..
-                            }
-                        );
-
-                        if matches {
-                            TilingLayout::unmap_internal(&mut tree, &id);
-                            break;
-                        }
-                    }
-                }
-
                 let new_id = tree
                     .insert(
                         Node::new(Data::Mapped {
@@ -1798,6 +1775,24 @@ impl TilingLayout {
                 window
             }
         };
+
+        if let Some(root) = tree.root_node_id() {
+            for id in tree
+                .traverse_pre_order_ids(root)
+                .unwrap()
+                .collect::<Vec<_>>()
+                .into_iter()
+            {
+                let matches = matches!(
+                    tree.get(&id).map(|node| node.data()),
+                    Ok(Data::Placeholder { .. })
+                );
+
+                if matches {
+                    TilingLayout::unmap_internal(&mut tree, &id);
+                }
+            }
+        }
 
         if let Some(mut tree) = owned_tree {
             let blocker = TilingLayout::update_positions(output, &mut tree, self.gaps);
@@ -2123,6 +2118,10 @@ impl TilingLayout {
                 }
             }
 
+            if !matches!(overview, OverviewMode::Started(_, _)) {
+                last_overview_hover.take();
+            }
+
             if matches!(overview, OverviewMode::None) {
                 let mut result = None;
                 let mut lookup = Some(root.clone());
@@ -2285,11 +2284,15 @@ impl TilingLayout {
                     } = &mut data
                     {
                         if let Some(parent) = node.parent() {
-                            if tree
-                                .children(parent)
-                                .unwrap()
-                                .any(|child| child.data().is_placeholder())
-                            {
+                            if tree.children(parent).unwrap().any(|child| {
+                                matches!(
+                                    child.data(),
+                                    Data::Placeholder {
+                                        initial_placeholder: false,
+                                        ..
+                                    }
+                                )
+                            }) {
                                 res_id = tree
                                     .children_ids(parent)
                                     .unwrap()
