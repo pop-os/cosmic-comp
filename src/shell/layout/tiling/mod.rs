@@ -2476,10 +2476,11 @@ impl TilingLayout {
                                     match old_target_zone {
                                         TargetZone::InitialPlaceholder(_) => {
                                             Instant::now().duration_since(*instant).as_millis()
-                                                > 400
+                                                > 500
                                         }
                                         _ => {
-                                            Instant::now().duration_since(*instant).as_millis() > 50
+                                            Instant::now().duration_since(*instant).as_millis()
+                                                > 200
                                         }
                                     }
                                 } else {
