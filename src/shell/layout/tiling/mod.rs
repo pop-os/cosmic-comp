@@ -3110,7 +3110,8 @@ where
                                     )
                                     .into(),
                                 );
-                            } else if mouse_tiling.is_some() && node.parent() == Some(&root) {
+                            }
+                            if mouse_tiling.is_some() && pill_indicator.is_some() {
                                 elements.push(
                                     IndicatorShader::element(
                                         *renderer,
