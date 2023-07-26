@@ -32,7 +32,7 @@ use smithay::{
     },
     output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::{IsAlive, Logical, Point, Rectangle, Serial, Size},
+    utils::{IsAlive, Logical, Point, Rectangle, Serial},
     wayland::compositor::SurfaceData,
 };
 use std::{
@@ -127,8 +127,7 @@ impl MoveGrabState {
             .flat_map(|(indicator, location)| {
                 indicator.render_elements(
                     renderer,
-                    (cursor_at.to_i32_round() - output.geometry().loc - Point::from((250, 50)))
-                        .to_physical_precise_round(output_scale),
+                    location.to_physical_precise_round(output_scale),
                     output_scale,
                     1.0,
                 )
@@ -234,10 +233,7 @@ impl PointerGrab<State> for MoveGrab {
 
                 if indicator_location.is_some() != grab_state.stacking_indicator.is_some() {
                     grab_state.stacking_indicator = indicator_location.map(|geo| {
-                        let element = stack_hover(
-                            state.common.event_loop_handle.clone(),
-                            Size::from((500, 100)),
-                        );
+                        let element = stack_hover(state.common.event_loop_handle.clone(), geo.size);
                         for output in &self.outputs {
                             element.output_enter(output, output.geometry());
                         }
