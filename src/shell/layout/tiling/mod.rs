@@ -1785,13 +1785,12 @@ impl TilingLayout {
                 .collect::<Vec<_>>()
                 .into_iter()
             {
-                let matches = matches!(
-                    tree.get(&id).map(|node| node.data()),
-                    Ok(Data::Placeholder { .. })
-                );
-
-                if matches {
-                    TilingLayout::unmap_internal(&mut tree, &id);
+                match tree.get_mut(&id).map(|node| node.data_mut()) {
+                    Ok(Data::Placeholder { .. }) => TilingLayout::unmap_internal(&mut tree, &id),
+                    Ok(Data::Group { pill_indicator, .. }) if pill_indicator.is_some() => {
+                        pill_indicator.take();
+                    }
+                    _ => {}
                 }
             }
         }
