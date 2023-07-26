@@ -60,6 +60,8 @@ pub use self::blocker::*;
 pub use self::grabs::*;
 
 pub const ANIMATION_DURATION: Duration = Duration::from_millis(200);
+pub const MOUSE_ANIMATION_DELAY: Duration = Duration::from_millis(150);
+pub const INTIAL_MOUSE_ANIMATION_DELAY: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone)]
 struct OutputData {
@@ -2478,12 +2480,12 @@ impl TilingLayout {
                                 let overdue = if let Some(instant) = instant {
                                     match old_target_zone {
                                         TargetZone::InitialPlaceholder(_) => {
-                                            Instant::now().duration_since(*instant).as_millis()
-                                                > 500
+                                            Instant::now().duration_since(*instant)
+                                                > INTIAL_MOUSE_ANIMATION_DELAY
                                         }
                                         _ => {
-                                            Instant::now().duration_since(*instant).as_millis()
-                                                > 200
+                                            Instant::now().duration_since(*instant)
+                                                > MOUSE_ANIMATION_DELAY
                                         }
                                     }
                                 } else {
