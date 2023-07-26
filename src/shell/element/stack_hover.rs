@@ -31,7 +31,6 @@ impl Program for StackHoverInternal {
         row(vec![
             icon("window-stack-symbolic", 24)
                 .force_svg(true)
-                .style(theme::Svg::Symbolic)
                 .apply(container)
                 .padding([0, 8, 0, 0])
                 .width(Length::Shrink)
@@ -55,8 +54,8 @@ impl Program for StackHoverInternal {
         .apply(container)
         .padding([8, 16])
         .style(theme::Container::custom(|theme| container::Appearance {
-            text_color: Some(Color::from(theme.cosmic().palette.neutral_9)),
-            background: Some(Background::Color(theme.cosmic().palette.neutral_3.into())),
+            text_color: Some(Color::from(theme.cosmic().accent.on)),
+            background: Some(Background::Color(theme.cosmic().accent_color().into())),
             border_radius: 24.0.into(),
             border_width: 0.0,
             border_color: Color::TRANSPARENT,
