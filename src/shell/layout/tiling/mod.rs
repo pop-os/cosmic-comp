@@ -3127,66 +3127,68 @@ where
 
                         geometries.insert(node_id.clone(), geo);
 
-                        if let Some(PillIndicator::Outer(direction)) = pill_indicator {
-                            let (pill_geo, remaining_geo) = match direction {
-                                Direction::Left => (
-                                    Rectangle::from_loc_and_size(
-                                        (geo.loc.x + 32, geo.loc.y + 32),
-                                        (16, geo.size.h - 64),
+                        if mouse_tiling.is_some() {
+                            if let Some(PillIndicator::Outer(direction)) = pill_indicator {
+                                let (pill_geo, remaining_geo) = match direction {
+                                    Direction::Left => (
+                                        Rectangle::from_loc_and_size(
+                                            (geo.loc.x + 32, geo.loc.y + 32),
+                                            (16, geo.size.h - 64),
+                                        ),
+                                        Rectangle::from_loc_and_size(
+                                            (geo.loc.x + 48, geo.loc.y),
+                                            (geo.size.w - 48, geo.size.h),
+                                        ),
                                     ),
-                                    Rectangle::from_loc_and_size(
-                                        (geo.loc.x + 48, geo.loc.y),
-                                        (geo.size.w - 48, geo.size.h),
+                                    Direction::Up => (
+                                        Rectangle::from_loc_and_size(
+                                            (geo.loc.x + 32, geo.loc.y + 32),
+                                            (geo.size.w - 64, 16),
+                                        ),
+                                        Rectangle::from_loc_and_size(
+                                            (geo.loc.x, geo.loc.y + 48),
+                                            (geo.size.w, geo.size.h - 48),
+                                        ),
                                     ),
-                                ),
-                                Direction::Up => (
-                                    Rectangle::from_loc_and_size(
-                                        (geo.loc.x + 32, geo.loc.y + 32),
-                                        (geo.size.w - 64, 16),
+                                    Direction::Right => (
+                                        Rectangle::from_loc_and_size(
+                                            (geo.loc.x + geo.size.w - 48, geo.loc.y + 32),
+                                            (16, geo.size.h - 64),
+                                        ),
+                                        Rectangle::from_loc_and_size(
+                                            geo.loc,
+                                            (geo.size.w - 48, geo.size.h),
+                                        ),
                                     ),
-                                    Rectangle::from_loc_and_size(
-                                        (geo.loc.x, geo.loc.y + 48),
-                                        (geo.size.w, geo.size.h - 48),
+                                    Direction::Down => (
+                                        Rectangle::from_loc_and_size(
+                                            (geo.loc.x + 32, geo.loc.y + geo.size.h - 48),
+                                            (geo.size.w - 64, 16),
+                                        ),
+                                        Rectangle::from_loc_and_size(
+                                            geo.loc,
+                                            (geo.size.w, geo.size.h - 48),
+                                        ),
                                     ),
-                                ),
-                                Direction::Right => (
-                                    Rectangle::from_loc_and_size(
-                                        (geo.loc.x + geo.size.w - 48, geo.loc.y + 32),
-                                        (16, geo.size.h - 64),
-                                    ),
-                                    Rectangle::from_loc_and_size(
-                                        geo.loc,
-                                        (geo.size.w - 48, geo.size.h),
-                                    ),
-                                ),
-                                Direction::Down => (
-                                    Rectangle::from_loc_and_size(
-                                        (geo.loc.x + 32, geo.loc.y + geo.size.h - 48),
-                                        (geo.size.w - 64, 16),
-                                    ),
-                                    Rectangle::from_loc_and_size(
-                                        geo.loc,
-                                        (geo.size.w, geo.size.h - 48),
-                                    ),
-                                ),
+                                };
+
+                                if let Some(renderer) = renderer.as_mut() {
+                                    elements.push(
+                                        BackdropShader::element(
+                                            *renderer,
+                                            placeholder_id.clone(),
+                                            pill_geo,
+                                            8.,
+                                            alpha * 0.4,
+                                            GROUP_COLOR,
+                                        )
+                                        .into(),
+                                    );
+                                }
+
+                                geo = remaining_geo;
                             };
-
-                            if let Some(renderer) = renderer.as_mut() {
-                                elements.push(
-                                    BackdropShader::element(
-                                        *renderer,
-                                        placeholder_id.clone(),
-                                        pill_geo,
-                                        8.,
-                                        alpha * 0.4,
-                                        GROUP_COLOR,
-                                    )
-                                    .into(),
-                                );
-                            }
-
-                            geo = remaining_geo;
-                        };
+                        }
 
                         if !is_placeholder_group {
                             geo.loc += (outer_gap, outer_gap).into();
@@ -3223,33 +3225,36 @@ where
                                         (geo.loc.x, geo.loc.y + previous),
                                         (geo.size.w, *size),
                                     );
-                                    if let Some(PillIndicator::Inner(pill_idx)) = pill_indicator {
-                                        if *pill_idx == idx {
-                                            geo.size.h -= 16;
-                                        }
-                                        if idx
-                                            .checked_sub(1)
-                                            .map(|idx| idx == *pill_idx)
-                                            .unwrap_or(false)
+                                    if mouse_tiling.is_some() {
+                                        if let Some(PillIndicator::Inner(pill_idx)) = pill_indicator
                                         {
-                                            if let Some(renderer) = renderer.as_mut() {
-                                                elements.push(
-                                                    BackdropShader::element(
-                                                        *renderer,
-                                                        placeholder_id.clone(),
-                                                        Rectangle::from_loc_and_size(
-                                                            (geo.loc.x + 32, geo.loc.y - 8),
-                                                            (geo.size.w - 64, 16),
-                                                        ),
-                                                        8.,
-                                                        alpha * 0.4,
-                                                        GROUP_COLOR,
-                                                    )
-                                                    .into(),
-                                                );
+                                            if *pill_idx == idx {
+                                                geo.size.h -= 16;
                                             }
-                                            geo.loc.y += 16;
-                                            geo.size.h -= 16;
+                                            if idx
+                                                .checked_sub(1)
+                                                .map(|idx| idx == *pill_idx)
+                                                .unwrap_or(false)
+                                            {
+                                                if let Some(renderer) = renderer.as_mut() {
+                                                    elements.push(
+                                                        BackdropShader::element(
+                                                            *renderer,
+                                                            placeholder_id.clone(),
+                                                            Rectangle::from_loc_and_size(
+                                                                (geo.loc.x + 32, geo.loc.y - 8),
+                                                                (geo.size.w - 64, 16),
+                                                            ),
+                                                            8.,
+                                                            alpha * 0.4,
+                                                            GROUP_COLOR,
+                                                        )
+                                                        .into(),
+                                                    );
+                                                }
+                                                geo.loc.y += 16;
+                                                geo.size.h -= 16;
+                                            }
                                         }
                                     }
                                     stack.push(geo);
@@ -3263,33 +3268,36 @@ where
                                         (geo.loc.x + previous, geo.loc.y),
                                         (*size, geo.size.h),
                                     );
-                                    if let Some(PillIndicator::Inner(pill_idx)) = pill_indicator {
-                                        if *pill_idx == idx {
-                                            geo.size.w -= 16;
-                                        }
-                                        if idx
-                                            .checked_sub(1)
-                                            .map(|idx| idx == *pill_idx)
-                                            .unwrap_or(false)
+                                    if mouse_tiling.is_some() {
+                                        if let Some(PillIndicator::Inner(pill_idx)) = pill_indicator
                                         {
-                                            if let Some(renderer) = renderer.as_mut() {
-                                                elements.push(
-                                                    BackdropShader::element(
-                                                        *renderer,
-                                                        placeholder_id.clone(),
-                                                        Rectangle::from_loc_and_size(
-                                                            (geo.loc.x - 8, geo.loc.y + 32),
-                                                            (16, geo.size.h - 64),
-                                                        ),
-                                                        8.,
-                                                        alpha * 0.4,
-                                                        GROUP_COLOR,
-                                                    )
-                                                    .into(),
-                                                );
+                                            if *pill_idx == idx {
+                                                geo.size.w -= 16;
                                             }
-                                            geo.loc.x += 16;
-                                            geo.size.w -= 16;
+                                            if idx
+                                                .checked_sub(1)
+                                                .map(|idx| idx == *pill_idx)
+                                                .unwrap_or(false)
+                                            {
+                                                if let Some(renderer) = renderer.as_mut() {
+                                                    elements.push(
+                                                        BackdropShader::element(
+                                                            *renderer,
+                                                            placeholder_id.clone(),
+                                                            Rectangle::from_loc_and_size(
+                                                                (geo.loc.x - 8, geo.loc.y + 32),
+                                                                (16, geo.size.h - 64),
+                                                            ),
+                                                            8.,
+                                                            alpha * 0.4,
+                                                            GROUP_COLOR,
+                                                        )
+                                                        .into(),
+                                                    );
+                                                }
+                                                geo.loc.x += 16;
+                                                geo.size.w -= 16;
+                                            }
                                         }
                                     }
                                     stack.push(geo);
