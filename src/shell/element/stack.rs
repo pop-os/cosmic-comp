@@ -658,7 +658,9 @@ impl Program for CosmicStackInternal {
                 .height(Length::Fill)
                 .width(Length::Fill),
             ),
-            iced_widget::horizontal_space(64)
+            iced_widget::horizontal_space(0)
+                .apply(iced_widget::container)
+                .padding([64, 24])
                 .apply(iced_widget::mouse_area)
                 .on_press(Message::DragStart)
                 .into(),
