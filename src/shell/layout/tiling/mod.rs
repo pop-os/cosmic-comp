@@ -61,7 +61,7 @@ pub use self::grabs::*;
 
 pub const ANIMATION_DURATION: Duration = Duration::from_millis(200);
 pub const MOUSE_ANIMATION_DELAY: Duration = Duration::from_millis(150);
-pub const INTIAL_MOUSE_ANIMATION_DELAY: Duration = Duration::from_millis(500);
+pub const INITIAL_MOUSE_ANIMATION_DELAY: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone)]
 struct OutputData {
@@ -1940,6 +1940,34 @@ impl TilingLayout {
         }
     }
 
+    fn has_sibling_node(tree: &Tree<Data>, node: &NodeId, direction: Direction) -> bool {
+        match tree.get(node).ok().and_then(|node| node.parent()) {
+            Some(parent_id) => {
+                let parent = tree.get(parent_id).unwrap();
+                let children = parent.children();
+                let idx = children.iter().position(|id| id == node).unwrap();
+
+                match direction {
+                    Direction::Up => {
+                        parent.data().orientation() == Orientation::Horizontal && idx > 0
+                    }
+                    Direction::Down => {
+                        parent.data().orientation() == Orientation::Horizontal
+                            && idx < (children.len() - 1)
+                    }
+                    Direction::Left => {
+                        parent.data().orientation() == Orientation::Vertical && idx > 0
+                    }
+                    Direction::Right => {
+                        parent.data().orientation() == Orientation::Vertical
+                            && idx < (children.len() - 1)
+                    }
+                }
+            }
+            None => false,
+        }
+    }
+
     fn update_positions(
         output: &Output,
         tree: &mut Tree<Data>,
@@ -2238,6 +2266,17 @@ impl TilingLayout {
 
                     lookup = None;
                     if result.is_some() && data.is_group() {
+                        if tree.children(&node).unwrap().any(|child| {
+                            matches!(
+                                child.data(),
+                                Data::Placeholder {
+                                    initial_placeholder: false,
+                                    ..
+                                }
+                            )
+                        }) {
+                            break;
+                        }
                         for child_id in tree.children_ids(&node).unwrap() {
                             if geometries
                                 .get(child_id)
@@ -2251,64 +2290,161 @@ impl TilingLayout {
                     }
                 }
 
-                if let Some(mut res_id) = result {
+                if let Some(res_id) = result {
                     let mut last_geometry = *geometries.get(&res_id)?;
                     let node = tree.get(&res_id).unwrap();
-                    let mut data = node.data().clone();
+                    let data = node.data().clone();
 
-                    // treat placeholder as their parent
-                    if matches!(
-                        data,
-                        Data::Placeholder {
-                            initial_placeholder: false,
-                            ..
-                        }
-                    ) {
-                        let parent = node.parent().unwrap();
-                        last_geometry = *geometries.get(&parent).unwrap();
-                        data = Data::Mapped {
-                            mapped: tree
-                                .children(parent)
-                                .unwrap()
-                                .find_map(|n| match n.data() {
-                                    Data::Mapped { mapped, .. } => Some(mapped.clone()),
-                                    _ => None,
-                                })
-                                .unwrap(),
-                            last_geometry: *geometries.get(&parent).unwrap(),
-                        };
-                    }
-                    // check if the node is already split and treat as parent
-                    if let Data::Mapped {
-                        last_geometry: geometry,
-                        ..
-                    } = &mut data
-                    {
-                        if let Some(parent) = node.parent() {
-                            if tree.children(parent).unwrap().any(|child| {
-                                matches!(
-                                    child.data(),
-                                    Data::Placeholder {
-                                        initial_placeholder: false,
-                                        ..
-                                    }
-                                )
-                            }) {
-                                res_id = tree
-                                    .children_ids(parent)
+                    let group_zone = if let Data::Group { orientation, .. } = &data {
+                        if node.children().iter().any(|child_id| {
+                            tree.get(child_id)
+                                .ok()
+                                .map(|child| child.data().is_placeholder())
+                                .unwrap_or(false)
+                        }) {
+                            None
+                        } else {
+                            let left_edge = match &*last_overview_hover {
+                                Some((_, TargetZone::GroupEdge(id, Direction::Left)))
+                                    if *id == res_id =>
+                                {
+                                    let zone = Rectangle::from_loc_and_size(
+                                        last_geometry.loc,
+                                        (80, last_geometry.size.h),
+                                    );
+                                    last_geometry.loc.x += 80;
+                                    last_geometry.size.w -= 80;
+                                    zone
+                                }
+                                _ => {
+                                    let zone = Rectangle::from_loc_and_size(
+                                        last_geometry.loc,
+                                        (32, last_geometry.size.h),
+                                    );
+                                    last_geometry.loc.x += 32;
+                                    last_geometry.size.w -= 32;
+                                    zone
+                                }
+                            };
+                            let top_edge = match &*last_overview_hover {
+                                Some((_, TargetZone::GroupEdge(id, Direction::Up)))
+                                    if *id == res_id =>
+                                {
+                                    let zone = Rectangle::from_loc_and_size(
+                                        last_geometry.loc,
+                                        (last_geometry.size.w, 80),
+                                    );
+                                    last_geometry.loc.y += 80;
+                                    last_geometry.size.h -= 80;
+                                    zone
+                                }
+                                _ => {
+                                    let zone = Rectangle::from_loc_and_size(
+                                        last_geometry.loc,
+                                        (last_geometry.size.w, 32),
+                                    );
+                                    last_geometry.loc.y += 32;
+                                    last_geometry.size.h -= 32;
+                                    zone
+                                }
+                            };
+                            let right_edge = match &*last_overview_hover {
+                                Some((_, TargetZone::GroupEdge(id, Direction::Right)))
+                                    if *id == res_id =>
+                                {
+                                    let zone = Rectangle::from_loc_and_size(
+                                        (
+                                            last_geometry.loc.x + last_geometry.size.w - 80,
+                                            last_geometry.loc.y,
+                                        ),
+                                        (80, last_geometry.size.h),
+                                    );
+                                    last_geometry.size.w -= 80;
+                                    zone
+                                }
+                                _ => {
+                                    let zone = Rectangle::from_loc_and_size(
+                                        (
+                                            last_geometry.loc.x + last_geometry.size.w - 32,
+                                            last_geometry.loc.y,
+                                        ),
+                                        (32, last_geometry.size.h),
+                                    );
+                                    last_geometry.size.w -= 32;
+                                    zone
+                                }
+                            };
+                            let bottom_edge = match &*last_overview_hover {
+                                Some((_, TargetZone::GroupEdge(id, Direction::Down)))
+                                    if *id == res_id =>
+                                {
+                                    let zone = Rectangle::from_loc_and_size(
+                                        (
+                                            last_geometry.loc.x,
+                                            last_geometry.loc.y + last_geometry.size.h - 80,
+                                        ),
+                                        (last_geometry.size.w, 80),
+                                    );
+                                    last_geometry.size.h -= 80;
+                                    zone
+                                }
+                                _ => {
+                                    let zone = Rectangle::from_loc_and_size(
+                                        (
+                                            last_geometry.loc.x,
+                                            last_geometry.loc.y + last_geometry.size.h - 32,
+                                        ),
+                                        (last_geometry.size.w, 32),
+                                    );
+                                    last_geometry.size.h -= 32;
+                                    zone
+                                }
+                            };
+
+                            if left_edge.contains(location) {
+                                Some(TargetZone::GroupEdge(res_id.clone(), Direction::Left))
+                            } else if right_edge.contains(location) {
+                                Some(TargetZone::GroupEdge(res_id.clone(), Direction::Right))
+                            } else if top_edge.contains(location) {
+                                Some(TargetZone::GroupEdge(res_id.clone(), Direction::Up))
+                            } else if bottom_edge.contains(location) {
+                                Some(TargetZone::GroupEdge(res_id.clone(), Direction::Down))
+                            } else {
+                                let idx = tree
+                                    .children_ids(&res_id)
                                     .unwrap()
-                                    .find(|id| tree.get(id).unwrap().data().is_mapped(None))
-                                    .cloned()
-                                    .unwrap();
-                                let geo = geometries.get(parent).unwrap();
-                                *geometry = *geo;
-                                last_geometry = *geo;
+                                    .position(|node| {
+                                        let Some(geo) = geometries.get(node) else { return false };
+                                        match orientation {
+                                            Orientation::Vertical => location.x < geo.loc.x,
+                                            Orientation::Horizontal => location.y < geo.loc.y,
+                                        }
+                                    })
+                                    .and_then(|x| x.checked_sub(1))?;
+                                Some(TargetZone::GroupInterior(res_id.clone(), idx))
                             }
                         }
-                    }
+                    } else {
+                        None
+                    };
 
-                    let target_zone = match data {
-                        Data::Mapped { .. } => {
+                    let target_zone = group_zone.unwrap_or_else(|| match &data {
+                        Data::Placeholder { .. } => TargetZone::InitialPlaceholder(res_id),
+                        Data::Group { .. } | Data::Mapped { .. } => {
+                            let id = if data.is_group() {
+                                tree.get(&res_id)
+                                    .unwrap()
+                                    .children()
+                                    .iter()
+                                    .find(|child_id| {
+                                        tree.get(child_id).unwrap().data().is_mapped(None)
+                                    })
+                                    .expect("Placeholder group without real window?")
+                                    .clone()
+                            } else {
+                                res_id
+                            };
+
                             let third_width = (last_geometry.size.w as f64 / 3.0).round() as i32;
                             let third_height = (last_geometry.size.h as f64 / 3.0).round() as i32;
                             let stack_region = Rectangle::from_extemities(
@@ -2323,7 +2459,7 @@ impl TilingLayout {
                             );
 
                             if stack_region.contains(location) {
-                                TargetZone::WindowStack(res_id, last_geometry)
+                                TargetZone::WindowStack(id, last_geometry)
                             } else {
                                 let left_right = {
                                     let relative_loc = (location.x - last_geometry.loc.x) as f64;
@@ -2357,104 +2493,10 @@ impl TilingLayout {
                                     up_down.0
                                 };
 
-                                TargetZone::WindowSplit(res_id, direction)
+                                TargetZone::WindowSplit(id, direction)
                             }
                         }
-                        Data::Placeholder { .. } => TargetZone::InitialPlaceholder(res_id),
-                        Data::Group { orientation, .. } => {
-                            let left_edge = match &*last_overview_hover {
-                                Some((_, TargetZone::GroupEdge(id, Direction::Left)))
-                                    if *id == res_id =>
-                                {
-                                    Rectangle::from_loc_and_size(
-                                        last_geometry.loc,
-                                        (80, last_geometry.size.h),
-                                    )
-                                }
-                                _ => Rectangle::from_loc_and_size(
-                                    last_geometry.loc,
-                                    (32, last_geometry.size.h),
-                                ),
-                            };
-                            let top_edge = match &*last_overview_hover {
-                                Some((_, TargetZone::GroupEdge(id, Direction::Up)))
-                                    if *id == res_id =>
-                                {
-                                    Rectangle::from_loc_and_size(
-                                        last_geometry.loc,
-                                        (last_geometry.size.w, 80),
-                                    )
-                                }
-                                _ => Rectangle::from_loc_and_size(
-                                    last_geometry.loc,
-                                    (last_geometry.size.w, 32),
-                                ),
-                            };
-                            let right_edge = match &*last_overview_hover {
-                                Some((_, TargetZone::GroupEdge(id, Direction::Right)))
-                                    if *id == res_id =>
-                                {
-                                    Rectangle::from_loc_and_size(
-                                        (
-                                            last_geometry.loc.x + last_geometry.size.w - 80,
-                                            last_geometry.loc.y,
-                                        ),
-                                        (80, last_geometry.size.h),
-                                    )
-                                }
-                                _ => Rectangle::from_loc_and_size(
-                                    (
-                                        last_geometry.loc.x + last_geometry.size.w - 32,
-                                        last_geometry.loc.y,
-                                    ),
-                                    (32, last_geometry.size.h),
-                                ),
-                            };
-                            let bottom_edge = match &*last_overview_hover {
-                                Some((_, TargetZone::GroupEdge(id, Direction::Down)))
-                                    if *id == res_id =>
-                                {
-                                    Rectangle::from_loc_and_size(
-                                        (
-                                            last_geometry.loc.x,
-                                            last_geometry.loc.y + last_geometry.size.h - 80,
-                                        ),
-                                        (last_geometry.size.w, 80),
-                                    )
-                                }
-                                _ => Rectangle::from_loc_and_size(
-                                    (
-                                        last_geometry.loc.x,
-                                        last_geometry.loc.y + last_geometry.size.h - 32,
-                                    ),
-                                    (last_geometry.size.w, 32),
-                                ),
-                            };
-
-                            if left_edge.contains(location) {
-                                TargetZone::GroupEdge(res_id, Direction::Left)
-                            } else if right_edge.contains(location) {
-                                TargetZone::GroupEdge(res_id, Direction::Right)
-                            } else if top_edge.contains(location) {
-                                TargetZone::GroupEdge(res_id, Direction::Up)
-                            } else if bottom_edge.contains(location) {
-                                TargetZone::GroupEdge(res_id, Direction::Down)
-                            } else {
-                                let idx = tree
-                                    .children_ids(&res_id)
-                                    .unwrap()
-                                    .position(|node| {
-                                        let Some(geo) = geometries.get(node) else { return false };
-                                        match orientation {
-                                            Orientation::Vertical => location.x < geo.loc.x,
-                                            Orientation::Horizontal => location.y < geo.loc.y,
-                                        }
-                                    })
-                                    .and_then(|x| x.checked_sub(1))?;
-                                TargetZone::GroupInterior(res_id, idx)
-                            }
-                        }
-                    };
+                    });
 
                     match &mut *last_overview_hover {
                         last_overview_hover @ None => {
@@ -2480,7 +2522,7 @@ impl TilingLayout {
                                     match old_target_zone {
                                         TargetZone::InitialPlaceholder(_) => {
                                             Instant::now().duration_since(*instant)
-                                                > INTIAL_MOUSE_ANIMATION_DELAY
+                                                > INITIAL_MOUSE_ANIMATION_DELAY
                                         }
                                         _ => {
                                             Instant::now().duration_since(*instant)
@@ -2934,11 +2976,11 @@ impl TilingLayout {
     }
 }
 
-const OUTER_GAP_KEYBOARD: i32 = 8;
-const INNER_GAP_KEYBOARD: i32 = 16;
-
-const OUTER_GAP_MOUSE: i32 = 16;
-const INNER_GAP_MOUSE: i32 = 16;
+const GAP_KEYBOARD: i32 = 8;
+const GAP_MOUSE: i32 = 32;
+const PLACEHOLDER_GAP_MOUSE: i32 = 8;
+const WINDOW_BACKDROP_BORDER: i32 = 4;
+const WINDOW_BACKDROP_GAP: i32 = 12;
 
 fn geometries_for_groupview<'a, R>(
     tree: &Tree<Data>,
@@ -2961,27 +3003,16 @@ where
 {
     // we need to recalculate geometry for all elements, if we are drawing groups
     if let Some(root) = tree.root_node_id() {
-        let outer_gap: i32 = (if mouse_tiling.is_some() {
-            OUTER_GAP_MOUSE
+        let gap: i32 = (if mouse_tiling.is_some() {
+            GAP_MOUSE
         } else {
-            OUTER_GAP_KEYBOARD
-        } as f32
-            * transition)
-            .round() as i32;
-        let inner_gap: i32 = (if mouse_tiling.is_some() {
-            INNER_GAP_MOUSE
-        } else {
-            INNER_GAP_KEYBOARD
+            GAP_KEYBOARD
         } as f32
             * transition)
             .round() as i32;
         let mut renderer = renderer.into();
 
-        let mut stack = vec![Rectangle::from_loc_and_size(
-            non_exclusive_zone.loc + Point::from((outer_gap, outer_gap)),
-            (non_exclusive_zone.size.to_point() - Point::from((outer_gap * 2, outer_gap * 2)))
-                .to_size(),
-        )];
+        let mut stack = vec![(non_exclusive_zone, 0)];
         let mut elements = Vec::new();
         let mut geometries = HashMap::new();
         let alpha = alpha * transition;
@@ -3010,43 +3041,17 @@ where
         };
 
         for node_id in tree.traverse_pre_order_ids(root).unwrap() {
-            if let Some(mut geo) = stack.pop() {
+            if let Some((mut geo, depth)) = stack.pop() {
                 let node: &Node<Data> = tree.get(&node_id).unwrap();
                 let data = node.data();
 
-                let is_placeholder_group = node
-                    .children()
-                    .iter()
-                    .any(|child_id| tree.get(child_id).unwrap().data().is_placeholder());
-                let gap = (
-                    (
-                        if TilingLayout::has_adjacent_node(tree, &node_id, Direction::Left) {
-                            outer_gap / 2
-                        } else {
-                            outer_gap
-                        },
-                        if TilingLayout::has_adjacent_node(tree, &node_id, Direction::Up) {
-                            outer_gap / 2
-                        } else {
-                            outer_gap
-                        },
-                    ),
-                    (
-                        if TilingLayout::has_adjacent_node(tree, &node_id, Direction::Right) {
-                            outer_gap / 2
-                        } else {
-                            outer_gap
-                        },
-                        if TilingLayout::has_adjacent_node(tree, &node_id, Direction::Down) {
-                            outer_gap / 2
-                        } else {
-                            outer_gap
-                        },
-                    ),
-                );
-                geo.loc += gap.0.into();
-                geo.size -= gap.0.into();
-                geo.size -= gap.1.into();
+                let is_placeholder_sibling = node
+                    .parent()
+                    .and_then(|parent_id| tree.children_ids(parent_id).ok())
+                    .map(|mut siblings| {
+                        siblings.any(|child_id| tree.get(child_id).unwrap().data().is_placeholder())
+                    })
+                    .unwrap_or(false);
 
                 let render_potential_group = has_potential_groups
                     && (if let Some(focused_id) = focused.as_ref() {
@@ -3078,6 +3083,44 @@ where
                         false
                     });
 
+                let (element_gap_left, element_gap_up, element_gap_right, element_gap_down) = {
+                    let gap = if is_placeholder_sibling {
+                        PLACEHOLDER_GAP_MOUSE
+                    } else {
+                        gap
+                    };
+                    (
+                        if TilingLayout::has_sibling_node(tree, &node_id, Direction::Left)
+                            && (mouse_tiling.is_some() || depth > 0)
+                        {
+                            gap / 2
+                        } else {
+                            0
+                        },
+                        if TilingLayout::has_sibling_node(tree, &node_id, Direction::Up)
+                            && (mouse_tiling.is_some() || depth > 0)
+                        {
+                            gap / 2
+                        } else {
+                            0
+                        },
+                        if TilingLayout::has_sibling_node(tree, &node_id, Direction::Right)
+                            && (mouse_tiling.is_some() || depth > 0)
+                        {
+                            gap / 2
+                        } else {
+                            0
+                        },
+                        if TilingLayout::has_sibling_node(tree, &node_id, Direction::Down)
+                            && (mouse_tiling.is_some() || depth > 0)
+                        {
+                            gap / 2
+                        } else {
+                            0
+                        },
+                    )
+                };
+
                 match data {
                     Data::Group {
                         orientation,
@@ -3096,6 +3139,12 @@ where
                             false
                         };
 
+                        geo.loc += (element_gap_left, element_gap_up).into();
+                        geo.size -= (element_gap_left, element_gap_up).into();
+                        geo.size -= (element_gap_right, element_gap_down).into();
+
+                        geometries.insert(node_id.clone(), geo);
+
                         if let Some(renderer) = renderer.as_mut() {
                             if (render_potential_group || render_active_child) && &node_id != root {
                                 elements.push(
@@ -3111,7 +3160,10 @@ where
                                     .into(),
                                 );
                             }
-                            if mouse_tiling.is_some() && pill_indicator.is_some() {
+                            if mouse_tiling.is_some()
+                                && pill_indicator.is_some()
+                                && &node_id != root
+                            {
                                 elements.push(
                                     IndicatorShader::element(
                                         *renderer,
@@ -3127,15 +3179,16 @@ where
                             }
                         }
 
-                        geometries.insert(node_id.clone(), geo);
+                        geo.loc += (gap, gap).into();
+                        geo.size -= (gap * 2, gap * 2).into();
 
                         if mouse_tiling.is_some() {
                             if let Some(PillIndicator::Outer(direction)) = pill_indicator {
                                 let (pill_geo, remaining_geo) = match direction {
                                     Direction::Left => (
                                         Rectangle::from_loc_and_size(
-                                            (geo.loc.x + 32, geo.loc.y + 32),
-                                            (16, geo.size.h - 64),
+                                            (geo.loc.x, geo.loc.y),
+                                            (16, geo.size.h),
                                         ),
                                         Rectangle::from_loc_and_size(
                                             (geo.loc.x + 48, geo.loc.y),
@@ -3144,8 +3197,8 @@ where
                                     ),
                                     Direction::Up => (
                                         Rectangle::from_loc_and_size(
-                                            (geo.loc.x + 32, geo.loc.y + 32),
-                                            (geo.size.w - 64, 16),
+                                            (geo.loc.x, geo.loc.y),
+                                            (geo.size.w, 16),
                                         ),
                                         Rectangle::from_loc_and_size(
                                             (geo.loc.x, geo.loc.y + 48),
@@ -3154,8 +3207,8 @@ where
                                     ),
                                     Direction::Right => (
                                         Rectangle::from_loc_and_size(
-                                            (geo.loc.x + geo.size.w - 48, geo.loc.y + 32),
-                                            (16, geo.size.h - 64),
+                                            (geo.loc.x + geo.size.w - 16, geo.loc.y),
+                                            (16, geo.size.h),
                                         ),
                                         Rectangle::from_loc_and_size(
                                             geo.loc,
@@ -3164,8 +3217,8 @@ where
                                     ),
                                     Direction::Down => (
                                         Rectangle::from_loc_and_size(
-                                            (geo.loc.x + 32, geo.loc.y + geo.size.h - 48),
-                                            (geo.size.w - 64, 16),
+                                            (geo.loc.x, geo.loc.y + geo.size.h - 16),
+                                            (geo.size.w, 16),
                                         ),
                                         Rectangle::from_loc_and_size(
                                             geo.loc,
@@ -3190,11 +3243,6 @@ where
 
                                 geo = remaining_geo;
                             };
-                        }
-
-                        if !is_placeholder_group {
-                            geo.loc += (outer_gap, outer_gap).into();
-                            geo.size -= (outer_gap * 2, outer_gap * 2).into();
                         }
 
                         let previous_length = match orientation {
@@ -3231,7 +3279,7 @@ where
                                         if let Some(PillIndicator::Inner(pill_idx)) = pill_indicator
                                         {
                                             if *pill_idx == idx {
-                                                geo.size.h -= 16;
+                                                geo.size.h -= 32;
                                             }
                                             if idx
                                                 .checked_sub(1)
@@ -3244,8 +3292,8 @@ where
                                                             *renderer,
                                                             placeholder_id.clone(),
                                                             Rectangle::from_loc_and_size(
-                                                                (geo.loc.x + 32, geo.loc.y - 8),
-                                                                (geo.size.w - 64, 16),
+                                                                (geo.loc.x, geo.loc.y - 8),
+                                                                (geo.size.w, 16),
                                                             ),
                                                             8.,
                                                             alpha * 0.4,
@@ -3254,12 +3302,12 @@ where
                                                         .into(),
                                                     );
                                                 }
-                                                geo.loc.y += 16;
-                                                geo.size.h -= 16;
+                                                geo.loc.y += 32;
+                                                geo.size.h -= 32;
                                             }
                                         }
                                     }
-                                    stack.push(geo);
+                                    stack.push((geo, depth + 1));
                                 }
                             }
                             Orientation::Vertical => {
@@ -3274,7 +3322,7 @@ where
                                         if let Some(PillIndicator::Inner(pill_idx)) = pill_indicator
                                         {
                                             if *pill_idx == idx {
-                                                geo.size.w -= 16;
+                                                geo.size.w -= 32;
                                             }
                                             if idx
                                                 .checked_sub(1)
@@ -3287,8 +3335,8 @@ where
                                                             *renderer,
                                                             placeholder_id.clone(),
                                                             Rectangle::from_loc_and_size(
-                                                                (geo.loc.x - 8, geo.loc.y + 32),
-                                                                (16, geo.size.h - 64),
+                                                                (geo.loc.x - 8, geo.loc.y),
+                                                                (16, geo.size.h),
                                                             ),
                                                             8.,
                                                             alpha * 0.4,
@@ -3297,19 +3345,23 @@ where
                                                         .into(),
                                                     );
                                                 }
-                                                geo.loc.x += 16;
-                                                geo.size.w -= 16;
+                                                geo.loc.x += 32;
+                                                geo.size.w -= 32;
                                             }
                                         }
                                     }
-                                    stack.push(geo);
+                                    stack.push((geo, depth + 1));
                                 }
                             }
                         }
                     }
                     Data::Mapped { mapped, .. } => {
-                        if render_potential_group {
-                            if let Some(renderer) = renderer.as_mut() {
+                        geo.loc += (element_gap_left, element_gap_up).into();
+                        geo.size -= (element_gap_left, element_gap_up).into();
+                        geo.size -= (element_gap_right, element_gap_down).into();
+
+                        if let Some(renderer) = renderer.as_mut() {
+                            if render_potential_group {
                                 elements.push(
                                     IndicatorShader::element(
                                         *renderer,
@@ -3317,18 +3369,15 @@ where
                                         geo,
                                         4,
                                         8,
-                                        alpha * if render_potential_group { 0.40 } else { 1.0 },
+                                        alpha * 0.40,
                                         GROUP_COLOR,
                                     )
                                     .into(),
                                 );
+                                geo.loc += (gap, gap).into();
+                                geo.size -= (gap * 2, gap * 2).into();
                             }
 
-                            geo.loc += (outer_gap, outer_gap).into();
-                            geo.size -= (outer_gap * 2, outer_gap * 2).into();
-                        }
-
-                        if let Some(renderer) = renderer.as_mut() {
                             if focused
                                 .as_ref()
                                 .map(|focused_id| {
@@ -3347,6 +3396,9 @@ where
                                     }
                                     _ => GROUP_COLOR,
                                 };
+                                geo.loc += (WINDOW_BACKDROP_BORDER, WINDOW_BACKDROP_BORDER).into();
+                                geo.size -=
+                                    (WINDOW_BACKDROP_BORDER * 2, WINDOW_BACKDROP_BORDER * 2).into();
                                 elements.push(
                                     BackdropShader::element(
                                         *renderer,
@@ -3368,17 +3420,22 @@ where
                                     .into(),
                                 );
                             }
-                        }
 
-                        if renderer.is_some() {
-                            geo.loc += (inner_gap, inner_gap).into();
-                            geo.size -= (inner_gap * 2, inner_gap * 2).into();
+                            geo.loc += (WINDOW_BACKDROP_GAP, WINDOW_BACKDROP_GAP).into();
+                            geo.size -= (WINDOW_BACKDROP_GAP * 2, WINDOW_BACKDROP_GAP * 2).into();
                         }
 
                         geometries.insert(node_id.clone(), geo);
                     }
                     Data::Placeholder { .. } => {
+                        geo.loc += (element_gap_left, element_gap_up).into();
+                        geo.size -= (element_gap_left, element_gap_up).into();
+                        geo.size -= (element_gap_right, element_gap_down).into();
+
                         if let Some(renderer) = renderer.as_mut() {
+                            geo.loc += (WINDOW_BACKDROP_BORDER, WINDOW_BACKDROP_BORDER).into();
+                            geo.size -=
+                                (WINDOW_BACKDROP_BORDER * 2, WINDOW_BACKDROP_BORDER * 2).into();
                             elements.push(
                                 BackdropShader::element(
                                     *renderer,
@@ -3676,8 +3733,7 @@ where
                     if indicator_thickness > 0 || data.is_group() {
                         let mut geo = geo.clone();
                         if data.is_group() {
-                            let outer_gap: i32 =
-                                (OUTER_GAP_KEYBOARD as f32 * percentage).round() as i32;
+                            let outer_gap: i32 = (GAP_KEYBOARD as f32 * percentage).round() as i32;
                             geo.loc += (outer_gap, outer_gap).into();
                             geo.size -= (outer_gap * 2, outer_gap * 2).into();
 
