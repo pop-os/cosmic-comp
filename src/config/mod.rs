@@ -5,6 +5,7 @@ use crate::{
     state::{BackendData, Data, State},
     wayland::protocols::output_configuration::OutputConfigurationState,
 };
+use cosmic_config::{ConfigGet, ConfigSet};
 use serde::{Deserialize, Serialize};
 use smithay::input::Seat;
 pub use smithay::{
@@ -34,6 +35,9 @@ pub use self::types::*;
 pub struct Config {
     pub static_conf: StaticConfig,
     pub dynamic_conf: DynamicConfig,
+    pub config: cosmic_config::Config,
+    pub xkb: XkbConfig,
+    pub input_devices: HashMap<String, InputConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -65,7 +69,6 @@ pub enum WorkspaceLayout {
 #[derive(Debug)]
 pub struct DynamicConfig {
     outputs: (Option<PathBuf>, OutputsConfig),
-    inputs: (Option<PathBuf>, InputsConfig),
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -152,18 +155,22 @@ impl OutputConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct InputsConfig {
-    xkb: XkbConfig,
-    devices: HashMap<String, InputConfig>,
-}
-
 impl Config {
-    pub fn load() -> Config {
+    pub fn load(loop_handle: &LoopHandle<'_, Data>) -> Config {
+        let config = cosmic_config::Config::new("com.system76.CosmicComp", 1).unwrap();
+        let source = cosmic_config::calloop::ConfigWatchSource::new(&config).unwrap();
+        loop_handle
+            .insert_source(source, |(config, keys), (), shared_data| {
+                config_changed(config, keys, &mut shared_data.state);
+            })
+            .expect("Failed to add cosmic-config to the event loop");
         let xdg = xdg::BaseDirectories::new().ok();
         Config {
             static_conf: Self::load_static(xdg.as_ref()),
             dynamic_conf: Self::load_dynamic(xdg.as_ref()),
+            xkb: get_config(&config, "xkb-config"),
+            input_devices: get_config(&config, "input-devices"),
+            config,
         }
     }
 
@@ -218,12 +225,8 @@ impl Config {
             xdg.and_then(|base| base.place_state_file("cosmic-comp/outputs.ron").ok());
         let outputs = Self::load_outputs(&output_path);
 
-        let input_path = xdg.and_then(|base| base.place_state_file("cosmic-comp/inputs.ron").ok());
-        let inputs = Self::load_inputs(&input_path);
-
         DynamicConfig {
             outputs: (output_path, outputs),
-            inputs: (input_path, inputs),
         }
     }
 
@@ -244,27 +247,6 @@ impl Config {
 
         OutputsConfig {
             config: HashMap::new(),
-        }
-    }
-
-    fn load_inputs(path: &Option<PathBuf>) -> InputsConfig {
-        if let Some(path) = path.as_ref() {
-            if path.exists() {
-                match ron::de::from_reader(OpenOptions::new().read(true).open(path).unwrap()) {
-                    Ok(config) => return config,
-                    Err(err) => {
-                        warn!(?err, "Failed to read input_config, resetting..");
-                        if let Err(err) = std::fs::remove_file(path) {
-                            error!(?err, "Failed to remove input_config.");
-                        }
-                    }
-                };
-            }
-        }
-
-        InputsConfig {
-            xkb: XkbConfig::default(),
-            devices: HashMap::new(),
         }
     }
 
@@ -422,17 +404,23 @@ impl Config {
     }
 
     pub fn xkb_config(&self) -> XkbConfig {
-        self.dynamic_conf.inputs().xkb.clone()
+        self.xkb.clone()
     }
 
     pub fn read_device(&mut self, device: &mut InputDevice) {
         use std::collections::hash_map::Entry;
 
-        let mut inputs = self.dynamic_conf.inputs_mut();
-        match inputs.devices.entry(device.name().into()) {
+        let mut config_changed = false;
+        match self.input_devices.entry(device.name().into()) {
             Entry::Occupied(entry) => entry.get().update_device(device),
             Entry::Vacant(entry) => {
                 entry.insert(InputConfig::for_device(device));
+                config_changed = true;
+            }
+        }
+        if config_changed {
+            if let Err(err) = self.config.set("input-devices", &self.input_devices) {
+                error!(?err, "Failed to write config 'input-devices'");
             }
         }
     }
@@ -483,12 +471,45 @@ impl DynamicConfig {
     pub fn outputs_mut<'a>(&'a mut self) -> PersistenceGuard<'a, OutputsConfig> {
         PersistenceGuard(self.outputs.0.clone(), &mut self.outputs.1)
     }
+}
 
-    pub fn inputs(&self) -> &InputsConfig {
-        &self.inputs.1
-    }
+fn get_config<T: Default + serde::de::DeserializeOwned>(
+    config: &cosmic_config::Config,
+    key: &str,
+) -> T {
+    config.get(key).unwrap_or_else(|err| {
+        error!(?err, "Failed to read config '{}'", key);
+        T::default()
+    })
+}
 
-    pub fn inputs_mut<'a>(&'a mut self) -> PersistenceGuard<'a, InputsConfig> {
-        PersistenceGuard(self.inputs.0.clone(), &mut self.inputs.1)
+fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut State) {
+    for key in &keys {
+        match key.as_str() {
+            "xkb-config" => {
+                let value = get_config::<XkbConfig>(&config, "xkb-config");
+                for seat in state.common.seats().cloned().collect::<Vec<_>>().iter() {
+                    if let Some(keyboard) = seat.get_keyboard() {
+                        if let Err(err) = keyboard.set_xkb_config(state, (&value).into()) {
+                            error!(?err, "Failed to load provided xkb config");
+                            // TODO Revert to default?
+                        }
+                    }
+                }
+                state.common.config.xkb = value;
+            }
+            "input-devices" => {
+                let value = get_config::<HashMap<String, InputConfig>>(&config, "input-devices");
+                if let BackendData::Kms(ref mut kms_state) = &mut state.backend {
+                    for (name, device) in kms_state.input_devices.iter_mut() {
+                        if let Some(input_config) = value.get(name) {
+                            input_config.update_device(device);
+                        }
+                    }
+                }
+                state.common.config.input_devices = value;
+            }
+            _ => {}
+        }
     }
 }

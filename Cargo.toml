@@ -30,9 +30,10 @@ ron = "0.7"
 libsystemd = { version = "0.5", optional = true }
 wayland-backend = "0.1.0"
 wayland-scanner = "0.30.0"
+cosmic-config = { git = "https://github.com/pop-os/libcosmic/", rev = "4895b0c", features = ["calloop"] }
 cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", branch = "main", default-features = false, features = ["server"] }
-libcosmic = { git = "https://github.com/pop-os/libcosmic/", rev = "42d7baf", default-features = false }
-iced_tiny_skia = { git = "https://github.com/pop-os/libcosmic/", rev = "42d7baf" }
+libcosmic = { git = "https://github.com/pop-os/libcosmic/", rev = "4895b0c", default-features = false }
+iced_tiny_skia = { git = "https://github.com/pop-os/libcosmic/", rev = "4895b0c" }
 tiny-skia = "0.9"
 ordered-float = "3.0"
 glow = "0.11.2"
