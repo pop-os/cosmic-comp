@@ -3177,6 +3177,73 @@ where
                                     .into(),
                                 );
                             }
+
+                            if mouse_tiling.is_some()
+                                && node
+                                    .parent()
+                                    .map(|parent_id| {
+                                        matches!(
+                                            tree.get(&parent_id).unwrap().data(),
+                                            Data::Group {
+                                                pill_indicator: Some(_),
+                                                ..
+                                            }
+                                        )
+                                    })
+                                    .unwrap_or(false)
+                            {
+                                // test if parent pill-indicator is adjacent
+                                let parent_id = node.parent().unwrap();
+                                let parent = tree.get(parent_id).unwrap();
+                                let own_idx = tree
+                                    .children_ids(parent_id)
+                                    .unwrap()
+                                    .position(|child_id| child_id == &node_id)
+                                    .unwrap();
+                                let draw_outline = match parent.data() {
+                                    Data::Group {
+                                        pill_indicator,
+                                        orientation,
+                                        ..
+                                    } => match pill_indicator {
+                                        Some(PillIndicator::Inner(pill_idx)) => {
+                                            *pill_idx == own_idx || pill_idx + 1 == own_idx
+                                        }
+                                        Some(PillIndicator::Outer(dir)) => match (dir, orientation)
+                                        {
+                                            (Direction::Left, Orientation::Horizontal)
+                                            | (Direction::Right, Orientation::Horizontal)
+                                            | (Direction::Up, Orientation::Vertical)
+                                            | (Direction::Down, Orientation::Vertical) => true,
+                                            (Direction::Left, Orientation::Vertical)
+                                            | (Direction::Up, Orientation::Horizontal) => {
+                                                own_idx == 0
+                                            }
+                                            (Direction::Right, Orientation::Vertical)
+                                            | (Direction::Down, Orientation::Horizontal) => {
+                                                own_idx + 1 == parent.data().len()
+                                            }
+                                        },
+                                        None => unreachable!(),
+                                    },
+                                    _ => unreachable!(),
+                                };
+
+                                if draw_outline {
+                                    elements.push(
+                                        IndicatorShader::element(
+                                            *renderer,
+                                            Key::Group(Arc::downgrade(alive)),
+                                            geo,
+                                            4,
+                                            8,
+                                            alpha * 0.15,
+                                            GROUP_COLOR,
+                                        )
+                                        .into(),
+                                    );
+                                }
+                            }
                         }
 
                         geo.loc += (gap, gap).into();
