@@ -103,7 +103,7 @@ impl Into<theme::Container> for TabBackgroundTheme {
     }
 }
 
-pub trait TabMessage {
+pub trait TabMessage: Clone {
     fn activate(idx: usize) -> Self;
     fn is_activate(&self) -> Option<usize>;
 
@@ -119,6 +119,7 @@ pub struct Tab<'a, Message: TabMessage> {
     title: String,
     font: Font,
     close_message: Option<Message>,
+    press_message: Option<Message>,
     rule_theme: TabRuleTheme,
     background_theme: TabBackgroundTheme,
     active: bool,
@@ -132,10 +133,16 @@ impl<'a, Message: TabMessage> Tab<'a, Message> {
             title: title.into(),
             font: cosmic::font::FONT,
             close_message: None,
+            press_message: None,
             rule_theme: TabRuleTheme::Default,
             background_theme: TabBackgroundTheme::Default,
             active: false,
         }
+    }
+
+    pub fn on_press(mut self, message: Message) -> Self {
+        self.press_message = Some(message);
+        self
     }
 
     pub fn on_close(mut self, message: Message) -> Self {
@@ -191,7 +198,7 @@ impl<'a, Message: TabMessage> Tab<'a, Message> {
             close_button = close_button.on_press(close_message);
         }
 
-        let mut items = vec![
+        let items = vec![
             widget::vertical_rule(4).style(self.rule_theme).into(),
             self.app_icon
                 .apply(widget::container)
@@ -200,8 +207,6 @@ impl<'a, Message: TabMessage> Tab<'a, Message> {
                 .padding([2, 4])
                 .center_y()
                 .into(),
-        ];
-        items.push(
             text(self.title)
                 .size(14)
                 .font(self.font)
@@ -212,8 +217,6 @@ impl<'a, Message: TabMessage> Tab<'a, Message> {
                 .height(Length::Fill)
                 .width(Length::Fill)
                 .into(),
-        );
-        items.push(
             close_button
                 .apply(widget::container)
                 .height(Length::Fill)
@@ -222,7 +225,7 @@ impl<'a, Message: TabMessage> Tab<'a, Message> {
                 .center_y()
                 .align_x(alignment::Horizontal::Right)
                 .into(),
-        );
+        ];
 
         TabInternal {
             id: self.id,
@@ -230,6 +233,7 @@ impl<'a, Message: TabMessage> Tab<'a, Message> {
             active: self.active,
             background: self.background_theme.into(),
             elements: items,
+            press_message: self.press_message,
         }
     }
 }
@@ -247,6 +251,7 @@ pub(super) struct TabInternal<'a, Message: TabMessage, Renderer> {
     active: bool,
     background: theme::Container,
     elements: Vec<Element<'a, Message, Renderer>>,
+    press_message: Option<Message>,
 }
 
 impl<'a, Message, Renderer> Widget<Message, Renderer> for TabInternal<'a, Message, Renderer>
@@ -361,15 +366,23 @@ where
             })
             .fold(event::Status::Ignored, event::Status::merge);
 
-        if status == event::Status::Ignored
-            && cursor.is_over(layout.bounds())
-            && matches!(
+        if status == event::Status::Ignored && cursor.is_over(layout.bounds()) {
+            if matches!(
+                event,
+                event::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+            ) {
+                if let Some(message) = self.press_message.clone() {
+                    shell.publish(message);
+                    return event::Status::Captured;
+                }
+            }
+            if matches!(
                 event,
                 event::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
-            )
-        {
-            shell.publish(Message::activate(self.idx));
-            return event::Status::Captured;
+            ) {
+                shell.publish(Message::activate(self.idx));
+                return event::Status::Captured;
+            }
         }
 
         status

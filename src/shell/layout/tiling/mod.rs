@@ -131,6 +131,7 @@ pub enum MoveResult {
 
 #[derive(Debug, Clone, PartialEq)]
 enum TargetZone {
+    InitialStackGrab,
     InitialPlaceholder(NodeId),
     WindowStack(NodeId, Rectangle<i32, Logical>),
     WindowSplit(NodeId, Direction),
@@ -2502,18 +2503,17 @@ impl TilingLayout {
                         last_overview_hover @ None => {
                             *last_overview_hover = Some((
                                 None,
-                                TargetZone::InitialPlaceholder(
-                                    tree.traverse_pre_order_ids(root)
-                                        .unwrap()
-                                        .find(|id| match tree.get(id).unwrap().data() {
-                                            Data::Placeholder {
-                                                initial_placeholder: true,
-                                                ..
-                                            } => true,
-                                            _ => false,
-                                        })
-                                        .unwrap(),
-                                ),
+                                tree.traverse_pre_order_ids(root)
+                                    .unwrap()
+                                    .find(|id| match tree.get(id).unwrap().data() {
+                                        Data::Placeholder {
+                                            initial_placeholder: true,
+                                            ..
+                                        } => true,
+                                        _ => false,
+                                    })
+                                    .map(|node_id| TargetZone::InitialPlaceholder(node_id))
+                                    .unwrap_or(TargetZone::InitialStackGrab),
                             ));
                         }
                         Some((instant, old_target_zone)) => {
