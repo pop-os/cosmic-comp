@@ -17,14 +17,14 @@ use smithay::{
         egl::EGLDevice,
         renderer::{
             buffer_dimensions, buffer_type,
-            damage::{Error as DTError, OutputDamageTracker, OutputNoMode, RenderOutputResult},
+            damage::{Error as DTError, OutputDamageTracker, RenderOutputResult},
             element::{surface::WaylandSurfaceRenderElement, AsRenderElements, RenderElement},
             gles::{Capability, GlesError, GlesRenderbuffer, GlesRenderer},
             Bind, Blit, BufferType, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
         },
     },
     desktop::{layer_map_for_output, space::SpaceElement},
-    output::Output,
+    output::{Output, OutputNoMode},
     reexports::wayland_server::{
         protocol::{wl_buffer::WlBuffer, wl_shm::Format as ShmFormat, wl_surface::WlSurface},
         Resource,

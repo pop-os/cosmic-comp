@@ -43,7 +43,7 @@ use smithay::{
         drm::DrmNode,
         renderer::{
             buffer_dimensions,
-            damage::{Error as RenderError, OutputDamageTracker, OutputNoMode, RenderOutputResult},
+            damage::{Error as RenderError, OutputDamageTracker, RenderOutputResult},
             element::{
                 surface::render_elements_from_surface_tree,
                 utils::{Relocate, RelocateRenderElement},
@@ -60,7 +60,7 @@ use smithay::{
         },
     },
     desktop::{layer_map_for_output, PopupManager},
-    output::Output,
+    output::{Output, OutputNoMode},
     utils::{IsAlive, Logical, Point, Rectangle, Scale},
     wayland::{
         dmabuf::get_dmabuf,

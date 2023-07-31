@@ -33,7 +33,7 @@ use smithay::{
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
             buffer_dimensions,
-            damage::{Error as RenderError, OutputNoMode, RenderOutputResult},
+            damage::{Error as RenderError, RenderOutputResult},
             element::Element,
             gles::{GlesRenderbuffer, GlesTexture},
             glow::GlowRenderer,
@@ -47,7 +47,7 @@ use smithay::{
     },
     desktop::utils::OutputPresentationFeedback,
     input::Seat,
-    output::{Mode as OutputMode, Output, PhysicalProperties, Subpixel},
+    output::{Mode as OutputMode, Output, OutputNoMode, PhysicalProperties, Subpixel},
     reexports::{
         calloop::{
             timer::{TimeoutAction, Timer},
