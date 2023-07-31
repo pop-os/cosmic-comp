@@ -199,7 +199,9 @@ impl CosmicMapped {
 
     pub fn has_surface(&self, surface: &WlSurface, surface_type: WindowSurfaceType) -> bool {
         self.windows().any(|(w, _)| {
-            let Some(toplevel ) = w.wl_surface() else { return false };
+            let Some(toplevel) = w.wl_surface() else {
+                return false;
+            };
 
             if surface_type.contains(WindowSurfaceType::TOPLEVEL) {
                 if toplevel == *surface {

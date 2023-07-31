@@ -1,18 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
+    backend::render::cursor::CursorState,
     config::{Action, Config, KeyPattern, WorkspaceLayout},
     shell::{
         focus::{target::PointerFocusTarget, FocusDirection},
         grabs::{ResizeEdge, SeatMoveGrabState},
-        layout::{
-            tiling::{Direction, FocusResult, MoveResult},
-        },
-        OverviewMode, ResizeDirection, ResizeMode, Workspace, Trigger,
-    }, // shell::grabs::SeatMoveGrabState
+        layout::tiling::{Direction, FocusResult, MoveResult},
+        OverviewMode, ResizeDirection, ResizeMode, Trigger, Workspace,
+    },
     state::Common,
     utils::prelude::*,
-    wayland::{handlers::screencopy::ScreencopySessions, protocols::screencopy::Session}, backend::render::cursor::CursorState,
+    wayland::{handlers::screencopy::ScreencopySessions, protocols::screencopy::Session},
 };
 use calloop::{timer::Timer, RegistrationToken};
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
@@ -315,7 +314,7 @@ impl State {
                                                 modifiers: modifiers.clone().into(),
                                                 key: handle.raw_code(),
                                             };
-                                            
+
                                             if state == KeyState::Released {
                                                 if let Some(tokens) = userdata.get::<SupressedKeys>().unwrap().filter(&handle) {
                                                     for token in tokens {
@@ -334,7 +333,7 @@ impl State {
                                                         calloop::timer::TimeoutAction::ToDuration(Duration::from_millis(25))
                                                     }).ok()
                                                 } else { None };
-                                    
+
                                                userdata
                                                         .get::<SupressedKeys>()
                                                         .unwrap()
@@ -658,9 +657,12 @@ impl State {
                                         let layers = layer_map_for_output(&output);
                                         if let Some(layer) = layers
                                             .layer_under(WlrLayer::Overlay, relative_pos)
-                                            .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos))
+                                            .or_else(|| {
+                                                layers.layer_under(WlrLayer::Top, relative_pos)
+                                            })
                                         {
-                                            let layer_loc = layers.layer_geometry(layer).unwrap().loc;
+                                            let layer_loc =
+                                                layers.layer_geometry(layer).unwrap().loc;
                                             if layer.can_receive_keyboard_focus()
                                                 && layer
                                                     .surface_under(
@@ -685,9 +687,12 @@ impl State {
                                             let layers = layer_map_for_output(&output);
                                             if let Some(layer) = layers
                                                 .layer_under(WlrLayer::Bottom, pos)
-                                                .or_else(|| layers.layer_under(WlrLayer::Background, pos))
+                                                .or_else(|| {
+                                                    layers.layer_under(WlrLayer::Background, pos)
+                                                })
                                             {
-                                                let layer_loc = layers.layer_geometry(layer).unwrap().loc;
+                                                let layer_loc =
+                                                    layers.layer_geometry(layer).unwrap().loc;
                                                 if layer.can_receive_keyboard_focus()
                                                     && layer
                                                         .surface_under(
@@ -702,7 +707,12 @@ impl State {
                                         }
                                     }
                                 }
-                                Common::set_focus(self, under.and_then(|target| target.try_into().ok()).as_ref(), seat, Some(serial));
+                                Common::set_focus(
+                                    self,
+                                    under.and_then(|target| target.try_into().ok()).as_ref(),
+                                    seat,
+                                    Some(serial),
+                                );
                             }
                         } else {
                             if let OverviewMode::Started(Trigger::Pointer(action_button), _) =
@@ -1239,7 +1249,9 @@ impl State {
                     MoveResult::Done => {
                         if let Some(focused_window) = workspace.focus_stack.get(seat).last() {
                             if workspace.is_tiled(focused_window) {
-                                self.common.shell.set_overview_mode(Some(Trigger::Keyboard(pattern.modifiers)));
+                                self.common
+                                    .shell
+                                    .set_overview_mode(Some(Trigger::Keyboard(pattern.modifiers)));
                             }
                         }
                     }
@@ -1376,10 +1388,7 @@ impl State {
                 return Some((or.clone().into(), or.geometry().loc));
             }
             if let Some((target, loc)) = workspace.element_under(relative_pos, overview) {
-                return Some((
-                    target,
-                    loc + (global_pos - relative_pos).to_i32_round(),
-                ));
+                return Some((target, loc + (global_pos - relative_pos).to_i32_round()));
             }
             {
                 let layers = layer_map_for_output(output);

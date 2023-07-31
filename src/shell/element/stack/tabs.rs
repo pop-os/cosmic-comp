@@ -722,13 +722,24 @@ where
         let changes = if unknown_keys {
             Some(Difference::NewOrRemoved)
         } else {
-            current_state.iter().filter_map(|(a_id, a_bounds)| {
-                let Some(b_bounds) = last_state.get(a_id) else { return Some(Difference::Movement) };
-                (a_bounds != b_bounds).then(|| if a_bounds.position() != b_bounds.position() { Difference::Movement } else { Difference::Focus })
-            }).fold(None, |a, b| match (a, b) {
-                (None | Some(Difference::Movement), x) => Some(x),
-                (a, _) => a,
-            })
+            current_state
+                .iter()
+                .filter_map(|(a_id, a_bounds)| {
+                    let Some(b_bounds) = last_state.get(a_id) else {
+                        return Some(Difference::Movement);
+                    };
+                    (a_bounds != b_bounds).then(|| {
+                        if a_bounds.position() != b_bounds.position() {
+                            Difference::Movement
+                        } else {
+                            Difference::Focus
+                        }
+                    })
+                })
+                .fold(None, |a, b| match (a, b) {
+                    (None | Some(Difference::Movement), x) => Some(x),
+                    (a, _) => a,
+                })
         };
 
         if unknown_keys || changes.is_some() {

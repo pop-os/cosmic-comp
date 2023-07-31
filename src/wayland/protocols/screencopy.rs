@@ -626,7 +626,9 @@ where
                 output,
                 cursor,
             } => {
-                let Some(cursor) = check_cursor(cursor, &data, resource) else { return; };
+                let Some(cursor) = check_cursor(cursor, &data, resource) else {
+                    return;
+                };
 
                 match Output::from_resource(&output) {
                     Some(output) => {
@@ -664,7 +666,9 @@ where
                 toplevel,
                 cursor,
             } => {
-                let Some(cursor) = check_cursor(cursor, &data, resource) else { return; };
+                let Some(cursor) = check_cursor(cursor, &data, resource) else {
+                    return;
+                };
 
                 match window_from_handle::<<D as ToplevelInfoHandler>::Window>(toplevel) {
                     Some(window) => {
@@ -704,7 +708,9 @@ where
                 output,
                 cursor,
             } => {
-                let Some(cursor) = check_cursor(cursor, &data, resource) else { return; };
+                let Some(cursor) = check_cursor(cursor, &data, resource) else {
+                    return;
+                };
 
                 match Output::from_resource(&output) {
                     Some(output) => match state.workspace_state().workspace_handle(&workspace) {

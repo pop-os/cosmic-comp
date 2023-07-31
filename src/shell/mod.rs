@@ -1442,8 +1442,12 @@ impl Shell {
         let from_workspace = state.common.shell.workspaces.active_mut(from_output);
         let maybe_window = from_workspace.focus_stack.get(seat).last().cloned();
 
-        let Some(mapped) = maybe_window else { return Ok(None); };
-        let Some(window_state) = from_workspace.unmap(&mapped) else { return Ok(None); };
+        let Some(mapped) = maybe_window else {
+            return Ok(None);
+        };
+        let Some(window_state) = from_workspace.unmap(&mapped) else {
+            return Ok(None);
+        };
 
         for (toplevel, _) in mapped.windows() {
             state
@@ -1610,7 +1614,9 @@ impl Shell {
     pub fn resize(&mut self, seat: &Seat<State>, direction: ResizeDirection, edge: ResizeEdge) {
         let output = seat.active_output();
         let (_, idx) = self.workspaces.active_num(&output);
-        let Some(focused) = seat.get_keyboard().unwrap().current_focus() else { return };
+        let Some(focused) = seat.get_keyboard().unwrap().current_focus() else {
+            return;
+        };
 
         if let Some(workspace) = self.workspaces.get_mut(idx, &output) {
             let amount = (self
@@ -1632,12 +1638,16 @@ impl Shell {
         {
             let workspace = self.workspaces.get(idx, &output).unwrap();
             if old_direction == direction && old_edge == edge {
-                let Some(toplevel) = old_focused.toplevel() else { return };
+                let Some(toplevel) = old_focused.toplevel() else {
+                    return;
+                };
                 let Some(mapped) = workspace
                     .mapped()
                     .find(|m| m.has_surface(&toplevel, WindowSurfaceType::TOPLEVEL))
                     .cloned()
-                else { return };
+                else {
+                    return;
+                };
                 let mut resize_state = mapped.resize_state.lock().unwrap();
                 if let Some(ResizeState::Resizing(data)) = *resize_state {
                     *resize_state = Some(ResizeState::WaitingForCommit(data));

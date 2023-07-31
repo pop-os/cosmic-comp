@@ -193,7 +193,9 @@ impl CosmicStack {
                 return;
             }
 
-            let Some(idx) = windows.iter().position(|w| w == window) else { return };
+            let Some(idx) = windows.iter().position(|w| w == window) else {
+                return;
+            };
             let window = windows.remove(idx);
             window.try_force_undecorated(false);
             window.set_tiled(false);
@@ -619,13 +621,7 @@ impl Program for CosmicStackInternal {
 
     fn view(&self) -> CosmicElement<'_, Self::Message> {
         let windows = self.windows.lock().unwrap();
-        let Some(width) = self
-            .geometry
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|r| r.size.w)
-        else {
+        let Some(width) = self.geometry.lock().unwrap().as_ref().map(|r| r.size.w) else {
             return iced_widget::row(Vec::new()).into();
         };
         let active = self.active.load(Ordering::SeqCst);

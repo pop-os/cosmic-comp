@@ -164,7 +164,9 @@ impl ScreencopyHandler for State {
     }
 
     fn capture_toplevel(&mut self, toplevel: CosmicSurface, session: Session) -> Vec<BufferInfo> {
-        let Some(surface) = toplevel.wl_surface() else { return Vec::new() };
+        let Some(surface) = toplevel.wl_surface() else {
+            return Vec::new();
+        };
         let size = toplevel.geometry().size.to_buffer(1, Transform::Normal);
 
         let mut _kms_renderer = None;

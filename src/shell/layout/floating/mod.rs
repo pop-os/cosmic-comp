@@ -260,11 +260,19 @@ impl FloatingLayout {
         edge: ResizeEdge,
         amount: i32,
     ) -> bool {
-        let Some(toplevel) = focused.toplevel() else { return false };
-        let Some(mapped) = self.space.elements().find(|m| m.has_surface(&toplevel, WindowSurfaceType::TOPLEVEL)) else { return false };
+        let Some(toplevel) = focused.toplevel() else {
+            return false;
+        };
+        let Some(mapped) = self
+            .space
+            .elements()
+            .find(|m| m.has_surface(&toplevel, WindowSurfaceType::TOPLEVEL))
+        else {
+            return false;
+        };
 
         let Some(original_geo) = self.space.element_geometry(mapped) else {
-            return false // we don't have that window
+            return false; // we don't have that window
         };
         let mut geo = original_geo.clone();
 
@@ -297,13 +305,18 @@ impl FloatingLayout {
             }
         }
 
-        let Some(bounding_box) = self.space.outputs()
+        let Some(bounding_box) = self
+            .space
+            .outputs()
             .map(|o| self.space.output_geometry(o).unwrap())
             .filter(|output_geo| output_geo.overlaps(geo))
             .fold(None, |res, output_geo| match res {
                 None => Some(output_geo),
                 Some(other) => Some(other.merge(output_geo)),
-            }) else { return true };
+            })
+        else {
+            return true;
+        };
 
         let (min_size, max_size) = (mapped.min_size(), mapped.max_size());
         let min_width = min_size.map(|s| s.w).unwrap_or(360);
