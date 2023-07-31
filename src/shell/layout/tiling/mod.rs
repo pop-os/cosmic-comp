@@ -1641,6 +1641,40 @@ impl TilingLayout {
         }
     }
 
+    pub fn cleanup_drag(&mut self, output: &Output) {
+        let mut queue = self.queues.get_mut(output);
+        let mut owned_tree = None;
+        let mut tree = if let Some(queue) = queue.as_mut() {
+            owned_tree = queue.trees.back().map(|x| x.0.copy_clone());
+            owned_tree.as_mut()
+        } else {
+            self.standby_tree.as_mut()
+        }
+        .unwrap();
+
+        if let Some(root) = tree.root_node_id() {
+            for id in tree
+                .traverse_pre_order_ids(root)
+                .unwrap()
+                .collect::<Vec<_>>()
+                .into_iter()
+            {
+                match tree.get_mut(&id).map(|node| node.data_mut()) {
+                    Ok(Data::Placeholder { .. }) => TilingLayout::unmap_internal(&mut tree, &id),
+                    Ok(Data::Group { pill_indicator, .. }) if pill_indicator.is_some() => {
+                        pill_indicator.take();
+                    }
+                    _ => {}
+                }
+            }
+
+            if let Some(mut tree) = owned_tree {
+                let blocker = TilingLayout::update_positions(output, &mut tree, self.gaps);
+                queue.unwrap().push_tree(tree, ANIMATION_DURATION, blocker);
+            }
+        }
+    }
+
     pub fn drop_window(
         &mut self,
         window: CosmicMapped,

@@ -184,7 +184,8 @@ pub struct MoveGrab {
     window: CosmicMapped,
     start_data: PointerGrabStartData<State>,
     seat: Seat<State>,
-    outputs: HashSet<Output>,
+    cursor_output: Output,
+    window_outputs: HashSet<Output>,
     tiling: bool,
 }
 
@@ -196,6 +197,30 @@ impl PointerGrab<State> for MoveGrab {
         _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
         event: &MotionEvent,
     ) {
+        let Some(current_output) = state
+            .common
+            .shell
+            .outputs()
+            .find(|output| {
+                output
+                    .geometry()
+                    .contains(handle.current_location().to_i32_round())
+            })
+            .cloned()
+        else {
+            return;
+        };
+        if self.cursor_output != current_output {
+            state
+                .common
+                .shell
+                .workspaces
+                .active_mut(&self.cursor_output)
+                .tiling_layer
+                .cleanup_drag(&self.cursor_output);
+            self.cursor_output = current_output.clone();
+        }
+
         let mut borrow = self
             .seat
             .user_data()
@@ -204,9 +229,9 @@ impl PointerGrab<State> for MoveGrab {
         if let Some(grab_state) = borrow.as_mut().and_then(|s| s.as_mut()) {
             let mut window_geo = self.window.geometry();
             window_geo.loc += event.location.to_i32_round() + grab_state.window_offset;
-            for output in state.common.shell.outputs() {
+            for output in &state.common.shell.outputs {
                 if let Some(overlap) = output.geometry().intersection(window_geo) {
-                    if self.outputs.insert(output.clone()) {
+                    if self.window_outputs.insert(output.clone()) {
                         self.window.output_enter(output, overlap);
                         if let Some(indicator) =
                             grab_state.stacking_indicator.as_ref().map(|x| &x.0)
@@ -214,7 +239,7 @@ impl PointerGrab<State> for MoveGrab {
                             indicator.output_enter(output, overlap);
                         }
                     }
-                } else if self.outputs.remove(&output) {
+                } else if self.window_outputs.remove(&output) {
                     self.window.output_leave(output);
                     if let Some(indicator) = grab_state.stacking_indicator.as_ref().map(|x| &x.0) {
                         indicator.output_leave(output);
@@ -222,19 +247,18 @@ impl PointerGrab<State> for MoveGrab {
                 }
             }
 
-            let output = state.common.last_active_seat().active_output();
             if self.tiling {
                 let indicator_location = state
                     .common
                     .shell
-                    .active_space(&output)
+                    .active_space(&current_output)
                     .tiling_layer
                     .stacking_indicator();
 
                 if indicator_location.is_some() != grab_state.stacking_indicator.is_some() {
                     grab_state.stacking_indicator = indicator_location.map(|geo| {
                         let element = stack_hover(state.common.event_loop_handle.clone(), geo.size);
-                        for output in &self.outputs {
+                        for output in &self.window_outputs {
                             element.output_enter(output, output.geometry());
                         }
                         (element, geo.loc)
@@ -327,7 +351,8 @@ impl MoveGrab {
             window,
             start_data,
             seat: seat.clone(),
-            outputs,
+            window_outputs: outputs,
+            cursor_output: output,
             tiling: was_tiled,
         }
     }
@@ -358,7 +383,7 @@ impl MoveGrab {
                     + grab_state.window_offset;
 
                 let workspace_handle = state.common.shell.active_space(&output).handle;
-                for old_output in self.outputs.iter().filter(|o| *o != &output) {
+                for old_output in self.window_outputs.iter().filter(|o| *o != &output) {
                     grab_state.window.output_leave(old_output);
                 }
                 for (window, _) in grab_state.window.windows() {

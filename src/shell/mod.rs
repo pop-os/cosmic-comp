@@ -1003,6 +1003,12 @@ impl Shell {
         if match &mut self.workspaces {
             WorkspaceMode::OutputBound(sets, _) => {
                 if let Some(set) = sets.get_mut(output) {
+                    if matches!(
+                        self.overview_mode,
+                        OverviewMode::Started(Trigger::Pointer(_), _)
+                    ) {
+                        set.workspaces[set.active].tiling_layer.cleanup_drag(output);
+                    }
                     set.activate(idx, &mut self.workspace_state.update())?
                 } else {
                     false
