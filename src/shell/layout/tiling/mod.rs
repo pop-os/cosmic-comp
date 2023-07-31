@@ -131,7 +131,7 @@ pub enum MoveResult {
 
 #[derive(Debug, Clone, PartialEq)]
 enum TargetZone {
-    InitialStackGrab,
+    Initial,
     InitialPlaceholder(NodeId),
     WindowStack(NodeId, Rectangle<i32, Logical>),
     WindowSplit(NodeId, Direction),
@@ -1801,7 +1801,6 @@ impl TilingLayout {
                 }
             }
             _ => {
-                // shouldn't happen, but lets not loose the window
                 TilingLayout::map_to_tree(
                     &mut tree,
                     window.clone(),
@@ -2334,7 +2333,15 @@ impl TilingLayout {
                         if node.children().iter().any(|child_id| {
                             tree.get(child_id)
                                 .ok()
-                                .map(|child| child.data().is_placeholder())
+                                .map(|child| {
+                                    matches!(
+                                        child.data(),
+                                        Data::Placeholder {
+                                            initial_placeholder: false,
+                                            ..
+                                        }
+                                    )
+                                })
                                 .unwrap_or(false)
                         }) {
                             None
@@ -2455,7 +2462,8 @@ impl TilingLayout {
                                             Orientation::Horizontal => location.y < geo.loc.y,
                                         }
                                     })
-                                    .and_then(|x| x.checked_sub(1))?;
+                                    .and_then(|x| x.checked_sub(1))
+                                    .unwrap_or(0);
                                 Some(TargetZone::GroupInterior(res_id.clone(), idx))
                             }
                         }
@@ -2547,7 +2555,7 @@ impl TilingLayout {
                                         _ => false,
                                     })
                                     .map(|node_id| TargetZone::InitialPlaceholder(node_id))
-                                    .unwrap_or(TargetZone::InitialStackGrab),
+                                    .unwrap_or(TargetZone::Initial),
                             ));
                         }
                         Some((instant, old_target_zone)) => {
