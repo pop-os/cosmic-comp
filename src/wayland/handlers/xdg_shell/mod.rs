@@ -24,7 +24,7 @@ use smithay::{
 use std::cell::Cell;
 use tracing::warn;
 
-use super::screencopy::PendingScreencopyBuffers;
+use super::{compositor::client_compositor_state, screencopy::PendingScreencopyBuffers};
 
 pub mod popup;
 
@@ -236,6 +236,15 @@ impl XdgShellHandler for State {
             .collect::<Vec<_>>();
         for output in outputs.iter() {
             self.common.shell.active_space_mut(output).refresh();
+        }
+
+        // animations might be unblocked now
+        let clients = self.common.shell.update_animations();
+        {
+            let dh = self.common.display_handle.clone();
+            for client in clients.values() {
+                client_compositor_state(&client).blocker_cleared(self, &dh);
+            }
         }
 
         // screencopy
