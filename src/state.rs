@@ -98,10 +98,13 @@ pub struct ClientState {
     pub workspace_client_state: WorkspaceClientState,
     pub drm_node: Option<DrmNode>,
     pub privileged: bool,
+    pub evls: LoopSignal,
 }
 impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
-    fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
+    fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {
+        self.evls.wakeup();
+    }
 }
 
 pub struct Data {
@@ -367,6 +370,7 @@ impl State {
                 _ => None,
             },
             privileged: false,
+            evls: self.common.event_loop_signal.clone(),
         }
     }
 
@@ -376,6 +380,7 @@ impl State {
             workspace_client_state: WorkspaceClientState::default(),
             drm_node: Some(drm_node),
             privileged: false,
+            evls: self.common.event_loop_signal.clone(),
         }
     }
 
@@ -388,6 +393,7 @@ impl State {
                 _ => None,
             },
             privileged: true,
+            evls: self.common.event_loop_signal.clone(),
         }
     }
 }
