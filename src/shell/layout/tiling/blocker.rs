@@ -1,7 +1,7 @@
 use crate::shell::element::CosmicSurface;
 use smithay::{
     reexports::wayland_server::{backend::ClientId, Client, Resource},
-    utils::Serial,
+    utils::{IsAlive, Serial},
     wayland::{
         compositor::{Blocker, BlockerState},
         seat::WaylandFocus,
@@ -50,11 +50,12 @@ impl TilingBlocker {
             || self
                 .necessary_acks
                 .iter()
-                .all(|(surf, serial)| surf.serial_acked(serial))
+                .all(|(surf, serial)| !surf.alive() || surf.serial_acked(serial))
     }
 
     pub fn is_signaled(&self) -> bool {
         self.signaled.load(Ordering::SeqCst)
+            || !self.necessary_acks.iter().any(|(surf, _)| surf.alive())
     }
 
     #[must_use]
