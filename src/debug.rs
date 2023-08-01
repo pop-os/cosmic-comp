@@ -337,6 +337,7 @@ fn format_pointer_focus(focus: Option<PointerFocusTarget>) -> String {
         Some(LayerSurface(x)) => format!("LayerSurface {}", x.wl_surface().id().protocol_id()),
         Some(Popup(x)) => format!("Popup {}", x.wl_surface().id().protocol_id()),
         Some(OverrideRedirect(x)) => format!("Override Redirect {}", x.window_id()),
+        Some(PointerFocusTarget::ResizeFork(x)) => format!("Resize Fork {:?}", x.node),
         None => format!("None"),
     }
 }

@@ -681,6 +681,7 @@ impl Common {
 }
 
 #[cfg(feature = "debug")]
+#[derive(Debug)]
 pub struct Egui {
     pub active: bool,
     pub state: smithay_egui::EguiState,

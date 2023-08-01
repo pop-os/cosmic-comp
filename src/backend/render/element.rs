@@ -178,7 +178,7 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>> for CosmicElement<GlMultiRen
                 let elem = {
                     let glow_frame = frame.glow_frame_mut();
                     RenderElement::<GlowRenderer>::draw(elem, glow_frame, src, dst, damage)
-                        .map_err(|err| MultiError::Render(err))
+                        .map_err(|err| GlMultiError::Render(err))
                 };
                 elem
             }
