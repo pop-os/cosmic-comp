@@ -35,7 +35,7 @@ use smithay::{
         glow::{GlowFrame, GlowRenderer},
         ImportAll, ImportMem, Renderer,
     },
-    desktop::{layer_map_for_output, space::SpaceElement},
+    desktop::layer_map_for_output,
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
     reexports::wayland_server::{protocol::wl_surface::WlSurface, Client},
@@ -521,7 +521,7 @@ impl Workspace {
             popup_elements.extend(
                 override_redirect_windows
                     .iter()
-                    .filter(|or| or.geometry().intersection(output.geometry()).is_some())
+                    .filter(|or| (*or).geometry().intersection(output.geometry()).is_some())
                     .flat_map(|or| {
                         AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
                             or,
@@ -569,7 +569,7 @@ impl Workspace {
             popup_elements.extend(
                 override_redirect_windows
                     .iter()
-                    .filter(|or| or.geometry().intersection(output.geometry()).is_some())
+                    .filter(|or| (*or).geometry().intersection(output.geometry()).is_some())
                     .flat_map(|or| {
                         AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
                             or,
