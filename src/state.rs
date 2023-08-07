@@ -69,6 +69,7 @@ use smithay::{
         shell::{kde::decoration::KdeDecorationState, xdg::decoration::XdgDecorationState},
         shm::ShmState,
         viewporter::ViewporterState,
+        xwayland_keyboard_grab::XWaylandKeyboardGrabState,
     },
 };
 use tracing::error;
@@ -299,6 +300,7 @@ impl State {
         let wl_drm_state = WlDrmState;
         let kde_decoration_state = KdeDecorationState::new::<Self>(&dh, Mode::Client);
         let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
+        XWaylandKeyboardGrabState::new::<Self>(&dh);
 
         let shell = Shell::new(&config, dh);
 
