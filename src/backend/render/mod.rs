@@ -8,6 +8,8 @@ use std::{
     time::Instant,
 };
 
+#[cfg(feature = "debug")]
+use crate::debug::{fps_ui, profiler_ui};
 use crate::{
     config::WorkspaceLayout,
     shell::{
@@ -28,11 +30,6 @@ use crate::{
             workspace::WorkspaceHandle,
         },
     },
-};
-#[cfg(feature = "debug")]
-use crate::{
-    debug::{fps_ui, profiler_ui},
-    utils::prelude::*,
 };
 
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::FailureReason;

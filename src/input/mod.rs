@@ -371,7 +371,7 @@ impl State {
                                                 userdata
                                                     .get::<SupressedKeys>()
                                                     .unwrap()
-                                                    .add(&handle);
+                                                    .add(&handle, None);
                                                 return FilterResult::Intercept(None);
                                             }
                                         }

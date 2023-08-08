@@ -569,7 +569,7 @@ impl CosmicMapped {
         C: From<CosmicMappedRenderElement<R>>,
     {
         #[cfg(feature = "debug")]
-        let mut debug_elements = if let Some(debug) = self.debug.lock().unwrap().as_mut() {
+        let debug_elements = if let Some(debug) = self.debug.lock().unwrap().as_mut() {
             let window = self.active_window();
             let window_geo = window.geometry();
             let (min_size, max_size, size) =
@@ -609,16 +609,16 @@ impl CosmicMapped {
                                     });
                                     ui.horizontal(|ui| {
                                         ui.label("States: ");
-                                        if window.is_maximized() {
+                                        if window.is_maximized(true) {
                                             ui.label("🗖");
                                         }
-                                        if window.is_fullscreen() {
+                                        if window.is_fullscreen(true) {
                                             ui.label("⬜");
                                         }
-                                        if window.is_activated() {
+                                        if window.is_activated(true) {
                                             ui.label("🖱");
                                         }
-                                        if window.is_resizing().is_some() {
+                                        if window.is_resizing(true).is_some() {
                                             ui.label("↔");
                                         }
                                     });
