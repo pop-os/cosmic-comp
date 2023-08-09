@@ -22,3 +22,4 @@ pub mod viewporter;
 pub mod wl_drm;
 pub mod workspace;
 pub mod xdg_shell;
+pub mod xwayland_keyboard_grab;
