@@ -546,9 +546,9 @@ impl Workspace {
             ));
 
             if let Some(xwm) = xwm_state.and_then(|state| state.xwm.as_mut()) {
-                if let Err(err) = xwm.update_stacking_order_upwards(
-                    window_elements.iter().rev().map(|e| e.id()),
-                ) {
+                if let Err(err) =
+                    xwm.update_stacking_order_upwards(window_elements.iter().map(|e| e.id()))
+                {
                     warn!(
                         wm_id = ?xwm.id(),
                         ?err,
@@ -624,9 +624,9 @@ impl Workspace {
             window_elements.extend(w_elements.into_iter().map(WorkspaceRenderElement::from));
 
             if let Some(xwm) = xwm_state.and_then(|state| state.xwm.as_mut()) {
-                if let Err(err) = xwm.update_stacking_order_upwards(
-                    window_elements.iter().rev().map(|e| e.id()),
-                ) {
+                if let Err(err) =
+                    xwm.update_stacking_order_upwards(window_elements.iter().map(|e| e.id()))
+                {
                     warn!(
                         wm_id = ?xwm.id(),
                         ?err,
