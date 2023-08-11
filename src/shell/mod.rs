@@ -59,13 +59,14 @@ pub use self::workspace::*;
 use self::{
     element::{
         resize_indicator::{resize_indicator, ResizeIndicator},
+        swap_indicator::{swap_indicator, SwapIndicator},
         CosmicWindow,
     },
     focus::target::KeyboardFocusTarget,
     grabs::ResizeEdge,
     layout::{
         floating::{FloatingLayout, ResizeState},
-        tiling::{Direction, TilingLayout},
+        tiling::{Direction, NodeDesc, TilingLayout},
     },
 };
 
@@ -73,7 +74,8 @@ const ANIMATION_DURATION: Duration = Duration::from_millis(200);
 
 #[derive(Debug, Clone)]
 pub enum Trigger {
-    Keyboard(KeyModifiers),
+    KeyboardSwap(KeyPattern, NodeDesc),
+    KeyboardMove(KeyModifiers),
     Pointer(u32),
 }
 
@@ -81,7 +83,7 @@ pub enum Trigger {
 pub enum OverviewMode {
     None,
     Started(Trigger, Instant),
-    Ended(Instant),
+    Ended(Option<Trigger>, Instant),
 }
 
 impl OverviewMode {
@@ -92,7 +94,7 @@ impl OverviewMode {
                     / ANIMATION_DURATION.as_millis() as f32;
                 Some(ease(EaseInOutCubic, 0.0, 1.0, percentage))
             }
-            OverviewMode::Ended(end) => {
+            OverviewMode::Ended(_, end) => {
                 let percentage = Instant::now().duration_since(*end).as_millis() as f32
                     / ANIMATION_DURATION.as_millis() as f32;
                 if percentage < 1.0 {
@@ -160,6 +162,7 @@ pub struct Shell {
 
     gaps: (u8, u8),
     overview_mode: OverviewMode,
+    swap_indicator: Option<SwapIndicator>,
     resize_mode: ResizeMode,
     resize_state: Option<(
         KeyboardFocusTarget,
@@ -628,6 +631,7 @@ impl Shell {
 
             gaps: config.static_conf.gaps,
             overview_mode: OverviewMode::None,
+            swap_indicator: None,
             resize_mode: ResizeMode::None,
             resize_state: None,
             resize_indicator: None,
@@ -1206,32 +1210,45 @@ impl Shell {
         clients
     }
 
-    pub fn set_overview_mode(&mut self, enabled: Option<Trigger>) {
+    pub fn set_overview_mode(
+        &mut self,
+        enabled: Option<Trigger>,
+        evlh: LoopHandle<'static, crate::state::Data>,
+    ) {
         if let Some(trigger) = enabled {
             if !matches!(self.overview_mode, OverviewMode::Started(_, _)) {
+                if matches!(trigger, Trigger::KeyboardSwap(_, _)) {
+                    self.swap_indicator = Some(swap_indicator(evlh));
+                }
                 self.overview_mode = OverviewMode::Started(trigger, Instant::now());
             }
         } else {
-            if !matches!(self.overview_mode, OverviewMode::Ended(_)) {
-                let reverse_duration = if let OverviewMode::Started(_, start) = self.overview_mode {
-                    ANIMATION_DURATION
-                        - Instant::now().duration_since(start).min(ANIMATION_DURATION)
-                } else {
-                    Duration::ZERO
-                };
-                self.overview_mode = OverviewMode::Ended(Instant::now() - reverse_duration);
+            if !matches!(self.overview_mode, OverviewMode::Ended(_, _)) {
+                let (reverse_duration, trigger) =
+                    if let OverviewMode::Started(trigger, start) = self.overview_mode.clone() {
+                        (
+                            ANIMATION_DURATION
+                                - Instant::now().duration_since(start).min(ANIMATION_DURATION),
+                            Some(trigger),
+                        )
+                    } else {
+                        (Duration::ZERO, None)
+                    };
+                self.overview_mode =
+                    OverviewMode::Ended(trigger, Instant::now() - reverse_duration);
             }
         }
     }
 
-    pub fn overview_mode(&mut self) -> OverviewMode {
-        if let OverviewMode::Ended(timestamp) = self.overview_mode {
+    pub fn overview_mode(&mut self) -> (OverviewMode, Option<SwapIndicator>) {
+        if let OverviewMode::Ended(_, timestamp) = self.overview_mode {
             if Instant::now().duration_since(timestamp) > ANIMATION_DURATION {
                 self.overview_mode = OverviewMode::None;
+                self.swap_indicator = None;
             }
         }
 
-        self.overview_mode.clone()
+        (self.overview_mode.clone(), self.swap_indicator.clone())
     }
 
     pub fn set_resize_mode(
@@ -1570,10 +1587,10 @@ impl Shell {
                             .toplevel_info_state
                             .toplevel_leave_output(&window, &output);
                         if grab.is_tiling_grab() {
-                            state
-                                .common
-                                .shell
-                                .set_overview_mode(Some(Trigger::Pointer(button)));
+                            state.common.shell.set_overview_mode(
+                                Some(Trigger::Pointer(button)),
+                                state.common.event_loop_handle.clone(),
+                            );
                         }
                         seat.get_pointer().unwrap().set_grab(
                             state,

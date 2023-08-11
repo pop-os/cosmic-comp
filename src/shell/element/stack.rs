@@ -1,6 +1,11 @@
 use super::{CosmicMapped, CosmicSurface, CosmicWindow};
 use crate::{
-    shell::{focus::FocusDirection, grabs::MoveGrab, layout::tiling::Direction, Shell, Trigger},
+    shell::{
+        focus::FocusDirection,
+        grabs::MoveGrab,
+        layout::tiling::{Direction, NodeDesc},
+        Shell, Trigger,
+    },
     state::State,
     utils::iced::{IcedElement, Program},
     utils::prelude::SeatExt,
@@ -85,6 +90,7 @@ pub struct CosmicStackInternal {
     previous_keyboard: Arc<AtomicUsize>,
     pointer_entered: Arc<AtomicU8>,
     previous_pointer: Arc<AtomicUsize>,
+    reenter: Arc<AtomicBool>,
     potential_drag: Arc<Mutex<Option<usize>>>,
     override_alive: Arc<AtomicBool>,
     last_seat: Arc<Mutex<Option<(Seat<State>, Serial)>>>,
@@ -107,7 +113,7 @@ impl CosmicStackInternal {
     }
 }
 
-const TAB_HEIGHT: i32 = 24;
+pub const TAB_HEIGHT: i32 = 24;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -148,6 +154,7 @@ impl CosmicStack {
                 previous_keyboard: Arc::new(AtomicUsize::new(0)),
                 pointer_entered: Arc::new(AtomicU8::new(Focus::None as u8)),
                 previous_pointer: Arc::new(AtomicUsize::new(0)),
+                reenter: Arc::new(AtomicBool::new(false)),
                 potential_drag: Arc::new(Mutex::new(None)),
                 override_alive: Arc::new(AtomicBool::new(true)),
                 last_seat: Arc::new(Mutex::new(None)),
@@ -198,6 +205,9 @@ impl CosmicStack {
             let Some(idx) = windows.iter().position(|w| w == window) else {
                 return;
             };
+            if idx == p.active.load(Ordering::SeqCst) {
+                p.reenter.store(true, Ordering::SeqCst);
+            }
             let window = windows.remove(idx);
             window.try_force_undecorated(false);
             window.set_tiled(false);
@@ -220,7 +230,10 @@ impl CosmicStack {
             if windows.len() <= idx {
                 return;
             }
-            let window = dbg!(windows.remove(idx));
+            if idx == p.active.load(Ordering::SeqCst) {
+                p.reenter.store(true, Ordering::SeqCst);
+            }
+            let window = windows.remove(idx);
             window.try_force_undecorated(false);
             window.set_tiled(false);
 
@@ -233,7 +246,7 @@ impl CosmicStack {
         self.0.with_program(|p| p.windows.lock().unwrap().len())
     }
 
-    pub fn handle_focus(&self, direction: FocusDirection) -> bool {
+    pub fn handle_focus(&self, direction: FocusDirection, swap: Option<NodeDesc>) -> bool {
         let result = self.0.with_program(|p| match direction {
             FocusDirection::Left => {
                 if !p.group_focused.load(Ordering::SeqCst) {
@@ -278,7 +291,7 @@ impl CosmicStack {
                     false
                 }
             }
-            FocusDirection::Out => {
+            FocusDirection::Out if swap.is_none() => {
                 if !p.group_focused.swap(true, Ordering::SeqCst) {
                     p.windows.lock().unwrap().iter().for_each(|w| {
                         w.set_activated(false);
@@ -289,7 +302,7 @@ impl CosmicStack {
                     false
                 }
             }
-            FocusDirection::In => {
+            FocusDirection::In if swap.is_none() => {
                 if !p.group_focused.swap(false, Ordering::SeqCst) {
                     p.windows.lock().unwrap().iter().for_each(|w| {
                         w.set_activated(true);
@@ -360,6 +373,11 @@ impl CosmicStack {
             .with_program(|p| &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)] == window)
     }
 
+    pub fn whole_stack_focused(&self) -> bool {
+        self.0
+            .with_program(|p| p.group_focused.load(Ordering::SeqCst))
+    }
+
     pub fn set_active(&self, window: &CosmicSurface) {
         self.0.with_program(|p| {
             if let Some(val) = p.windows.lock().unwrap().iter().position(|w| w == window) {
@@ -412,10 +430,12 @@ impl CosmicStack {
         self.0.with_program(|p| {
             let active = p.active.load(Ordering::SeqCst);
             let previous = p.previous_keyboard.swap(active, Ordering::SeqCst);
-            if previous != active {
+            if previous != active || p.reenter.swap(false, Ordering::SeqCst) {
                 let windows = p.windows.lock().unwrap();
-                if let Some(previous) = windows.get(previous) {
-                    KeyboardTarget::leave(previous, seat, data, serial);
+                if let Some(previous_surface) = windows.get(previous) {
+                    if previous != active {
+                        KeyboardTarget::leave(previous_surface, seat, data, serial);
+                    }
                 }
                 KeyboardTarget::enter(
                     &windows[active],
@@ -476,7 +496,7 @@ impl CosmicStack {
             .with_program(|p| p.group_focused.store(true, Ordering::SeqCst));
     }
 
-    pub(super) fn loop_handle(&self) -> LoopHandle<'static, crate::state::Data> {
+    pub(in super::super) fn loop_handle(&self) -> LoopHandle<'static, crate::state::Data> {
         self.0.loop_handle()
     }
 
@@ -1051,9 +1071,10 @@ impl PointerTarget<State> for CosmicStack {
                                         was_tiled,
                                     );
                                     if grab.is_tiling_grab() {
-                                        data.common
-                                            .shell
-                                            .set_overview_mode(Some(Trigger::Pointer(button)));
+                                        data.common.shell.set_overview_mode(
+                                            Some(Trigger::Pointer(button)),
+                                            data.common.event_loop_handle.clone(),
+                                        );
                                     }
 
                                     let seat = seat.clone();

@@ -1,4 +1,5 @@
 grow-window = Grow
 shrink-window = Shrink
-unknown-keybinding = <unset>
+swap-windows = Swap Windows
 stack-windows = Stack Windows
+unknown-keybinding = <unset>

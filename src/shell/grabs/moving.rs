@@ -4,7 +4,7 @@ use crate::{
     backend::render::{
         cursor::{CursorShape, CursorState},
         element::AsGlowRenderer,
-        IndicatorShader,
+        IndicatorShader, Key, Usage,
     },
     shell::{
         element::{
@@ -96,7 +96,7 @@ impl MoveGrabState {
             Some(
                 CosmicMappedRenderElement::from(IndicatorShader::focus_element(
                     renderer,
-                    self.window.clone(),
+                    Key::Window(Usage::MoveGrabIndicator, self.window.clone()),
                     Rectangle::from_loc_and_size(
                         render_location,
                         self.window

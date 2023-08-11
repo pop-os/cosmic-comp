@@ -88,18 +88,30 @@ pub static RECTANGLE_SHADER: &str = include_str!("./shaders/rounded_rectangle.fr
 
 pub struct IndicatorShader(pub GlesPixelProgram);
 
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub enum Usage {
+    OverviewBackdrop,
+    Overlay,
+    MoveGrabIndicator,
+    FocusIndicator,
+    PotentialGroupIndicator,
+}
+
 #[derive(Clone)]
 pub enum Key {
     Static(Id),
     Group(Weak<()>),
-    Window(CosmicMapped),
+    Window(Usage, CosmicMapped),
 }
 impl std::hash::Hash for Key {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
             Key::Static(id) => id.hash(state),
             Key::Group(arc) => (arc.as_ptr() as usize).hash(state),
-            Key::Window(window) => window.hash(state),
+            Key::Window(usage, window) => {
+                usage.hash(state);
+                window.hash(state);
+            }
         }
     }
 }
@@ -108,17 +120,12 @@ impl PartialEq for Key {
         match (self, other) {
             (Key::Static(s1), Key::Static(s2)) => s1 == s2,
             (Key::Group(g1), Key::Group(g2)) => Weak::ptr_eq(g1, g2),
-            (Key::Window(w1), Key::Window(w2)) => w1 == w2,
+            (Key::Window(u1, w1), Key::Window(u2, w2)) => u1 == u2 && w1 == w2,
             _ => false,
         }
     }
 }
 impl Eq for Key {}
-impl From<CosmicMapped> for Key {
-    fn from(window: CosmicMapped) -> Self {
-        Key::Window(window)
-    }
-}
 impl From<WindowGroup> for Key {
     fn from(group: WindowGroup) -> Self {
         Key::Group(group.alive.clone())
@@ -202,7 +209,7 @@ impl IndicatorShader {
         cache.retain(|k, _| match k {
             Key::Static(_) => true,
             Key::Group(w) => w.upgrade().is_some(),
-            Key::Window(w) => w.alive(),
+            Key::Window(_, w) => w.alive(),
         });
 
         let key = key.into();
@@ -283,7 +290,7 @@ impl BackdropShader {
         cache.retain(|k, _| match k {
             Key::Static(_) => true,
             Key::Group(a) => a.upgrade().is_some(),
-            Key::Window(w) => w.alive(),
+            Key::Window(_, w) => w.alive(),
         });
 
         let key = key.into();

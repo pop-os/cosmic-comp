@@ -157,9 +157,9 @@ pub enum Action {
     Orientation(crate::shell::layout::Orientation),
 
     ToggleStacking,
-
     ToggleTiling,
     ToggleWindowFloating,
+    SwapWindow,
 
     Resizing(ResizeDirection),
     #[serde(skip)]

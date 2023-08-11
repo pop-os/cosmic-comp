@@ -62,6 +62,7 @@ pub mod window;
 pub use self::window::CosmicWindow;
 pub mod resize_indicator;
 pub mod stack_hover;
+pub mod swap_indicator;
 
 #[cfg(feature = "debug")]
 use egui::plot::{Corner, Legend, Plot, PlotPoints, Polygon};
@@ -72,7 +73,10 @@ use tracing::debug;
 
 use super::{
     focus::FocusDirection,
-    layout::{floating::ResizeState, tiling::Direction},
+    layout::{
+        floating::ResizeState,
+        tiling::{Direction, NodeDesc},
+    },
 };
 
 space_elements! {
@@ -90,7 +94,7 @@ pub struct CosmicMapped {
     last_cursor_position: Arc<Mutex<HashMap<usize, Point<f64, Logical>>>>,
 
     //tiling
-    pub(super) tiling_node_id: Arc<Mutex<Option<NodeId>>>,
+    pub tiling_node_id: Arc<Mutex<Option<NodeId>>>,
     //floating
     pub(super) last_geometry: Arc<Mutex<Option<Rectangle<i32, Logical>>>>,
     pub(super) resize_state: Arc<Mutex<Option<ResizeState>>>,
@@ -167,14 +171,12 @@ impl CosmicMapped {
             CosmicMappedInternal::Stack(stack) => {
                 let win = stack.active();
                 let location = stack.offset();
-                let mut size = win.geometry().size;
-                size -= location.to_size();
+                let size = win.geometry().size;
                 Rectangle::from_loc_and_size(location, size)
             }
             CosmicMappedInternal::Window(win) => {
                 let location = win.offset();
-                let mut size = win.geometry().size;
-                size -= location.to_size();
+                let size = win.geometry().size;
                 Rectangle::from_loc_and_size(location, size)
             }
             _ => unreachable!(),
@@ -248,9 +250,9 @@ impl CosmicMapped {
         }
     }
 
-    pub fn handle_focus(&self, direction: FocusDirection) -> bool {
+    pub fn handle_focus(&self, direction: FocusDirection, swap: Option<NodeDesc>) -> bool {
         if let CosmicMappedInternal::Stack(stack) = &self.element {
-            stack.handle_focus(direction)
+            stack.handle_focus(direction, swap)
         } else {
             false
         }
@@ -1100,9 +1102,13 @@ where
             RescaleRenderElement<CropRenderElement<self::window::CosmicWindowRenderElement<R>>>,
         >,
     ),
+    TiledOverlay(
+        RelocateRenderElement<RescaleRenderElement<CropRenderElement<PixelShaderElement>>>,
+    ),
     GrabbedStack(RescaleRenderElement<self::stack::CosmicStackRenderElement<R>>),
     GrabbedWindow(RescaleRenderElement<self::window::CosmicWindowRenderElement<R>>),
     FocusIndicator(PixelShaderElement),
+    Overlay(PixelShaderElement),
     StackHoverIndicator(MemoryRenderBufferRenderElement<R>),
     #[cfg(feature = "debug")]
     Egui(TextureRenderElement<GlesTexture>),
@@ -1119,9 +1125,11 @@ where
             CosmicMappedRenderElement::Window(elem) => elem.id(),
             CosmicMappedRenderElement::TiledStack(elem) => elem.id(),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.id(),
+            CosmicMappedRenderElement::TiledOverlay(elem) => elem.id(),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.id(),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.id(),
             CosmicMappedRenderElement::FocusIndicator(elem) => elem.id(),
+            CosmicMappedRenderElement::Overlay(elem) => elem.id(),
             CosmicMappedRenderElement::StackHoverIndicator(elem) => elem.id(),
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => elem.id(),
@@ -1134,9 +1142,11 @@ where
             CosmicMappedRenderElement::Window(elem) => elem.current_commit(),
             CosmicMappedRenderElement::TiledStack(elem) => elem.current_commit(),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.current_commit(),
+            CosmicMappedRenderElement::TiledOverlay(elem) => elem.current_commit(),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.current_commit(),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.current_commit(),
             CosmicMappedRenderElement::FocusIndicator(elem) => elem.current_commit(),
+            CosmicMappedRenderElement::Overlay(elem) => elem.current_commit(),
             CosmicMappedRenderElement::StackHoverIndicator(elem) => elem.current_commit(),
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => elem.current_commit(),
@@ -1149,9 +1159,11 @@ where
             CosmicMappedRenderElement::Window(elem) => elem.src(),
             CosmicMappedRenderElement::TiledStack(elem) => elem.src(),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.src(),
+            CosmicMappedRenderElement::TiledOverlay(elem) => elem.src(),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.src(),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.src(),
             CosmicMappedRenderElement::FocusIndicator(elem) => elem.src(),
+            CosmicMappedRenderElement::Overlay(elem) => elem.src(),
             CosmicMappedRenderElement::StackHoverIndicator(elem) => elem.src(),
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => elem.src(),
@@ -1164,9 +1176,11 @@ where
             CosmicMappedRenderElement::Window(elem) => elem.geometry(scale),
             CosmicMappedRenderElement::TiledStack(elem) => elem.geometry(scale),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.geometry(scale),
+            CosmicMappedRenderElement::TiledOverlay(elem) => elem.geometry(scale),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.geometry(scale),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.geometry(scale),
             CosmicMappedRenderElement::FocusIndicator(elem) => elem.geometry(scale),
+            CosmicMappedRenderElement::Overlay(elem) => elem.geometry(scale),
             CosmicMappedRenderElement::StackHoverIndicator(elem) => elem.geometry(scale),
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => elem.geometry(scale),
@@ -1179,9 +1193,11 @@ where
             CosmicMappedRenderElement::Window(elem) => elem.location(scale),
             CosmicMappedRenderElement::TiledStack(elem) => elem.location(scale),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.location(scale),
+            CosmicMappedRenderElement::TiledOverlay(elem) => elem.location(scale),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.location(scale),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.location(scale),
             CosmicMappedRenderElement::FocusIndicator(elem) => elem.location(scale),
+            CosmicMappedRenderElement::Overlay(elem) => elem.location(scale),
             CosmicMappedRenderElement::StackHoverIndicator(elem) => elem.location(scale),
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => elem.location(scale),
@@ -1194,9 +1210,11 @@ where
             CosmicMappedRenderElement::Window(elem) => elem.transform(),
             CosmicMappedRenderElement::TiledStack(elem) => elem.transform(),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.transform(),
+            CosmicMappedRenderElement::TiledOverlay(elem) => elem.transform(),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.transform(),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.transform(),
             CosmicMappedRenderElement::FocusIndicator(elem) => elem.transform(),
+            CosmicMappedRenderElement::Overlay(elem) => elem.transform(),
             CosmicMappedRenderElement::StackHoverIndicator(elem) => elem.transform(),
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => elem.transform(),
@@ -1213,9 +1231,11 @@ where
             CosmicMappedRenderElement::Window(elem) => elem.damage_since(scale, commit),
             CosmicMappedRenderElement::TiledStack(elem) => elem.damage_since(scale, commit),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.damage_since(scale, commit),
+            CosmicMappedRenderElement::TiledOverlay(elem) => elem.damage_since(scale, commit),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.damage_since(scale, commit),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.damage_since(scale, commit),
             CosmicMappedRenderElement::FocusIndicator(elem) => elem.damage_since(scale, commit),
+            CosmicMappedRenderElement::Overlay(elem) => elem.damage_since(scale, commit),
             CosmicMappedRenderElement::StackHoverIndicator(elem) => {
                 elem.damage_since(scale, commit)
             }
@@ -1230,9 +1250,11 @@ where
             CosmicMappedRenderElement::Window(elem) => elem.opaque_regions(scale),
             CosmicMappedRenderElement::TiledStack(elem) => elem.opaque_regions(scale),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.opaque_regions(scale),
+            CosmicMappedRenderElement::TiledOverlay(elem) => elem.opaque_regions(scale),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.opaque_regions(scale),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.opaque_regions(scale),
             CosmicMappedRenderElement::FocusIndicator(elem) => elem.opaque_regions(scale),
+            CosmicMappedRenderElement::Overlay(elem) => elem.opaque_regions(scale),
             CosmicMappedRenderElement::StackHoverIndicator(elem) => elem.opaque_regions(scale),
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => elem.opaque_regions(scale),
@@ -1245,9 +1267,11 @@ where
             CosmicMappedRenderElement::Window(elem) => elem.alpha(),
             CosmicMappedRenderElement::TiledStack(elem) => elem.alpha(),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.alpha(),
+            CosmicMappedRenderElement::TiledOverlay(elem) => elem.alpha(),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.alpha(),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.alpha(),
             CosmicMappedRenderElement::FocusIndicator(elem) => elem.alpha(),
+            CosmicMappedRenderElement::Overlay(elem) => elem.alpha(),
             CosmicMappedRenderElement::StackHoverIndicator(elem) => elem.alpha(),
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => elem.alpha(),
@@ -1268,9 +1292,15 @@ impl RenderElement<GlowRenderer> for CosmicMappedRenderElement<GlowRenderer> {
             CosmicMappedRenderElement::Window(elem) => elem.draw(frame, src, dst, damage),
             CosmicMappedRenderElement::TiledStack(elem) => elem.draw(frame, src, dst, damage),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.draw(frame, src, dst, damage),
+            CosmicMappedRenderElement::TiledOverlay(elem) => {
+                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage)
+            }
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.draw(frame, src, dst, damage),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.draw(frame, src, dst, damage),
             CosmicMappedRenderElement::FocusIndicator(elem) => {
+                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage)
+            }
+            CosmicMappedRenderElement::Overlay(elem) => {
                 RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage)
             }
             CosmicMappedRenderElement::StackHoverIndicator(elem) => {
@@ -1289,9 +1319,11 @@ impl RenderElement<GlowRenderer> for CosmicMappedRenderElement<GlowRenderer> {
             CosmicMappedRenderElement::Window(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::TiledStack(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.underlying_storage(renderer),
+            CosmicMappedRenderElement::TiledOverlay(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::FocusIndicator(elem) => elem.underlying_storage(renderer),
+            CosmicMappedRenderElement::Overlay(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::StackHoverIndicator(elem) => {
                 elem.underlying_storage(renderer)
             }
@@ -1316,9 +1348,17 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>>
             CosmicMappedRenderElement::Window(elem) => elem.draw(frame, src, dst, damage),
             CosmicMappedRenderElement::TiledStack(elem) => elem.draw(frame, src, dst, damage),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.draw(frame, src, dst, damage),
+            CosmicMappedRenderElement::TiledOverlay(elem) => {
+                RenderElement::<GlowRenderer>::draw(elem, frame.glow_frame_mut(), src, dst, damage)
+                    .map_err(|err| GlMultiError::Render(err))
+            }
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.draw(frame, src, dst, damage),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.draw(frame, src, dst, damage),
             CosmicMappedRenderElement::FocusIndicator(elem) => {
+                RenderElement::<GlowRenderer>::draw(elem, frame.glow_frame_mut(), src, dst, damage)
+                    .map_err(|err| GlMultiError::Render(err))
+            }
+            CosmicMappedRenderElement::Overlay(elem) => {
                 RenderElement::<GlowRenderer>::draw(elem, frame.glow_frame_mut(), src, dst, damage)
                     .map_err(|err| GlMultiError::Render(err))
             }
@@ -1343,9 +1383,15 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>>
             CosmicMappedRenderElement::Window(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::TiledStack(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.underlying_storage(renderer),
+            CosmicMappedRenderElement::TiledOverlay(elem) => {
+                elem.underlying_storage(renderer.glow_renderer_mut())
+            }
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::FocusIndicator(elem) => {
+                elem.underlying_storage(renderer.glow_renderer_mut())
+            }
+            CosmicMappedRenderElement::Overlay(elem) => {
                 elem.underlying_storage(renderer.glow_renderer_mut())
             }
             CosmicMappedRenderElement::StackHoverIndicator(elem) => {

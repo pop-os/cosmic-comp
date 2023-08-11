@@ -6,7 +6,7 @@ use crate::{
     shell::{
         focus::{target::PointerFocusTarget, FocusDirection},
         grabs::{ResizeEdge, SeatMoveGrabState},
-        layout::tiling::{Direction, FocusResult, MoveResult},
+        layout::tiling::{Direction, FocusResult, MoveResult, SwapWindowGrab, TilingLayout},
         OverviewMode, ResizeDirection, ResizeMode, Trigger, Workspace,
     },
     state::Common,
@@ -250,9 +250,9 @@ impl State {
 
                     let serial = SERIAL_COUNTER.next_serial();
                     let time = Event::time_msec(&event);
-                    if let Some((action, pattern)) = seat
-                            .get_keyboard()
-                            .unwrap()
+                    let keyboard = seat.get_keyboard().unwrap();
+                    let current_focus = keyboard.current_focus();
+                    if let Some((action, pattern)) = keyboard
                             .input(
                                 self,
                                 keycode,
@@ -260,16 +260,58 @@ impl State {
                                 serial,
                                 time,
                                 |data, modifiers, handle| {
-                                    // Leave overview mode, if any modifier was released
-                                    if let OverviewMode::Started(Trigger::Keyboard(action_modifiers), _) =
-                                        data.common.shell.overview_mode()
+                                    // Leave move overview mode, if any modifier was released
+                                    if let OverviewMode::Started(Trigger::KeyboardMove(action_modifiers), _) =
+                                        data.common.shell.overview_mode().0
                                     {
                                         if (action_modifiers.ctrl && !modifiers.ctrl)
                                             || (action_modifiers.alt && !modifiers.alt)
                                             || (action_modifiers.logo && !modifiers.logo)
                                             || (action_modifiers.shift && !modifiers.shift)
                                         {
-                                            data.common.shell.set_overview_mode(None);
+                                            data.common.shell.set_overview_mode(None, data.common.event_loop_handle.clone());
+                                        }
+                                    }
+                                    // Leave swap overview mode, if any key was released
+                                    if let OverviewMode::Started(Trigger::KeyboardSwap(action_pattern, old_descriptor), _) =
+                                        data.common.shell.overview_mode().0
+                                    {
+                                        if (action_pattern.modifiers.ctrl && !modifiers.ctrl)
+                                            || (action_pattern.modifiers.alt && !modifiers.alt)
+                                            || (action_pattern.modifiers.logo && !modifiers.logo)
+                                            || (action_pattern.modifiers.shift && !modifiers.shift)
+                                            || (handle.raw_syms().contains(&action_pattern.key) && state == KeyState::Released)
+                                        {
+                                            data.common.shell.set_overview_mode(None, data.common.event_loop_handle.clone());
+
+                                            if let Some(focus) = current_focus {
+                                                if let Some(new_descriptor) = data.common.shell.workspaces.active(&current_output).1.node_desc(focus) {
+                                                    let mut spaces = data.common.shell.workspaces.spaces_mut();
+                                                    if old_descriptor.handle != new_descriptor.handle {
+                                                        let (mut old_w, mut other_w) = spaces.partition::<Vec<_>, _>(|w| w.handle == old_descriptor.handle);
+                                                        if let Some(old_tiling_layer) = old_w.get_mut(0).map(|w| &mut w.tiling_layer) {
+                                                            if let Some(new_tiling_layer) = other_w.iter_mut().find(|w| w.handle == new_descriptor.handle).map(|w| &mut w.tiling_layer) {
+                                                                if let Some(focus) = TilingLayout::swap_trees(old_tiling_layer, Some(new_tiling_layer), &old_descriptor, &new_descriptor) {
+                                                                    let seat = seat.clone();
+                                                                    data.common.event_loop_handle.insert_idle(move |data| {
+                                                                        Common::set_focus(&mut data.state, Some(&focus), &seat, None);
+                                                                    });
+                                                                }
+                                                            }
+                                                        }
+                                                    } else {
+                                                        if let Some(tiling_layer) = spaces.find(|w| w.handle == new_descriptor.handle).map(|w| &mut w.tiling_layer) {
+                                                            if let Some(focus) = TilingLayout::swap_trees(tiling_layer, None, &old_descriptor, &new_descriptor) {
+                                                                std::mem::drop(spaces);
+                                                                let seat = seat.clone();
+                                                                data.common.event_loop_handle.insert_idle(move |data| {
+                                                                    Common::set_focus(&mut data.state, Some(&focus), &seat, None);
+                                                                });
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
 
@@ -481,7 +523,7 @@ impl State {
                         &output,
                         output_geometry,
                         &self.common.shell.override_redirect_windows,
-                        overview,
+                        overview.0,
                         workspace,
                     );
 
@@ -551,7 +593,7 @@ impl State {
                         &output,
                         geometry,
                         &self.common.shell.override_redirect_windows,
-                        overview,
+                        overview.0,
                         workspace,
                     );
 
@@ -670,7 +712,7 @@ impl State {
                                 };
                                 if !done {
                                     if let Some((target, _)) =
-                                        workspace.element_under(relative_pos, overview)
+                                        workspace.element_under(relative_pos, overview.0)
                                     {
                                         under = Some(target);
                                     } else {
@@ -705,10 +747,12 @@ impl State {
                         }
                     } else {
                         if let OverviewMode::Started(Trigger::Pointer(action_button), _) =
-                            self.common.shell.overview_mode()
+                            self.common.shell.overview_mode().0
                         {
                             if action_button == button {
-                                self.common.shell.set_overview_mode(None);
+                                self.common
+                                    .shell
+                                    .set_overview_mode(None, self.common.event_loop_handle.clone());
                             }
                         }
                     };
@@ -899,7 +943,7 @@ impl State {
         }
     }
 
-    fn handle_action(
+    pub fn handle_action(
         &mut self,
         action: Action,
         seat: &Seat<State>,
@@ -1232,11 +1276,18 @@ impl State {
             }
             Action::Focus(focus) => {
                 let current_output = seat.active_output();
+                let overview = self.common.shell.overview_mode().0;
                 let workspace = self.common.shell.active_space_mut(&current_output);
                 let focus_stack = workspace.focus_stack.get(seat);
-                let mut result = workspace
-                    .tiling_layer
-                    .next_focus(focus, seat, focus_stack.iter());
+                let mut result = workspace.tiling_layer.next_focus(
+                    focus,
+                    seat,
+                    focus_stack.iter(),
+                    match overview {
+                        OverviewMode::Started(Trigger::KeyboardSwap(_, desc), _) => Some(desc),
+                        _ => None,
+                    },
+                );
                 if workspace.get_fullscreen(&current_output).is_some() {
                     result = FocusResult::None;
                 }
@@ -1348,11 +1399,31 @@ impl State {
                     MoveResult::Done => {
                         if let Some(focused_window) = workspace.focus_stack.get(seat).last() {
                             if workspace.is_tiled(focused_window) {
-                                self.common
-                                    .shell
-                                    .set_overview_mode(Some(Trigger::Keyboard(pattern.modifiers)));
+                                self.common.shell.set_overview_mode(
+                                    Some(Trigger::KeyboardMove(pattern.modifiers)),
+                                    self.common.event_loop_handle.clone(),
+                                );
                             }
                         }
+                    }
+                }
+            }
+            Action::SwapWindow => {
+                let current_output = seat.active_output();
+                let workspace = self.common.shell.active_space_mut(&current_output);
+                if workspace.get_fullscreen(&current_output).is_some() {
+                    return; // TODO, is this what we want? Maybe disengage fullscreen instead?
+                }
+
+                let keyboard_handle = seat.get_keyboard().unwrap();
+                if let Some(focus) = keyboard_handle.current_focus() {
+                    if let Some(descriptor) = workspace.node_desc(focus) {
+                        let grab = SwapWindowGrab::new(seat.clone(), descriptor.clone());
+                        keyboard_handle.set_grab(grab, serial);
+                        self.common.shell.set_overview_mode(
+                            Some(Trigger::KeyboardSwap(pattern, descriptor)),
+                            self.common.event_loop_handle.clone(),
+                        );
                     }
                 }
             }

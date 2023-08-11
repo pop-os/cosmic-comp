@@ -1,4 +1,5 @@
 grow-window = Vergrößern
 shrink-window = Verkleinern
-unknown-keybinding = <nicht zugewiesen>
+swap-windows = Fenster tauschen
 stack-windows = Fenster stapeln
+unknown-keybinding = <nicht zugewiesen>

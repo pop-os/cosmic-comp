@@ -50,13 +50,14 @@ use wayland_backend::server::ClientId;
 use super::{
     element::{
         resize_indicator::ResizeIndicator, stack::CosmicStackRenderElement,
-        window::CosmicWindowRenderElement, CosmicMapped,
+        swap_indicator::SwapIndicator, window::CosmicWindowRenderElement, CosmicMapped,
     },
     focus::{
-        target::{KeyboardFocusTarget, PointerFocusTarget},
+        target::{KeyboardFocusTarget, PointerFocusTarget, WindowGroup},
         FocusStack, FocusStackMut,
     },
     grabs::{ResizeEdge, ResizeGrab},
+    layout::tiling::NodeDesc,
     CosmicMappedRenderElement, CosmicSurface, ResizeDirection, ResizeMode,
 };
 
@@ -482,6 +483,43 @@ impl Workspace {
             && self.tiling_layer.mapped().any(|(_, m, _)| m == mapped)
     }
 
+    pub fn node_desc(&self, focus: KeyboardFocusTarget) -> Option<NodeDesc> {
+        match focus {
+            KeyboardFocusTarget::Element(mapped) => {
+                self.tiling_layer.mapped().find_map(|(output, m, _)| {
+                    (m == &mapped).then_some(output.clone()).and_then(|output| {
+                        mapped
+                            .tiling_node_id
+                            .lock()
+                            .unwrap()
+                            .clone()
+                            .map(|node_id| NodeDesc {
+                                handle: self.handle.clone(),
+                                output: output.downgrade(),
+                                node: node_id,
+                                stack_window: if mapped
+                                    .stack_ref()
+                                    .map(|stack| !stack.whole_stack_focused())
+                                    .unwrap_or(false)
+                                {
+                                    Some(mapped.active_window())
+                                } else {
+                                    None
+                                },
+                            })
+                    })
+                })
+            }
+            KeyboardFocusTarget::Group(WindowGroup { output, node, .. }) => Some(NodeDesc {
+                handle: self.handle.clone(),
+                output,
+                node,
+                stack_window: None,
+            }),
+            _ => None,
+        }
+    }
+
     pub fn render_output<'a, R>(
         &self,
         renderer: &mut R,
@@ -489,7 +527,7 @@ impl Workspace {
         override_redirect_windows: &[X11Surface],
         xwm_state: Option<&'a mut XWaylandState>,
         draw_focus_indicator: Option<&Seat<State>>,
-        overview: OverviewMode,
+        overview: (OverviewMode, Option<SwapIndicator>),
         resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
         indicator_thickness: u8,
     ) -> Result<
@@ -582,7 +620,7 @@ impl Workspace {
                 draw_focus_indicator.and_then(|seat| self.focus_stack.get(seat).last().cloned());
 
             // floating surfaces
-            let alpha = match &overview {
+            let alpha = match &overview.0 {
                 OverviewMode::Started(_, started) => {
                     (1.0 - (Instant::now().duration_since(*started).as_millis()
                         / ANIMATION_DURATION.as_millis()) as f32)
@@ -590,7 +628,7 @@ impl Workspace {
                         * 0.4
                         + 0.6
                 }
-                OverviewMode::Ended(ended) => {
+                OverviewMode::Ended(_, ended) => {
                     ((Instant::now().duration_since(*ended).as_millis()
                         / ANIMATION_DURATION.as_millis()) as f32)
                         * 0.4
@@ -614,6 +652,7 @@ impl Workspace {
             let (w_elements, p_elements) = self.tiling_layer.render_output::<R>(
                 renderer,
                 output,
+                &self.handle,
                 draw_focus_indicator,
                 layer_map.non_exclusive_zone(),
                 overview.clone(),
@@ -635,12 +674,12 @@ impl Workspace {
                 }
             }
 
-            let alpha = match overview {
+            let alpha = match overview.0 {
                 OverviewMode::Started(_, start) => Some(
                     (Instant::now().duration_since(start).as_millis() as f64 / 100.0).min(1.0)
                         as f32,
                 ),
-                OverviewMode::Ended(ended) => Some(
+                OverviewMode::Ended(_, ended) => Some(
                     1.0 - (Instant::now().duration_since(ended).as_millis() as f64 / 100.0).min(1.0)
                         as f32,
                 ),
