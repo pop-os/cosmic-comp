@@ -18,6 +18,7 @@ pub mod screencopy;
 pub mod seat;
 pub mod security_context;
 pub mod shm;
+pub mod tablet_manager;
 pub mod toplevel_info;
 pub mod toplevel_management;
 pub mod viewporter;

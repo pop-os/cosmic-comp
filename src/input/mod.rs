@@ -41,7 +41,7 @@ use smithay::{
     utils::{Logical, Point, Rectangle, Serial, SERIAL_COUNTER},
     wayland::{
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat, seat::WaylandFocus,
-        shell::wlr_layer::Layer as WlrLayer,
+        shell::wlr_layer::Layer as WlrLayer, tablet_manager::{TabletSeatTrait, TabletDescriptor},
     },
     xwayland::X11Surface,
 };
@@ -194,7 +194,10 @@ impl State {
                 let devices = userdata.get::<Devices>().unwrap();
                 for cap in devices.add_device(&device) {
                     match cap {
-                        // TODO: Handle touch, tablet
+                        DeviceCapability::TabletTool => {
+                            seat.tablet_seat().add_tablet::<Self>(&self.common.display_handle, &TabletDescriptor::from(&device));
+                        }
+                        // TODO: Handle touch
                         _ => {}
                     }
                 }
@@ -210,7 +213,10 @@ impl State {
                     if devices.has_device(&device) {
                         for cap in devices.remove_device(&device) {
                             match cap {
-                                // TODO: Handle touch, tablet
+                                DeviceCapability::TabletTool => {
+                                    seat.tablet_seat().remove_tablet(&TabletDescriptor::from(&device));
+                                }
+                                // TODO: Handle touch
                                 _ => {}
                             }
                         }
