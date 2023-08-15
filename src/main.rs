@@ -12,10 +12,7 @@ use anyhow::{Context, Result};
 use std::{ffi::OsString, os::unix::prelude::AsRawFd, sync::Arc};
 use tracing::{error, info, warn};
 
-use crate::wayland::{
-    handlers::{compositor::client_compositor_state, screencopy::PendingScreencopyBuffers},
-    protocols::screencopy::SessionType,
-};
+use crate::wayland::handlers::compositor::client_compositor_state;
 
 pub mod backend;
 pub mod config;
@@ -79,35 +76,6 @@ fn main() -> Result<()> {
             }
         }
         data.state.common.shell.refresh();
-        if data.state.common.shell.animations_going() {
-            for output in data.state.common.shell.outputs() {
-                let mut scheduled_sessions = None;
-                if let Some(sessions) = output.user_data().get::<PendingScreencopyBuffers>() {
-                    scheduled_sessions
-                        .get_or_insert_with(Vec::new)
-                        .extend(sessions.borrow_mut().drain(..));
-                }
-
-                data.state.backend.schedule_render(
-                    &data.state.common.event_loop_handle,
-                    &output,
-                    scheduled_sessions.as_ref().map(|sessions| {
-                        sessions
-                            .iter()
-                            .filter(|(s, _)| match s.session_type() {
-                                SessionType::Output(o) | SessionType::Workspace(o, _)
-                                    if &o == output =>
-                                {
-                                    true
-                                }
-                                _ => false,
-                            })
-                            .cloned()
-                            .collect::<Vec<_>>()
-                    }),
-                );
-            }
-        }
         state::Common::refresh_focus(&mut data.state);
 
         // send out events
