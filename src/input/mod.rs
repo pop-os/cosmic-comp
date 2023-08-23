@@ -901,7 +901,9 @@ impl State {
                     );
                 }
             }
-            _ => { /* TODO e.g. tablet or touch events */ }
+            InputEvent::TabletToolProximity { event, .. } => { }
+            InputEvent::TabletToolTip { event, .. } => { }
+            _ => { /* TODO e.g. touch events */ }
         }
     }
 
