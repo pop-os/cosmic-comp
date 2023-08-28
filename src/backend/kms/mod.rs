@@ -141,6 +141,7 @@ pub struct Surface {
     scheduled: bool,
     pending: bool,
     dirty: bool,
+    last_animation_state: bool,
     render_timer_token: Option<RegistrationToken>,
     fps: Fps,
     feedback: HashMap<DrmNode, SurfaceDmabufFeedback>,
@@ -505,11 +506,20 @@ impl State {
                                         }
 
                                         surface.pending = false;
-                                        (surface.dirty
-                                            || data.state.common.shell.animations_going())
-                                        .then(|| {
-                                            (surface.output.clone(), surface.fps.avg_rendertime(5))
-                                        })
+                                        let animations_going =
+                                            data.state.common.shell.animations_going();
+                                        let animation_diff = std::mem::replace(
+                                            &mut surface.last_animation_state,
+                                            animations_going,
+                                        ) != animations_going;
+                                        (surface.dirty || animations_going || animation_diff).then(
+                                            || {
+                                                (
+                                                    surface.output.clone(),
+                                                    surface.fps.avg_rendertime(5),
+                                                )
+                                            },
+                                        )
                                     }
                                     Some(Err(err)) => {
                                         warn!(?err, "Failed to submit frame.");
@@ -916,6 +926,7 @@ impl Device {
             scheduled: false,
             pending: false,
             dirty: false,
+            last_animation_state: false,
             render_timer_token: None,
             fps: Fps::new(renderer.as_mut()),
             feedback: HashMap::new(),
