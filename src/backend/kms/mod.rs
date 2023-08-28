@@ -1004,7 +1004,11 @@ fn get_surface_dmabuf_feedback(
     let target_node = surface.device_fd().dev_id().unwrap();
     let mut builder = DmabufFeedbackBuilder::new(render_node.dev_id(), render_formats);
     if target_node != render_node.dev_id() && !combined_formats.is_empty() {
-        builder = builder.add_preference_tranche(target_node, None, combined_formats);
+        builder = builder.add_preference_tranche(
+            target_node,
+            Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
+            combined_formats,
+        );
     };
     let render_feedback = builder.clone().build().unwrap();
 
