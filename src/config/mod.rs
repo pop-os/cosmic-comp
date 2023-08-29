@@ -5,7 +5,7 @@ use crate::{
     state::{BackendData, Data, State},
     wayland::protocols::output_configuration::OutputConfigurationState,
 };
-use cosmic_config::{ConfigGet, ConfigSet};
+use cosmic_config::ConfigGet;
 use serde::{Deserialize, Serialize};
 use smithay::input::Seat;
 pub use smithay::{
@@ -25,11 +25,11 @@ use std::{cell::RefCell, collections::HashMap, fs::OpenOptions, path::PathBuf};
 use tracing::{debug, error, info, warn};
 
 mod input_config;
-use input_config::InputConfig;
 mod key_bindings;
 pub use key_bindings::{Action, KeyModifier, KeyModifiers, KeyPattern};
 mod types;
 pub use self::types::*;
+use cosmic_comp_config::{input::InputConfig, XkbConfig};
 
 #[derive(Debug)]
 pub struct Config {
@@ -37,6 +37,8 @@ pub struct Config {
     pub dynamic_conf: DynamicConfig,
     pub config: cosmic_config::Config,
     pub xkb: XkbConfig,
+    pub input_default: InputConfig,
+    pub input_touchpad: InputConfig,
     pub input_devices: HashMap<String, InputConfig>,
 }
 
@@ -169,6 +171,8 @@ impl Config {
             static_conf: Self::load_static(xdg.as_ref()),
             dynamic_conf: Self::load_dynamic(xdg.as_ref()),
             xkb: get_config(&config, "xkb-config"),
+            input_default: get_config(&config, "input-default"),
+            input_touchpad: get_config(&config, "input-touchpad"),
             input_devices: get_config(&config, "input-devices"),
             config,
         }
@@ -407,22 +411,14 @@ impl Config {
         self.xkb.clone()
     }
 
-    pub fn read_device(&mut self, device: &mut InputDevice) {
-        use std::collections::hash_map::Entry;
-
-        let mut config_changed = false;
-        match self.input_devices.entry(device.name().into()) {
-            Entry::Occupied(entry) => entry.get().update_device(device),
-            Entry::Vacant(entry) => {
-                entry.insert(InputConfig::for_device(device));
-                config_changed = true;
-            }
-        }
-        if config_changed {
-            if let Err(err) = self.config.set("input-devices", &self.input_devices) {
-                error!(?err, "Failed to write config 'input-devices'");
-            }
-        }
+    pub fn read_device(&self, device: &mut InputDevice) {
+        let default_config = if device.config_tap_finger_count() > 0 {
+            &self.input_touchpad
+        } else {
+            &self.input_default
+        };
+        let device_config = self.input_devices.get(device.name());
+        input_config::update_device(device, device_config, default_config);
     }
 }
 
@@ -483,6 +479,14 @@ fn get_config<T: Default + serde::de::DeserializeOwned>(
     })
 }
 
+fn update_input(state: &mut State) {
+    if let BackendData::Kms(ref mut kms_state) = &mut state.backend {
+        for device in kms_state.input_devices.values_mut() {
+            state.common.config.read_device(device);
+        }
+    }
+}
+
 fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut State) {
     for key in &keys {
         match key.as_str() {
@@ -490,7 +494,7 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 let value = get_config::<XkbConfig>(&config, "xkb-config");
                 for seat in state.common.seats().cloned().collect::<Vec<_>>().iter() {
                     if let Some(keyboard) = seat.get_keyboard() {
-                        if let Err(err) = keyboard.set_xkb_config(state, (&value).into()) {
+                        if let Err(err) = keyboard.set_xkb_config(state, xkb_config_to_wl(&value)) {
                             error!(?err, "Failed to load provided xkb config");
                             // TODO Revert to default?
                         }
@@ -498,18 +502,32 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 }
                 state.common.config.xkb = value;
             }
+            "input-default" => {
+                let value = get_config::<InputConfig>(&config, "input-default");
+                state.common.config.input_default = value;
+                update_input(state);
+            }
+            "input-touchpad" => {
+                let value = get_config::<InputConfig>(&config, "input-touchpad");
+                state.common.config.input_touchpad = value;
+                update_input(state);
+            }
             "input-devices" => {
                 let value = get_config::<HashMap<String, InputConfig>>(&config, "input-devices");
-                if let BackendData::Kms(ref mut kms_state) = &mut state.backend {
-                    for (name, device) in kms_state.input_devices.iter_mut() {
-                        if let Some(input_config) = value.get(name) {
-                            input_config.update_device(device);
-                        }
-                    }
-                }
                 state.common.config.input_devices = value;
+                update_input(state);
             }
             _ => {}
         }
+    }
+}
+
+pub fn xkb_config_to_wl(config: &XkbConfig) -> WlXkbConfig<'_> {
+    WlXkbConfig {
+        rules: &config.rules,
+        model: &config.model,
+        layout: &config.layout,
+        variant: &config.variant,
+        options: config.options.clone(),
     }
 }
