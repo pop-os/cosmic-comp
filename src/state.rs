@@ -52,7 +52,7 @@ use smithay::{
         wayland_server::{
             backend::{ClientData, ClientId, DisconnectReason},
             protocol::wl_shm,
-            Display, DisplayHandle,
+            Client, Display, DisplayHandle,
         },
     },
     utils::{Clock, IsAlive, Monotonic},
@@ -66,6 +66,7 @@ use smithay::{
         presentation::PresentationState,
         primary_selection::PrimarySelectionState,
         seat::WaylandFocus,
+        security_context::SecurityContext,
         shell::{kde::decoration::KdeDecorationState, xdg::decoration::XdgDecorationState},
         shm::ShmState,
         viewporter::ViewporterState,
@@ -100,6 +101,7 @@ pub struct ClientState {
     pub drm_node: Option<DrmNode>,
     pub privileged: bool,
     pub evls: LoopSignal,
+    pub security_context: Option<SecurityContext>,
 }
 impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
@@ -265,6 +267,12 @@ impl BackendData {
     }
 }
 
+pub fn client_has_security_context(client: &Client) -> bool {
+    client
+        .get_data::<ClientState>()
+        .map_or(true, |client_state| client_state.security_context.is_none())
+}
+
 impl State {
     pub fn new(
         dh: &DisplayHandle,
@@ -285,13 +293,14 @@ impl State {
         let fractional_scale_state = FractionalScaleManagerState::new::<State>(dh);
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<Self>(dh);
         let output_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
-        let output_configuration_state = OutputConfigurationState::new(dh, |_| true);
+        let output_configuration_state =
+            OutputConfigurationState::new(dh, client_has_security_context);
         let presentation_state = PresentationState::new::<Self>(dh, clock.id() as u32);
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
         let screencopy_state = ScreencopyState::new::<Self, _, _>(
             dh,
             vec![CursorMode::Embedded, CursorMode::Hidden],
-            |_| true,
+            client_has_security_context,
         ); // TODO: privileged
         let shm_state =
             ShmState::new::<Self>(dh, vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888]);
@@ -373,6 +382,7 @@ impl State {
             },
             privileged: false,
             evls: self.common.event_loop_signal.clone(),
+            security_context: None,
         }
     }
 
@@ -383,6 +393,7 @@ impl State {
             drm_node: Some(drm_node),
             privileged: false,
             evls: self.common.event_loop_signal.clone(),
+            security_context: None,
         }
     }
 
@@ -396,6 +407,7 @@ impl State {
             },
             privileged: true,
             evls: self.common.event_loop_signal.clone(),
+            security_context: None,
         }
     }
 }

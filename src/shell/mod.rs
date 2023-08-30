@@ -37,6 +37,7 @@ use smithay::{
 
 use crate::{
     config::{Config, KeyModifiers, KeyPattern, OutputConfig, WorkspaceMode as ConfigMode},
+    state::client_has_security_context,
     utils::prelude::*,
     wayland::protocols::{
         toplevel_info::ToplevelInfoState,
@@ -583,7 +584,7 @@ impl Shell {
         let toplevel_info_state = ToplevelInfoState::new(
             dh,
             //|client| client.get_data::<ClientState>().map_or(false, |s| s.privileged),
-            |_| true,
+            client_has_security_context,
         );
         let toplevel_management_state = ToplevelManagementState::new::<State, _>(
             dh,
@@ -592,12 +593,12 @@ impl Shell {
                 ManagementCapabilities::Activate,
             ],
             //|client| client.get_data::<ClientState>().map_or(false, |s| s.privileged),
-            |_| true,
+            client_has_security_context,
         );
         let mut workspace_state = WorkspaceState::new(
             dh,
             //|client| client.get_data::<ClientState>().map_or(false, |s| s.privileged),
-            |_| true,
+            client_has_security_context,
         );
 
         let tiling_enabled = config.static_conf.tiling_enabled;
