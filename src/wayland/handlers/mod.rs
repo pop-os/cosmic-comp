@@ -16,6 +16,7 @@ pub mod primary_selection;
 pub mod relative_pointer;
 pub mod screencopy;
 pub mod seat;
+pub mod security_context;
 pub mod shm;
 pub mod toplevel_info;
 pub mod toplevel_management;
