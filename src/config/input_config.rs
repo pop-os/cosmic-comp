@@ -1,15 +1,5 @@
-pub use smithay::{
-    backend::input::KeyState,
-    input::keyboard::{keysyms as KeySyms, Keysym, ModifiersState},
-    output::{Mode, Output},
-    reexports::{
-        calloop::LoopHandle,
-        input::{
-            AccelProfile, ClickMethod, Device as InputDevice, ScrollMethod, SendEventsMode,
-            TapButtonMap,
-        },
-    },
-    utils::{Logical, Physical, Point, Size, Transform},
+use smithay::reexports::input::{
+    Device as InputDevice, DeviceConfigError, ScrollMethod, SendEventsMode,
 };
 use tracing::warn;
 
@@ -91,17 +81,38 @@ pub fn for_device(device: &InputDevice) -> InputConfig {
     }
 }
 
+// Get setting from `device_config` if present, then `default_config`
+// Returns `is_default` to indicate this is a default value.
 fn get_config<'a, T: 'a, F: Fn(&'a InputConfig) -> Option<T>>(
     device_config: Option<&'a InputConfig>,
     default_config: &'a InputConfig,
     f: F,
-) -> Option<T> {
-    if let Some(device_config) = device_config {
-        if let Some(setting) = f(device_config) {
-            return Some(setting);
-        }
+) -> Option<(T, bool)> {
+    if let Some(setting) = device_config.and_then(&f) {
+        Some((setting, false))
+    } else if let Some(setting) = f(default_config) {
+        Some((setting, true))
+    } else {
+        None
     }
-    f(default_config)
+}
+
+fn config_set_error<T: std::fmt::Debug>(
+    device: &InputDevice,
+    setting: &str,
+    value: T,
+    err: DeviceConfigError,
+    is_default: bool,
+) {
+    if !(is_default && err == DeviceConfigError::Unsupported) {
+        warn!(
+            ?err,
+            "Failed to apply {} {:?} for device {:?}.",
+            setting,
+            value,
+            device.name(),
+        );
+    }
 }
 
 pub fn update_device(
@@ -130,152 +141,77 @@ pub fn update_device(
             device.name(),
         );
     }
-    if let Some(accel) = config!(|x| x.acceleration.as_ref()) {
+    if let Some((accel, is_default)) = config!(|x| x.acceleration.as_ref()) {
         if let Some(profile) = accel.profile {
             if let Err(err) = device.config_accel_set_profile(profile) {
-                warn!(
-                    ?err,
-                    "Failed to apply acceleration profile {:?} for device {:?}.",
-                    profile,
-                    device.name(),
-                );
+                config_set_error(device, "acceleration profile", profile, err, is_default);
             }
         }
         if let Err(err) = device.config_accel_set_speed(accel.speed) {
-            warn!(
-                ?err,
-                "Failed to apply acceleration speed {:?} for device {:?}.",
-                accel.speed,
-                device.name(),
-            );
+            config_set_error(device, "acceleration speed", accel.speed, err, is_default);
         }
     }
-    if let Some(matrix) = config!(|x| x.calibration) {
+    if let Some((matrix, is_default)) = config!(|x| x.calibration) {
         if let Err(err) = device.config_calibration_set_matrix(matrix) {
-            warn!(
-                ?err,
-                "Failed to apply calibration matrix {:?} for device {:?}.",
-                matrix,
-                device.name(),
-            );
+            config_set_error(device, "calibration matrix", matrix, err, is_default);
         }
     }
-    if let Some(method) = config!(|x| x.click_method) {
+    if let Some((method, is_default)) = config!(|x| x.click_method) {
         if let Err(err) = device.config_click_set_method(method) {
-            warn!(
-                ?err,
-                "Failed to apply click method {:?} for device {:?}.",
-                method,
-                device.name(),
-            );
+            config_set_error(device, "click method", method, err, is_default);
         }
     }
-    if let Some(dwt) = config!(|x| x.disable_while_typing) {
+    if let Some((dwt, is_default)) = config!(|x| x.disable_while_typing) {
         if let Err(err) = device.config_dwt_set_enabled(dwt) {
-            warn!(
-                ?err,
-                "Failed to apply disable-while-typing {:?} for device {:?}.",
-                dwt,
-                device.name(),
-            );
+            config_set_error(device, "disable-while-typing", dwt, err, is_default);
         }
     }
-    if let Some(left) = config!(|x| x.left_handed) {
+    if let Some((left, is_default)) = config!(|x| x.left_handed) {
         if let Err(err) = device.config_left_handed_set(left) {
-            warn!(
-                ?err,
-                "Failed to apply left-handed {:?} for device {:?}.",
-                left,
-                device.name(),
-            );
+            config_set_error(device, "left-handed", left, err, is_default);
         }
     }
-    if let Some(middle) = config!(|x| x.middle_button_emulation) {
+    if let Some((middle, is_default)) = config!(|x| x.middle_button_emulation) {
         if let Err(err) = device.config_middle_emulation_set_enabled(middle) {
-            warn!(
-                ?err,
-                "Failed to apply middle-button-emulation {:?} for device {:?}.",
-                middle,
-                device.name(),
-            );
+            config_set_error(device, "middle-button-emulation", middle, err, is_default);
         }
     }
-    if let Some(angle) = config!(|x| x.rotation_angle) {
+    if let Some((angle, is_default)) = config!(|x| x.rotation_angle) {
         if let Err(err) = device.config_rotation_set_angle(angle) {
-            warn!(
-                ?err,
-                "Failed to apply rotation-angle {:?} for device {:?}",
-                angle,
-                device.name(),
-            );
+            config_set_error(device, "rotation-angle", angle, err, is_default);
         }
     }
-    if let Some(scroll) = config!(|x| x.scroll_config.as_ref()) {
+    if let Some((scroll, is_default)) = config!(|x| x.scroll_config.as_ref()) {
         if let Some(method) = scroll.method {
             if let Err(err) = device.config_scroll_set_method(method) {
-                warn!(
-                    ?err,
-                    "Failed to apply scroll method {:?} for device {:?}.",
-                    method,
-                    device.name(),
-                );
+                config_set_error(device, "scroll method", scroll, err, is_default);
             }
         }
         if let Some(natural) = scroll.natural_scroll {
             if let Err(err) = device.config_scroll_set_natural_scroll_enabled(natural) {
-                warn!(
-                    ?err,
-                    "Failed to apply natural scrolling {:?} for device {:?}.",
-                    natural,
-                    device.name(),
-                );
+                config_set_error(device, "natural scrolling", natural, err, is_default);
             }
         }
         if let Some(button) = scroll.scroll_button {
             if let Err(err) = device.config_scroll_set_button(button) {
-                warn!(
-                    ?err,
-                    "Failed to apply scroll button {:?} for device {:?}.",
-                    button,
-                    device.name(),
-                );
+                config_set_error(device, "scroll button", button, err, is_default);
             }
         }
     }
-    if let Some(tap) = config!(|x| x.tap_config.as_ref()) {
+    if let Some((tap, is_default)) = config!(|x| x.tap_config.as_ref()) {
         if let Err(err) = device.config_tap_set_enabled(tap.enabled) {
-            warn!(
-                ?err,
-                "Failed to apply tap-to-click {:?} for device {:?}.",
-                tap.enabled,
-                device.name(),
-            );
+            config_set_error(device, "tap-to-click", tap.enabled, err, is_default);
         }
         if let Some(button_map) = tap.button_map {
             if let Err(err) = device.config_tap_set_button_map(button_map) {
-                warn!(
-                    ?err,
-                    "Failed to apply button map {:?} for device {:?}.",
-                    button_map,
-                    device.name(),
-                );
+                config_set_error(device, "button map", button_map, err, is_default);
             }
         }
         if let Err(err) = device.config_tap_set_drag_enabled(tap.drag) {
-            warn!(
-                ?err,
-                "Failed to apply tap-drag {:?} for device {:?}.",
-                tap.drag,
-                device.name(),
-            );
+            config_set_error(device, "tap-drag", tap.drag, err, is_default);
         }
         if let Err(err) = device.config_tap_set_drag_lock_enabled(tap.drag_lock) {
-            warn!(
-                ?err,
-                "Failed to apply tap-drag-lock {:?} for device {:?}.",
-                tap.drag_lock,
-                device.name(),
-            );
+            config_set_error(device, "tap-drag-lock", tap.drag_lock, err, is_default);
         }
     }
 }
