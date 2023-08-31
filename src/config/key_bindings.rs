@@ -195,7 +195,7 @@ pub fn add_default_bindings(
     {
         WorkspaceLayout::Horizontal => (
             [KeySyms::KEY_Left, KeySyms::KEY_h],
-            [KeySyms::KEY_Right, KeySyms::KEY_j],
+            [KeySyms::KEY_Right, KeySyms::KEY_l],
             [KeySyms::KEY_Up, KeySyms::KEY_k],
             [KeySyms::KEY_Down, KeySyms::KEY_j],
         ),
@@ -203,7 +203,7 @@ pub fn add_default_bindings(
             [KeySyms::KEY_Up, KeySyms::KEY_k],
             [KeySyms::KEY_Down, KeySyms::KEY_j],
             [KeySyms::KEY_Left, KeySyms::KEY_h],
-            [KeySyms::KEY_Right, KeySyms::KEY_j],
+            [KeySyms::KEY_Right, KeySyms::KEY_l],
         ),
     };
 
