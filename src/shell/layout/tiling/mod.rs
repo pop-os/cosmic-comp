@@ -2971,6 +2971,7 @@ impl TilingLayout {
         let mut window_elements = Vec::new();
         let mut popup_elements = Vec::new();
 
+        let is_overview = !matches!(overview, OverviewMode::None);
         let is_mouse_tiling = (matches!(overview, OverviewMode::Started(Trigger::Pointer(_), _)))
             .then(|| self.last_overview_hover.as_ref().map(|x| &x.1));
 
@@ -3035,6 +3036,7 @@ impl TilingLayout {
             renderer,
             geometries,
             old_geometries,
+            is_overview,
             seat,
             output,
             percentage,
@@ -3755,6 +3757,7 @@ fn render_new_tree<R>(
     renderer: &mut R,
     geometries: Option<HashMap<NodeId, Rectangle<i32, Logical>>>,
     old_geometries: Option<HashMap<NodeId, Rectangle<i32, Logical>>>,
+    is_overview: bool,
     seat: Option<&Seat<State>>,
     output: &Output,
     percentage: f32,
@@ -3891,7 +3894,9 @@ where
                     if indicator_thickness > 0 || data.is_group() {
                         let mut geo = geo.clone();
                         if data.is_group() {
-                            let outer_gap: i32 = (GAP_KEYBOARD as f32 * percentage).round() as i32;
+                            let outer_gap: i32 = (if is_overview { GAP_KEYBOARD } else { 4 } as f32
+                                * percentage)
+                                .round() as i32;
                             geo.loc += (outer_gap, outer_gap).into();
                             geo.size -= (outer_gap * 2, outer_gap * 2).into();
 
