@@ -517,6 +517,7 @@ impl FloatingLayout {
                             elem.clone(),
                             indicator_geometry,
                             indicator_thickness,
+                            output_scale,
                             alpha,
                         );
                         window_elements.push(element.into());

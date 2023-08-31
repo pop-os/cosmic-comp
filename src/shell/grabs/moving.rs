@@ -32,7 +32,7 @@ use smithay::{
     },
     output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::{IsAlive, Logical, Point, Rectangle, Serial},
+    utils::{IsAlive, Logical, Point, Rectangle, Scale, Serial},
     wayland::compositor::SurfaceData,
 };
 use std::{
@@ -83,7 +83,7 @@ impl MoveGrabState {
             return Vec::new();
         }
 
-        let output_scale = output.current_scale().fractional_scale().into();
+        let output_scale: Scale<f64> = output.current_scale().fractional_scale().into();
         let scaling_offset =
             self.window_offset - self.window_offset.to_f64().upscale(scale).to_i32_round();
         let render_location =
@@ -104,6 +104,7 @@ impl MoveGrabState {
                             .to_i32_round(),
                     ),
                     self.indicator_thickness,
+                    output_scale.x,
                     1.0,
                 ))
                 .into(),

@@ -2319,6 +2319,7 @@ impl TilingLayout {
                     None,
                     1.0,
                     overview.alpha().unwrap(),
+                    1.0,
                     placeholder_id,
                     Some(None),
                 )
@@ -2984,6 +2985,7 @@ impl TilingLayout {
                     // but for that we have to associate focus with a tree (and animate focus changes properly)
                     1.0 - transition,
                     transition,
+                    output_scale,
                     &self.placeholder_id,
                     is_mouse_tiling,
                 )
@@ -3017,6 +3019,7 @@ impl TilingLayout {
                 seat,
                 transition,
                 transition,
+                output_scale,
                 &self.placeholder_id,
                 is_mouse_tiling,
             )
@@ -3072,6 +3075,7 @@ fn geometries_for_groupview<'a, R>(
     seat: Option<&Seat<State>>,
     alpha: f32,
     transition: f32,
+    output_scale: f64,
     placeholder_id: &Id,
     mouse_tiling: Option<Option<&TargetZone>>,
 ) -> Option<(
@@ -3238,6 +3242,7 @@ where
                                         4,
                                         if render_active_child { 16 } else { 8 },
                                         alpha * if render_potential_group { 0.40 } else { 1.0 },
+                                        output_scale,
                                         GROUP_COLOR,
                                     )
                                     .into(),
@@ -3255,6 +3260,7 @@ where
                                         4,
                                         8,
                                         alpha * 0.40,
+                                        output_scale,
                                         GROUP_COLOR,
                                     )
                                     .into(),
@@ -3321,6 +3327,7 @@ where
                                             4,
                                             8,
                                             alpha * 0.15,
+                                            output_scale,
                                             GROUP_COLOR,
                                         )
                                         .into(),
@@ -3520,6 +3527,7 @@ where
                                         4,
                                         8,
                                         alpha * 0.40,
+                                        output_scale,
                                         GROUP_COLOR,
                                     )
                                     .into(),
@@ -3913,6 +3921,7 @@ where
                             } else {
                                 indicator_thickness
                             },
+                            output_scale,
                             1.0,
                         ));
                     }

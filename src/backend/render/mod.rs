@@ -155,6 +155,7 @@ impl IndicatorShader {
         key: impl Into<Key>,
         mut element_geo: Rectangle<i32, Logical>,
         thickness: u8,
+        scale: f64,
         alpha: f32,
     ) -> PixelShaderElement {
         let t = thickness as i32;
@@ -168,6 +169,7 @@ impl IndicatorShader {
             thickness,
             thickness * 2,
             alpha,
+            scale,
             FOCUS_INDICATOR_COLOR,
         )
     }
@@ -179,8 +181,11 @@ impl IndicatorShader {
         thickness: u8,
         radius: u8,
         alpha: f32,
+        scale: f64,
         color: [f32; 3],
     ) -> PixelShaderElement {
+        let thickness = (thickness as f64 * scale).round() as u8;
+
         let settings = IndicatorSettings {
             thickness,
             radius,
