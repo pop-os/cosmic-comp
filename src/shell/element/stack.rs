@@ -714,8 +714,8 @@ impl Program for CosmicStackInternal {
     ) {
         if self.group_focused.load(Ordering::SeqCst) {
             let border = Rectangle::from_loc_and_size(
-                (0, TAB_HEIGHT - scale as i32),
-                (pixels.width() as i32, scale as i32),
+                (0, ((TAB_HEIGHT as f32 * scale) - scale).floor() as i32),
+                (pixels.width() as i32, scale.ceil() as i32),
             );
 
             let mut paint = tiny_skia::Paint::default();
