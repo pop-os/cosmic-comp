@@ -278,7 +278,7 @@ impl State {
             .unwrap();
 
         let clock = Clock::new().expect("Failed to initialize clock");
-        let config = Config::load();
+        let config = Config::load(&handle);
         let compositor_state = CompositorState::new::<Self>(dh);
         let data_device_state = DataDeviceState::new::<Self>(dh);
         let dmabuf_state = DmabufState::new();

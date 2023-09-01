@@ -57,7 +57,7 @@ use smithay::{
             control::{connector, crtc, Device as ControlDevice, ModeTypeFlags},
             Device as _,
         },
-        input::Libinput,
+        input::{self, Libinput},
         nix::{fcntl::OFlag, sys::stat::dev_t},
         wayland_protocols::wp::{
             linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1,
@@ -97,6 +97,7 @@ const MIN_RENDER_TIME: Duration = Duration::from_millis(3);
 #[derive(Debug)]
 pub struct KmsState {
     devices: HashMap<DrmNode, Device>,
+    pub input_devices: HashMap<String, input::Device>,
     pub api: GpuManager<GbmGlesBackend<GlowRenderer>>,
     pub primary: DrmNode,
     session: LibSeatSession,
@@ -172,8 +173,15 @@ pub fn init_backend(
     let libinput_event_source = event_loop
         .handle()
         .insert_source(libinput_backend, move |mut event, _, data| {
-            if let &mut InputEvent::DeviceAdded { ref mut device } = &mut event {
+            if let InputEvent::DeviceAdded { ref mut device } = &mut event {
                 data.state.common.config.read_device(device);
+                data.state
+                    .backend
+                    .kms()
+                    .input_devices
+                    .insert(device.name().into(), device.clone());
+            } else if let InputEvent::DeviceRemoved { device } = &event {
+                data.state.backend.kms().input_devices.remove(device.name());
             }
             data.state.process_input_event(event, true);
             for output in data.state.common.shell.outputs() {
@@ -363,6 +371,7 @@ pub fn init_backend(
         primary,
         session,
         devices: HashMap::new(),
+        input_devices: HashMap::new(),
     });
 
     // Create relative pointer global

@@ -2,7 +2,7 @@
 
 use crate::{
     backend::render::cursor::CursorState,
-    config::{Action, Config, KeyPattern, WorkspaceLayout},
+    config::{xkb_config_to_wl, Action, Config, KeyPattern, WorkspaceLayout},
     shell::{
         focus::{target::PointerFocusTarget, FocusDirection},
         grabs::{ResizeEdge, SeatMoveGrabState},
@@ -153,7 +153,7 @@ pub fn add_seat(
     // So instead of doing the right thing (and initialize these capabilities as matching
     // devices appear), we have to surrender to reality and just always expose a keyboard and pointer.
     let conf = config.xkb_config();
-    if let Err(err) = seat.add_keyboard((&conf).into(), 200, 25) {
+    if let Err(err) = seat.add_keyboard(xkb_config_to_wl(&conf), 200, 25) {
         warn!(
             ?err,
             "Failed to load provided xkb config. Trying default...",
