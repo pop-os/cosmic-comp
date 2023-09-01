@@ -42,6 +42,7 @@ pub struct ScrollConfig {
     pub method: Option<ScrollMethod>,
     pub natural_scroll: Option<bool>,
     pub scroll_button: Option<u32>,
+    pub scroll_factor: Option<f64>,
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]

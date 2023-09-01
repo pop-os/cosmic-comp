@@ -412,13 +412,26 @@ impl Config {
     }
 
     pub fn read_device(&self, device: &mut InputDevice) {
+        let (device_config, default_config) = self.get_device_config(device);
+        input_config::update_device(device, device_config, default_config);
+    }
+
+    pub fn scroll_factor(&self, device: &InputDevice) -> f64 {
+        let (device_config, default_config) = self.get_device_config(device);
+        input_config::get_config(device_config, default_config, |x| {
+            x.scroll_config.as_ref()?.scroll_factor
+        })
+        .map_or(1.0, |x| x.0)
+    }
+
+    fn get_device_config(&self, device: &InputDevice) -> (Option<&InputConfig>, &InputConfig) {
         let default_config = if device.config_tap_finger_count() > 0 {
             &self.input_touchpad
         } else {
             &self.input_default
         };
         let device_config = self.input_devices.get(device.name());
-        input_config::update_device(device, device_config, default_config);
+        (device_config, default_config)
     }
 }
 

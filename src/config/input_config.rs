@@ -64,6 +64,7 @@ pub fn for_device(device: &InputDevice) -> InputConfig {
                 } else {
                     None
                 },
+                scroll_factor: None,
             })
         } else {
             None
@@ -83,7 +84,7 @@ pub fn for_device(device: &InputDevice) -> InputConfig {
 
 // Get setting from `device_config` if present, then `default_config`
 // Returns `is_default` to indicate this is a default value.
-fn get_config<'a, T: 'a, F: Fn(&'a InputConfig) -> Option<T>>(
+pub fn get_config<'a, T: 'a, F: Fn(&'a InputConfig) -> Option<T>>(
     device_config: Option<&'a InputConfig>,
     default_config: &'a InputConfig,
     f: F,
