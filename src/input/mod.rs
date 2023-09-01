@@ -20,7 +20,8 @@ use smithay::{
     backend::input::{
         Axis, AxisSource, Device, DeviceCapability, GestureBeginEvent, GestureEndEvent,
         GesturePinchUpdateEvent as _, GestureSwipeUpdateEvent as _, InputBackend, InputEvent,
-        KeyState, PointerAxisEvent,
+        KeyState, PointerAxisEvent, TabletToolEvent, TabletToolButtonEvent, TabletToolTipEvent,
+        TabletToolTipState,
     },
     desktop::{layer_map_for_output, space::SpaceElement, WindowSurfaceType},
     input::{
@@ -40,8 +41,10 @@ use smithay::{
     },
     utils::{Logical, Point, Rectangle, Serial, SERIAL_COUNTER},
     wayland::{
-        keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat, seat::WaylandFocus,
-        shell::wlr_layer::Layer as WlrLayer, tablet_manager::{TabletSeatTrait, TabletDescriptor},
+        keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
+        seat::WaylandFocus,
+        shell::wlr_layer::Layer as WlrLayer,
+        tablet_manager::{TabletDescriptor, TabletSeatTrait},
     },
     xwayland::X11Surface,
 };
@@ -195,7 +198,10 @@ impl State {
                 for cap in devices.add_device(&device) {
                     match cap {
                         DeviceCapability::TabletTool => {
-                            seat.tablet_seat().add_tablet::<Self>(&self.common.display_handle, &TabletDescriptor::from(&device));
+                            seat.tablet_seat().add_tablet::<Self>(
+                                &self.common.display_handle,
+                                &TabletDescriptor::from(&device),
+                            );
                         }
                         // TODO: Handle touch
                         _ => {}
@@ -214,7 +220,8 @@ impl State {
                         for cap in devices.remove_device(&device) {
                             match cap {
                                 DeviceCapability::TabletTool => {
-                                    seat.tablet_seat().remove_tablet(&TabletDescriptor::from(&device));
+                                    seat.tablet_seat()
+                                        .remove_tablet(&TabletDescriptor::from(&device));
                                 }
                                 // TODO: Handle touch
                                 _ => {}
@@ -903,6 +910,180 @@ impl State {
             }
             InputEvent::TabletToolProximity { event, .. } => { }
             InputEvent::TabletToolTip { event, .. } => { }
+            InputEvent::TabletToolAxis { event, .. } => {
+                
+            }
+            InputEvent::TabletToolProximity { event, .. } => {
+
+            }
+            InputEvent::TabletToolTip { event, .. } => {
+                if let Some(seat) = self.common.seat_with_device(&event.device()) {
+                    /*#[cfg(feature = "debug")]
+                    if self.common.seats().position(|x| x == seat).unwrap() == 0
+                        && self.common.egui.active
+                    {
+                        if self.common.egui.state.wants_pointer() {
+                            self.common.egui.state.handle_pointer_axis(
+                                event
+                                    .amount_discrete(Axis::Horizontal)
+                                    .or_else(|| event.amount(Axis::Horizontal).map(|x| x * 3.0))
+                                    .unwrap_or(0.0),
+                                event
+                                    .amount_discrete(Axis::Vertical)
+                                    .or_else(|| event.amount(Axis::Vertical).map(|x| x * 3.0))
+                                    .unwrap_or(0.0),
+                            );
+                            break;
+                        }
+                    }*/
+                    let tool = seat.tablet_seat().get_tool(&event.tool());
+
+                    if let Some(tool) = tool {
+                        match event.tip_state() {
+                            TabletToolTipState::Down => {
+                                let serial = SERIAL_COUNTER.next_serial();
+                                tool.tip_down(serial, event.time().try_into().unwrap());
+
+                                // change the keyboard focus unless the pointer or keyboard is grabbed
+                                // We test for any matching surface type here but always use the root
+                                // (in case of a window the toplevel) surface for the focus.
+                                // see: https://gitlab.freedesktop.org/wayland/wayland/-/issues/294
+                                if !seat.get_pointer().unwrap().is_grabbed()
+                                    && !seat.get_keyboard().map(|k| k.is_grabbed()).unwrap_or(false)
+                                {
+                                    let output = seat.active_output();
+                                    let pos = seat.get_pointer().unwrap().current_location();
+                                    let relative_pos =
+                                        self.common.shell.map_global_to_space(pos, &output);
+                                    let overview = self.common.shell.overview_mode();
+                                    let workspace = self.common.shell.active_space_mut(&output);
+                                    let mut under = None;
+
+                                    if let Some(window) = workspace.get_fullscreen(&output) {
+                                        let layers = layer_map_for_output(&output);
+                                        if let Some(layer) =
+                                            layers.layer_under(WlrLayer::Overlay, relative_pos)
+                                        {
+                                            let layer_loc =
+                                                layers.layer_geometry(layer).unwrap().loc;
+                                            if layer.can_receive_keyboard_focus()
+                                                && layer
+                                                    .surface_under(
+                                                        relative_pos - layer_loc.to_f64(),
+                                                        WindowSurfaceType::ALL,
+                                                    )
+                                                    .is_some()
+                                            {
+                                                under = Some(layer.clone().into());
+                                            }
+                                        } else {
+                                            under = Some(window.clone().into());
+                                        }
+                                    } else {
+                                        let done = {
+                                            let layers = layer_map_for_output(&output);
+                                            if let Some(layer) = layers
+                                                .layer_under(WlrLayer::Overlay, relative_pos)
+                                                .or_else(|| {
+                                                    layers.layer_under(WlrLayer::Top, relative_pos)
+                                                })
+                                            {
+                                                let layer_loc =
+                                                    layers.layer_geometry(layer).unwrap().loc;
+                                                if layer.can_receive_keyboard_focus()
+                                                    && layer
+                                                        .surface_under(
+                                                            relative_pos - layer_loc.to_f64(),
+                                                            WindowSurfaceType::ALL,
+                                                        )
+                                                        .is_some()
+                                                {
+                                                    under = Some(layer.clone().into());
+                                                }
+                                                true
+                                            } else {
+                                                false
+                                            }
+                                        };
+                                        if !done {
+                                            if let Some((target, _)) =
+                                                workspace.element_under(relative_pos, overview)
+                                            {
+                                                under = Some(target);
+                                            } else {
+                                                let layers = layer_map_for_output(&output);
+                                                if let Some(layer) = layers
+                                                    .layer_under(WlrLayer::Bottom, pos)
+                                                    .or_else(|| {
+                                                        layers
+                                                            .layer_under(WlrLayer::Background, pos)
+                                                    })
+                                                {
+                                                    let layer_loc =
+                                                        layers.layer_geometry(layer).unwrap().loc;
+                                                    if layer.can_receive_keyboard_focus()
+                                                        && layer
+                                                            .surface_under(
+                                                                relative_pos - layer_loc.to_f64(),
+                                                                WindowSurfaceType::ALL,
+                                                            )
+                                                            .is_some()
+                                                    {
+                                                        under = Some(layer.clone().into());
+                                                    }
+                                                };
+                                            }
+                                        }
+                                    }
+
+                                    // change the keyboard focus
+                                    Common::set_focus(
+                                        self,
+                                        under.and_then(|target| target.try_into().ok()).as_ref(),
+                                        seat,
+                                        Some(serial),
+                                    );
+                                }
+                            }
+                            TabletToolTipState::Up => {
+                                tool.tip_up(event.time().try_into().unwrap());
+                            }
+                        }
+                    }
+                }
+            }
+            InputEvent::TabletToolButton { event, .. } => {
+                if let Some(seat) = self.common.seat_with_device(&event.device()) {
+                    /*#[cfg(feature = "debug")]
+                    if self.common.seats().position(|x| x == seat).unwrap() == 0
+                        && self.common.egui.active
+                    {
+                        if self.common.egui.state.wants_pointer() {
+                            self.common.egui.state.handle_pointer_axis(
+                                event
+                                    .amount_discrete(Axis::Horizontal)
+                                    .or_else(|| event.amount(Axis::Horizontal).map(|x| x * 3.0))
+                                    .unwrap_or(0.0),
+                                event
+                                    .amount_discrete(Axis::Vertical)
+                                    .or_else(|| event.amount(Axis::Vertical).map(|x| x * 3.0))
+                                    .unwrap_or(0.0),
+                            );
+                            break;
+                        }
+                    }*/
+                    let tool = seat.tablet_seat().get_tool(&event.tool());
+
+                    if let Some(tool) = tool {
+                        tool.button(
+                            event.button(),
+                            event.button_state(),
+                            SERIAL_COUNTER.next_serial(),
+                            event.time().try_into().unwrap(),
+                        );
+                    }
+                }
+            }
             _ => { /* TODO e.g. touch events */ }
         }
     }
