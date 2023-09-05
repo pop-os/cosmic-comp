@@ -789,10 +789,10 @@ impl TilingLayout {
                     .surfaces()
                     .position(|s| &s == this_surface)
                     .unwrap();
-                this_stack.remove_window(&this_surface);
                 for (i, surface) in surfaces.into_iter().enumerate() {
                     this_stack.add_window(surface, Some(this_idx + i));
                 }
+                this_stack.remove_window(&this_surface);
 
                 let mapped: CosmicMapped =
                     CosmicWindow::new(this_surface.clone(), this_stack.loop_handle()).into();
@@ -840,10 +840,10 @@ impl TilingLayout {
                     .surfaces()
                     .position(|s| &s == other_surface)
                     .unwrap();
-                other_stack.remove_window(&other_surface);
                 for (i, surface) in surfaces.into_iter().enumerate() {
                     other_stack.add_window(surface, Some(other_idx + i));
                 }
+                other_stack.remove_window(&other_surface);
 
                 let mapped: CosmicMapped =
                     CosmicWindow::new(other_surface.clone(), other_stack.loop_handle()).into();
@@ -892,10 +892,10 @@ impl TilingLayout {
                     .unwrap();
                 let this_was_active = &this_stack.active() == this_surface;
                 let other_was_active = &other_stack.active() == other_surface;
-                this_stack.remove_window(&this_surface);
                 this_stack.add_window(other_surface.clone(), Some(this_idx));
-                other_stack.remove_window(&other_surface);
+                this_stack.remove_window(&this_surface);
                 other_stack.add_window(this_surface.clone(), Some(other_idx));
+                other_stack.remove_window(&other_surface);
                 if this_was_active {
                     this_stack.set_active(&other_surface);
                 }
