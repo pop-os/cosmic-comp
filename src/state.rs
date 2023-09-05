@@ -7,6 +7,7 @@ use crate::{
         x11::X11State,
     },
     config::{Config, OutputConfig},
+    input::Devices,
     shell::{grabs::SeatMoveGrabState, Shell},
     utils::prelude::*,
     wayland::protocols::{
@@ -30,6 +31,7 @@ use smithay::utils::Rectangle;
 use smithay::{
     backend::{
         drm::DrmNode,
+        input::Device,
         renderer::{
             element::{
                 default_primary_scanout_output_compare, utils::select_dmabuf_feedback,
@@ -63,6 +65,7 @@ use smithay::{
         fractional_scale::{with_fractional_scale, FractionalScaleManagerState},
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState,
         output::OutputManagerState,
+        pointer_gestures::PointerGesturesState,
         presentation::PresentationState,
         primary_selection::PrimarySelectionState,
         seat::WaylandFocus,
@@ -301,6 +304,7 @@ impl State {
         let kde_decoration_state = KdeDecorationState::new::<Self>(&dh, Mode::Client);
         let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
         XWaylandKeyboardGrabState::new::<Self>(&dh);
+        PointerGesturesState::new::<Self>(&dh);
 
         let shell = Shell::new(&config, dh);
 
@@ -419,6 +423,14 @@ impl Common {
 
     pub fn seats(&self) -> impl Iterator<Item = &Seat<State>> {
         self.seats.iter()
+    }
+
+    pub fn seat_with_device<D: Device>(&self, device: &D) -> Option<&Seat<State>> {
+        self.seats().find(|seat| {
+            let userdata = seat.user_data();
+            let devices = userdata.get::<Devices>().unwrap();
+            devices.has_device(device)
+        })
     }
 
     pub fn last_active_seat(&self) -> &Seat<State> {
