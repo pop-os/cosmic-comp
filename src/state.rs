@@ -7,6 +7,7 @@ use crate::{
         x11::X11State,
     },
     config::{Config, OutputConfig},
+    input::Devices,
     shell::{grabs::SeatMoveGrabState, Shell},
     utils::prelude::*,
     wayland::protocols::{
@@ -30,6 +31,7 @@ use smithay::utils::Rectangle;
 use smithay::{
     backend::{
         drm::DrmNode,
+        input::Device,
         renderer::{
             element::{
                 default_primary_scanout_output_compare, utils::select_dmabuf_feedback,
@@ -52,7 +54,7 @@ use smithay::{
         wayland_server::{
             backend::{ClientData, ClientId, DisconnectReason},
             protocol::wl_shm,
-            Display, DisplayHandle,
+            Client, Display, DisplayHandle,
         },
     },
     utils::{Clock, IsAlive, Monotonic},
@@ -63,9 +65,11 @@ use smithay::{
         fractional_scale::{with_fractional_scale, FractionalScaleManagerState},
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState,
         output::OutputManagerState,
+        pointer_gestures::PointerGesturesState,
         presentation::PresentationState,
         primary_selection::PrimarySelectionState,
         seat::WaylandFocus,
+        security_context::{SecurityContext, SecurityContextState},
         shell::{kde::decoration::KdeDecorationState, xdg::decoration::XdgDecorationState},
         shm::ShmState,
         viewporter::ViewporterState,
@@ -100,6 +104,7 @@ pub struct ClientState {
     pub drm_node: Option<DrmNode>,
     pub privileged: bool,
     pub evls: LoopSignal,
+    pub security_context: Option<SecurityContext>,
 }
 impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
@@ -265,6 +270,12 @@ impl BackendData {
     }
 }
 
+pub fn client_has_security_context(client: &Client) -> bool {
+    client
+        .get_data::<ClientState>()
+        .map_or(true, |client_state| client_state.security_context.is_none())
+}
+
 impl State {
     pub fn new(
         dh: &DisplayHandle,
@@ -285,13 +296,14 @@ impl State {
         let fractional_scale_state = FractionalScaleManagerState::new::<State>(dh);
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<Self>(dh);
         let output_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
-        let output_configuration_state = OutputConfigurationState::new(dh, |_| true);
+        let output_configuration_state =
+            OutputConfigurationState::new(dh, client_has_security_context);
         let presentation_state = PresentationState::new::<Self>(dh, clock.id() as u32);
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
         let screencopy_state = ScreencopyState::new::<Self, _, _>(
             dh,
             vec![CursorMode::Embedded, CursorMode::Hidden],
-            |_| true,
+            client_has_security_context,
         ); // TODO: privileged
         let shm_state =
             ShmState::new::<Self>(dh, vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888]);
@@ -301,6 +313,8 @@ impl State {
         let kde_decoration_state = KdeDecorationState::new::<Self>(&dh, Mode::Client);
         let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
         XWaylandKeyboardGrabState::new::<Self>(&dh);
+        PointerGesturesState::new::<Self>(&dh);
+        SecurityContextState::new::<Self, _>(&dh, client_has_security_context);
 
         let shell = Shell::new(&config, dh);
 
@@ -373,6 +387,7 @@ impl State {
             },
             privileged: false,
             evls: self.common.event_loop_signal.clone(),
+            security_context: None,
         }
     }
 
@@ -383,6 +398,7 @@ impl State {
             drm_node: Some(drm_node),
             privileged: false,
             evls: self.common.event_loop_signal.clone(),
+            security_context: None,
         }
     }
 
@@ -396,6 +412,7 @@ impl State {
             },
             privileged: true,
             evls: self.common.event_loop_signal.clone(),
+            security_context: None,
         }
     }
 }
@@ -419,6 +436,14 @@ impl Common {
 
     pub fn seats(&self) -> impl Iterator<Item = &Seat<State>> {
         self.seats.iter()
+    }
+
+    pub fn seat_with_device<D: Device>(&self, device: &D) -> Option<&Seat<State>> {
+        self.seats().find(|seat| {
+            let userdata = seat.user_data();
+            let devices = userdata.get::<Devices>().unwrap();
+            devices.has_device(device)
+        })
     }
 
     pub fn last_active_seat(&self) -> &Seat<State> {

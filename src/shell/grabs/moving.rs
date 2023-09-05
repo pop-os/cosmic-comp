@@ -25,8 +25,11 @@ use smithay::{
     desktop::space::SpaceElement,
     input::{
         pointer::{
-            AxisFrame, ButtonEvent, GrabStartData as PointerGrabStartData, MotionEvent,
-            PointerGrab, PointerInnerHandle, RelativeMotionEvent,
+            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
+            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
+            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
+            GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab, PointerInnerHandle,
+            RelativeMotionEvent,
         },
         Seat,
     },
@@ -306,6 +309,78 @@ impl PointerGrab<State> for MoveGrab {
         details: AxisFrame,
     ) {
         handle.axis(state, details);
+    }
+
+    fn gesture_swipe_begin(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureSwipeBeginEvent,
+    ) {
+        handle.gesture_swipe_begin(data, event)
+    }
+
+    fn gesture_swipe_update(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureSwipeUpdateEvent,
+    ) {
+        handle.gesture_swipe_update(data, event)
+    }
+
+    fn gesture_swipe_end(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureSwipeEndEvent,
+    ) {
+        handle.gesture_swipe_end(data, event)
+    }
+
+    fn gesture_pinch_begin(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GesturePinchBeginEvent,
+    ) {
+        handle.gesture_pinch_begin(data, event)
+    }
+
+    fn gesture_pinch_update(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GesturePinchUpdateEvent,
+    ) {
+        handle.gesture_pinch_update(data, event)
+    }
+
+    fn gesture_pinch_end(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GesturePinchEndEvent,
+    ) {
+        handle.gesture_pinch_end(data, event)
+    }
+
+    fn gesture_hold_begin(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureHoldBeginEvent,
+    ) {
+        handle.gesture_hold_begin(data, event)
+    }
+
+    fn gesture_hold_end(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureHoldEndEvent,
+    ) {
+        handle.gesture_hold_end(data, event)
     }
 
     fn start_data(&self) -> &PointerGrabStartData<State> {

@@ -507,7 +507,11 @@ impl State {
                                                 surface
                                                     .output
                                                     .current_mode()
-                                                    .map(|mode| mode.refresh as u32)
+                                                    .map(|mode| {
+                                                        Duration::from_secs_f64(
+                                                            1_000.0 / mode.refresh as f64,
+                                                        )
+                                                    })
                                                     .unwrap_or_default(),
                                                 seq as u64,
                                                 flags,
@@ -1002,19 +1006,20 @@ fn get_surface_dmabuf_feedback(
         .collect::<HashSet<_>>();
 
     let surface = compositor.surface();
-    let planes = surface.planes().unwrap();
+    let planes = surface.planes();
     // We limit the scan-out trache to formats we can also render from
     // so that there is always a fallback render path available in case
     // the supplied buffer can not be scanned out directly
-    let planes_formats = surface
-        .supported_formats(planes.primary.handle)
-        .unwrap()
-        .into_iter()
+    let planes_formats = planes
+        .primary
+        .formats
+        .iter()
+        .cloned()
         .chain(
             planes
                 .overlay
                 .iter()
-                .flat_map(|p| surface.supported_formats(p.handle).unwrap()),
+                .flat_map(|p| p.formats.iter().cloned()),
         )
         .collect::<HashSet<_>>()
         .intersection(&combined_formats)
@@ -1330,9 +1335,7 @@ impl KmsState {
                         let driver = drm
                             .get_driver()
                             .with_context(|| "Failed to query drm driver")?;
-                        let mut planes = drm_surface
-                            .planes()
-                            .with_context(|| "Failed to query drm planes")?;
+                        let mut planes = drm_surface.planes().clone();
                         // QUIRK: Using an overlay plane on a nvidia card breaks the display controller (wtf...)
                         if driver
                             .name()

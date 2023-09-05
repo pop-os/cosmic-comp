@@ -18,13 +18,19 @@ use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::Inp
 #[allow(deprecated)]
 use smithay::{
     backend::input::{
-        Axis, AxisSource, Device, DeviceCapability, InputBackend, InputEvent, KeyState,
-        PointerAxisEvent,
+        Axis, AxisSource, Device, DeviceCapability, GestureBeginEvent, GestureEndEvent,
+        GesturePinchUpdateEvent as _, GestureSwipeUpdateEvent as _, InputBackend, InputEvent,
+        KeyState, PointerAxisEvent,
     },
     desktop::{layer_map_for_output, space::SpaceElement, WindowSurfaceType},
     input::{
         keyboard::{keysyms, FilterResult, KeysymHandle, XkbConfig},
-        pointer::{AxisFrame, ButtonEvent, CursorImageStatus, MotionEvent, RelativeMotionEvent},
+        pointer::{
+            AxisFrame, ButtonEvent, CursorImageStatus, GestureHoldBeginEvent, GestureHoldEndEvent,
+            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
+            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
+            RelativeMotionEvent,
+        },
         Seat, SeatState,
     },
     output::Output,
@@ -220,14 +226,15 @@ impl State {
                 use smithay::backend::input::KeyboardKeyEvent;
 
                 let loop_handle = self.common.event_loop_handle.clone();
-                let device = event.device();
 
-                for seat in self.common.seats().cloned().collect::<Vec<_>>().iter() {
+                if let Some(seat) = self.common.seat_with_device(&event.device()).cloned() {
+                    let userdata = seat.user_data();
+
                     let current_output = seat.active_output();
                     let workspace = self.common.shell.active_space_mut(&current_output);
                     let shortcuts_inhibited = workspace
                         .focus_stack
-                        .get(seat)
+                        .get(&seat)
                         .last()
                         .and_then(|window| {
                             window.wl_surface().and_then(|surface| {
@@ -237,16 +244,13 @@ impl State {
                         .map(|inhibitor| inhibitor.is_active())
                         .unwrap_or(false);
 
-                    let userdata = seat.user_data();
-                    let devices = userdata.get::<Devices>().unwrap();
-                    if devices.has_device(&device) {
-                        let keycode = event.key_code();
-                        let state = event.state();
-                        trace!(?keycode, ?state, "key");
+                    let keycode = event.key_code();
+                    let state = event.state();
+                    trace!(?keycode, ?state, "key");
 
-                        let serial = SERIAL_COUNTER.next_serial();
-                        let time = Event::time_msec(&event);
-                        if let Some((action, pattern)) = seat
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let time = Event::time_msec(&event);
+                    if let Some((action, pattern)) = seat
                             .get_keyboard()
                             .unwrap()
                             .input(
@@ -366,7 +370,7 @@ impl State {
                                     // Pass keys to debug interface, if it has focus
                                     #[cfg(feature = "debug")]
                                     {
-                                        if data.common.seats().position(|x| x == seat).unwrap() == 0
+                                        if data.common.seats().position(|x| x == &seat).unwrap() == 0
                                             && data.common.egui.active
                                         {
                                             if data.common.egui.state.wants_keyboard() {
@@ -427,223 +431,224 @@ impl State {
                             )
                             .flatten()
                         {
-                            self.handle_action(action, seat, serial, time, pattern, None)
+                            self.handle_action(action, &seat, serial, time, pattern, None)
                         }
-                        break;
-                    }
                 }
             }
             InputEvent::PointerMotion { event, .. } => {
                 use smithay::backend::input::PointerMotionEvent;
 
-                let device = event.device();
-                for seat in self.common.seats().cloned().collect::<Vec<_>>().iter() {
-                    let userdata = seat.user_data();
-                    let devices = userdata.get::<Devices>().unwrap();
-                    if devices.has_device(&device) {
-                        let current_output = seat.active_output();
+                if let Some(seat) = self.common.seat_with_device(&event.device()).cloned() {
+                    let current_output = seat.active_output();
 
-                        let mut position = seat.get_pointer().unwrap().current_location();
-                        position += event.delta();
+                    let mut position = seat.get_pointer().unwrap().current_location();
+                    position += event.delta();
 
-                        let output = self
-                            .common
-                            .shell
-                            .outputs()
-                            .find(|output| output.geometry().to_f64().contains(position))
-                            .cloned()
-                            .unwrap_or(current_output.clone());
-                        if output != current_output {
-                            for session in sessions_for_output(&self.common, &current_output) {
-                                session.cursor_leave(seat, InputType::Pointer);
-                            }
-
-                            for session in sessions_for_output(&self.common, &output) {
-                                session.cursor_enter(seat, InputType::Pointer);
-                            }
-
-                            seat.set_active_output(&output);
+                    let output = self
+                        .common
+                        .shell
+                        .outputs()
+                        .find(|output| output.geometry().to_f64().contains(position))
+                        .cloned()
+                        .unwrap_or(current_output.clone());
+                    if output != current_output {
+                        for session in sessions_for_output(&self.common, &current_output) {
+                            session.cursor_leave(&seat, InputType::Pointer);
                         }
-                        let output_geometry = output.geometry();
-
-                        position.x = (output_geometry.loc.x as f64)
-                            .max(position.x)
-                            .min((output_geometry.loc.x + output_geometry.size.w) as f64);
-                        position.y = (output_geometry.loc.y as f64)
-                            .max(position.y)
-                            .min((output_geometry.loc.y + output_geometry.size.h) as f64);
-
-                        let serial = SERIAL_COUNTER.next_serial();
-                        let relative_pos = self.common.shell.map_global_to_space(position, &output);
-                        let overview = self.common.shell.overview_mode();
-                        let workspace = self.common.shell.workspaces.active_mut(&output);
-                        let under = State::surface_under(
-                            position,
-                            relative_pos,
-                            &output,
-                            output_geometry,
-                            &self.common.shell.override_redirect_windows,
-                            overview,
-                            workspace,
-                        );
 
                         for session in sessions_for_output(&self.common, &output) {
-                            if let Some((geometry, offset)) = seat.cursor_geometry(
-                                position.to_buffer(
-                                    output.current_scale().fractional_scale(),
-                                    output.current_transform(),
-                                    &output.geometry().size.to_f64(),
-                                ),
-                                self.common.clock.now(),
-                            ) {
-                                session.cursor_info(seat, InputType::Pointer, geometry, offset);
-                            }
+                            session.cursor_enter(&seat, InputType::Pointer);
                         }
-                        let ptr = seat.get_pointer().unwrap();
-                        ptr.motion(
-                            self,
-                            under.clone(),
-                            &MotionEvent {
-                                location: position,
-                                serial,
-                                time: event.time_msec(),
-                            },
-                        );
-                        ptr.relative_motion(
-                            self,
-                            under,
-                            &RelativeMotionEvent {
-                                delta: event.delta(),
-                                delta_unaccel: event.delta_unaccel(),
-                                utime: event.time(),
-                            },
-                        );
-                        #[cfg(feature = "debug")]
-                        if self.common.seats().position(|x| x == seat).unwrap() == 0 {
-                            let location = if let Some(output) = self.common.shell.outputs.first() {
-                                self.common
-                                    .shell
-                                    .map_global_to_space(position, output)
-                                    .to_i32_round()
-                            } else {
-                                position.to_i32_round()
-                            };
-                            self.common.egui.state.handle_pointer_motion(location);
+
+                        seat.set_active_output(&output);
+                    }
+                    let output_geometry = output.geometry();
+
+                    position.x = (output_geometry.loc.x as f64)
+                        .max(position.x)
+                        .min((output_geometry.loc.x + output_geometry.size.w) as f64);
+                    position.y = (output_geometry.loc.y as f64)
+                        .max(position.y)
+                        .min((output_geometry.loc.y + output_geometry.size.h) as f64);
+
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let relative_pos = self.common.shell.map_global_to_space(position, &output);
+                    let overview = self.common.shell.overview_mode();
+                    let workspace = self.common.shell.workspaces.active_mut(&output);
+                    let under = State::surface_under(
+                        position,
+                        relative_pos,
+                        &output,
+                        output_geometry,
+                        &self.common.shell.override_redirect_windows,
+                        overview,
+                        workspace,
+                    );
+
+                    for session in sessions_for_output(&self.common, &output) {
+                        if let Some((geometry, offset)) = seat.cursor_geometry(
+                            position.to_buffer(
+                                output.current_scale().fractional_scale(),
+                                output.current_transform(),
+                                &output.geometry().size.to_f64(),
+                            ),
+                            self.common.clock.now(),
+                        ) {
+                            session.cursor_info(&seat, InputType::Pointer, geometry, offset);
                         }
-                        break;
+                    }
+                    let ptr = seat.get_pointer().unwrap();
+                    ptr.motion(
+                        self,
+                        under.clone(),
+                        &MotionEvent {
+                            location: position,
+                            serial,
+                            time: event.time_msec(),
+                        },
+                    );
+                    ptr.relative_motion(
+                        self,
+                        under,
+                        &RelativeMotionEvent {
+                            delta: event.delta(),
+                            delta_unaccel: event.delta_unaccel(),
+                            utime: event.time(),
+                        },
+                    );
+                    #[cfg(feature = "debug")]
+                    if self.common.seats().position(|x| x == &seat).unwrap() == 0 {
+                        let location = if let Some(output) = self.common.shell.outputs.first() {
+                            self.common
+                                .shell
+                                .map_global_to_space(position, output)
+                                .to_i32_round()
+                        } else {
+                            position.to_i32_round()
+                        };
+                        self.common.egui.state.handle_pointer_motion(location);
                     }
                 }
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
-                let device = event.device();
-                for seat in self.common.seats().cloned().collect::<Vec<_>>().iter() {
-                    let userdata = seat.user_data();
-                    let devices = userdata.get::<Devices>().unwrap();
-                    if devices.has_device(&device) {
-                        let output = seat.active_output();
-                        let geometry = output.geometry();
-                        let position = geometry.loc.to_f64()
-                            + smithay::backend::input::AbsolutePositionEvent::position_transformed(
-                                &event,
-                                geometry.size,
-                            );
-                        let relative_pos = self.common.shell.map_global_to_space(position, &output);
-                        let overview = self.common.shell.overview_mode();
-                        let workspace = self.common.shell.workspaces.active_mut(&output);
-                        let serial = SERIAL_COUNTER.next_serial();
-                        let under = State::surface_under(
-                            position,
-                            relative_pos,
-                            &output,
-                            geometry,
-                            &self.common.shell.override_redirect_windows,
-                            overview,
-                            workspace,
+                if let Some(seat) = self.common.seat_with_device(&event.device()).cloned() {
+                    let output = seat.active_output();
+                    let geometry = output.geometry();
+                    let position = geometry.loc.to_f64()
+                        + smithay::backend::input::AbsolutePositionEvent::position_transformed(
+                            &event,
+                            geometry.size,
                         );
+                    let relative_pos = self.common.shell.map_global_to_space(position, &output);
+                    let overview = self.common.shell.overview_mode();
+                    let workspace = self.common.shell.workspaces.active_mut(&output);
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let under = State::surface_under(
+                        position,
+                        relative_pos,
+                        &output,
+                        geometry,
+                        &self.common.shell.override_redirect_windows,
+                        overview,
+                        workspace,
+                    );
 
-                        for session in sessions_for_output(&self.common, &output) {
-                            if let Some((geometry, offset)) = seat.cursor_geometry(
-                                position.to_buffer(
-                                    output.current_scale().fractional_scale(),
-                                    output.current_transform(),
-                                    &output.geometry().size.to_f64(),
-                                ),
-                                self.common.clock.now(),
-                            ) {
-                                session.cursor_info(seat, InputType::Pointer, geometry, offset);
-                            }
+                    for session in sessions_for_output(&self.common, &output) {
+                        if let Some((geometry, offset)) = seat.cursor_geometry(
+                            position.to_buffer(
+                                output.current_scale().fractional_scale(),
+                                output.current_transform(),
+                                &output.geometry().size.to_f64(),
+                            ),
+                            self.common.clock.now(),
+                        ) {
+                            session.cursor_info(&seat, InputType::Pointer, geometry, offset);
                         }
-                        seat.get_pointer().unwrap().motion(
-                            self,
-                            under,
-                            &MotionEvent {
-                                location: position,
-                                serial,
-                                time: event.time_msec(),
-                            },
-                        );
-                        #[cfg(feature = "debug")]
-                        if self.common.seats().position(|x| x == seat).unwrap() == 0 {
-                            let location = if let Some(output) = self.common.shell.outputs.first() {
-                                self.common
-                                    .shell
-                                    .map_global_to_space(position, output)
-                                    .to_i32_round()
-                            } else {
-                                position.to_i32_round()
-                            };
-                            self.common.egui.state.handle_pointer_motion(location);
-                        }
-
-                        break;
+                    }
+                    seat.get_pointer().unwrap().motion(
+                        self,
+                        under,
+                        &MotionEvent {
+                            location: position,
+                            serial,
+                            time: event.time_msec(),
+                        },
+                    );
+                    #[cfg(feature = "debug")]
+                    if self.common.seats().position(|x| x == &seat).unwrap() == 0 {
+                        let location = if let Some(output) = self.common.shell.outputs.first() {
+                            self.common
+                                .shell
+                                .map_global_to_space(position, output)
+                                .to_i32_round()
+                        } else {
+                            position.to_i32_round()
+                        };
+                        self.common.egui.state.handle_pointer_motion(location);
                     }
                 }
             }
             InputEvent::PointerButton { event, .. } => {
                 use smithay::backend::input::{ButtonState, PointerButtonEvent};
 
-                let device = event.device();
-                for seat in self.common.seats().cloned().collect::<Vec<_>>().iter() {
-                    let userdata = seat.user_data();
-                    let devices = userdata.get::<Devices>().unwrap();
-                    if devices.has_device(&device) {
-                        #[cfg(feature = "debug")]
-                        if self.common.seats().position(|x| x == seat).unwrap() == 0
-                            && self.common.egui.active
-                        {
-                            if self.common.egui.state.wants_pointer() {
-                                if let Some(button) = event.button() {
-                                    self.common.egui.state.handle_pointer_button(
-                                        button,
-                                        event.state() == ButtonState::Pressed,
-                                    );
-                                }
-                                break;
+                if let Some(seat) = self.common.seat_with_device(&event.device()).cloned() {
+                    #[cfg(feature = "debug")]
+                    if self.common.seats().position(|x| x == &seat).unwrap() == 0
+                        && self.common.egui.active
+                    {
+                        if self.common.egui.state.wants_pointer() {
+                            if let Some(button) = event.button() {
+                                self.common.egui.state.handle_pointer_button(
+                                    button,
+                                    event.state() == ButtonState::Pressed,
+                                );
                             }
+                            return;
                         }
+                    }
 
-                        let serial = SERIAL_COUNTER.next_serial();
-                        let button = event.button_code();
-                        if event.state() == ButtonState::Pressed {
-                            // change the keyboard focus unless the pointer or keyboard is grabbed
-                            // We test for any matching surface type here but always use the root
-                            // (in case of a window the toplevel) surface for the focus.
-                            // see: https://gitlab.freedesktop.org/wayland/wayland/-/issues/294
-                            if !seat.get_pointer().unwrap().is_grabbed()
-                                && !seat.get_keyboard().map(|k| k.is_grabbed()).unwrap_or(false)
-                            {
-                                let output = seat.active_output();
-                                let pos = seat.get_pointer().unwrap().current_location();
-                                let relative_pos =
-                                    self.common.shell.map_global_to_space(pos, &output);
-                                let overview = self.common.shell.overview_mode();
-                                let workspace = self.common.shell.active_space_mut(&output);
-                                let mut under = None;
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let button = event.button_code();
+                    if event.state() == ButtonState::Pressed {
+                        // change the keyboard focus unless the pointer or keyboard is grabbed
+                        // We test for any matching surface type here but always use the root
+                        // (in case of a window the toplevel) surface for the focus.
+                        // see: https://gitlab.freedesktop.org/wayland/wayland/-/issues/294
+                        if !seat.get_pointer().unwrap().is_grabbed()
+                            && !seat.get_keyboard().map(|k| k.is_grabbed()).unwrap_or(false)
+                        {
+                            let output = seat.active_output();
+                            let pos = seat.get_pointer().unwrap().current_location();
+                            let relative_pos = self.common.shell.map_global_to_space(pos, &output);
+                            let overview = self.common.shell.overview_mode();
+                            let workspace = self.common.shell.active_space_mut(&output);
+                            let mut under = None;
 
-                                if let Some(window) = workspace.get_fullscreen(&output) {
+                            if let Some(window) = workspace.get_fullscreen(&output) {
+                                let layers = layer_map_for_output(&output);
+                                if let Some(layer) =
+                                    layers.layer_under(WlrLayer::Overlay, relative_pos)
+                                {
+                                    let layer_loc = layers.layer_geometry(layer).unwrap().loc;
+                                    if layer.can_receive_keyboard_focus()
+                                        && layer
+                                            .surface_under(
+                                                relative_pos - layer_loc.to_f64(),
+                                                WindowSurfaceType::ALL,
+                                            )
+                                            .is_some()
+                                    {
+                                        under = Some(layer.clone().into());
+                                    }
+                                } else {
+                                    under = Some(window.clone().into());
+                                }
+                            } else {
+                                let done = {
                                     let layers = layer_map_for_output(&output);
-                                    if let Some(layer) =
-                                        layers.layer_under(WlrLayer::Overlay, relative_pos)
+                                    if let Some(layer) = layers
+                                        .layer_under(WlrLayer::Overlay, relative_pos)
+                                        .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos))
                                     {
                                         let layer_loc = layers.layer_geometry(layer).unwrap().loc;
                                         if layer.can_receive_keyboard_focus()
@@ -656,17 +661,22 @@ impl State {
                                         {
                                             under = Some(layer.clone().into());
                                         }
+                                        true
                                     } else {
-                                        under = Some(window.clone().into());
+                                        false
                                     }
-                                } else {
-                                    let done = {
+                                };
+                                if !done {
+                                    if let Some((target, _)) =
+                                        workspace.element_under(relative_pos, overview)
+                                    {
+                                        under = Some(target);
+                                    } else {
                                         let layers = layer_map_for_output(&output);
-                                        if let Some(layer) = layers
-                                            .layer_under(WlrLayer::Overlay, relative_pos)
-                                            .or_else(|| {
-                                                layers.layer_under(WlrLayer::Top, relative_pos)
-                                            })
+                                        if let Some(layer) =
+                                            layers.layer_under(WlrLayer::Bottom, pos).or_else(
+                                                || layers.layer_under(WlrLayer::Background, pos),
+                                            )
                                         {
                                             let layer_loc =
                                                 layers.layer_geometry(layer).unwrap().loc;
@@ -680,67 +690,35 @@ impl State {
                                             {
                                                 under = Some(layer.clone().into());
                                             }
-                                            true
-                                        } else {
-                                            false
-                                        }
-                                    };
-                                    if !done {
-                                        if let Some((target, _)) =
-                                            workspace.element_under(relative_pos, overview)
-                                        {
-                                            under = Some(target);
-                                        } else {
-                                            let layers = layer_map_for_output(&output);
-                                            if let Some(layer) = layers
-                                                .layer_under(WlrLayer::Bottom, pos)
-                                                .or_else(|| {
-                                                    layers.layer_under(WlrLayer::Background, pos)
-                                                })
-                                            {
-                                                let layer_loc =
-                                                    layers.layer_geometry(layer).unwrap().loc;
-                                                if layer.can_receive_keyboard_focus()
-                                                    && layer
-                                                        .surface_under(
-                                                            relative_pos - layer_loc.to_f64(),
-                                                            WindowSurfaceType::ALL,
-                                                        )
-                                                        .is_some()
-                                                {
-                                                    under = Some(layer.clone().into());
-                                                }
-                                            };
-                                        }
+                                        };
                                     }
                                 }
-                                Common::set_focus(
-                                    self,
-                                    under.and_then(|target| target.try_into().ok()).as_ref(),
-                                    seat,
-                                    Some(serial),
-                                );
                             }
-                        } else {
-                            if let OverviewMode::Started(Trigger::Pointer(action_button), _) =
-                                self.common.shell.overview_mode()
-                            {
-                                if action_button == button {
-                                    self.common.shell.set_overview_mode(None);
-                                }
+                            Common::set_focus(
+                                self,
+                                under.and_then(|target| target.try_into().ok()).as_ref(),
+                                &seat,
+                                Some(serial),
+                            );
+                        }
+                    } else {
+                        if let OverviewMode::Started(Trigger::Pointer(action_button), _) =
+                            self.common.shell.overview_mode()
+                        {
+                            if action_button == button {
+                                self.common.shell.set_overview_mode(None);
                             }
-                        };
-                        seat.get_pointer().unwrap().button(
-                            self,
-                            &ButtonEvent {
-                                button,
-                                state: event.state(),
-                                serial,
-                                time: event.time_msec(),
-                            },
-                        );
-                        break;
-                    }
+                        }
+                    };
+                    seat.get_pointer().unwrap().button(
+                        self,
+                        &ButtonEvent {
+                            button,
+                            state: event.state(),
+                            serial,
+                            time: event.time_msec(),
+                        },
+                    );
                 }
             }
             InputEvent::PointerAxis { event, .. } => {
@@ -753,8 +731,7 @@ impl State {
                     1.0
                 };
 
-                let device = event.device();
-                for seat in self.common.seats().cloned().collect::<Vec<_>>().iter() {
+                if let Some(seat) = self.common.seat_with_device(&event.device()) {
                     #[cfg(feature = "debug")]
                     if self.common.seats().position(|x| x == seat).unwrap() == 0
                         && self.common.egui.active
@@ -770,48 +747,150 @@ impl State {
                                     .or_else(|| event.amount(Axis::Vertical).map(|x| x * 3.0))
                                     .unwrap_or(0.0),
                             );
-                            break;
+                            return;
                         }
                     }
 
-                    let userdata = seat.user_data();
-                    let devices = userdata.get::<Devices>().unwrap();
-                    if devices.has_device(&device) {
-                        let horizontal_amount =
-                            event.amount(Axis::Horizontal).unwrap_or_else(|| {
-                                event.amount_discrete(Axis::Horizontal).unwrap_or(0.0) * 3.0
-                            });
-                        let vertical_amount = event.amount(Axis::Vertical).unwrap_or_else(|| {
-                            event.amount_discrete(Axis::Vertical).unwrap_or(0.0) * 3.0
-                        });
-                        let horizontal_amount_discrete = event.amount_discrete(Axis::Horizontal);
-                        let vertical_amount_discrete = event.amount_discrete(Axis::Vertical);
+                    let horizontal_amount = event.amount(Axis::Horizontal).unwrap_or_else(|| {
+                        event.amount_discrete(Axis::Horizontal).unwrap_or(0.0) * 3.0
+                    });
+                    let vertical_amount = event.amount(Axis::Vertical).unwrap_or_else(|| {
+                        event.amount_discrete(Axis::Vertical).unwrap_or(0.0) * 3.0
+                    });
+                    let horizontal_amount_discrete = event.amount_discrete(Axis::Horizontal);
+                    let vertical_amount_discrete = event.amount_discrete(Axis::Vertical);
 
-                        {
-                            let mut frame =
-                                AxisFrame::new(event.time_msec()).source(event.source());
-                            if horizontal_amount != 0.0 {
-                                frame = frame
-                                    .value(Axis::Horizontal, scroll_factor * horizontal_amount);
-                                if let Some(discrete) = horizontal_amount_discrete {
-                                    frame = frame.discrete(Axis::Horizontal, discrete as i32);
-                                }
-                            } else if event.source() == AxisSource::Finger {
-                                frame = frame.stop(Axis::Horizontal);
+                    {
+                        let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
+                        if horizontal_amount != 0.0 {
+                            frame =
+                                frame.value(Axis::Horizontal, scroll_factor * horizontal_amount);
+                            if let Some(discrete) = horizontal_amount_discrete {
+                                frame = frame.discrete(Axis::Horizontal, discrete as i32);
                             }
-                            if vertical_amount != 0.0 {
-                                frame =
-                                    frame.value(Axis::Vertical, scroll_factor * vertical_amount);
-                                if let Some(discrete) = vertical_amount_discrete {
-                                    frame = frame.discrete(Axis::Vertical, discrete as i32);
-                                }
-                            } else if event.source() == AxisSource::Finger {
-                                frame = frame.stop(Axis::Vertical);
-                            }
-                            seat.get_pointer().unwrap().axis(self, frame);
+                        } else if event.source() == AxisSource::Finger {
+                            frame = frame.stop(Axis::Horizontal);
                         }
-                        break;
+                        if vertical_amount != 0.0 {
+                            frame = frame.value(Axis::Vertical, scroll_factor * vertical_amount);
+                            if let Some(discrete) = vertical_amount_discrete {
+                                frame = frame.discrete(Axis::Vertical, discrete as i32);
+                            }
+                        } else if event.source() == AxisSource::Finger {
+                            frame = frame.stop(Axis::Vertical);
+                        }
+                        seat.get_pointer().unwrap().axis(self, frame);
                     }
+                }
+            }
+            InputEvent::GestureSwipeBegin { event, .. } => {
+                if let Some(seat) = self.common.seat_with_device(&event.device()) {
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let pointer = seat.get_pointer().unwrap();
+                    pointer.gesture_swipe_begin(
+                        self,
+                        &GestureSwipeBeginEvent {
+                            serial,
+                            time: event.time_msec(),
+                            fingers: event.fingers(),
+                        },
+                    );
+                }
+            }
+            InputEvent::GestureSwipeUpdate { event, .. } => {
+                if let Some(seat) = self.common.seat_with_device(&event.device()) {
+                    let pointer = seat.get_pointer().unwrap();
+                    pointer.gesture_swipe_update(
+                        self,
+                        &GestureSwipeUpdateEvent {
+                            time: event.time_msec(),
+                            delta: event.delta(),
+                        },
+                    );
+                }
+            }
+            InputEvent::GestureSwipeEnd { event, .. } => {
+                if let Some(seat) = self.common.seat_with_device(&event.device()) {
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let pointer = seat.get_pointer().unwrap();
+                    pointer.gesture_swipe_end(
+                        self,
+                        &GestureSwipeEndEvent {
+                            serial,
+                            time: event.time_msec(),
+                            cancelled: event.cancelled(),
+                        },
+                    );
+                }
+            }
+            InputEvent::GesturePinchBegin { event, .. } => {
+                if let Some(seat) = self.common.seat_with_device(&event.device()) {
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let pointer = seat.get_pointer().unwrap();
+                    pointer.gesture_pinch_begin(
+                        self,
+                        &GesturePinchBeginEvent {
+                            serial,
+                            time: event.time_msec(),
+                            fingers: event.fingers(),
+                        },
+                    );
+                }
+            }
+            InputEvent::GesturePinchUpdate { event, .. } => {
+                if let Some(seat) = self.common.seat_with_device(&event.device()) {
+                    let pointer = seat.get_pointer().unwrap();
+                    pointer.gesture_pinch_update(
+                        self,
+                        &GesturePinchUpdateEvent {
+                            time: event.time_msec(),
+                            delta: event.delta(),
+                            scale: event.scale(),
+                            rotation: event.rotation(),
+                        },
+                    );
+                }
+            }
+            InputEvent::GesturePinchEnd { event, .. } => {
+                if let Some(seat) = self.common.seat_with_device(&event.device()) {
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let pointer = seat.get_pointer().unwrap();
+                    pointer.gesture_pinch_end(
+                        self,
+                        &GesturePinchEndEvent {
+                            serial,
+                            time: event.time_msec(),
+                            cancelled: event.cancelled(),
+                        },
+                    );
+                }
+            }
+            InputEvent::GestureHoldBegin { event, .. } => {
+                if let Some(seat) = self.common.seat_with_device(&event.device()) {
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let pointer = seat.get_pointer().unwrap();
+                    pointer.gesture_hold_begin(
+                        self,
+                        &GestureHoldBeginEvent {
+                            serial,
+                            time: event.time_msec(),
+                            fingers: event.fingers(),
+                        },
+                    );
+                }
+            }
+            InputEvent::GestureHoldEnd { event, .. } => {
+                if let Some(seat) = self.common.seat_with_device(&event.device()) {
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let pointer = seat.get_pointer().unwrap();
+                    pointer.gesture_hold_end(
+                        self,
+                        &GestureHoldEndEvent {
+                            serial,
+                            time: event.time_msec(),
+                            cancelled: event.cancelled(),
+                        },
+                    );
                 }
             }
             _ => { /* TODO e.g. tablet or touch events */ }

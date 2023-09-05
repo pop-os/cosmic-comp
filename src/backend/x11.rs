@@ -39,7 +39,7 @@ use smithay::{
     utils::{DeviceFd, Transform},
     wayland::dmabuf::DmabufFeedbackBuilder,
 };
-use std::{cell::RefCell, os::unix::io::OwnedFd};
+use std::{cell::RefCell, os::unix::io::OwnedFd, time::Duration};
 use tracing::{debug, error, info, warn};
 
 #[cfg(feature = "debug")]
@@ -260,7 +260,7 @@ impl Surface {
                         state.clock.now(),
                         self.output
                             .current_mode()
-                            .map(|mode| mode.refresh as u32)
+                            .map(|mode| Duration::from_secs_f64(1_000.0 / mode.refresh as f64))
                             .unwrap_or_default(),
                         0,
                         wp_presentation_feedback::Kind::Vsync,

@@ -11,7 +11,12 @@ use smithay::{
     desktop::{LayerSurface, PopupKind},
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
-        pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget, RelativeMotionEvent},
+        pointer::{
+            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
+            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
+            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
+            PointerTarget, RelativeMotionEvent,
+        },
         Seat,
     },
     output::WeakOutput,
@@ -196,6 +201,215 @@ impl PointerTarget<State> for PointerFocusTarget {
                 PointerTarget::leave(s, seat, data, serial, time)
             }
             PointerFocusTarget::ResizeFork(f) => PointerTarget::leave(f, seat, data, serial, time),
+        }
+    }
+    fn gesture_swipe_begin(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GestureSwipeBeginEvent,
+    ) {
+        match self {
+            PointerFocusTarget::Element(w) => {
+                PointerTarget::gesture_swipe_begin(w, seat, data, event)
+            }
+            PointerFocusTarget::Fullscreen(w) => {
+                PointerTarget::gesture_swipe_begin(w, seat, data, event)
+            }
+            PointerFocusTarget::LayerSurface(l) => {
+                PointerTarget::gesture_swipe_begin(l, seat, data, event)
+            }
+            PointerFocusTarget::Popup(p) => {
+                PointerTarget::gesture_swipe_begin(p.wl_surface(), seat, data, event)
+            }
+            PointerFocusTarget::OverrideRedirect(s) => {
+                PointerTarget::gesture_swipe_begin(s, seat, data, event)
+            }
+            PointerFocusTarget::ResizeFork(f) => {
+                PointerTarget::gesture_swipe_begin(f, seat, data, event)
+            }
+        }
+    }
+    fn gesture_swipe_update(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GestureSwipeUpdateEvent,
+    ) {
+        match self {
+            PointerFocusTarget::Element(w) => {
+                PointerTarget::gesture_swipe_update(w, seat, data, event)
+            }
+            PointerFocusTarget::Fullscreen(w) => {
+                PointerTarget::gesture_swipe_update(w, seat, data, event)
+            }
+            PointerFocusTarget::LayerSurface(l) => {
+                PointerTarget::gesture_swipe_update(l, seat, data, event)
+            }
+            PointerFocusTarget::Popup(p) => {
+                PointerTarget::gesture_swipe_update(p.wl_surface(), seat, data, event)
+            }
+            PointerFocusTarget::OverrideRedirect(s) => {
+                PointerTarget::gesture_swipe_update(s, seat, data, event)
+            }
+            PointerFocusTarget::ResizeFork(f) => {
+                PointerTarget::gesture_swipe_update(f, seat, data, event)
+            }
+        }
+    }
+    fn gesture_swipe_end(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GestureSwipeEndEvent,
+    ) {
+        match self {
+            PointerFocusTarget::Element(w) => {
+                PointerTarget::gesture_swipe_end(w, seat, data, event)
+            }
+            PointerFocusTarget::Fullscreen(w) => {
+                PointerTarget::gesture_swipe_end(w, seat, data, event)
+            }
+            PointerFocusTarget::LayerSurface(l) => {
+                PointerTarget::gesture_swipe_end(l, seat, data, event)
+            }
+            PointerFocusTarget::Popup(p) => {
+                PointerTarget::gesture_swipe_end(p.wl_surface(), seat, data, event)
+            }
+            PointerFocusTarget::OverrideRedirect(s) => {
+                PointerTarget::gesture_swipe_end(s, seat, data, event)
+            }
+            PointerFocusTarget::ResizeFork(f) => {
+                PointerTarget::gesture_swipe_end(f, seat, data, event)
+            }
+        }
+    }
+    fn gesture_pinch_begin(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GesturePinchBeginEvent,
+    ) {
+        match self {
+            PointerFocusTarget::Element(w) => {
+                PointerTarget::gesture_pinch_begin(w, seat, data, event)
+            }
+            PointerFocusTarget::Fullscreen(w) => {
+                PointerTarget::gesture_pinch_begin(w, seat, data, event)
+            }
+            PointerFocusTarget::LayerSurface(l) => {
+                PointerTarget::gesture_pinch_begin(l, seat, data, event)
+            }
+            PointerFocusTarget::Popup(p) => {
+                PointerTarget::gesture_pinch_begin(p.wl_surface(), seat, data, event)
+            }
+            PointerFocusTarget::OverrideRedirect(s) => {
+                PointerTarget::gesture_pinch_begin(s, seat, data, event)
+            }
+            PointerFocusTarget::ResizeFork(f) => {
+                PointerTarget::gesture_pinch_begin(f, seat, data, event)
+            }
+        }
+    }
+    fn gesture_pinch_update(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GesturePinchUpdateEvent,
+    ) {
+        match self {
+            PointerFocusTarget::Element(w) => {
+                PointerTarget::gesture_pinch_update(w, seat, data, event)
+            }
+            PointerFocusTarget::Fullscreen(w) => {
+                PointerTarget::gesture_pinch_update(w, seat, data, event)
+            }
+            PointerFocusTarget::LayerSurface(l) => {
+                PointerTarget::gesture_pinch_update(l, seat, data, event)
+            }
+            PointerFocusTarget::Popup(p) => {
+                PointerTarget::gesture_pinch_update(p.wl_surface(), seat, data, event)
+            }
+            PointerFocusTarget::OverrideRedirect(s) => {
+                PointerTarget::gesture_pinch_update(s, seat, data, event)
+            }
+            PointerFocusTarget::ResizeFork(f) => {
+                PointerTarget::gesture_pinch_update(f, seat, data, event)
+            }
+        }
+    }
+    fn gesture_pinch_end(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GesturePinchEndEvent,
+    ) {
+        match self {
+            PointerFocusTarget::Element(w) => {
+                PointerTarget::gesture_pinch_end(w, seat, data, event)
+            }
+            PointerFocusTarget::Fullscreen(w) => {
+                PointerTarget::gesture_pinch_end(w, seat, data, event)
+            }
+            PointerFocusTarget::LayerSurface(l) => {
+                PointerTarget::gesture_pinch_end(l, seat, data, event)
+            }
+            PointerFocusTarget::Popup(p) => {
+                PointerTarget::gesture_pinch_end(p.wl_surface(), seat, data, event)
+            }
+            PointerFocusTarget::OverrideRedirect(s) => {
+                PointerTarget::gesture_pinch_end(s, seat, data, event)
+            }
+            PointerFocusTarget::ResizeFork(f) => {
+                PointerTarget::gesture_pinch_end(f, seat, data, event)
+            }
+        }
+    }
+    fn gesture_hold_begin(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GestureHoldBeginEvent,
+    ) {
+        match self {
+            PointerFocusTarget::Element(w) => {
+                PointerTarget::gesture_hold_begin(w, seat, data, event)
+            }
+            PointerFocusTarget::Fullscreen(w) => {
+                PointerTarget::gesture_hold_begin(w, seat, data, event)
+            }
+            PointerFocusTarget::LayerSurface(l) => {
+                PointerTarget::gesture_hold_begin(l, seat, data, event)
+            }
+            PointerFocusTarget::Popup(p) => {
+                PointerTarget::gesture_hold_begin(p.wl_surface(), seat, data, event)
+            }
+            PointerFocusTarget::OverrideRedirect(s) => {
+                PointerTarget::gesture_hold_begin(s, seat, data, event)
+            }
+            PointerFocusTarget::ResizeFork(f) => {
+                PointerTarget::gesture_hold_begin(f, seat, data, event)
+            }
+        }
+    }
+    fn gesture_hold_end(&self, seat: &Seat<State>, data: &mut State, event: &GestureHoldEndEvent) {
+        match self {
+            PointerFocusTarget::Element(w) => PointerTarget::gesture_hold_end(w, seat, data, event),
+            PointerFocusTarget::Fullscreen(w) => {
+                PointerTarget::gesture_hold_end(w, seat, data, event)
+            }
+            PointerFocusTarget::LayerSurface(l) => {
+                PointerTarget::gesture_hold_end(l, seat, data, event)
+            }
+            PointerFocusTarget::Popup(p) => {
+                PointerTarget::gesture_hold_end(p.wl_surface(), seat, data, event)
+            }
+            PointerFocusTarget::OverrideRedirect(s) => {
+                PointerTarget::gesture_hold_end(s, seat, data, event)
+            }
+            PointerFocusTarget::ResizeFork(f) => {
+                PointerTarget::gesture_hold_end(f, seat, data, event)
+            }
         }
     }
 }
