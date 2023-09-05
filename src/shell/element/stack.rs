@@ -32,8 +32,10 @@ use smithay::{
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{
-            AxisFrame, ButtonEvent, GrabStartData as PointerGrabStartData, MotionEvent,
-            PointerTarget, RelativeMotionEvent,
+            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
+            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
+            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
+            GrabStartData as PointerGrabStartData, MotionEvent, PointerTarget, RelativeMotionEvent,
         },
         Seat,
     },
@@ -1178,6 +1180,113 @@ impl PointerTarget<State> for CosmicStack {
             }),
             _ => {}
         }
+    }
+
+    fn gesture_swipe_begin(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GestureSwipeBeginEvent,
+    ) {
+        self.0.with_program(|p| {
+            if p.current_focus() == Focus::Window {
+                let window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
+                window.gesture_swipe_begin(seat, data, event)
+            }
+        })
+    }
+
+    fn gesture_swipe_update(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GestureSwipeUpdateEvent,
+    ) {
+        self.0.with_program(|p| {
+            if p.current_focus() == Focus::Window {
+                let window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
+                window.gesture_swipe_update(seat, data, event)
+            }
+        })
+    }
+
+    fn gesture_swipe_end(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GestureSwipeEndEvent,
+    ) {
+        self.0.with_program(|p| {
+            if p.current_focus() == Focus::Window {
+                let window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
+                window.gesture_swipe_end(seat, data, event)
+            }
+        })
+    }
+
+    fn gesture_pinch_begin(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GesturePinchBeginEvent,
+    ) {
+        self.0.with_program(|p| {
+            if p.current_focus() == Focus::Window {
+                let window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
+                window.gesture_pinch_begin(seat, data, event)
+            }
+        })
+    }
+
+    fn gesture_pinch_update(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GesturePinchUpdateEvent,
+    ) {
+        self.0.with_program(|p| {
+            if p.current_focus() == Focus::Window {
+                let window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
+                window.gesture_pinch_update(seat, data, event)
+            }
+        })
+    }
+
+    fn gesture_pinch_end(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GesturePinchEndEvent,
+    ) {
+        self.0.with_program(|p| {
+            if p.current_focus() == Focus::Window {
+                let window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
+                window.gesture_pinch_end(seat, data, event)
+            }
+        })
+    }
+
+    fn gesture_hold_begin(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GestureHoldBeginEvent,
+    ) {
+        self.0.with_program(|p| {
+            if p.current_focus() == Focus::Window {
+                let window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
+                window.gesture_hold_begin(seat, data, event)
+            }
+        })
+    }
+
+    fn gesture_hold_end(&self, seat: &Seat<State>, data: &mut State, event: &GestureHoldEndEvent) {
+        self.0.with_program(|p| {
+            if p.current_focus() == Focus::Window {
+                let window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
+                window.gesture_hold_end(seat, data, event)
+            }
+        })
     }
 }
 

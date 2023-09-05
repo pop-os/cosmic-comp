@@ -24,7 +24,12 @@ use smithay::{
     desktop::space::SpaceElement,
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
-        pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget, RelativeMotionEvent},
+        pointer::{
+            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
+            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
+            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
+            PointerTarget, RelativeMotionEvent,
+        },
         Seat,
     },
     output::Output,
@@ -589,6 +594,105 @@ impl PointerTarget<State> for CosmicWindow {
                 .with_program(|p| PointerTarget::leave(&p.window, seat, data, serial, time)),
             _ => {}
         }
+    }
+
+    fn gesture_swipe_begin(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GestureSwipeBeginEvent,
+    ) {
+        self.0.with_program(|p| {
+            if !p.has_ssd(false) || p.current_focus() == Focus::Window {
+                PointerTarget::gesture_swipe_begin(&p.window, seat, data, event)
+            }
+        })
+    }
+
+    fn gesture_swipe_update(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GestureSwipeUpdateEvent,
+    ) {
+        self.0.with_program(|p| {
+            if !p.has_ssd(false) || p.current_focus() == Focus::Window {
+                PointerTarget::gesture_swipe_update(&p.window, seat, data, event)
+            }
+        })
+    }
+
+    fn gesture_swipe_end(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GestureSwipeEndEvent,
+    ) {
+        self.0.with_program(|p| {
+            if !p.has_ssd(false) || p.current_focus() == Focus::Window {
+                PointerTarget::gesture_swipe_end(&p.window, seat, data, event)
+            }
+        })
+    }
+
+    fn gesture_pinch_begin(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GesturePinchBeginEvent,
+    ) {
+        self.0.with_program(|p| {
+            if !p.has_ssd(false) || p.current_focus() == Focus::Window {
+                PointerTarget::gesture_pinch_begin(&p.window, seat, data, event)
+            }
+        })
+    }
+
+    fn gesture_pinch_update(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GesturePinchUpdateEvent,
+    ) {
+        self.0.with_program(|p| {
+            if !p.has_ssd(false) || p.current_focus() == Focus::Window {
+                PointerTarget::gesture_pinch_update(&p.window, seat, data, event)
+            }
+        })
+    }
+
+    fn gesture_pinch_end(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GesturePinchEndEvent,
+    ) {
+        self.0.with_program(|p| {
+            if !p.has_ssd(false) || p.current_focus() == Focus::Window {
+                PointerTarget::gesture_pinch_end(&p.window, seat, data, event)
+            }
+        })
+    }
+
+    fn gesture_hold_begin(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GestureHoldBeginEvent,
+    ) {
+        self.0.with_program(|p| {
+            if !p.has_ssd(false) || p.current_focus() == Focus::Window {
+                PointerTarget::gesture_hold_begin(&p.window, seat, data, event)
+            }
+        })
+    }
+
+    fn gesture_hold_end(&self, seat: &Seat<State>, data: &mut State, event: &GestureHoldEndEvent) {
+        self.0.with_program(|p| {
+            if !p.has_ssd(false) || p.current_focus() == Focus::Window {
+                PointerTarget::gesture_hold_end(&p.window, seat, data, event)
+            }
+        })
     }
 }
 

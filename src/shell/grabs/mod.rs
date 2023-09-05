@@ -1,7 +1,9 @@
 use smithay::{
     input::pointer::{
-        AxisFrame, ButtonEvent, GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab,
-        PointerInnerHandle, RelativeMotionEvent,
+        AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
+        GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent,
+        GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData as PointerGrabStartData,
+        MotionEvent, PointerGrab, PointerInnerHandle, RelativeMotionEvent,
     },
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
     utils::{Logical, Point},
@@ -147,6 +149,102 @@ impl PointerGrab<State> for ResizeGrab {
         match self {
             ResizeGrab::Floating(grab) => grab.axis(data, handle, details),
             ResizeGrab::Tiling(grab) => grab.axis(data, handle, details),
+        }
+    }
+
+    fn gesture_swipe_begin(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureSwipeBeginEvent,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => grab.gesture_swipe_begin(data, handle, event),
+            ResizeGrab::Tiling(grab) => grab.gesture_swipe_begin(data, handle, event),
+        }
+    }
+
+    fn gesture_swipe_update(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureSwipeUpdateEvent,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => grab.gesture_swipe_update(data, handle, event),
+            ResizeGrab::Tiling(grab) => grab.gesture_swipe_update(data, handle, event),
+        }
+    }
+
+    fn gesture_swipe_end(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureSwipeEndEvent,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => grab.gesture_swipe_end(data, handle, event),
+            ResizeGrab::Tiling(grab) => grab.gesture_swipe_end(data, handle, event),
+        }
+    }
+
+    fn gesture_pinch_begin(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GesturePinchBeginEvent,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => grab.gesture_pinch_begin(data, handle, event),
+            ResizeGrab::Tiling(grab) => grab.gesture_pinch_begin(data, handle, event),
+        }
+    }
+
+    fn gesture_pinch_update(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GesturePinchUpdateEvent,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => grab.gesture_pinch_update(data, handle, event),
+            ResizeGrab::Tiling(grab) => grab.gesture_pinch_update(data, handle, event),
+        }
+    }
+
+    fn gesture_pinch_end(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GesturePinchEndEvent,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => grab.gesture_pinch_end(data, handle, event),
+            ResizeGrab::Tiling(grab) => grab.gesture_pinch_end(data, handle, event),
+        }
+    }
+
+    fn gesture_hold_begin(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureHoldBeginEvent,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => grab.gesture_hold_begin(data, handle, event),
+            ResizeGrab::Tiling(grab) => grab.gesture_hold_begin(data, handle, event),
+        }
+    }
+
+    fn gesture_hold_end(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureHoldEndEvent,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => grab.gesture_hold_end(data, handle, event),
+            ResizeGrab::Tiling(grab) => grab.gesture_hold_end(data, handle, event),
         }
     }
 

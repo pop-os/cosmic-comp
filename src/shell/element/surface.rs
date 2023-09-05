@@ -17,7 +17,16 @@ use smithay::{
         },
         PopupManager, Window,
     },
-    input::{keyboard::KeyboardTarget, pointer::PointerTarget},
+    input::{
+        keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
+        pointer::{
+            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
+            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
+            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
+            PointerTarget, RelativeMotionEvent,
+        },
+        Seat,
+    },
     output::Output,
     reexports::{
         wayland_protocols::{
@@ -34,12 +43,15 @@ use smithay::{
     wayland::{
         compositor::{with_states, SurfaceData},
         seat::WaylandFocus,
-        shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData},
+        shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceData},
     },
     xwayland::{xwm::X11Relatable, X11Surface},
 };
 
-use crate::{state::SurfaceDmabufFeedback, wayland::handlers::decoration::PreferredDecorationMode};
+use crate::{
+    state::{State, SurfaceDmabufFeedback},
+    wayland::handlers::decoration::PreferredDecorationMode,
+};
 
 space_elements! {
     #[derive(Debug, Clone, PartialEq)]
@@ -363,13 +375,7 @@ impl CosmicSurface {
         match self {
             CosmicSurface::Wayland(window) => {
                 Some(with_states(window.toplevel().wl_surface(), |states| {
-                    let attrs = states
-                        .data_map
-                        .get::<XdgToplevelSurfaceData>()
-                        .unwrap()
-                        .lock()
-                        .unwrap();
-                    attrs.min_size
+                    states.cached_state.current::<SurfaceCachedState>().min_size
                 }))
                 .filter(|size| !(size.w == 0 && size.h == 0))
             }
@@ -389,13 +395,7 @@ impl CosmicSurface {
         match self {
             CosmicSurface::Wayland(window) => {
                 Some(with_states(window.toplevel().wl_surface(), |states| {
-                    let attrs = states
-                        .data_map
-                        .get::<XdgToplevelSurfaceData>()
-                        .unwrap()
-                        .lock()
-                        .unwrap();
-                    attrs.max_size
+                    states.cached_state.current::<SurfaceCachedState>().max_size
                 }))
                 .filter(|size| !(size.w == 0 && size.h == 0))
             }
@@ -638,12 +638,12 @@ impl CosmicSurface {
     }
 }
 
-impl KeyboardTarget<crate::state::State> for CosmicSurface {
+impl KeyboardTarget<State> for CosmicSurface {
     fn enter(
         &self,
-        seat: &smithay::input::Seat<crate::state::State>,
-        data: &mut crate::state::State,
-        keys: Vec<smithay::input::keyboard::KeysymHandle<'_>>,
+        seat: &Seat<State>,
+        data: &mut State,
+        keys: Vec<KeysymHandle<'_>>,
         serial: smithay::utils::Serial,
     ) {
         match self {
@@ -657,12 +657,7 @@ impl KeyboardTarget<crate::state::State> for CosmicSurface {
         }
     }
 
-    fn leave(
-        &self,
-        seat: &smithay::input::Seat<crate::state::State>,
-        data: &mut crate::state::State,
-        serial: smithay::utils::Serial,
-    ) {
+    fn leave(&self, seat: &Seat<State>, data: &mut State, serial: smithay::utils::Serial) {
         match self {
             CosmicSurface::Wayland(window) => KeyboardTarget::leave(window, seat, data, serial),
             CosmicSurface::X11(surface) => KeyboardTarget::leave(surface, seat, data, serial),
@@ -672,9 +667,9 @@ impl KeyboardTarget<crate::state::State> for CosmicSurface {
 
     fn key(
         &self,
-        seat: &smithay::input::Seat<crate::state::State>,
-        data: &mut crate::state::State,
-        key: smithay::input::keyboard::KeysymHandle<'_>,
+        seat: &Seat<State>,
+        data: &mut State,
+        key: KeysymHandle<'_>,
         state: smithay::backend::input::KeyState,
         serial: smithay::utils::Serial,
         time: u32,
@@ -692,9 +687,9 @@ impl KeyboardTarget<crate::state::State> for CosmicSurface {
 
     fn modifiers(
         &self,
-        seat: &smithay::input::Seat<crate::state::State>,
-        data: &mut crate::state::State,
-        modifiers: smithay::input::keyboard::ModifiersState,
+        seat: &Seat<State>,
+        data: &mut State,
+        modifiers: ModifiersState,
         serial: smithay::utils::Serial,
     ) {
         match self {
@@ -709,13 +704,8 @@ impl KeyboardTarget<crate::state::State> for CosmicSurface {
     }
 }
 
-impl PointerTarget<crate::state::State> for CosmicSurface {
-    fn enter(
-        &self,
-        seat: &smithay::input::Seat<crate::state::State>,
-        data: &mut crate::state::State,
-        event: &smithay::input::pointer::MotionEvent,
-    ) {
+impl PointerTarget<State> for CosmicSurface {
+    fn enter(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
         match self {
             CosmicSurface::Wayland(window) => PointerTarget::enter(window, seat, data, event),
             CosmicSurface::X11(surface) => PointerTarget::enter(surface, seat, data, event),
@@ -723,12 +713,7 @@ impl PointerTarget<crate::state::State> for CosmicSurface {
         }
     }
 
-    fn motion(
-        &self,
-        seat: &smithay::input::Seat<crate::state::State>,
-        data: &mut crate::state::State,
-        event: &smithay::input::pointer::MotionEvent,
-    ) {
+    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
         match self {
             CosmicSurface::Wayland(window) => PointerTarget::motion(window, seat, data, event),
             CosmicSurface::X11(surface) => PointerTarget::motion(surface, seat, data, event),
@@ -736,12 +721,7 @@ impl PointerTarget<crate::state::State> for CosmicSurface {
         }
     }
 
-    fn relative_motion(
-        &self,
-        seat: &smithay::input::Seat<crate::state::State>,
-        data: &mut crate::state::State,
-        event: &smithay::input::pointer::RelativeMotionEvent,
-    ) {
+    fn relative_motion(&self, seat: &Seat<State>, data: &mut State, event: &RelativeMotionEvent) {
         match self {
             CosmicSurface::Wayland(window) => {
                 PointerTarget::relative_motion(window, seat, data, event)
@@ -753,12 +733,7 @@ impl PointerTarget<crate::state::State> for CosmicSurface {
         }
     }
 
-    fn button(
-        &self,
-        seat: &smithay::input::Seat<crate::state::State>,
-        data: &mut crate::state::State,
-        event: &smithay::input::pointer::ButtonEvent,
-    ) {
+    fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
         match self {
             CosmicSurface::Wayland(window) => PointerTarget::button(window, seat, data, event),
             CosmicSurface::X11(surface) => PointerTarget::button(surface, seat, data, event),
@@ -766,12 +741,7 @@ impl PointerTarget<crate::state::State> for CosmicSurface {
         }
     }
 
-    fn axis(
-        &self,
-        seat: &smithay::input::Seat<crate::state::State>,
-        data: &mut crate::state::State,
-        frame: smithay::input::pointer::AxisFrame,
-    ) {
+    fn axis(&self, seat: &Seat<State>, data: &mut State, frame: AxisFrame) {
         match self {
             CosmicSurface::Wayland(window) => PointerTarget::axis(window, seat, data, frame),
             CosmicSurface::X11(surface) => PointerTarget::axis(surface, seat, data, frame),
@@ -781,8 +751,8 @@ impl PointerTarget<crate::state::State> for CosmicSurface {
 
     fn leave(
         &self,
-        seat: &smithay::input::Seat<crate::state::State>,
-        data: &mut crate::state::State,
+        seat: &Seat<State>,
+        data: &mut State,
         serial: smithay::utils::Serial,
         time: u32,
     ) {
@@ -791,6 +761,137 @@ impl PointerTarget<crate::state::State> for CosmicSurface {
                 PointerTarget::leave(window, seat, data, serial, time)
             }
             CosmicSurface::X11(surface) => PointerTarget::leave(surface, seat, data, serial, time),
+            _ => unreachable!(),
+        }
+    }
+
+    fn gesture_swipe_begin(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GestureSwipeBeginEvent,
+    ) {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                PointerTarget::gesture_swipe_begin(window, seat, data, event)
+            }
+            CosmicSurface::X11(surface) => {
+                PointerTarget::gesture_swipe_begin(surface, seat, data, event)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn gesture_swipe_update(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GestureSwipeUpdateEvent,
+    ) {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                PointerTarget::gesture_swipe_update(window, seat, data, event)
+            }
+            CosmicSurface::X11(surface) => {
+                PointerTarget::gesture_swipe_update(surface, seat, data, event)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn gesture_swipe_end(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GestureSwipeEndEvent,
+    ) {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                PointerTarget::gesture_swipe_end(window, seat, data, event)
+            }
+            CosmicSurface::X11(surface) => {
+                PointerTarget::gesture_swipe_end(surface, seat, data, event)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn gesture_pinch_begin(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GesturePinchBeginEvent,
+    ) {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                PointerTarget::gesture_pinch_begin(window, seat, data, event)
+            }
+            CosmicSurface::X11(surface) => {
+                PointerTarget::gesture_pinch_begin(surface, seat, data, event)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn gesture_pinch_update(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GesturePinchUpdateEvent,
+    ) {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                PointerTarget::gesture_pinch_update(window, seat, data, event)
+            }
+            CosmicSurface::X11(surface) => {
+                PointerTarget::gesture_pinch_update(surface, seat, data, event)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn gesture_pinch_end(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GesturePinchEndEvent,
+    ) {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                PointerTarget::gesture_pinch_end(window, seat, data, event)
+            }
+            CosmicSurface::X11(surface) => {
+                PointerTarget::gesture_pinch_end(surface, seat, data, event)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn gesture_hold_begin(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GestureHoldBeginEvent,
+    ) {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                PointerTarget::gesture_hold_begin(window, seat, data, event)
+            }
+            CosmicSurface::X11(surface) => {
+                PointerTarget::gesture_hold_begin(surface, seat, data, event)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn gesture_hold_end(&self, seat: &Seat<State>, data: &mut State, event: &GestureHoldEndEvent) {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                PointerTarget::gesture_hold_end(window, seat, data, event)
+            }
+            CosmicSurface::X11(surface) => {
+                PointerTarget::gesture_hold_end(surface, seat, data, event)
+            }
             _ => unreachable!(),
         }
     }

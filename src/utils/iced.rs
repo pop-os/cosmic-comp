@@ -44,7 +44,12 @@ use smithay::{
     desktop::space::{RenderZindex, SpaceElement},
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
-        pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget, RelativeMotionEvent},
+        pointer::{
+            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
+            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
+            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
+            PointerTarget, RelativeMotionEvent,
+        },
         Seat,
     },
     output::Output,
@@ -460,6 +465,63 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorLeft));
         let _ = internal.update(true);
+    }
+
+    fn gesture_swipe_begin(
+        &self,
+        _: &Seat<crate::state::State>,
+        _: &mut crate::state::State,
+        _: &GestureSwipeBeginEvent,
+    ) {
+    }
+    fn gesture_swipe_update(
+        &self,
+        _: &Seat<crate::state::State>,
+        _: &mut crate::state::State,
+        _: &GestureSwipeUpdateEvent,
+    ) {
+    }
+    fn gesture_swipe_end(
+        &self,
+        _: &Seat<crate::state::State>,
+        _: &mut crate::state::State,
+        _: &GestureSwipeEndEvent,
+    ) {
+    }
+    fn gesture_pinch_begin(
+        &self,
+        _: &Seat<crate::state::State>,
+        _: &mut crate::state::State,
+        _: &GesturePinchBeginEvent,
+    ) {
+    }
+    fn gesture_pinch_update(
+        &self,
+        _: &Seat<crate::state::State>,
+        _: &mut crate::state::State,
+        _: &GesturePinchUpdateEvent,
+    ) {
+    }
+    fn gesture_pinch_end(
+        &self,
+        _: &Seat<crate::state::State>,
+        _: &mut crate::state::State,
+        _: &GesturePinchEndEvent,
+    ) {
+    }
+    fn gesture_hold_begin(
+        &self,
+        _: &Seat<crate::state::State>,
+        _: &mut crate::state::State,
+        _: &GestureHoldBeginEvent,
+    ) {
+    }
+    fn gesture_hold_end(
+        &self,
+        _: &Seat<crate::state::State>,
+        _: &mut crate::state::State,
+        _: &GestureHoldEndEvent,
+    ) {
     }
 }
 
