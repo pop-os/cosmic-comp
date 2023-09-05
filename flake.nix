@@ -30,6 +30,7 @@
                 ./Cargo.toml
                 ./Cargo.lock
                 ./resources
+                ./cosmic-comp-config
               ];
             };
 
