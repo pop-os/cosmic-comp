@@ -70,6 +70,7 @@ pub struct WorkspaceGroupHandle {
 pub struct WorkspaceGroupDataInner {
     outputs: Vec<Output>,
     capabilities: Vec<GroupCapabilities>,
+    workspace_count: usize,
 }
 pub type WorkspaceGroupData = Mutex<WorkspaceGroupDataInner>;
 
@@ -869,6 +870,11 @@ where
         handle_state.capabilities = group.capabilities.clone();
         changed = true;
     }
+
+    if handle_state.workspace_count != group.workspaces.len() {
+        changed = true;
+    }
+    handle_state.workspace_count = group.workspaces.len();
 
     for workspace in &mut group.workspaces {
         if send_workspace_to_client::<D>(dh, instance, workspace) {

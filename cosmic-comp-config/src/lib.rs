@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub mod input;
+pub mod workspace;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct XkbConfig {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    shell::{Shell, WorkspaceAmount},
+    shell::Shell,
     state::{BackendData, State},
     wayland::protocols::output_configuration::OutputConfigurationState,
 };
@@ -29,7 +29,11 @@ mod key_bindings;
 pub use key_bindings::{Action, KeyModifier, KeyModifiers, KeyPattern};
 mod types;
 pub use self::types::*;
-use cosmic_comp_config::{input::InputConfig, XkbConfig};
+use cosmic_comp_config::{
+    input::InputConfig,
+    workspace::{WorkspaceConfig, WorkspaceLayout},
+    XkbConfig,
+};
 
 #[derive(Debug)]
 pub struct Config {
@@ -40,28 +44,13 @@ pub struct Config {
     pub input_default: InputConfig,
     pub input_touchpad: InputConfig,
     pub input_devices: HashMap<String, InputConfig>,
+    pub workspace: WorkspaceConfig,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct StaticConfig {
     pub key_bindings: HashMap<key_bindings::KeyPattern, key_bindings::Action>,
-    pub workspace_mode: WorkspaceMode,
-    pub workspace_amount: WorkspaceAmount,
-    #[serde(default = "default_workspace_layout")]
-    pub workspace_layout: WorkspaceLayout,
     pub tiling_enabled: bool,
-}
-
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
-pub enum WorkspaceMode {
-    OutputBound,
-    Global,
-}
-
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
-pub enum WorkspaceLayout {
-    Vertical,
-    Horizontal,
 }
 
 #[derive(Debug)]
@@ -94,10 +83,6 @@ impl From<Output> for OutputInfo {
 
 fn default_enabled() -> bool {
     true
-}
-
-fn default_workspace_layout() -> WorkspaceLayout {
-    WorkspaceLayout::Vertical
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
@@ -155,18 +140,23 @@ impl Config {
             })
             .expect("Failed to add cosmic-config to the event loop");
         let xdg = xdg::BaseDirectories::new().ok();
+        let workspace = get_config::<WorkspaceConfig>(&config, "workspaces");
         Config {
-            static_conf: Self::load_static(xdg.as_ref()),
+            static_conf: Self::load_static(xdg.as_ref(), workspace.workspace_layout),
             dynamic_conf: Self::load_dynamic(xdg.as_ref()),
             xkb: get_config(&config, "xkb-config"),
             input_default: get_config(&config, "input-default"),
             input_touchpad: get_config(&config, "input-touchpad"),
             input_devices: get_config(&config, "input-devices"),
+            workspace,
             config,
         }
     }
 
-    fn load_static(xdg: Option<&xdg::BaseDirectories>) -> StaticConfig {
+    fn load_static(
+        xdg: Option<&xdg::BaseDirectories>,
+        workspace_layout: WorkspaceLayout,
+    ) -> StaticConfig {
         let mut locations = if let Some(base) = xdg {
             vec![
                 base.get_config_file("cosmic-comp.ron"),
@@ -192,10 +182,7 @@ impl Config {
                     ron::de::from_reader(OpenOptions::new().read(true).open(path).unwrap())
                         .expect("Malformed config file");
 
-                key_bindings::add_default_bindings(
-                    &mut config.key_bindings,
-                    config.workspace_layout,
-                );
+                key_bindings::add_default_bindings(&mut config.key_bindings, workspace_layout);
 
                 return config;
             }
@@ -203,9 +190,6 @@ impl Config {
 
         StaticConfig {
             key_bindings: HashMap::new(),
-            workspace_mode: WorkspaceMode::Global,
-            workspace_amount: WorkspaceAmount::Dynamic,
-            workspace_layout: WorkspaceLayout::Vertical,
             tiling_enabled: false,
         }
     }
@@ -515,6 +499,11 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 let value = get_config::<HashMap<String, InputConfig>>(&config, "input-devices");
                 state.common.config.input_devices = value;
                 update_input(state);
+            }
+            "workspaces" => {
+                state.common.config.workspace =
+                    get_config::<WorkspaceConfig>(&config, "workspaces");
+                state.common.shell.update_config(&state.common.config);
             }
             _ => {}
         }

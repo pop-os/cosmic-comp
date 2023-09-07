@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::shell::{focus::FocusDirection, grabs::ResizeEdge, Direction, ResizeDirection};
+use cosmic_comp_config::workspace::WorkspaceLayout;
 use serde::Deserialize;
 use smithay::{
     backend::input::KeyState,
@@ -8,7 +9,7 @@ use smithay::{
 };
 use std::collections::HashMap;
 
-use super::{types::*, WorkspaceLayout};
+use super::types::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub enum KeyModifier {
