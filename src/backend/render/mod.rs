@@ -14,7 +14,7 @@ use crate::{
     config::WorkspaceLayout,
     shell::{
         focus::target::WindowGroup, grabs::SeatMoveGrabState, layout::tiling::ANIMATION_DURATION,
-        CosmicMapped, CosmicMappedRenderElement, WorkspaceRenderElement,
+        CosmicMapped, CosmicMappedRenderElement, OverviewMode, Trigger, WorkspaceRenderElement,
     },
     state::{Common, Fps},
     utils::prelude::{OutputExt, SeatExt},
@@ -489,6 +489,26 @@ where
     let overview = state.shell.overview_mode();
     let (resize_mode, resize_indicator) = state.shell.resize_mode();
     let resize_indicator = resize_indicator.map(|indicator| (resize_mode, indicator));
+    let swap_tree = if let OverviewMode::Started(Trigger::KeyboardSwap(_, desc), _) = &overview.0 {
+        if let Some(desc_output) = desc.output.upgrade() {
+            if output != &desc_output || current.0 != desc.handle {
+                state
+                    .shell
+                    .space_for_handle(&desc.handle)
+                    .and_then(|w| w.tiling_layer.tree_for_output(&desc_output))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let overview = (
+        overview.0,
+        overview.1.map(|indicator| (indicator, swap_tree)),
+    );
 
     let last_active_seat = state.last_active_seat().clone();
     let move_active = last_active_seat

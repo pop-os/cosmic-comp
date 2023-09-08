@@ -955,6 +955,13 @@ impl TilingLayout {
         }
     }
 
+    pub fn tree_for_output(&self, output: &Output) -> Option<&Tree<Data>> {
+        self.queues
+            .get(output)
+            .and_then(|queue| queue.trees.back())
+            .map(|tree| &tree.0)
+    }
+
     pub fn unmap(&mut self, window: &CosmicMapped) -> Option<Output> {
         let output = {
             let node_id = window.tiling_node_id.lock().unwrap().clone()?;
@@ -2771,9 +2778,9 @@ impl TilingLayout {
                     placeholder_id,
                     Some(None),
                     None,
+                    None,
                 )
-                .map(|x| x.0)
-                .unwrap_or_default();
+                .0;
 
                 let mut result = None;
                 let mut lookup = Some(root.clone());
@@ -3366,10 +3373,9 @@ impl TilingLayout {
         &self,
         renderer: &mut R,
         output: &Output,
-        workspace: &WorkspaceHandle,
         seat: Option<&Seat<State>>,
         non_exclusive_zone: Rectangle<i32, Logical>,
-        overview: (OverviewMode, Option<SwapIndicator>),
+        overview: (OverviewMode, Option<(SwapIndicator, Option<&Tree<Data>>)>),
         resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
         indicator_thickness: u8,
     ) -> Result<
@@ -3426,20 +3432,14 @@ impl TilingLayout {
             .then(|| self.last_overview_hover.as_ref().map(|x| &x.1));
         let swap_desc = match &overview.0 {
             OverviewMode::Started(Trigger::KeyboardSwap(_, desc), _)
-            | OverviewMode::Ended(Some(Trigger::KeyboardSwap(_, desc)), _) => {
-                if desc.output == *output && desc.handle == *workspace {
-                    Some(desc.clone())
-                } else {
-                    None
-                }
-            }
+            | OverviewMode::Ended(Some(Trigger::KeyboardSwap(_, desc)), _) => Some(desc.clone()),
             _ => None,
         };
 
         // all gone windows and fade them out
         let old_geometries = if let Some(reference_tree) = reference_tree.as_ref() {
             let (geometries, _) = if let Some(transition) = draw_groups {
-                geometries_for_groupview(
+                Some(geometries_for_groupview(
                     reference_tree,
                     &mut *renderer,
                     non_exclusive_zone,
@@ -3451,7 +3451,8 @@ impl TilingLayout {
                     &self.placeholder_id,
                     is_mouse_tiling,
                     swap_desc.clone(),
-                )
+                    overview.1.as_ref().and_then(|(_, tree)| tree.clone()),
+                ))
             } else {
                 None
             }
@@ -3476,7 +3477,7 @@ impl TilingLayout {
         };
 
         let (geometries, group_elements) = if let Some(transition) = draw_groups {
-            geometries_for_groupview(
+            Some(geometries_for_groupview(
                 target_tree,
                 &mut *renderer,
                 non_exclusive_zone,
@@ -3487,7 +3488,8 @@ impl TilingLayout {
                 &self.placeholder_id,
                 is_mouse_tiling,
                 swap_desc.clone(),
-            )
+                overview.1.as_ref().and_then(|(_, tree)| tree.clone()),
+            ))
         } else {
             None
         }
@@ -3498,6 +3500,7 @@ impl TilingLayout {
             target_tree,
             reference_tree,
             renderer,
+            non_exclusive_zone,
             geometries,
             old_geometries,
             is_overview,
@@ -3519,6 +3522,7 @@ impl TilingLayout {
             resize_indicator,
             swap_desc.clone(),
             &self.swapping_stack_surface_id,
+            &self.placeholder_id,
         );
         window_elements.extend(w_elements);
         popup_elements.extend(p_elements);
@@ -3558,8 +3562,8 @@ fn swap_geometry(
     ));
 
     let loc = Point::from((
-        relative_to.loc.x + relative_to.size.w - new_size.w + 16,
-        relative_to.loc.y - 16,
+        relative_to.loc.x + relative_to.size.w - new_size.w,
+        relative_to.loc.y,
     ));
 
     Rectangle::from_loc_and_size(loc, new_size)
@@ -3576,10 +3580,11 @@ fn geometries_for_groupview<'a, R>(
     placeholder_id: &Id,
     mouse_tiling: Option<Option<&TargetZone>>,
     swap_desc: Option<NodeDesc>,
-) -> Option<(
+    swap_tree: Option<&Tree<Data>>,
+) -> (
     HashMap<NodeId, Rectangle<i32, Logical>>,
     Vec<CosmicMappedRenderElement<R>>,
-)>
+)
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer + 'a,
     <R as Renderer>::TextureId: 'static,
@@ -3587,582 +3592,611 @@ where
     CosmicWindowRenderElement<R>: RenderElement<R>,
 {
     // we need to recalculate geometry for all elements, if we are drawing groups
-    if let Some(root) = tree.root_node_id() {
-        let gap: i32 = (if mouse_tiling.is_some() {
-            GAP_MOUSE
-        } else {
-            GAP_KEYBOARD
-        } as f32
-            * transition)
-            .round() as i32;
-        let mut renderer = renderer.into();
+    let gap: i32 = (if mouse_tiling.is_some() {
+        GAP_MOUSE
+    } else {
+        GAP_KEYBOARD
+    } as f32
+        * transition)
+        .round() as i32;
+    let mut renderer = renderer.into();
 
-        let mut stack = vec![(non_exclusive_zone, 0)];
-        let mut elements = Vec::new();
-        let mut geometries: HashMap<NodeId, Rectangle<i32, Logical>> = HashMap::new();
-        let alpha = alpha * transition;
+    let root = tree.root_node_id();
+    let mut stack = Vec::new();
+    if swap_tree.is_some() {
+        // push bogos value, that will get ignored anyway
+        stack.push((Rectangle::from_loc_and_size((0, 0), (320, 240)), 0));
+    }
+    if root.is_some() {
+        stack.push((non_exclusive_zone, 0));
+    }
 
-        let focused = seat
-            .and_then(|seat| {
-                seat.get_keyboard()
-                    .unwrap()
-                    .current_focus()
-                    .and_then(|target| {
-                        TilingLayout::currently_focused_node(&tree, &seat.active_output(), target)
-                    })
-            })
-            .map(|(id, _)| id);
-        let focused_geo = if let Some(focused_id) = focused.as_ref() {
-            Some(*tree.get(focused_id).unwrap().data().geometry())
-        } else {
-            None
-        };
+    let mut elements = Vec::new();
+    let mut geometries: HashMap<NodeId, Rectangle<i32, Logical>> = HashMap::new();
+    let alpha = alpha * transition;
 
-        let has_potential_groups = if let Some(focused_id) = focused.as_ref() {
-            let focused_node = tree.get(focused_id).unwrap();
-            if let Some(parent) = focused_node.parent() {
-                let parent_node = tree.get(parent).unwrap();
-                parent_node.children().len() > 2
-            } else {
-                false
-            }
+    let focused = seat
+        .and_then(|seat| {
+            seat.get_keyboard()
+                .unwrap()
+                .current_focus()
+                .and_then(|target| {
+                    TilingLayout::currently_focused_node(&tree, &seat.active_output(), target)
+                })
+        })
+        .map(|(id, _)| id);
+    let focused_geo = if let Some(focused_id) = focused.as_ref() {
+        Some(*tree.get(focused_id).unwrap().data().geometry())
+    } else {
+        None
+    };
+
+    let has_potential_groups = if let Some(focused_id) = focused.as_ref() {
+        let focused_node = tree.get(focused_id).unwrap();
+        if let Some(parent) = focused_node.parent() {
+            let parent_node = tree.get(parent).unwrap();
+            parent_node.children().len() > 2
         } else {
             false
-        };
+        }
+    } else {
+        false
+    };
 
-        for node_id in tree.traverse_pre_order_ids(root).unwrap() {
-            if let Some((mut geo, depth)) = stack.pop() {
-                let node: &Node<Data> = tree.get(&node_id).unwrap();
-                let data = node.data();
+    for (tree, node_id) in root
+        .into_iter()
+        .flat_map(|root| tree.traverse_pre_order_ids(root).unwrap())
+        .map(|id| (tree, id))
+        .chain(
+            swap_tree
+                .as_ref()
+                .filter(|_| swap_desc.as_ref().unwrap().stack_window.is_none())
+                .into_iter()
+                .flat_map(|tree| {
+                    tree.traverse_pre_order_ids(&swap_desc.as_ref().unwrap().node)
+                        .unwrap()
+                })
+                .map(|id| (*swap_tree.as_ref().unwrap(), id)),
+        )
+    {
+        if let Some((mut geo, depth)) = stack.pop() {
+            let node: &Node<Data> = tree.get(&node_id).unwrap();
+            let data = node.data();
 
-                let is_placeholder_sibling = node
-                    .parent()
-                    .and_then(|parent_id| tree.children_ids(parent_id).ok())
-                    .map(|mut siblings| {
-                        siblings.any(|child_id| tree.get(child_id).unwrap().data().is_placeholder())
-                    })
-                    .unwrap_or(false);
+            let is_placeholder_sibling = node
+                .parent()
+                .and_then(|parent_id| tree.children_ids(parent_id).ok())
+                .map(|mut siblings| {
+                    siblings.any(|child_id| tree.get(child_id).unwrap().data().is_placeholder())
+                })
+                .unwrap_or(false);
 
-                let render_potential_group = swap_desc.is_none()
-                    && has_potential_groups
-                    && (if let Some(focused_id) = focused.as_ref() {
-                        // `focused` can move into us directly
-                        if let Some(parent) = node.parent() {
-                            let parent_data = tree.get(parent).unwrap().data();
+            let render_potential_group = swap_desc.is_none()
+                && has_potential_groups
+                && (if let Some(focused_id) = focused.as_ref() {
+                    // `focused` can move into us directly
+                    if let Some(parent) = node.parent() {
+                        let parent_data = tree.get(parent).unwrap().data();
 
-                            let idx = tree
-                                .children_ids(parent)
-                                .unwrap()
-                                .position(|id| id == &node_id)
-                                .unwrap();
-                            if let Some(focused_idx) = tree
-                                .children_ids(parent)
-                                .unwrap()
-                                .position(|id| id == focused_id)
-                            {
-                                // only direct neighbors
-                                focused_idx.abs_diff(idx) == 1
+                        let idx = tree
+                            .children_ids(parent)
+                            .unwrap()
+                            .position(|id| id == &node_id)
+                            .unwrap();
+                        if let Some(focused_idx) = tree
+                            .children_ids(parent)
+                            .unwrap()
+                            .position(|id| id == focused_id)
+                        {
+                            // only direct neighbors
+                            focused_idx.abs_diff(idx) == 1
                                 // skip neighbors, if this is a group of two
                                 && parent_data.len() > 2
-                            } else {
-                                false
-                            }
                         } else {
                             false
                         }
                     } else {
                         false
-                    });
+                    }
+                } else {
+                    false
+                });
 
-                let (element_gap_left, element_gap_up, element_gap_right, element_gap_down) = {
-                    let gap = if is_placeholder_sibling {
-                        PLACEHOLDER_GAP_MOUSE
-                    } else {
-                        gap
-                    };
-                    (
-                        if TilingLayout::has_sibling_node(tree, &node_id, Direction::Left)
-                            && (mouse_tiling.is_some() || depth > 0)
-                        {
-                            gap / 2
-                        } else {
-                            0
-                        },
-                        if TilingLayout::has_sibling_node(tree, &node_id, Direction::Up)
-                            && (mouse_tiling.is_some() || depth > 0)
-                        {
-                            gap / 2
-                        } else {
-                            0
-                        },
-                        if TilingLayout::has_sibling_node(tree, &node_id, Direction::Right)
-                            && (mouse_tiling.is_some() || depth > 0)
-                        {
-                            gap / 2
-                        } else {
-                            0
-                        },
-                        if TilingLayout::has_sibling_node(tree, &node_id, Direction::Down)
-                            && (mouse_tiling.is_some() || depth > 0)
-                        {
-                            gap / 2
-                        } else {
-                            0
-                        },
-                    )
+            let (element_gap_left, element_gap_up, element_gap_right, element_gap_down) = {
+                let gap = if is_placeholder_sibling {
+                    PLACEHOLDER_GAP_MOUSE
+                } else {
+                    gap
                 };
+                (
+                    if TilingLayout::has_sibling_node(tree, &node_id, Direction::Left)
+                        && (mouse_tiling.is_some() || depth > 0)
+                    {
+                        gap / 2
+                    } else {
+                        0
+                    },
+                    if TilingLayout::has_sibling_node(tree, &node_id, Direction::Up)
+                        && (mouse_tiling.is_some() || depth > 0)
+                    {
+                        gap / 2
+                    } else {
+                        0
+                    },
+                    if TilingLayout::has_sibling_node(tree, &node_id, Direction::Right)
+                        && (mouse_tiling.is_some() || depth > 0)
+                    {
+                        gap / 2
+                    } else {
+                        0
+                    },
+                    if TilingLayout::has_sibling_node(tree, &node_id, Direction::Down)
+                        && (mouse_tiling.is_some() || depth > 0)
+                    {
+                        gap / 2
+                    } else {
+                        0
+                    },
+                )
+            };
 
-                match data {
-                    Data::Group {
-                        orientation,
-                        last_geometry,
-                        sizes,
-                        alive,
-                        pill_indicator,
-                    } => {
-                        let render_active_child = if let Some(focused_id) = focused.as_ref() {
-                            !has_potential_groups
-                                && swap_desc.is_none()
-                                && node
-                                    .children()
-                                    .iter()
-                                    .any(|child_id| child_id == focused_id)
-                        } else {
-                            false
-                        };
+            match data {
+                Data::Group {
+                    orientation,
+                    last_geometry,
+                    sizes,
+                    alive,
+                    pill_indicator,
+                } => {
+                    let render_active_child = if let Some(focused_id) = focused.as_ref() {
+                        !has_potential_groups
+                            && swap_desc.is_none()
+                            && node
+                                .children()
+                                .iter()
+                                .any(|child_id| child_id == focused_id)
+                    } else {
+                        false
+                    };
 
-                        geo.loc += (element_gap_left, element_gap_up).into();
-                        geo.size -= (element_gap_left, element_gap_up).into();
-                        geo.size -= (element_gap_right, element_gap_down).into();
+                    geo.loc += (element_gap_left, element_gap_up).into();
+                    geo.size -= (element_gap_left, element_gap_up).into();
+                    geo.size -= (element_gap_right, element_gap_down).into();
 
-                        geometries.insert(node_id.clone(), geo);
+                    geometries.insert(node_id.clone(), geo);
 
-                        if let Some(renderer) = renderer.as_mut() {
-                            if (render_potential_group || render_active_child) && &node_id != root {
-                                elements.push(
-                                    IndicatorShader::element(
-                                        *renderer,
-                                        Key::Group(Arc::downgrade(alive)),
-                                        geo,
-                                        4,
-                                        if render_active_child { 16 } else { 8 },
-                                        alpha * if render_potential_group { 0.40 } else { 1.0 },
-                                        output_scale,
-                                        GROUP_COLOR,
-                                    )
-                                    .into(),
-                                );
-                            }
-                            if mouse_tiling.is_some()
-                                && pill_indicator.is_some()
-                                && &node_id != root
-                            {
-                                elements.push(
-                                    IndicatorShader::element(
-                                        *renderer,
-                                        Key::Group(Arc::downgrade(alive)),
-                                        geo,
-                                        4,
-                                        8,
-                                        alpha * 0.40,
-                                        output_scale,
-                                        GROUP_COLOR,
-                                    )
-                                    .into(),
-                                );
-                            }
-
-                            if mouse_tiling.is_some()
-                                && node
-                                    .parent()
-                                    .map(|parent_id| {
-                                        matches!(
-                                            tree.get(&parent_id).unwrap().data(),
-                                            Data::Group {
-                                                pill_indicator: Some(_),
-                                                ..
-                                            }
-                                        )
-                                    })
-                                    .unwrap_or(false)
-                            {
-                                // test if parent pill-indicator is adjacent
-                                let parent_id = node.parent().unwrap();
-                                let parent = tree.get(parent_id).unwrap();
-                                let own_idx = tree
-                                    .children_ids(parent_id)
-                                    .unwrap()
-                                    .position(|child_id| child_id == &node_id)
-                                    .unwrap();
-                                let draw_outline = match parent.data() {
-                                    Data::Group {
-                                        pill_indicator,
-                                        orientation,
-                                        ..
-                                    } => match pill_indicator {
-                                        Some(PillIndicator::Inner(pill_idx)) => {
-                                            *pill_idx == own_idx || pill_idx + 1 == own_idx
-                                        }
-                                        Some(PillIndicator::Outer(dir)) => match (dir, orientation)
-                                        {
-                                            (Direction::Left, Orientation::Horizontal)
-                                            | (Direction::Right, Orientation::Horizontal)
-                                            | (Direction::Up, Orientation::Vertical)
-                                            | (Direction::Down, Orientation::Vertical) => true,
-                                            (Direction::Left, Orientation::Vertical)
-                                            | (Direction::Up, Orientation::Horizontal) => {
-                                                own_idx == 0
-                                            }
-                                            (Direction::Right, Orientation::Vertical)
-                                            | (Direction::Down, Orientation::Horizontal) => {
-                                                own_idx + 1 == parent.data().len()
-                                            }
-                                        },
-                                        None => unreachable!(),
-                                    },
-                                    _ => unreachable!(),
-                                };
-
-                                if draw_outline {
-                                    elements.push(
-                                        IndicatorShader::element(
-                                            *renderer,
-                                            Key::Group(Arc::downgrade(alive)),
-                                            geo,
-                                            4,
-                                            8,
-                                            alpha * 0.15,
-                                            output_scale,
-                                            GROUP_COLOR,
-                                        )
-                                        .into(),
-                                    );
-                                }
-                            }
-                        }
-
-                        geo.loc += (gap, gap).into();
-                        geo.size -= (gap * 2, gap * 2).into();
-
-                        if mouse_tiling.is_some() {
-                            if let Some(PillIndicator::Outer(direction)) = pill_indicator {
-                                let (pill_geo, remaining_geo) = match direction {
-                                    Direction::Left => (
-                                        Rectangle::from_loc_and_size(
-                                            (geo.loc.x, geo.loc.y),
-                                            (16, geo.size.h),
-                                        ),
-                                        Rectangle::from_loc_and_size(
-                                            (geo.loc.x + 48, geo.loc.y),
-                                            (geo.size.w - 48, geo.size.h),
-                                        ),
-                                    ),
-                                    Direction::Up => (
-                                        Rectangle::from_loc_and_size(
-                                            (geo.loc.x, geo.loc.y),
-                                            (geo.size.w, 16),
-                                        ),
-                                        Rectangle::from_loc_and_size(
-                                            (geo.loc.x, geo.loc.y + 48),
-                                            (geo.size.w, geo.size.h - 48),
-                                        ),
-                                    ),
-                                    Direction::Right => (
-                                        Rectangle::from_loc_and_size(
-                                            (geo.loc.x + geo.size.w - 16, geo.loc.y),
-                                            (16, geo.size.h),
-                                        ),
-                                        Rectangle::from_loc_and_size(
-                                            geo.loc,
-                                            (geo.size.w - 48, geo.size.h),
-                                        ),
-                                    ),
-                                    Direction::Down => (
-                                        Rectangle::from_loc_and_size(
-                                            (geo.loc.x, geo.loc.y + geo.size.h - 16),
-                                            (geo.size.w, 16),
-                                        ),
-                                        Rectangle::from_loc_and_size(
-                                            geo.loc,
-                                            (geo.size.w, geo.size.h - 48),
-                                        ),
-                                    ),
-                                };
-
-                                if let Some(renderer) = renderer.as_mut() {
-                                    elements.push(
-                                        BackdropShader::element(
-                                            *renderer,
-                                            placeholder_id.clone(),
-                                            pill_geo,
-                                            8.,
-                                            alpha * 0.4,
-                                            GROUP_COLOR,
-                                        )
-                                        .into(),
-                                    );
-                                }
-
-                                geo = remaining_geo;
-                            };
-                        }
-
-                        if matches!(swap_desc, Some(ref desc) if &desc.node == &node_id) {
-                            if let Some(focused_geo) = focused_geo {
-                                if let Some(renderer) = renderer.as_mut() {
-                                    elements.push(
-                                        BackdropShader::element(
-                                            *renderer,
-                                            Key::Group(Arc::downgrade(alive)),
-                                            geo,
-                                            8.,
-                                            alpha * 0.15,
-                                            GROUP_COLOR,
-                                        )
-                                        .into(),
-                                    );
-                                }
-                                let swap_geo = swap_geometry(geo.size, focused_geo);
-                                geo = ease(
-                                    Linear,
-                                    EaseRectangle(geo),
-                                    EaseRectangle(swap_geo),
-                                    transition,
-                                )
-                                .unwrap();
-                                geometries.insert(node_id.clone(), geo);
-                            }
-                        };
-
-                        let previous_length = match orientation {
-                            Orientation::Horizontal => last_geometry.size.h,
-                            Orientation::Vertical => last_geometry.size.w,
-                        };
-                        let new_length = match orientation {
-                            Orientation::Horizontal => geo.size.h,
-                            Orientation::Vertical => geo.size.w,
-                        };
-
-                        let mut sizes = sizes
-                            .iter()
-                            .map(|len| {
-                                (((*len as f64) / (previous_length as f64)) * (new_length as f64))
-                                    .round() as i32
-                            })
-                            .collect::<Vec<_>>();
-                        let sum: i32 = sizes.iter().sum();
-                        if sum < new_length {
-                            *sizes.last_mut().unwrap() += new_length - sum;
-                        }
-
-                        match orientation {
-                            Orientation::Horizontal => {
-                                let mut previous: i32 = sizes.iter().sum();
-                                for (idx, size) in sizes.iter().enumerate().rev() {
-                                    previous -= *size;
-                                    let mut geo = Rectangle::from_loc_and_size(
-                                        (geo.loc.x, geo.loc.y + previous),
-                                        (geo.size.w, *size),
-                                    );
-                                    if mouse_tiling.is_some() {
-                                        if let Some(PillIndicator::Inner(pill_idx)) = pill_indicator
-                                        {
-                                            if *pill_idx == idx {
-                                                geo.size.h -= 32;
-                                            }
-                                            if idx
-                                                .checked_sub(1)
-                                                .map(|idx| idx == *pill_idx)
-                                                .unwrap_or(false)
-                                            {
-                                                if let Some(renderer) = renderer.as_mut() {
-                                                    elements.push(
-                                                        BackdropShader::element(
-                                                            *renderer,
-                                                            placeholder_id.clone(),
-                                                            Rectangle::from_loc_and_size(
-                                                                (geo.loc.x, geo.loc.y - 8),
-                                                                (geo.size.w, 16),
-                                                            ),
-                                                            8.,
-                                                            alpha * 0.4,
-                                                            GROUP_COLOR,
-                                                        )
-                                                        .into(),
-                                                    );
-                                                }
-                                                geo.loc.y += 32;
-                                                geo.size.h -= 32;
-                                            }
-                                        }
-                                    }
-                                    stack.push((geo, depth + 1));
-                                }
-                            }
-                            Orientation::Vertical => {
-                                let mut previous: i32 = sizes.iter().sum();
-                                for (idx, size) in sizes.iter().enumerate().rev() {
-                                    previous -= *size;
-                                    let mut geo = Rectangle::from_loc_and_size(
-                                        (geo.loc.x + previous, geo.loc.y),
-                                        (*size, geo.size.h),
-                                    );
-                                    if mouse_tiling.is_some() {
-                                        if let Some(PillIndicator::Inner(pill_idx)) = pill_indicator
-                                        {
-                                            if *pill_idx == idx {
-                                                geo.size.w -= 32;
-                                            }
-                                            if idx
-                                                .checked_sub(1)
-                                                .map(|idx| idx == *pill_idx)
-                                                .unwrap_or(false)
-                                            {
-                                                if let Some(renderer) = renderer.as_mut() {
-                                                    elements.push(
-                                                        BackdropShader::element(
-                                                            *renderer,
-                                                            placeholder_id.clone(),
-                                                            Rectangle::from_loc_and_size(
-                                                                (geo.loc.x - 8, geo.loc.y),
-                                                                (16, geo.size.h),
-                                                            ),
-                                                            8.,
-                                                            alpha * 0.4,
-                                                            GROUP_COLOR,
-                                                        )
-                                                        .into(),
-                                                    );
-                                                }
-                                                geo.loc.x += 32;
-                                                geo.size.w -= 32;
-                                            }
-                                        }
-                                    }
-                                    stack.push((geo, depth + 1));
-                                }
-                            }
-                        }
-                    }
-                    Data::Mapped { mapped, .. } => {
-                        geo.loc += (element_gap_left, element_gap_up).into();
-                        geo.size -= (element_gap_left, element_gap_up).into();
-                        geo.size -= (element_gap_right, element_gap_down).into();
-
-                        if let Some(renderer) = renderer.as_mut() {
-                            if render_potential_group {
-                                elements.push(
-                                    IndicatorShader::element(
-                                        *renderer,
-                                        Key::Window(Usage::PotentialGroupIndicator, mapped.clone()),
-                                        geo,
-                                        4,
-                                        8,
-                                        alpha * 0.40,
-                                        output_scale,
-                                        GROUP_COLOR,
-                                    )
-                                    .into(),
-                                );
-                                geo.loc += (gap, gap).into();
-                                geo.size -= (gap * 2, gap * 2).into();
-                            }
-
-                            if focused
-                                .as_ref()
-                                .map(|focused_id| {
-                                    !tree
-                                        .ancestor_ids(&node_id)
-                                        .unwrap()
-                                        .any(|id| id == focused_id)
-                                })
-                                .unwrap_or(mouse_tiling.is_some())
-                            {
-                                let color = match mouse_tiling {
-                                    Some(Some(TargetZone::WindowStack(stack_id, _)))
-                                        if *stack_id == node_id =>
-                                    {
-                                        ACTIVE_GROUP_COLOR
-                                    }
-                                    _ => GROUP_COLOR,
-                                };
-                                geo.loc += (WINDOW_BACKDROP_BORDER, WINDOW_BACKDROP_BORDER).into();
-                                geo.size -=
-                                    (WINDOW_BACKDROP_BORDER * 2, WINDOW_BACKDROP_BORDER * 2).into();
-                                elements.push(
-                                    BackdropShader::element(
-                                        *renderer,
-                                        Key::Window(Usage::OverviewBackdrop, mapped.clone()),
-                                        geo,
-                                        8.,
-                                        alpha
-                                            * if focused
-                                                .as_ref()
-                                                .map(|focused_id| focused_id == &node_id)
-                                                .unwrap_or(color == ACTIVE_GROUP_COLOR)
-                                            {
-                                                0.4
-                                            } else {
-                                                0.15
-                                            },
-                                        color,
-                                    )
-                                    .into(),
-                                );
-                            }
-
-                            geo.loc += (WINDOW_BACKDROP_GAP, WINDOW_BACKDROP_GAP).into();
-                            geo.size -= (WINDOW_BACKDROP_GAP * 2, WINDOW_BACKDROP_GAP * 2).into();
-                        }
-
-                        if matches!(swap_desc, Some(ref desc) if &desc.node == &node_id && desc.stack_window.is_none())
+                    if let Some(renderer) = renderer.as_mut() {
+                        if (render_potential_group || render_active_child) && Some(&node_id) != root
                         {
-                            if let Some(focused_geo) = focused_geo {
-                                let swap_geo = swap_geometry(geo.size, focused_geo);
-                                geo = ease(
-                                    Linear,
-                                    EaseRectangle(geo),
-                                    EaseRectangle(swap_geo),
-                                    transition,
-                                )
-                                .unwrap();
-                            }
-                        };
-
-                        geometries.insert(node_id.clone(), geo);
-                    }
-                    Data::Placeholder { .. } => {
-                        geo.loc += (element_gap_left, element_gap_up).into();
-                        geo.size -= (element_gap_left, element_gap_up).into();
-                        geo.size -= (element_gap_right, element_gap_down).into();
-
-                        if let Some(renderer) = renderer.as_mut() {
-                            geo.loc += (WINDOW_BACKDROP_BORDER, WINDOW_BACKDROP_BORDER).into();
-                            geo.size -=
-                                (WINDOW_BACKDROP_BORDER * 2, WINDOW_BACKDROP_BORDER * 2).into();
                             elements.push(
-                                BackdropShader::element(
+                                IndicatorShader::element(
                                     *renderer,
-                                    placeholder_id.clone(),
+                                    Key::Group(Arc::downgrade(alive)),
                                     geo,
-                                    8.,
-                                    alpha * 0.4,
+                                    4,
+                                    if render_active_child { 16 } else { 8 },
+                                    alpha * if render_potential_group { 0.40 } else { 1.0 },
+                                    output_scale,
+                                    GROUP_COLOR,
+                                )
+                                .into(),
+                            );
+                        }
+                        if mouse_tiling.is_some()
+                            && pill_indicator.is_some()
+                            && Some(&node_id) != root
+                        {
+                            elements.push(
+                                IndicatorShader::element(
+                                    *renderer,
+                                    Key::Group(Arc::downgrade(alive)),
+                                    geo,
+                                    4,
+                                    8,
+                                    alpha * 0.40,
+                                    output_scale,
                                     GROUP_COLOR,
                                 )
                                 .into(),
                             );
                         }
 
-                        geometries.insert(node_id.clone(), geo);
+                        if mouse_tiling.is_some()
+                            && node
+                                .parent()
+                                .map(|parent_id| {
+                                    matches!(
+                                        tree.get(&parent_id).unwrap().data(),
+                                        Data::Group {
+                                            pill_indicator: Some(_),
+                                            ..
+                                        }
+                                    )
+                                })
+                                .unwrap_or(false)
+                        {
+                            // test if parent pill-indicator is adjacent
+                            let parent_id = node.parent().unwrap();
+                            let parent = tree.get(parent_id).unwrap();
+                            let own_idx = tree
+                                .children_ids(parent_id)
+                                .unwrap()
+                                .position(|child_id| child_id == &node_id)
+                                .unwrap();
+                            let draw_outline = match parent.data() {
+                                Data::Group {
+                                    pill_indicator,
+                                    orientation,
+                                    ..
+                                } => match pill_indicator {
+                                    Some(PillIndicator::Inner(pill_idx)) => {
+                                        *pill_idx == own_idx || pill_idx + 1 == own_idx
+                                    }
+                                    Some(PillIndicator::Outer(dir)) => match (dir, orientation) {
+                                        (Direction::Left, Orientation::Horizontal)
+                                        | (Direction::Right, Orientation::Horizontal)
+                                        | (Direction::Up, Orientation::Vertical)
+                                        | (Direction::Down, Orientation::Vertical) => true,
+                                        (Direction::Left, Orientation::Vertical)
+                                        | (Direction::Up, Orientation::Horizontal) => own_idx == 0,
+                                        (Direction::Right, Orientation::Vertical)
+                                        | (Direction::Down, Orientation::Horizontal) => {
+                                            own_idx + 1 == parent.data().len()
+                                        }
+                                    },
+                                    None => unreachable!(),
+                                },
+                                _ => unreachable!(),
+                            };
+
+                            if draw_outline {
+                                elements.push(
+                                    IndicatorShader::element(
+                                        *renderer,
+                                        Key::Group(Arc::downgrade(alive)),
+                                        geo,
+                                        4,
+                                        8,
+                                        alpha * 0.15,
+                                        output_scale,
+                                        GROUP_COLOR,
+                                    )
+                                    .into(),
+                                );
+                            }
+                        }
                     }
+
+                    geo.loc += (gap, gap).into();
+                    geo.size -= (gap * 2, gap * 2).into();
+
+                    if mouse_tiling.is_some() {
+                        if let Some(PillIndicator::Outer(direction)) = pill_indicator {
+                            let (pill_geo, remaining_geo) = match direction {
+                                Direction::Left => (
+                                    Rectangle::from_loc_and_size(
+                                        (geo.loc.x, geo.loc.y),
+                                        (16, geo.size.h),
+                                    ),
+                                    Rectangle::from_loc_and_size(
+                                        (geo.loc.x + 48, geo.loc.y),
+                                        (geo.size.w - 48, geo.size.h),
+                                    ),
+                                ),
+                                Direction::Up => (
+                                    Rectangle::from_loc_and_size(
+                                        (geo.loc.x, geo.loc.y),
+                                        (geo.size.w, 16),
+                                    ),
+                                    Rectangle::from_loc_and_size(
+                                        (geo.loc.x, geo.loc.y + 48),
+                                        (geo.size.w, geo.size.h - 48),
+                                    ),
+                                ),
+                                Direction::Right => (
+                                    Rectangle::from_loc_and_size(
+                                        (geo.loc.x + geo.size.w - 16, geo.loc.y),
+                                        (16, geo.size.h),
+                                    ),
+                                    Rectangle::from_loc_and_size(
+                                        geo.loc,
+                                        (geo.size.w - 48, geo.size.h),
+                                    ),
+                                ),
+                                Direction::Down => (
+                                    Rectangle::from_loc_and_size(
+                                        (geo.loc.x, geo.loc.y + geo.size.h - 16),
+                                        (geo.size.w, 16),
+                                    ),
+                                    Rectangle::from_loc_and_size(
+                                        geo.loc,
+                                        (geo.size.w, geo.size.h - 48),
+                                    ),
+                                ),
+                            };
+
+                            if let Some(renderer) = renderer.as_mut() {
+                                elements.push(
+                                    BackdropShader::element(
+                                        *renderer,
+                                        placeholder_id.clone(),
+                                        pill_geo,
+                                        8.,
+                                        alpha * 0.4,
+                                        GROUP_COLOR,
+                                    )
+                                    .into(),
+                                );
+                            }
+
+                            geo = remaining_geo;
+                        };
+                    }
+
+                    if matches!(swap_desc, Some(ref desc) if &desc.node == &node_id) {
+                        if let Some(renderer) = renderer.as_mut() {
+                            elements.push(
+                                BackdropShader::element(
+                                    *renderer,
+                                    Key::Group(Arc::downgrade(alive)),
+                                    geo,
+                                    8.,
+                                    alpha * 0.15,
+                                    GROUP_COLOR,
+                                )
+                                .into(),
+                            );
+                        }
+                        let swap_geo = swap_geometry(
+                            geo.size,
+                            focused_geo.unwrap_or({
+                                let mut geo = non_exclusive_zone;
+                                geo.loc += (WINDOW_BACKDROP_BORDER, WINDOW_BACKDROP_BORDER).into();
+                                geo.size -=
+                                    (WINDOW_BACKDROP_BORDER * 2, WINDOW_BACKDROP_BORDER * 2).into();
+                                geo
+                            }),
+                        );
+                        geo = ease(
+                            Linear,
+                            EaseRectangle(geo),
+                            EaseRectangle(swap_geo),
+                            transition,
+                        )
+                        .unwrap();
+                        geometries.insert(node_id.clone(), geo);
+                    };
+
+                    let previous_length = match orientation {
+                        Orientation::Horizontal => last_geometry.size.h,
+                        Orientation::Vertical => last_geometry.size.w,
+                    };
+                    let new_length = match orientation {
+                        Orientation::Horizontal => geo.size.h,
+                        Orientation::Vertical => geo.size.w,
+                    };
+
+                    let mut sizes = sizes
+                        .iter()
+                        .map(|len| {
+                            (((*len as f64) / (previous_length as f64)) * (new_length as f64))
+                                .round() as i32
+                        })
+                        .collect::<Vec<_>>();
+                    let sum: i32 = sizes.iter().sum();
+                    if sum < new_length {
+                        *sizes.last_mut().unwrap() += new_length - sum;
+                    }
+
+                    match orientation {
+                        Orientation::Horizontal => {
+                            let mut previous: i32 = sizes.iter().sum();
+                            for (idx, size) in sizes.iter().enumerate().rev() {
+                                previous -= *size;
+                                let mut geo = Rectangle::from_loc_and_size(
+                                    (geo.loc.x, geo.loc.y + previous),
+                                    (geo.size.w, *size),
+                                );
+                                if mouse_tiling.is_some() {
+                                    if let Some(PillIndicator::Inner(pill_idx)) = pill_indicator {
+                                        if *pill_idx == idx {
+                                            geo.size.h -= 32;
+                                        }
+                                        if idx
+                                            .checked_sub(1)
+                                            .map(|idx| idx == *pill_idx)
+                                            .unwrap_or(false)
+                                        {
+                                            if let Some(renderer) = renderer.as_mut() {
+                                                elements.push(
+                                                    BackdropShader::element(
+                                                        *renderer,
+                                                        placeholder_id.clone(),
+                                                        Rectangle::from_loc_and_size(
+                                                            (geo.loc.x, geo.loc.y - 8),
+                                                            (geo.size.w, 16),
+                                                        ),
+                                                        8.,
+                                                        alpha * 0.4,
+                                                        GROUP_COLOR,
+                                                    )
+                                                    .into(),
+                                                );
+                                            }
+                                            geo.loc.y += 32;
+                                            geo.size.h -= 32;
+                                        }
+                                    }
+                                }
+                                stack.push((geo, depth + 1));
+                            }
+                        }
+                        Orientation::Vertical => {
+                            let mut previous: i32 = sizes.iter().sum();
+                            for (idx, size) in sizes.iter().enumerate().rev() {
+                                previous -= *size;
+                                let mut geo = Rectangle::from_loc_and_size(
+                                    (geo.loc.x + previous, geo.loc.y),
+                                    (*size, geo.size.h),
+                                );
+                                if mouse_tiling.is_some() {
+                                    if let Some(PillIndicator::Inner(pill_idx)) = pill_indicator {
+                                        if *pill_idx == idx {
+                                            geo.size.w -= 32;
+                                        }
+                                        if idx
+                                            .checked_sub(1)
+                                            .map(|idx| idx == *pill_idx)
+                                            .unwrap_or(false)
+                                        {
+                                            if let Some(renderer) = renderer.as_mut() {
+                                                elements.push(
+                                                    BackdropShader::element(
+                                                        *renderer,
+                                                        placeholder_id.clone(),
+                                                        Rectangle::from_loc_and_size(
+                                                            (geo.loc.x - 8, geo.loc.y),
+                                                            (16, geo.size.h),
+                                                        ),
+                                                        8.,
+                                                        alpha * 0.4,
+                                                        GROUP_COLOR,
+                                                    )
+                                                    .into(),
+                                                );
+                                            }
+                                            geo.loc.x += 32;
+                                            geo.size.w -= 32;
+                                        }
+                                    }
+                                }
+                                stack.push((geo, depth + 1));
+                            }
+                        }
+                    }
+                }
+                Data::Mapped { mapped, .. } => {
+                    geo.loc += (element_gap_left, element_gap_up).into();
+                    geo.size -= (element_gap_left, element_gap_up).into();
+                    geo.size -= (element_gap_right, element_gap_down).into();
+
+                    if let Some(renderer) = renderer.as_mut() {
+                        if render_potential_group {
+                            elements.push(
+                                IndicatorShader::element(
+                                    *renderer,
+                                    Key::Window(Usage::PotentialGroupIndicator, mapped.clone()),
+                                    geo,
+                                    4,
+                                    8,
+                                    alpha * 0.40,
+                                    output_scale,
+                                    GROUP_COLOR,
+                                )
+                                .into(),
+                            );
+                            geo.loc += (gap, gap).into();
+                            geo.size -= (gap * 2, gap * 2).into();
+                        }
+
+                        if focused
+                            .as_ref()
+                            .map(|focused_id| {
+                                !tree
+                                    .ancestor_ids(&node_id)
+                                    .unwrap()
+                                    .any(|id| id == focused_id)
+                            })
+                            .unwrap_or(mouse_tiling.is_some())
+                        {
+                            let color = match mouse_tiling {
+                                Some(Some(TargetZone::WindowStack(stack_id, _)))
+                                    if *stack_id == node_id =>
+                                {
+                                    ACTIVE_GROUP_COLOR
+                                }
+                                _ => GROUP_COLOR,
+                            };
+                            geo.loc += (WINDOW_BACKDROP_BORDER, WINDOW_BACKDROP_BORDER).into();
+                            geo.size -=
+                                (WINDOW_BACKDROP_BORDER * 2, WINDOW_BACKDROP_BORDER * 2).into();
+                            elements.push(
+                                BackdropShader::element(
+                                    *renderer,
+                                    Key::Window(Usage::OverviewBackdrop, mapped.clone()),
+                                    geo,
+                                    8.,
+                                    alpha
+                                        * if focused
+                                            .as_ref()
+                                            .map(|focused_id| focused_id == &node_id)
+                                            .unwrap_or(color == ACTIVE_GROUP_COLOR)
+                                        {
+                                            0.4
+                                        } else {
+                                            0.15
+                                        },
+                                    color,
+                                )
+                                .into(),
+                            );
+                        }
+
+                        geo.loc += (WINDOW_BACKDROP_GAP, WINDOW_BACKDROP_GAP).into();
+                        geo.size -= (WINDOW_BACKDROP_GAP * 2, WINDOW_BACKDROP_GAP * 2).into();
+                    }
+
+                    if matches!(swap_desc, Some(ref desc) if &desc.node == &node_id && desc.stack_window.is_none())
+                    {
+                        let swap_geo = swap_geometry(
+                            geo.size,
+                            focused_geo.unwrap_or({
+                                let mut geo = non_exclusive_zone;
+                                geo.loc += (WINDOW_BACKDROP_BORDER, WINDOW_BACKDROP_BORDER).into();
+                                geo.size -=
+                                    (WINDOW_BACKDROP_BORDER * 2, WINDOW_BACKDROP_BORDER * 2).into();
+                                geo
+                            }),
+                        );
+                        geo = ease(
+                            Linear,
+                            EaseRectangle(geo),
+                            EaseRectangle(swap_geo),
+                            transition,
+                        )
+                        .unwrap();
+                    };
+
+                    geometries.insert(node_id.clone(), geo);
+                }
+                Data::Placeholder { .. } => {
+                    geo.loc += (element_gap_left, element_gap_up).into();
+                    geo.size -= (element_gap_left, element_gap_up).into();
+                    geo.size -= (element_gap_right, element_gap_down).into();
+
+                    if let Some(renderer) = renderer.as_mut() {
+                        geo.loc += (WINDOW_BACKDROP_BORDER, WINDOW_BACKDROP_BORDER).into();
+                        geo.size -= (WINDOW_BACKDROP_BORDER * 2, WINDOW_BACKDROP_BORDER * 2).into();
+                        elements.push(
+                            BackdropShader::element(
+                                *renderer,
+                                placeholder_id.clone(),
+                                geo,
+                                8.,
+                                alpha * 0.4,
+                                GROUP_COLOR,
+                            )
+                            .into(),
+                        );
+                    }
+
+                    geometries.insert(node_id.clone(), geo);
                 }
             }
         }
-
-        Some((geometries, elements))
-    } else {
-        None
     }
+
+    (geometries, elements)
 }
 
 fn render_old_tree<R>(
@@ -4301,6 +4335,7 @@ fn render_new_tree<R>(
     target_tree: &Tree<Data>,
     reference_tree: Option<&Tree<Data>>,
     renderer: &mut R,
+    non_exclusive_zone: Rectangle<i32, Logical>,
     geometries: Option<HashMap<NodeId, Rectangle<i32, Logical>>>,
     old_geometries: Option<HashMap<NodeId, Rectangle<i32, Logical>>>,
     is_overview: bool,
@@ -4309,10 +4344,11 @@ fn render_new_tree<R>(
     percentage: f32,
     transition: Option<f32>,
     indicator_thickness: u8,
-    overview: (OverviewMode, Option<SwapIndicator>),
+    overview: (OverviewMode, Option<(SwapIndicator, Option<&Tree<Data>>)>),
     mut resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
     swap_desc: Option<NodeDesc>,
     swapping_stack_surface_id: &Id,
+    placeholder_id: &Id,
 ) -> (
     Vec<CosmicMappedRenderElement<R>>,
     Vec<CosmicMappedRenderElement<R>>,
@@ -4339,6 +4375,7 @@ where
         })
         .map(|(id, _)| id);
 
+    let mut animating_window_elements = Vec::new();
     let mut window_elements = Vec::new();
     let mut popup_elements = Vec::new();
 
@@ -4350,60 +4387,70 @@ where
     let output_geo = output.geometry();
     let output_scale = output.current_scale().fractional_scale();
 
-    if let Some(root) = target_tree.root_node_id() {
-        let old_geometries = old_geometries.unwrap_or_default();
-        let geometries = geometries.unwrap_or_default();
-        target_tree
-            .traverse_pre_order_ids(root)
-            .unwrap()
-            .for_each(|node_id| {
-                let data = target_tree.get(&node_id).unwrap().data();
-                let (original_geo, scaled_geo) = (data.geometry(), geometries.get(&node_id));
+    let (swap_indicator, swap_tree) = overview.1.unzip();
+    let swap_tree = swap_tree.flatten();
 
-                let (old_original_geo, old_scaled_geo) =
-                    if let Some(reference_tree) = reference_tree.as_ref() {
-                        if let Some(root) = reference_tree.root_node_id() {
-                            reference_tree
-                                .traverse_pre_order_ids(root)
-                                .unwrap()
-                                .find(|id| &node_id == id)
-                                .map(|node_id| {
-                                    (
-                                        reference_tree.get(&node_id).unwrap().data().geometry(),
-                                        old_geometries.get(&node_id),
-                                    )
-                                })
-                        } else {
-                            None
-                        }
+    if target_tree.root_node_id().is_none() && swap_desc.is_some() {
+        let mut geo = non_exclusive_zone;
+        geo.loc += (WINDOW_BACKDROP_BORDER, WINDOW_BACKDROP_BORDER).into();
+        geo.size -= (WINDOW_BACKDROP_BORDER * 2, WINDOW_BACKDROP_BORDER * 2).into();
+        window_elements.push(
+            BackdropShader::element(
+                renderer,
+                placeholder_id.clone(),
+                geo,
+                8.,
+                transition.unwrap_or(1.0) * 0.4,
+                GROUP_COLOR,
+            )
+            .into(),
+        );
+    }
+
+    let old_geometries = old_geometries.unwrap_or_default();
+    let geometries = geometries.unwrap_or_default();
+    target_tree
+        .root_node_id()
+        .into_iter()
+        .flat_map(|root| target_tree.traverse_pre_order_ids(root).unwrap())
+        .map(|id| (target_tree, id))
+        .chain(swap_tree.into_iter().flat_map(|tree| {
+            let sub_root = &swap_desc.as_ref().unwrap().node;
+            tree.traverse_pre_order_ids(sub_root)
+                .unwrap()
+                .map(move |id| (tree, id))
+        }))
+        .for_each(|(target_tree, node_id)| {
+            let data = target_tree.get(&node_id).unwrap().data();
+            let (original_geo, scaled_geo) = (data.geometry(), geometries.get(&node_id));
+
+            let (old_original_geo, old_scaled_geo) =
+                if let Some(reference_tree) = reference_tree.as_ref() {
+                    if let Some(root) = reference_tree.root_node_id() {
+                        reference_tree
+                            .traverse_pre_order_ids(root)
+                            .unwrap()
+                            .find(|id| &node_id == id)
+                            .map(|node_id| {
+                                (
+                                    reference_tree.get(&node_id).unwrap().data().geometry(),
+                                    old_geometries.get(&node_id),
+                                )
+                            })
                     } else {
                         None
                     }
-                    .unzip();
-                let old_geo = old_original_geo.map(|original_geo| {
-                    let (scale, offset) = old_scaled_geo
-                        .unwrap()
-                        .map(|adapted_geo| scale_to_center(original_geo, adapted_geo))
-                        .unwrap_or_else(|| (1.0.into(), (0, 0).into()));
-                    old_scaled_geo
-                        .unwrap()
-                        .map(|adapted_geo| {
-                            Rectangle::from_loc_and_size(
-                                adapted_geo.loc + offset,
-                                (
-                                    (original_geo.size.w as f64 * scale).round() as i32,
-                                    (original_geo.size.h as f64 * scale).round() as i32,
-                                ),
-                            )
-                        })
-                        .unwrap_or(*original_geo)
-                });
-
-                let mut crop_rect = original_geo;
-                let (scale, offset) = scaled_geo
+                } else {
+                    None
+                }
+                .unzip();
+            let old_geo = old_original_geo.map(|original_geo| {
+                let (scale, offset) = old_scaled_geo
+                    .unwrap()
                     .map(|adapted_geo| scale_to_center(original_geo, adapted_geo))
                     .unwrap_or_else(|| (1.0.into(), (0, 0).into()));
-                let new_geo = scaled_geo
+                old_scaled_geo
+                    .unwrap()
                     .map(|adapted_geo| {
                         Rectangle::from_loc_and_size(
                             adapted_geo.loc + offset,
@@ -4413,334 +4460,349 @@ where
                             ),
                         )
                     })
-                    .unwrap_or(*original_geo);
+                    .unwrap_or(*original_geo)
+            });
 
-                let (geo, alpha) = if let Some(old_geo) = old_geo.filter(|_| {
-                    swap_desc
-                        .as_ref()
-                        .map(|desc| desc.node != node_id && desc.stack_window.is_none())
-                        .unwrap_or(true)
-                }) {
-                    (
-                        ease(
-                            Linear,
-                            EaseRectangle(old_geo),
-                            EaseRectangle(new_geo),
-                            percentage,
-                        )
-                        .unwrap(),
-                        1.0,
+            let mut crop_rect = original_geo;
+            let (scale, offset) = scaled_geo
+                .map(|adapted_geo| scale_to_center(original_geo, adapted_geo))
+                .unwrap_or_else(|| (1.0.into(), (0, 0).into()));
+            let new_geo = scaled_geo
+                .map(|adapted_geo| {
+                    Rectangle::from_loc_and_size(
+                        adapted_geo.loc + offset,
+                        (
+                            (original_geo.size.w as f64 * scale).round() as i32,
+                            (original_geo.size.h as f64 * scale).round() as i32,
+                        ),
                     )
-                } else {
-                    (new_geo, percentage)
-                };
-                if matches!(overview.0, OverviewMode::None) {
-                    crop_rect = &geo;
-                }
+                })
+                .unwrap_or(*original_geo);
 
-                if swap_desc.as_ref().map(|desc| &desc.node) == Some(&node_id)
-                    || focused.as_ref() == Some(&node_id)
-                {
-                    if indicator_thickness > 0 || data.is_group() {
-                        let mut geo = geo.clone();
-                        if data.is_group() {
-                            let outer_gap: i32 = (if is_overview { GAP_KEYBOARD } else { 4 } as f32
-                                * percentage)
-                                .round() as i32;
-                            geo.loc += (outer_gap, outer_gap).into();
-                            geo.size -= (outer_gap * 2, outer_gap * 2).into();
+            let (geo, alpha, animating) = if let Some(old_geo) = old_geo.filter(|_| {
+                swap_desc
+                    .as_ref()
+                    .map(|desc| desc.node != node_id && desc.stack_window.is_none())
+                    .unwrap_or(true)
+            }) {
+                (
+                    ease(
+                        Linear,
+                        EaseRectangle(old_geo),
+                        EaseRectangle(new_geo),
+                        percentage,
+                    )
+                    .unwrap(),
+                    1.0,
+                    old_geo != new_geo,
+                )
+            } else {
+                (new_geo, percentage, false)
+            };
+            if matches!(overview.0, OverviewMode::None) {
+                crop_rect = &geo;
+            }
 
-                            group_backdrop = Some(BackdropShader::element(
-                                renderer,
-                                match data {
-                                    Data::Group { alive, .. } => Key::Group(Arc::downgrade(alive)),
-                                    _ => unreachable!(),
-                                },
-                                geo,
-                                8.,
-                                0.4,
-                                GROUP_COLOR,
-                            ));
-                        }
+            if swap_desc.as_ref().map(|desc| &desc.node) == Some(&node_id)
+                || focused.as_ref() == Some(&node_id)
+            {
+                if indicator_thickness > 0 || data.is_group() {
+                    let mut geo = geo.clone();
+                    if data.is_group() {
+                        let outer_gap: i32 = (if is_overview { GAP_KEYBOARD } else { 4 } as f32
+                            * percentage)
+                            .round() as i32;
+                        geo.loc += (outer_gap, outer_gap).into();
+                        geo.size -= (outer_gap * 2, outer_gap * 2).into();
 
-                        if swap_desc.as_ref().map(|desc| &desc.node) == Some(&node_id)
-                            || focused.as_ref() == Some(&node_id)
+                        group_backdrop = Some(BackdropShader::element(
+                            renderer,
+                            match data {
+                                Data::Group { alive, .. } => Key::Group(Arc::downgrade(alive)),
+                                _ => unreachable!(),
+                            },
+                            geo,
+                            8.,
+                            0.4,
+                            GROUP_COLOR,
+                        ));
+                    }
+
+                    if !swap_desc
+                        .as_ref()
+                        .map(|desc| desc.stack_window.is_some())
+                        .unwrap_or(false)
+                        || focused.as_ref() == Some(&node_id)
+                    {
+                        indicators.push(IndicatorShader::focus_element(
+                            renderer,
+                            match data {
+                                Data::Mapped { mapped, .. } => {
+                                    Key::Window(Usage::FocusIndicator, mapped.clone().into())
+                                }
+                                Data::Group { alive, .. } => Key::Group(Arc::downgrade(alive)),
+                                _ => unreachable!(),
+                            },
+                            geo,
+                            if data.is_group() {
+                                4
+                            } else {
+                                indicator_thickness
+                            },
+                            output_scale,
+                            1.0,
+                        ));
+                    }
+
+                    if focused.as_ref() == Some(&node_id) {
+                        if let Some(window) = swap_desc
+                            .as_ref()
+                            .and_then(|desc| desc.stack_window.clone())
                         {
-                            if !swap_desc
-                                .as_ref()
-                                .map(|desc| desc.stack_window.is_some())
-                                .unwrap_or(false)
-                                || focused.as_ref() == Some(&node_id)
-                            {
-                                indicators.push(IndicatorShader::focus_element(
-                                    renderer,
-                                    match data {
-                                        Data::Mapped { mapped, .. } => Key::Window(
-                                            Usage::FocusIndicator,
-                                            mapped.clone().into(),
-                                        ),
-                                        Data::Group { alive, .. } => {
-                                            Key::Group(Arc::downgrade(alive))
-                                        }
-                                        _ => unreachable!(),
-                                    },
-                                    geo,
-                                    if data.is_group() {
-                                        4
-                                    } else {
-                                        indicator_thickness
-                                    },
-                                    output_scale,
-                                    1.0,
-                                ));
-                            }
+                            let window_geo = window.geometry();
+                            let swap_geo = ease(
+                                Linear,
+                                EaseRectangle({
+                                    let mut geo = geo.clone();
+                                    geo.loc.x += STACK_TAB_HEIGHT;
+                                    geo.size.h -= STACK_TAB_HEIGHT;
+                                    geo
+                                }),
+                                EaseRectangle(swap_geometry(window_geo.size, geo)),
+                                transition.unwrap_or(1.0),
+                            )
+                            .unwrap();
 
-                            if focused.as_ref() == Some(&node_id) {
-                                if let Some(window) = swap_desc
-                                    .as_ref()
-                                    .and_then(|desc| desc.stack_window.clone())
-                                {
-                                    let window_geo = window.geometry();
-                                    let swap_geo = ease(
-                                        Linear,
-                                        EaseRectangle({
-                                            let mut geo = geo.clone();
-                                            geo.loc.x += STACK_TAB_HEIGHT;
-                                            geo.size.h -= STACK_TAB_HEIGHT;
-                                            geo
-                                        }),
-                                        EaseRectangle(swap_geometry(window_geo.size, geo)),
-                                        transition.unwrap_or(1.0),
-                                    )
-                                    .unwrap();
+                            indicators.push(IndicatorShader::focus_element(
+                                renderer,
+                                Key::Static(swapping_stack_surface_id.clone()),
+                                swap_geo,
+                                4,
+                                output_scale,
+                                transition.unwrap_or(1.0),
+                            ));
 
-                                    indicators.push(IndicatorShader::focus_element(
+                            let render_loc = (swap_geo.loc - window_geo.loc)
+                                .to_physical_precise_round(output_scale);
+
+                            swap_elements.extend(
+                                window
+                                    .render_elements::<CosmicWindowRenderElement<R>>(
                                         renderer,
-                                        Key::Static(swapping_stack_surface_id.clone()),
-                                        swap_geo,
-                                        4,
-                                        output_scale,
-                                        transition.unwrap_or(1.0),
-                                    ));
-
-                                    let render_loc = (swap_geo.loc - window_geo.loc)
-                                        .to_physical_precise_round(output_scale);
-
-                                    swap_elements.extend(
-                                        window
-                                            .render_elements::<CosmicWindowRenderElement<R>>(
-                                                renderer,
-                                                render_loc,
-                                                output_scale.into(),
-                                                1.0,
-                                            )
-                                            .into_iter()
-                                            .map(|window| {
-                                                CosmicMappedRenderElement::GrabbedWindow(
-                                                    RescaleRenderElement::from_element(
-                                                        window,
-                                                        swap_geo.loc.to_physical_precise_round(
-                                                            output_scale,
-                                                        ),
-                                                        ease(
-                                                            Linear,
-                                                            1.0,
-                                                            swap_factor(window_geo.size),
-                                                            transition.unwrap_or(1.0),
-                                                        ),
-                                                    ),
-                                                )
-                                            }),
+                                        render_loc,
+                                        output_scale.into(),
+                                        1.0,
                                     )
-                                }
-                            }
-
-                            if focused.as_ref() == Some(&node_id)
-                                && swap_desc.as_ref().map(|desc| &desc.node) != Some(&node_id)
-                            {
-                                if let Some(swap) = &overview.1 {
-                                    swap.resize(geo.size);
-                                    swap.output_enter(output, output_geo);
-                                    swap_elements.extend(
-                                        swap.render_elements::<CosmicWindowRenderElement<R>>(
-                                            renderer,
-                                            geo.loc.to_physical_precise_round(output_scale),
-                                            output_scale.into(),
-                                            alpha * overview.0.alpha().unwrap_or(1.0),
+                                    .into_iter()
+                                    .map(|window| {
+                                        CosmicMappedRenderElement::GrabbedWindow(
+                                            RescaleRenderElement::from_element(
+                                                window,
+                                                swap_geo
+                                                    .loc
+                                                    .to_physical_precise_round(output_scale),
+                                                ease(
+                                                    Linear,
+                                                    1.0,
+                                                    swap_factor(window_geo.size),
+                                                    transition.unwrap_or(1.0),
+                                                ),
+                                            ),
                                         )
-                                        .into_iter()
-                                        .map(CosmicMappedRenderElement::from),
-                                    );
-                                }
-                            }
+                                    }),
+                            )
                         }
                     }
 
-                    if let Some((mode, resize)) = resize_indicator.as_mut() {
-                        let mut geo = geo.clone();
-                        geo.loc -= (18, 18).into();
-                        geo.size += (36, 36).into();
-
-                        resize.resize(geo.size);
-                        resize.output_enter(output, output_geo);
-                        let possible_edges =
-                            TilingLayout::possible_resizes(target_tree, node_id.clone());
-                        if !possible_edges.is_empty() {
-                            if resize.with_program(|internal| {
-                                let mut edges = internal.edges.lock().unwrap();
-                                if *edges != possible_edges {
-                                    *edges = possible_edges;
-                                    true
-                                } else {
-                                    false
-                                }
-                            }) {
-                                resize.force_update();
-                            }
-                            resize_elements = Some(
-                                resize
-                                    .render_elements::<CosmicWindowRenderElement<R>>(
-                                        renderer,
-                                        geo.loc.to_physical_precise_round(output_scale),
-                                        output_scale.into(),
-                                        alpha * mode.alpha().unwrap_or(1.0),
-                                    )
-                                    .into_iter()
-                                    .map(CosmicMappedRenderElement::from)
-                                    .collect::<Vec<_>>(),
+                    if focused.as_ref() == Some(&node_id)
+                        && swap_desc.as_ref().map(|desc| &desc.node) != Some(&node_id)
+                    {
+                        if let Some(swap) = swap_indicator.as_ref() {
+                            swap.resize(geo.size);
+                            swap.output_enter(output, output_geo);
+                            swap_elements.extend(
+                                swap.render_elements::<CosmicWindowRenderElement<R>>(
+                                    renderer,
+                                    geo.loc.to_physical_precise_round(output_scale),
+                                    output_scale.into(),
+                                    alpha * overview.0.alpha().unwrap_or(1.0),
+                                )
+                                .into_iter()
+                                .map(CosmicMappedRenderElement::from),
                             );
                         }
                     }
                 }
 
-                if let Data::Mapped { mapped, .. } = data {
-                    let original_location = (original_geo.loc - mapped.geometry().loc)
-                        .to_physical_precise_round(output_scale);
+                if let Some((mode, resize)) = resize_indicator.as_mut() {
+                    let mut geo = geo.clone();
+                    geo.loc -= (18, 18).into();
+                    geo.size += (36, 36).into();
 
-                    let (mut w_elements, p_elements) = mapped
-                        .split_render_elements::<R, CosmicMappedRenderElement<R>>(
-                            renderer,
-                            original_location,
-                            Scale::from(output_scale),
-                            alpha,
+                    resize.resize(geo.size);
+                    resize.output_enter(output, output_geo);
+                    let possible_edges =
+                        TilingLayout::possible_resizes(target_tree, node_id.clone());
+                    if !possible_edges.is_empty() {
+                        if resize.with_program(|internal| {
+                            let mut edges = internal.edges.lock().unwrap();
+                            if *edges != possible_edges {
+                                *edges = possible_edges;
+                                true
+                            } else {
+                                false
+                            }
+                        }) {
+                            resize.force_update();
+                        }
+                        resize_elements = Some(
+                            resize
+                                .render_elements::<CosmicWindowRenderElement<R>>(
+                                    renderer,
+                                    geo.loc.to_physical_precise_round(output_scale),
+                                    output_scale.into(),
+                                    alpha * mode.alpha().unwrap_or(1.0),
+                                )
+                                .into_iter()
+                                .map(CosmicMappedRenderElement::from)
+                                .collect::<Vec<_>>(),
                         );
-                    if swap_desc
-                        .as_ref()
-                        .map(|swap_desc| {
-                            &swap_desc.node == &node_id && swap_desc.stack_window.is_some()
-                        })
-                        .unwrap_or(false)
-                    {
-                        let mut geo = mapped.active_window_geometry();
-                        geo.loc += original_geo.loc;
-                        w_elements.insert(
-                            0,
-                            CosmicMappedRenderElement::Overlay(BackdropShader::element(
-                                renderer,
-                                Key::Window(Usage::Overlay, mapped.clone()),
-                                geo,
-                                0.0,
-                                0.3,
-                                GROUP_COLOR,
-                            )),
-                        )
-                    }
-
-                    let w_elements = w_elements.into_iter().flat_map(|element| match element {
-                        CosmicMappedRenderElement::Stack(elem) => {
-                            Some(CosmicMappedRenderElement::TiledStack({
-                                let cropped = CropRenderElement::from_element(
-                                    elem,
-                                    output_scale,
-                                    crop_rect.to_physical_precise_round(output_scale),
-                                )?;
-                                let rescaled = RescaleRenderElement::from_element(
-                                    cropped,
-                                    original_geo.loc.to_physical_precise_round(output_scale),
-                                    scale,
-                                );
-                                let relocated = RelocateRenderElement::from_element(
-                                    rescaled,
-                                    (geo.loc - original_geo.loc)
-                                        .to_physical_precise_round(output_scale),
-                                    Relocate::Relative,
-                                );
-                                relocated
-                            }))
-                        }
-                        CosmicMappedRenderElement::Window(elem) => {
-                            Some(CosmicMappedRenderElement::TiledWindow({
-                                let cropped = CropRenderElement::from_element(
-                                    elem,
-                                    output_scale,
-                                    crop_rect.to_physical_precise_round(output_scale),
-                                )?;
-                                let rescaled = RescaleRenderElement::from_element(
-                                    cropped,
-                                    original_geo.loc.to_physical_precise_round(output_scale),
-                                    scale,
-                                );
-                                let relocated = RelocateRenderElement::from_element(
-                                    rescaled,
-                                    (geo.loc - original_geo.loc)
-                                        .to_physical_precise_round(output_scale),
-                                    Relocate::Relative,
-                                );
-                                relocated
-                            }))
-                        }
-                        CosmicMappedRenderElement::Overlay(elem) => {
-                            Some(CosmicMappedRenderElement::TiledOverlay({
-                                let cropped = CropRenderElement::from_element(
-                                    elem,
-                                    output_scale,
-                                    crop_rect.to_physical_precise_round(output_scale),
-                                )?;
-                                let rescaled = RescaleRenderElement::from_element(
-                                    cropped,
-                                    original_geo.loc.to_physical_precise_round(output_scale),
-                                    scale,
-                                );
-                                let relocated = RelocateRenderElement::from_element(
-                                    rescaled,
-                                    (geo.loc - original_geo.loc)
-                                        .to_physical_precise_round(output_scale),
-                                    Relocate::Relative,
-                                );
-                                relocated
-                            }))
-                        }
-                        x => Some(x),
-                    });
-                    if swap_desc
-                        .as_ref()
-                        .map(|swap_desc| {
-                            (&swap_desc.node == &node_id
-                                || target_tree
-                                    .ancestor_ids(&node_id)
-                                    .unwrap()
-                                    .any(|id| &swap_desc.node == id))
-                                && swap_desc.stack_window.is_none()
-                        })
-                        .unwrap_or(false)
-                    {
-                        swap_elements.extend(w_elements);
-                    } else {
-                        window_elements.extend(w_elements);
-                        popup_elements.extend(p_elements)
                     }
                 }
-            });
+            }
 
-        window_elements = resize_elements
-            .into_iter()
-            .flatten()
-            .chain(swap_elements)
-            .chain(indicators.into_iter().map(Into::into))
-            .chain(window_elements)
-            .chain(group_backdrop.into_iter().map(Into::into))
-            .collect();
-    }
+            if let Data::Mapped { mapped, .. } = data {
+                let original_location = (original_geo.loc - mapped.geometry().loc)
+                    .to_physical_precise_round(output_scale);
+
+                let (mut w_elements, p_elements) = mapped
+                    .split_render_elements::<R, CosmicMappedRenderElement<R>>(
+                        renderer,
+                        original_location,
+                        Scale::from(output_scale),
+                        alpha,
+                    );
+                if swap_desc
+                    .as_ref()
+                    .map(|swap_desc| {
+                        &swap_desc.node == &node_id && swap_desc.stack_window.is_some()
+                    })
+                    .unwrap_or(false)
+                {
+                    let mut geo = mapped.active_window_geometry();
+                    geo.loc += original_geo.loc;
+                    w_elements.insert(
+                        0,
+                        CosmicMappedRenderElement::Overlay(BackdropShader::element(
+                            renderer,
+                            Key::Window(Usage::Overlay, mapped.clone()),
+                            geo,
+                            0.0,
+                            0.3,
+                            GROUP_COLOR,
+                        )),
+                    )
+                }
+
+                let w_elements = w_elements.into_iter().flat_map(|element| match element {
+                    CosmicMappedRenderElement::Stack(elem) => {
+                        Some(CosmicMappedRenderElement::TiledStack({
+                            let cropped = CropRenderElement::from_element(
+                                elem,
+                                output_scale,
+                                crop_rect.to_physical_precise_round(output_scale),
+                            )?;
+                            let rescaled = RescaleRenderElement::from_element(
+                                cropped,
+                                original_geo.loc.to_physical_precise_round(output_scale),
+                                scale,
+                            );
+                            let relocated = RelocateRenderElement::from_element(
+                                rescaled,
+                                (geo.loc - original_geo.loc)
+                                    .to_physical_precise_round(output_scale),
+                                Relocate::Relative,
+                            );
+                            relocated
+                        }))
+                    }
+                    CosmicMappedRenderElement::Window(elem) => {
+                        Some(CosmicMappedRenderElement::TiledWindow({
+                            let cropped = CropRenderElement::from_element(
+                                elem,
+                                output_scale,
+                                crop_rect.to_physical_precise_round(output_scale),
+                            )?;
+                            let rescaled = RescaleRenderElement::from_element(
+                                cropped,
+                                original_geo.loc.to_physical_precise_round(output_scale),
+                                scale,
+                            );
+                            let relocated = RelocateRenderElement::from_element(
+                                rescaled,
+                                (geo.loc - original_geo.loc)
+                                    .to_physical_precise_round(output_scale),
+                                Relocate::Relative,
+                            );
+                            relocated
+                        }))
+                    }
+                    CosmicMappedRenderElement::Overlay(elem) => {
+                        Some(CosmicMappedRenderElement::TiledOverlay({
+                            let cropped = CropRenderElement::from_element(
+                                elem,
+                                output_scale,
+                                crop_rect.to_physical_precise_round(output_scale),
+                            )?;
+                            let rescaled = RescaleRenderElement::from_element(
+                                cropped,
+                                original_geo.loc.to_physical_precise_round(output_scale),
+                                scale,
+                            );
+                            let relocated = RelocateRenderElement::from_element(
+                                rescaled,
+                                (geo.loc - original_geo.loc)
+                                    .to_physical_precise_round(output_scale),
+                                Relocate::Relative,
+                            );
+                            relocated
+                        }))
+                    }
+                    x => Some(x),
+                });
+                if swap_desc
+                    .as_ref()
+                    .map(|swap_desc| {
+                        (&swap_desc.node == &node_id
+                            || target_tree
+                                .ancestor_ids(&node_id)
+                                .unwrap()
+                                .any(|id| &swap_desc.node == id))
+                            && swap_desc.stack_window.is_none()
+                    })
+                    .unwrap_or(false)
+                {
+                    swap_elements.extend(w_elements);
+                } else {
+                    if animating {
+                        animating_window_elements.extend(w_elements);
+                    } else {
+                        window_elements.extend(w_elements);
+                    }
+                    popup_elements.extend(p_elements)
+                }
+            }
+        });
+
+    window_elements = resize_elements
+        .into_iter()
+        .flatten()
+        .chain(swap_elements)
+        .chain(indicators.into_iter().map(Into::into))
+        .chain(window_elements)
+        .chain(animating_window_elements)
+        .chain(group_backdrop.into_iter().map(Into::into))
+        .collect();
 
     (window_elements, popup_elements)
 }

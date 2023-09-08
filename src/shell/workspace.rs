@@ -24,6 +24,7 @@ use crate::{
     xwayland::XWaylandState,
 };
 
+use id_tree::Tree;
 use indexmap::IndexSet;
 use smithay::{
     backend::renderer::{
@@ -57,7 +58,7 @@ use super::{
         FocusStack, FocusStackMut,
     },
     grabs::{ResizeEdge, ResizeGrab},
-    layout::tiling::NodeDesc,
+    layout::tiling::{Data, NodeDesc},
     CosmicMappedRenderElement, CosmicSurface, ResizeDirection, ResizeMode,
 };
 
@@ -527,7 +528,7 @@ impl Workspace {
         override_redirect_windows: &[X11Surface],
         xwm_state: Option<&'a mut XWaylandState>,
         draw_focus_indicator: Option<&Seat<State>>,
-        overview: (OverviewMode, Option<SwapIndicator>),
+        overview: (OverviewMode, Option<(SwapIndicator, Option<&Tree<Data>>)>),
         resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
         indicator_thickness: u8,
     ) -> Result<
@@ -595,10 +596,6 @@ impl Workspace {
                 }
             }
         } else {
-            // TODO: Handle modes like
-            // - keyboard window swapping
-            // - resizing in tiling
-
             // OR windows above all
             popup_elements.extend(
                 override_redirect_windows
@@ -648,14 +645,25 @@ impl Workspace {
             popup_elements.extend(p_elements.into_iter().map(WorkspaceRenderElement::from));
             window_elements.extend(w_elements.into_iter().map(WorkspaceRenderElement::from));
 
+            let alpha = match &overview.0 {
+                OverviewMode::Started(_, start) => Some(
+                    (Instant::now().duration_since(*start).as_millis() as f64 / 100.0).min(1.0)
+                        as f32,
+                ),
+                OverviewMode::Ended(_, ended) => Some(
+                    1.0 - (Instant::now().duration_since(*ended).as_millis() as f64 / 100.0)
+                        .min(1.0) as f32,
+                ),
+                _ => None,
+            };
+
             //tiling surfaces
             let (w_elements, p_elements) = self.tiling_layer.render_output::<R>(
                 renderer,
                 output,
-                &self.handle,
                 draw_focus_indicator,
                 layer_map.non_exclusive_zone(),
-                overview.clone(),
+                overview,
                 resize_indicator,
                 indicator_thickness,
             )?;
@@ -673,18 +681,6 @@ impl Workspace {
                     );
                 }
             }
-
-            let alpha = match overview.0 {
-                OverviewMode::Started(_, start) => Some(
-                    (Instant::now().duration_since(start).as_millis() as f64 / 100.0).min(1.0)
-                        as f32,
-                ),
-                OverviewMode::Ended(_, ended) => Some(
-                    1.0 - (Instant::now().duration_since(ended).as_millis() as f64 / 100.0).min(1.0)
-                        as f32,
-                ),
-                _ => None,
-            };
 
             if let Some(alpha) = alpha {
                 window_elements.push(
