@@ -498,22 +498,24 @@ impl State {
                         }
                     }
                     let ptr = seat.get_pointer().unwrap();
-                    ptr.motion(
-                        self,
-                        under.clone(),
-                        &MotionEvent {
-                            location: position,
-                            serial,
-                            time: event.time_msec(),
-                        },
-                    );
+                    // Relative motion is sent first to ensure they're part of a `frame`
+                    // TODO: Find more correct solution
                     ptr.relative_motion(
                         self,
-                        under,
+                        under.clone(),
                         &RelativeMotionEvent {
                             delta: event.delta(),
                             delta_unaccel: event.delta_unaccel(),
                             utime: event.time(),
+                        },
+                    );
+                    ptr.motion(
+                        self,
+                        under,
+                        &MotionEvent {
+                            location: position,
+                            serial,
+                            time: event.time_msec(),
                         },
                     );
                     #[cfg(feature = "debug")]
