@@ -108,6 +108,13 @@ impl Workspace {
         self.tiling_layer.refresh();
     }
 
+    pub fn refresh_focus_stack(&mut self) {
+        let windows: Vec<CosmicMapped> = self.mapped().cloned().collect();
+        for stack in self.focus_stack.0.values_mut() {
+            stack.retain(|w| windows.contains(w));
+        }
+    }
+
     pub fn animations_going(&self) -> bool {
         self.tiling_layer.animations_going()
     }

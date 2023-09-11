@@ -289,25 +289,28 @@ impl State {
                                                     let mut spaces = data.common.shell.workspaces.spaces_mut();
                                                     if old_descriptor.handle != new_descriptor.handle {
                                                         let (mut old_w, mut other_w) = spaces.partition::<Vec<_>, _>(|w| w.handle == old_descriptor.handle);
-                                                        if let Some(old_tiling_layer) = old_w.get_mut(0).map(|w| &mut w.tiling_layer) {
-                                                            if let Some(new_tiling_layer) = other_w.iter_mut().find(|w| w.handle == new_descriptor.handle).map(|w| &mut w.tiling_layer) {
-                                                                if let Some(focus) = TilingLayout::swap_trees(old_tiling_layer, Some(new_tiling_layer), &old_descriptor, &new_descriptor) {
+                                                        if let Some(old_workspace) = old_w.get_mut(0) {
+                                                            if let Some(new_workspace) = other_w.iter_mut().find(|w| w.handle == new_descriptor.handle) {
+                                                                if let Some(focus) = TilingLayout::swap_trees(&mut old_workspace.tiling_layer, Some(&mut new_workspace.tiling_layer), &old_descriptor, &new_descriptor, &mut data.common.shell.toplevel_info_state) {
                                                                     let seat = seat.clone();
                                                                     data.common.event_loop_handle.insert_idle(move |data| {
                                                                         Common::set_focus(&mut data.state, Some(&focus), &seat, None);
                                                                     });
                                                                 }
+                                                                old_workspace.refresh_focus_stack();
+                                                                new_workspace.refresh_focus_stack();
                                                             }
                                                         }
                                                     } else {
-                                                        if let Some(tiling_layer) = spaces.find(|w| w.handle == new_descriptor.handle).map(|w| &mut w.tiling_layer) {
-                                                            if let Some(focus) = TilingLayout::swap_trees(tiling_layer, None, &old_descriptor, &new_descriptor) {
+                                                        if let Some(workspace) = spaces.find(|w| w.handle == new_descriptor.handle) {
+                                                            if let Some(focus) = TilingLayout::swap_trees(&mut workspace.tiling_layer, None, &old_descriptor, &new_descriptor, &mut data.common.shell.toplevel_info_state) {
                                                                 std::mem::drop(spaces);
                                                                 let seat = seat.clone();
                                                                 data.common.event_loop_handle.insert_idle(move |data| {
                                                                     Common::set_focus(&mut data.state, Some(&focus), &seat, None);
                                                                 });
                                                             }
+                                                            workspace.refresh_focus_stack();
                                                         }
                                                     }
                                                 }
