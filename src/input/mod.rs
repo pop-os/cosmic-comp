@@ -314,6 +314,25 @@ impl State {
                                                         }
                                                     }
                                                 }
+                                            } else {
+                                                let new_workspace = data.common.shell.workspaces.active(&current_output).1.handle;
+                                                if new_workspace != old_descriptor.handle {
+                                                    let spaces = data.common.shell.workspaces.spaces_mut();
+                                                    let (mut old_w, mut other_w) = spaces.partition::<Vec<_>, _>(|w| w.handle == old_descriptor.handle);
+                                                    if let Some(old_workspace) = old_w.get_mut(0) {
+                                                        if let Some(new_workspace) = other_w.iter_mut().find(|w| w.handle == new_workspace) {
+                                                            if new_workspace.tiling_layer.windows().next().is_none() {
+                                                                if let Some(focus) = TilingLayout::move_tree(&mut old_workspace.tiling_layer, &mut new_workspace.tiling_layer, &current_output, &new_workspace.handle, &seat, new_workspace.focus_stack.get(&seat).iter(), old_descriptor, &mut data.common.shell.toplevel_info_state) {
+                                                                    let seat = seat.clone();
+                                                                    data.common.event_loop_handle.insert_idle(move |data| {
+                                                                        Common::set_focus(&mut data.state, Some(&focus), &seat, None);
+                                                                    });
+                                                                }
+                                                                old_workspace.refresh_focus_stack();
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }

@@ -616,6 +616,182 @@ impl TilingLayout {
         queue.push_tree(tree, ANIMATION_DURATION, blocker);
     }
 
+    pub fn move_tree<'a>(
+        this: &mut Self,
+        other: &mut Self,
+        other_output: &Output,
+        other_handle: &WorkspaceHandle,
+        seat: &Seat<State>,
+        focus_stack: impl Iterator<Item = &'a CosmicMapped> + 'a,
+        desc: NodeDesc,
+        toplevel_info_state: &mut ToplevelInfoState<State, CosmicSurface>,
+    ) -> Option<KeyboardFocusTarget> {
+        let this_output = desc.output.upgrade()?;
+        let this_handle = &desc.handle;
+        let mut this_tree = this
+            .queues
+            .get(&this_output)
+            .map(|queue| queue.trees.back().unwrap().0.copy_clone())?;
+        let mut other_tree = other
+            .queues
+            .get(other_output)
+            .map(|queue| queue.trees.back().unwrap().0.copy_clone())?;
+
+        match desc.stack_window {
+            Some(stack_surface) => {
+                let node = this_tree.get(&desc.node).ok()?;
+                let Data::Mapped { mapped: this_mapped, .. } = node.data() else { return None };
+                let this_stack = this_mapped.stack_ref()?;
+                this_stack.remove_window(&stack_surface);
+
+                let mapped: CosmicMapped =
+                    CosmicWindow::new(stack_surface, this_stack.loop_handle()).into();
+                if &this_output != other_output {
+                    mapped.output_leave(&this_output);
+                    mapped.output_enter(other_output, mapped.bbox());
+                    for (ref surface, _) in mapped.windows() {
+                        toplevel_info_state.toplevel_leave_output(surface, &this_output);
+                        toplevel_info_state.toplevel_enter_output(surface, other_output);
+                    }
+                }
+                for (ref surface, _) in mapped.windows() {
+                    toplevel_info_state.toplevel_leave_workspace(surface, this_handle);
+                    toplevel_info_state.toplevel_enter_workspace(surface, other_handle);
+                }
+
+                mapped.set_tiled(true);
+                this.map(mapped.clone(), seat, focus_stack, None);
+                return Some(KeyboardFocusTarget::Element(mapped));
+            }
+            None => {
+                let node = this_tree.get(&desc.node).ok()?;
+                let mut children = node
+                    .children()
+                    .into_iter()
+                    .map(|child_id| (desc.node.clone(), child_id.clone()))
+                    .collect::<Vec<_>>();
+                let node = Node::new(node.data().clone());
+                TilingLayout::unmap_internal(&mut this_tree, &desc.node);
+
+                let id = match other_tree.root_node_id() {
+                    None => other_tree.insert(node, InsertBehavior::AsRoot).unwrap(),
+                    Some(_) => {
+                        let focused_node = seat
+                            .get_keyboard()
+                            .unwrap()
+                            .current_focus()
+                            .and_then(|target| {
+                                TilingLayout::currently_focused_node(
+                                    &other_tree,
+                                    &other_output,
+                                    target,
+                                )
+                            })
+                            .map(|(id, _)| id)
+                            .unwrap_or(other_tree.root_node_id().unwrap().clone());
+                        let orientation = {
+                            let window_size = other_tree
+                                .get(&focused_node)
+                                .unwrap()
+                                .data()
+                                .geometry()
+                                .size;
+                            if window_size.w > window_size.h {
+                                Orientation::Vertical
+                            } else {
+                                Orientation::Horizontal
+                            }
+                        };
+                        let id = other_tree.insert(node, InsertBehavior::AsRoot).unwrap();
+                        TilingLayout::new_group(&mut other_tree, &focused_node, &id, orientation)
+                            .unwrap();
+                        id
+                    }
+                };
+
+                for (ref mut parent_id, _) in children.iter_mut() {
+                    *parent_id = id.clone();
+                }
+                if let Data::Mapped { mapped, .. } = other_tree.get_mut(&id).unwrap().data_mut() {
+                    if &this_output != other_output {
+                        mapped.output_leave(&this_output);
+                        mapped.output_enter(other_output, mapped.bbox());
+                        for (ref surface, _) in mapped.windows() {
+                            toplevel_info_state.toplevel_leave_output(surface, &this_output);
+                            toplevel_info_state.toplevel_enter_output(surface, other_output);
+                        }
+                    }
+                    for (ref surface, _) in mapped.windows() {
+                        toplevel_info_state.toplevel_leave_workspace(surface, this_handle);
+                        toplevel_info_state.toplevel_enter_workspace(surface, other_handle);
+                    }
+
+                    *mapped.tiling_node_id.lock().unwrap() = Some(id.clone());
+                }
+
+                while !children.is_empty() {
+                    for (parent_id, child_id) in std::mem::take(&mut children) {
+                        let new_children = this_tree
+                            .children_ids(&child_id)
+                            .unwrap()
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        let child_node = this_tree
+                            .remove_node(child_id, RemoveBehavior::OrphanChildren)
+                            .unwrap();
+                        let maybe_mapped = match child_node.data() {
+                            Data::Mapped { mapped, .. } => Some(mapped.clone()),
+                            _ => None,
+                        };
+                        let new_id = other_tree
+                            .insert(child_node, InsertBehavior::UnderNode(&parent_id))
+                            .unwrap();
+                        if let Some(mapped) = maybe_mapped {
+                            if &this_output != other_output {
+                                mapped.output_leave(&this_output);
+                                mapped.output_enter(other_output, mapped.bbox());
+                                for (ref surface, _) in mapped.windows() {
+                                    toplevel_info_state
+                                        .toplevel_leave_output(surface, &this_output);
+                                    toplevel_info_state
+                                        .toplevel_enter_output(surface, other_output);
+                                }
+                            }
+                            for (ref surface, _) in mapped.windows() {
+                                toplevel_info_state.toplevel_leave_workspace(surface, this_handle);
+                                toplevel_info_state.toplevel_enter_workspace(surface, other_handle);
+                            }
+
+                            *mapped.tiling_node_id.lock().unwrap() = Some(new_id.clone());
+                        }
+                        children.extend(
+                            new_children
+                                .into_iter()
+                                .map(|new_child| (new_id.clone(), new_child)),
+                        );
+                    }
+                }
+
+                let this_queue = this.queues.get_mut(&this_output).unwrap();
+                let blocker =
+                    TilingLayout::update_positions(&this_output, &mut this_tree, this.gaps);
+                this_queue.push_tree(this_tree, ANIMATION_DURATION, blocker);
+
+                let other_queue = other.queues.get_mut(other_output).unwrap();
+                let blocker =
+                    TilingLayout::update_positions(&other_output, &mut other_tree, other.gaps);
+                other_queue.push_tree(other_tree, ANIMATION_DURATION, blocker);
+
+                other.node_desc_to_focus(&NodeDesc {
+                    handle: other_handle.clone(),
+                    output: other_output.downgrade(),
+                    node: id,
+                    stack_window: None,
+                })
+            }
+        }
+    }
+
     pub fn swap_trees(
         this: &mut Self,
         mut other: Option<&mut Self>,
