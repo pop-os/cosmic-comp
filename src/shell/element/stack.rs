@@ -180,7 +180,12 @@ impl CosmicStack {
             window.send_configure();
             if let Some(idx) = idx {
                 p.windows.lock().unwrap().insert(idx, window);
-                p.active.store(idx, Ordering::SeqCst);
+                let old_idx = p.active.swap(idx, Ordering::SeqCst);
+                if old_idx == idx {
+                    p.reenter.store(true, Ordering::SeqCst);
+                    p.previous_keyboard.store(old_idx, Ordering::SeqCst);
+                    p.previous_pointer.store(old_idx, Ordering::SeqCst);
+                }
             } else {
                 let mut windows = p.windows.lock().unwrap();
                 windows.push(window);
