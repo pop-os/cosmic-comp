@@ -609,6 +609,9 @@ impl TilingLayout {
             _ => unreachable!("Tiling id points to group"),
         }
 
+        old.output_leave(&output_data.output);
+        new.output_enter(&output_data.output, new.bbox());
+
         let blocker = TilingLayout::update_positions(&output_data.output, &mut tree, self.gaps);
         queue.push_tree(tree, ANIMATION_DURATION, blocker);
     }
@@ -618,6 +621,7 @@ impl TilingLayout {
         mut other: Option<&mut Self>,
         this_desc: &NodeDesc,
         other_desc: &NodeDesc,
+        toplevel_info_state: &mut ToplevelInfoState<State, CosmicSurface>,
     ) -> Option<KeyboardFocusTarget> {
         let this_output = this_desc.output.upgrade()?;
         let other_output = other_desc.output.upgrade()?;
@@ -662,7 +666,35 @@ impl TilingLayout {
                         &other_desc.node,
                         id_tree::SwapBehavior::TakeChildren,
                     ) {
-                        Ok(_) => {}
+                        Ok(_) => {
+                            if this_output != other_output {
+                                for node in this_tree.traverse_pre_order(&this_desc.node).unwrap() {
+                                    if let Data::Mapped { mapped, .. } = node.data() {
+                                        mapped.output_leave(&this_output);
+                                        mapped.output_enter(&other_output, mapped.bbox());
+                                        for (ref surface, _) in mapped.windows() {
+                                            toplevel_info_state
+                                                .toplevel_leave_output(surface, &this_output);
+                                            toplevel_info_state
+                                                .toplevel_enter_output(surface, &other_output);
+                                        }
+                                    }
+                                }
+                                for node in this_tree.traverse_pre_order(&other_desc.node).unwrap()
+                                {
+                                    if let Data::Mapped { mapped, .. } = node.data() {
+                                        mapped.output_leave(&other_output);
+                                        mapped.output_enter(&this_output, mapped.bbox());
+                                        for (ref surface, _) in mapped.windows() {
+                                            toplevel_info_state
+                                                .toplevel_leave_output(surface, &other_output);
+                                            toplevel_info_state
+                                                .toplevel_enter_output(surface, &this_output);
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         Err(_) => return None, // Invalid node-descs, nothing to do here
                     }
                 }
@@ -677,9 +709,33 @@ impl TilingLayout {
                 other_node.replace_data(this_node.replace_data(other_data));
 
                 if let Data::Mapped { mapped, .. } = this_node.data_mut() {
+                    if this_output != other_output {
+                        mapped.output_leave(&other_output);
+                        mapped.output_enter(&this_output, mapped.bbox());
+                        for (ref surface, _) in mapped.windows() {
+                            toplevel_info_state.toplevel_leave_output(surface, &other_output);
+                            toplevel_info_state.toplevel_enter_output(surface, &this_output);
+                        }
+                    }
+                    for (ref surface, _) in mapped.windows() {
+                        toplevel_info_state.toplevel_leave_workspace(surface, &other_desc.handle);
+                        toplevel_info_state.toplevel_enter_workspace(surface, &this_desc.handle);
+                    }
                     *mapped.tiling_node_id.lock().unwrap() = Some(this_desc.node.clone());
                 }
                 if let Data::Mapped { mapped, .. } = other_node.data_mut() {
+                    if this_output != other_output {
+                        mapped.output_leave(&this_output);
+                        mapped.output_enter(&other_output, mapped.bbox());
+                        for (ref surface, _) in mapped.windows() {
+                            toplevel_info_state.toplevel_leave_output(surface, &this_output);
+                            toplevel_info_state.toplevel_enter_output(surface, &other_output);
+                        }
+                    }
+                    for (ref surface, _) in mapped.windows() {
+                        toplevel_info_state.toplevel_leave_workspace(surface, &this_desc.handle);
+                        toplevel_info_state.toplevel_enter_workspace(surface, &other_desc.handle);
+                    }
                     *mapped.tiling_node_id.lock().unwrap() = Some(other_desc.node.clone());
                 }
 
@@ -707,6 +763,22 @@ impl TilingLayout {
                             .insert(child_node, InsertBehavior::UnderNode(&parent_id))
                             .unwrap();
                         if let Some(mapped) = maybe_mapped {
+                            if this_output != other_output {
+                                mapped.output_leave(&this_output);
+                                mapped.output_enter(&other_output, mapped.bbox());
+                                for (ref surface, _) in mapped.windows() {
+                                    toplevel_info_state
+                                        .toplevel_leave_output(surface, &this_output);
+                                    toplevel_info_state
+                                        .toplevel_enter_output(surface, &other_output);
+                                }
+                            }
+                            for (ref surface, _) in mapped.windows() {
+                                toplevel_info_state
+                                    .toplevel_leave_workspace(surface, &this_desc.handle);
+                                toplevel_info_state
+                                    .toplevel_enter_workspace(surface, &other_desc.handle);
+                            }
                             *mapped.tiling_node_id.lock().unwrap() = Some(new_id.clone());
                         }
                         this_children.extend(
@@ -741,6 +813,22 @@ impl TilingLayout {
                             .insert(child_node, InsertBehavior::UnderNode(&parent_id))
                             .unwrap();
                         if let Some(mapped) = maybe_mapped {
+                            if this_output != other_output {
+                                mapped.output_leave(&other_output);
+                                mapped.output_enter(&this_output, mapped.bbox());
+                                for (ref surface, _) in mapped.windows() {
+                                    toplevel_info_state
+                                        .toplevel_leave_output(surface, &other_output);
+                                    toplevel_info_state
+                                        .toplevel_enter_output(surface, &this_output);
+                                }
+                            }
+                            for (ref surface, _) in mapped.windows() {
+                                toplevel_info_state
+                                    .toplevel_leave_workspace(surface, &other_desc.handle);
+                                toplevel_info_state
+                                    .toplevel_enter_workspace(surface, &this_desc.handle);
+                            }
                             *mapped.tiling_node_id.lock().unwrap() = Some(new_id.clone());
                         }
                         other_children.extend(
@@ -790,12 +878,37 @@ impl TilingLayout {
                     .position(|s| &s == this_surface)
                     .unwrap();
                 for (i, surface) in surfaces.into_iter().enumerate() {
+                    if this_output != other_output {
+                        surface.output_leave(&other_output);
+                        surface.output_enter(&this_output, surface.bbox());
+                        toplevel_info_state.toplevel_leave_output(&surface, &other_output);
+                        toplevel_info_state.toplevel_enter_output(&surface, &this_output);
+                    }
+                    if this_desc.handle != other_desc.handle {
+                        toplevel_info_state.toplevel_leave_workspace(&surface, &other_desc.handle);
+                        toplevel_info_state.toplevel_enter_workspace(&surface, &this_desc.handle);
+                    }
                     this_stack.add_window(surface, Some(this_idx + i));
+                }
+                if this_output != other_output {
+                    this_surface.output_leave(&this_output);
+                    toplevel_info_state.toplevel_leave_output(&this_surface, &this_output);
+                    toplevel_info_state.toplevel_enter_output(&this_surface, &other_output);
+                }
+                if this_desc.handle != other_desc.handle {
+                    toplevel_info_state.toplevel_leave_workspace(&this_surface, &this_desc.handle);
+                    toplevel_info_state.toplevel_enter_workspace(&this_surface, &other_desc.handle);
                 }
                 this_stack.remove_window(&this_surface);
 
                 let mapped: CosmicMapped =
                     CosmicWindow::new(this_surface.clone(), this_stack.loop_handle()).into();
+                mapped.set_tiled(true);
+                mapped.refresh();
+                if this_output != other_output {
+                    mapped.output_enter(&other_output, mapped.bbox());
+                }
+
                 *mapped.tiling_node_id.lock().unwrap() = Some(other_desc.node.clone());
                 other_tree
                     .get_mut(&other_desc.node)
@@ -841,12 +954,38 @@ impl TilingLayout {
                     .position(|s| &s == other_surface)
                     .unwrap();
                 for (i, surface) in surfaces.into_iter().enumerate() {
+                    if this_output != other_output {
+                        surface.output_leave(&this_output);
+                        surface.output_enter(&other_output, surface.bbox());
+                        toplevel_info_state.toplevel_leave_output(&surface, &this_output);
+                        toplevel_info_state.toplevel_enter_output(&surface, &other_output);
+                    }
+                    if this_desc.handle != other_desc.handle {
+                        toplevel_info_state.toplevel_leave_workspace(&surface, &this_desc.handle);
+                        toplevel_info_state.toplevel_enter_workspace(&surface, &other_desc.handle);
+                    }
                     other_stack.add_window(surface, Some(other_idx + i));
+                }
+                if this_output != other_output {
+                    other_surface.output_leave(&other_output);
+                    toplevel_info_state.toplevel_leave_output(&other_surface, &other_output);
+                    toplevel_info_state.toplevel_enter_output(&other_surface, &this_output);
+                }
+                if this_desc.handle != other_desc.handle {
+                    toplevel_info_state
+                        .toplevel_leave_workspace(&other_surface, &other_desc.handle);
+                    toplevel_info_state.toplevel_enter_workspace(&other_surface, &this_desc.handle);
                 }
                 other_stack.remove_window(&other_surface);
 
                 let mapped: CosmicMapped =
                     CosmicWindow::new(other_surface.clone(), other_stack.loop_handle()).into();
+                mapped.set_tiled(true);
+                mapped.refresh();
+                if this_output != other_output {
+                    mapped.output_enter(&this_output, mapped.bbox());
+                }
+
                 *mapped.tiling_node_id.lock().unwrap() = Some(this_desc.node.clone());
                 this_tree
                     .get_mut(&this_desc.node)
@@ -895,6 +1034,21 @@ impl TilingLayout {
                 this_stack.add_window(other_surface.clone(), Some(this_idx));
                 this_stack.remove_window(&this_surface);
                 other_stack.add_window(this_surface.clone(), Some(other_idx));
+
+                if this_output != other_output {
+                    toplevel_info_state.toplevel_leave_output(&this_surface, &this_output);
+                    toplevel_info_state.toplevel_leave_output(&other_surface, &other_output);
+                    toplevel_info_state.toplevel_enter_output(&this_surface, &other_output);
+                    toplevel_info_state.toplevel_enter_output(&other_surface, &this_output);
+                }
+                if this_desc.handle != other_desc.handle {
+                    toplevel_info_state.toplevel_leave_workspace(&this_surface, &this_desc.handle);
+                    toplevel_info_state
+                        .toplevel_leave_workspace(&other_surface, &other_desc.handle);
+                    toplevel_info_state.toplevel_enter_workspace(&this_surface, &other_desc.handle);
+                    toplevel_info_state.toplevel_enter_workspace(&other_surface, &this_desc.handle);
+                }
+
                 other_stack.remove_window(&other_surface);
                 if this_was_active {
                     this_stack.set_active(&other_surface);
