@@ -1060,7 +1060,7 @@ impl TilingLayout {
                 return other
                     .as_ref()
                     .unwrap_or(&this)
-                    .node_desc_to_focus(&other_desc);
+                    .node_desc_to_focus(other_desc);
             }
         }
 
@@ -1068,6 +1068,7 @@ impl TilingLayout {
         let blocker = TilingLayout::update_positions(&this_output, &mut this_tree, this.gaps);
         this_queue.push_tree(this_tree, ANIMATION_DURATION, blocker);
 
+        let has_other_tree = other_tree.is_some();
         if let Some(mut other_tree) = other_tree {
             let (other_queue, gaps) = if let Some(other) = other.as_mut() {
                 (other.queues.get_mut(&other_output).unwrap(), other.gaps)
@@ -1079,8 +1080,8 @@ impl TilingLayout {
         }
 
         match (&this_desc.stack_window, &other_desc.stack_window) {
-            (None, None) => this.node_desc_to_focus(&this_desc),
-            (None, Some(_)) => None,
+            (None, None) if !has_other_tree => this.node_desc_to_focus(&this_desc),
+            //(None, Some(_)) => None,
             _ => other
                 .as_ref()
                 .unwrap_or(&this)
@@ -1088,7 +1089,7 @@ impl TilingLayout {
         }
     }
 
-    fn node_desc_to_focus(&self, desc: &NodeDesc) -> Option<KeyboardFocusTarget> {
+    pub fn node_desc_to_focus(&self, desc: &NodeDesc) -> Option<KeyboardFocusTarget> {
         let output = desc.output.upgrade()?;
         let queue = self.queues.get(&output)?;
         let tree = &queue.trees.back().unwrap().0;
