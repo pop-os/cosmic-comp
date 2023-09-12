@@ -1948,7 +1948,10 @@ impl TilingLayout {
                                     }))
                                 }
                                 Data::Mapped { mapped, .. } => {
-                                    if mapped.is_stack() && desc.stack_window.is_none() {
+                                    if mapped.is_stack()
+                                        && desc.stack_window.is_none()
+                                        && replacement_id == &desc.node
+                                    {
                                         mapped.stack_ref().unwrap().focus_stack();
                                     }
                                     FocusResult::Some(KeyboardFocusTarget::Element(mapped.clone()))
@@ -2025,7 +2028,10 @@ impl TilingLayout {
                             if mapped.is_stack()
                                 && swap_desc
                                     .as_ref()
-                                    .map(|desc| desc.stack_window.is_none())
+                                    .map(|desc| {
+                                        desc.stack_window.is_none()
+                                            && &desc.node == node_id.unwrap()
+                                    })
                                     .unwrap_or(false)
                             {
                                 mapped.stack_ref().unwrap().focus_stack();
