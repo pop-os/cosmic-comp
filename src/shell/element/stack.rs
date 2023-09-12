@@ -623,7 +623,7 @@ impl Program for CosmicStackInternal {
 
     fn view(&self) -> CosmicElement<'_, Self::Message> {
         let windows = self.windows.lock().unwrap();
-        let Some(width) = self.geometry.lock().unwrap().as_ref().map(|r| r.size.w) else {
+        if self.geometry.lock().unwrap().is_none() {
             return iced_widget::row(Vec::new()).into();
         };
         let active = self.active.load(Ordering::SeqCst);
@@ -685,7 +685,7 @@ impl Program for CosmicStackInternal {
 
         iced_widget::row(elements)
             .height(TAB_HEIGHT as u16)
-            .width(width as u16)
+            .width(Length::Fill) //width as u16)
             .apply(iced_widget::container)
             .center_y()
             .style(if self.group_focused.load(Ordering::SeqCst) {
