@@ -200,6 +200,7 @@ impl XwmHandler for Data {
     }
 
     fn unmapped_window(&mut self, _xwm: XwmId, window: X11Surface) {
+        let surface = CosmicSurface::X11(window.clone());
         if window.is_override_redirect() {
             self.state
                 .common
@@ -210,7 +211,7 @@ impl XwmHandler for Data {
             .state
             .common
             .shell
-            .element_for_surface(&CosmicSurface::X11(window.clone()))
+            .element_for_surface(&surface)
             .cloned()
             .and_then(|element| {
                 self.state
@@ -220,7 +221,11 @@ impl XwmHandler for Data {
                     .map(|space| (element, space))
             })
         {
-            space.unmap(&element);
+            if element.is_stack() && element.stack_ref().unwrap().len() >= 2 {
+                element.stack_ref().unwrap().remove_window(&surface);
+            } else {
+                space.unmap(&element);
+            }
         }
 
         let outputs = if let Some(wl_surface) = window.wl_surface() {
