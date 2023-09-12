@@ -137,7 +137,7 @@ struct IcedElementInternal<P: Program + Send + 'static> {
     // draw buffer
     outputs: HashSet<Output>,
     buffers: HashMap<OrderedFloat<f64>, (MemoryRenderBuffer, Option<(Vec<Primitive>, Color)>)>,
-    pending_resize: Option<(Instant, Size<i32, Logical>)>,
+    pending_update: Option<Instant>,
 
     // state
     size: Size<i32, Logical>,
@@ -184,7 +184,7 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
         IcedElementInternal {
             outputs: self.outputs.clone(),
             buffers: self.buffers.clone(),
-            pending_resize: self.pending_resize.clone(),
+            pending_update: self.pending_update.clone(),
             size: self.size.clone(),
             cursor_pos: self.cursor_pos.clone(),
             theme: self.theme.clone(),
@@ -204,7 +204,7 @@ impl<P: Program + Send + 'static> fmt::Debug for IcedElementInternal<P> {
         f.debug_struct("IcedElementInternal")
             .field("buffers", &"...")
             .field("size", &self.size)
-            .field("pending_resize", &self.pending_resize)
+            .field("pending_update", &self.pending_update)
             .field("cursor_pos", &self.cursor_pos)
             .field("theme", &self.theme)
             .field("renderer", &"...")
@@ -254,7 +254,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         let mut internal = IcedElementInternal {
             outputs: HashSet::new(),
             buffers: HashMap::new(),
-            pending_resize: None,
+            pending_update: None,
             size,
             cursor_pos: None,
             theme: Theme::dark(), // TODO
@@ -287,8 +287,20 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             return;
         }
 
-        if internal_ref.pending_resize.is_none() {
-            internal_ref.pending_resize = Some((Instant::now(), size));
+        internal_ref.size = size;
+        for (scale, (buffer, old_primitives)) in internal_ref.buffers.iter_mut() {
+            let buffer_size = internal_ref
+                .size
+                .to_f64()
+                .to_buffer(**scale, Transform::Normal)
+                .to_i32_round();
+            *buffer =
+                MemoryRenderBuffer::new(Fourcc::Argb8888, buffer_size, 1, Transform::Normal, None);
+            *old_primitives = None;
+        }
+
+        if internal_ref.pending_update.is_none() {
+            internal_ref.pending_update = Some(Instant::now());
         }
     }
 
@@ -702,34 +714,18 @@ where
         alpha: f32,
     ) -> Vec<C> {
         let mut internal = self.0.lock().unwrap();
+        // makes partial borrows easier
         let internal_ref = &mut *internal;
         let force = if matches!(
-            internal_ref.pending_resize,
-            Some((instant, _)) if Instant::now().duration_since(instant) > Duration::from_millis(25)
+            internal_ref.pending_update,
+            Some(instant) if Instant::now().duration_since(instant) > Duration::from_millis(25)
         ) {
-            internal_ref.size = internal_ref.pending_resize.take().unwrap().1;
-            for (scale, (buffer, old_primitives)) in internal_ref.buffers.iter_mut() {
-                let buffer_size = internal_ref
-                    .size
-                    .to_f64()
-                    .to_buffer(**scale, Transform::Normal)
-                    .to_i32_round();
-                *buffer = MemoryRenderBuffer::new(
-                    Fourcc::Argb8888,
-                    buffer_size,
-                    1,
-                    Transform::Normal,
-                    None,
-                );
-                *old_primitives = None;
-            }
             true
         } else {
             false
         };
         let _ = internal_ref.update(force);
 
-        // makes partial borrows easier
         if let Some((buffer, ref mut old_primitives)) =
             internal_ref.buffers.get_mut(&OrderedFloat(scale.x))
         {
