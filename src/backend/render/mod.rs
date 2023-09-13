@@ -528,7 +528,7 @@ where
         .space_for_handle(&current.0)
         .ok_or(OutputNoMode)?;
 
-    let has_fullscreen = workspace.fullscreen.contains_key(output);
+    let has_fullscreen = workspace.fullscreen.get(output).map(|f| f.exclusive);
     let (overlay_elements, overlay_popups) =
         split_layer_elements(renderer, output, Layer::Overlay, exclude_workspace_overview);
 
@@ -536,7 +536,7 @@ where
     elements.extend(overlay_popups.into_iter().map(Into::into));
     elements.extend(overlay_elements.into_iter().map(Into::into));
 
-    let mut window_elements = if !has_fullscreen {
+    let mut window_elements = if !has_fullscreen.unwrap_or(false) {
         let (top_elements, top_popups) =
             split_layer_elements(renderer, output, Layer::Top, exclude_workspace_overview);
         elements.extend(top_popups.into_iter().map(Into::into));
@@ -553,6 +553,7 @@ where
                 .shell
                 .space_for_handle(&previous)
                 .ok_or(OutputNoMode)?;
+            let has_fullscreen = workspace.fullscreen.contains_key(output);
             let is_active_space = workspace.outputs().any(|o| o == &active_output);
 
             let percentage = {
@@ -602,22 +603,24 @@ where
                 ))
             }));
 
-            let (w_elements, p_elements) =
-                background_layer_elements(renderer, output, exclude_workspace_overview);
-            elements.extend(p_elements.into_iter().map(|p_element| {
-                CosmicElement::Workspace(RelocateRenderElement::from_element(
-                    p_element,
-                    offset.to_physical_precise_round(output_scale),
-                    Relocate::Relative,
-                ))
-            }));
-            window_elements.extend(w_elements.into_iter().map(|w_element| {
-                CosmicElement::Workspace(RelocateRenderElement::from_element(
-                    w_element,
-                    offset.to_physical_precise_round(output_scale),
-                    Relocate::Relative,
-                ))
-            }));
+            if !has_fullscreen {
+                let (w_elements, p_elements) =
+                    background_layer_elements(renderer, output, exclude_workspace_overview);
+                elements.extend(p_elements.into_iter().map(|p_element| {
+                    CosmicElement::Workspace(RelocateRenderElement::from_element(
+                        p_element,
+                        offset.to_physical_precise_round(output_scale),
+                        Relocate::Relative,
+                    ))
+                }));
+                window_elements.extend(w_elements.into_iter().map(|w_element| {
+                    CosmicElement::Workspace(RelocateRenderElement::from_element(
+                        w_element,
+                        offset.to_physical_precise_round(output_scale),
+                        Relocate::Relative,
+                    ))
+                }));
+            }
 
             Point::<i32, Logical>::from(match (layout, *previous_idx < current.1) {
                 (WorkspaceLayout::Vertical, true) => (0, output_size.h + offset.y),
@@ -658,24 +661,26 @@ where
         ))
     }));
 
-    let (w_elements, p_elements) =
-        background_layer_elements(renderer, output, exclude_workspace_overview);
+    if has_fullscreen.is_none() {
+        let (w_elements, p_elements) =
+            background_layer_elements(renderer, output, exclude_workspace_overview);
 
-    elements.extend(p_elements.into_iter().map(|p_element| {
-        CosmicElement::Workspace(RelocateRenderElement::from_element(
-            p_element,
-            offset.to_physical_precise_round(output_scale),
-            Relocate::Relative,
-        ))
-    }));
+        elements.extend(p_elements.into_iter().map(|p_element| {
+            CosmicElement::Workspace(RelocateRenderElement::from_element(
+                p_element,
+                offset.to_physical_precise_round(output_scale),
+                Relocate::Relative,
+            ))
+        }));
 
-    window_elements.extend(w_elements.into_iter().map(|w_element| {
-        CosmicElement::Workspace(RelocateRenderElement::from_element(
-            w_element,
-            offset.to_physical_precise_round(output_scale),
-            Relocate::Relative,
-        ))
-    }));
+        window_elements.extend(w_elements.into_iter().map(|w_element| {
+            CosmicElement::Workspace(RelocateRenderElement::from_element(
+                w_element,
+                offset.to_physical_precise_round(output_scale),
+                Relocate::Relative,
+            ))
+        }));
+    }
 
     elements.extend(window_elements);
 

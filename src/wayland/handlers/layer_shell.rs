@@ -76,7 +76,7 @@ impl WlrLayerShellHandler for State {
             }
 
             for workspace in self.common.shell.workspaces.spaces_mut() {
-                workspace.tiling_layer.recalculate(&output);
+                workspace.recalculate(&output);
             }
 
             // collect screencopy sessions needing an update

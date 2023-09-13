@@ -67,12 +67,24 @@ pub struct Workspace {
     pub tiling_layer: TilingLayout,
     pub floating_layer: FloatingLayout,
     pub tiling_enabled: bool,
-    pub fullscreen: HashMap<Output, CosmicSurface>,
+    pub fullscreen: HashMap<Output, FullscreenSurface>,
     pub handle: WorkspaceHandle,
     pub focus_stack: FocusStacks,
     pub pending_buffers: Vec<(ScreencopySession, BufferParams)>,
     pub screencopy_sessions: Vec<DropableSession>,
     pub(super) backdrop_id: Id,
+}
+
+#[derive(Debug, Clone)]
+pub struct FullscreenSurface {
+    pub surface: CosmicSurface,
+    pub exclusive: bool,
+}
+
+impl IsAlive for FullscreenSurface {
+    fn alive(&self) -> bool {
+        self.surface.alive()
+    }
 }
 
 #[derive(Debug, Default)]
@@ -145,7 +157,7 @@ impl Workspace {
         toplevel_info: &mut ToplevelInfoState<State, CosmicSurface>,
     ) {
         if let Some(dead_output_window) = self.fullscreen.remove(output) {
-            self.unfullscreen_request(&dead_output_window);
+            self.unfullscreen_request(&dead_output_window.surface);
         }
         self.tiling_layer.unmap_output(output, toplevel_info);
         self.floating_layer.unmap_output(output, toplevel_info);
@@ -243,6 +255,16 @@ impl Workspace {
             })
     }
 
+    pub fn recalculate(&mut self, output: &Output) {
+        if let Some(f) = self.fullscreen.get(output) {
+            if !f.exclusive {
+                f.surface
+                    .set_geometry(layer_map_for_output(output).non_exclusive_zone());
+            }
+        }
+        self.tiling_layer.recalculate(output);
+    }
+
     pub fn maximize_request(&mut self, window: &CosmicSurface, output: &Output) {
         if self.fullscreen.contains_key(output) {
             return;
@@ -252,10 +274,10 @@ impl Workspace {
 
         window.set_fullscreen(false);
         window.set_maximized(true);
-        self.set_fullscreen(window, output)
+        self.set_fullscreen(window, output, false)
     }
     pub fn unmaximize_request(&mut self, window: &CosmicSurface) -> Option<Size<i32, Logical>> {
-        if self.fullscreen.values().any(|w| w == window) {
+        if self.fullscreen.values().any(|w| &w.surface == window) {
             self.unfullscreen_request(window);
             self.floating_layer.unmaximize_request(window)
         } else {
@@ -264,50 +286,69 @@ impl Workspace {
     }
 
     pub fn fullscreen_request(&mut self, window: &CosmicSurface, output: &Output) {
-        if self.fullscreen.contains_key(output) {
+        if self
+            .fullscreen
+            .get(output)
+            .map(|w| &w.surface != window)
+            .unwrap_or(false)
+        {
             return;
+        }
+
+        if !window.is_maximized(true) {
+            self.floating_layer.maximize_request(window);
         }
 
         window.set_maximized(false);
         window.set_fullscreen(true);
-        self.set_fullscreen(window, output)
+        self.set_fullscreen(window, output, true)
     }
 
-    pub(super) fn set_fullscreen<'a>(
-        &mut self,
-        window: impl Into<Option<&'a CosmicSurface>>,
-        output: &Output,
-    ) {
-        match window.into() {
-            Some(window) => {
-                if let Some(mapped) = self
-                    .mapped()
-                    .find(|m| m.windows().any(|(w, _)| &w == window))
-                {
-                    mapped.set_active(window);
-                }
-
-                window.set_geometry(output.geometry());
-                window.send_configure();
-                self.fullscreen.insert(output.clone(), window.clone());
-            }
-            None => {
-                if let Some(surface) = self.fullscreen.get(output).cloned() {
-                    self.unfullscreen_request(&surface);
-                }
-            }
+    fn set_fullscreen<'a>(&mut self, window: &'a CosmicSurface, output: &Output, exclusive: bool) {
+        if let Some(mapped) = self
+            .mapped()
+            .find(|m| m.windows().any(|(w, _)| &w == window))
+        {
+            mapped.set_active(window);
         }
+
+        window.set_geometry(if exclusive {
+            output.geometry()
+        } else {
+            layer_map_for_output(output).non_exclusive_zone()
+        });
+        window.send_configure();
+        self.fullscreen.insert(
+            output.clone(),
+            FullscreenSurface {
+                surface: window.clone(),
+                exclusive,
+            },
+        );
     }
 
     pub fn unfullscreen_request(&mut self, window: &CosmicSurface) {
-        if let Some((output, _)) = self.fullscreen.iter().find(|(_, w)| *w == window) {
+        if let Some((output, _)) = self.fullscreen.iter().find(|(_, w)| &w.surface == window) {
             window.set_maximized(false);
             window.set_fullscreen(false);
+            self.floating_layer.unmaximize_request(window);
             self.floating_layer.refresh();
             self.tiling_layer.recalculate(output);
             self.tiling_layer.refresh();
             window.send_configure();
-            self.fullscreen.retain(|_, w| w != window);
+            self.fullscreen.retain(|_, w| &w.surface != window);
+        }
+    }
+
+    pub fn remove_fullscreen(&mut self, output: &Output) {
+        if let Some(FullscreenSurface { surface, .. }) = self.fullscreen.remove(output) {
+            surface.set_maximized(false);
+            surface.set_fullscreen(false);
+            self.floating_layer.unmaximize_request(&surface);
+            self.floating_layer.refresh();
+            self.tiling_layer.recalculate(output);
+            self.tiling_layer.refresh();
+            surface.send_configure();
         }
     }
 
@@ -320,7 +361,17 @@ impl Workspace {
     }
 
     pub fn get_fullscreen(&self, output: &Output) -> Option<&CosmicSurface> {
-        self.fullscreen.get(output).filter(|w| w.alive())
+        self.fullscreen
+            .get(output)
+            .filter(|w| w.alive() && w.exclusive)
+            .map(|w| &w.surface)
+    }
+
+    pub fn get_maximized(&self, output: &Output) -> Option<&CosmicSurface> {
+        self.fullscreen
+            .get(output)
+            .filter(|w| w.alive() && !w.exclusive)
+            .map(|w| &w.surface)
     }
 
     pub fn resize_request(
@@ -354,7 +405,7 @@ impl Workspace {
             if self
                 .fullscreen
                 .values()
-                .any(|surface| surface.wl_surface().as_ref() == Some(&toplevel))
+                .any(|f| f.surface.wl_surface().as_ref() == Some(&toplevel))
             {
                 return false;
             }
@@ -472,14 +523,20 @@ impl Workspace {
     pub fn is_fullscreen(&self, mapped: &CosmicMapped) -> bool {
         self.fullscreen
             .values()
-            .any(|s| s == &mapped.active_window())
+            .any(|f| f.exclusive && f.surface == mapped.active_window())
+    }
+
+    pub fn is_maximized(&self, mapped: &CosmicMapped) -> bool {
+        self.fullscreen
+            .values()
+            .any(|f| !f.exclusive && f.surface == mapped.active_window())
     }
 
     pub fn is_floating(&self, mapped: &CosmicMapped) -> bool {
         !self
             .fullscreen
             .values()
-            .any(|s| s == &mapped.active_window())
+            .any(|f| f.surface == mapped.active_window())
             && self.floating_layer.mapped().any(|m| m == mapped)
     }
 
@@ -487,7 +544,7 @@ impl Workspace {
         !self
             .fullscreen
             .values()
-            .any(|s| s == &mapped.active_window())
+            .any(|f| f.surface == mapped.active_window())
             && self.tiling_layer.mapped().any(|(_, m, _)| m == mapped)
     }
 
@@ -563,30 +620,38 @@ impl Workspace {
         let layer_map = layer_map_for_output(output);
         let zone = layer_map.non_exclusive_zone();
 
-        if let Some(fullscreen) = self.fullscreen.get(output) {
-            popup_elements.extend(
-                override_redirect_windows
-                    .iter()
-                    .filter(|or| (*or).geometry().intersection(output.geometry()).is_some())
-                    .flat_map(|or| {
-                        AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
-                            or,
-                            renderer,
-                            (or.geometry().loc - output.geometry().loc)
-                                .to_physical_precise_round(output_scale),
-                            Scale::from(output_scale),
-                            1.0,
-                        )
-                    }),
-            );
+        // OR windows above all
+        popup_elements.extend(
+            override_redirect_windows
+                .iter()
+                .filter(|or| (*or).geometry().intersection(output.geometry()).is_some())
+                .flat_map(|or| {
+                    AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
+                        or,
+                        renderer,
+                        (or.geometry().loc - output.geometry().loc)
+                            .to_physical_precise_round(output_scale),
+                        Scale::from(output_scale),
+                        1.0,
+                    )
+                }),
+        );
 
+        if let Some(fullscreen) = self.fullscreen.get(output) {
             // fullscreen window
             window_elements.extend(AsRenderElements::<R>::render_elements::<
                 WorkspaceRenderElement<R>,
             >(
-                fullscreen,
+                &fullscreen.surface,
                 renderer,
-                (0, 0).into(),
+                if fullscreen.exclusive {
+                    (0, 0).into()
+                } else {
+                    layer_map
+                        .non_exclusive_zone()
+                        .loc
+                        .to_physical_precise_round(output_scale)
+                },
                 output_scale.into(),
                 1.0,
             ));
@@ -603,23 +668,6 @@ impl Workspace {
                 }
             }
         } else {
-            // OR windows above all
-            popup_elements.extend(
-                override_redirect_windows
-                    .iter()
-                    .filter(|or| (*or).geometry().intersection(output.geometry()).is_some())
-                    .flat_map(|or| {
-                        AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
-                            or,
-                            renderer,
-                            (or.geometry().loc - output.geometry().loc)
-                                .to_physical_precise_round(output_scale),
-                            Scale::from(output_scale),
-                            1.0,
-                        )
-                    }),
-            );
-
             let focused =
                 draw_focus_indicator.and_then(|seat| self.focus_stack.get(seat).last().cloned());
 

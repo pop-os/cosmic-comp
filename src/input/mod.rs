@@ -733,30 +733,35 @@ impl State {
                                     }
                                 };
                                 if !done {
-                                    if let Some((target, _)) =
-                                        workspace.element_under(relative_pos, overview.0)
-                                    {
-                                        under = Some(target);
+                                    if let Some(surface) = workspace.get_maximized(&output) {
+                                        under = Some(surface.clone().into());
                                     } else {
-                                        let layers = layer_map_for_output(&output);
-                                        if let Some(layer) =
-                                            layers.layer_under(WlrLayer::Bottom, pos).or_else(
-                                                || layers.layer_under(WlrLayer::Background, pos),
-                                            )
+                                        if let Some((target, _)) =
+                                            workspace.element_under(relative_pos, overview.0)
                                         {
-                                            let layer_loc =
-                                                layers.layer_geometry(layer).unwrap().loc;
-                                            if layer.can_receive_keyboard_focus()
-                                                && layer
-                                                    .surface_under(
-                                                        relative_pos - layer_loc.to_f64(),
-                                                        WindowSurfaceType::ALL,
-                                                    )
-                                                    .is_some()
+                                            under = Some(target);
+                                        } else {
+                                            let layers = layer_map_for_output(&output);
+                                            if let Some(layer) = layers
+                                                .layer_under(WlrLayer::Bottom, pos)
+                                                .or_else(|| {
+                                                    layers.layer_under(WlrLayer::Background, pos)
+                                                })
                                             {
-                                                under = Some(layer.clone().into());
-                                            }
-                                        };
+                                                let layer_loc =
+                                                    layers.layer_geometry(layer).unwrap().loc;
+                                                if layer.can_receive_keyboard_focus()
+                                                    && layer
+                                                        .surface_under(
+                                                            relative_pos - layer_loc.to_f64(),
+                                                            WindowSurfaceType::ALL,
+                                                        )
+                                                        .is_some()
+                                                {
+                                                    under = Some(layer.clone().into());
+                                                }
+                                            };
+                                        }
                                     }
                                 }
                             }
@@ -1579,21 +1584,29 @@ impl State {
             {
                 return Some((or.clone().into(), or.geometry().loc));
             }
-            if let Some((target, loc)) = workspace.element_under(relative_pos, overview) {
-                return Some((target, loc + (global_pos - relative_pos).to_i32_round()));
-            }
-            {
-                let layers = layer_map_for_output(output);
-                if let Some(layer) = layers
-                    .layer_under(WlrLayer::Bottom, relative_pos)
-                    .or_else(|| layers.layer_under(WlrLayer::Background, relative_pos))
+            if let Some(surface) = workspace.get_maximized(output) {
+                let offset = layer_map_for_output(output).non_exclusive_zone().loc;
+                return Some((surface.clone().into(), output_geo.loc + offset));
+            } else {
+                if let Some((target, loc)) = workspace.element_under(relative_pos, overview) {
+                    return Some((target, loc + (global_pos - relative_pos).to_i32_round()));
+                }
                 {
-                    let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                    if layer
-                        .surface_under(relative_pos - layer_loc.to_f64(), WindowSurfaceType::ALL)
-                        .is_some()
+                    let layers = layer_map_for_output(output);
+                    if let Some(layer) = layers
+                        .layer_under(WlrLayer::Bottom, relative_pos)
+                        .or_else(|| layers.layer_under(WlrLayer::Background, relative_pos))
                     {
-                        return Some((layer.clone().into(), output_geo.loc + layer_loc));
+                        let layer_loc = layers.layer_geometry(layer).unwrap().loc;
+                        if layer
+                            .surface_under(
+                                relative_pos - layer_loc.to_f64(),
+                                WindowSurfaceType::ALL,
+                            )
+                            .is_some()
+                        {
+                            return Some((layer.clone().into(), output_geo.loc + layer_loc));
+                        }
                     }
                 }
             }
