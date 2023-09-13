@@ -3055,7 +3055,7 @@ impl TilingLayout {
                         mapped.is_in_input_region(&test_point).then(|| {
                             (
                                 mapped.clone().into(),
-                                last_geometry.loc - output_data.location - mapped.geometry().loc,
+                                last_geometry.loc + output_data.location - mapped.geometry().loc,
                             )
                         })
                     }
@@ -3086,7 +3086,8 @@ impl TilingLayout {
                                 orientation,
                             }
                             .into(),
-                            last_geometry.loc - output_data.location
+                            last_geometry.loc
+                                + output_data.location
                                 + tree
                                     .children(&id)
                                     .unwrap()
