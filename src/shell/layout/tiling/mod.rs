@@ -4711,6 +4711,9 @@ where
                 })
         })
         .map(|(id, _)| id);
+    let is_active_output = seat
+        .map(|seat| &seat.active_output() == output)
+        .unwrap_or(false);
 
     let mut animating_window_elements = Vec::new();
     let mut window_elements = Vec::new();
@@ -4725,7 +4728,8 @@ where
     let output_scale = output.current_scale().fractional_scale();
 
     let (swap_indicator, swap_tree) = overview.1.unzip();
-    let swap_tree = swap_tree.flatten();
+    let swap_tree = swap_tree.flatten().filter(|_| is_active_output);
+    let swap_desc = swap_desc.filter(|_| is_active_output);
 
     if target_tree.root_node_id().is_none() && swap_desc.is_some() {
         let mut geo = non_exclusive_zone;
