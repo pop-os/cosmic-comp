@@ -102,6 +102,7 @@ impl PointerTarget<State> for ResizeForkTarget {
     ) {
     }
     fn axis(&self, _seat: &Seat<State>, _data: &mut State, _frame: AxisFrame) {}
+    fn frame(&self, _seat: &Seat<State>, _data: &mut State) {}
     fn gesture_swipe_begin(&self, _: &Seat<State>, _: &mut State, _: &GestureSwipeBeginEvent) {}
     fn gesture_swipe_update(&self, _: &Seat<State>, _: &mut State, _: &GestureSwipeUpdateEvent) {}
     fn gesture_swipe_end(&self, _: &Seat<State>, _: &mut State, _: &GestureSwipeEndEvent) {}
@@ -232,6 +233,10 @@ impl PointerGrab<State> for ResizeForkGrab {
         details: AxisFrame,
     ) {
         handle.axis(data, details)
+    }
+
+    fn frame(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>) {
+        handle.frame(data)
     }
 
     fn gesture_swipe_begin(

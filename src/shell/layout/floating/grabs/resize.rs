@@ -164,6 +164,10 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
         handle.axis(data, details)
     }
 
+    fn frame(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>) {
+        handle.frame(data)
+    }
+
     fn gesture_swipe_begin(
         &mut self,
         data: &mut State,

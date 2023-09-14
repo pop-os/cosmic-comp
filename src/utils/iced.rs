@@ -461,6 +461,8 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         let _ = internal.update(true);
     }
 
+    fn frame(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State) {}
+
     fn leave(
         &self,
         _seat: &Seat<crate::state::State>,

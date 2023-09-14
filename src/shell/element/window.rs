@@ -585,6 +585,16 @@ impl PointerTarget<State> for CosmicWindow {
         }
     }
 
+    fn frame(&self, seat: &Seat<State>, data: &mut State) {
+        match self.0.with_program(|p| p.current_focus()) {
+            Focus::Header => PointerTarget::frame(&self.0, seat, data),
+            Focus::Window => self
+                .0
+                .with_program(|p| PointerTarget::frame(&p.window, seat, data)),
+            _ => {}
+        }
+    }
+
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
         let previous = self.0.with_program(|p| {
             if let Some(sessions) = p.window.user_data().get::<ScreencopySessions>() {
