@@ -8,6 +8,7 @@ use smithay::{
             element::{
                 surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
                 texture::{TextureBuffer, TextureRenderElement},
+                Kind,
             },
             ImportAll, ImportMem, Renderer,
         },
@@ -170,6 +171,7 @@ where
         position.to_physical_precise_round(scale),
         scale,
         1.0,
+        Kind::Cursor,
     )
 }
 
@@ -199,6 +201,7 @@ where
         location.into().to_physical_precise_round(scale),
         scale,
         1.0,
+        Kind::Cursor,
     )
 }
 
@@ -344,6 +347,7 @@ where
                 None,
                 None,
                 None,
+                Kind::Cursor,
             ),
         )];
     } else {

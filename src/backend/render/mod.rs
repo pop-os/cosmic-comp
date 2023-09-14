@@ -44,7 +44,7 @@ use smithay::{
             element::{
                 surface::render_elements_from_surface_tree,
                 utils::{Relocate, RelocateRenderElement},
-                Element, Id, RenderElement,
+                Element, Id, Kind, RenderElement,
             },
             gles::{
                 element::PixelShaderElement, GlesError, GlesPixelProgram, GlesRenderer, Uniform,
@@ -234,6 +234,7 @@ impl IndicatorShader {
                     Uniform::new("thickness", thickness),
                     Uniform::new("radius", radius as f32),
                 ],
+                Kind::Unspecified,
             );
             cache.insert(key.clone(), (settings, elem));
         }
@@ -313,6 +314,7 @@ impl BackdropShader {
                     ),
                     Uniform::new("radius", radius),
                 ],
+                Kind::Unspecified,
             );
             cache.insert(key.clone(), (settings, elem));
         }
@@ -729,12 +731,18 @@ where
                         location + offset,
                         scale,
                         1.0,
+                        Kind::Unspecified,
                     )
                 },
             ));
 
             layer_elements.extend(render_elements_from_surface_tree(
-                renderer, surface, location, scale, 1.0,
+                renderer,
+                surface,
+                location,
+                scale,
+                1.0,
+                Kind::Unspecified,
             ));
         });
 
