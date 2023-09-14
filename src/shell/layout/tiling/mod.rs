@@ -643,6 +643,9 @@ impl TilingLayout {
                 let Data::Mapped { mapped: this_mapped, .. } = node.data() else { return None };
                 let this_stack = this_mapped.stack_ref()?;
                 this_stack.remove_window(&stack_surface);
+                if !this_stack.alive() {
+                    this.unmap(&this_mapped);
+                }
 
                 let mapped: CosmicMapped =
                     CosmicWindow::new(stack_surface, this_stack.loop_handle()).into();
@@ -660,7 +663,7 @@ impl TilingLayout {
                 }
 
                 mapped.set_tiled(true);
-                this.map(mapped.clone(), seat, focus_stack, None);
+                other.map(mapped.clone(), seat, focus_stack, None);
                 return Some(KeyboardFocusTarget::Element(mapped));
             }
             None => {
