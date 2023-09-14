@@ -201,7 +201,7 @@ where
         location.into().to_physical_precise_round(scale),
         scale,
         1.0,
-        Kind::Cursor,
+        Kind::Unspecified,
     )
 }
 
