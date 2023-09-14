@@ -4726,6 +4726,27 @@ where
                 })
         })
         .map(|(id, _)| id);
+    let focused_geo = if let Some(focused) = focused.as_ref() {
+        geometries
+            .as_ref()
+            .and_then(|geometries| geometries.get(focused))
+            .or_else(|| {
+                target_tree
+                    .get(focused)
+                    .ok()
+                    .map(|node| node.data().geometry())
+            })
+            .cloned()
+    } else {
+        None
+    }
+    .unwrap_or({
+        let mut geo = non_exclusive_zone;
+        geo.loc += (WINDOW_BACKDROP_BORDER, WINDOW_BACKDROP_BORDER).into();
+        geo.size -= (WINDOW_BACKDROP_BORDER * 2, WINDOW_BACKDROP_BORDER * 2).into();
+        geo
+    });
+
     let is_active_output = seat
         .map(|seat| &seat.active_output() == output)
         .unwrap_or(false);
@@ -4746,15 +4767,13 @@ where
     let swap_tree = swap_tree.flatten().filter(|_| is_active_output);
     let swap_desc = swap_desc.filter(|_| is_active_output);
 
+    // render placeholder, if we are swapping to an empty workspace
     if target_tree.root_node_id().is_none() && swap_desc.is_some() {
-        let mut geo = non_exclusive_zone;
-        geo.loc += (WINDOW_BACKDROP_BORDER, WINDOW_BACKDROP_BORDER).into();
-        geo.size -= (WINDOW_BACKDROP_BORDER * 2, WINDOW_BACKDROP_BORDER * 2).into();
         window_elements.push(
             BackdropShader::element(
                 renderer,
                 placeholder_id.clone(),
-                geo,
+                focused_geo,
                 8.,
                 transition.unwrap_or(1.0) * 0.4,
                 GROUP_COLOR,
@@ -4763,6 +4782,61 @@ where
         );
     }
 
+    // render single stack window when swapping separately
+    if let Some(window) = swap_desc
+        .as_ref()
+        .and_then(|desc| desc.stack_window.clone())
+    {
+        let window_geo = window.geometry();
+        let swap_geo = ease(
+            Linear,
+            EaseRectangle({
+                let mut geo = focused_geo.clone();
+                geo.loc.x += STACK_TAB_HEIGHT;
+                geo.size.h -= STACK_TAB_HEIGHT;
+                geo
+            }),
+            EaseRectangle(swap_geometry(window_geo.size, focused_geo)),
+            transition.unwrap_or(1.0),
+        )
+        .unwrap();
+
+        indicators.push(IndicatorShader::focus_element(
+            renderer,
+            Key::Static(swapping_stack_surface_id.clone()),
+            swap_geo,
+            4,
+            output_scale,
+            transition.unwrap_or(1.0),
+        ));
+
+        let render_loc = (swap_geo.loc - window_geo.loc).to_physical_precise_round(output_scale);
+
+        swap_elements.extend(
+            window
+                .render_elements::<CosmicWindowRenderElement<R>>(
+                    renderer,
+                    render_loc,
+                    output_scale.into(),
+                    1.0,
+                )
+                .into_iter()
+                .map(|window| {
+                    CosmicMappedRenderElement::GrabbedWindow(RescaleRenderElement::from_element(
+                        window,
+                        swap_geo.loc.to_physical_precise_round(output_scale),
+                        ease(
+                            Linear,
+                            1.0,
+                            swap_factor(window_geo.size),
+                            transition.unwrap_or(1.0),
+                        ),
+                    ))
+                }),
+        )
+    }
+
+    // render actual tree nodes
     let old_geometries = old_geometries.unwrap_or_default();
     let geometries = geometries.unwrap_or_default();
     target_tree
@@ -4770,12 +4844,23 @@ where
         .into_iter()
         .flat_map(|root| target_tree.traverse_pre_order_ids(root).unwrap())
         .map(|id| (target_tree, id))
-        .chain(swap_tree.into_iter().flat_map(|tree| {
-            let sub_root = &swap_desc.as_ref().unwrap().node;
-            tree.traverse_pre_order_ids(sub_root)
-                .unwrap()
-                .map(move |id| (tree, id))
-        }))
+        .chain(
+            swap_tree
+                .into_iter()
+                .flat_map(|tree| {
+                    let sub_root = &swap_desc.as_ref().unwrap().node;
+                    if swap_desc.as_ref().unwrap().stack_window.is_none() {
+                        Some(
+                            tree.traverse_pre_order_ids(sub_root)
+                                .unwrap()
+                                .map(move |id| (tree, id)),
+                        )
+                    } else {
+                        None
+                    }
+                })
+                .flatten(),
+        )
         .for_each(|(target_tree, node_id)| {
             let data = target_tree.get(&node_id).unwrap().data();
             let (original_geo, scaled_geo) = (data.geometry(), geometries.get(&node_id));
@@ -4908,66 +4993,6 @@ where
                             output_scale,
                             1.0,
                         ));
-                    }
-
-                    if focused.as_ref() == Some(&node_id) {
-                        if let Some(window) = swap_desc
-                            .as_ref()
-                            .and_then(|desc| desc.stack_window.clone())
-                        {
-                            let window_geo = window.geometry();
-                            let swap_geo = ease(
-                                Linear,
-                                EaseRectangle({
-                                    let mut geo = geo.clone();
-                                    geo.loc.x += STACK_TAB_HEIGHT;
-                                    geo.size.h -= STACK_TAB_HEIGHT;
-                                    geo
-                                }),
-                                EaseRectangle(swap_geometry(window_geo.size, geo)),
-                                transition.unwrap_or(1.0),
-                            )
-                            .unwrap();
-
-                            indicators.push(IndicatorShader::focus_element(
-                                renderer,
-                                Key::Static(swapping_stack_surface_id.clone()),
-                                swap_geo,
-                                4,
-                                output_scale,
-                                transition.unwrap_or(1.0),
-                            ));
-
-                            let render_loc = (swap_geo.loc - window_geo.loc)
-                                .to_physical_precise_round(output_scale);
-
-                            swap_elements.extend(
-                                window
-                                    .render_elements::<CosmicWindowRenderElement<R>>(
-                                        renderer,
-                                        render_loc,
-                                        output_scale.into(),
-                                        1.0,
-                                    )
-                                    .into_iter()
-                                    .map(|window| {
-                                        CosmicMappedRenderElement::GrabbedWindow(
-                                            RescaleRenderElement::from_element(
-                                                window,
-                                                swap_geo
-                                                    .loc
-                                                    .to_physical_precise_round(output_scale),
-                                                ease(
-                                                    Linear,
-                                                    1.0,
-                                                    swap_factor(window_geo.size),
-                                                    transition.unwrap_or(1.0),
-                                                ),
-                                            ),
-                                        )
-                                    }),
-                            )
-                        }
                     }
 
                     if focused.as_ref() == Some(&node_id)
