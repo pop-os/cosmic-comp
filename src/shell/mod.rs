@@ -288,16 +288,16 @@ impl WorkspaceSet {
             if Instant::now().duration_since(start).as_millis() >= ANIMATION_DURATION.as_millis() {
                 self.previously_active = None;
             }
-        }
-
-        match self.amount {
-            WorkspaceAmount::Dynamic => self.ensure_last_empty(state, outputs),
-            WorkspaceAmount::Static(len) => {
-                self.ensure_static(len as usize, state, toplevel_info, outputs)
+        } else {
+            match self.amount {
+                WorkspaceAmount::Dynamic => self.ensure_last_empty(state, outputs),
+                WorkspaceAmount::Static(len) => {
+                    self.ensure_static(len as usize, state, toplevel_info, outputs)
+                }
             }
-        }
 
-        self.workspaces[self.active].refresh();
+            self.workspaces[self.active].refresh();
+        }
     }
 
     fn ensure_last_empty<'a>(
