@@ -4968,7 +4968,25 @@ where
                     }
 
                     if focused.as_ref() == Some(&node_id)
-                        && swap_desc.as_ref().map(|desc| &desc.node) != Some(&node_id)
+                        && (swap_desc.as_ref().map(|desc| &desc.node) != Some(&node_id)
+                            || swap_desc
+                                .as_ref()
+                                .and_then(|swap_desc| swap_desc.stack_window.as_ref())
+                                .zip(focused.as_ref())
+                                .map(|(stack_window, focused_id)| {
+                                    target_tree
+                                        .get(focused_id)
+                                        .ok()
+                                        .map(|focused| match focused.data() {
+                                            Data::Mapped { mapped, .. } => mapped
+                                                .stack_ref()
+                                                .map(|stack| &stack.active() != stack_window)
+                                                .unwrap_or(false),
+                                            _ => unreachable!(),
+                                        })
+                                        .unwrap_or(false)
+                                })
+                                .unwrap_or(false))
                     {
                         if let Some(swap) = swap_indicator.as_ref() {
                             swap.resize(geo.size);
@@ -5037,8 +5055,21 @@ where
                     );
                 if swap_desc
                     .as_ref()
-                    .map(|swap_desc| {
-                        &swap_desc.node == &node_id && swap_desc.stack_window.is_some()
+                    .filter(|swap_desc| swap_desc.node == node_id)
+                    .and_then(|swap_desc| swap_desc.stack_window.as_ref())
+                    .zip(focused.as_ref())
+                    .map(|(stack_window, focused_id)| {
+                        target_tree
+                            .get(focused_id)
+                            .ok()
+                            .map(|focused| match focused.data() {
+                                Data::Mapped { mapped, .. } => mapped
+                                    .stack_ref()
+                                    .map(|stack| &stack.active() == stack_window)
+                                    .unwrap_or(false),
+                                _ => unreachable!(),
+                            })
+                            .unwrap_or(false)
                     })
                     .unwrap_or(false)
                 {
