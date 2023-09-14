@@ -4279,7 +4279,18 @@ where
                                     Key::Group(Arc::downgrade(alive)),
                                     geo,
                                     8.,
-                                    alpha * 0.15,
+                                    alpha
+                                        * if focused
+                                            .as_ref()
+                                            .map(|focused| {
+                                                focused == &swap_desc.as_ref().unwrap().node
+                                            })
+                                            .unwrap_or(false)
+                                        {
+                                            0.4
+                                        } else {
+                                            0.15
+                                        },
                                     GROUP_COLOR,
                                 )
                                 .into(),
