@@ -3,6 +3,7 @@ use std::time::Duration;
 use smithay::{
     backend::renderer::{
         element::{
+            self,
             surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
             utils::select_dmabuf_feedback,
             AsRenderElements, RenderElementStates,
@@ -620,12 +621,19 @@ impl CosmicSurface {
                             location + offset,
                             scale,
                             alpha,
+                            element::Kind::Unspecified,
                         )
                     })
                     .collect();
 
-                let window_render_elements =
-                    render_elements_from_surface_tree(renderer, surface, location, scale, alpha);
+                let window_render_elements = render_elements_from_surface_tree(
+                    renderer,
+                    surface,
+                    location,
+                    scale,
+                    alpha,
+                    element::Kind::Unspecified,
+                );
 
                 (window_render_elements, popup_render_elements)
             }

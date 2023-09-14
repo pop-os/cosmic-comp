@@ -37,7 +37,7 @@ use smithay::{
         renderer::{
             element::{
                 memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
-                AsRenderElements,
+                AsRenderElements, Kind,
             },
             ImportMem, Renderer,
         },
@@ -811,6 +811,7 @@ where
                     size.to_f64().to_logical(1.0, Transform::Normal),
                 )),
                 Some(internal_ref.size),
+                Kind::Unspecified,
             ) {
                 return vec![C::from(buffer)];
             }
