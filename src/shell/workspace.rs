@@ -5,14 +5,11 @@ use crate::{
     },
     shell::{
         grabs::MoveGrab,
-        layout::{
-            floating::FloatingLayout,
-            tiling::{TilingLayout, ANIMATION_DURATION},
-        },
-        OverviewMode,
+        layout::{floating::FloatingLayout, tiling::TilingLayout},
+        OverviewMode, ANIMATION_DURATION,
     },
     state::State,
-    utils::prelude::*,
+    utils::{prelude::*, tween::EaseRectangle},
     wayland::{
         handlers::screencopy::DropableSession,
         protocols::{
@@ -26,25 +23,36 @@ use crate::{
 
 use id_tree::Tree;
 use indexmap::IndexSet;
+use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     backend::renderer::{
         element::{
-            surface::WaylandSurfaceRenderElement, texture::TextureRenderElement, AsRenderElements,
-            Element, Id, RenderElement,
+            surface::WaylandSurfaceRenderElement, texture::TextureRenderElement,
+            utils::RescaleRenderElement, AsRenderElements, Element, Id, RenderElement,
         },
         gles::{GlesError, GlesTexture},
         glow::{GlowFrame, GlowRenderer},
         ImportAll, ImportMem, Renderer,
     },
-    desktop::layer_map_for_output,
+    desktop::{layer_map_for_output, space::SpaceElement},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
-    reexports::wayland_server::{protocol::wl_surface::WlSurface, Client},
+    reexports::wayland_server::{protocol::wl_surface::WlSurface, Client, Resource},
     utils::{Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Size},
-    wayland::seat::WaylandFocus,
+    wayland::{
+        compositor::{add_blocker, Blocker, BlockerState},
+        seat::WaylandFocus,
+    },
     xwayland::X11Surface,
 };
-use std::{collections::HashMap, time::Instant};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
 use tracing::warn;
 use wayland_backend::server::ClientId;
 
@@ -61,6 +69,8 @@ use super::{
     layout::tiling::{Data, NodeDesc},
     CosmicMappedRenderElement, CosmicSurface, ResizeDirection, ResizeMode,
 };
+
+const FULLSCREEN_ANIMATION_DURATION: Duration = Duration::from_millis(200);
 
 #[derive(Debug)]
 pub struct Workspace {
@@ -79,6 +89,30 @@ pub struct Workspace {
 pub struct FullscreenSurface {
     pub surface: CosmicSurface,
     pub exclusive: bool,
+    original_size: Size<i32, Logical>,
+    start_at: Option<Instant>,
+    ended_at: Option<Instant>,
+    animation_signal: Option<Arc<AtomicBool>>,
+}
+
+struct FullscreenBlocker {
+    signal: Arc<AtomicBool>,
+}
+
+impl Blocker for FullscreenBlocker {
+    fn state(&self) -> BlockerState {
+        if self.signal.load(Ordering::SeqCst) {
+            BlockerState::Released
+        } else {
+            BlockerState::Pending
+        }
+    }
+}
+
+impl FullscreenSurface {
+    pub fn is_animating(&self) -> bool {
+        self.start_at.is_some() || self.ended_at.is_some()
+    }
 }
 
 impl IsAlive for FullscreenSurface {
@@ -129,10 +163,55 @@ impl Workspace {
 
     pub fn animations_going(&self) -> bool {
         self.tiling_layer.animations_going()
+            || self
+                .fullscreen
+                .values()
+                .any(|f| f.start_at.is_some() || f.ended_at.is_some())
     }
 
     pub fn update_animations(&mut self) -> HashMap<ClientId, Client> {
-        self.tiling_layer.update_animation_state()
+        let mut clients = Vec::new();
+
+        for f in self.fullscreen.values_mut() {
+            if let Some(start) = f.start_at.as_ref() {
+                let duration_since = Instant::now().duration_since(*start);
+                if duration_since > FULLSCREEN_ANIMATION_DURATION {
+                    f.start_at.take();
+                }
+                if duration_since * 2 > FULLSCREEN_ANIMATION_DURATION {
+                    if let Some(signal) = f.animation_signal.take() {
+                        signal.store(true, Ordering::SeqCst);
+                        if let Some(client) =
+                            f.surface.wl_surface().as_ref().and_then(Resource::client)
+                        {
+                            clients.push((client.id(), client));
+                        }
+                    }
+                }
+            }
+        }
+        self.fullscreen.retain(|_, f| match f.ended_at {
+            None => true,
+            Some(instant) => {
+                let duration_since = Instant::now().duration_since(instant);
+                if duration_since * 2 > FULLSCREEN_ANIMATION_DURATION {
+                    if let Some(signal) = f.animation_signal.take() {
+                        signal.store(true, Ordering::SeqCst);
+                        if let Some(client) =
+                            f.surface.wl_surface().as_ref().and_then(Resource::client)
+                        {
+                            clients.push((client.id(), client));
+                        }
+                    }
+                }
+
+                duration_since < FULLSCREEN_ANIMATION_DURATION
+            }
+        });
+
+        let mut updates = self.tiling_layer.update_animation_state();
+        updates.extend(clients);
+        updates
     }
 
     pub fn commit(&mut self, surface: &WlSurface) {
@@ -317,38 +396,126 @@ impl Workspace {
         } else {
             layer_map_for_output(output).non_exclusive_zone()
         });
+        let original_size = window.geometry().size;
+        let signal = if let Some(surface) = window.wl_surface() {
+            let signal = Arc::new(AtomicBool::new(false));
+            add_blocker(
+                &surface,
+                FullscreenBlocker {
+                    signal: signal.clone(),
+                },
+            );
+            Some(signal)
+        } else {
+            None
+        };
         window.send_configure();
+
         self.fullscreen.insert(
             output.clone(),
             FullscreenSurface {
                 surface: window.clone(),
                 exclusive,
+                original_size,
+                start_at: Some(Instant::now()),
+                ended_at: None,
+                animation_signal: signal,
             },
         );
     }
 
     pub fn unfullscreen_request(&mut self, window: &CosmicSurface) {
-        if let Some((output, _)) = self.fullscreen.iter().find(|(_, w)| &w.surface == window) {
+        if let Some((output, f)) = self
+            .fullscreen
+            .iter_mut()
+            .find(|(_, w)| &w.surface == window)
+        {
             window.set_maximized(false);
             window.set_fullscreen(false);
             self.floating_layer.unmaximize_request(window);
             self.floating_layer.refresh();
             self.tiling_layer.recalculate(output);
             self.tiling_layer.refresh();
+            let signal = if let Some(surface) = window.wl_surface() {
+                let signal = Arc::new(AtomicBool::new(false));
+                add_blocker(
+                    &surface,
+                    FullscreenBlocker {
+                        signal: signal.clone(),
+                    },
+                );
+                Some(signal)
+            } else {
+                None
+            };
             window.send_configure();
-            self.fullscreen.retain(|_, w| &w.surface != window);
+
+            f.ended_at = Some(
+                Instant::now()
+                    - (FULLSCREEN_ANIMATION_DURATION
+                        - f.start_at
+                            .take()
+                            .map(|earlier| {
+                                Instant::now()
+                                    .duration_since(earlier)
+                                    .min(FULLSCREEN_ANIMATION_DURATION)
+                            })
+                            .unwrap_or(FULLSCREEN_ANIMATION_DURATION)),
+            );
+            if let Some(new_signal) = signal {
+                if let Some(old_signal) = f.animation_signal.replace(new_signal) {
+                    old_signal.store(true, Ordering::SeqCst);
+                }
+            }
         }
     }
 
     pub fn remove_fullscreen(&mut self, output: &Output) {
-        if let Some(FullscreenSurface { surface, .. }) = self.fullscreen.remove(output) {
+        if let Some(FullscreenSurface {
+            surface,
+            ended_at,
+            start_at,
+            animation_signal,
+            ..
+        }) = self.fullscreen.get_mut(output)
+        {
             surface.set_maximized(false);
             surface.set_fullscreen(false);
             self.floating_layer.unmaximize_request(&surface);
             self.floating_layer.refresh();
             self.tiling_layer.recalculate(output);
             self.tiling_layer.refresh();
+            let signal = if let Some(surface) = surface.wl_surface() {
+                let signal = Arc::new(AtomicBool::new(false));
+                add_blocker(
+                    &surface,
+                    FullscreenBlocker {
+                        signal: signal.clone(),
+                    },
+                );
+                Some(signal)
+            } else {
+                None
+            };
             surface.send_configure();
+
+            *ended_at = Some(
+                Instant::now()
+                    - (FULLSCREEN_ANIMATION_DURATION
+                        - start_at
+                            .take()
+                            .map(|earlier| {
+                                Instant::now()
+                                    .duration_since(earlier)
+                                    .min(FULLSCREEN_ANIMATION_DURATION)
+                            })
+                            .unwrap_or(FULLSCREEN_ANIMATION_DURATION)),
+            );
+            if let Some(new_signal) = signal {
+                if let Some(old_signal) = animation_signal.replace(new_signal) {
+                    old_signal.store(true, Ordering::SeqCst);
+                }
+            }
         }
     }
 
@@ -364,6 +531,7 @@ impl Workspace {
         self.fullscreen
             .get(output)
             .filter(|w| w.alive() && w.exclusive)
+            .filter(|w| w.ended_at.is_none() && w.start_at.is_none())
             .map(|w| &w.surface)
     }
 
@@ -371,6 +539,7 @@ impl Workspace {
         self.fullscreen
             .get(output)
             .filter(|w| w.alive() && !w.exclusive)
+            .filter(|w| w.ended_at.is_none() && w.start_at.is_none())
             .map(|w| &w.surface)
     }
 
@@ -639,35 +808,101 @@ impl Workspace {
 
         if let Some(fullscreen) = self.fullscreen.get(output) {
             // fullscreen window
-            window_elements.extend(AsRenderElements::<R>::render_elements::<
-                WorkspaceRenderElement<R>,
-            >(
-                &fullscreen.surface,
-                renderer,
-                if fullscreen.exclusive {
-                    (0, 0).into()
-                } else {
-                    layer_map
-                        .non_exclusive_zone()
-                        .loc
-                        .to_physical_precise_round(output_scale)
-                },
-                output_scale.into(),
-                1.0,
-            ));
+            let bbox = fullscreen.surface.bbox();
+            let element_geo = Rectangle::from_loc_and_size(
+                self.element_for_surface(&fullscreen.surface)
+                    .and_then(|elem| {
+                        self.floating_layer
+                            .space
+                            .element_geometry(elem)
+                            .or_else(|| self.tiling_layer.element_geometry(elem))
+                            .map(|mut geo| {
+                                geo.loc -= elem.geometry().loc;
+                                geo
+                            })
+                    })
+                    .unwrap_or(bbox)
+                    .loc,
+                fullscreen.original_size,
+            );
 
-            if let Some(xwm) = xwm_state.and_then(|state| state.xwm.as_mut()) {
-                if let Err(err) =
-                    xwm.update_stacking_order_upwards(window_elements.iter().map(|e| e.id()))
-                {
-                    warn!(
-                        wm_id = ?xwm.id(),
-                        ?err,
-                        "Failed to update Xwm stacking order.",
-                    );
+            let mut full_geo = if fullscreen.exclusive {
+                Rectangle::from_loc_and_size((0, 0), output.geometry().size)
+            } else {
+                layer_map.non_exclusive_zone()
+            };
+
+            if fullscreen.start_at.is_none() {
+                if bbox != full_geo {
+                    if bbox.size.w < full_geo.size.w {
+                        full_geo.loc.x += (full_geo.size.w - bbox.size.w) / 2;
+                        full_geo.size.w = bbox.size.w;
+                    }
+                    if bbox.size.h < full_geo.size.h {
+                        full_geo.loc.y += (full_geo.size.h - bbox.size.h) / 2;
+                        full_geo.size.h = bbox.size.h;
+                    }
                 }
             }
-        } else {
+
+            let (target_geo, alpha) = match (fullscreen.start_at, fullscreen.ended_at) {
+                (Some(started), _) => {
+                    let duration = Instant::now().duration_since(started).as_secs_f64()
+                        / FULLSCREEN_ANIMATION_DURATION.as_secs_f64();
+                    (
+                        ease(
+                            EaseInOutCubic,
+                            EaseRectangle(element_geo),
+                            EaseRectangle(full_geo),
+                            duration,
+                        )
+                        .0,
+                        ease(EaseInOutCubic, 0.0, 1.0, duration),
+                    )
+                }
+                (_, Some(ended)) => {
+                    let duration = Instant::now().duration_since(ended).as_secs_f64()
+                        / FULLSCREEN_ANIMATION_DURATION.as_secs_f64();
+                    (
+                        ease(
+                            EaseInOutCubic,
+                            EaseRectangle(full_geo),
+                            EaseRectangle(element_geo),
+                            duration,
+                        )
+                        .0,
+                        ease(EaseInOutCubic, 1.0, 0.0, duration),
+                    )
+                }
+                (None, None) => (full_geo, 1.0),
+            };
+
+            let render_loc = target_geo.loc.to_physical_precise_round(output_scale);
+            let scale = Scale {
+                x: target_geo.size.w as f64 / bbox.size.w as f64,
+                y: target_geo.size.h as f64 / bbox.size.h as f64,
+            };
+
+            window_elements.extend(
+                AsRenderElements::<R>::render_elements::<WaylandSurfaceRenderElement<R>>(
+                    &fullscreen.surface,
+                    renderer,
+                    render_loc,
+                    output_scale.into(),
+                    alpha,
+                )
+                .into_iter()
+                .map(|elem| RescaleRenderElement::from_element(elem, render_loc, scale))
+                .map(Into::into),
+            );
+        }
+
+        if self
+            .fullscreen
+            .get(output)
+            .map(|f| f.start_at.is_some() || f.ended_at.is_some())
+            .unwrap_or(true)
+        {
             let focused =
                 draw_focus_indicator.and_then(|seat| self.focus_stack.get(seat).last().cloned());
 
@@ -725,18 +960,6 @@ impl Workspace {
             popup_elements.extend(p_elements.into_iter().map(WorkspaceRenderElement::from));
             window_elements.extend(w_elements.into_iter().map(WorkspaceRenderElement::from));
 
-            if let Some(xwm) = xwm_state.and_then(|state| state.xwm.as_mut()) {
-                if let Err(err) =
-                    xwm.update_stacking_order_upwards(window_elements.iter().map(|e| e.id()))
-                {
-                    warn!(
-                        wm_id = ?xwm.id(),
-                        ?err,
-                        "Failed to update Xwm stacking order.",
-                    );
-                }
-            }
-
             if let Some(alpha) = alpha {
                 window_elements.push(
                     Into::<CosmicMappedRenderElement<R>>::into(BackdropShader::element(
@@ -749,6 +972,18 @@ impl Workspace {
                     ))
                     .into(),
                 )
+            }
+        }
+
+        if let Some(xwm) = xwm_state.and_then(|state| state.xwm.as_mut()) {
+            if let Err(err) =
+                xwm.update_stacking_order_upwards(window_elements.iter().map(|e| e.id()))
+            {
+                warn!(
+                    wm_id = ?xwm.id(),
+                    ?err,
+                    "Failed to update Xwm stacking order.",
+                );
             }
         }
 
@@ -773,6 +1008,7 @@ where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
 {
+    Fullscreen(RescaleRenderElement<WaylandSurfaceRenderElement<R>>),
     Wayland(WaylandSurfaceRenderElement<R>),
     Window(CosmicMappedRenderElement<R>),
     Backdrop(TextureRenderElement<GlesTexture>),
@@ -785,6 +1021,7 @@ where
 {
     fn id(&self) -> &smithay::backend::renderer::element::Id {
         match self {
+            WorkspaceRenderElement::Fullscreen(elem) => elem.id(),
             WorkspaceRenderElement::Wayland(elem) => elem.id(),
             WorkspaceRenderElement::Window(elem) => elem.id(),
             WorkspaceRenderElement::Backdrop(elem) => elem.id(),
@@ -793,6 +1030,7 @@ where
 
     fn current_commit(&self) -> smithay::backend::renderer::utils::CommitCounter {
         match self {
+            WorkspaceRenderElement::Fullscreen(elem) => elem.current_commit(),
             WorkspaceRenderElement::Wayland(elem) => elem.current_commit(),
             WorkspaceRenderElement::Window(elem) => elem.current_commit(),
             WorkspaceRenderElement::Backdrop(elem) => elem.current_commit(),
@@ -801,6 +1039,7 @@ where
 
     fn src(&self) -> Rectangle<f64, smithay::utils::Buffer> {
         match self {
+            WorkspaceRenderElement::Fullscreen(elem) => elem.src(),
             WorkspaceRenderElement::Wayland(elem) => elem.src(),
             WorkspaceRenderElement::Window(elem) => elem.src(),
             WorkspaceRenderElement::Backdrop(elem) => elem.src(),
@@ -809,6 +1048,7 @@ where
 
     fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, smithay::utils::Physical> {
         match self {
+            WorkspaceRenderElement::Fullscreen(elem) => elem.geometry(scale),
             WorkspaceRenderElement::Wayland(elem) => elem.geometry(scale),
             WorkspaceRenderElement::Window(elem) => elem.geometry(scale),
             WorkspaceRenderElement::Backdrop(elem) => elem.geometry(scale),
@@ -817,6 +1057,7 @@ where
 
     fn location(&self, scale: Scale<f64>) -> Point<i32, smithay::utils::Physical> {
         match self {
+            WorkspaceRenderElement::Fullscreen(elem) => elem.location(scale),
             WorkspaceRenderElement::Wayland(elem) => elem.location(scale),
             WorkspaceRenderElement::Window(elem) => elem.location(scale),
             WorkspaceRenderElement::Backdrop(elem) => elem.location(scale),
@@ -825,6 +1066,7 @@ where
 
     fn transform(&self) -> smithay::utils::Transform {
         match self {
+            WorkspaceRenderElement::Fullscreen(elem) => elem.transform(),
             WorkspaceRenderElement::Wayland(elem) => elem.transform(),
             WorkspaceRenderElement::Window(elem) => elem.transform(),
             WorkspaceRenderElement::Backdrop(elem) => elem.transform(),
@@ -837,6 +1079,7 @@ where
         commit: Option<smithay::backend::renderer::utils::CommitCounter>,
     ) -> Vec<Rectangle<i32, smithay::utils::Physical>> {
         match self {
+            WorkspaceRenderElement::Fullscreen(elem) => elem.damage_since(scale, commit),
             WorkspaceRenderElement::Wayland(elem) => elem.damage_since(scale, commit),
             WorkspaceRenderElement::Window(elem) => elem.damage_since(scale, commit),
             WorkspaceRenderElement::Backdrop(elem) => elem.damage_since(scale, commit),
@@ -845,6 +1088,7 @@ where
 
     fn opaque_regions(&self, scale: Scale<f64>) -> Vec<Rectangle<i32, smithay::utils::Physical>> {
         match self {
+            WorkspaceRenderElement::Fullscreen(elem) => elem.opaque_regions(scale),
             WorkspaceRenderElement::Wayland(elem) => elem.opaque_regions(scale),
             WorkspaceRenderElement::Window(elem) => elem.opaque_regions(scale),
             WorkspaceRenderElement::Backdrop(elem) => elem.opaque_regions(scale),
@@ -853,6 +1097,7 @@ where
 
     fn alpha(&self) -> f32 {
         match self {
+            WorkspaceRenderElement::Fullscreen(elem) => elem.alpha(),
             WorkspaceRenderElement::Wayland(elem) => elem.alpha(),
             WorkspaceRenderElement::Window(elem) => elem.alpha(),
             WorkspaceRenderElement::Backdrop(elem) => elem.alpha(),
@@ -869,6 +1114,7 @@ impl RenderElement<GlowRenderer> for WorkspaceRenderElement<GlowRenderer> {
         damage: &[Rectangle<i32, smithay::utils::Physical>],
     ) -> Result<(), GlesError> {
         match self {
+            WorkspaceRenderElement::Fullscreen(elem) => elem.draw(frame, src, dst, damage),
             WorkspaceRenderElement::Wayland(elem) => elem.draw(frame, src, dst, damage),
             WorkspaceRenderElement::Window(elem) => elem.draw(frame, src, dst, damage),
             WorkspaceRenderElement::Backdrop(elem) => {
@@ -882,6 +1128,7 @@ impl RenderElement<GlowRenderer> for WorkspaceRenderElement<GlowRenderer> {
         renderer: &mut GlowRenderer,
     ) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
         match self {
+            WorkspaceRenderElement::Fullscreen(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::Wayland(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::Window(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::Backdrop(elem) => elem.underlying_storage(renderer),
@@ -900,6 +1147,7 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>>
         damage: &[Rectangle<i32, smithay::utils::Physical>],
     ) -> Result<(), GlMultiError> {
         match self {
+            WorkspaceRenderElement::Fullscreen(elem) => elem.draw(frame, src, dst, damage),
             WorkspaceRenderElement::Wayland(elem) => elem.draw(frame, src, dst, damage),
             WorkspaceRenderElement::Window(elem) => elem.draw(frame, src, dst, damage),
             WorkspaceRenderElement::Backdrop(elem) => {
@@ -914,12 +1162,24 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>>
         renderer: &mut GlMultiRenderer<'a, 'b>,
     ) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
         match self {
+            WorkspaceRenderElement::Fullscreen(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::Wayland(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::Window(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::Backdrop(elem) => {
                 elem.underlying_storage(renderer.glow_renderer_mut())
             }
         }
+    }
+}
+
+impl<R> From<RescaleRenderElement<WaylandSurfaceRenderElement<R>>> for WorkspaceRenderElement<R>
+where
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    <R as Renderer>::TextureId: 'static,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+{
+    fn from(elem: RescaleRenderElement<WaylandSurfaceRenderElement<R>>) -> Self {
+        WorkspaceRenderElement::Fullscreen(elem)
     }
 }
 

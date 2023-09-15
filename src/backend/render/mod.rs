@@ -528,7 +528,11 @@ where
         .space_for_handle(&current.0)
         .ok_or(OutputNoMode)?;
 
-    let has_fullscreen = workspace.fullscreen.get(output).map(|f| f.exclusive);
+    let has_fullscreen = workspace
+        .fullscreen
+        .get(output)
+        .filter(|f| !f.is_animating())
+        .map(|f| f.exclusive);
     let (overlay_elements, overlay_popups) =
         split_layer_elements(renderer, output, Layer::Overlay, exclude_workspace_overview);
 
