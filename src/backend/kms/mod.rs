@@ -972,7 +972,7 @@ fn render_node_for_output(
     let workspace = shell.active_space(output);
     let nodes = workspace
         .get_fullscreen(output)
-        .map(|w| vec![w.clone()])
+        .map(|w| vec![w.surface()])
         .unwrap_or_else(|| workspace.windows().collect::<Vec<_>>())
         .into_iter()
         .flat_map(|w| w.wl_surface().and_then(|s| source_node_for_surface(&s, dh)))

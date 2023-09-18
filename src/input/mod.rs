@@ -1460,7 +1460,11 @@ impl State {
                 let focus_stack = workspace.focus_stack.get(seat);
                 let focused_window = focus_stack.last();
                 if let Some(window) = focused_window.map(|f| f.active_window()) {
-                    workspace.maximize_toggle(&window, &current_output);
+                    workspace.maximize_toggle(
+                        &window,
+                        &current_output,
+                        self.common.event_loop_handle.clone(),
+                    );
                 }
             }
             Action::Resizing(direction) => self.common.shell.set_resize_mode(
@@ -1624,14 +1628,20 @@ fn sessions_for_output(state: &Common, output: &Output) -> impl Iterator<Item = 
         .map(|s| (&**s).clone())
         .chain(
             maybe_fullscreen
-                .and_then(|w| w.user_data().get::<ScreencopySessions>())
-                .map(|sessions| {
-                    sessions
-                        .0
-                        .borrow()
-                        .iter()
-                        .map(|s| (&**s).clone())
-                        .collect::<Vec<_>>()
+                .as_ref()
+                .and_then(|w| {
+                    if let Some(sessions) = w.surface().user_data().get::<ScreencopySessions>() {
+                        Some(
+                            sessions
+                                .0
+                                .borrow()
+                                .iter()
+                                .map(|s| (&**s).clone())
+                                .collect::<Vec<_>>(),
+                        )
+                    } else {
+                        None
+                    }
                 })
                 .into_iter()
                 .flatten(),

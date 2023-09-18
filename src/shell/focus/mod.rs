@@ -224,13 +224,13 @@ impl Common {
                                 continue; // Focus is valid,
                             }
                         }
-                        KeyboardFocusTarget::Fullscreen(surface) => {
+                        KeyboardFocusTarget::Fullscreen(window) => {
                             let workspace = state.common.shell.active_space(&output);
                             let focus_stack = workspace.focus_stack.get(&seat);
 
                             if focus_stack
                                 .last()
-                                .map(|m| m.has_active_window(&surface))
+                                .map(|m| m.has_active_window(&window.surface()))
                                 .unwrap_or(false)
                                 && workspace.get_fullscreen(&output).is_some()
                             {

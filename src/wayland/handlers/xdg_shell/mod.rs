@@ -164,7 +164,7 @@ impl XdgShellHandler for State {
                     .windows()
                     .find(|(w, _)| w.wl_surface().as_ref() == Some(surface.wl_surface()))
                     .unwrap();
-                workspace.maximize_request(&window, &output)
+                workspace.maximize_request(&window, &output, self.common.event_loop_handle.clone())
             }
         }
     }
@@ -206,7 +206,11 @@ impl XdgShellHandler for State {
                     .windows()
                     .find(|(w, _)| w.wl_surface().as_ref() == Some(surface.wl_surface()))
                     .unwrap();
-                workspace.fullscreen_request(&window, &output)
+                workspace.fullscreen_request(
+                    &window,
+                    &output,
+                    self.common.event_loop_handle.clone(),
+                )
             }
         }
     }

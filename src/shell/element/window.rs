@@ -33,6 +33,7 @@ use smithay::{
         Seat,
     },
     output::Output,
+    reexports::wayland_server::protocol::wl_surface::WlSurface,
     render_elements,
     utils::{Buffer as BufferCoords, IsAlive, Logical, Point, Rectangle, Serial, Size},
     wayland::seat::WaylandFocus,
@@ -45,6 +46,7 @@ use std::{
         Arc, Mutex,
     },
 };
+use wayland_backend::server::ObjectId;
 
 use super::{surface::SSD_HEIGHT, CosmicSurface};
 
@@ -257,7 +259,11 @@ impl Program for CosmicWindowInternal {
                                         .windows()
                                         .find(|(w, _)| w.wl_surface().as_ref() == Some(&surface))
                                         .unwrap();
-                                    workspace.maximize_request(&window, &output)
+                                    workspace.maximize_toggle(
+                                        &window,
+                                        &output,
+                                        data.state.common.event_loop_handle.clone(),
+                                    )
                                 }
                             }
                         });
@@ -695,6 +701,16 @@ impl PointerTarget<State> for CosmicWindow {
                 PointerTarget::gesture_hold_end(&p.window, seat, data, event)
             }
         })
+    }
+}
+
+impl WaylandFocus for CosmicWindow {
+    fn wl_surface(&self) -> Option<WlSurface> {
+        self.0.with_program(|p| p.window.wl_surface())
+    }
+
+    fn same_client_as(&self, object_id: &ObjectId) -> bool {
+        self.0.with_program(|p| p.window.same_client_as(object_id))
     }
 }
 

@@ -401,7 +401,11 @@ impl XwmHandler for Data {
         {
             if let Some(workspace) = self.state.common.shell.space_for_mut(&mapped) {
                 let (window, _) = mapped.windows().find(|(w, _)| w == &surface).unwrap();
-                workspace.maximize_request(&window, &output)
+                workspace.maximize_request(
+                    &window,
+                    &output,
+                    self.state.common.event_loop_handle.clone(),
+                )
             }
         }
     }
@@ -436,7 +440,11 @@ impl XwmHandler for Data {
         {
             if let Some(workspace) = self.state.common.shell.space_for_mut(&mapped) {
                 let (window, _) = mapped.windows().find(|(w, _)| w == &surface).unwrap();
-                workspace.fullscreen_request(&window, &output)
+                workspace.fullscreen_request(
+                    &window,
+                    &output,
+                    self.state.common.event_loop_handle.clone(),
+                )
             }
         }
     }

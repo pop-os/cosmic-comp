@@ -1,7 +1,10 @@
 use std::sync::Weak;
 
 use crate::{
-    shell::{element::CosmicMapped, layout::tiling::ResizeForkTarget, CosmicSurface},
+    shell::{
+        element::{CosmicMapped, CosmicWindow},
+        layout::tiling::ResizeForkTarget,
+    },
     utils::prelude::*,
     wayland::handlers::xdg_shell::popup::get_popup_toplevel,
 };
@@ -29,7 +32,7 @@ use smithay::{
 #[derive(Debug, Clone, PartialEq)]
 pub enum PointerFocusTarget {
     Element(CosmicMapped),
-    Fullscreen(CosmicSurface),
+    Fullscreen(CosmicWindow),
     LayerSurface(LayerSurface),
     Popup(PopupKind),
     OverrideRedirect(X11Surface),
@@ -39,7 +42,7 @@ pub enum PointerFocusTarget {
 #[derive(Debug, Clone, PartialEq)]
 pub enum KeyboardFocusTarget {
     Element(CosmicMapped),
-    Fullscreen(CosmicSurface),
+    Fullscreen(CosmicWindow),
     Group(WindowGroup),
     LayerSurface(LayerSurface),
     Popup(PopupKind),
@@ -551,8 +554,8 @@ impl From<CosmicMapped> for PointerFocusTarget {
     }
 }
 
-impl From<CosmicSurface> for PointerFocusTarget {
-    fn from(s: CosmicSurface) -> Self {
+impl From<CosmicWindow> for PointerFocusTarget {
+    fn from(s: CosmicWindow) -> Self {
         PointerFocusTarget::Fullscreen(s)
     }
 }
@@ -587,8 +590,8 @@ impl From<CosmicMapped> for KeyboardFocusTarget {
     }
 }
 
-impl From<CosmicSurface> for KeyboardFocusTarget {
-    fn from(s: CosmicSurface) -> Self {
+impl From<CosmicWindow> for KeyboardFocusTarget {
+    fn from(s: CosmicWindow) -> Self {
         KeyboardFocusTarget::Fullscreen(s)
     }
 }
