@@ -277,7 +277,9 @@ impl Program for CosmicWindowInternal {
     ) {
         if !self.window.is_activated(false) {
             let mut mask = self.mask.lock().unwrap();
-            if mask.is_none() {
+            if self.window.is_maximized(false) {
+                mask.take();
+            } else if mask.is_none() {
                 let (w, h) = (pixels.width(), pixels.height());
                 let mut new_mask = tiny_skia::Mask::new(w, h).unwrap();
 
