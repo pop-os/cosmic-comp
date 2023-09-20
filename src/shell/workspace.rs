@@ -85,6 +85,7 @@ pub struct Workspace {
     pub pending_buffers: Vec<(ScreencopySession, BufferParams)>,
     pub screencopy_sessions: Vec<DropableSession>,
     pub(super) backdrop_id: Id,
+    pub dirty: AtomicBool,
 }
 
 #[derive(Debug, Clone)]
@@ -144,6 +145,7 @@ impl Workspace {
             pending_buffers: Vec::new(),
             screencopy_sessions: Vec::new(),
             backdrop_id: Id::new(),
+            dirty: AtomicBool::new(false),
         }
     }
 
@@ -169,16 +171,18 @@ impl Workspace {
                 .fullscreen
                 .values()
                 .any(|f| f.start_at.is_some() || f.ended_at.is_some())
+            || self.dirty.swap(false, Ordering::SeqCst)
     }
 
     pub fn update_animations(&mut self) -> HashMap<ClientId, Client> {
-        let mut clients = Vec::new();
+        let mut clients = HashMap::new();
 
         for f in self.fullscreen.values_mut() {
             if let Some(start) = f.start_at.as_ref() {
                 let duration_since = Instant::now().duration_since(*start);
                 if duration_since > FULLSCREEN_ANIMATION_DURATION {
                     f.start_at.take();
+                    self.dirty.store(true, Ordering::SeqCst);
                 }
                 if duration_since * 2 > FULLSCREEN_ANIMATION_DURATION {
                     if let Some(signal) = f.animation_signal.take() {
@@ -186,12 +190,14 @@ impl Workspace {
                         if let Some(client) =
                             f.window.wl_surface().as_ref().and_then(Resource::client)
                         {
-                            clients.push((client.id(), client));
+                            clients.insert(client.id(), client);
                         }
                     }
                 }
             }
         }
+
+        let len = self.fullscreen.len();
         self.fullscreen.retain(|_, f| match f.ended_at {
             None => true,
             Some(instant) => {
@@ -202,7 +208,7 @@ impl Workspace {
                         if let Some(client) =
                             f.window.wl_surface().as_ref().and_then(Resource::client)
                         {
-                            clients.push((client.id(), client));
+                            clients.insert(client.id(), client);
                         }
                     }
                 }
@@ -210,10 +216,12 @@ impl Workspace {
                 duration_since < FULLSCREEN_ANIMATION_DURATION
             }
         });
+        if len != self.fullscreen.len() {
+            self.dirty.store(true, Ordering::SeqCst);
+        }
 
-        let mut updates = self.tiling_layer.update_animation_state();
-        updates.extend(clients);
-        updates
+        clients.extend(self.tiling_layer.update_animation_state());
+        clients
     }
 
     pub fn commit(&mut self, surface: &WlSurface) {
@@ -939,8 +947,9 @@ impl Workspace {
             .map(|f| f.start_at.is_some() || f.ended_at.is_some())
             .unwrap_or(true)
         {
-            let focused =
-                draw_focus_indicator.and_then(|seat| self.focus_stack.get(seat).last().cloned());
+            let focused = draw_focus_indicator
+                .filter(|_| !self.fullscreen.contains_key(output))
+                .and_then(|seat| self.focus_stack.get(seat).last().cloned());
 
             // floating surfaces
             let alpha = match &overview.0 {
