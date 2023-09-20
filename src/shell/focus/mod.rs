@@ -97,12 +97,22 @@ impl Shell {
         serial: Option<Serial>,
     ) {
         // update FocusStack and notify layouts about new focus (if any window)
-        if let Some(KeyboardFocusTarget::Element(mapped)) = target {
-            if let Some(workspace) = state.common.shell.space_for_mut(mapped) {
+        let element = match target {
+            Some(KeyboardFocusTarget::Element(mapped)) => Some(mapped.clone()),
+            Some(KeyboardFocusTarget::Fullscreen(window)) => state
+                .common
+                .shell
+                .element_for_surface(&window.surface())
+                .cloned(),
+            _ => None,
+        };
+
+        if let Some(mapped) = element {
+            if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
                 let mut focus_stack = workspace.focus_stack.get_mut(active_seat);
-                if Some(mapped) != focus_stack.last() {
+                if Some(&mapped) != focus_stack.last() {
                     trace!(?mapped, "Focusing window.");
-                    focus_stack.append(mapped);
+                    focus_stack.append(&mapped);
                     // also remove popup grabs, if we are switching focus
                     if let Some(mut popup_grab) = active_seat
                         .user_data()

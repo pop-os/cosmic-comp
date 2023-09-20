@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::shell::{
-    focus::FocusDirection, grabs::ResizeEdge, layout::tiling::Direction, ResizeDirection,
-};
+use crate::shell::{focus::FocusDirection, grabs::ResizeEdge, Direction, ResizeDirection};
 use serde::Deserialize;
 use smithay::{
     backend::input::KeyState,

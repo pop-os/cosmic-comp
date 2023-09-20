@@ -13,18 +13,18 @@ use smithay::{
 };
 use std::collections::HashMap;
 
-use crate::shell::focus::FocusDirection;
-use crate::shell::FocusResult;
 use crate::{
     backend::render::{element::AsGlowRenderer, IndicatorShader, Key, Usage},
     shell::{
         element::{
-            resize_indicator::ResizeIndicator, stack::CosmicStackRenderElement,
-            window::CosmicWindowRenderElement, CosmicMapped, CosmicMappedRenderElement,
+            resize_indicator::ResizeIndicator,
+            stack::{CosmicStackRenderElement, MoveResult as StackMoveResult},
+            window::CosmicWindowRenderElement,
+            CosmicMapped, CosmicMappedRenderElement, CosmicWindow,
         },
-        focus::target::KeyboardFocusTarget,
+        focus::{target::KeyboardFocusTarget, FocusDirection},
         grabs::ResizeEdge,
-        CosmicSurface, ResizeDirection, ResizeMode,
+        CosmicSurface, Direction, FocusResult, MoveResult, ResizeDirection, ResizeMode,
     },
     state::State,
     utils::prelude::*,
@@ -421,6 +421,62 @@ impl FloatingLayout {
 
         next.map(|elem| FocusResult::Some(KeyboardFocusTarget::Element(elem.clone())))
             .unwrap_or(FocusResult::None)
+    }
+
+    pub fn move_current_element<'a>(
+        &mut self,
+        direction: Direction,
+        seat: &Seat<State>,
+    ) -> MoveResult {
+        let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
+            return MoveResult::None
+        };
+
+        let Some(focused) = (match target {
+            KeyboardFocusTarget::Popup(popup) => {
+                let Some(toplevel_surface) = (match popup {
+                    PopupKind::Xdg(xdg) => get_popup_toplevel(&xdg),
+                }) else {
+                    return MoveResult::None
+                };
+                self.space.elements().find(|elem| elem.wl_surface().as_ref() == Some(&toplevel_surface))
+            },
+            KeyboardFocusTarget::Element(elem) => self.space.elements().find(|e| *e == &elem),
+            _ => None,
+        }) else {
+            return MoveResult::None
+        };
+
+        match focused.handle_move(direction) {
+            StackMoveResult::Handled => return MoveResult::Done,
+            StackMoveResult::MoveOut(surface, loop_handle) => {
+                let mapped: CosmicMapped = CosmicWindow::new(surface, loop_handle).into();
+                let output = seat.active_output();
+                let pos = self.space.element_geometry(focused).unwrap().loc
+                    + match direction {
+                        Direction::Up => Point::from((5, -10)),
+                        Direction::Down => Point::from((5, 10)),
+                        Direction::Left => Point::from((-10, 5)),
+                        Direction::Right => Point::from((10, 5)),
+                    };
+                let position = self
+                    .space
+                    .output_geometry(&output)
+                    .unwrap()
+                    .overlaps({
+                        let mut geo = mapped.geometry();
+                        geo.loc += pos;
+                        geo
+                    })
+                    .then_some(pos);
+
+                self.map_internal(mapped.clone(), &output, position);
+                return MoveResult::ShiftFocus(KeyboardFocusTarget::Element(mapped));
+            }
+            StackMoveResult::Default => {}
+        };
+
+        MoveResult::MoveFurther(KeyboardFocusTarget::Element(focused.clone()))
     }
 
     pub fn mapped(&self) -> impl Iterator<Item = &CosmicMapped> {

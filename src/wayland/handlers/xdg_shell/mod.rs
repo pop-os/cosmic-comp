@@ -227,7 +227,7 @@ impl XdgShellHandler for State {
                     .windows()
                     .find(|(w, _)| w.wl_surface().as_ref() == Some(surface.wl_surface()))
                     .unwrap();
-                workspace.unfullscreen_request(&window)
+                workspace.unfullscreen_request(&window);
             }
         }
     }

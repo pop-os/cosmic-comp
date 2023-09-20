@@ -6,8 +6,9 @@ use crate::{
     shell::{
         focus::{target::PointerFocusTarget, FocusDirection},
         grabs::{ResizeEdge, SeatMoveGrabState},
-        layout::tiling::{Direction, MoveResult, SwapWindowGrab, TilingLayout},
-        FocusResult, OverviewMode, ResizeDirection, ResizeMode, Trigger, Workspace,
+        layout::tiling::{SwapWindowGrab, TilingLayout},
+        Direction, FocusResult, MoveResult, OverviewMode, ResizeDirection, ResizeMode, Trigger,
+        Workspace,
     },
     state::Common,
     utils::prelude::*,
@@ -1373,7 +1374,7 @@ impl State {
                     return; // TODO, is this what we want? How do we indicate the switch?
                 }
 
-                match workspace.tiling_layer.move_current_node(direction, seat) {
+                match workspace.move_current_element(direction, seat) {
                     MoveResult::MoveFurther(_move_further) => {
                         match (direction, self.common.config.static_conf.workspace_layout) {
                             (Direction::Left, WorkspaceLayout::Horizontal)
@@ -1417,7 +1418,7 @@ impl State {
                     MoveResult::ShiftFocus(shift) => {
                         Common::set_focus(self, Some(&shift), seat, None);
                     }
-                    MoveResult::Done => {
+                    _ => {
                         if let Some(focused_window) = workspace.focus_stack.get(seat).last() {
                             if workspace.is_tiled(focused_window) {
                                 self.common.shell.set_overview_mode(

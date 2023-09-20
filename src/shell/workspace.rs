@@ -128,9 +128,34 @@ impl IsAlive for FullscreenSurface {
 pub struct FocusStacks(HashMap<Seat<State>, IndexSet<CosmicMapped>>);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ManagedState {
+pub struct ManagedState {
+    pub layer: ManagedLayer,
+    pub was_fullscreen: Option<bool>,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ManagedLayer {
     Tiling,
     Floating,
+}
+
+#[derive(Debug, serde::Deserialize, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+impl std::ops::Not for Direction {
+    type Output = Self;
+    fn not(self) -> Self::Output {
+        match self {
+            Direction::Left => Direction::Right,
+            Direction::Right => Direction::Left,
+            Direction::Up => Direction::Down,
+            Direction::Down => Direction::Up,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -147,6 +172,26 @@ impl FocusResult {
     {
         match self {
             FocusResult::None => f(),
+            x => x,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MoveResult {
+    None,
+    Done,
+    MoveFurther(KeyboardFocusTarget),
+    ShiftFocus(KeyboardFocusTarget),
+}
+
+impl MoveResult {
+    pub fn or_else<F>(self, f: F) -> MoveResult
+    where
+        F: FnOnce() -> MoveResult,
+    {
+        match self {
+            MoveResult::None => f(),
             x => x,
         }
     }
@@ -279,7 +324,9 @@ impl Workspace {
             assert!(was_floating != was_tiling);
         }
 
-        if mapped.is_maximized(true) || mapped.is_fullscreen(true) {
+        let was_maximized = mapped.is_maximized(true);
+        let was_fullscreen = mapped.is_fullscreen(true);
+        if was_maximized || was_fullscreen {
             self.unmaximize_request(&mapped.active_window());
         }
 
@@ -288,9 +335,15 @@ impl Workspace {
             .values_mut()
             .for_each(|set| set.retain(|m| m != mapped));
         if was_floating {
-            Some(ManagedState::Floating)
+            Some(ManagedState {
+                layer: ManagedLayer::Floating,
+                was_fullscreen: (was_fullscreen || was_maximized).then_some(was_fullscreen),
+            })
         } else if was_tiling {
-            Some(ManagedState::Tiling)
+            Some(ManagedState {
+                layer: ManagedLayer::Tiling,
+                was_fullscreen: (was_fullscreen || was_maximized).then_some(was_fullscreen),
+            })
         } else {
             None
         }
@@ -389,14 +442,14 @@ impl Workspace {
         window.set_maximized(true);
         self.set_fullscreen(window, output, false, evlh)
     }
+
     pub fn unmaximize_request(&mut self, window: &CosmicSurface) -> Option<Size<i32, Logical>> {
         if self
             .fullscreen
             .values()
             .any(|f| &f.window.surface() == window)
         {
-            self.unfullscreen_request(window);
-            self.floating_layer.unmaximize_request(window)
+            self.unfullscreen_request(window)
         } else {
             None
         }
@@ -476,7 +529,7 @@ impl Workspace {
         );
     }
 
-    pub fn unfullscreen_request(&mut self, window: &CosmicSurface) {
+    pub fn unfullscreen_request(&mut self, window: &CosmicSurface) -> Option<Size<i32, Logical>> {
         if let Some((output, f)) = self
             .fullscreen
             .iter_mut()
@@ -485,7 +538,7 @@ impl Workspace {
             f.window.output_leave(output);
             window.set_maximized(false);
             window.set_fullscreen(false);
-            self.floating_layer.unmaximize_request(window);
+            let result = self.floating_layer.unmaximize_request(window);
             self.floating_layer.refresh();
             self.tiling_layer.recalculate(output);
             self.tiling_layer.refresh();
@@ -520,6 +573,10 @@ impl Workspace {
                     old_signal.store(true, Ordering::SeqCst);
                 }
             }
+
+            result
+        } else {
+            None
         }
     }
 
@@ -831,6 +888,20 @@ impl Workspace {
                 self.tiling_layer
                     .next_focus(direction, seat, focus_stack.iter(), swap_desc)
             })
+    }
+
+    pub fn move_current_element<'a>(
+        &mut self,
+        direction: Direction,
+        seat: &Seat<State>,
+    ) -> MoveResult {
+        if let Some(f) = self.fullscreen.get(&seat.active_output()) {
+            MoveResult::MoveFurther(KeyboardFocusTarget::Fullscreen(f.window.clone()))
+        } else {
+            self.floating_layer
+                .move_current_element(direction, seat)
+                .or_else(|| self.tiling_layer.move_current_node(direction, seat))
+        }
     }
 
     pub fn render_output<'a, R>(

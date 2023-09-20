@@ -66,7 +66,7 @@ use self::{
     grabs::ResizeEdge,
     layout::{
         floating::{FloatingLayout, ResizeState},
-        tiling::{Direction, NodeDesc, TilingLayout},
+        tiling::{NodeDesc, TilingLayout},
     },
 };
 
@@ -1500,13 +1500,47 @@ impl Shell {
             .get_mut(to_idx, to_output)
             .unwrap(); // checked above
         let focus_stack = to_workspace.focus_stack.get(&seat);
-        if window_state == ManagedState::Floating {
+        if window_state.layer == ManagedLayer::Floating {
             to_workspace.floating_layer.map(mapped.clone(), &seat, None);
         } else {
             to_workspace
                 .tiling_layer
                 .map(mapped.clone(), &seat, focus_stack.iter(), direction);
         }
+        let focus_target = match window_state.was_fullscreen {
+            Some(true) => {
+                to_workspace.fullscreen_request(
+                    &mapped.active_window(),
+                    &to_output,
+                    state.common.event_loop_handle.clone(),
+                );
+                KeyboardFocusTarget::from(
+                    to_workspace
+                        .fullscreen
+                        .get(to_output)
+                        .unwrap()
+                        .window
+                        .clone(),
+                )
+            }
+            Some(false) => {
+                to_workspace.maximize_request(
+                    &mapped.active_window(),
+                    &to_output,
+                    state.common.event_loop_handle.clone(),
+                );
+                KeyboardFocusTarget::from(
+                    to_workspace
+                        .fullscreen
+                        .get(to_output)
+                        .unwrap()
+                        .window
+                        .clone(),
+                )
+            }
+            None => KeyboardFocusTarget::from(mapped.clone()),
+        };
+
         for (toplevel, _) in mapped.windows() {
             if from_output != to_output {
                 state
@@ -1531,7 +1565,7 @@ impl Shell {
         }
 
         if follow {
-            Common::set_focus(state, Some(&KeyboardFocusTarget::from(mapped)), &seat, None);
+            Common::set_focus(state, Some(&focus_target), &seat, None);
         }
         Ok(new_pos)
     }

@@ -22,8 +22,8 @@ use crate::{
         },
         grabs::ResizeEdge,
         layout::Orientation,
-        CosmicSurface, FocusResult, OutputNotMapped, OverviewMode, ResizeDirection, ResizeMode,
-        Trigger,
+        CosmicSurface, Direction, FocusResult, MoveResult, OutputNotMapped, OverviewMode,
+        ResizeDirection, ResizeMode, Trigger,
     },
     utils::{prelude::*, tween::EaseRectangle},
     wayland::{
@@ -110,33 +110,6 @@ pub struct NodeDesc {
     pub output: WeakOutput,
     pub node: NodeId,
     pub stack_window: Option<CosmicSurface>,
-}
-
-#[derive(Debug, serde::Deserialize, Clone, Copy, PartialEq, Eq)]
-pub enum Direction {
-    Left,
-    Right,
-    Up,
-    Down,
-}
-
-impl std::ops::Not for Direction {
-    type Output = Self;
-    fn not(self) -> Self::Output {
-        match self {
-            Direction::Left => Direction::Right,
-            Direction::Right => Direction::Left,
-            Direction::Up => Direction::Down,
-            Direction::Down => Direction::Up,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum MoveResult {
-    Done,
-    MoveFurther(KeyboardFocusTarget),
-    ShiftFocus(KeyboardFocusTarget),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1454,12 +1427,12 @@ impl TilingLayout {
         let mut tree = queue.trees.back().unwrap().0.copy_clone();
 
         let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
-            return MoveResult::Done;
+            return MoveResult::None;
         };
         let Some((node_id, data)) =
             TilingLayout::currently_focused_node(&mut tree, &seat.active_output(), target)
         else {
-            return MoveResult::Done;
+            return MoveResult::None;
         };
 
         // stacks may handle movement internally

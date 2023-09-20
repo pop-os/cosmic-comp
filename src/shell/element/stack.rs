@@ -1,10 +1,7 @@
 use super::{CosmicMapped, CosmicSurface, CosmicWindow};
 use crate::{
     shell::{
-        focus::FocusDirection,
-        grabs::MoveGrab,
-        layout::tiling::{Direction, NodeDesc},
-        Shell, Trigger,
+        focus::FocusDirection, grabs::MoveGrab, layout::tiling::NodeDesc, Direction, Shell, Trigger,
     },
     state::State,
     utils::iced::{IcedElement, Program},

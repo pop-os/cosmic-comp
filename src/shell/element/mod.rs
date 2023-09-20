@@ -73,10 +73,8 @@ use tracing::debug;
 
 use super::{
     focus::FocusDirection,
-    layout::{
-        floating::ResizeState,
-        tiling::{Direction, NodeDesc},
-    },
+    layout::{floating::ResizeState, tiling::NodeDesc},
+    Direction,
 };
 
 space_elements! {
