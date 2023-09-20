@@ -10,13 +10,14 @@ use smithay::{
     desktop::{layer_map_for_output, PopupUngrabStrategy},
     input::Seat,
     utils::{IsAlive, Serial, SERIAL_COUNTER},
+    wayland::seat::WaylandFocus,
 };
 use std::cell::RefCell;
 use tracing::{debug, trace};
 
 use self::target::{KeyboardFocusTarget, WindowGroup};
 
-use super::CosmicSurface;
+use super::{layout::floating::FloatingLayout, CosmicSurface};
 
 pub mod target;
 
@@ -170,14 +171,35 @@ impl Shell {
                         let _ = xwm.raise_window(&window);
                     }
                 }
-                if workspace.floating_layer.mapped().any(|m| m == focused) {
-                    workspace.floating_layer.space.raise_element(focused, true);
-                }
+                raise_with_children(&mut workspace.floating_layer, focused);
             }
             for window in workspace.mapped() {
                 window.set_activated(focused_windows.contains(&window));
                 window.configure();
             }
+        }
+    }
+}
+
+fn raise_with_children(floating_layer: &mut FloatingLayout, focused: &CosmicMapped) {
+    if floating_layer.mapped().any(|m| m == focused) {
+        floating_layer.space.raise_element(focused, true);
+        for element in floating_layer
+            .space
+            .elements()
+            .filter(|elem| {
+                let parent = match elem.active_window() {
+                    CosmicSurface::Wayland(w) => w.toplevel().parent(),
+                    _ => None,
+                };
+
+                parent == focused.active_window().wl_surface()
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
+        {
+            raise_with_children(floating_layer, &element);
         }
     }
 }
