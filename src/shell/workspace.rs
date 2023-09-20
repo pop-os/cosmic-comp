@@ -65,7 +65,7 @@ use super::{
     },
     focus::{
         target::{KeyboardFocusTarget, PointerFocusTarget, WindowGroup},
-        FocusStack, FocusStackMut,
+        FocusDirection, FocusStack, FocusStackMut,
     },
     grabs::{ResizeEdge, ResizeGrab},
     layout::tiling::{Data, NodeDesc},
@@ -131,6 +131,25 @@ pub struct FocusStacks(HashMap<Seat<State>, IndexSet<CosmicMapped>>);
 pub enum ManagedState {
     Tiling,
     Floating,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FocusResult {
+    None,
+    Handled,
+    Some(KeyboardFocusTarget),
+}
+
+impl FocusResult {
+    pub fn or_else<F>(self, f: F) -> FocusResult
+    where
+        F: FnOnce() -> FocusResult,
+    {
+        match self {
+            FocusResult::None => f(),
+            x => x,
+        }
+    }
 }
 
 impl Workspace {
@@ -793,6 +812,25 @@ impl Workspace {
             }),
             _ => None,
         }
+    }
+
+    pub fn next_focus<'a>(
+        &mut self,
+        direction: FocusDirection,
+        seat: &Seat<State>,
+        swap_desc: Option<NodeDesc>,
+    ) -> FocusResult {
+        if self.fullscreen.contains_key(&seat.active_output()) {
+            return FocusResult::None;
+        }
+
+        let focus_stack = self.focus_stack.get(seat);
+        self.floating_layer
+            .next_focus(direction, seat, focus_stack.iter())
+            .or_else(|| {
+                self.tiling_layer
+                    .next_focus(direction, seat, focus_stack.iter(), swap_desc)
+            })
     }
 
     pub fn render_output<'a, R>(

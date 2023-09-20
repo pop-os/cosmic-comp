@@ -5,13 +5,16 @@ use smithay::{
         element::{AsRenderElements, RenderElement},
         ImportAll, ImportMem, Renderer,
     },
-    desktop::{layer_map_for_output, space::SpaceElement, Space, WindowSurfaceType},
+    desktop::{layer_map_for_output, space::SpaceElement, PopupKind, Space, WindowSurfaceType},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
     utils::{Logical, Point, Rectangle, Size},
+    wayland::seat::WaylandFocus,
 };
 use std::collections::HashMap;
 
+use crate::shell::focus::FocusDirection;
+use crate::shell::FocusResult;
 use crate::{
     backend::render::{element::AsGlowRenderer, IndicatorShader, Key, Usage},
     shell::{
@@ -25,7 +28,9 @@ use crate::{
     },
     state::State,
     utils::prelude::*,
-    wayland::protocols::toplevel_info::ToplevelInfoState,
+    wayland::{
+        handlers::xdg_shell::popup::get_popup_toplevel, protocols::toplevel_info::ToplevelInfoState,
+    },
 };
 
 mod grabs;
@@ -345,6 +350,77 @@ impl FloatingLayout {
         mapped.configure();
 
         true
+    }
+
+    pub fn next_focus<'a>(
+        &mut self,
+        direction: FocusDirection,
+        seat: &Seat<State>,
+        _focus_stack: impl Iterator<Item = &'a CosmicMapped> + 'a,
+    ) -> FocusResult {
+        let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
+            return FocusResult::None
+        };
+
+        let Some(focused) = (match target {
+            KeyboardFocusTarget::Popup(popup) => {
+                let Some(toplevel_surface) = (match popup {
+                    PopupKind::Xdg(xdg) => get_popup_toplevel(&xdg),
+                }) else {
+                    return FocusResult::None
+                };
+                self.space.elements().find(|elem| elem.wl_surface().as_ref() == Some(&toplevel_surface))
+            },
+            KeyboardFocusTarget::Element(elem) => self.space.elements().find(|e| *e == &elem),
+            _ => None,
+        }) else {
+            return FocusResult::None
+        };
+
+        if focused.handle_focus(direction, None) {
+            return FocusResult::Handled;
+        }
+
+        let geometry = self.space.element_geometry(focused).unwrap();
+
+        let next = match direction {
+            FocusDirection::Up => self.space.elements().min_by_key(|other| {
+                let res = geometry.loc.y - self.space.element_geometry(other).unwrap().loc.y;
+                if res.is_positive() {
+                    res
+                } else {
+                    i32::MAX
+                }
+            }),
+            FocusDirection::Down => self.space.elements().max_by_key(|other| {
+                let res = geometry.loc.y - self.space.element_geometry(other).unwrap().loc.y;
+                if res.is_negative() {
+                    res
+                } else {
+                    i32::MIN
+                }
+            }),
+            FocusDirection::Left => self.space.elements().min_by_key(|other| {
+                let res = geometry.loc.x - self.space.element_geometry(other).unwrap().loc.x;
+                if res.is_positive() {
+                    res
+                } else {
+                    i32::MAX
+                }
+            }),
+            FocusDirection::Right => self.space.elements().max_by_key(|other| {
+                let res = geometry.loc.x - self.space.element_geometry(other).unwrap().loc.x;
+                if res.is_negative() {
+                    res
+                } else {
+                    i32::MIN
+                }
+            }),
+            _ => return FocusResult::None,
+        };
+
+        next.map(|elem| FocusResult::Some(KeyboardFocusTarget::Element(elem.clone())))
+            .unwrap_or(FocusResult::None)
     }
 
     pub fn mapped(&self) -> impl Iterator<Item = &CosmicMapped> {

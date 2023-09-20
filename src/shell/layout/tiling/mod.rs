@@ -22,7 +22,8 @@ use crate::{
         },
         grabs::ResizeEdge,
         layout::Orientation,
-        CosmicSurface, OutputNotMapped, OverviewMode, ResizeDirection, ResizeMode, Trigger,
+        CosmicSurface, FocusResult, OutputNotMapped, OverviewMode, ResizeDirection, ResizeMode,
+        Trigger,
     },
     utils::{prelude::*, tween::EaseRectangle},
     wayland::{
@@ -129,13 +130,6 @@ impl std::ops::Not for Direction {
             Direction::Down => Direction::Up,
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum FocusResult {
-    None,
-    Handled,
-    Some(KeyboardFocusTarget),
 }
 
 #[derive(Debug, Clone, PartialEq)]

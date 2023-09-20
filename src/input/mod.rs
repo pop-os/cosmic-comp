@@ -6,8 +6,8 @@ use crate::{
     shell::{
         focus::{target::PointerFocusTarget, FocusDirection},
         grabs::{ResizeEdge, SeatMoveGrabState},
-        layout::tiling::{Direction, FocusResult, MoveResult, SwapWindowGrab, TilingLayout},
-        OverviewMode, ResizeDirection, ResizeMode, Trigger, Workspace,
+        layout::tiling::{Direction, MoveResult, SwapWindowGrab, TilingLayout},
+        FocusResult, OverviewMode, ResizeDirection, ResizeMode, Trigger, Workspace,
     },
     state::Common,
     utils::prelude::*,
@@ -1305,19 +1305,14 @@ impl State {
                 let current_output = seat.active_output();
                 let overview = self.common.shell.overview_mode().0;
                 let workspace = self.common.shell.active_space_mut(&current_output);
-                let focus_stack = workspace.focus_stack.get(seat);
-                let mut result = workspace.tiling_layer.next_focus(
+                let result = workspace.next_focus(
                     focus,
                     seat,
-                    focus_stack.iter(),
                     match overview {
                         OverviewMode::Started(Trigger::KeyboardSwap(_, desc), _) => Some(desc),
                         _ => None,
                     },
                 );
-                if workspace.get_fullscreen(&current_output).is_some() {
-                    result = FocusResult::None;
-                }
 
                 match result {
                     FocusResult::None => {
@@ -1367,7 +1362,6 @@ impl State {
                     }
                     FocusResult::Handled => {}
                     FocusResult::Some(target) => {
-                        std::mem::drop(focus_stack);
                         Common::set_focus(self, Some(&target), seat, None);
                     }
                 }
