@@ -184,6 +184,7 @@ impl CompositorHandler for State {
                         && with_renderer_surface_state(&surface, |state| state.buffer().is_some())
                     {
                         let output = seat.active_output();
+                        window.on_commit();
                         Shell::map_window(self, &window, &output);
                     } else {
                         return;
