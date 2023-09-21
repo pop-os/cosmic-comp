@@ -728,6 +728,12 @@ impl Shell {
                                 [WorkspaceCapabilities::Activate].into_iter(),
                             );
                             workspace.handle = workspace_handle;
+                            for window in workspace.mapped() {
+                                for (surface, _) in window.windows() {
+                                    self.toplevel_info_state
+                                        .toplevel_enter_workspace(&surface, &workspace.handle);
+                                }
+                            }
 
                             // update mapping
                             workspace.map_output(new_output, (0, 0).into());
