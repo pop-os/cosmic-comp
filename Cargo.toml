@@ -61,13 +61,13 @@ branch = "feature/copy_clone"
 [dependencies.smithay]
 version = "0.3"
 git = "https://github.com/smithay/smithay.git"
-rev = "138921bff4"
+rev = "58d5bdc"
 default-features = false
 features = ["backend_drm", "backend_gbm", "backend_egl", "backend_libinput", "backend_session_libseat", "backend_udev", "backend_winit", "backend_vulkan", "backend_x11", "desktop", "use_system_lib", "renderer_glow", "renderer_multi", "wayland_frontend", "xwayland"]
 
 [dependencies.smithay-egui]
 git = "https://github.com/Smithay/smithay-egui.git"
-rev = "0a4d573"
+rev = "dab5c1b"
 features = ["svg"]
 optional = true
 
@@ -87,4 +87,4 @@ debug = true
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/smithay//smithay", rev = "5affbde525" }
+smithay = { git = "https://github.com/smithay//smithay", rev = "58d5bdc" }

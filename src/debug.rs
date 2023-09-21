@@ -327,12 +327,12 @@ fn format_pointer_focus(focus: Option<PointerFocusTarget>) -> String {
         },
         Some(Fullscreen(x)) => format!(
             "Fullscreen {} ({})",
-            match &x {
+            match x.surface() {
                 CosmicSurface::Wayland(w) => w.toplevel().wl_surface().id().protocol_id(),
                 CosmicSurface::X11(x) => x.window_id(),
                 _ => unreachable!(),
             },
-            x.title()
+            x.surface().title()
         ),
         Some(LayerSurface(x)) => format!("LayerSurface {}", x.wl_surface().id().protocol_id()),
         Some(Popup(x)) => format!("Popup {}", x.wl_surface().id().protocol_id()),
@@ -369,12 +369,12 @@ fn format_keyboard_focus(focus: Option<KeyboardFocusTarget>) -> String {
         },
         Some(Fullscreen(x)) => format!(
             "Fullscreen {} ({})",
-            match &x {
+            match x.surface() {
                 CosmicSurface::Wayland(w) => w.toplevel().wl_surface().id().protocol_id(),
                 CosmicSurface::X11(x) => x.window_id(),
                 _ => unreachable!(),
             },
-            x.title()
+            x.surface().title()
         ),
         Some(LayerSurface(x)) => format!("LayerSurface {}", x.wl_surface().id().protocol_id()),
         Some(Popup(x)) => format!("Popup {}", x.wl_surface().id().protocol_id()),
