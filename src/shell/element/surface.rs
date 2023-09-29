@@ -757,6 +757,14 @@ impl PointerTarget<State> for CosmicSurface {
         }
     }
 
+    fn frame(&self, seat: &Seat<State>, data: &mut State) {
+        match self {
+            CosmicSurface::Wayland(window) => PointerTarget::frame(window, seat, data),
+            CosmicSurface::X11(surface) => PointerTarget::frame(surface, seat, data),
+            _ => unreachable!(),
+        }
+    }
+
     fn leave(
         &self,
         seat: &Seat<State>,

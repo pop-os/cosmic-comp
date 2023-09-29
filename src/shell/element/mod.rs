@@ -906,6 +906,13 @@ impl PointerTarget<State> for CosmicMapped {
             _ => {}
         }
     }
+    fn frame(&self, seat: &Seat<State>, data: &mut State) {
+        match &self.element {
+            CosmicMappedInternal::Stack(s) => PointerTarget::frame(s, seat, data),
+            CosmicMappedInternal::Window(w) => PointerTarget::frame(w, seat, data),
+            _ => {}
+        }
+    }
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
         self.last_cursor_position.lock().unwrap().remove(&seat.id());
         match &self.element {

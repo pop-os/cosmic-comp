@@ -152,6 +152,13 @@ impl PointerGrab<State> for ResizeGrab {
         }
     }
 
+    fn frame(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>) {
+        match self {
+            ResizeGrab::Floating(grab) => grab.frame(data, handle),
+            ResizeGrab::Tiling(grab) => grab.frame(data, handle),
+        }
+    }
+
     fn gesture_swipe_begin(
         &mut self,
         data: &mut State,

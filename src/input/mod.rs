@@ -41,7 +41,9 @@ use smithay::{
     },
     utils::{Logical, Point, Rectangle, Serial, SERIAL_COUNTER},
     wayland::{
-        keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat, seat::WaylandFocus,
+        keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
+        pointer_constraints::{with_pointer_constraint, PointerConstraint},
+        seat::WaylandFocus,
         shell::wlr_layer::Layer as WlrLayer,
     },
     xwayland::X11Surface,
@@ -507,6 +509,70 @@ impl State {
                     let current_output = seat.active_output();
 
                     let mut position = seat.get_pointer().unwrap().current_location();
+
+                    let relative_pos = self
+                        .common
+                        .shell
+                        .map_global_to_space(position, &current_output);
+                    let overview = self.common.shell.overview_mode();
+                    let output_geometry = current_output.geometry();
+                    let workspace = self.common.shell.workspaces.active_mut(&current_output);
+                    let under = State::surface_under(
+                        position,
+                        relative_pos,
+                        &current_output,
+                        output_geometry,
+                        &self.common.shell.override_redirect_windows,
+                        overview.0.clone(),
+                        workspace,
+                    );
+
+                    let ptr = seat.get_pointer().unwrap();
+
+                    let mut pointer_locked = false;
+                    let mut pointer_confined = false;
+                    let mut confine_region = None;
+                    if let Some((surface, surface_loc)) = under
+                        .as_ref()
+                        .and_then(|(target, l)| Some((target.wl_surface()?, l)))
+                    {
+                        with_pointer_constraint(&surface, &ptr, |constraint| match constraint {
+                            Some(constraint) if constraint.is_active() => {
+                                // Constraint does not apply if not within region
+                                if !constraint.region().map_or(true, |x| {
+                                    x.contains(ptr.current_location().to_i32_round() - *surface_loc)
+                                }) {
+                                    return;
+                                }
+                                match &*constraint {
+                                    PointerConstraint::Locked(_locked) => {
+                                        pointer_locked = true;
+                                    }
+                                    PointerConstraint::Confined(confine) => {
+                                        pointer_confined = true;
+                                        confine_region = confine.region().cloned();
+                                    }
+                                }
+                            }
+                            _ => {}
+                        });
+                    }
+
+                    ptr.relative_motion(
+                        self,
+                        under.clone(),
+                        &RelativeMotionEvent {
+                            delta: event.delta(),
+                            delta_unaccel: event.delta_unaccel(),
+                            utime: event.time(),
+                        },
+                    );
+
+                    if pointer_locked {
+                        ptr.frame(self);
+                        return;
+                    }
+
                     position += event.delta();
 
                     let output = self
@@ -516,6 +582,85 @@ impl State {
                         .find(|output| output.geometry().to_f64().contains(position))
                         .cloned()
                         .unwrap_or(current_output.clone());
+
+                    let workspace = self.common.shell.workspaces.active_mut(&output);
+                    let output_geometry = output.geometry();
+                    let new_under = State::surface_under(
+                        position,
+                        relative_pos,
+                        &output,
+                        output_geometry,
+                        &self.common.shell.override_redirect_windows,
+                        overview.0,
+                        workspace,
+                    );
+
+                    position.x = position.x.clamp(
+                        output_geometry.loc.x as f64,
+                        (output_geometry.loc.x + output_geometry.size.w) as f64,
+                    );
+                    position.y = position.y.clamp(
+                        output_geometry.loc.y as f64,
+                        (output_geometry.loc.y + output_geometry.size.h) as f64,
+                    );
+
+                    // If confined, don't move pointer if it would go outside surface or region
+                    if pointer_confined {
+                        if let Some((surface, surface_loc)) = &under {
+                            if new_under.as_ref().and_then(|(under, _)| under.wl_surface())
+                                != surface.wl_surface()
+                            {
+                                ptr.frame(self);
+                                return;
+                            }
+                            if let PointerFocusTarget::Element(element) = surface {
+                                //if !element.is_in_input_region(&(position.to_i32_round() - *surface_loc).to_f64()) {
+                                if !element.is_in_input_region(&(position - surface_loc.to_f64())) {
+                                    ptr.frame(self);
+                                    return;
+                                }
+                            }
+                            if let Some(region) = confine_region {
+                                if !region.contains(position.to_i32_round() - *surface_loc) {
+                                    ptr.frame(self);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+
+                    let serial = SERIAL_COUNTER.next_serial();
+                    ptr.motion(
+                        self,
+                        under,
+                        &MotionEvent {
+                            location: position,
+                            serial,
+                            time: event.time_msec(),
+                        },
+                    );
+                    ptr.frame(self);
+
+                    // If pointer is now in a constraint region, activate it
+                    if let Some((under, surface_location)) =
+                        new_under.and_then(|(target, loc)| Some((target.wl_surface()?, loc)))
+                    {
+                        with_pointer_constraint(&under, &ptr, |constraint| match constraint {
+                            Some(constraint) if !constraint.is_active() => {
+                                let region = match &*constraint {
+                                    PointerConstraint::Locked(locked) => locked.region(),
+                                    PointerConstraint::Confined(confined) => confined.region(),
+                                };
+                                let point =
+                                    ptr.current_location().to_i32_round() - surface_location;
+                                if region.map_or(true, |region| region.contains(point)) {
+                                    constraint.activate();
+                                }
+                            }
+                            _ => {}
+                        });
+                    }
+
                     if output != current_output {
                         for session in sessions_for_output(&self.common, &current_output) {
                             session.cursor_leave(&seat, InputType::Pointer);
@@ -527,28 +672,6 @@ impl State {
 
                         seat.set_active_output(&output);
                     }
-                    let output_geometry = output.geometry();
-
-                    position.x = (output_geometry.loc.x as f64)
-                        .max(position.x)
-                        .min((output_geometry.loc.x + output_geometry.size.w) as f64);
-                    position.y = (output_geometry.loc.y as f64)
-                        .max(position.y)
-                        .min((output_geometry.loc.y + output_geometry.size.h) as f64);
-
-                    let serial = SERIAL_COUNTER.next_serial();
-                    let relative_pos = self.common.shell.map_global_to_space(position, &output);
-                    let overview = self.common.shell.overview_mode();
-                    let workspace = self.common.shell.workspaces.active_mut(&output);
-                    let under = State::surface_under(
-                        position,
-                        relative_pos,
-                        &output,
-                        output_geometry,
-                        &self.common.shell.override_redirect_windows,
-                        overview.0,
-                        workspace,
-                    );
 
                     for session in sessions_for_output(&self.common, &output) {
                         if let Some((geometry, offset)) = seat.cursor_geometry(
@@ -562,27 +685,7 @@ impl State {
                             session.cursor_info(&seat, InputType::Pointer, geometry, offset);
                         }
                     }
-                    let ptr = seat.get_pointer().unwrap();
-                    // Relative motion is sent first to ensure they're part of a `frame`
-                    // TODO: Find more correct solution
-                    ptr.relative_motion(
-                        self,
-                        under.clone(),
-                        &RelativeMotionEvent {
-                            delta: event.delta(),
-                            delta_unaccel: event.delta_unaccel(),
-                            utime: event.time(),
-                        },
-                    );
-                    ptr.motion(
-                        self,
-                        under,
-                        &MotionEvent {
-                            location: position,
-                            serial,
-                            time: event.time_msec(),
-                        },
-                    );
+
                     #[cfg(feature = "debug")]
                     if self.common.seats().position(|x| x == &seat).unwrap() == 0 {
                         let location = if let Some(output) = self.common.shell.outputs.first() {
@@ -632,7 +735,8 @@ impl State {
                             session.cursor_info(&seat, InputType::Pointer, geometry, offset);
                         }
                     }
-                    seat.get_pointer().unwrap().motion(
+                    let ptr = seat.get_pointer().unwrap();
+                    ptr.motion(
                         self,
                         under,
                         &MotionEvent {
@@ -641,6 +745,7 @@ impl State {
                             time: event.time_msec(),
                         },
                     );
+                    ptr.frame(self);
                     #[cfg(feature = "debug")]
                     if self.common.seats().position(|x| x == &seat).unwrap() == 0 {
                         let location = if let Some(output) = self.common.shell.outputs.first() {
@@ -784,7 +889,8 @@ impl State {
                             }
                         }
                     };
-                    seat.get_pointer().unwrap().button(
+                    let ptr = seat.get_pointer().unwrap();
+                    ptr.button(
                         self,
                         &ButtonEvent {
                             button,
@@ -793,6 +899,7 @@ impl State {
                             time: event.time_msec(),
                         },
                     );
+                    ptr.frame(self);
                 }
             }
             InputEvent::PointerAxis { event, .. } => {
@@ -853,7 +960,9 @@ impl State {
                         } else if event.source() == AxisSource::Finger {
                             frame = frame.stop(Axis::Vertical);
                         }
-                        seat.get_pointer().unwrap().axis(self, frame);
+                        let ptr = seat.get_pointer().unwrap();
+                        ptr.axis(self, frame);
+                        ptr.frame(self);
                     }
                 }
             }
@@ -1200,6 +1309,7 @@ impl State {
                                         time,
                                     },
                                 );
+                                ptr.frame(self);
                             }
                         }
                         Ok(None) => {
@@ -1236,6 +1346,7 @@ impl State {
                                         time,
                                     },
                                 );
+                                ptr.frame(self);
                             }
                         }
                         Ok(None) => {
@@ -1275,6 +1386,7 @@ impl State {
                                     time,
                                 },
                             );
+                            ptr.frame(self);
                         }
                     }
                 }
@@ -1310,6 +1422,7 @@ impl State {
                                     time,
                                 },
                             );
+                            ptr.frame(self);
                         }
                     }
                 }

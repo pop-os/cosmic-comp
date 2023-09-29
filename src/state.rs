@@ -65,6 +65,7 @@ use smithay::{
         fractional_scale::{with_fractional_scale, FractionalScaleManagerState},
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState,
         output::OutputManagerState,
+        pointer_constraints::PointerConstraintsState,
         pointer_gestures::PointerGesturesState,
         presentation::PresentationState,
         primary_selection::PrimarySelectionState,
@@ -313,6 +314,7 @@ impl State {
         let kde_decoration_state = KdeDecorationState::new::<Self>(&dh, Mode::Client);
         let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
         XWaylandKeyboardGrabState::new::<Self>(&dh);
+        PointerConstraintsState::new::<Self>(&dh);
         PointerGesturesState::new::<Self>(&dh);
         SecurityContextState::new::<Self, _>(&dh, client_has_security_context);
 

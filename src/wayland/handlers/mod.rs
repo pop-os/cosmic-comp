@@ -10,6 +10,7 @@ pub mod keyboard_shortcuts_inhibit;
 pub mod layer_shell;
 pub mod output;
 pub mod output_configuration;
+pub mod pointer_constraints;
 pub mod pointer_gestures;
 pub mod presentation;
 pub mod primary_selection;

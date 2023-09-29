@@ -190,6 +190,16 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::ResizeFork(f) => PointerTarget::axis(f, seat, data, frame),
         }
     }
+    fn frame(&self, seat: &Seat<State>, data: &mut State) {
+        match self {
+            PointerFocusTarget::Element(w) => PointerTarget::frame(w, seat, data),
+            PointerFocusTarget::Fullscreen(w) => PointerTarget::frame(w, seat, data),
+            PointerFocusTarget::LayerSurface(l) => PointerTarget::frame(l, seat, data),
+            PointerFocusTarget::Popup(p) => PointerTarget::frame(p.wl_surface(), seat, data),
+            PointerFocusTarget::OverrideRedirect(s) => PointerTarget::frame(s, seat, data),
+            PointerFocusTarget::ResizeFork(f) => PointerTarget::frame(f, seat, data),
+        }
+    }
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
         match self {
             PointerFocusTarget::Element(w) => PointerTarget::leave(w, seat, data, serial, time),

@@ -1169,6 +1169,27 @@ impl PointerTarget<State> for CosmicStack {
         }
     }
 
+    fn frame(&self, seat: &Seat<State>, data: &mut State) {
+        if let Some((location, serial, time)) = self
+            .0
+            .with_program(|p| p.last_location.lock().unwrap().clone())
+        {
+            self.pointer_leave_if_previous(seat, data, serial, time, location);
+        }
+
+        match self.0.with_program(|p| p.current_focus()) {
+            Focus::Header => PointerTarget::frame(&self.0, seat, data),
+            Focus::Window => self.0.with_program(|p| {
+                PointerTarget::frame(
+                    &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)],
+                    seat,
+                    data,
+                )
+            }),
+            _ => {}
+        }
+    }
+
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
         if let Some((location, serial, time)) = self
             .0
