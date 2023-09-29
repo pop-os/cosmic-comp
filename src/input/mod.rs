@@ -1187,19 +1187,25 @@ impl State {
                     .cloned()
                 {
                     let idx = self.common.shell.workspaces.active_num(&next_output).1;
-                    if let Ok(Some(new_pos)) = self.common.shell.activate(&next_output, idx) {
-                        seat.set_active_output(&next_output);
-                        if let Some(ptr) = seat.get_pointer() {
-                            ptr.motion(
-                                self,
-                                None,
-                                &MotionEvent {
-                                    location: new_pos.to_f64(),
-                                    serial,
-                                    time,
-                                },
-                            );
+                    match self.common.shell.activate(&next_output, idx) {
+                        Ok(Some(new_pos)) => {
+                            seat.set_active_output(&next_output);
+                            if let Some(ptr) = seat.get_pointer() {
+                                ptr.motion(
+                                    self,
+                                    None,
+                                    &MotionEvent {
+                                        location: new_pos.to_f64(),
+                                        serial,
+                                        time,
+                                    },
+                                );
+                            }
                         }
+                        Ok(None) => {
+                            seat.set_active_output(&next_output);
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -1217,19 +1223,25 @@ impl State {
                     .cloned()
                 {
                     let idx = self.common.shell.workspaces.active_num(&prev_output).1;
-                    if let Ok(Some(new_pos)) = self.common.shell.activate(&prev_output, idx) {
-                        seat.set_active_output(&prev_output);
-                        if let Some(ptr) = seat.get_pointer() {
-                            ptr.motion(
-                                self,
-                                None,
-                                &MotionEvent {
-                                    location: new_pos.to_f64(),
-                                    serial,
-                                    time,
-                                },
-                            );
+                    match self.common.shell.activate(&prev_output, idx) {
+                        Ok(Some(new_pos)) => {
+                            seat.set_active_output(&prev_output);
+                            if let Some(ptr) = seat.get_pointer() {
+                                ptr.motion(
+                                    self,
+                                    None,
+                                    &MotionEvent {
+                                        location: new_pos.to_f64(),
+                                        serial,
+                                        time,
+                                    },
+                                );
+                            }
                         }
+                        Ok(None) => {
+                            seat.set_active_output(&prev_output);
+                        }
+                        _ => {}
                     }
                 }
             }
