@@ -22,7 +22,7 @@ pub type ResizeIndicator = IcedElement<ResizeIndicatorInternal>;
 pub fn resize_indicator(
     direction: ResizeDirection,
     config: &Config,
-    evlh: LoopHandle<'static, crate::state::Data>,
+    evlh: LoopHandle<'static, crate::state::State>,
 ) -> ResizeIndicator {
     ResizeIndicator::new(
         ResizeIndicatorInternal {

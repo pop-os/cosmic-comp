@@ -98,7 +98,7 @@ pub trait Program {
     fn update(
         &mut self,
         message: Self::Message,
-        loop_handle: &LoopHandle<'static, crate::state::Data>,
+        loop_handle: &LoopHandle<'static, crate::state::State>,
     ) -> Command<Self::Message> {
         let _ = (message, loop_handle);
         Command::none()
@@ -119,7 +119,7 @@ pub trait Program {
     }
 }
 
-struct ProgramWrapper<P: Program>(P, LoopHandle<'static, crate::state::Data>);
+struct ProgramWrapper<P: Program>(P, LoopHandle<'static, crate::state::State>);
 impl<P: Program> IcedProgram for ProgramWrapper<P> {
     type Message = <P as Program>::Message;
     type Renderer = IcedRenderer;
@@ -150,7 +150,7 @@ struct IcedElementInternal<P: Program + Send + 'static> {
     debug: Debug,
 
     // futures
-    handle: LoopHandle<'static, crate::state::Data>,
+    handle: LoopHandle<'static, crate::state::State>,
     scheduler: Scheduler<<P as Program>::Message>,
     executor_token: Option<RegistrationToken>,
     rx: Receiver<<P as Program>::Message>,
@@ -228,7 +228,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
     pub fn new(
         program: P,
         size: impl Into<Size<i32, Logical>>,
-        handle: LoopHandle<'static, crate::state::Data>,
+        handle: LoopHandle<'static, crate::state::State>,
     ) -> IcedElement<P> {
         let size = size.into();
         let mut renderer =
@@ -276,7 +276,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         func(&internal.state.program().0)
     }
 
-    pub fn loop_handle(&self) -> LoopHandle<'static, crate::state::Data> {
+    pub fn loop_handle(&self) -> LoopHandle<'static, crate::state::State> {
         self.0.lock().unwrap().handle.clone()
     }
 

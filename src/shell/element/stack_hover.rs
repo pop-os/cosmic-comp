@@ -16,7 +16,7 @@ use smithay::utils::{Logical, Size};
 pub type StackHover = IcedElement<StackHoverInternal>;
 
 pub fn stack_hover(
-    evlh: LoopHandle<'static, crate::state::Data>,
+    evlh: LoopHandle<'static, crate::state::State>,
     size: Size<i32, Logical>,
 ) -> StackHover {
     StackHover::new(StackHoverInternal, size, evlh)

@@ -4,7 +4,7 @@ use crate::shell::{focus::FocusDirection, grabs::ResizeEdge, Direction, ResizeDi
 use serde::Deserialize;
 use smithay::{
     backend::input::KeyState,
-    input::keyboard::{keysyms as KeySyms, xkb::keysym_get_name, ModifiersState},
+    input::keyboard::{xkb::keysym_get_name, ModifiersState},
 };
 use std::collections::HashMap;
 
@@ -90,11 +90,11 @@ pub struct KeyPattern {
     pub modifiers: KeyModifiers,
     /// The actual key, that was pressed
     #[serde(deserialize_with = "deserialize_Keysym", default)]
-    pub key: Option<u32>,
+    pub key: Option<Keysym>,
 }
 
 impl KeyPattern {
-    pub fn new(modifiers: impl Into<KeyModifiers>, key: Option<u32>) -> KeyPattern {
+    pub fn new(modifiers: impl Into<KeyModifiers>, key: Option<Keysym>) -> KeyPattern {
         KeyPattern {
             modifiers: modifiers.into(),
             key,
@@ -174,7 +174,7 @@ pub enum Action {
 fn insert_binding(
     key_bindings: &mut HashMap<KeyPattern, Action>,
     modifiers: KeyModifiers,
-    keys: impl Iterator<Item = u32>,
+    keys: impl Iterator<Item = Keysym>,
     action: Action,
 ) {
     if !key_bindings.values().any(|a| a == &action) {
@@ -197,16 +197,16 @@ pub fn add_default_bindings(
     let (workspace_previous, workspace_next, output_previous, output_next) = match workspace_layout
     {
         WorkspaceLayout::Horizontal => (
-            [KeySyms::KEY_Left, KeySyms::KEY_h],
-            [KeySyms::KEY_Right, KeySyms::KEY_l],
-            [KeySyms::KEY_Up, KeySyms::KEY_k],
-            [KeySyms::KEY_Down, KeySyms::KEY_j],
+            [Keysym::Left, Keysym::h],
+            [Keysym::Right, Keysym::l],
+            [Keysym::Up, Keysym::k],
+            [Keysym::Down, Keysym::j],
         ),
         WorkspaceLayout::Vertical => (
-            [KeySyms::KEY_Up, KeySyms::KEY_k],
-            [KeySyms::KEY_Down, KeySyms::KEY_j],
-            [KeySyms::KEY_Left, KeySyms::KEY_h],
-            [KeySyms::KEY_Right, KeySyms::KEY_l],
+            [Keysym::Up, Keysym::k],
+            [Keysym::Down, Keysym::j],
+            [Keysym::Left, Keysym::h],
+            [Keysym::Right, Keysym::l],
         ),
     };
 

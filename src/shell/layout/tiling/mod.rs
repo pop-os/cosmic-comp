@@ -2660,6 +2660,7 @@ impl TilingLayout {
         if let KeyboardFocusTarget::Popup(popup) = target {
             let toplevel_surface = match popup {
                 PopupKind::Xdg(xdg) => get_popup_toplevel(&xdg),
+                PopupKind::InputMethod(_) => unreachable!(),
             }?;
             let root_id = tree.root_node_id()?;
             let node =

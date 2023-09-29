@@ -15,7 +15,7 @@ use smithay::utils::Size;
 
 pub type SwapIndicator = IcedElement<SwapIndicatorInternal>;
 
-pub fn swap_indicator(evlh: LoopHandle<'static, crate::state::Data>) -> SwapIndicator {
+pub fn swap_indicator(evlh: LoopHandle<'static, crate::state::State>) -> SwapIndicator {
     SwapIndicator::new(SwapIndicatorInternal, Size::from((1, 1)), evlh)
 }
 

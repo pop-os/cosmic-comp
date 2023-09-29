@@ -54,7 +54,7 @@ use smithay::{
         wayland_server::{
             backend::{ClientData, ClientId, DisconnectReason},
             protocol::wl_shm,
-            Client, Display, DisplayHandle,
+            Client, DisplayHandle,
         },
     },
     utils::{Clock, IsAlive, Monotonic},
@@ -114,11 +114,6 @@ impl ClientData for ClientState {
     }
 }
 
-pub struct Data {
-    pub display: Display<State>,
-    pub state: State,
-}
-
 #[derive(Debug)]
 pub struct State {
     pub backend: BackendData,
@@ -131,7 +126,7 @@ pub struct Common {
 
     pub socket: OsString,
     pub display_handle: DisplayHandle,
-    pub event_loop_handle: LoopHandle<'static, Data>,
+    pub event_loop_handle: LoopHandle<'static, State>,
     pub event_loop_signal: LoopSignal,
 
     //pub output_conf: ConfigurationManager,
@@ -212,7 +207,7 @@ impl BackendData {
         test_only: bool,
         shell: &mut Shell,
         seats: impl Iterator<Item = Seat<State>>,
-        loop_handle: &LoopHandle<'_, Data>,
+        loop_handle: &LoopHandle<'_, State>,
     ) -> Result<(), anyhow::Error> {
         let result = match self {
             BackendData::Kms(ref mut state) => {
@@ -252,7 +247,7 @@ impl BackendData {
 
     pub fn schedule_render(
         &mut self,
-        loop_handle: &LoopHandle<'_, Data>,
+        loop_handle: &LoopHandle<'_, State>,
         output: &Output,
         screencopy: Option<Vec<(ScreencopySession, BufferParams)>>,
     ) {
@@ -281,7 +276,7 @@ impl State {
     pub fn new(
         dh: &DisplayHandle,
         socket: OsString,
-        handle: LoopHandle<'static, Data>,
+        handle: LoopHandle<'static, State>,
         signal: LoopSignal,
     ) -> State {
         let requested_languages = DesktopLanguageRequester::requested_languages();

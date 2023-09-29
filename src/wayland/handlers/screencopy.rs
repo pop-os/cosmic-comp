@@ -46,7 +46,7 @@ use crate::{
         render_output, render_workspace, CursorMode, CLEAR_COLOR,
     },
     shell::{CosmicMappedRenderElement, CosmicSurface, WorkspaceRenderElement},
-    state::{BackendData, ClientState, Common, Data, State},
+    state::{BackendData, ClientState, Common, State},
     utils::prelude::OutputExt,
     wayland::protocols::{
         screencopy::{
@@ -1173,19 +1173,14 @@ impl State {
             if active.wl_surface().as_ref() == Some(surface) {
                 for (session, params) in active.pending_buffers() {
                     let window = active.clone();
-                    self.common.event_loop_handle.insert_idle(move |data| {
+                    self.common.event_loop_handle.insert_idle(move |state| {
                         if !session.alive() {
                             return;
                         }
 
-                        match render_window_to_buffer(
-                            &mut data.state,
-                            &session,
-                            params.clone(),
-                            &window,
-                        ) {
+                        match render_window_to_buffer(state, &session, params.clone(), &window) {
                             // rendering yielded no damage, buffer is still pending
-                            Ok(false) => data.state.common.still_pending(session, params),
+                            Ok(false) => state.common.still_pending(session, params),
                             Ok(true) => {} // success
                             Err((reason, err)) => {
                                 warn!(?err, "Screencopy session failed");
@@ -1291,21 +1286,21 @@ impl State {
 }
 
 pub fn schedule_offscreen_workspace_session(
-    event_loop_handle: &LoopHandle<'static, Data>,
+    event_loop_handle: &LoopHandle<'static, State>,
     session: Session,
     params: BufferParams,
     output: Output,
     handle: WorkspaceHandle,
 ) {
-    event_loop_handle.insert_idle(move |data| {
+    event_loop_handle.insert_idle(move |state| {
         if !session.alive() {
             return;
         }
-        if !data.state.common.shell.outputs.contains(&output) {
+        if !state.common.shell.outputs.contains(&output) {
             return;
         }
         match render_workspace_to_buffer(
-            &mut data.state,
+            state,
             &session,
             params.clone(),
             &output,
@@ -1313,7 +1308,7 @@ pub fn schedule_offscreen_workspace_session(
         ) {
             Ok(false) => {
                 // rendering yielded no new damage, buffer still pending
-                data.state.common.still_pending(session, params);
+                state.common.still_pending(session, params);
             }
             Ok(true) => {}
             Err((reason, err)) => {

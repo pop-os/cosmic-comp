@@ -2,7 +2,7 @@
 
 use crate::{
     shell::{Shell, WorkspaceAmount},
-    state::{BackendData, Data, State},
+    state::{BackendData, State},
     wayland::protocols::output_configuration::OutputConfigurationState,
 };
 use cosmic_config::ConfigGet;
@@ -158,12 +158,12 @@ impl OutputConfig {
 }
 
 impl Config {
-    pub fn load(loop_handle: &LoopHandle<'_, Data>) -> Config {
+    pub fn load(loop_handle: &LoopHandle<'_, State>) -> Config {
         let config = cosmic_config::Config::new("com.system76.CosmicComp", 1).unwrap();
         let source = cosmic_config::calloop::ConfigWatchSource::new(&config).unwrap();
         loop_handle
-            .insert_source(source, |(config, keys), (), shared_data| {
-                config_changed(config, keys, &mut shared_data.state);
+            .insert_source(source, |(config, keys), (), state| {
+                config_changed(config, keys, state);
             })
             .expect("Failed to add cosmic-config to the event loop");
         let xdg = xdg::BaseDirectories::new().ok();
@@ -260,7 +260,7 @@ impl Config {
         backend: &mut BackendData,
         shell: &mut Shell,
         seats: impl Iterator<Item = Seat<State>>,
-        loop_handle: &LoopHandle<'_, Data>,
+        loop_handle: &LoopHandle<'_, State>,
     ) {
         let seats = seats.collect::<Vec<_>>();
         let outputs = output_state.outputs().collect::<Vec<_>>();

@@ -95,6 +95,7 @@ pub fn update_reactive_popups<'a>(
                     }
                 }
             }
+            PopupKind::InputMethod(_) => {}
         }
     }
 }

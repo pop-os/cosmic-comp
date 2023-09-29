@@ -12,14 +12,14 @@ use std::{
     collections::HashMap,
     io::{Read, Write},
     os::unix::{
-        io::{AsRawFd, FromRawFd, RawFd},
+        io::{AsFd, BorrowedFd, FromRawFd, RawFd},
         net::UnixStream,
     },
     sync::Arc,
 };
 use tracing::{error, warn};
 
-use crate::state::{Data, State};
+use crate::state::State;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "message")]
@@ -34,9 +34,9 @@ struct StreamWrapper {
     size: u16,
     read_bytes: usize,
 }
-impl AsRawFd for StreamWrapper {
-    fn as_raw_fd(&self) -> RawFd {
-        self.stream.as_raw_fd()
+impl AsFd for StreamWrapper {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.stream.as_fd()
     }
 }
 impl From<UnixStream> for StreamWrapper {
@@ -50,7 +50,7 @@ impl From<UnixStream> for StreamWrapper {
     }
 }
 
-pub fn setup_socket(handle: LoopHandle<Data>, state: &State) -> Result<()> {
+pub fn setup_socket(handle: LoopHandle<State>, state: &State) -> Result<()> {
     if let Ok(fd_num) = std::env::var("COSMIC_SESSION_SOCK") {
         if let Ok(fd) = fd_num.parse::<RawFd>() {
             // set CLOEXEC
@@ -94,7 +94,10 @@ pub fn setup_socket(handle: LoopHandle<Data>, state: &State) -> Result<()> {
 
             handle.insert_source(
                 Generic::new(StreamWrapper::from(session_socket), Interest::READ, Mode::Level),
-                move |_, stream, data: &mut crate::state::Data| {
+                move |_, stream, state| {
+                    // SAFETY: We don't drop the stream!
+                    let stream = unsafe { stream.get_mut() };
+
                     if stream.size == 0 {
                         let mut len = [0u8; 2];
                         match stream.stream.read_exact(&mut len) {
@@ -131,7 +134,7 @@ pub fn setup_socket(handle: LoopHandle<Data>, state: &State) -> Result<()> {
                                                 assert_eq!(received_count, count);
                                                 for fd in fds.into_iter().take(received_count) {
                                                     let stream = unsafe { UnixStream::from_raw_fd(fd) };
-                                                    if let Err(err) = data.display.handle().insert_client(stream, Arc::new(data.state.new_privileged_client_state())) {
+                                                    if let Err(err) = state.common.display_handle.insert_client(stream, Arc::new(state.new_privileged_client_state())) {
                                                         warn!(?err, "Failed to add privileged client to display");
                                                     }
                                                 }

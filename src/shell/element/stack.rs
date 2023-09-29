@@ -122,14 +122,14 @@ pub enum Focus {
 
 pub enum MoveResult {
     Handled,
-    MoveOut(CosmicSurface, LoopHandle<'static, crate::state::Data>),
+    MoveOut(CosmicSurface, LoopHandle<'static, crate::state::State>),
     Default,
 }
 
 impl CosmicStack {
     pub fn new<I: Into<CosmicSurface>>(
         windows: impl Iterator<Item = I>,
-        handle: LoopHandle<'static, crate::state::Data>,
+        handle: LoopHandle<'static, crate::state::State>,
     ) -> CosmicStack {
         let windows = windows.map(Into::into).collect::<Vec<_>>();
         assert!(!windows.is_empty());
@@ -498,7 +498,7 @@ impl CosmicStack {
             .with_program(|p| p.group_focused.store(true, Ordering::SeqCst));
     }
 
-    pub(in super::super) fn loop_handle(&self) -> LoopHandle<'static, crate::state::Data> {
+    pub(in super::super) fn loop_handle(&self) -> LoopHandle<'static, crate::state::State> {
         self.0.loop_handle()
     }
 
@@ -603,7 +603,7 @@ impl Program for CosmicStackInternal {
     fn update(
         &mut self,
         message: Self::Message,
-        loop_handle: &LoopHandle<'static, crate::state::Data>,
+        loop_handle: &LoopHandle<'static, crate::state::State>,
     ) -> Command<Self::Message> {
         match message {
             Message::DragStart => {
@@ -612,8 +612,8 @@ impl Program for CosmicStackInternal {
                         [self.active.load(Ordering::SeqCst)]
                     .wl_surface()
                     {
-                        loop_handle.insert_idle(move |data| {
-                            Shell::move_request(&mut data.state, &surface, &seat, serial);
+                        loop_handle.insert_idle(move |state| {
+                            Shell::move_request(state, &surface, &seat, serial);
                         });
                     }
                 }
@@ -1080,9 +1080,9 @@ impl PointerTarget<State> for CosmicStack {
                                     }
 
                                     let seat = seat.clone();
-                                    data.common.event_loop_handle.insert_idle(move |data| {
+                                    data.common.event_loop_handle.insert_idle(move |state| {
                                         seat.get_pointer().unwrap().set_grab(
-                                            &mut data.state,
+                                            state,
                                             grab,
                                             event.serial,
                                             smithay::input::pointer::Focus::Clear,

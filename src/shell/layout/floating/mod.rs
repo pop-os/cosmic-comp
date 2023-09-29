@@ -366,6 +366,7 @@ impl FloatingLayout {
             KeyboardFocusTarget::Popup(popup) => {
                 let Some(toplevel_surface) = (match popup {
                     PopupKind::Xdg(xdg) => get_popup_toplevel(&xdg),
+                    PopupKind::InputMethod(_) => unreachable!(),
                 }) else {
                     return FocusResult::None
                 };
@@ -436,6 +437,7 @@ impl FloatingLayout {
             KeyboardFocusTarget::Popup(popup) => {
                 let Some(toplevel_surface) = (match popup {
                     PopupKind::Xdg(xdg) => get_popup_toplevel(&xdg),
+                    PopupKind::InputMethod(_) => unreachable!(),
                 }) else {
                     return MoveResult::None
                 };

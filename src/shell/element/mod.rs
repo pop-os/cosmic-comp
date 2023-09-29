@@ -539,7 +539,7 @@ impl CosmicMapped {
         self.element = CosmicMappedInternal::Window(window);
     }
 
-    pub(super) fn loop_handle(&self) -> LoopHandle<'static, crate::state::Data> {
+    pub(super) fn loop_handle(&self) -> LoopHandle<'static, crate::state::State> {
         match &self.element {
             CosmicMappedInternal::Stack(stack) => stack.loop_handle(),
             CosmicMappedInternal::Window(window) => window.loop_handle(),

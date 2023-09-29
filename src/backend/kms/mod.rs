@@ -6,7 +6,7 @@ use crate::{
     backend::render::{workspace_elements, CLEAR_COLOR},
     config::OutputConfig,
     shell::Shell,
-    state::{BackendData, ClientState, Common, Data, Fps, SurfaceDmabufFeedback},
+    state::{BackendData, ClientState, Common, Fps, SurfaceDmabufFeedback},
     utils::prelude::*,
     wayland::{
         handlers::screencopy::{render_session, UserdataExt},
@@ -157,7 +157,7 @@ pub type GbmDrmCompositor = DrmCompositor<
 
 pub fn init_backend(
     dh: &DisplayHandle,
-    event_loop: &mut EventLoop<'static, Data>,
+    event_loop: &mut EventLoop<'static, State>,
     state: &mut State,
 ) -> Result<()> {
     let (session, notifier) = LibSeatSession::new().context("Failed to acquire session")?;
@@ -172,21 +172,21 @@ pub fn init_backend(
 
     let libinput_event_source = event_loop
         .handle()
-        .insert_source(libinput_backend, move |mut event, _, data| {
+        .insert_source(libinput_backend, move |mut event, _, state| {
             if let InputEvent::DeviceAdded { ref mut device } = &mut event {
-                data.state.common.config.read_device(device);
-                data.state
+                state.common.config.read_device(device);
+                state
                     .backend
                     .kms()
                     .input_devices
                     .insert(device.name().into(), device.clone());
             } else if let InputEvent::DeviceRemoved { device } = &event {
-                data.state.backend.kms().input_devices.remove(device.name());
+                state.backend.kms().input_devices.remove(device.name());
             }
-            data.state.process_input_event(event, true);
-            for output in data.state.common.shell.outputs() {
-                if let Err(err) = data.state.backend.kms().schedule_render(
-                    &data.state.common.event_loop_handle,
+            state.process_input_event(event, true);
+            for output in state.common.shell.outputs() {
+                if let Err(err) = state.backend.kms().schedule_render(
+                    &state.common.event_loop_handle,
                     output,
                     None,
                     None,
@@ -236,19 +236,17 @@ pub fn init_backend(
     };
     info!("Using {} as primary gpu for rendering.", primary);
 
-    let udev_dispatcher = Dispatcher::new(udev_backend, move |event, _, data: &mut Data| {
+    let udev_dispatcher = Dispatcher::new(udev_backend, move |event, _, state: &mut State| {
+        let dh = state.common.display_handle.clone();
         match match event {
-            UdevEvent::Added { device_id, path } => data
-                .state
-                .device_added(device_id, path, &data.display.handle(), true)
+            UdevEvent::Added { device_id, path } => state
+                .device_added(device_id, path, &dh, true)
                 .with_context(|| format!("Failed to add drm device: {}", device_id)),
-            UdevEvent::Changed { device_id } => data
-                .state
+            UdevEvent::Changed { device_id } => state
                 .device_changed(device_id)
                 .with_context(|| format!("Failed to update drm device: {}", device_id)),
-            UdevEvent::Removed { device_id } => data
-                .state
-                .device_removed(device_id, &data.display.handle())
+            UdevEvent::Removed { device_id } => state
+                .device_removed(device_id, &dh)
                 .with_context(|| format!("Failed to remove drm device: {}", device_id)),
         } {
             Ok(()) => {
@@ -269,16 +267,16 @@ pub fn init_backend(
     let dispatcher = udev_dispatcher.clone();
     let session_event_source = event_loop
         .handle()
-        .insert_source(notifier, move |event, &mut (), data| match event {
+        .insert_source(notifier, move |event, &mut (), state| match event {
             SessionEvent::ActivateSession => {
                 if let Err(err) = libinput_context.resume() {
                     error!(?err, "Failed to resume libinput context.");
                 }
-                for device in data.state.backend.kms().devices.values() {
+                for device in state.backend.kms().devices.values() {
                     device.drm.activate();
                 }
                 let dispatcher = dispatcher.clone();
-                handle.insert_idle(move |data| {
+                handle.insert_idle(move |state| {
                     for (dev, path) in dispatcher.as_source_ref().device_list() {
                         let drm_node = match DrmNode::from_dev_id(dev) {
                             Ok(node) => node,
@@ -287,32 +285,27 @@ pub fn init_backend(
                                 continue;
                             }
                         };
-                        if data.state.backend.kms().devices.contains_key(&drm_node) {
-                            if let Err(err) = data.state.device_changed(dev) {
+                        if state.backend.kms().devices.contains_key(&drm_node) {
+                            if let Err(err) = state.device_changed(dev) {
                                 error!(?err, "Failed to update drm device {}.", path.display(),);
                             }
                         } else {
-                            if let Err(err) = data.state.device_added(
-                                dev,
-                                path.into(),
-                                &data.display.handle(),
-                                true,
-                            ) {
+                            let dh = state.common.display_handle.clone();
+                            if let Err(err) = state.device_added(dev, path.into(), &dh, true) {
                                 error!(?err, "Failed to add drm device {}.", path.display(),);
                             }
                         }
                     }
 
-                    let seats = data.state.common.seats().cloned().collect::<Vec<_>>();
-                    data.state.common.config.read_outputs(
-                        &mut data.state.common.output_configuration_state,
-                        &mut data.state.backend,
-                        &mut data.state.common.shell,
+                    let seats = state.common.seats().cloned().collect::<Vec<_>>();
+                    state.common.config.read_outputs(
+                        &mut state.common.output_configuration_state,
+                        &mut state.backend,
+                        &mut state.common.shell,
                         seats.into_iter(),
-                        &data.state.common.event_loop_handle,
+                        &state.common.event_loop_handle,
                     );
-                    for surface in data
-                        .state
+                    for surface in state
                         .backend
                         .kms()
                         .devices
@@ -322,10 +315,10 @@ pub fn init_backend(
                         surface.scheduled = false;
                         surface.pending = false;
                     }
-                    for output in data.state.common.shell.outputs() {
+                    for output in state.common.shell.outputs() {
                         let sessions = output.pending_buffers().collect::<Vec<_>>();
-                        if let Err(err) = data.state.backend.kms().schedule_render(
-                            &data.state.common.event_loop_handle,
+                        if let Err(err) = state.backend.kms().schedule_render(
+                            &state.common.event_loop_handle,
                             output,
                             None,
                             if !sessions.is_empty() {
@@ -346,12 +339,12 @@ pub fn init_backend(
             }
             SessionEvent::PauseSession => {
                 libinput_context.suspend();
-                for device in data.state.backend.kms().devices.values_mut() {
+                for device in state.backend.kms().devices.values_mut() {
                     device.drm.pause();
                     for surface in device.surfaces.values_mut() {
                         surface.surface = None;
                         if let Some(token) = surface.render_timer_token.take() {
-                            data.state.common.event_loop_handle.remove(token);
+                            state.common.event_loop_handle.remove(token);
                         }
                         surface.scheduled = false;
                     }
@@ -466,10 +459,10 @@ impl State {
             .event_loop_handle
             .insert_source(
                 notifier,
-                move |event, metadata, data: &mut Data| match event {
+                move |event, metadata, state: &mut State| match event {
                     DrmEvent::VBlank(crtc) => {
                         let rescheduled = if let Some(device) =
-                            data.state.backend.kms().devices.get_mut(&drm_node)
+                            state.backend.kms().devices.get_mut(&drm_node)
                         {
                             if let Some(surface) = device.surfaces.get_mut(&crtc) {
                                 #[cfg(feature = "debug")]
@@ -497,7 +490,7 @@ impl State {
                                             )
                                             } else {
                                                 (
-                                                    data.state.common.clock.now(),
+                                                    state.common.clock.now(),
                                                     wp_presentation_feedback::Kind::Vsync,
                                                 )
                                             };
@@ -520,7 +513,7 @@ impl State {
 
                                         surface.pending = false;
                                         let animations_going =
-                                            data.state.common.shell.animations_going();
+                                            state.common.shell.animations_going();
                                         let animation_diff = std::mem::replace(
                                             &mut surface.last_animation_state,
                                             animations_going,
@@ -549,7 +542,7 @@ impl State {
 
                         if let Some((output, avg_rendertime)) = rescheduled {
                             let mut scheduled_sessions =
-                                data.state.workspace_session_for_output(&output);
+                                state.workspace_session_for_output(&output);
                             let mut output_sessions = output.pending_buffers().peekable();
                             if output_sessions.peek().is_some() {
                                 scheduled_sessions
@@ -559,8 +552,8 @@ impl State {
 
                             let estimated_rendertime =
                                 std::cmp::max(avg_rendertime, MIN_RENDER_TIME);
-                            if let Err(err) = data.state.backend.kms().schedule_render(
-                                &data.state.common.event_loop_handle,
+                            if let Err(err) = state.backend.kms().schedule_render(
+                                &state.common.event_loop_handle,
                                 &output,
                                 Some(estimated_rendertime),
                                 scheduled_sessions,
@@ -1255,7 +1248,7 @@ impl KmsState {
         seats: impl Iterator<Item = Seat<State>>,
         shell: &mut Shell,
         test_only: bool,
-        loop_handle: &LoopHandle<'_, Data>,
+        loop_handle: &LoopHandle<'_, State>,
     ) -> Result<(), anyhow::Error> {
         let recreated = if let Some(device) = self
             .devices
@@ -1464,7 +1457,7 @@ impl KmsState {
 
     pub fn schedule_render(
         &mut self,
-        loop_handle: &LoopHandle<'_, Data>,
+        loop_handle: &LoopHandle<'_, State>,
         output: &Output,
         estimated_rendertime: Option<Duration>,
         mut screencopy_sessions: Option<Vec<(ScreencopySession, BufferParams)>>,
@@ -1477,9 +1470,9 @@ impl KmsState {
         {
             if surface.surface.is_none() {
                 if let Some(sessions) = screencopy_sessions {
-                    loop_handle.insert_idle(move |data| {
+                    loop_handle.insert_idle(move |state| {
                         for (session, params) in sessions.into_iter() {
-                            data.state.common.still_pending(session, params);
+                            state.common.still_pending(session, params);
                         }
                     });
                 }
@@ -1500,8 +1493,8 @@ impl KmsState {
                                 .saturating_sub(estimated_rendertime.unwrap()),
                         )
                     },
-                    move |_time, _, data| {
-                        let backend = data.state.backend.kms();
+                    move |_time, _, state| {
+                        let backend = state.backend.kms();
                         let (mut device, mut other) = backend
                             .devices
                             .iter_mut()
@@ -1511,12 +1504,12 @@ impl KmsState {
                         if let Some(surface) = target_device.surfaces.get_mut(&crtc) {
                             let target_node = target_device.render_node;
                             let render_node = render_node_for_output(
-                                &data.display.handle(),
+                                &state.common.display_handle,
                                 &surface.output,
                                 target_node,
-                                &data.state.common.shell,
+                                &state.common.shell,
                             );
-                            let state = &mut data.state.common;
+                            let common = &mut state.common;
 
                             let result = if render_node != target_node {
                                 let render_device = &mut other
@@ -1531,7 +1524,7 @@ impl KmsState {
                                         render_device.allocator.as_mut(),
                                     )),
                                     &target_node,
-                                    state,
+                                    common,
                                     screencopy_sessions.as_deref(),
                                 )
                             } else {
@@ -1539,7 +1532,7 @@ impl KmsState {
                                     &mut backend.api,
                                     None,
                                     &target_node,
-                                    state,
+                                    common,
                                     screencopy_sessions.as_deref(),
                                 )
                             };
@@ -1564,7 +1557,7 @@ impl KmsState {
 
                         if let Some(sessions) = screencopy_sessions.as_mut() {
                             for (session, params) in sessions.drain(..) {
-                                data.state.common.still_pending(session, params);
+                                state.common.still_pending(session, params);
                             }
                         }
                         TimeoutAction::Drop
@@ -1573,9 +1566,9 @@ impl KmsState {
                 surface.scheduled = true;
             } else {
                 if let Some(sessions) = screencopy_sessions {
-                    loop_handle.insert_idle(|data| {
+                    loop_handle.insert_idle(|state| {
                         for (session, params) in sessions.into_iter() {
-                            data.state.common.still_pending(session, params);
+                            state.common.still_pending(session, params);
                         }
                     });
                 }

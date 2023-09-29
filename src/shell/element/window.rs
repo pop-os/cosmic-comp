@@ -113,7 +113,7 @@ impl CosmicWindowInternal {
 impl CosmicWindow {
     pub fn new(
         window: impl Into<CosmicSurface>,
-        handle: LoopHandle<'static, crate::state::Data>,
+        handle: LoopHandle<'static, crate::state::State>,
     ) -> CosmicWindow {
         let window = window.into();
         let width = window.geometry().size.w;
@@ -166,7 +166,7 @@ impl CosmicWindow {
         }
     }
 
-    pub(super) fn loop_handle(&self) -> LoopHandle<'static, crate::state::Data> {
+    pub(super) fn loop_handle(&self) -> LoopHandle<'static, crate::state::State> {
         self.0.loop_handle()
     }
 
@@ -228,14 +228,14 @@ impl Program for CosmicWindowInternal {
     fn update(
         &mut self,
         message: Self::Message,
-        loop_handle: &LoopHandle<'static, crate::state::Data>,
+        loop_handle: &LoopHandle<'static, crate::state::State>,
     ) -> Command<Self::Message> {
         match message {
             Message::DragStart => {
                 if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
                     if let Some(surface) = self.window.wl_surface() {
-                        loop_handle.insert_idle(move |data| {
-                            Shell::move_request(&mut data.state, &surface, &seat, serial);
+                        loop_handle.insert_idle(move |state| {
+                            Shell::move_request(state, &surface, &seat, serial);
                         });
                     }
                 }
@@ -243,17 +243,11 @@ impl Program for CosmicWindowInternal {
             Message::Maximize => {
                 if let Some((seat, _serial)) = self.last_seat.lock().unwrap().clone() {
                     if let Some(surface) = self.window.wl_surface() {
-                        loop_handle.insert_idle(move |data| {
-                            if let Some(mapped) = data
-                                .state
-                                .common
-                                .shell
-                                .element_for_wl_surface(&surface)
-                                .cloned()
+                        loop_handle.insert_idle(move |state| {
+                            if let Some(mapped) =
+                                state.common.shell.element_for_wl_surface(&surface).cloned()
                             {
-                                if let Some(workspace) =
-                                    data.state.common.shell.space_for_mut(&mapped)
-                                {
+                                if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
                                     let output = seat.active_output();
                                     let (window, _) = mapped
                                         .windows()
@@ -262,7 +256,7 @@ impl Program for CosmicWindowInternal {
                                     workspace.maximize_toggle(
                                         &window,
                                         &output,
-                                        data.state.common.event_loop_handle.clone(),
+                                        state.common.event_loop_handle.clone(),
                                     )
                                 }
                             }

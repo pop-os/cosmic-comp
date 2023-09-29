@@ -11,11 +11,10 @@ members = [
 ]
 
 [dependencies]
-apply = "0.3.0"
 anyhow = { version = "1.0.51", features = ["backtrace"] }
-bitflags = "1.3.2"
+bitflags = "2.4"
 bytemuck = "1.12"
-calloop = { version = "0.10.1", features = ["executor"] }
+calloop = { version = "0.12.2", features = ["executor"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sendfd = "0.4.1"
@@ -28,19 +27,19 @@ log-panics = { version = "2", features = ["with-backtrace"] }
 thiserror = "1.0.26"
 regex = "1"
 xcursor = "0.3.3"
-xkbcommon = "0.4"
-indexmap = "1.8.0"
+xkbcommon = "0.6"
+indexmap = "2.0"
 xdg = "^2.1"
 ron = "0.7"
 libsystemd = { version = "0.5", optional = true }
-wayland-backend = "0.1.0"
-wayland-scanner = "0.30.0"
+wayland-backend = "0.3.0"
+wayland-scanner = "0.31.0"
 cosmic-comp-config = { path = "cosmic-comp-config" }
-cosmic-config = { git = "https://github.com/pop-os/libcosmic/", rev = "4895b0c", features = ["calloop"] }
+cosmic-config = { git = "https://github.com/pop-os/libcosmic/", rev = "188b7c2b", features = ["calloop"] }
 cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", branch = "main", default-features = false, features = ["server"] }
-libcosmic = { git = "https://github.com/pop-os/libcosmic/", rev = "4895b0c", default-features = false }
-iced_tiny_skia = { git = "https://github.com/pop-os/libcosmic/", rev = "4895b0c" }
-tiny-skia = "0.9"
+libcosmic = { git = "https://github.com/pop-os/libcosmic/", rev = "188b7c2b", default-features = false }
+iced_tiny_skia = { git = "https://github.com/pop-os/libcosmic/", rev = "188b7c2b" }
+tiny-skia = "0.10"
 ordered-float = "3.0"
 glow = "0.11.2"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter", "tracing-log"] }
@@ -61,13 +60,13 @@ branch = "feature/copy_clone"
 [dependencies.smithay]
 version = "0.3"
 git = "https://github.com/smithay/smithay.git"
-rev = "58d5bdc"
+rev = "74ef59a3f"
 default-features = false
 features = ["backend_drm", "backend_gbm", "backend_egl", "backend_libinput", "backend_session_libseat", "backend_udev", "backend_winit", "backend_vulkan", "backend_x11", "desktop", "use_system_lib", "renderer_glow", "renderer_multi", "wayland_frontend", "xwayland"]
 
 [dependencies.smithay-egui]
 git = "https://github.com/Smithay/smithay-egui.git"
-rev = "dab5c1b"
+rev = "114d8db6"
 features = ["svg"]
 optional = true
 
@@ -87,4 +86,4 @@ debug = true
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/smithay//smithay", rev = "d3e1ef9" }
+smithay = { git = "https://github.com/smithay//smithay", rev = "74ef59a3f" }

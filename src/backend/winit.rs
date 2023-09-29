@@ -4,7 +4,7 @@ use crate::{
     backend::render,
     config::OutputConfig,
     input::Devices,
-    state::{BackendData, Common, Data},
+    state::{BackendData, Common},
     utils::prelude::*,
     wayland::protocols::screencopy::{BufferParams, Session as ScreencopySession},
 };
@@ -147,7 +147,7 @@ impl WinitState {
 
 pub fn init_backend(
     dh: &DisplayHandle,
-    event_loop: &mut EventLoop<Data>,
+    event_loop: &mut EventLoop<State>,
     state: &mut State,
 ) -> Result<()> {
     let (mut backend, mut input) =
@@ -197,13 +197,8 @@ pub fn init_backend(
     let mut token = Some(
         event_loop
             .handle()
-            .insert_source(render_source, move |_, _, data| {
-                if let Err(err) = data
-                    .state
-                    .backend
-                    .winit()
-                    .render_output(&mut data.state.common)
-                {
+            .insert_source(render_source, move |_, _, state| {
+                if let Err(err) = state.backend.winit().render_output(&mut state.common) {
                     error!(?err, "Failed to render frame.");
                     render_ping.ping();
                 }
@@ -213,21 +208,18 @@ pub fn init_backend(
     let event_loop_handle = event_loop.handle();
     event_loop
         .handle()
-        .insert_source(event_source, move |_, _, data| {
-            match input.dispatch_new_events(|event| {
-                data.state.process_winit_event(event, &render_ping_handle)
-            }) {
+        .insert_source(event_source, move |_, _, state| {
+            match input
+                .dispatch_new_events(|event| state.process_winit_event(event, &render_ping_handle))
+            {
                 Ok(_) => {
                     event_ping_handle.ping();
                     render_ping_handle.ping();
                 }
                 Err(winit::WinitError::WindowClosed) => {
-                    let output = data.state.backend.winit().output.clone();
-                    let seats = data.state.common.seats().cloned().collect::<Vec<_>>();
-                    data.state
-                        .common
-                        .shell
-                        .remove_output(&output, seats.into_iter());
+                    let output = state.backend.winit().output.clone();
+                    let seats = state.common.seats().cloned().collect::<Vec<_>>();
+                    state.common.shell.remove_output(&output, seats.into_iter());
                     if let Some(token) = token.take() {
                         event_loop_handle.remove(token);
                     }
