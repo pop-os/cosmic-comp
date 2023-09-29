@@ -254,7 +254,7 @@ impl CompositorHandler for State {
             let changed = layer_map_for_output(&output).arrange();
             if changed {
                 for workspace in self.common.shell.workspaces.spaces_mut() {
-                    workspace.recalculate(&output);
+                    workspace.recalculate();
                 }
             }
         }

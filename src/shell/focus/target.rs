@@ -1,10 +1,7 @@
 use std::sync::Weak;
 
 use crate::{
-    shell::{
-        element::{CosmicMapped, CosmicWindow},
-        layout::tiling::ResizeForkTarget,
-    },
+    shell::{element::CosmicMapped, layout::tiling::ResizeForkTarget, CosmicSurface},
     utils::prelude::*,
     wayland::handlers::xdg_shell::popup::get_popup_toplevel,
 };
@@ -22,7 +19,6 @@ use smithay::{
         },
         Seat,
     },
-    output::WeakOutput,
     reexports::wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface, Resource},
     utils::{IsAlive, Serial},
     wayland::seat::WaylandFocus,
@@ -32,7 +28,7 @@ use smithay::{
 #[derive(Debug, Clone, PartialEq)]
 pub enum PointerFocusTarget {
     Element(CosmicMapped),
-    Fullscreen(CosmicWindow),
+    Fullscreen(CosmicSurface),
     LayerSurface(LayerSurface),
     Popup(PopupKind),
     OverrideRedirect(X11Surface),
@@ -42,7 +38,7 @@ pub enum PointerFocusTarget {
 #[derive(Debug, Clone, PartialEq)]
 pub enum KeyboardFocusTarget {
     Element(CosmicMapped),
-    Fullscreen(CosmicWindow),
+    Fullscreen(CosmicSurface),
     Group(WindowGroup),
     LayerSurface(LayerSurface),
     Popup(PopupKind),
@@ -87,16 +83,13 @@ impl KeyboardFocusTarget {
 #[derive(Debug, Clone)]
 pub struct WindowGroup {
     pub node: NodeId,
-    pub output: WeakOutput,
     pub alive: Weak<()>,
     pub focus_stack: Vec<NodeId>,
 }
 
 impl PartialEq for WindowGroup {
     fn eq(&self, other: &Self) -> bool {
-        self.node == other.node
-            && self.output == other.output
-            && Weak::ptr_eq(&self.alive, &other.alive)
+        self.node == other.node && Weak::ptr_eq(&self.alive, &other.alive)
     }
 }
 
@@ -564,8 +557,8 @@ impl From<CosmicMapped> for PointerFocusTarget {
     }
 }
 
-impl From<CosmicWindow> for PointerFocusTarget {
-    fn from(s: CosmicWindow) -> Self {
+impl From<CosmicSurface> for PointerFocusTarget {
+    fn from(s: CosmicSurface) -> Self {
         PointerFocusTarget::Fullscreen(s)
     }
 }
@@ -600,8 +593,8 @@ impl From<CosmicMapped> for KeyboardFocusTarget {
     }
 }
 
-impl From<CosmicWindow> for KeyboardFocusTarget {
-    fn from(s: CosmicWindow) -> Self {
+impl From<CosmicSurface> for KeyboardFocusTarget {
+    fn from(s: CosmicSurface) -> Self {
         KeyboardFocusTarget::Fullscreen(s)
     }
 }

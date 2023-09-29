@@ -50,7 +50,7 @@ impl XdgShellHandler for State {
 
         if surface.get_parent_surface().is_some() {
             // let other shells deal with their popups
-            self.common.shell.unconstrain_popup(&surface, &positioner);
+            self.common.shell.unconstrain_popup(&surface);
 
             if surface.send_configure().is_ok() {
                 self.common
@@ -123,7 +123,7 @@ impl XdgShellHandler for State {
             state.positioner = positioner;
         });
 
-        self.common.shell.unconstrain_popup(&surface, &positioner);
+        self.common.shell.unconstrain_popup(&surface);
         surface.send_repositioned(token);
         if let Err(err) = surface.send_configure() {
             warn!(
@@ -150,9 +150,6 @@ impl XdgShellHandler for State {
     }
 
     fn maximize_request(&mut self, surface: ToplevelSurface) {
-        let seat = self.common.last_active_seat();
-        let output = seat.active_output();
-
         if let Some(mapped) = self
             .common
             .shell
@@ -164,7 +161,7 @@ impl XdgShellHandler for State {
                     .windows()
                     .find(|(w, _)| w.wl_surface().as_ref() == Some(surface.wl_surface()))
                     .unwrap();
-                workspace.maximize_request(&window, &output, self.common.event_loop_handle.clone())
+                workspace.maximize_request(&window)
             }
         }
     }
@@ -194,6 +191,7 @@ impl XdgShellHandler for State {
                 let seat = self.common.last_active_seat();
                 seat.active_output()
             });
+        // TODO: If this is not the output? Do we move it?
 
         if let Some(mapped) = self
             .common
@@ -206,11 +204,7 @@ impl XdgShellHandler for State {
                     .windows()
                     .find(|(w, _)| w.wl_surface().as_ref() == Some(surface.wl_surface()))
                     .unwrap();
-                workspace.fullscreen_request(
-                    &window,
-                    &output,
-                    self.common.event_loop_handle.clone(),
-                )
+                workspace.fullscreen_request(&window)
             }
         }
     }

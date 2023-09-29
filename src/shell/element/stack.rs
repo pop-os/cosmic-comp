@@ -5,7 +5,7 @@ use crate::{
     },
     state::State,
     utils::iced::{IcedElement, Program},
-    utils::prelude::SeatExt,
+    utils::prelude::*,
     wayland::handlers::screencopy::ScreencopySessions,
 };
 use calloop::LoopHandle;
@@ -91,7 +91,7 @@ pub struct CosmicStackInternal {
     override_alive: Arc<AtomicBool>,
     last_seat: Arc<Mutex<Option<(Seat<State>, Serial)>>>,
     last_location: Arc<Mutex<Option<(Point<f64, Logical>, Serial, u32)>>>,
-    geometry: Arc<Mutex<Option<Rectangle<i32, Logical>>>>,
+    geometry: Arc<Mutex<Option<Rectangle<i32, Global>>>>,
     mask: Arc<Mutex<Option<tiny_skia::Mask>>>,
 }
 
@@ -406,7 +406,7 @@ impl CosmicStack {
         Point::from((0, TAB_HEIGHT))
     }
 
-    pub fn set_geometry(&self, geo: Rectangle<i32, Logical>) {
+    pub fn set_geometry(&self, geo: Rectangle<i32, Global>) {
         self.0.with_program(|p| {
             let loc = (geo.loc.x, geo.loc.y + TAB_HEIGHT);
             let size = (geo.size.w, geo.size.h - TAB_HEIGHT);
@@ -1047,11 +1047,11 @@ impl PointerTarget<State> for CosmicStack {
                                 if let Some(workspace) = data.common.shell.space_for(stack_mapped) {
                                     // TODO: Unify this somehow with Shell::move_request/Workspace::move_request
                                     let button = 0x110; // BTN_LEFT
-                                    let pos = event.location;
+                                    let pos = event.location.as_global();
                                     let start_data = PointerGrabStartData {
                                         focus: None,
                                         button,
-                                        location: pos,
+                                        location: pos.as_logical(),
                                     };
                                     let mapped = CosmicMapped::from(CosmicWindow::new(
                                         surface,

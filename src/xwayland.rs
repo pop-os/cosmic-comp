@@ -277,13 +277,16 @@ impl XwmHandler for State {
         {
             let space = self.common.shell.space_for(mapped).unwrap();
             if space.is_floating(mapped) {
-                mapped.set_geometry(Rectangle::from_loc_and_size(
-                    current_geo.loc,
-                    (
-                        w.map(|w| w as i32).unwrap_or(current_geo.size.w),
-                        h.map(|h| h as i32).unwrap_or(current_geo.size.h),
-                    ),
-                ))
+                mapped.set_geometry(
+                    Rectangle::from_loc_and_size(
+                        current_geo.loc,
+                        (
+                            w.map(|w| w as i32).unwrap_or(current_geo.size.w),
+                            h.map(|h| h as i32).unwrap_or(current_geo.size.h),
+                        ),
+                    )
+                    .as_global(),
+                )
             }
         } else {
             if let Some(x) = x {
@@ -325,13 +328,13 @@ impl XwmHandler for State {
                 }
             }
 
-            let geo = window.geometry();
+            let geo = window.geometry().as_global();
             for (output, overlap) in self.common.shell.outputs().cloned().map(|o| {
                 let intersection = o.geometry().intersection(geo);
                 (o, intersection)
             }) {
                 if let Some(overlap) = overlap {
-                    window.output_enter(&output, overlap);
+                    window.output_enter(&output, overlap.as_logical());
                 } else {
                     window.output_leave(&output);
                 }
@@ -360,14 +363,11 @@ impl XwmHandler for State {
     }
 
     fn maximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let seat = self.common.last_active_seat();
-        let output = seat.active_output();
         let surface = CosmicSurface::X11(window);
-
         if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
                 let (window, _) = mapped.windows().find(|(w, _)| w == &surface).unwrap();
-                workspace.maximize_request(&window, &output, self.common.event_loop_handle.clone())
+                workspace.maximize_request(&window);
             }
         }
     }
@@ -383,18 +383,10 @@ impl XwmHandler for State {
     }
 
     fn fullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let seat = self.common.last_active_seat();
-        let output = seat.active_output();
         let surface = CosmicSurface::X11(window);
-
         if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
-                let (window, _) = mapped.windows().find(|(w, _)| w == &surface).unwrap();
-                workspace.fullscreen_request(
-                    &window,
-                    &output,
-                    self.common.event_loop_handle.clone(),
-                )
+                workspace.fullscreen_request(&surface)
             }
         }
     }

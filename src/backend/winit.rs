@@ -349,7 +349,6 @@ impl State {
                 output.change_current_state(Some(mode), None, None, None);
                 layer_map_for_output(output).arrange();
                 self.common.output_configuration_state.update();
-                self.common.shell.refresh_outputs();
                 render_ping.ping();
             }
             WinitEvent::Refresh => render_ping.ping(),

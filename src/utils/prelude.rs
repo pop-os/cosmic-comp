@@ -11,20 +11,21 @@ use smithay::{
         Seat,
     },
     output::Output,
-    utils::{Buffer, IsAlive, Logical, Monotonic, Point, Rectangle, Time, Transform},
+    utils::{Buffer, IsAlive, Monotonic, Point, Rectangle, Time, Transform},
     wayland::compositor::with_states,
 };
 
+pub use super::geometry::*;
 pub use crate::shell::{Shell, Workspace};
 pub use crate::state::{Common, State};
 pub use crate::wayland::handlers::xdg_shell::popup::update_reactive_popups;
 
 pub trait OutputExt {
-    fn geometry(&self) -> Rectangle<i32, Logical>;
+    fn geometry(&self) -> Rectangle<i32, Global>;
 }
 
 impl OutputExt for Output {
-    fn geometry(&self) -> Rectangle<i32, Logical> {
+    fn geometry(&self) -> Rectangle<i32, Global> {
         Rectangle::from_loc_and_size(self.current_location(), {
             Transform::from(self.current_transform())
                 .transform_size(
@@ -36,6 +37,7 @@ impl OutputExt for Output {
                 .to_logical(self.current_scale().fractional_scale())
                 .to_i32_round()
         })
+        .as_global()
     }
 }
 

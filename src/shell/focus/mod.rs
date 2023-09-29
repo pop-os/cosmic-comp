@@ -100,11 +100,9 @@ impl Shell {
         // update FocusStack and notify layouts about new focus (if any window)
         let element = match target {
             Some(KeyboardFocusTarget::Element(mapped)) => Some(mapped.clone()),
-            Some(KeyboardFocusTarget::Fullscreen(window)) => state
-                .common
-                .shell
-                .element_for_surface(&window.surface())
-                .cloned(),
+            Some(KeyboardFocusTarget::Fullscreen(window)) => {
+                state.common.shell.element_for_surface(window).cloned()
+            }
             _ => None,
         };
 
@@ -154,7 +152,7 @@ impl Shell {
                     return None;
                 }
 
-                Some(self.outputs.iter().flat_map(|o| {
+                Some(self.outputs().flat_map(|o| {
                     let space = self.active_space(o);
                     let stack = space.focus_stack.get(seat);
                     stack.last().cloned()
@@ -163,8 +161,9 @@ impl Shell {
             .flatten()
             .collect::<Vec<_>>();
 
-        for output in self.outputs.iter() {
-            let workspace = self.workspaces.active_mut(output);
+        for output in self.outputs().cloned().collect::<Vec<_>>().into_iter() {
+            // TODO: Add self.workspaces.active_workspaces()
+            let workspace = self.workspaces.active_mut(&output);
             for focused in focused_windows.iter() {
                 if let CosmicSurface::X11(window) = focused.active_window() {
                     if let Some(xwm) = xwm.as_mut().and_then(|state| state.xwm.as_mut()) {
@@ -223,8 +222,8 @@ impl Common {
         let seats = state.common.seats().cloned().collect::<Vec<_>>();
         for seat in seats {
             let output = seat.active_output();
-            if !state.common.shell.outputs.contains(&output) {
-                seat.set_active_output(&state.common.shell.outputs[0]);
+            if !state.common.shell.outputs().any(|o| o == &output) {
+                seat.set_active_output(&state.common.shell.outputs().next().unwrap());
                 continue;
             }
             let last_known_focus = ActiveFocus::get(&seat);
@@ -236,7 +235,7 @@ impl Common {
                             let workspace = state.common.shell.active_space(&output);
                             let focus_stack = workspace.focus_stack.get(&seat);
                             if focus_stack.last().map(|m| m == &mapped).unwrap_or(false)
-                                && workspace.get_fullscreen(&output).is_none()
+                                && workspace.get_fullscreen().is_none()
                             {
                                 continue; // Focus is valid
                             } else {
@@ -248,11 +247,16 @@ impl Common {
                                 continue; // Focus is valid
                             }
                         }
-                        KeyboardFocusTarget::Group(WindowGroup {
-                            output: weak_output,
-                            ..
-                        }) => {
-                            if weak_output == output {
+                        KeyboardFocusTarget::Group(WindowGroup { node, .. }) => {
+                            if state
+                                .common
+                                .shell
+                                .workspaces
+                                .active(&output)
+                                .1
+                                .tiling_layer
+                                .has_node(&node)
+                            {
                                 continue; // Focus is valid,
                             }
                         }
@@ -262,9 +266,9 @@ impl Common {
 
                             if focus_stack
                                 .last()
-                                .map(|m| m.has_active_window(&window.surface()))
+                                .map(|m| m.has_active_window(&window))
                                 .unwrap_or(false)
-                                && workspace.get_fullscreen(&output).is_some()
+                                && workspace.get_fullscreen().is_some()
                             {
                                 continue; // Focus is valid
                             } else {
@@ -307,7 +311,7 @@ impl Common {
                     .common
                     .shell
                     .active_space(&output)
-                    .get_fullscreen(&output)
+                    .get_fullscreen()
                     .cloned()
                     .map(KeyboardFocusTarget::Fullscreen)
                     .or_else(|| {

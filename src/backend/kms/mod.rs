@@ -1093,8 +1093,8 @@ fn render_node_for_output(
 ) -> DrmNode {
     let workspace = shell.active_space(output);
     let nodes = workspace
-        .get_fullscreen(output)
-        .map(|w| vec![w.surface()])
+        .get_fullscreen()
+        .map(|w| vec![w.clone()])
         .unwrap_or_else(|| workspace.windows().collect::<Vec<_>>())
         .into_iter()
         .flat_map(|w| w.wl_surface().and_then(|s| source_node_for_surface(&s, dh)))
@@ -1507,7 +1507,6 @@ impl KmsState {
             false
         };
 
-        shell.refresh_outputs();
         if recreated {
             let sessions = output.pending_buffers().collect::<Vec<_>>();
             if let Err(err) = self.schedule_render(
