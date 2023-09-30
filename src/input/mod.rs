@@ -67,6 +67,8 @@ pub struct SeatId(pub usize);
 pub struct ActiveOutput(pub RefCell<Output>);
 #[derive(Default)]
 pub struct SupressedKeys(RefCell<Vec<(u32, Option<RegistrationToken>)>>);
+#[derive(Default, Debug)]
+pub struct ModifiersShortcutQueue(RefCell<Option<KeyPattern>>);
 #[derive(Default)]
 pub struct Devices(RefCell<HashMap<String, Vec<DeviceCapability>>>);
 
@@ -104,6 +106,28 @@ impl SupressedKeys {
         } else {
             Some(removed)
         }
+    }
+}
+
+impl ModifiersShortcutQueue {
+    pub fn set(&self, binding: KeyPattern) {
+        let mut set = self.0.borrow_mut();
+        *set = Some(binding);
+    }
+
+    pub fn take(&self, binding: &KeyPattern) -> bool {
+        let mut set = self.0.borrow_mut();
+        if set.is_some() && set.as_ref().unwrap() == binding {
+            *set = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn clear(&self) {
+        let mut set = self.0.borrow_mut();
+        *set = None;
     }
 }
 
@@ -152,6 +176,7 @@ pub fn add_seat(
     userdata.insert_if_missing(SeatId::default);
     userdata.insert_if_missing(Devices::default);
     userdata.insert_if_missing(SupressedKeys::default);
+    userdata.insert_if_missing(ModifiersShortcutQueue::default);
     userdata.insert_if_missing(SeatMoveGrabState::default);
     userdata.insert_if_missing(CursorState::default);
     userdata.insert_if_missing(|| ActiveOutput(RefCell::new(output.clone())));
@@ -283,7 +308,7 @@ impl State {
                                             || (action_pattern.modifiers.alt && !modifiers.alt)
                                             || (action_pattern.modifiers.logo && !modifiers.logo)
                                             || (action_pattern.modifiers.shift && !modifiers.shift)
-                                            || (handle.raw_syms().contains(&action_pattern.key) && state == KeyState::Released)
+                                            || (action_pattern.key.is_some() && handle.raw_syms().contains(&action_pattern.key.unwrap()) && state == KeyState::Released)
                                         {
                                             data.common.shell.set_overview_mode(None, data.common.event_loop_handle.clone());
 
@@ -344,8 +369,8 @@ impl State {
                                     if let (ResizeMode::Started(action_pattern, _, _), _) =
                                         data.common.shell.resize_mode()
                                     {
-                                        if state == KeyState::Released
-                                            && handle.raw_syms().contains(&action_pattern.key)
+                                        if action_pattern.key.is_some() && state == KeyState::Released
+                                            && handle.raw_syms().contains(&action_pattern.key.unwrap())
                                         {
                                             data.common.shell.set_resize_mode(None, &data.common.config, data.common.event_loop_handle.clone());
                                         } else if action_pattern.modifiers != *modifiers {
@@ -390,7 +415,7 @@ impl State {
                                             let action = Action::_ResizingInternal(direction, edge, state);
                                             let key_pattern = KeyPattern {
                                                 modifiers: modifiers.clone().into(),
-                                                key: handle.raw_code(),
+                                                key: Some(handle.raw_code()),
                                             };
 
                                             if state == KeyState::Released {
@@ -412,7 +437,7 @@ impl State {
                                                     }).ok()
                                                 } else { None };
 
-                                               userdata
+                                                userdata
                                                         .get::<SupressedKeys>()
                                                         .unwrap()
                                                         .add(&handle, token);
@@ -472,14 +497,30 @@ impl State {
                                     }
 
                                     // handle the rest of the global shortcuts
+                                    let mut can_clear_modifiers_shortcut = true;
                                     if !shortcuts_inhibited {
+                                        let modifiers_queue = userdata.get::<ModifiersShortcutQueue>().unwrap();
                                         for (binding, action) in
                                             data.common.config.static_conf.key_bindings.iter()
                                         {
-                                            if state == KeyState::Pressed
-                                                && binding.modifiers == *modifiers
-                                                && handle.raw_syms().contains(&binding.key)
+                                            let modifiers_bypass = binding.key.is_none()
+                                                && state == KeyState::Released
+                                                && binding.modifiers != *modifiers
+                                                && modifiers_queue.take(binding);
+
+                                            if !modifiers_bypass && binding.key.is_none() && state == KeyState::Pressed && binding.modifiers == *modifiers {
+                                                modifiers_queue.set(binding.clone());
+                                                can_clear_modifiers_shortcut = false;
+                                            }
+
+                                            if (
+                                                    binding.key.is_some()
+                                                    && state == KeyState::Pressed
+                                                    && handle.raw_syms().contains(&binding.key.unwrap())
+                                                    && binding.modifiers == *modifiers
+                                                ) || modifiers_bypass
                                             {
+                                                modifiers_queue.clear();
                                                 userdata
                                                     .get::<SupressedKeys>()
                                                     .unwrap()
@@ -490,6 +531,10 @@ impl State {
                                                 )));
                                             }
                                         }
+                                    }
+
+                                    if can_clear_modifiers_shortcut {
+                                        userdata.get::<ModifiersShortcutQueue>().unwrap().clear();
                                     }
 
                                     // keys are passed through to apps

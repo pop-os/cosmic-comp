@@ -56,13 +56,18 @@ where
 }
 
 #[allow(non_snake_case)]
-pub fn deserialize_Keysym<'de, D>(deserializer: D) -> Result<Keysym, D::Error>
+pub fn deserialize_Keysym<'de, D>(deserializer: D) -> Result<Option<Keysym>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     use serde::de::{Error, Unexpected};
 
-    let name = String::deserialize(deserializer)?;
+    let name: Option<String> = Option::deserialize(deserializer)?;
+    if name.is_none() {
+        return Ok(None);
+    }
+
+    let name = name.unwrap();
     //let name = format!("KEY_{}", code);
     match xkb::keysym_from_name(&name, xkb::KEYSYM_NO_FLAGS) {
         KeySyms::KEY_NoSymbol => match xkb::keysym_from_name(&name, xkb::KEYSYM_CASE_INSENSITIVE) {
@@ -76,9 +81,9 @@ where
                     name,
                     xkb::keysym_get_name(x)
                 );
-                Ok(x)
+                Ok(Some(x))
             }
         },
-        x => Ok(x),
+        x => Ok(Some(x)),
     }
 }

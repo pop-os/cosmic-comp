@@ -90,11 +90,11 @@ pub struct KeyPattern {
     pub modifiers: KeyModifiers,
     /// The actual key, that was pressed
     #[serde(deserialize_with = "deserialize_Keysym")]
-    pub key: u32,
+    pub key: Option<u32>,
 }
 
 impl KeyPattern {
-    pub fn new(modifiers: impl Into<KeyModifiers>, key: u32) -> KeyPattern {
+    pub fn new(modifiers: impl Into<KeyModifiers>, key: Option<u32>) -> KeyPattern {
         KeyPattern {
             modifiers: modifiers.into(),
             key,
@@ -117,7 +117,12 @@ impl ToString for KeyPattern {
         if self.modifiers.shift {
             result += "Shift+";
         }
-        result += &keysym_get_name(self.key);
+
+        if let Some(key) = self.key {
+            result += &keysym_get_name(key);
+        } else {
+            result.remove(result.len() - 1);
+        }
         result
     }
 }
@@ -176,7 +181,7 @@ fn insert_binding(
         for key in keys {
             let pattern = KeyPattern {
                 modifiers: modifiers.clone(),
-                key,
+                key: Some(key),
             };
             if !key_bindings.contains_key(&pattern) {
                 key_bindings.insert(pattern, action.clone());
