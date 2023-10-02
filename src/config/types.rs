@@ -62,12 +62,7 @@ where
 {
     use serde::de::{Error, Unexpected};
 
-    let name: Option<String> = Option::deserialize(deserializer)?;
-    if name.is_none() {
-        return Ok(None);
-    }
-
-    let name = name.unwrap();
+    let name = String::deserialize(deserializer)?;
     //let name = format!("KEY_{}", code);
     match xkb::keysym_from_name(&name, xkb::KEYSYM_NO_FLAGS) {
         KeySyms::KEY_NoSymbol => match xkb::keysym_from_name(&name, xkb::KEYSYM_CASE_INSENSITIVE) {

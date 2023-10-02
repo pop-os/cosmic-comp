@@ -89,7 +89,7 @@ pub struct KeyPattern {
     #[serde(deserialize_with = "deserialize_KeyModifiers")]
     pub modifiers: KeyModifiers,
     /// The actual key, that was pressed
-    #[serde(deserialize_with = "deserialize_Keysym")]
+    #[serde(deserialize_with = "deserialize_Keysym", default)]
     pub key: Option<u32>,
 }
 
