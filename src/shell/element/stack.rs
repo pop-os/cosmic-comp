@@ -8,14 +8,13 @@ use crate::{
     utils::prelude::SeatExt,
     wayland::handlers::screencopy::ScreencopySessions,
 };
-use apply::Apply;
 use calloop::LoopHandle;
 use cosmic::{
     iced::{id::Id, widget as iced_widget},
     iced_core::{Background, BorderRadius, Color, Length},
     iced_runtime::Command,
     iced_widget::scrollable::AbsoluteOffset,
-    theme, widget as cosmic_widget, Element as CosmicElement,
+    theme, widget as cosmic_widget, Apply, Element as CosmicElement,
 };
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
 use once_cell::sync::Lazy;
@@ -652,8 +651,10 @@ impl Program for CosmicStackInternal {
         let group_focused = self.group_focused.load(Ordering::SeqCst);
 
         let elements = vec![
-            cosmic_widget::icon("window-stack-symbolic", 16)
-                .force_svg(true)
+            cosmic_widget::icon::from_name("window-stack-symbolic")
+                .size(16)
+                .prefer_svg(true)
+                .icon()
                 .style(if group_focused {
                     theme::Svg::custom(|theme| iced_widget::svg::Appearance {
                         color: Some(if theme.cosmic().is_dark {
@@ -663,7 +664,7 @@ impl Program for CosmicStackInternal {
                         }),
                     })
                 } else {
-                    theme::Svg::Symbolic
+                    theme::Svg::Default
                 })
                 .apply(iced_widget::container)
                 .padding([4, 24])
@@ -712,6 +713,7 @@ impl Program for CosmicStackInternal {
             .center_y()
             .style(if self.group_focused.load(Ordering::SeqCst) {
                 theme::Container::custom(|theme| iced_widget::container::Appearance {
+                    icon_color: Some(Color::from(theme.cosmic().background.on)),
                     text_color: Some(Color::from(theme.cosmic().background.on)),
                     background: Some(Background::Color(theme.cosmic().accent_color().into())),
                     border_radius: BorderRadius::from([8.0, 8.0, 0.0, 0.0]),
@@ -720,6 +722,7 @@ impl Program for CosmicStackInternal {
                 })
             } else {
                 theme::Container::custom(|theme| iced_widget::container::Appearance {
+                    icon_color: Some(Color::from(theme.cosmic().background.on)),
                     text_color: Some(Color::from(theme.cosmic().background.on)),
                     background: Some(Background::Color(theme.cosmic().palette.neutral_3.into())),
                     border_radius: BorderRadius::from([8.0, 8.0, 0.0, 0.0]),

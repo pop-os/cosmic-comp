@@ -1,5 +1,4 @@
 use super::tab::{Tab, TabBackgroundTheme, TabMessage, TabRuleTheme, MIN_ACTIVE_TAB_WIDTH};
-use apply::Apply;
 use cosmic::{
     font::Font,
     iced::{id::Id, widget, Element},
@@ -24,7 +23,8 @@ use cosmic::{
     },
     iced_widget::container::draw_background,
     theme,
-    widget::{icon, Icon},
+    widget::{icon::from_name, Icon},
+    Apply,
 };
 use keyframe::{
     ease,
@@ -122,17 +122,17 @@ impl<'a, Message, Renderer> Tabs<'a, Message, Renderer>
 where
     Renderer: cosmic::iced_core::Renderer + 'a,
     Renderer: cosmic::iced_core::text::Renderer<Font = Font>,
-    Renderer::Theme: ButtonStyleSheet<Style = theme::Button>,
+    Renderer::Theme: ButtonStyleSheet<Style = theme::iced::Button>,
     Renderer::Theme: ContainerStyleSheet<Style = theme::Container>,
     Renderer::Theme: RuleStyleSheet<Style = theme::Rule>,
     Renderer::Theme: TextStyleSheet,
     Message: TabMessage + 'a,
     widget::Button<'a, Message, Renderer>: Into<Element<'a, Message, Renderer>>,
     widget::Container<'a, Message, Renderer>: Into<Element<'a, Message, Renderer>>,
-    Icon<'a>: Into<Element<'a, Message, Renderer>>,
+    Icon: Into<Element<'a, Message, Renderer>>,
 {
     pub fn new(
-        tabs: impl IntoIterator<Item = Tab<'a, Message>>,
+        tabs: impl IntoIterator<Item = Tab<Message>>,
         active: usize,
         activated: bool,
         group_focused: bool,
@@ -189,22 +189,24 @@ where
                         TabRuleTheme::Default
                     })
                     .into(),
-                icon("go-previous-symbolic", 16)
-                    .force_svg(true)
-                    .style(theme::Svg::Symbolic)
+                from_name("go-previous-symbolic")
+                    .size(16)
+                    .prefer_svg(true)
+                    .icon()
                     .apply(widget::button)
-                    .style(theme::Button::Text)
+                    .style(theme::iced::Button::Text)
                     .on_press(Message::scroll_back())
                     .into(),
             ]
             .into_iter()
             .chain(tabs)
             .chain(vec![
-                icon("go-next-symbolic", 16)
-                    .force_svg(true)
-                    .style(theme::Svg::Symbolic)
+                from_name("go-next-symbolic")
+                    .size(16)
+                    .prefer_svg(true)
+                    .icon()
                     .apply(widget::button)
-                    .style(theme::Button::Text)
+                    .style(theme::iced::Button::Text)
                     .on_press(Message::scroll_further())
                     .into(),
                 widget::vertical_rule(4)
@@ -489,6 +491,7 @@ where
         let background_style = ContainerStyleSheet::appearance(
             theme,
             &theme::Container::custom(|theme| widget::container::Appearance {
+                icon_color: None,
                 text_color: None,
                 background: Some(Background::Color(Color::from(
                     theme.cosmic().palette.neutral_3,
@@ -659,11 +662,18 @@ where
         operation: &mut dyn Operation<OperationOutputWrapper<Message>>,
     ) {
         let state = tree.state.downcast_mut::<State>();
+        let bounds = layout.bounds();
+
         state.cleanup_old_animations();
 
-        operation.scrollable(state, self.id.as_ref());
+        operation.scrollable(
+            state,
+            self.id.as_ref(),
+            bounds,
+            Vector { x: 0.0, y: 0.0 }, /* seemingly unused */
+        );
 
-        operation.container(self.id.as_ref(), &mut |operation| {
+        operation.container(self.id.as_ref(), bounds, &mut |operation| {
             self.elements[2..self.elements.len() - 3]
                 .iter()
                 .zip(tree.children.iter_mut().skip(2))
@@ -685,6 +695,7 @@ where
         renderer: &Renderer,
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
     ) -> event::Status {
         let state = tree.state.downcast_mut::<State>();
         state.cleanup_old_animations();
@@ -826,6 +837,7 @@ where
                         renderer,
                         clipboard,
                         &mut internal_shell,
+                        viewport,
                     )
                 })
                 .fold(event::Status::Ignored, event::Status::merge)
@@ -848,6 +860,7 @@ where
                         renderer,
                         clipboard,
                         &mut internal_shell,
+                        viewport,
                     )
                 })
                 .fold(event::Status::Ignored, event::Status::merge)
@@ -870,6 +883,7 @@ where
                         renderer,
                         clipboard,
                         &mut internal_shell,
+                        viewport,
                     )
                 })
                 .fold(event::Status::Ignored, event::Status::merge)

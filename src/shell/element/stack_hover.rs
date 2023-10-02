@@ -3,13 +3,13 @@ use crate::{
     utils::iced::{IcedElement, Program},
 };
 
-use apply::Apply;
 use calloop::LoopHandle;
 use cosmic::{
     iced::widget::{container, row},
     iced_core::{Background, Color, Length},
     theme,
-    widget::{icon, text},
+    widget::{icon::from_name, text},
+    Apply,
 };
 use smithay::utils::{Logical, Size};
 
@@ -29,8 +29,10 @@ impl Program for StackHoverInternal {
 
     fn view(&self) -> crate::utils::iced::Element<'_, Self::Message> {
         row(vec![
-            icon("window-stack-symbolic", 24)
-                .force_svg(true)
+            from_name("window-stack-symbolic")
+                .size(24)
+                .prefer_svg(true)
+                .icon()
                 .apply(container)
                 .padding([0, 8, 0, 0])
                 .width(Length::Shrink)
@@ -54,6 +56,7 @@ impl Program for StackHoverInternal {
         .apply(container)
         .padding([8, 16])
         .style(theme::Container::custom(|theme| container::Appearance {
+            icon_color: Some(Color::from(theme.cosmic().accent.on)),
             text_color: Some(Color::from(theme.cosmic().accent.on)),
             background: Some(Background::Color(theme.cosmic().accent_color().into())),
             border_radius: 24.0.into(),
