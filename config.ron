@@ -75,6 +75,7 @@
         (modifiers: [Super], key: "a"): Spawn("busctl --user call com.system76.CosmicAppLibrary /com/system76/CosmicAppLibrary com.system76.CosmicAppLibrary Toggle"),
         (modifiers: [Super], key: "w"): Spawn("busctl --user call com.system76.CosmicWorkspaces /com/system76/CosmicWorkspaces com.system76.CosmicWorkspaces Toggle"),
         (modifiers: [Super], key: "slash"): Spawn("busctl --user call com.system76.CosmicLauncher /com/system76/CosmicLauncher com.system76.CosmicLauncher Toggle"),
+        (modifiers: [Super]): Spawn("busctl --user call com.system76.CosmicLauncher /com/system76/CosmicLauncher com.system76.CosmicLauncher Toggle"),
 
         (modifiers: [], key: "XF86AudioRaiseVolume"): Spawn("amixer sset Master 5%+"),
         (modifiers: [], key: "XF86AudioLowerVolume"): Spawn("amixer sset Master 5%-"),

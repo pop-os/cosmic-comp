@@ -62,7 +62,7 @@ impl KeyboardGrab<State> for SwapWindowGrab {
                 (pattern.key, *direction)
             })
             .collect::<Vec<_>>();
-        let Some(direction) = syms.iter().find_map(|sym| focus_bindings.iter().find_map(|(key, direction)| (sym == key).then_some(*direction))) else { return };
+        let Some(direction) = syms.iter().find_map(|sym| focus_bindings.iter().find_map(|(key, direction)| (key.is_some() && sym == key.as_ref().unwrap()).then_some(*direction))) else { return };
 
         data.handle_action(
             Action::Focus(direction),
@@ -71,7 +71,7 @@ impl KeyboardGrab<State> for SwapWindowGrab {
             time,
             KeyPattern {
                 modifiers: modifiers.map(Into::into).unwrap_or_default(),
-                key: keycode,
+                key: Some(keycode),
             },
             None,
         );

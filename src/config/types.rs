@@ -56,7 +56,7 @@ where
 }
 
 #[allow(non_snake_case)]
-pub fn deserialize_Keysym<'de, D>(deserializer: D) -> Result<Keysym, D::Error>
+pub fn deserialize_Keysym<'de, D>(deserializer: D) -> Result<Option<Keysym>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -76,9 +76,9 @@ where
                     name,
                     xkb::keysym_get_name(x)
                 );
-                Ok(x)
+                Ok(Some(x))
             }
         },
-        x => Ok(x),
+        x => Ok(Some(x)),
     }
 }
