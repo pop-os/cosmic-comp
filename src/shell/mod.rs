@@ -1219,7 +1219,7 @@ impl Shell {
     pub fn set_overview_mode(
         &mut self,
         enabled: Option<Trigger>,
-        evlh: LoopHandle<'static, crate::state::Data>,
+        evlh: LoopHandle<'static, crate::state::State>,
     ) {
         if let Some(trigger) = enabled {
             if !matches!(self.overview_mode, OverviewMode::Started(_, _)) {
@@ -1261,7 +1261,7 @@ impl Shell {
         &mut self,
         enabled: Option<(KeyPattern, ResizeDirection)>,
         config: &Config,
-        evlh: LoopHandle<'static, crate::state::Data>,
+        evlh: LoopHandle<'static, crate::state::State>,
     ) {
         if let Some((pattern, direction)) = enabled {
             if let ResizeMode::Started(old_pattern, _, old_direction) = &mut self.resize_mode {

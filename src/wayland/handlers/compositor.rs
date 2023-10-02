@@ -2,7 +2,7 @@
 
 use crate::{
     shell::CosmicSurface,
-    state::{BackendData, ClientState, Data},
+    state::{BackendData, ClientState},
     utils::prelude::*,
     wayland::protocols::screencopy::SessionType,
 };
@@ -73,20 +73,21 @@ impl State {
     }
 
     fn xdg_popup_ensure_initial_configure(&mut self, popup: &PopupKind) {
-        let PopupKind::Xdg(ref popup) = popup;
-        let initial_configure_sent = with_states(popup.wl_surface(), |states| {
-            states
-                .data_map
-                .get::<Mutex<XdgPopupSurfaceRoleAttributes>>()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .initial_configure_sent
-        });
-        if !initial_configure_sent {
-            // NOTE: This should never fail as the initial configure is always
-            // allowed.
-            popup.send_configure().expect("initial configure failed");
+        if let PopupKind::Xdg(ref popup) = popup {
+            let initial_configure_sent = with_states(popup.wl_surface(), |states| {
+                states
+                    .data_map
+                    .get::<Mutex<XdgPopupSurfaceRoleAttributes>>()
+                    .unwrap()
+                    .lock()
+                    .unwrap()
+                    .initial_configure_sent
+            });
+            if !initial_configure_sent {
+                // NOTE: This should never fail as the initial configure is always
+                // allowed.
+                popup.send_configure().expect("initial configure failed");
+            }
         }
     }
 
@@ -149,10 +150,11 @@ impl CompositorHandler for State {
                         state
                             .common
                             .event_loop_handle
-                            .insert_source(source, move |_, _, data| {
-                                data.state
+                            .insert_source(source, move |_, _, state| {
+                                let dh = state.common.display_handle.clone();
+                                state
                                     .client_compositor_state(&client)
-                                    .blocker_cleared(&mut data.state, &data.display.handle());
+                                    .blocker_cleared(state, &dh);
                                 Ok(())
                             });
                     if res.is_ok() {
@@ -164,7 +166,7 @@ impl CompositorHandler for State {
     }
 
     fn commit(&mut self, surface: &WlSurface) {
-        X11Wm::commit_hook::<Data>(surface);
+        X11Wm::commit_hook::<State>(surface);
         // first load the buffer for various smithay helper functions
         on_commit_buffer_handler::<Self>(surface);
 

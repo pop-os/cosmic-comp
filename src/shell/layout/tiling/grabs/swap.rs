@@ -9,6 +9,7 @@ use smithay::{
     },
     utils::Serial,
 };
+use xkbcommon::xkb::Keysym;
 
 use crate::{
     config::{Action, KeyPattern},
@@ -71,7 +72,7 @@ impl KeyboardGrab<State> for SwapWindowGrab {
             time,
             KeyPattern {
                 modifiers: modifiers.map(Into::into).unwrap_or_default(),
-                key: Some(keycode),
+                key: Some(Keysym::new(keycode)),
             },
             None,
         );

@@ -16,12 +16,12 @@ impl SecurityContextHandler for State {
     ) {
         self.common
             .event_loop_handle
-            .insert_source(source, move |client_stream, _, data| {
-                if let Err(err) = data.display.handle().insert_client(
+            .insert_source(source, move |client_stream, _, state| {
+                if let Err(err) = state.common.display_handle.insert_client(
                     client_stream,
                     Arc::new(ClientState {
                         security_context: Some(security_context.clone()),
-                        ..data.state.new_client_state()
+                        ..state.new_client_state()
                     }),
                 ) {
                     warn!(?err, "Error adding wayland client");

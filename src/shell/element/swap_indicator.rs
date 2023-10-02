@@ -3,19 +3,19 @@ use crate::{
     utils::iced::{IcedElement, Program},
 };
 
-use apply::Apply;
 use calloop::LoopHandle;
 use cosmic::{
     iced::widget::{container, horizontal_space, row},
     iced_core::{Alignment, Background, Color, Length},
     theme,
-    widget::{icon, text},
+    widget::{icon::from_name, text},
+    Apply,
 };
 use smithay::utils::Size;
 
 pub type SwapIndicator = IcedElement<SwapIndicatorInternal>;
 
-pub fn swap_indicator(evlh: LoopHandle<'static, crate::state::Data>) -> SwapIndicator {
+pub fn swap_indicator(evlh: LoopHandle<'static, crate::state::State>) -> SwapIndicator {
     SwapIndicator::new(SwapIndicatorInternal, Size::from((1, 1)), evlh)
 }
 
@@ -26,7 +26,11 @@ impl Program for SwapIndicatorInternal {
 
     fn view(&self) -> crate::utils::iced::Element<'_, Self::Message> {
         row(vec![
-            icon("window-swap-symbolic", 32).force_svg(true).into(),
+            from_name("window-swap-symbolic")
+                .size(32)
+                .prefer_svg(true)
+                .icon()
+                .into(),
             horizontal_space(16).into(),
             text(fl!("swap-windows"))
                 .font(cosmic::font::FONT)
@@ -40,6 +44,7 @@ impl Program for SwapIndicatorInternal {
         .padding(16)
         .apply(container)
         .style(theme::Container::custom(|theme| container::Appearance {
+            icon_color: Some(Color::from(theme.cosmic().accent.on)),
             text_color: Some(Color::from(theme.cosmic().accent.on)),
             background: Some(Background::Color(theme.cosmic().accent_color().into())),
             border_radius: 18.0.into(),

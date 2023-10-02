@@ -3,6 +3,7 @@
 
 use super::{KeyModifier, KeyModifiers};
 use serde::{Deserialize, Serialize};
+use smithay::reexports::x11rb::NO_SYMBOL;
 pub use smithay::{
     backend::input::KeyState,
     input::keyboard::{keysyms as KeySyms, Keysym, XkbConfig as WlXkbConfig},
@@ -65,20 +66,22 @@ where
     let name = String::deserialize(deserializer)?;
     //let name = format!("KEY_{}", code);
     match xkb::keysym_from_name(&name, xkb::KEYSYM_NO_FLAGS) {
-        KeySyms::KEY_NoSymbol => match xkb::keysym_from_name(&name, xkb::KEYSYM_CASE_INSENSITIVE) {
-            KeySyms::KEY_NoSymbol => Err(<D::Error as Error>::invalid_value(
-                Unexpected::Str(&name),
-                &"One of the keysym names of xkbcommon.h without the 'KEY_' prefix",
-            )),
-            x => {
-                warn!(
-                    "Key-Binding '{}' only matched case insensitive for {:?}",
-                    name,
-                    xkb::keysym_get_name(x)
-                );
-                Ok(Some(x))
+        x if x.raw() == NO_SYMBOL => {
+            match xkb::keysym_from_name(&name, xkb::KEYSYM_CASE_INSENSITIVE) {
+                x if x.raw() == NO_SYMBOL => Err(<D::Error as Error>::invalid_value(
+                    Unexpected::Str(&name),
+                    &"One of the keysym names of xkbcommon.h without the 'KEY_' prefix",
+                )),
+                x => {
+                    warn!(
+                        "Key-Binding '{}' only matched case insensitive for {:?}",
+                        name,
+                        xkb::keysym_get_name(x)
+                    );
+                    Ok(Some(x))
+                }
             }
-        },
+        }
         x => Ok(Some(x)),
     }
 }

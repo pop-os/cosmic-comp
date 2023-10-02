@@ -69,11 +69,11 @@ impl PointerTarget<State> for ResizeForkTarget {
             let orientation = self.orientation;
             let serial = event.serial;
             let button = event.button;
-            data.common.event_loop_handle.insert_idle(move |data| {
+            data.common.event_loop_handle.insert_idle(move |state| {
                 let pointer = seat.get_pointer().unwrap();
                 let location = pointer.current_location();
                 pointer.set_grab(
-                    &mut data.state,
+                    state,
                     ResizeForkGrab {
                         start_data: PointerGrabStartData {
                             focus: None,

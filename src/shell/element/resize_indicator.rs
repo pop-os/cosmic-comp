@@ -7,13 +7,13 @@ use crate::{
     utils::iced::{IcedElement, Program},
 };
 
-use apply::Apply;
 use calloop::LoopHandle;
 use cosmic::{
     iced::widget::{column, container, horizontal_space, row, vertical_space},
     iced_core::{Background, Color, Length},
     theme,
-    widget::{icon, text},
+    widget::{icon::from_name, text},
+    Apply,
 };
 use smithay::utils::Size;
 
@@ -22,7 +22,7 @@ pub type ResizeIndicator = IcedElement<ResizeIndicatorInternal>;
 pub fn resize_indicator(
     direction: ResizeDirection,
     config: &Config,
-    evlh: LoopHandle<'static, crate::state::Data>,
+    evlh: LoopHandle<'static, crate::state::State>,
 ) -> ResizeIndicator {
     ResizeIndicator::new(
         ResizeIndicatorInternal {
@@ -64,26 +64,29 @@ impl Program for ResizeIndicatorInternal {
 
     fn view(&self) -> crate::utils::iced::Element<'_, Self::Message> {
         let edges = self.edges.lock().unwrap();
+        let icon_container_style = || {
+            theme::Container::custom(|theme| container::Appearance {
+                icon_color: Some(Color::from(theme.cosmic().accent.on)),
+                text_color: Some(Color::from(theme.cosmic().accent.on)),
+                background: Some(Background::Color(theme.cosmic().accent_color().into())),
+                border_radius: 18.0.into(),
+                border_width: 0.0,
+                border_color: Color::TRANSPARENT,
+            })
+        };
+
         column(vec![
             if edges.contains(ResizeEdge::TOP) {
-                icon(
-                    if self.direction == ResizeDirection::Outwards {
-                        "go-up-symbolic"
-                    } else {
-                        "go-down-symbolic"
-                    },
-                    32,
-                )
-                .force_svg(true)
+                from_name(if self.direction == ResizeDirection::Outwards {
+                    "go-up-symbolic"
+                } else {
+                    "go-down-symbolic"
+                })
+                .size(32)
+                .prefer_svg(true)
                 .apply(container)
                 .padding(2)
-                .style(theme::Container::custom(|theme| container::Appearance {
-                    text_color: Some(Color::from(theme.cosmic().accent.on)),
-                    background: Some(Background::Color(theme.cosmic().accent_color().into())),
-                    border_radius: 18.0.into(),
-                    border_width: 0.0,
-                    border_color: Color::TRANSPARENT,
-                }))
+                .style(icon_container_style())
                 .width(Length::Shrink)
                 .apply(container)
                 .center_x()
@@ -94,24 +97,16 @@ impl Program for ResizeIndicatorInternal {
             },
             row(vec![
                 if edges.contains(ResizeEdge::LEFT) {
-                    icon(
-                        if self.direction == ResizeDirection::Outwards {
-                            "go-previous-symbolic"
-                        } else {
-                            "go-next-symbolic"
-                        },
-                        32,
-                    )
-                    .force_svg(true)
+                    from_name(if self.direction == ResizeDirection::Outwards {
+                        "go-previous-symbolic"
+                    } else {
+                        "go-next-symbolic"
+                    })
+                    .size(32)
+                    .prefer_svg(true)
                     .apply(container)
                     .padding(4)
-                    .style(theme::Container::custom(|theme| container::Appearance {
-                        text_color: Some(Color::from(theme.cosmic().accent.on)),
-                        background: Some(Background::Color(theme.cosmic().accent_color().into())),
-                        border_radius: 18.0.into(),
-                        border_width: 0.0,
-                        border_color: Color::TRANSPARENT,
-                    }))
+                    .style(icon_container_style())
                     .width(Length::Shrink)
                     .apply(container)
                     .center_y()
@@ -144,13 +139,7 @@ impl Program for ResizeIndicatorInternal {
                 .center_y()
                 .padding(16)
                 .apply(container)
-                .style(theme::Container::custom(|theme| container::Appearance {
-                    text_color: Some(Color::from(theme.cosmic().accent.on)),
-                    background: Some(Background::Color(theme.cosmic().accent_color().into())),
-                    border_radius: 18.0.into(),
-                    border_width: 0.0,
-                    border_color: Color::TRANSPARENT,
-                }))
+                .style(icon_container_style())
                 .width(Length::Shrink)
                 .height(Length::Shrink)
                 .apply(container)
@@ -160,24 +149,16 @@ impl Program for ResizeIndicatorInternal {
                 .center_y()
                 .into(),
                 if edges.contains(ResizeEdge::RIGHT) {
-                    icon(
-                        if self.direction == ResizeDirection::Outwards {
-                            "go-next-symbolic"
-                        } else {
-                            "go-previous-symbolic"
-                        },
-                        32,
-                    )
-                    .force_svg(true)
+                    from_name(if self.direction == ResizeDirection::Outwards {
+                        "go-next-symbolic"
+                    } else {
+                        "go-previous-symbolic"
+                    })
+                    .size(32)
+                    .prefer_svg(true)
                     .apply(container)
                     .padding(4)
-                    .style(theme::Container::custom(|theme| container::Appearance {
-                        text_color: Some(Color::from(theme.cosmic().accent.on)),
-                        background: Some(Background::Color(theme.cosmic().accent_color().into())),
-                        border_radius: 18.0.into(),
-                        border_width: 0.0,
-                        border_color: Color::TRANSPARENT,
-                    }))
+                    .style(icon_container_style())
                     .height(Length::Shrink)
                     .apply(container)
                     .center_y()
@@ -191,24 +172,16 @@ impl Program for ResizeIndicatorInternal {
             .height(Length::Fill)
             .into(),
             if edges.contains(ResizeEdge::BOTTOM) {
-                icon(
-                    if self.direction == ResizeDirection::Outwards {
-                        "go-down-symbolic"
-                    } else {
-                        "go-up-symbolic"
-                    },
-                    32,
-                )
-                .force_svg(true)
+                from_name(if self.direction == ResizeDirection::Outwards {
+                    "go-down-symbolic"
+                } else {
+                    "go-up-symbolic"
+                })
+                .size(32)
+                .prefer_svg(true)
                 .apply(container)
                 .padding(4)
-                .style(theme::Container::custom(|theme| container::Appearance {
-                    text_color: Some(Color::from(theme.cosmic().accent.on)),
-                    background: Some(Background::Color(theme.cosmic().accent_color().into())),
-                    border_radius: 18.0.into(),
-                    border_width: 0.0,
-                    border_color: Color::TRANSPARENT,
-                }))
+                .style(icon_container_style())
                 .width(Length::Shrink)
                 .apply(container)
                 .center_x()

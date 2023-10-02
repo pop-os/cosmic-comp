@@ -4,7 +4,7 @@ use smithay::{
     input::{Seat, SeatHandler},
     output::Output,
     reexports::wayland_server::{
-        backend::{ClientId, GlobalId, ObjectId},
+        backend::{ClientId, GlobalId},
         protocol::wl_surface::WlSurface,
         Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
     },
@@ -225,9 +225,9 @@ where
         }
     }
 
-    fn destroyed(state: &mut D, client: ClientId, resource: ObjectId, _data: &()) {
+    fn destroyed(state: &mut D, client: ClientId, resource: &ZcosmicToplevelManagerV1, _data: &()) {
         let mng_state = state.toplevel_management_state();
-        mng_state.instances.retain(|i| i.id() != resource);
+        mng_state.instances.retain(|i| i != resource);
         if !mng_state
             .instances
             .iter()

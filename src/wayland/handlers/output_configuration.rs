@@ -137,8 +137,8 @@ impl State {
         self.common
             .config
             .write_outputs(self.common.output_configuration_state.outputs());
-        self.common.event_loop_handle.insert_idle(move |data| {
-            data.state.common.output_configuration_state.update();
+        self.common.event_loop_handle.insert_idle(move |state| {
+            state.common.output_configuration_state.update();
         });
 
         true

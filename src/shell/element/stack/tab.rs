@@ -1,10 +1,7 @@
-use apply::Apply;
 use cosmic::{
     font::Font,
     iced::{
-        widget::{
-            self, container::draw_background, rule::FillMode, text::StyleSheet as TextStyleSheet,
-        },
+        widget::{self, container::draw_background, rule::FillMode},
         Element,
     },
     iced_core::{
@@ -13,6 +10,7 @@ use cosmic::{
         mouse, overlay, renderer,
         widget::{
             operation::{Operation, OperationOutputWrapper},
+            text::StyleSheet as TextStyleSheet,
             tree::Tree,
             Id, Widget,
         },
@@ -22,9 +20,10 @@ use cosmic::{
         button::StyleSheet as ButtonStyleSheet, container::StyleSheet as ContainerStyleSheet,
         rule::StyleSheet as RuleStyleSheet,
     },
-    iced_widget::scrollable::AbsoluteOffset,
+    iced_widget::{scrollable::AbsoluteOffset, text},
     theme,
-    widget::{icon, text, Icon},
+    widget::{icon::from_name, Icon},
+    Apply,
 };
 
 use super::tab_text::tab_text;
@@ -82,6 +81,7 @@ impl Into<theme::Container> for TabBackgroundTheme {
         match self {
             Self::ActiveActivated => {
                 theme::Container::custom(move |theme| widget::container::Appearance {
+                    icon_color: Some(Color::from(theme.cosmic().accent_text_color())),
                     text_color: Some(Color::from(theme.cosmic().accent_text_color())),
                     background: Some(background_color),
                     border_radius: 0.0.into(),
@@ -91,6 +91,7 @@ impl Into<theme::Container> for TabBackgroundTheme {
             }
             Self::ActiveDeactivated => {
                 theme::Container::custom(move |_theme| widget::container::Appearance {
+                    icon_color: None,
                     text_color: None,
                     background: Some(background_color),
                     border_radius: 0.0.into(),
@@ -113,9 +114,9 @@ pub trait TabMessage: Clone {
     fn scrolled() -> Self;
 }
 
-pub struct Tab<'a, Message: TabMessage> {
+pub struct Tab<Message: TabMessage> {
     id: Id,
-    app_icon: Icon<'a>,
+    app_icon: Icon,
     title: String,
     font: Font,
     close_message: Option<Message>,
@@ -125,11 +126,11 @@ pub struct Tab<'a, Message: TabMessage> {
     active: bool,
 }
 
-impl<'a, Message: TabMessage> Tab<'a, Message> {
+impl<Message: TabMessage> Tab<Message> {
     pub fn new(title: impl Into<String>, app_id: impl Into<String>, id: Id) -> Self {
         Tab {
             id,
-            app_icon: icon(app_id.into(), 16),
+            app_icon: from_name(app_id.into()).size(16).icon(),
             title: title.into(),
             font: cosmic::font::FONT,
             close_message: None,
@@ -175,25 +176,27 @@ impl<'a, Message: TabMessage> Tab<'a, Message> {
         self
     }
 
-    pub(super) fn internal<Renderer>(self, idx: usize) -> TabInternal<'a, Message, Renderer>
+    pub(super) fn internal<'a, Renderer>(self, idx: usize) -> TabInternal<'a, Message, Renderer>
     where
         Renderer: cosmic::iced_core::Renderer + 'a,
         Renderer: cosmic::iced_core::text::Renderer<Font = Font>,
-        Renderer::Theme: ButtonStyleSheet<Style = theme::Button>,
+        Renderer::Theme: ButtonStyleSheet<Style = theme::iced::Button>,
         Renderer::Theme: ContainerStyleSheet,
         Renderer::Theme: RuleStyleSheet<Style = theme::Rule>,
         Renderer::Theme: TextStyleSheet,
         Message: 'a,
         widget::Button<'a, Message, Renderer>: Into<Element<'a, Message, Renderer>>,
         widget::Container<'a, Message, Renderer>: Into<Element<'a, Message, Renderer>>,
-        Icon<'a>: Into<Element<'a, Message, Renderer>>,
+        widget::Text<'a, Renderer>: Into<Element<'a, Message, Renderer>>,
+        Icon: Into<Element<'a, Message, Renderer>>,
     {
-        let mut close_button = icon("window-close-symbolic", 16)
-            .force_svg(true)
-            .style(theme::Svg::Symbolic)
+        let mut close_button = from_name("window-close-symbolic")
+            .size(16)
+            .prefer_svg(true)
+            .icon()
             .apply(widget::button)
             .padding(0)
-            .style(theme::Button::Text);
+            .style(theme::iced::Button::Text);
         if let Some(close_message) = self.close_message {
             close_button = close_button.on_press(close_message);
         }
@@ -207,16 +210,17 @@ impl<'a, Message: TabMessage> Tab<'a, Message> {
                 .padding([2, 4])
                 .center_y()
                 .into(),
-            text(self.title)
-                .size(14)
-                .font(self.font)
-                .horizontal_alignment(alignment::Horizontal::Left)
-                .vertical_alignment(alignment::Vertical::Center)
-                .apply(tab_text)
-                .background(self.background_theme.background_color())
-                .height(Length::Fill)
-                .width(Length::Fill)
-                .into(),
+            Element::<'a, Message, Renderer>::new(
+                text(self.title)
+                    .size(14)
+                    .font(self.font)
+                    .horizontal_alignment(alignment::Horizontal::Left)
+                    .vertical_alignment(alignment::Vertical::Center)
+                    .apply(tab_text)
+                    .background(self.background_theme.background_color())
+                    .height(Length::Fill)
+                    .width(Length::Fill),
+            ),
             close_button
                 .apply(widget::container)
                 .height(Length::Fill)
@@ -325,7 +329,7 @@ where
         renderer: &Renderer,
         operation: &mut dyn Operation<OperationOutputWrapper<Message>>,
     ) {
-        operation.container(None, &mut |operation| {
+        operation.container(None, layout.bounds(), &mut |operation| {
             self.elements
                 .iter()
                 .zip(&mut tree.children)
@@ -347,6 +351,7 @@ where
         renderer: &Renderer,
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
     ) -> event::Status {
         let status = self
             .elements
@@ -362,6 +367,7 @@ where
                     renderer,
                     clipboard,
                     shell,
+                    viewport,
                 )
             })
             .fold(event::Status::Ignored, event::Status::merge);
@@ -434,7 +440,9 @@ where
                 renderer,
                 theme,
                 &renderer::Style {
+                    icon_color: style.text_color.unwrap_or(renderer_style.text_color),
                     text_color: style.text_color.unwrap_or(renderer_style.text_color),
+                    scale_factor: renderer_style.scale_factor,
                 },
                 layout,
                 cursor,

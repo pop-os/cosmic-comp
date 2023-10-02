@@ -4,7 +4,7 @@ use cosmic::{
         gradient,
         layout::{Layout, Limits, Node},
         mouse::Cursor,
-        renderer,
+        renderer::{self, Renderer as IcedRenderer},
         widget::{Tree, Widget},
         Background, Color, Degrees, Gradient, Length, Point, Rectangle, Size,
     },
@@ -13,7 +13,7 @@ use cosmic::{
 
 pub struct TabText<'a, Message, Renderer>
 where
-    Renderer: cosmic::iced_core::Renderer,
+    Renderer: IcedRenderer,
     Renderer::Theme: TextStyleSheet,
 {
     text: Element<'a, Message, Renderer>,
@@ -26,7 +26,7 @@ pub fn tab_text<'a, Message, Renderer>(
     text: impl Into<Element<'a, Message, Renderer>>,
 ) -> TabText<'a, Message, Renderer>
 where
-    Renderer: cosmic::iced_core::Renderer,
+    Renderer: IcedRenderer,
     Renderer::Theme: TextStyleSheet,
 {
     TabText::new(text, Color::TRANSPARENT)
@@ -34,7 +34,7 @@ where
 
 impl<'a, Message, Renderer> TabText<'a, Message, Renderer>
 where
-    Renderer: cosmic::iced_core::Renderer,
+    Renderer: IcedRenderer,
     Renderer::Theme: TextStyleSheet,
 {
     pub fn new(text: impl Into<Element<'a, Message, Renderer>>, background: Color) -> Self {
@@ -66,7 +66,7 @@ where
 
 impl<'a, Message, Renderer> Widget<Message, Renderer> for TabText<'a, Message, Renderer>
 where
-    Renderer: cosmic::iced_core::Renderer,
+    Renderer: IcedRenderer,
     Renderer::Theme: TextStyleSheet,
 {
     fn width(&self) -> Length {
@@ -148,7 +148,7 @@ where
 
 impl<'a, Message, Renderer> Into<Element<'a, Message, Renderer>> for TabText<'a, Message, Renderer>
 where
-    Renderer: cosmic::iced_core::Renderer + 'a,
+    Renderer: IcedRenderer + 'a,
     Renderer::Theme: TextStyleSheet,
     Message: 'a,
 {

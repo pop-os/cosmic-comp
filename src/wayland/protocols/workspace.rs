@@ -211,11 +211,16 @@ where
         }
     }
 
-    fn destroyed(state: &mut D, _client: ClientId, resource: ObjectId, _data: &()) {
+    fn destroyed(
+        state: &mut D,
+        _client: ClientId,
+        resource: &ZcosmicWorkspaceManagerV1,
+        _data: &(),
+    ) {
         state
             .workspace_state_mut()
             .instances
-            .retain(|i| i.id() != resource);
+            .retain(|i| i != resource);
     }
 }
 
@@ -268,9 +273,14 @@ where
         }
     }
 
-    fn destroyed(state: &mut D, _client: ClientId, resource: ObjectId, _data: &WorkspaceGroupData) {
+    fn destroyed(
+        state: &mut D,
+        _client: ClientId,
+        resource: &ZcosmicWorkspaceGroupHandleV1,
+        _data: &WorkspaceGroupData,
+    ) {
         for group in &mut state.workspace_state_mut().groups {
-            group.instances.retain(|i| i.id() != resource)
+            group.instances.retain(|i| i != resource)
         }
     }
 }
@@ -361,10 +371,15 @@ where
         }
     }
 
-    fn destroyed(state: &mut D, _client: ClientId, resource: ObjectId, _data: &WorkspaceData) {
+    fn destroyed(
+        state: &mut D,
+        _client: ClientId,
+        resource: &ZcosmicWorkspaceHandleV1,
+        _data: &WorkspaceData,
+    ) {
         for group in &mut state.workspace_state_mut().groups {
             for workspace in &mut group.workspaces {
-                workspace.instances.retain(|i| i.id() != resource)
+                workspace.instances.retain(|i| i != resource)
             }
         }
     }

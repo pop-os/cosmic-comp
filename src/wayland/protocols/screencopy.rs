@@ -883,18 +883,18 @@ where
     fn destroyed(
         state: &mut D,
         _client: wayland_backend::server::ClientId,
-        resource: wayland_backend::server::ObjectId,
+        resource: &ZcosmicScreencopySessionV1,
         data: &SessionData,
     ) {
         if data.inner.lock().unwrap().is_cursor() {
             let session = CursorSession {
-                obj: SessionResource::Destroyed(resource),
+                obj: SessionResource::Destroyed(resource.id()),
                 data: data.clone(),
             };
             state.cursor_session_destroyed(session)
         } else {
             let session = Session {
-                obj: SessionResource::Destroyed(resource),
+                obj: SessionResource::Destroyed(resource.id()),
                 data: data.clone(),
             };
             state.session_destroyed(session)

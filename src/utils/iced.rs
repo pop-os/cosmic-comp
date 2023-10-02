@@ -15,19 +15,19 @@ use cosmic::{
         Command, Point as IcedPoint, Rectangle as IcedRectangle, Size as IcedSize,
     },
     iced_core::{clipboard::Null as NullClipboard, renderer::Style, Color},
-    iced_renderer::Backend as BackendWrapper,
+    iced_renderer::{graphics::Renderer as IcedGraphicsRenderer, Renderer as IcedRenderer},
     iced_runtime::{
         command::Action,
         program::{Program as IcedProgram, State},
         Debug,
     },
-    Renderer as IcedRenderer, Theme,
+    Theme,
 };
 use iced_tiny_skia::{
-    graphics::{damage, Primitive, Viewport},
-    Backend,
+    graphics::{damage, Viewport},
+    Backend, Primitive,
 };
-pub type Element<'a, Message> = cosmic::iced::Element<'a, Message, IcedRenderer>;
+pub type Element<'a, Message> = cosmic::iced::Element<'a, Message, IcedRenderer<Theme>>;
 
 use ordered_float::OrderedFloat;
 use smithay::{
@@ -98,7 +98,7 @@ pub trait Program {
     fn update(
         &mut self,
         message: Self::Message,
-        loop_handle: &LoopHandle<'static, crate::state::Data>,
+        loop_handle: &LoopHandle<'static, crate::state::State>,
     ) -> Command<Self::Message> {
         let _ = (message, loop_handle);
         Command::none()
@@ -119,10 +119,10 @@ pub trait Program {
     }
 }
 
-struct ProgramWrapper<P: Program>(P, LoopHandle<'static, crate::state::Data>);
+struct ProgramWrapper<P: Program>(P, LoopHandle<'static, crate::state::State>);
 impl<P: Program> IcedProgram for ProgramWrapper<P> {
     type Message = <P as Program>::Message;
-    type Renderer = IcedRenderer;
+    type Renderer = IcedRenderer<Theme>;
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         self.0.update(message, &self.1)
@@ -145,12 +145,12 @@ struct IcedElementInternal<P: Program + Send + 'static> {
 
     // iced
     theme: Theme,
-    renderer: IcedRenderer,
+    renderer: IcedRenderer<Theme>,
     state: State<ProgramWrapper<P>>,
     debug: Debug,
 
     // futures
-    handle: LoopHandle<'static, crate::state::Data>,
+    handle: LoopHandle<'static, crate::state::State>,
     scheduler: Scheduler<<P as Program>::Message>,
     executor_token: Option<RegistrationToken>,
     rx: Receiver<<P as Program>::Message>,
@@ -171,7 +171,7 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
             tracing::warn!("Missing force_update call");
         }
         let mut renderer =
-            IcedRenderer::new(BackendWrapper::TinySkia(Backend::new(Default::default())));
+            IcedRenderer::TinySkia(IcedGraphicsRenderer::new(Backend::new(Default::default())));
         let mut debug = Debug::new();
         let state = State::new(
             Id(0),
@@ -228,11 +228,11 @@ impl<P: Program + Send + 'static> IcedElement<P> {
     pub fn new(
         program: P,
         size: impl Into<Size<i32, Logical>>,
-        handle: LoopHandle<'static, crate::state::Data>,
+        handle: LoopHandle<'static, crate::state::State>,
     ) -> IcedElement<P> {
         let size = size.into();
         let mut renderer =
-            IcedRenderer::new(BackendWrapper::TinySkia(Backend::new(Default::default())));
+            IcedRenderer::TinySkia(IcedGraphicsRenderer::new(Backend::new(Default::default())));
         let mut debug = Debug::new();
 
         let state = State::new(
@@ -276,7 +276,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         func(&internal.state.program().0)
     }
 
-    pub fn loop_handle(&self) -> LoopHandle<'static, crate::state::Data> {
+    pub fn loop_handle(&self) -> LoopHandle<'static, crate::state::State> {
         self.0.lock().unwrap().handle.clone()
     }
 
@@ -353,6 +353,8 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
                 &mut self.renderer,
                 &self.theme,
                 &Style {
+                    scale_factor: 1.0, //TODO: why is this
+                    icon_color: self.theme.cosmic().on_bg_color().into(),
                     text_color: self.theme.cosmic().on_bg_color().into(),
                 },
                 &mut NullClipboard,
@@ -738,7 +740,7 @@ where
                 .to_i32_round();
 
             if size.w > 0 && size.h > 0 {
-                let renderer = &mut internal_ref.renderer;
+                let IcedRenderer::TinySkia(renderer) = &mut internal_ref.renderer;
                 let state_ref = &internal_ref.state;
                 let mut clip_mask = tiny_skia::Mask::new(size.w as u32, size.h as u32).unwrap();
                 let overlay = internal_ref.debug.overlay();
@@ -751,7 +753,6 @@ where
                                 .expect("Failed to create pixel map");
 
                         renderer.with_primitives(|backend, primitives| {
-                            let BackendWrapper::TinySkia(ref mut backend) = backend;
                             let background_color = state_ref.program().0.background_color();
                             let bounds = IcedSize::new(size.w as u32, size.h as u32);
                             let viewport = Viewport::with_physical_size(bounds, scale.x);

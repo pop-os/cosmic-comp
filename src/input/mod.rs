@@ -25,7 +25,7 @@ use smithay::{
     },
     desktop::{layer_map_for_output, space::SpaceElement, WindowSurfaceType},
     input::{
-        keyboard::{keysyms, FilterResult, KeysymHandle, XkbConfig},
+        keyboard::{FilterResult, KeysymHandle, XkbConfig},
         pointer::{
             AxisFrame, ButtonEvent, CursorImageStatus, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
@@ -51,6 +51,7 @@ use smithay::{
 #[cfg(not(feature = "debug"))]
 use tracing::info;
 use tracing::{error, trace, warn};
+use xkbcommon::xkb::{Keycode, Keysym};
 
 use std::{
     any::Any,
@@ -58,7 +59,6 @@ use std::{
     collections::HashMap,
     time::{Duration, Instant},
 };
-use xkbcommon::xkb::KEY_XF86Switch_VT_12;
 
 crate::utils::id_gen!(next_seat_id, SEAT_ID, SEAT_IDS);
 
@@ -66,7 +66,7 @@ crate::utils::id_gen!(next_seat_id, SEAT_ID, SEAT_IDS);
 pub struct SeatId(pub usize);
 pub struct ActiveOutput(pub RefCell<Output>);
 #[derive(Default)]
-pub struct SupressedKeys(RefCell<Vec<(u32, Option<RegistrationToken>)>>);
+pub struct SupressedKeys(RefCell<Vec<(Keycode, Option<RegistrationToken>)>>);
 #[derive(Default, Debug)]
 pub struct ModifiersShortcutQueue(RefCell<Option<KeyPattern>>);
 #[derive(Default)]
@@ -321,8 +321,8 @@ impl State {
                                                             if let Some(new_workspace) = other_w.iter_mut().find(|w| w.handle == new_descriptor.handle) {
                                                                 if let Some(focus) = TilingLayout::swap_trees(&mut old_workspace.tiling_layer, Some(&mut new_workspace.tiling_layer), &old_descriptor, &new_descriptor, &mut data.common.shell.toplevel_info_state) {
                                                                     let seat = seat.clone();
-                                                                    data.common.event_loop_handle.insert_idle(move |data| {
-                                                                        Common::set_focus(&mut data.state, Some(&focus), &seat, None);
+                                                                    data.common.event_loop_handle.insert_idle(move |state| {
+                                                                        Common::set_focus(state, Some(&focus), &seat, None);
                                                                     });
                                                                 }
                                                                 old_workspace.refresh_focus_stack();
@@ -334,8 +334,8 @@ impl State {
                                                             if let Some(focus) = TilingLayout::swap_trees(&mut workspace.tiling_layer, None, &old_descriptor, &new_descriptor, &mut data.common.shell.toplevel_info_state) {
                                                                 std::mem::drop(spaces);
                                                                 let seat = seat.clone();
-                                                                data.common.event_loop_handle.insert_idle(move |data| {
-                                                                    Common::set_focus(&mut data.state, Some(&focus), &seat, None);
+                                                                data.common.event_loop_handle.insert_idle(move |state| {
+                                                                    Common::set_focus(state, Some(&focus), &seat, None);
                                                                 });
                                                             }
                                                             workspace.refresh_focus_stack();
@@ -352,8 +352,8 @@ impl State {
                                                             if new_workspace.tiling_layer.windows().next().is_none() {
                                                                 if let Some(focus) = TilingLayout::move_tree(&mut old_workspace.tiling_layer, &mut new_workspace.tiling_layer, &current_output, &new_workspace.handle, &seat, new_workspace.focus_stack.get(&seat).iter(), old_descriptor, &mut data.common.shell.toplevel_info_state) {
                                                                     let seat = seat.clone();
-                                                                    data.common.event_loop_handle.insert_idle(move |data| {
-                                                                        Common::set_focus(&mut data.state, Some(&focus), &seat, None);
+                                                                    data.common.event_loop_handle.insert_idle(move |state| {
+                                                                        Common::set_focus(state, Some(&focus), &seat, None);
                                                                     });
                                                                 }
                                                                 old_workspace.refresh_focus_stack();
@@ -401,10 +401,10 @@ impl State {
                                         data.common.shell.resize_mode()
                                     {
                                         let resize_edge = match handle.modified_sym() {
-                                            keysyms::KEY_Left | keysyms::KEY_h | keysyms::KEY_H => Some(ResizeEdge::LEFT),
-                                            keysyms::KEY_Down | keysyms::KEY_j | keysyms::KEY_J => Some(ResizeEdge::BOTTOM),
-                                            keysyms::KEY_Up | keysyms::KEY_k | keysyms::KEY_K => Some(ResizeEdge::TOP),
-                                            keysyms::KEY_Right | keysyms::KEY_l | keysyms::KEY_L => Some(ResizeEdge::RIGHT),
+                                            Keysym::Left | Keysym::h | Keysym::H => Some(ResizeEdge::LEFT),
+                                            Keysym::Down | Keysym::j | Keysym::J => Some(ResizeEdge::BOTTOM),
+                                            Keysym::Up | Keysym::k | Keysym::K => Some(ResizeEdge::TOP),
+                                            Keysym::Right | Keysym::l | Keysym::L => Some(ResizeEdge::RIGHT),
                                             _ => None,
                                         };
 
@@ -415,7 +415,7 @@ impl State {
                                             let action = Action::_ResizingInternal(direction, edge, state);
                                             let key_pattern = KeyPattern {
                                                 modifiers: modifiers.clone().into(),
-                                                key: Some(handle.raw_code()),
+                                                key: Some(Keysym::new(handle.raw_code().raw())),
                                             };
 
                                             if state == KeyState::Released {
@@ -430,9 +430,9 @@ impl State {
                                                     let action_clone = action.clone();
                                                     let key_pattern_clone = key_pattern.clone();
                                                     let start = Instant::now();
-                                                    loop_handle.insert_source(Timer::from_duration(Duration::from_millis(200)), move |current, _, data| {
+                                                    loop_handle.insert_source(Timer::from_duration(Duration::from_millis(200)), move |current, _, state| {
                                                         let duration = current.duration_since(start).as_millis();
-                                                        data.state.handle_action(action_clone.clone(), &seat_clone, serial, time.overflowing_add(duration as u32).0, key_pattern_clone.clone(), None);
+                                                        state.handle_action(action_clone.clone(), &seat_clone, serial, time.overflowing_add(duration as u32).0, key_pattern_clone.clone(), None);
                                                         calloop::timer::TimeoutAction::ToDuration(Duration::from_millis(25))
                                                     }).ok()
                                                 } else { None };
@@ -482,11 +482,11 @@ impl State {
 
                                     // Handle VT switches
                                     if state == KeyState::Pressed
-                                        && (keysyms::KEY_XF86Switch_VT_1..=KEY_XF86Switch_VT_12)
-                                            .contains(&handle.modified_sym())
+                                        && (Keysym::XF86_Switch_VT_1.raw() ..= Keysym::XF86_Switch_VT_12.raw())
+                                            .contains(&handle.modified_sym().raw())
                                     {
                                         if let Err(err) = data.backend.kms().switch_vt(
-                                            (handle.modified_sym() - keysyms::KEY_XF86Switch_VT_1
+                                            (handle.modified_sym().raw() - Keysym::XF86_Switch_VT_1.raw()
                                                 + 1)
                                                 as i32,
                                         ) {

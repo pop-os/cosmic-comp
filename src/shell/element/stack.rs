@@ -8,14 +8,13 @@ use crate::{
     utils::prelude::SeatExt,
     wayland::handlers::screencopy::ScreencopySessions,
 };
-use apply::Apply;
 use calloop::LoopHandle;
 use cosmic::{
     iced::{id::Id, widget as iced_widget},
     iced_core::{Background, BorderRadius, Color, Length},
     iced_runtime::Command,
     iced_widget::scrollable::AbsoluteOffset,
-    theme, widget as cosmic_widget, Element as CosmicElement,
+    theme, widget as cosmic_widget, Apply, Element as CosmicElement,
 };
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
 use once_cell::sync::Lazy;
@@ -122,14 +121,14 @@ pub enum Focus {
 
 pub enum MoveResult {
     Handled,
-    MoveOut(CosmicSurface, LoopHandle<'static, crate::state::Data>),
+    MoveOut(CosmicSurface, LoopHandle<'static, crate::state::State>),
     Default,
 }
 
 impl CosmicStack {
     pub fn new<I: Into<CosmicSurface>>(
         windows: impl Iterator<Item = I>,
-        handle: LoopHandle<'static, crate::state::Data>,
+        handle: LoopHandle<'static, crate::state::State>,
     ) -> CosmicStack {
         let windows = windows.map(Into::into).collect::<Vec<_>>();
         assert!(!windows.is_empty());
@@ -498,7 +497,7 @@ impl CosmicStack {
             .with_program(|p| p.group_focused.store(true, Ordering::SeqCst));
     }
 
-    pub(in super::super) fn loop_handle(&self) -> LoopHandle<'static, crate::state::Data> {
+    pub(in super::super) fn loop_handle(&self) -> LoopHandle<'static, crate::state::State> {
         self.0.loop_handle()
     }
 
@@ -603,7 +602,7 @@ impl Program for CosmicStackInternal {
     fn update(
         &mut self,
         message: Self::Message,
-        loop_handle: &LoopHandle<'static, crate::state::Data>,
+        loop_handle: &LoopHandle<'static, crate::state::State>,
     ) -> Command<Self::Message> {
         match message {
             Message::DragStart => {
@@ -612,8 +611,8 @@ impl Program for CosmicStackInternal {
                         [self.active.load(Ordering::SeqCst)]
                     .wl_surface()
                     {
-                        loop_handle.insert_idle(move |data| {
-                            Shell::move_request(&mut data.state, &surface, &seat, serial);
+                        loop_handle.insert_idle(move |state| {
+                            Shell::move_request(state, &surface, &seat, serial);
                         });
                     }
                 }
@@ -652,8 +651,10 @@ impl Program for CosmicStackInternal {
         let group_focused = self.group_focused.load(Ordering::SeqCst);
 
         let elements = vec![
-            cosmic_widget::icon("window-stack-symbolic", 16)
-                .force_svg(true)
+            cosmic_widget::icon::from_name("window-stack-symbolic")
+                .size(16)
+                .prefer_svg(true)
+                .icon()
                 .style(if group_focused {
                     theme::Svg::custom(|theme| iced_widget::svg::Appearance {
                         color: Some(if theme.cosmic().is_dark {
@@ -663,7 +664,7 @@ impl Program for CosmicStackInternal {
                         }),
                     })
                 } else {
-                    theme::Svg::Symbolic
+                    theme::Svg::Default
                 })
                 .apply(iced_widget::container)
                 .padding([4, 24])
@@ -712,6 +713,7 @@ impl Program for CosmicStackInternal {
             .center_y()
             .style(if self.group_focused.load(Ordering::SeqCst) {
                 theme::Container::custom(|theme| iced_widget::container::Appearance {
+                    icon_color: Some(Color::from(theme.cosmic().background.on)),
                     text_color: Some(Color::from(theme.cosmic().background.on)),
                     background: Some(Background::Color(theme.cosmic().accent_color().into())),
                     border_radius: BorderRadius::from([8.0, 8.0, 0.0, 0.0]),
@@ -720,6 +722,7 @@ impl Program for CosmicStackInternal {
                 })
             } else {
                 theme::Container::custom(|theme| iced_widget::container::Appearance {
+                    icon_color: Some(Color::from(theme.cosmic().background.on)),
                     text_color: Some(Color::from(theme.cosmic().background.on)),
                     background: Some(Background::Color(theme.cosmic().palette.neutral_3.into())),
                     border_radius: BorderRadius::from([8.0, 8.0, 0.0, 0.0]),
@@ -1080,9 +1083,9 @@ impl PointerTarget<State> for CosmicStack {
                                     }
 
                                     let seat = seat.clone();
-                                    data.common.event_loop_handle.insert_idle(move |data| {
+                                    data.common.event_loop_handle.insert_idle(move |state| {
                                         seat.get_pointer().unwrap().set_grab(
-                                            &mut data.state,
+                                            state,
                                             grab,
                                             event.serial,
                                             smithay::input::pointer::Focus::Clear,

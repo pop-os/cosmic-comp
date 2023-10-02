@@ -430,7 +430,7 @@ impl Workspace {
         &mut self,
         window: &CosmicSurface,
         output: &Output,
-        evlh: LoopHandle<'static, crate::state::Data>,
+        evlh: LoopHandle<'static, crate::state::State>,
     ) {
         if self.fullscreen.contains_key(output) {
             return;
@@ -459,7 +459,7 @@ impl Workspace {
         &mut self,
         window: &CosmicSurface,
         output: &Output,
-        evlh: LoopHandle<'static, crate::state::Data>,
+        evlh: LoopHandle<'static, crate::state::State>,
     ) {
         if self
             .fullscreen
@@ -484,7 +484,7 @@ impl Workspace {
         window: &'a CosmicSurface,
         output: &Output,
         exclusive: bool,
-        evlh: LoopHandle<'static, crate::state::Data>,
+        evlh: LoopHandle<'static, crate::state::State>,
     ) {
         if let Some(mapped) = self
             .mapped()
@@ -635,7 +635,7 @@ impl Workspace {
         &mut self,
         window: &CosmicSurface,
         output: &Output,
-        evlh: LoopHandle<'static, crate::state::Data>,
+        evlh: LoopHandle<'static, crate::state::State>,
     ) {
         if self.fullscreen.contains_key(output) {
             self.unmaximize_request(window);

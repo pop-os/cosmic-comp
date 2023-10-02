@@ -19,10 +19,7 @@ use smithay::{
 use std::sync::Arc;
 use tracing::{info, warn};
 
-use crate::{
-    state::{ClientState, Data},
-    utils::prelude::*,
-};
+use crate::state::{ClientState, State};
 
 #[derive(Debug)]
 pub struct Socket {
@@ -96,10 +93,10 @@ impl State {
         let token = self
             .common
             .event_loop_handle
-            .insert_source(listener, move |client_stream, _, data: &mut Data| {
-                if let Err(err) = data.display.handle().insert_client(
+            .insert_source(listener, move |client_stream, _, state: &mut State| {
+                if let Err(err) = state.common.display_handle.insert_client(
                     client_stream,
-                    Arc::new(data.state.new_client_state_with_node(render_node)),
+                    Arc::new(state.new_client_state_with_node(render_node)),
                 ) {
                     warn!(
                         socket_name = socket_name_clone,

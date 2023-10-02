@@ -11,7 +11,7 @@ use smithay::{
             zwlr_output_mode_v1::{self, ZwlrOutputModeV1},
         },
         wayland_server::{
-            backend::{ClientId, GlobalId, ObjectId},
+            backend::{ClientId, GlobalId},
             protocol::wl_output::WlOutput,
             Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
         },
@@ -247,9 +247,9 @@ where
         }
     }
 
-    fn destroyed(state: &mut D, _client: ClientId, resource: ObjectId, _data: &Output) {
+    fn destroyed(state: &mut D, _client: ClientId, resource: &ZwlrOutputHeadV1, _data: &Output) {
         for instance in &mut state.output_configuration_state().instances {
-            instance.heads.retain(|h| h.head.id() != resource);
+            instance.heads.retain(|h| &h.head != resource);
         }
     }
 }
