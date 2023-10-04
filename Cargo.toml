@@ -33,7 +33,7 @@ indexmap = "2.0"
 xdg = "^2.1"
 ron = "0.8"
 libsystemd = { version = "0.6", optional = true }
-wayland-backend = "0.3.0"
+wayland-backend = "0.3.2"
 wayland-scanner = "0.31.0"
 cosmic-comp-config = { path = "cosmic-comp-config" }
 cosmic-config = { git = "https://github.com/pop-os/libcosmic/", rev = "f91287d", features = ["calloop"] }
@@ -88,3 +88,6 @@ lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
 smithay = { git = "https://github.com/smithay//smithay", rev = "74ef59a3f" }
+
+[patch.crates-io]
+calloop = { git = "https://github.com/Smithay/calloop", branch = "zombies" }

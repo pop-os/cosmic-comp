@@ -370,8 +370,7 @@ dependencies = [
 [[package]]
 name = "calloop"
 version = "0.12.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aadd183e815348c0649051b1c43418643208f8ed13c8a84da7215b4e1cf42714"
+source = "git+https://github.com/Smithay/calloop?branch=zombies#9c76b4f69d80013d9ed910cd7f2c1d828f46c14e"
 dependencies = [
  "async-task",
  "bitflags 2.4.0",
