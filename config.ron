@@ -65,13 +65,11 @@
         (modifiers: [Super], key: "r"): Resizing(Outwards),
         (modifiers: [Super, Shift], key: "r"): Resizing(Inwards),
 
-        //TODO: ability to select default web browser
-        (modifiers: [Super], key: "b"): Spawn("firefox"),
-        //TODO: ability to select default file browser
-        (modifiers: [Super], key: "f"): Spawn("nautilus"),
+        (modifiers: [Super], key: "b"): Spawn("xdg-open http://"),
+        (modifiers: [Super], key: "f"): Spawn("xdg-open ~"),
         //TODO: ability to select default terminal
         (modifiers: [Super], key: "t"): Spawn("gnome-terminal"),
-        
+
         (modifiers: [Super], key: "a"): Spawn("busctl --user call com.system76.CosmicAppLibrary /com/system76/CosmicAppLibrary com.system76.CosmicAppLibrary Toggle"),
         (modifiers: [Super], key: "w"): Spawn("busctl --user call com.system76.CosmicWorkspaces /com/system76/CosmicWorkspaces com.system76.CosmicWorkspaces Toggle"),
         (modifiers: [Super], key: "slash"): Spawn("busctl --user call com.system76.CosmicLauncher /com/system76/CosmicLauncher com.system76.CosmicLauncher Toggle"),
