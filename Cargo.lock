@@ -370,13 +370,13 @@ dependencies = [
 [[package]]
 name = "calloop"
 version = "0.12.2"
-source = "git+https://github.com/Smithay/calloop?branch=zombies#9c76b4f69d80013d9ed910cd7f2c1d828f46c14e"
+source = "git+https://github.com/Smithay/calloop?branch=zombies#9a4fd9d85b35e03213983f727e6fe49367abab51"
 dependencies = [
  "async-task",
  "bitflags 2.4.0",
  "log",
  "polling",
- "rustix 0.38.15",
+ "rustix 0.38.17",
  "slab",
  "thiserror",
 ]
@@ -3294,7 +3294,7 @@ dependencies = [
  "cfg-if",
  "concurrent-queue",
  "pin-project-lite",
- "rustix 0.38.15",
+ "rustix 0.38.17",
  "tracing",
  "windows-sys 0.48.0",
 ]
@@ -3745,9 +3745,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "0.38.15"
+version = "0.38.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2f9da0cbd88f9f09e7814e388301c8414c51c62aa6ce1e4b5c551d49d96e531"
+checksum = "f25469e9ae0f3d0047ca8b93fc56843f38e6774f0914a107ff8b41be8be8e0b7"
 dependencies = [
  "bitflags 2.4.0",
  "errno",
@@ -4191,7 +4191,7 @@ dependencies = [
  "cfg-if",
  "fastrand 2.0.1",
  "redox_syscall 0.3.5",
- "rustix 0.38.15",
+ "rustix 0.38.17",
  "windows-sys 0.48.0",
 ]
 
