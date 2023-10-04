@@ -9,7 +9,7 @@ use crate::{
     },
     state::{Common, Fps},
 };
-use egui::{Color32, Vec2};
+use egui::{load::SizedTexture, Color32, Vec2};
 use smithay::{
     backend::{
         drm::DrmNode,
@@ -62,7 +62,7 @@ pub fn fps_ui(
     area: Rectangle<i32, Logical>,
     scale: f64,
 ) -> Result<TextureRenderElement<GlesTexture>, GlesError> {
-    use egui::widgets::plot::{Bar, BarChart, Legend, Plot};
+    use egui_plot::{Bar, BarChart, Legend, Plot};
 
     let (max, min, avg, avg_fps) = (
         fps.max_frametime().as_secs_f64(),
@@ -176,7 +176,7 @@ pub fn fps_ui(
                                     {
                                         let factor = resp.rect.height() / size.y;
                                         size = Vec2::from([size.x * factor, resp.rect.height()]);
-                                        ui.image(*texture_id, size);
+                                        ui.image(SizedTexture::new(*texture_id, size));
                                     }
                                 }
                             });
