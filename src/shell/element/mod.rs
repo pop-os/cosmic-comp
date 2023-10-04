@@ -65,7 +65,7 @@ pub mod stack_hover;
 pub mod swap_indicator;
 
 #[cfg(feature = "debug")]
-use egui::plot::{Corner, Legend, Plot, PlotPoints, Polygon};
+use egui_plot::{Corner, Legend, Plot, PlotPoints, Polygon};
 #[cfg(feature = "debug")]
 use smithay::backend::renderer::{element::texture::TextureRenderElement, gles::GlesTexture};
 #[cfg(feature = "debug")]
