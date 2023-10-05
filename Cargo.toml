@@ -90,4 +90,4 @@ lto = "fat"
 smithay = { git = "https://github.com/smithay//smithay", rev = "74ef59a3f" }
 
 [patch.crates-io]
-calloop = { git = "https://github.com/Smithay/calloop", branch = "zombies" }
+calloop = { git = "https://github.com/Smithay/calloop", rev = "3cb03fb80" }
