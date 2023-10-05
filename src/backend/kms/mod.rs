@@ -465,6 +465,7 @@ impl State {
                             state.backend.kms().devices.get_mut(&drm_node)
                         {
                             if let Some(surface) = device.surfaces.get_mut(&crtc) {
+                                trace!(?crtc, "VBlank");
                                 #[cfg(feature = "debug")]
                                 surface.fps.displayed();
 
@@ -1539,6 +1540,7 @@ impl KmsState {
 
                             match result {
                                 Ok(_) => {
+                                    trace!(?crtc, "Frame pending");
                                     surface.dirty = false;
                                     surface.pending = true;
                                     surface.scheduled = false;
@@ -1564,6 +1566,7 @@ impl KmsState {
                         TimeoutAction::Drop
                     },
                 )?);
+                trace!(?surface.render_timer_token, ?crtc, "Frame scheduled");
                 surface.scheduled = true;
             } else {
                 if let Some(sessions) = screencopy_sessions {
