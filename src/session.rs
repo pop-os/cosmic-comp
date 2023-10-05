@@ -133,6 +133,9 @@ pub fn setup_socket(handle: LoopHandle<State>, state: &State) -> Result<()> {
                                             Ok((_, received_count)) => {
                                                 assert_eq!(received_count, count);
                                                 for fd in fds.into_iter().take(received_count) {
+                                                    if fd == -1 {
+                                                        continue;
+                                                    }
                                                     let stream = unsafe { UnixStream::from_raw_fd(fd) };
                                                     if let Err(err) = state.common.display_handle.insert_client(stream, Arc::new(state.new_privileged_client_state())) {
                                                         warn!(?err, "Failed to add privileged client to display");
