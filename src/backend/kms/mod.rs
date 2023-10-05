@@ -1542,6 +1542,7 @@ impl KmsState {
                                     surface.dirty = false;
                                     surface.pending = true;
                                     surface.scheduled = false;
+                                    surface.render_timer_token = None;
                                     return TimeoutAction::Drop;
                                 }
                                 Err(err) => {
