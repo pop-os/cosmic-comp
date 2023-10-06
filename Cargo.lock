@@ -370,7 +370,7 @@ dependencies = [
 [[package]]
 name = "calloop"
 version = "0.12.2"
-source = "git+https://github.com/Smithay/calloop?rev=3cb03fb80#3cb03fb80be39904b8e8b9b319862618341840d7"
+source = "git+https://github.com/Smithay/calloop?rev=71b6e633b1#71b6e633b199cd4a2b469f6286970fca7a368e14"
 dependencies = [
  "async-task",
  "bitflags 2.4.0",
