@@ -104,8 +104,7 @@ impl FloatingLayout {
 
         if let Some(size) = last_geometry.map(|g| g.size) {
             win_geo.size = size;
-        }
-        {
+        } else {
             let (min_size, max_size) = (
                 mapped.min_size().unwrap_or((0, 0).into()),
                 mapped.max_size().unwrap_or((0, 0).into()),
