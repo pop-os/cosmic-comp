@@ -110,9 +110,12 @@ impl FloatingLayout {
                 mapped.min_size().unwrap_or((0, 0).into()),
                 mapped.max_size().unwrap_or((0, 0).into()),
             );
-            if win_geo.size.w > geometry.size.w / 3 * 2 {
+            if win_geo.size.w > max_size.w
+                || win_geo.size.w < min_size.w
+                || win_geo.size.w > geometry.size.w
+            {
                 // try a more reasonable size
-                let mut width = geometry.size.w / 3 * 2;
+                let mut width = win_geo.size.w;
                 if max_size.w != 0 {
                     // don't go larger then the max_size ...
                     width = std::cmp::min(max_size.w, width);
@@ -124,9 +127,12 @@ impl FloatingLayout {
                 // but no matter the supported sizes, don't be larger than our non-exclusive-zone
                 win_geo.size.w = std::cmp::min(width, geometry.size.w);
             }
-            if win_geo.size.h > geometry.size.h / 3 * 2 {
+            if win_geo.size.h > max_size.h
+                || win_geo.size.h < min_size.h
+                || win_geo.size.h > geometry.size.h
+            {
                 // try a more reasonable size
-                let mut height = geometry.size.h / 3 * 2;
+                let mut height = win_geo.size.h;
                 if max_size.h != 0 {
                     // don't go larger then the max_size ...
                     height = std::cmp::min(max_size.h, height);
