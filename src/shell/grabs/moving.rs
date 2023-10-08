@@ -61,6 +61,7 @@ pub struct MoveGrabState {
 }
 
 impl MoveGrabState {
+    #[profiling::function]
     pub fn render<I, R>(
         &self,
         renderer: &mut R,

@@ -1095,6 +1095,7 @@ impl FloatingLayout {
         self.mapped().flat_map(|e| e.windows().map(|(w, _)| w))
     }
 
+    #[profiling::function]
     pub fn refresh(&mut self) {
         #[cfg(feature = "debug")]
         puffin::profile_function!();
@@ -1150,6 +1151,7 @@ impl FloatingLayout {
         self.refresh(); //fixup any out of bounds elements
     }
 
+    #[profiling::function]
     pub fn render<R>(
         &self,
         renderer: &mut R,

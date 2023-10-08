@@ -389,6 +389,7 @@ pub enum CursorMode {
     All,
 }
 
+#[profiling::function]
 pub fn cursor_elements<'frame, E, R>(
     renderer: &mut R,
     state: &Common,
@@ -464,6 +465,7 @@ where
     elements
 }
 
+#[profiling::function]
 pub fn workspace_elements<R>(
     _gpu: Option<&DrmNode>,
     renderer: &mut R,
@@ -965,6 +967,7 @@ where
     }
 }
 
+#[profiling::function]
 pub fn render_output<R, Target, OffTarget, Source>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,
@@ -1020,6 +1023,7 @@ where
     result
 }
 
+#[profiling::function]
 pub fn render_workspace<R, Target, OffTarget, Source>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,

@@ -58,6 +58,7 @@ xdg = "^2.1"
 xdg-user = "0.2.1"
 xkbcommon = "0.7"
 zbus = "3.15.0"
+profiling = { version = "1.0" }
 
 [dependencies.id_tree]
 branch = "feature/copy_clone"
@@ -96,6 +97,7 @@ rev = "cdc652e0"
 debug = ["egui", "egui_plot", "smithay-egui", "renderdoc", "puffin", "puffin_egui", "anyhow/backtrace"]
 default = ["systemd"]
 systemd = ["libsystemd"]
+profile-with-tracy = ["profiling/profile-with-tracy"]
 
 [profile.dev]
 lto = "thin"

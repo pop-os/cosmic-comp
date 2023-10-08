@@ -51,6 +51,7 @@ pub struct WinitState {
 }
 
 impl WinitState {
+    #[profiling::function]
     pub fn render_output(&mut self, state: &mut Common) -> Result<()> {
         self.backend
             .bind()
@@ -197,6 +198,7 @@ pub fn init_backend(
                     error!(?err, "Failed to render frame.");
                     render_ping.ping();
                 }
+                profiling::finish_frame!();
             })
             .map_err(|_| anyhow::anyhow!("Failed to init eventloop timer for winit"))?,
     );

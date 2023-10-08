@@ -2303,6 +2303,7 @@ impl TilingLayout {
         self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
     }
 
+    #[profiling::function]
     pub fn refresh(&mut self) {
         #[cfg(feature = "debug")]
         puffin::profile_function!();
@@ -2934,6 +2935,7 @@ impl TilingLayout {
         }
     }
 
+    #[profiling::function]
     fn update_positions(
         output: &Output,
         tree: &mut Tree<Data>,
@@ -3801,6 +3803,7 @@ impl TilingLayout {
         }
     }
 
+    #[profiling::function]
     pub fn render<R>(
         &self,
         renderer: &mut R,

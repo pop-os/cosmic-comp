@@ -286,6 +286,7 @@ impl Workspace {
         }
     }
 
+    #[profiling::function]
     pub fn refresh(&mut self, xdg_activation_state: &XdgActivationState) {
         #[cfg(feature = "debug")]
         puffin::profile_function!();
@@ -1059,6 +1060,7 @@ impl Workspace {
         }
     }
 
+    #[profiling::function]
     pub fn render<'a, R>(
         &self,
         renderer: &mut R,

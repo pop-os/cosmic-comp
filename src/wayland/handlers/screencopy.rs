@@ -593,6 +593,7 @@ where
     Ok(())
 }
 
+#[profiling::function]
 pub fn render_session<F, R>(
     node: Option<DrmNode>,
     renderer: &mut R,
@@ -637,6 +638,7 @@ where
     }
 }
 
+#[profiling::function]
 pub fn render_output_to_buffer(
     state: &mut State,
     session: &Session,
@@ -767,6 +769,7 @@ pub fn render_output_to_buffer(
     }
 }
 
+#[profiling::function]
 pub fn render_workspace_to_buffer(
     state: &mut State,
     session: &Session,
@@ -916,6 +919,7 @@ smithay::render_elements! {
     CursorElement=cursor::CursorRenderElement<R>,
 }
 
+#[profiling::function]
 pub fn render_window_to_buffer(
     state: &mut State,
     session: &Session,
