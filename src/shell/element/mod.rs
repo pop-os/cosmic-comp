@@ -847,6 +847,7 @@ impl SpaceElement for CosmicMapped {
     fn z_index(&self) -> u8 {
         SpaceElement::z_index(&self.element)
     }
+    #[profiling::function]
     fn refresh(&self) {
         SpaceElement::refresh(&self.element)
     }

@@ -358,6 +358,7 @@ impl<P: Program + Send + 'static + Clone> IcedElement<P> {
 }
 
 impl<P: Program + Send + 'static> IcedElementInternal<P> {
+    #[profiling::function]
     fn update(&mut self, mut force: bool) -> Vec<Action<<P as Program>::Message>> {
         while let Ok(message) = self.rx.try_recv() {
             self.state.queue_message(message);
@@ -691,6 +692,7 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
         RenderZindex::Shell as u8
     }
 
+    #[profiling::function]
     fn refresh(&self) {
         let mut internal = self.0.lock().unwrap();
         // makes partial borrows easier

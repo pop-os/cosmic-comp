@@ -1153,6 +1153,7 @@ fn get_surface_dmabuf_feedback(
 }
 
 impl Surface {
+    #[profiling::function]
     pub fn render_output(
         &mut self,
         api: &mut GpuManager<GbmGlesBackend<GlowRenderer, DrmDeviceFd>>,
@@ -1359,6 +1360,7 @@ impl KmsState {
         self.session.change_vt(num).map_err(Into::into)
     }
 
+    #[profiling::function]
     pub fn apply_config_for_output(
         &mut self,
         output: &Output,
@@ -1587,6 +1589,7 @@ impl KmsState {
         Err(last_err)
     }
 
+    #[profiling::function]
     pub fn schedule_render(
         &mut self,
         loop_handle: &LoopHandle<'_, State>,
@@ -1626,6 +1629,7 @@ impl KmsState {
                         )
                     },
                     move |_time, _, state| {
+                        profiling::scope!("render_timer");
                         let backend = state.backend.kms();
                         let (mut device, mut other) = backend
                             .devices
@@ -1665,6 +1669,8 @@ impl KmsState {
                                     screencopy_sessions.as_deref(),
                                 )
                             };
+
+                            profiling::finish_frame!();
 
                             match result {
                                 Ok(_) => {

@@ -1515,6 +1515,7 @@ impl Shell {
         }
     }
 
+    #[profiling::function]
     pub fn refresh(&mut self) {
         #[cfg(feature = "debug")]
         puffin::profile_function!();

@@ -490,11 +490,13 @@ impl SpaceElement for CosmicWindow {
             });
         }
     }
+    #[profiling::function]
     fn output_enter(&self, output: &Output, overlap: Rectangle<i32, Logical>) {
         SpaceElement::output_enter(&self.0, output, overlap);
         self.0
             .with_program(|p| SpaceElement::output_enter(&p.window, output, overlap));
     }
+    #[profiling::function]
     fn output_leave(&self, output: &Output) {
         SpaceElement::output_leave(&self.0, output);
         self.0
@@ -512,6 +514,7 @@ impl SpaceElement for CosmicWindow {
     fn z_index(&self) -> u8 {
         self.0.with_program(|p| SpaceElement::z_index(&p.window))
     }
+    #[profiling::function]
     fn refresh(&self) {
         SpaceElement::refresh(&self.0);
         if self.0.with_program(|p| {

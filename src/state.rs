@@ -353,7 +353,15 @@ impl State {
             .with_context(|| "Failed to load languages")
             .unwrap();
 
+        #[cfg(feature = "profile-with-tracy")]
+        unsafe {
+            time::util::local_offset::set_soundness(time::util::local_offset::Soundness::Unsound);
+        }
         let local_offset = UtcOffset::current_local_offset().expect("No yet multithreaded");
+        #[cfg(feature = "profile-with-tracy")]
+        unsafe {
+            time::util::local_offset::set_soundness(time::util::local_offset::Soundness::Sound);
+        }
         let clock = Clock::new();
         let config = Config::load(&handle);
         let compositor_state = CompositorState::new::<Self>(dh);

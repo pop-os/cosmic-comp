@@ -184,6 +184,7 @@ where
     )
 }
 
+#[profiling::function]
 pub fn draw_dnd_icon<R>(
     renderer: &mut R,
     surface: &wl_surface::WlSurface,
@@ -301,6 +302,7 @@ impl Default for CursorState {
     }
 }
 
+#[profiling::function]
 pub fn draw_cursor<R>(
     renderer: &mut R,
     seat: &Seat<State>,

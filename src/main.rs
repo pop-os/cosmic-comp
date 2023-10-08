@@ -38,6 +38,11 @@ pub mod utils;
 pub mod wayland;
 pub mod xwayland;
 
+#[cfg(feature = "profile-with-tracy")]
+#[global_allocator]
+static GLOBAL: profiling::tracy_client::ProfiledAllocator<std::alloc::System> =
+    profiling::tracy_client::ProfiledAllocator::new(std::alloc::System, 10);
+
 fn main() -> Result<()> {
     // setup logger
     logger::init_logger()?;
@@ -79,6 +84,11 @@ fn main() -> Result<()> {
     if let Err(err) = theme::watch_theme(event_loop.handle()) {
         warn!(?err, "Failed to watch theme");
     }
+
+    #[cfg(feature = "profile-with-tracy")]
+    profiling::tracy_client::Client::start();
+
+    profiling::register_thread!("Main Thread");
 
     // run the event loop
     event_loop.run(None, &mut state, |state| {
