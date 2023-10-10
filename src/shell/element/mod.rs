@@ -759,6 +759,22 @@ impl CosmicMapped {
             popup_elements.into_iter().map(C::from).collect(),
         )
     }
+
+    pub(crate) fn set_theme(&self) {
+        match &self.element {
+            CosmicMappedInternal::Window(w) => w.set_theme(),
+            CosmicMappedInternal::Stack(s) => s.set_theme(),
+            CosmicMappedInternal::_GenericCatcher(_) => {}
+        }
+    }
+
+    pub(crate) fn force_redraw(&self) {
+        match &self.element {
+            CosmicMappedInternal::Window(w) => w.force_redraw(),
+            CosmicMappedInternal::Stack(s) => s.force_redraw(),
+            CosmicMappedInternal::_GenericCatcher(_) => {}
+        }
+    }
 }
 
 impl IsAlive for CosmicMapped {

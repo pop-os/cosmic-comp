@@ -544,6 +544,14 @@ impl CosmicStack {
             popup_elements.into_iter().map(C::from).collect(),
         )
     }
+
+    pub(crate) fn set_theme(&self) {
+        self.0.set_theme();
+    }
+
+    pub(crate) fn force_redraw(&self) {
+        self.0.force_redraw();
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1059,8 +1067,7 @@ impl PointerTarget<State> for CosmicStack {
                                     ));
                                     let elem_geo =
                                         workspace.element_geometry(stack_mapped).unwrap();
-                                    let indicator_thickness =
-                                        data.common.config.static_conf.active_hint;
+                                    let indicator_thickness = crate::theme::active_hint();
                                     let was_tiled = workspace.is_tiled(stack_mapped);
 
                                     self.remove_idx(dragged_out);

@@ -43,7 +43,7 @@ use crate::{
     backend::render::{
         cursor,
         element::{AsGlowRenderer, CosmicElement},
-        render_output, render_workspace, CursorMode, CLEAR_COLOR,
+        render_output, render_workspace, CursorMode,
     },
     shell::{CosmicMappedRenderElement, CosmicSurface, WorkspaceRenderElement},
     state::{BackendData, ClientState, Common, State},
@@ -1015,7 +1015,7 @@ pub fn render_window_to_buffer(
             renderer.bind(render_buffer).map_err(DTError::Rendering)?;
         }
 
-        dt.render_output(renderer, age, &elements, CLEAR_COLOR)
+        dt.render_output(renderer, age, &elements, crate::theme::clear_color())
     }
 
     let node = node_from_params(&params, &mut state.backend, None);

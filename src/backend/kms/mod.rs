@@ -3,7 +3,7 @@
 #[cfg(feature = "debug")]
 use crate::backend::render::element::AsGlowRenderer;
 use crate::{
-    backend::render::{workspace_elements, CLEAR_COLOR},
+    backend::render::workspace_elements,
     config::OutputConfig,
     shell::Shell,
     state::{BackendData, ClientState, Common, Fps, SurfaceDmabufFeedback},
@@ -1107,8 +1107,11 @@ impl Surface {
         })?;
         self.fps.elements();
 
-        let res =
-            compositor.render_frame::<_, _, GlesTexture>(&mut renderer, &elements, CLEAR_COLOR);
+        let res = compositor.render_frame::<_, _, GlesTexture>(
+            &mut renderer,
+            &elements,
+            crate::theme::clear_color(),
+        );
         self.fps.render();
 
         match res {

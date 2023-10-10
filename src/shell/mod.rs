@@ -603,14 +603,14 @@ impl Shell {
             //|client| client.get_data::<ClientState>().map_or(false, |s| s.privileged),
             client_has_security_context,
         );
-
+        let gaps = crate::theme::gaps();
         let tiling_enabled = config.static_conf.tiling_enabled;
         let mode = WorkspaceMode::new(
             config.static_conf.workspace_mode,
             config.static_conf.workspace_amount,
             &mut workspace_state.update(),
             tiling_enabled,
-            config.static_conf.gaps,
+            gaps,
         );
 
         Shell {
@@ -629,7 +629,7 @@ impl Shell {
             xdg_shell_state,
             workspace_state,
 
-            gaps: config.static_conf.gaps,
+            gaps,
             overview_mode: OverviewMode::None,
             swap_indicator: None,
             resize_mode: ResizeMode::None,
@@ -1608,12 +1608,13 @@ impl Shell {
                         .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
                         .unwrap();
                     let button = start_data.button;
+                    let active_hint = crate::theme::active_hint();
                     if let Some(grab) = workspace.move_request(
                         &window,
                         &seat,
                         &output,
                         start_data,
-                        state.common.config.static_conf.active_hint,
+                        active_hint as u8,
                     ) {
                         let handle = workspace.handle;
                         state
@@ -1710,6 +1711,19 @@ impl Shell {
                 if let Some(ResizeState::Resizing(data)) = *resize_state {
                     *resize_state = Some(ResizeState::WaitingForCommit(data));
                 }
+            }
+        }
+    }
+
+    pub(crate) fn set_gaps(&mut self, gaps: (u8, u8)) {
+        self.gaps = gaps;
+        self.refresh();
+        for w in self.workspaces.spaces_mut() {
+            w.tiling_layer.update_gaps((gaps.0 as i32, gaps.1 as i32));
+            w.refresh();
+            w.dirty.store(true, Ordering::Relaxed);
+            for o in &self.outputs {
+                w.recalculate(&o);
             }
         }
     }

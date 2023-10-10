@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::render::{
-        element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, Usage, ACTIVE_GROUP_COLOR,
-        GROUP_COLOR,
-    },
+    backend::render::{element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, Usage},
     shell::{
         element::{
             resize_indicator::ResizeIndicator,
@@ -25,6 +22,7 @@ use crate::{
         CosmicSurface, Direction, FocusResult, MoveResult, OutputNotMapped, OverviewMode,
         ResizeDirection, ResizeMode, Trigger,
     },
+    theme::group_color,
     utils::{prelude::*, tween::EaseRectangle},
     wayland::{
         handlers::xdg_shell::popup::get_popup_toplevel,
@@ -3843,6 +3841,10 @@ impl TilingLayout {
 
         Ok((window_elements, popup_elements))
     }
+
+    pub(crate) fn update_gaps(&mut self, gaps: (i32, i32)) {
+        self.gaps = gaps;
+    }
 }
 
 const GAP_KEYBOARD: i32 = 8;
@@ -4086,7 +4088,7 @@ where
                                     if render_active_child { 16 } else { 8 },
                                     alpha * if render_potential_group { 0.40 } else { 1.0 },
                                     output_scale,
-                                    GROUP_COLOR,
+                                    group_color(),
                                 )
                                 .into(),
                             );
@@ -4104,7 +4106,7 @@ where
                                     8,
                                     alpha * 0.40,
                                     output_scale,
-                                    GROUP_COLOR,
+                                    group_color(),
                                 )
                                 .into(),
                             );
@@ -4168,7 +4170,7 @@ where
                                         8,
                                         alpha * 0.15,
                                         output_scale,
-                                        GROUP_COLOR,
+                                        group_color(),
                                     )
                                     .into(),
                                 );
@@ -4232,7 +4234,7 @@ where
                                         pill_geo,
                                         8.,
                                         alpha * 0.4,
-                                        GROUP_COLOR,
+                                        group_color(),
                                     )
                                     .into(),
                                 );
@@ -4262,7 +4264,7 @@ where
                                         } else {
                                             0.15
                                         },
-                                    GROUP_COLOR,
+                                    group_color(),
                                 )
                                 .into(),
                             );
@@ -4338,7 +4340,7 @@ where
                                                         ),
                                                         8.,
                                                         alpha * 0.4,
-                                                        GROUP_COLOR,
+                                                        group_color(),
                                                     )
                                                     .into(),
                                                 );
@@ -4380,7 +4382,7 @@ where
                                                         ),
                                                         8.,
                                                         alpha * 0.4,
-                                                        GROUP_COLOR,
+                                                        group_color(),
                                                     )
                                                     .into(),
                                                 );
@@ -4411,13 +4413,15 @@ where
                                     8,
                                     alpha * 0.40,
                                     output_scale,
-                                    GROUP_COLOR,
+                                    group_color(),
                                 )
                                 .into(),
                             );
                             geo.loc += (gap, gap).into();
                             geo.size -= (gap * 2, gap * 2).into();
                         }
+
+                        let accent = crate::theme::accent_color();
 
                         if focused
                             .as_ref()
@@ -4433,9 +4437,9 @@ where
                                 Some(Some(TargetZone::WindowStack(stack_id, _)))
                                     if *stack_id == node_id =>
                                 {
-                                    ACTIVE_GROUP_COLOR
+                                    [accent.red, accent.green, accent.blue]
                                 }
-                                _ => GROUP_COLOR,
+                                _ => group_color(),
                             };
                             geo.loc += (WINDOW_BACKDROP_BORDER, WINDOW_BACKDROP_BORDER).into();
                             geo.size -=
@@ -4450,7 +4454,9 @@ where
                                         * if focused
                                             .as_ref()
                                             .map(|focused_id| focused_id == &node_id)
-                                            .unwrap_or(color == ACTIVE_GROUP_COLOR)
+                                            .unwrap_or(
+                                                color == [accent.red, accent.green, accent.blue],
+                                            )
                                         {
                                             0.4
                                         } else {
@@ -4504,7 +4510,7 @@ where
                                 geo,
                                 8.,
                                 alpha * 0.4,
-                                GROUP_COLOR,
+                                group_color(),
                             )
                             .into(),
                         );
@@ -4744,7 +4750,7 @@ where
                 focused_geo,
                 8.,
                 transition.unwrap_or(1.0) * 0.4,
-                GROUP_COLOR,
+                group_color(),
             )
             .into(),
         );
@@ -4933,7 +4939,7 @@ where
                             geo,
                             8.,
                             0.4,
-                            GROUP_COLOR,
+                            group_color(),
                         ));
                     }
 
@@ -5079,7 +5085,7 @@ where
                             geo,
                             0.0,
                             0.3,
-                            GROUP_COLOR,
+                            group_color(),
                         )),
                     )
                 }

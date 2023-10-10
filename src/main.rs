@@ -25,6 +25,7 @@ pub mod shell;
 pub mod state;
 #[cfg(feature = "systemd")]
 pub mod systemd;
+pub mod theme;
 pub mod utils;
 pub mod wayland;
 pub mod xwayland;
@@ -54,6 +55,8 @@ fn main() -> Result<()> {
     }
     // potentially tell the session we are setup now
     session::setup_socket(event_loop.handle(), &state)?;
+
+    let _theme_res = theme::watch_theme(event_loop.handle());
 
     // run the event loop
     event_loop.run(None, &mut state, |state| {

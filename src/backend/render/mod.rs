@@ -78,11 +78,6 @@ pub type GlMultiFrame<'a, 'b, 'frame> =
     MultiFrame<'a, 'a, 'b, 'frame, GbmGlesBackend<GlowRenderer>, GbmGlesBackend<GlowRenderer>>;
 pub type GlMultiError = MultiError<GbmGlesBackend<GlowRenderer>, GbmGlesBackend<GlowRenderer>>;
 
-pub static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
-pub static GROUP_COLOR: [f32; 3] = [0.788, 0.788, 0.788];
-pub static ACTIVE_GROUP_COLOR: [f32; 3] = [0.58, 0.922, 0.922];
-pub static FOCUS_INDICATOR_COLOR: [f32; 3] = [0.580, 0.921, 0.921];
-
 pub static OUTLINE_SHADER: &str = include_str!("./shaders/rounded_outline.frag");
 pub static RECTANGLE_SHADER: &str = include_str!("./shaders/rounded_rectangle.frag");
 
@@ -169,6 +164,7 @@ impl IndicatorShader {
         element_geo.loc -= (t, t).into();
         element_geo.size += (t * 2, t * 2).into();
 
+        let focus_indicator = crate::theme::active_window_hint();
         IndicatorShader::element(
             renderer,
             key,
@@ -177,7 +173,11 @@ impl IndicatorShader {
             thickness * 2,
             alpha,
             scale,
-            FOCUS_INDICATOR_COLOR,
+            [
+                focus_indicator.red,
+                focus_indicator.green,
+                focus_indicator.blue,
+            ],
         )
     }
 
@@ -580,6 +580,7 @@ where
                 }
             });
 
+            let active_hint = crate::theme::active_hint();
             let (w_elements, p_elements) = workspace
                 .render_output::<R>(
                     renderer,
@@ -589,7 +590,7 @@ where
                     (!move_active && is_active_space).then_some(&last_active_seat),
                     overview.clone(),
                     resize_indicator.clone(),
-                    state.config.static_conf.active_hint,
+                    active_hint,
                 )
                 .map_err(|_| OutputNoMode)?;
             elements.extend(p_elements.into_iter().map(|p_element| {
@@ -647,7 +648,7 @@ where
             (!move_active && is_active_space).then_some(&last_active_seat),
             overview,
             resize_indicator,
-            state.config.static_conf.active_hint,
+            crate::theme::active_hint(),
         )
         .map_err(|_| OutputNoMode)?;
     elements.extend(p_elements.into_iter().map(|p_element| {
@@ -919,7 +920,7 @@ where
     }
 
     renderer.bind(target).map_err(RenderError::Rendering)?;
-    let res = damage_tracker.render_output(renderer, age, &elements, CLEAR_COLOR);
+    let res = damage_tracker.render_output(renderer, age, &elements, crate::theme::clear_color());
 
     if let Some(fps) = fps.as_mut() {
         fps.render();

@@ -62,6 +62,8 @@ use smithay::{
     },
 };
 
+use crate::theme::THEME;
+
 pub struct IcedElement<P: Program + Send + 'static>(Arc<Mutex<IcedElementInternal<P>>>);
 
 impl<P: Program + Send + 'static> fmt::Debug for IcedElement<P> {
@@ -251,13 +253,16 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             })
             .ok();
 
+        let theme_guard = THEME.read().unwrap();
+        let theme = theme_guard.clone();
+        drop(theme_guard);
         let mut internal = IcedElementInternal {
             outputs: HashSet::new(),
             buffers: HashMap::new(),
             pending_update: None,
             size,
             cursor_pos: None,
-            theme: Theme::dark(), // TODO
+            theme: theme.clone(), // TODO
             renderer,
             state,
             debug,
@@ -306,6 +311,11 @@ impl<P: Program + Send + 'static> IcedElement<P> {
 
     pub fn force_update(&self) {
         self.0.lock().unwrap().update(true);
+    }
+
+    pub fn set_theme(&self) {
+        let mut guard = self.0.lock().unwrap();
+        guard.theme = THEME.read().unwrap().clone();
     }
 
     pub fn force_redraw(&self) {

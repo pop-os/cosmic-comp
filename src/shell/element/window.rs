@@ -213,6 +213,14 @@ impl CosmicWindow {
             popup_elements.into_iter().map(C::from).collect(),
         )
     }
+
+    pub(crate) fn set_theme(&self) {
+        self.0.set_theme();
+    }
+
+    pub(crate) fn force_redraw(&self) {
+        self.0.force_redraw();
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
