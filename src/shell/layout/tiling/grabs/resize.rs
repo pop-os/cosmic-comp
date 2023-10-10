@@ -137,6 +137,8 @@ impl PointerGrab<State> for ResizeForkGrab {
 
         if let Some(output) = self.output.upgrade() {
             let tiling_layer = &mut data.common.shell.active_space_mut(&output).tiling_layer;
+            let gaps = tiling_layer.gaps();
+
             let tree = &mut tiling_layer.queue.trees.back_mut().unwrap().0;
             if tree.get(&self.node).is_ok() {
                 let delta = match self.orientation {
@@ -191,7 +193,7 @@ impl PointerGrab<State> for ResizeForkGrab {
                 }
 
                 self.last_loc = event.location;
-                let blocker = TilingLayout::update_positions(&output, tree, tiling_layer.gaps);
+                let blocker = TilingLayout::update_positions(&output, tree, gaps);
                 tiling_layer.pending_blockers.extend(blocker);
             } else {
                 handle.unset_grab(data, event.serial, event.time);

@@ -129,6 +129,7 @@ impl CosmicStack {
     pub fn new<I: Into<CosmicSurface>>(
         windows: impl Iterator<Item = I>,
         handle: LoopHandle<'static, crate::state::State>,
+        theme: cosmic::Theme,
     ) -> CosmicStack {
         let windows = windows.map(Into::into).collect::<Vec<_>>();
         assert!(!windows.is_empty());
@@ -160,6 +161,7 @@ impl CosmicStack {
             },
             (width, TAB_HEIGHT),
             handle,
+            theme,
         ))
     }
 
@@ -543,6 +545,14 @@ impl CosmicStack {
                 .collect(),
             popup_elements.into_iter().map(C::from).collect(),
         )
+    }
+
+    pub(crate) fn set_theme(&self, theme: cosmic::Theme) {
+        self.0.set_theme(theme);
+    }
+
+    pub(crate) fn force_redraw(&self) {
+        self.0.force_redraw();
     }
 }
 
@@ -1056,11 +1066,12 @@ impl PointerTarget<State> for CosmicStack {
                                     let mapped = CosmicMapped::from(CosmicWindow::new(
                                         surface,
                                         self.0.loop_handle(),
+                                        data.common.theme.clone(),
                                     ));
                                     let elem_geo =
                                         workspace.element_geometry(stack_mapped).unwrap();
                                     let indicator_thickness =
-                                        data.common.config.static_conf.active_hint;
+                                        data.common.theme.cosmic().active_hint as u8;
                                     let was_tiled = workspace.is_tiled(stack_mapped);
 
                                     self.remove_idx(dragged_out);

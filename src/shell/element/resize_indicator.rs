@@ -23,6 +23,7 @@ pub fn resize_indicator(
     direction: ResizeDirection,
     config: &Config,
     evlh: LoopHandle<'static, crate::state::State>,
+    theme: cosmic::Theme,
 ) -> ResizeIndicator {
     ResizeIndicator::new(
         ResizeIndicatorInternal {
@@ -49,6 +50,7 @@ pub fn resize_indicator(
         },
         Size::from((1, 1)),
         evlh,
+        theme,
     )
 }
 

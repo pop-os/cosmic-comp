@@ -220,6 +220,7 @@ impl XdgShellHandler for State {
                             CosmicMapped::from(CosmicWindow::new(
                                 surface,
                                 self.common.event_loop_handle.clone(),
+                                self.common.theme.clone(),
                             )),
                             if workspace.is_tiled(&mapped) {
                                 ManagedLayer::Tiling
