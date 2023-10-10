@@ -214,7 +214,6 @@ impl State {
         <B as InputBackend>::PointerAxisEvent: 'static,
     {
         use smithay::backend::input::Event;
-
         match event {
             InputEvent::DeviceAdded { device } => {
                 let seat = &mut self.common.last_active_seat();

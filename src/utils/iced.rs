@@ -229,6 +229,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         program: P,
         size: impl Into<Size<i32, Logical>>,
         handle: LoopHandle<'static, crate::state::State>,
+        theme: cosmic::Theme,
     ) -> IcedElement<P> {
         let size = size.into();
         let mut renderer =
@@ -257,7 +258,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             pending_update: None,
             size,
             cursor_pos: None,
-            theme: Theme::dark(), // TODO
+            theme,
             renderer,
             state,
             debug,
@@ -306,6 +307,11 @@ impl<P: Program + Send + 'static> IcedElement<P> {
 
     pub fn force_update(&self) {
         self.0.lock().unwrap().update(true);
+    }
+
+    pub fn set_theme(&self, theme: cosmic::Theme) {
+        let mut guard = self.0.lock().unwrap();
+        guard.theme = theme.clone();
     }
 
     pub fn force_redraw(&self) {

@@ -17,6 +17,7 @@ use crate::{
     utils::prelude::*,
 };
 
+use cosmic::theme::CosmicTheme;
 use smithay::{
     backend::renderer::{
         element::{utils::RescaleRenderElement, AsRenderElements, RenderElement},
@@ -58,7 +59,13 @@ pub struct MoveGrabState {
 }
 
 impl MoveGrabState {
-    pub fn render<I, R>(&self, renderer: &mut R, seat: &Seat<State>, output: &Output) -> Vec<I>
+    pub fn render<I, R>(
+        &self,
+        renderer: &mut R,
+        seat: &Seat<State>,
+        output: &Output,
+        theme: &CosmicTheme,
+    ) -> Vec<I>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         <R as Renderer>::TextureId: 'static,
@@ -103,6 +110,7 @@ impl MoveGrabState {
             + self.window_offset
             - scaling_offset;
 
+        let active_window_hint = crate::theme::active_window_hint(theme);
         let focus_element = if self.indicator_thickness > 0 {
             Some(
                 CosmicMappedRenderElement::from(IndicatorShader::focus_element(
@@ -121,6 +129,11 @@ impl MoveGrabState {
                     self.indicator_thickness,
                     output_scale.x,
                     alpha,
+                    [
+                        active_window_hint.red,
+                        active_window_hint.green,
+                        active_window_hint.blue,
+                    ],
                 ))
                 .into(),
             )
@@ -277,6 +290,7 @@ impl PointerGrab<State> for MoveGrab {
                         let element = stack_hover(
                             state.common.event_loop_handle.clone(),
                             geo.size.as_logical(),
+                            state.common.theme.clone(),
                         );
                         for output in &self.window_outputs {
                             element.output_enter(

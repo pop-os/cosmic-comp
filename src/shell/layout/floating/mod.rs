@@ -364,6 +364,7 @@ impl FloatingLayout {
         &mut self,
         direction: Direction,
         seat: &Seat<State>,
+        theme: cosmic::Theme,
     ) -> MoveResult {
         let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
             return MoveResult::None
@@ -388,7 +389,7 @@ impl FloatingLayout {
         match focused.handle_move(direction) {
             StackMoveResult::Handled => return MoveResult::Done,
             StackMoveResult::MoveOut(surface, loop_handle) => {
-                let mapped: CosmicMapped = CosmicWindow::new(surface, loop_handle).into();
+                let mapped: CosmicMapped = CosmicWindow::new(surface, loop_handle, theme).into();
                 let output = seat.active_output();
                 let pos = self.space.element_geometry(focused).unwrap().loc
                     + match direction {
@@ -464,6 +465,7 @@ impl FloatingLayout {
         mut resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
         indicator_thickness: u8,
         alpha: f32,
+        theme: &cosmic::theme::CosmicTheme,
     ) -> (
         Vec<CosmicMappedRenderElement<R>>,
         Vec<CosmicMappedRenderElement<R>>,
@@ -521,6 +523,8 @@ impl FloatingLayout {
                     );
                 }
 
+                let active_window_hint = crate::theme::active_window_hint(theme);
+
                 if indicator_thickness > 0 {
                     let element = IndicatorShader::focus_element(
                         renderer,
@@ -529,6 +533,11 @@ impl FloatingLayout {
                         indicator_thickness,
                         output_scale,
                         alpha,
+                        [
+                            active_window_hint.red,
+                            active_window_hint.green,
+                            active_window_hint.blue,
+                        ],
                     );
                     window_elements.push(element.into());
                 }

@@ -21,6 +21,7 @@ use crate::{
     xwayland::XWaylandState,
 };
 
+use cosmic::theme::CosmicTheme;
 use id_tree::Tree;
 use indexmap::IndexSet;
 use keyframe::{ease, functions::EaseInOutCubic};
@@ -210,9 +211,9 @@ impl Workspace {
         handle: WorkspaceHandle,
         output: Output,
         tiling_enabled: bool,
-        gaps: (u8, u8),
+        theme: cosmic::Theme,
     ) -> Workspace {
-        let tiling_layer = TilingLayout::new(gaps, &output);
+        let tiling_layer = TilingLayout::new(theme, &output);
         let floating_layer = FloatingLayout::new(&output);
 
         Workspace {
@@ -824,7 +825,7 @@ impl Workspace {
             MoveResult::MoveFurther(KeyboardFocusTarget::Fullscreen(f.surface.clone()))
         } else {
             self.floating_layer
-                .move_current_element(direction, seat)
+                .move_current_element(direction, seat, self.tiling_layer.theme.clone())
                 .or_else(|| self.tiling_layer.move_current_node(direction, seat))
         }
     }
@@ -838,6 +839,7 @@ impl Workspace {
         overview: (OverviewMode, Option<(SwapIndicator, Option<&Tree<Data>>)>),
         resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
         indicator_thickness: u8,
+        theme: &CosmicTheme,
     ) -> Result<
         (
             Vec<WorkspaceRenderElement<R>>,
@@ -1014,6 +1016,7 @@ impl Workspace {
                 resize_indicator.clone(),
                 indicator_thickness,
                 alpha,
+                theme,
             );
             popup_elements.extend(p_elements.into_iter().map(WorkspaceRenderElement::from));
             window_elements.extend(w_elements.into_iter().map(WorkspaceRenderElement::from));
@@ -1038,6 +1041,7 @@ impl Workspace {
                 overview,
                 resize_indicator,
                 indicator_thickness,
+                theme,
             )?;
             popup_elements.extend(p_elements.into_iter().map(WorkspaceRenderElement::from));
             window_elements.extend(w_elements.into_iter().map(WorkspaceRenderElement::from));

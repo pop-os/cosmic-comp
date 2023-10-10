@@ -163,6 +163,7 @@ pub struct Shell {
     pub xdg_shell_state: XdgShellState,
     pub workspace_state: WorkspaceState<State>,
 
+    theme: cosmic::Theme,
     overview_mode: OverviewMode,
     swap_indicator: Option<SwapIndicator>,
     resize_mode: ResizeMode,
@@ -184,8 +185,8 @@ pub struct WorkspaceSet {
     group: WorkspaceGroupHandle,
     idx: usize,
     tiling_enabled: bool,
-    gaps: (u8, u8),
     output: Output,
+    theme: cosmic::Theme,
     pub(crate) workspaces: Vec<Workspace>,
 }
 
@@ -201,7 +202,7 @@ fn create_workspace(
     group_handle: &WorkspaceGroupHandle,
     active: bool,
     tiling: bool,
-    gaps: (u8, u8),
+    theme: cosmic::Theme,
 ) -> Workspace {
     let workspace_handle = state.create_workspace(&group_handle).unwrap();
     if active {
@@ -211,7 +212,7 @@ fn create_workspace(
         &workspace_handle,
         [WorkspaceCapabilities::Activate].into_iter(),
     );
-    Workspace::new(workspace_handle, output.clone(), tiling, gaps)
+    Workspace::new(workspace_handle, output.clone(), tiling, theme.clone())
 }
 
 impl WorkspaceSet {
@@ -222,12 +223,18 @@ impl WorkspaceSet {
         amount: WorkspaceAmount,
         idx: usize,
         tiling_enabled: bool,
-        gaps: (u8, u8),
+        theme: cosmic::Theme,
     ) -> WorkspaceSet {
         let workspaces = match amount {
             WorkspaceAmount::Dynamic => {
-                let workspace =
-                    create_workspace(state, output, &group_handle, true, tiling_enabled, gaps);
+                let workspace = create_workspace(
+                    state,
+                    output,
+                    &group_handle,
+                    true,
+                    tiling_enabled,
+                    theme.clone(),
+                );
                 workspace_set_idx(state, 1, idx, &workspace.handle);
                 state.set_workspace_capabilities(
                     &workspace.handle,
@@ -243,7 +250,7 @@ impl WorkspaceSet {
                         &group_handle,
                         i == 0,
                         tiling_enabled,
-                        gaps,
+                        theme.clone(),
                     );
                     workspace_set_idx(state, i + 1, idx, &workspace.handle);
                     state.set_workspace_capabilities(
@@ -261,7 +268,7 @@ impl WorkspaceSet {
             group: group_handle,
             idx,
             tiling_enabled,
-            gaps,
+            theme,
             workspaces,
             output: output.clone(),
         }
@@ -316,7 +323,7 @@ impl WorkspaceSet {
             &self.group,
             false,
             self.tiling_enabled,
-            self.gaps,
+            self.theme.clone(),
         );
         workspace_set_idx(
             state,
@@ -411,7 +418,7 @@ impl WorkspaceSet {
                     &self.group,
                     false,
                     self.tiling_enabled,
-                    self.gaps,
+                    self.theme.clone(),
                 );
                 workspace_set_idx(
                     state,
@@ -452,18 +459,18 @@ pub struct Workspaces {
     amount: WorkspaceAmount,
     mode: WorkspaceMode,
     tiling_enabled: bool,
-    gaps: (u8, u8),
+    theme: cosmic::Theme,
 }
 
 impl Workspaces {
-    pub fn new(config: &Config) -> Workspaces {
+    pub fn new(config: &Config, theme: cosmic::Theme) -> Workspaces {
         Workspaces {
             sets: IndexMap::new(),
             backup_set: None,
             amount: config.static_conf.workspace_amount,
             mode: config.static_conf.workspace_mode,
             tiling_enabled: config.static_conf.tiling_enabled,
-            gaps: config.static_conf.gaps,
+            theme,
         }
     }
 
@@ -500,7 +507,7 @@ impl Workspaces {
                     self.amount,
                     self.sets.len(),
                     self.tiling_enabled,
-                    self.gaps,
+                    self.theme.clone(),
                 )
             });
         workspace_state.add_group_output(&set.group, &output);
@@ -674,7 +681,7 @@ impl Workspaces {
                                     &group,
                                     false,
                                     config.static_conf.tiling_enabled,
-                                    config.static_conf.gaps,
+                                    self.theme.clone(),
                                 ),
                             );
                         // Otherwise just update
@@ -882,6 +889,24 @@ impl Workspaces {
             set.update_tiling_status(seat, tiling)
         }
     }
+
+    pub fn set_theme(&mut self, theme: cosmic::Theme) {
+        for (_, s) in &mut self.sets {
+            s.theme = theme.clone();
+            for mut w in &mut s.workspaces {
+                w.tiling_layer.theme = theme.clone();
+
+                w.mapped().for_each(|m| {
+                    m.update_theme(theme.clone());
+                    m.force_redraw();
+                });
+
+                w.refresh();
+                w.dirty.store(true, Ordering::Relaxed);
+                w.recalculate();
+            }
+        }
+    }
 }
 
 pub struct InvalidWorkspaceIndex;
@@ -910,10 +935,11 @@ impl Shell {
             //|client| client.get_data::<ClientState>().map_or(false, |s| s.privileged),
             client_has_security_context,
         );
+        let theme = cosmic::theme::system_preference();
 
         Shell {
             popups: PopupManager::default(),
-            workspaces: Workspaces::new(config),
+            workspaces: Workspaces::new(config, theme.clone()),
             maximize_mode: MaximizeMode::Floating,
 
             pending_windows: Vec::new(),
@@ -926,6 +952,7 @@ impl Shell {
             xdg_shell_state,
             workspace_state,
 
+            theme,
             overview_mode: OverviewMode::None,
             swap_indicator: None,
             resize_mode: ResizeMode::None,
@@ -1158,7 +1185,7 @@ impl Shell {
         if let Some(trigger) = enabled {
             if !matches!(self.overview_mode, OverviewMode::Started(_, _)) {
                 if matches!(trigger, Trigger::KeyboardSwap(_, _)) {
-                    self.swap_indicator = Some(swap_indicator(evlh));
+                    self.swap_indicator = Some(swap_indicator(evlh, self.theme.clone()));
                 }
                 self.overview_mode = OverviewMode::Started(trigger, Instant::now());
             }
@@ -1204,7 +1231,12 @@ impl Shell {
             } else {
                 self.resize_mode = ResizeMode::Started(pattern, Instant::now(), direction);
             }
-            self.resize_indicator = Some(resize_indicator(direction, config, evlh));
+            self.resize_indicator = Some(resize_indicator(
+                direction,
+                config,
+                evlh,
+                self.theme.clone(),
+            ));
         } else {
             if let ResizeMode::Started(_, _, direction) = &self.resize_mode {
                 self.resize_mode = ResizeMode::Ended(Instant::now(), *direction);
@@ -1338,6 +1370,7 @@ impl Shell {
         let mapped = CosmicMapped::from(CosmicWindow::new(
             window.clone(),
             state.common.event_loop_handle.clone(),
+            state.common.theme.clone(),
         ));
         #[cfg(feature = "debug")]
         {
@@ -1579,12 +1612,13 @@ impl Shell {
                         .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
                         .unwrap();
                     let button = start_data.button;
+                    let active_hint = state.common.theme.cosmic().active_hint as u8;
                     if let Some(grab) = workspace.move_request(
                         &window,
                         &seat,
                         &output,
                         start_data,
-                        state.common.config.static_conf.active_hint,
+                        active_hint as u8,
                     ) {
                         let handle = workspace.handle;
                         state
@@ -1683,6 +1717,12 @@ impl Shell {
                 }
             }
         }
+    }
+
+    pub(crate) fn set_theme(&mut self, theme: cosmic::Theme) {
+        self.theme = theme.clone();
+        self.refresh();
+        self.workspaces.set_theme(theme.clone());
     }
 }
 
