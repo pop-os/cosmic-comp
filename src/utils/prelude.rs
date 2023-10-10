@@ -7,7 +7,7 @@ use crate::{
 use smithay::{
     desktop::utils::bbox_from_surface_tree,
     input::{
-        pointer::{CursorImageAttributes, CursorImageStatus},
+        pointer::{CursorIcon, CursorImageAttributes, CursorImageStatus},
         Seat,
     },
     output::Output,
@@ -86,12 +86,12 @@ impl SeatExt for Seat<State> {
                 let mut cursor_status = cell.borrow_mut();
                 if let CursorImageStatus::Surface(ref surface) = *cursor_status {
                     if !surface.alive() {
-                        *cursor_status = CursorImageStatus::Default;
+                        *cursor_status = CursorImageStatus::default_named();
                     }
                 }
                 cursor_status.clone()
             })
-            .unwrap_or(CursorImageStatus::Default);
+            .unwrap_or(CursorImageStatus::default_named());
 
         match cursor_status {
             CursorImageStatus::Surface(surface) => {
@@ -111,7 +111,7 @@ impl SeatExt for Seat<State> {
                 );
                 Some((buffer_geo, (hotspot.x, hotspot.y).into()))
             }
-            CursorImageStatus::Default => {
+            CursorImageStatus::Named(CursorIcon::Default) => {
                 let seat_userdata = self.user_data();
                 seat_userdata.insert_if_missing(CursorState::default);
                 let state = seat_userdata.get::<CursorState>().unwrap();
@@ -128,6 +128,10 @@ impl SeatExt for Seat<State> {
                     ),
                     (frame.xhot as i32, frame.yhot as i32).into(),
                 ))
+            }
+            CursorImageStatus::Named(_) => {
+                // TODO: Handle for `cursor_shape_v1` protocol
+                None
             }
             CursorImageStatus::Hidden => None,
         }

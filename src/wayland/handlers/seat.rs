@@ -9,8 +9,8 @@ use smithay::{
     input::{pointer::CursorImageStatus, SeatHandler, SeatState},
     reexports::wayland_server::Resource,
     wayland::{
-        data_device::set_data_device_focus, primary_selection::set_primary_focus,
-        seat::WaylandFocus,
+        seat::WaylandFocus, selection::data_device::set_data_device_focus,
+        selection::primary_selection::set_primary_focus,
     },
 };
 use std::cell::RefCell;

@@ -180,7 +180,7 @@ pub fn add_seat(
     userdata.insert_if_missing(SeatMoveGrabState::default);
     userdata.insert_if_missing(CursorState::default);
     userdata.insert_if_missing(|| ActiveOutput(RefCell::new(output.clone())));
-    userdata.insert_if_missing(|| RefCell::new(CursorImageStatus::Default));
+    userdata.insert_if_missing(|| RefCell::new(CursorImageStatus::default_named()));
 
     // A lot of clients bind keyboard and pointer unconditionally once on launch..
     // Initial clients might race the compositor on adding periheral and

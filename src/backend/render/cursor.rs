@@ -283,16 +283,17 @@ where
             let mut cursor_status = cell.borrow_mut();
             if let CursorImageStatus::Surface(ref surface) = *cursor_status {
                 if !surface.alive() {
-                    *cursor_status = CursorImageStatus::Default;
+                    *cursor_status = CursorImageStatus::default_named();
                 }
             }
             cursor_status.clone()
         })
-        .unwrap_or(CursorImageStatus::Default);
+        .unwrap_or(CursorImageStatus::default_named());
 
     if let CursorImageStatus::Surface(ref wl_surface) = cursor_status {
         return draw_surface_cursor(renderer, wl_surface, location.to_i32_round(), scale);
-    } else if draw_default && CursorImageStatus::Default == cursor_status {
+    // TODO: Handle other named cursors
+    } else if draw_default && CursorImageStatus::default_named() == cursor_status {
         let integer_scale = scale.x.max(scale.y).ceil() as u32;
 
         let seat_userdata = seat.user_data();

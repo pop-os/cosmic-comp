@@ -60,7 +60,6 @@ use smithay::{
     utils::{Clock, IsAlive, Monotonic},
     wayland::{
         compositor::{CompositorClientState, CompositorState},
-        data_device::DataDeviceState,
         dmabuf::{DmabufFeedback, DmabufState},
         fractional_scale::{with_fractional_scale, FractionalScaleManagerState},
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState,
@@ -68,9 +67,9 @@ use smithay::{
         pointer_constraints::PointerConstraintsState,
         pointer_gestures::PointerGesturesState,
         presentation::PresentationState,
-        primary_selection::PrimarySelectionState,
         seat::WaylandFocus,
         security_context::{SecurityContext, SecurityContextState},
+        selection::{data_device::DataDeviceState, primary_selection::PrimarySelectionState},
         shell::{kde::decoration::KdeDecorationState, xdg::decoration::XdgDecorationState},
         shm::ShmState,
         viewporter::ViewporterState,
@@ -465,12 +464,12 @@ impl Common {
                         let mut cursor_status = cell.borrow_mut();
                         if let CursorImageStatus::Surface(ref surface) = *cursor_status {
                             if !surface.alive() {
-                                *cursor_status = CursorImageStatus::Default;
+                                *cursor_status = CursorImageStatus::default_named();
                             }
                         }
                         cursor_status.clone()
                     })
-                    .unwrap_or(CursorImageStatus::Default);
+                    .unwrap_or(CursorImageStatus::default_named());
 
                 if let CursorImageStatus::Surface(wl_surface) = cursor_status {
                     send_frames_surface_tree(
