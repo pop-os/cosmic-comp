@@ -151,16 +151,19 @@ impl XwmHandler for State {
         }
 
         let seat = self.common.last_active_seat().clone();
-        self.common.shell.pending_windows.push((surface, seat));
+        self.common
+            .shell
+            .pending_windows
+            .push((surface, seat, None));
     }
 
     fn map_window_notify(&mut self, _xwm: XwmId, surface: X11Surface) {
-        if let Some((window, seat)) = self
+        if let Some((window, _, _)) = self
             .common
             .shell
             .pending_windows
             .iter()
-            .find(|(window, _)| {
+            .find(|(window, _, _)| {
                 if let CosmicSurface::X11(window) = window {
                     window == &surface
                 } else {
@@ -169,8 +172,7 @@ impl XwmHandler for State {
             })
             .cloned()
         {
-            let output = seat.active_output();
-            Shell::map_window(self, &window, &output);
+            Shell::map_window(self, &window);
         }
     }
 
@@ -386,7 +388,7 @@ impl XwmHandler for State {
         let surface = CosmicSurface::X11(window);
         if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
-                workspace.fullscreen_request(&surface)
+                workspace.fullscreen_request(&surface, None)
             }
         }
     }
@@ -396,7 +398,8 @@ impl XwmHandler for State {
         if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
                 let (window, _) = mapped.windows().find(|(w, _)| w == &surface).unwrap();
-                workspace.unfullscreen_request(&window);
+                let previous = workspace.unfullscreen_request(&window);
+                assert!(previous.is_none());
             }
         }
     }
