@@ -2,7 +2,6 @@ use calloop::LoopHandle;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::{
-    cell::RefCell,
     collections::HashMap,
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
@@ -22,7 +21,7 @@ use smithay::{
     },
     output::Output,
     reexports::wayland_server::{protocol::wl_surface::WlSurface, Client, DisplayHandle},
-    utils::{Logical, Point, Rectangle, Serial, SERIAL_COUNTER},
+    utils::{Point, Rectangle, Serial, SERIAL_COUNTER},
     wayland::{
         compositor::with_states,
         seat::WaylandFocus,
@@ -37,18 +36,15 @@ use smithay::{
 };
 
 use crate::{
-    config::{Config, KeyModifiers, KeyPattern, OutputConfig, WorkspaceMode},
+    config::{Config, KeyModifiers, KeyPattern, WorkspaceMode},
     state::client_has_security_context,
     utils::prelude::*,
-    wayland::{
-        handlers::output,
-        protocols::{
-            toplevel_info::ToplevelInfoState,
-            toplevel_management::{ManagementCapabilities, ToplevelManagementState},
-            workspace::{
-                WorkspaceCapabilities, WorkspaceGroupHandle, WorkspaceHandle, WorkspaceState,
-                WorkspaceUpdateGuard,
-            },
+    wayland::protocols::{
+        toplevel_info::ToplevelInfoState,
+        toplevel_management::{ManagementCapabilities, ToplevelManagementState},
+        workspace::{
+            WorkspaceCapabilities, WorkspaceGroupHandle, WorkspaceHandle, WorkspaceState,
+            WorkspaceUpdateGuard,
         },
     },
 };
@@ -68,10 +64,7 @@ use self::{
     },
     focus::target::KeyboardFocusTarget,
     grabs::ResizeEdge,
-    layout::{
-        floating::{FloatingLayout, ResizeState},
-        tiling::{NodeDesc, TilingLayout},
-    },
+    layout::{floating::ResizeState, tiling::NodeDesc},
 };
 
 const ANIMATION_DURATION: Duration = Duration::from_millis(200);
@@ -224,14 +217,13 @@ fn create_workspace(
 impl WorkspaceSet {
     fn new(
         state: &mut WorkspaceUpdateGuard<'_, State>,
+        group_handle: WorkspaceGroupHandle,
         output: &Output,
         amount: WorkspaceAmount,
         idx: usize,
         tiling_enabled: bool,
         gaps: (u8, u8),
     ) -> WorkspaceSet {
-        let group_handle = state.create_workspace_group();
-
         let workspaces = match amount {
             WorkspaceAmount::Dynamic => {
                 let workspace =
@@ -318,7 +310,7 @@ impl WorkspaceSet {
     }
 
     fn add_empty_workspace(&mut self, state: &mut WorkspaceUpdateGuard<State>) {
-        let mut workspace = create_workspace(
+        let workspace = create_workspace(
             state,
             &self.output,
             &self.group,
@@ -331,10 +323,6 @@ impl WorkspaceSet {
             self.workspaces.len() as u8 + 1,
             self.idx,
             &workspace.handle,
-        );
-        state.set_workspace_capabilities(
-            &workspace.handle,
-            [WorkspaceCapabilities::Activate].into_iter(),
         );
         self.workspaces.push(workspace);
     }
@@ -488,16 +476,32 @@ impl Workspaces {
             return;
         }
 
-        let set = self.backup_set.take().unwrap_or_else(|| {
-            WorkspaceSet::new(
-                workspace_state,
-                &output,
-                self.amount,
-                self.sets.len(),
-                self.tiling_enabled,
-                self.gaps,
-            )
-        });
+        let set = self
+            .backup_set
+            .take()
+            .map(|mut set| {
+                set.set_output(output, toplevel_info_state);
+                set
+            })
+            .unwrap_or_else(|| {
+                let group_handle = match self.mode {
+                    WorkspaceMode::Global => self
+                        .sets
+                        .first()
+                        .map(|(_, w)| w.group.clone())
+                        .unwrap_or(workspace_state.create_workspace_group()),
+                    WorkspaceMode::OutputBound => workspace_state.create_workspace_group(),
+                };
+                WorkspaceSet::new(
+                    workspace_state,
+                    group_handle,
+                    &output,
+                    self.amount,
+                    self.sets.len(),
+                    self.tiling_enabled,
+                    self.gaps,
+                )
+            });
         workspace_state.add_group_output(&set.group, &output);
 
         self.sets.insert(output.clone(), set);
@@ -566,7 +570,11 @@ impl Workspaces {
                     // TODO: merge if mode = static
                     new_set.workspaces.push(workspace);
                 }
-                workspace_state.remove_workspace_group(set.group);
+                if self.mode == WorkspaceMode::OutputBound {
+                    workspace_state.remove_workspace_group(set.group);
+                } else {
+                    workspace_state.remove_group_output(&workspace_group, output);
+                }
 
                 for (i, set) in self.sets.values_mut().enumerate() {
                     set.update_idx(workspace_state, i);
@@ -575,10 +583,135 @@ impl Workspaces {
                 workspace_state.remove_group_output(&set.group, output);
                 self.backup_set = Some(set);
             }
+
+            self.refresh(workspace_state, toplevel_info_state)
         }
     }
 
-    //pub fn update_mode
+    pub fn update_config(
+        &mut self,
+        config: &Config,
+        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+        toplevel_info_state: &mut ToplevelInfoState<State, CosmicSurface>,
+    ) {
+        if self.sets.len() <= 1 {
+            return;
+        }
+
+        match (self.mode, config.static_conf.workspace_mode) {
+            (WorkspaceMode::Global, WorkspaceMode::OutputBound) => {
+                // we need to create new separate workspace groups
+                let old_group = self.sets.first().map(|(_, w)| w.group.clone()).unwrap();
+                for (i, set) in self.sets.values_mut().enumerate() {
+                    let new_group = workspace_state.create_workspace_group();
+                    workspace_state.add_group_output(&new_group, &set.output);
+
+                    for workspace in &mut set.workspaces {
+                        // TODO: new protocol version allows workspaces to be reassigned,
+                        // that would also avoid updating toplevel-info
+                        let old_workspace_handle = workspace.handle;
+                        workspace_state.remove_workspace(old_workspace_handle);
+                        workspace.handle = workspace_state.create_workspace(&new_group).unwrap();
+                        workspace_state.set_workspace_capabilities(
+                            &workspace.handle,
+                            [WorkspaceCapabilities::Activate].into_iter(),
+                        );
+
+                        for window in workspace.mapped() {
+                            for (surface, _) in window.windows() {
+                                toplevel_info_state
+                                    .toplevel_leave_workspace(&surface, &old_workspace_handle);
+                                toplevel_info_state
+                                    .toplevel_enter_workspace(&surface, &workspace.handle);
+                            }
+                        }
+                    }
+
+                    set.update_idx(workspace_state, i);
+                    workspace_state.remove_workspace_group(old_group);
+                }
+            }
+            (WorkspaceMode::OutputBound, WorkspaceMode::Global) => {
+                // lets construct an iterator of all the pairs of workspaces we have to "merge"
+                let mut pairs = Vec::new();
+                if let Some(max) = self.sets.values().map(|set| set.workspaces.len()).max() {
+                    let offset = self.sets.values().map(|set| set.active).max().unwrap();
+                    for i in 0..max {
+                        pairs.push(
+                            self.sets
+                                .values()
+                                .map(|set| {
+                                    let idx = set.active as isize + i as isize - offset as isize;
+                                    if idx < 0 || idx >= set.workspaces.len() as isize {
+                                        None
+                                    } else {
+                                        Some(idx)
+                                    }
+                                })
+                                .collect::<Vec<_>>(),
+                        );
+                    }
+                }
+
+                let group = workspace_state.create_workspace_group();
+                for output in self.sets.keys() {
+                    workspace_state.add_group_output(&group, output);
+                }
+
+                let old_workspace_groups = self.sets.values().map(|w| w.group).collect::<Vec<_>>();
+                for (j, pair) in pairs.iter().enumerate() {
+                    for (i, x) in pair.iter().enumerate() {
+                        // Fill up sets, where necessary
+                        if x.is_none() {
+                            // create missing workspace
+                            let (output, set) = self.sets.get_index_mut(i).unwrap();
+                            set.workspaces.insert(
+                                j,
+                                create_workspace(
+                                    workspace_state,
+                                    output,
+                                    &group,
+                                    false,
+                                    config.static_conf.tiling_enabled,
+                                    config.static_conf.gaps,
+                                ),
+                            );
+                        // Otherwise just update
+                        } else {
+                            let set = &mut self.sets[i];
+                            let workspace = &mut set.workspaces[j];
+                            let old_workspace_handle = workspace.handle;
+                            workspace_state.remove_workspace(old_workspace_handle);
+                            workspace.handle = workspace_state.create_workspace(&group).unwrap();
+                            workspace_state.set_workspace_capabilities(
+                                &workspace.handle,
+                                [WorkspaceCapabilities::Activate].into_iter(),
+                            );
+
+                            for window in workspace.mapped() {
+                                for (surface, _) in window.windows() {
+                                    toplevel_info_state
+                                        .toplevel_leave_workspace(&surface, &old_workspace_handle);
+                                    toplevel_info_state
+                                        .toplevel_enter_workspace(&surface, &workspace.handle);
+                                }
+                            }
+                        }
+                    }
+                }
+                for (i, set) in self.sets.values_mut().enumerate() {
+                    set.group = group.clone();
+                    set.update_idx(workspace_state, i);
+                }
+                for old_group in old_workspace_groups {
+                    workspace_state.remove_workspace_group(old_group);
+                }
+            }
+            _ => {}
+        };
+
+        self.refresh(workspace_state, toplevel_info_state)
+    }
 
     pub fn refresh(
         &mut self,
@@ -818,232 +951,12 @@ impl Shell {
         self.refresh(); // cleans up excess of workspaces and empty workspaces
     }
 
-    /*
-    pub fn set_mode(&mut self, mode: ConfigMode) {
-        let mut state = self.workspace_state.update();
-
-        match (&mut self.workspaces, mode) {
-            (dst @ WorkspaceMode::OutputBound(_, _), ConfigMode::Global) => {
-                // rustc should really be able to infer that this doesn't need an if.
-                let (sets, amount) =
-                    if let &mut WorkspaceMode::OutputBound(ref mut sets, ref amount) = dst {
-                        (sets, *amount)
-                    } else {
-                        unreachable!()
-                    };
-
-                // in this case we have to merge our sets, preserving placing of windows as nicely as possible
-                let mut new_set = WorkspaceSet::new(
-                    &mut state,
-                    WorkspaceAmount::Static(0),
-                    0,
-                    self.tiling_enabled,
-                    self.gaps,
-                );
-                for output in &self.outputs {
-                    state.add_group_output(&new_set.group, output);
-                }
-
-                // lets construct an iterator of all the pairs of workspaces we have to merge
-                // we first split of the part of the workspaces that contain the currently active one
-                let mut second_half = sets
-                    .iter_mut()
-                    .map(|(output, set)| (output.clone(), set.workspaces.split_off(set.active)))
-                    .collect::<Vec<_>>();
-
-                let mut first_half = std::iter::repeat(())
-                    // we continuously pop the last elements from the first half and group them together.
-                    .map(|_| {
-                        sets.iter_mut()
-                            .flat_map(|(o, w)| w.workspaces.pop().map(|w| (o.clone(), w)))
-                            .collect::<Vec<_>>()
-                    })
-                    // we stop once there is no workspace anymore in the entire set
-                    .filter(|vec| !vec.is_empty())
-                    .fuse()
-                    .collect::<Vec<_>>();
-                // we reverse those then to get the proper order
-                first_half.reverse();
-
-                let mergers = first_half
-                    .into_iter()
-                    // we need to know, which is supposed to be active and we loose that info by chaining, so lets add a bool
-                    .map(|w| (w, false))
-                    .chain(
-                        (0..)
-                            // here we continuously remove the first element
-                            .map(|i| {
-                                (
-                                    second_half
-                                        .iter_mut()
-                                        .flat_map(|&mut (ref o, ref mut w)| {
-                                            if !w.is_empty() {
-                                                Some((o.clone(), w.remove(0)))
-                                            } else {
-                                                None
-                                            }
-                                        })
-                                        .collect::<Vec<_>>(),
-                                    i == 0,
-                                )
-                            })
-                            .filter(|(vec, _)| !vec.is_empty())
-                            .fuse(),
-                    );
-
-                for (i, (workspaces, active)) in mergers.into_iter().enumerate() {
-                    // and then we can merge each vector into one and put that into our new set.
-                    let workspace_handle = state.create_workspace(&new_set.group).unwrap();
-                    state.set_workspace_capabilities(
-                        &workspace_handle,
-                        [WorkspaceCapabilities::Activate].into_iter(),
-                    );
-                    workspace_set_idx(&mut state, i as u8 + 1, 0, &workspace_handle);
-
-                    let mut new_workspace =
-                        Workspace::new(workspace_handle, self.tiling_enabled, self.gaps);
-                    for output in self.outputs.iter() {
-                        new_workspace.map_output(output, output.current_location());
-                    }
-                    new_workspace.tiling_enabled = workspaces.iter().any(|(_, w)| w.tiling_enabled);
-
-                    for (_output, workspace) in workspaces.into_iter() {
-                        for toplevel in workspace.windows() {
-                            self.toplevel_info_state
-                                .toplevel_leave_workspace(&toplevel, &workspace.handle);
-                            self.toplevel_info_state
-                                .toplevel_enter_workspace(&toplevel, &new_workspace.handle);
-                        }
-                        new_workspace.tiling_layer.merge(workspace.tiling_layer);
-                        new_workspace.floating_layer.merge(workspace.floating_layer);
-                        new_workspace
-                            .fullscreen
-                            .extend(workspace.fullscreen.into_iter());
-                        state.remove_workspace(workspace.handle);
-                    }
-
-                    if active {
-                        new_set.active = new_set.workspaces.len();
-                    }
-                    new_set.workspaces.push(new_workspace);
-                }
-
-                for group in sets.values().map(|set| set.group) {
-                    state.remove_workspace_group(group);
-                }
-
-                new_set.amount = amount;
-                *dst = WorkspaceMode::Global(new_set);
-            }
-            (dst @ WorkspaceMode::Global(_), ConfigMode::OutputBound) => {
-                // rustc should really be able to infer that this doesn't need an if.
-                let set = if let &mut WorkspaceMode::Global(ref mut set) = dst {
-                    set
-                } else {
-                    unreachable!()
-                };
-
-                // split workspaces apart, preserving window positions relative to their outputs
-                let mut sets = HashMap::new();
-                for (i, output) in self.outputs.iter().enumerate() {
-                    let set = WorkspaceSet::new(
-                        &mut state,
-                        WorkspaceAmount::Static(0),
-                        i,
-                        self.tiling_enabled,
-                        self.gaps,
-                    );
-                    state.add_group_output(&set.group, output);
-                    sets.insert(output.clone(), set);
-                }
-                for (i, workspace) in set.workspaces.drain(..).enumerate() {
-                    for (idx, output) in self.outputs.iter().enumerate() {
-                        // copy over everything and then remove other outputs to preserve state
-                        let new_set = sets.get_mut(output).unwrap();
-                        let new_workspace_handle = state.create_workspace(&new_set.group).unwrap();
-                        state.set_workspace_capabilities(
-                            &new_workspace_handle,
-                            [WorkspaceCapabilities::Activate].into_iter(),
-                        );
-                        workspace_set_idx(&mut state, i as u8 + 1, idx, &new_workspace_handle);
-
-                        let mut old_tiling_layer = workspace.tiling_layer.clone();
-                        let mut new_floating_layer = FloatingLayout::new();
-                        let mut new_tiling_layer = TilingLayout::new(self.gaps);
-
-                        for element in workspace.mapped() {
-                            for (toplevel, _) in element.windows() {
-                                self.toplevel_info_state
-                                    .toplevel_leave_workspace(&toplevel, &workspace.handle);
-                            }
-
-                            if workspace
-                                .floating_layer
-                                .most_overlapped_output_for_element(element)
-                                .as_ref()
-                                == Some(output)
-                            {
-                                if let Some(mut old_mapped_loc) =
-                                    workspace.floating_layer.space.element_location(element)
-                                {
-                                    let old_output_geo = workspace
-                                        .floating_layer
-                                        .space
-                                        .output_geometry(output)
-                                        .unwrap();
-                                    old_mapped_loc -= old_output_geo.loc;
-                                    new_floating_layer.map_internal(
-                                        element.clone(),
-                                        output,
-                                        Some(old_mapped_loc),
-                                    );
-                                }
-                            } else {
-                                old_tiling_layer.unmap(element);
-                            }
-                        }
-
-                        new_floating_layer.map_output(output, (0, 0).into());
-                        new_tiling_layer.map_output(output, (0, 0).into());
-                        new_tiling_layer.merge(old_tiling_layer);
-
-                        let mut new_workspace = Workspace {
-                            tiling_layer: new_tiling_layer,
-                            floating_layer: new_floating_layer,
-                            tiling_enabled: workspace.tiling_enabled,
-                            fullscreen: workspace
-                                .fullscreen
-                                .iter()
-                                .filter(|(key, _)| *key == output)
-                                .map(|(o, w)| (o.clone(), w.clone()))
-                                .collect(),
-                            ..Workspace::new(new_workspace_handle, true, self.gaps)
-                        };
-                        for toplevel in new_workspace.windows() {
-                            self.toplevel_info_state
-                                .toplevel_enter_workspace(&toplevel, &new_workspace_handle);
-                        }
-                        new_workspace.refresh();
-
-                        new_set.workspaces.push(new_workspace);
-                        new_set.active = set.active;
-                    }
-                    state.remove_workspace(workspace.handle);
-                }
-                state.remove_workspace_group(set.group);
-
-                for new_set in sets.values_mut() {
-                    new_set.amount = set.amount;
-                }
-                *dst = WorkspaceMode::OutputBound(sets, set.amount);
-            }
-            _ => {}
-        }
-
-        std::mem::drop(state);
-        self.refresh(); // get rid of empty workspaces and enforce potential maximum
+    pub fn update_config(&mut self, config: &Config) {
+        let mut workspace_state = self.workspace_state.update();
+        let toplevel_info_state = &mut self.toplevel_info_state;
+        self.workspaces
+            .update_config(config, &mut workspace_state, toplevel_info_state);
     }
-    */
 
     pub fn activate(
         &mut self,
