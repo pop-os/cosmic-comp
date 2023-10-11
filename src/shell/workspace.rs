@@ -93,6 +93,7 @@ pub struct Workspace {
 #[derive(Debug, Clone)]
 pub struct FullscreenSurface {
     pub surface: CosmicSurface,
+    pub previously: Option<(ManagedLayer, WorkspaceHandle)>,
     original_geometry: Rectangle<i32, Global>,
     start_at: Option<Instant>,
     ended_at: Option<Instant>,
@@ -472,7 +473,11 @@ impl Workspace {
         None
     }
 
-    pub fn fullscreen_request(&mut self, window: &CosmicSurface) {
+    pub fn fullscreen_request(
+        &mut self,
+        window: &CosmicSurface,
+        previously: Option<(ManagedLayer, WorkspaceHandle)>,
+    ) {
         if self.fullscreen.is_some() {
             return;
         }
@@ -497,6 +502,7 @@ impl Workspace {
 
         self.fullscreen = Some(FullscreenSurface {
             surface: window.clone(),
+            previously,
             original_geometry,
             start_at: Some(Instant::now()),
             ended_at: None,
@@ -504,7 +510,11 @@ impl Workspace {
         });
     }
 
-    pub fn unfullscreen_request(&mut self, window: &CosmicSurface) -> Option<Size<i32, Logical>> {
+    #[must_use]
+    pub fn unfullscreen_request(
+        &mut self,
+        window: &CosmicSurface,
+    ) -> Option<(ManagedLayer, WorkspaceHandle)> {
         if let Some(f) = self.fullscreen.as_mut().filter(|f| &f.surface == window) {
             window.set_fullscreen(false);
             window.set_geometry(f.original_geometry);
@@ -545,15 +555,19 @@ impl Workspace {
                 }
             }
 
-            Some(f.original_geometry.size.as_logical())
+            f.previously
         } else {
             None
         }
     }
 
-    pub fn remove_fullscreen(&mut self) {
+    #[must_use]
+    pub fn remove_fullscreen(&mut self) -> Option<(CosmicMapped, ManagedLayer, WorkspaceHandle)> {
         if let Some(surface) = self.fullscreen.as_ref().map(|f| f.surface.clone()) {
-            self.unfullscreen_request(&surface);
+            self.unfullscreen_request(&surface)
+                .map(|(l, h)| (self.element_for_surface(&surface).unwrap().clone(), l, h))
+        } else {
+            None
         }
     }
 
@@ -633,7 +647,7 @@ impl Workspace {
             .as_ref()
             .is_some_and(|f| &f.surface == window)
         {
-            self.remove_fullscreen();
+            let _ = self.remove_fullscreen(); // We are moving this window, we don't need to send it back to it's original workspace
         }
 
         let mapped = self.element_for_surface(&window)?.clone();
@@ -692,7 +706,8 @@ impl Workspace {
                 .into_iter()
             {
                 self.floating_layer.unmap(&window);
-                self.tiling_layer.map(window, focus_stack.iter(), None)
+                self.tiling_layer
+                    .map(window, Some(focus_stack.iter()), None)
             }
             self.tiling_enabled = true;
         }
@@ -707,7 +722,8 @@ impl Workspace {
                 } else if self.floating_layer.mapped().any(|w| w == &window) {
                     let focus_stack = self.focus_stack.get(seat);
                     self.floating_layer.unmap(&window);
-                    self.tiling_layer.map(window, focus_stack.iter(), None)
+                    self.tiling_layer
+                        .map(window, Some(focus_stack.iter()), None)
                 }
             }
         }

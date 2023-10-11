@@ -152,7 +152,7 @@ pub struct Shell {
 
     pub popups: PopupManager,
     pub maximize_mode: MaximizeMode,
-    pub pending_windows: Vec<(CosmicSurface, Seat<State>)>,
+    pub pending_windows: Vec<(CosmicSurface, Seat<State>, Option<Output>)>,
     pub pending_layers: Vec<(LayerSurface, Output, Seat<State>)>,
     pub override_redirect_windows: Vec<X11Surface>,
 
@@ -382,7 +382,8 @@ impl WorkspaceSet {
 
             for mut workspace in overflow {
                 if last_space.fullscreen.is_some() {
-                    workspace.remove_fullscreen();
+                    // Don't handle the returned original workspace, for this nieche case.
+                    let _ = workspace.remove_fullscreen();
                 }
 
                 for element in workspace.mapped() {
@@ -1250,18 +1251,78 @@ impl Shell {
             .refresh(Some(&self.workspace_state));
     }
 
-    pub fn map_window(state: &mut State, window: &CosmicSurface, output: &Output) {
+    pub fn remap_unfullscreened_window(
+        &mut self,
+        mapped: CosmicMapped,
+        current_workspace: &WorkspaceHandle,
+        previous_workspace: &WorkspaceHandle,
+        target_layer: ManagedLayer,
+    ) {
+        if self.space_for_handle(previous_workspace).is_none() {
+            return;
+        }
+
+        {
+            let Some(workspace) = self.space_for_handle_mut(&current_workspace) else { return };
+            let _ = workspace.unmap(&mapped);
+        }
+
+        let new_workspace_output = self
+            .space_for_handle(&previous_workspace)
+            .unwrap()
+            .output()
+            .clone();
+        for (window, _) in mapped.windows() {
+            self.toplevel_info_state
+                .toplevel_enter_output(&window, &new_workspace_output);
+            self.toplevel_info_state
+                .toplevel_enter_workspace(&window, &previous_workspace);
+        }
+
+        let new_workspace = self.space_for_handle_mut(&previous_workspace).unwrap();
+        match target_layer {
+            ManagedLayer::Floating => new_workspace.floating_layer.map(mapped, None),
+            ManagedLayer::Tiling => {
+                new_workspace
+                    .tiling_layer
+                    .map(mapped, Option::<std::iter::Empty<_>>::None, None)
+            }
+        };
+    }
+
+    pub fn map_window(state: &mut State, window: &CosmicSurface) {
         let pos = state
             .common
             .shell
             .pending_windows
             .iter()
-            .position(|(w, _)| w == window)
+            .position(|(w, _, _)| w == window)
             .unwrap();
-        let (window, seat) = state.common.shell.pending_windows.remove(pos);
+        let (window, seat, output) = state.common.shell.pending_windows.remove(pos);
 
-        let workspace = state.common.shell.workspaces.active_mut(output);
-        workspace.remove_fullscreen();
+        let should_be_fullscreen = output.is_some();
+        let output = output.unwrap_or_else(|| seat.active_output());
+
+        let workspace = state.common.shell.workspaces.active_mut(&output);
+        if let Some((mapped, layer, previous_workspace)) = workspace.remove_fullscreen() {
+            let old_handle = workspace.handle.clone();
+            let new_workspace_handle = state
+                .common
+                .shell
+                .space_for_handle(&previous_workspace)
+                .is_some()
+                .then_some(previous_workspace)
+                .unwrap_or(old_handle);
+
+            state.common.shell.remap_unfullscreened_window(
+                mapped,
+                &old_handle,
+                &new_workspace_handle,
+                layer,
+            );
+        };
+
+        let workspace = state.common.shell.workspaces.active_mut(&output);
         state.common.shell.toplevel_info_state.new_toplevel(&window);
         state
             .common
@@ -1297,17 +1358,21 @@ impl Shell {
             let focus_stack = workspace.focus_stack.get(&seat);
             workspace
                 .tiling_layer
-                .map(mapped.clone(), focus_stack.iter(), None);
+                .map(mapped.clone(), Some(focus_stack.iter()), None);
         }
 
-        if let CosmicSurface::X11(surface) = window {
+        if should_be_fullscreen {
+            workspace.fullscreen_request(&mapped.active_window(), None);
+        }
+
+        if let CosmicSurface::X11(ref surface) = window {
             if let Some(xwm) = state
                 .common
                 .xwayland_state
                 .as_mut()
                 .and_then(|state| state.xwm.as_mut())
             {
-                if let Err(err) = xwm.raise_window(&surface) {
+                if let Err(err) = xwm.raise_window(surface) {
                     warn!(?err, "Failed to update Xwayland stacking order.");
                 }
             }
@@ -1315,7 +1380,7 @@ impl Shell {
 
         Shell::set_focus(state, Some(&KeyboardFocusTarget::from(mapped)), &seat, None);
 
-        let active_space = state.common.shell.active_space(output);
+        let active_space = state.common.shell.active_space(&output);
         for mapped in active_space.mapped() {
             state.common.shell.update_reactive_popups(mapped);
         }
@@ -1440,10 +1505,10 @@ impl Shell {
         } else {
             to_workspace
                 .tiling_layer
-                .map(mapped.clone(), focus_stack.iter(), direction);
+                .map(mapped.clone(), Some(focus_stack.iter()), direction);
         }
-        let focus_target = if window_state.was_fullscreen.is_some() {
-            to_workspace.fullscreen_request(&mapped.active_window());
+        let focus_target = if let Some(f) = window_state.was_fullscreen {
+            to_workspace.fullscreen_request(&mapped.active_window(), f.previously);
             KeyboardFocusTarget::from(to_workspace.get_fullscreen().unwrap().clone())
         } else {
             KeyboardFocusTarget::from(mapped.clone())

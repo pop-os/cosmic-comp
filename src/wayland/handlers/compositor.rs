@@ -171,12 +171,12 @@ impl CompositorHandler for State {
         on_commit_buffer_handler::<Self>(surface);
 
         // then handle initial configure events and map windows if necessary
-        if let Some((window, seat)) = self
+        if let Some((window, _, _)) = self
             .common
             .shell
             .pending_windows
             .iter()
-            .find(|(window, _)| window.wl_surface().as_ref() == Some(surface))
+            .find(|(window, _, _)| window.wl_surface().as_ref() == Some(surface))
             .cloned()
         {
             match window {
@@ -185,9 +185,8 @@ impl CompositorHandler for State {
                     if self.toplevel_ensure_initial_configure(&toplevel)
                         && with_renderer_surface_state(&surface, |state| state.buffer().is_some())
                     {
-                        let output = seat.active_output();
                         window.on_commit();
-                        Shell::map_window(self, &window, &output);
+                        Shell::map_window(self, &window);
                     } else {
                         return;
                     }

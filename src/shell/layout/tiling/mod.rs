@@ -363,15 +363,15 @@ impl TilingLayout {
     pub fn map<'a>(
         &mut self,
         window: CosmicMapped,
-        focus_stack: impl Iterator<Item = &'a CosmicMapped> + 'a,
+        focus_stack: Option<impl Iterator<Item = &'a CosmicMapped> + 'a>,
         direction: Option<Direction>,
     ) {
         window.output_enter(&self.output, window.bbox());
         window.set_bounds(self.output.geometry().size.as_logical());
-        self.map_internal(window, Some(focus_stack), direction);
+        self.map_internal(window, focus_stack, direction);
     }
 
-    fn map_internal<'a>(
+    pub fn map_internal<'a>(
         &mut self,
         window: impl Into<CosmicMapped>,
         focus_stack: Option<impl Iterator<Item = &'a CosmicMapped> + 'a>,
@@ -528,7 +528,7 @@ impl TilingLayout {
                 }
 
                 mapped.set_tiled(true);
-                other.map(mapped.clone(), focus_stack, None);
+                other.map(mapped.clone(), Some(focus_stack), None);
                 return Some(KeyboardFocusTarget::Element(mapped));
             }
             None => {
