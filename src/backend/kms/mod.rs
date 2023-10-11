@@ -1014,8 +1014,14 @@ impl Device {
             interface,
             PhysicalProperties {
                 size: (phys_w as i32, phys_h as i32).into(),
-                // TODO: We need to read that from the connector properties
-                subpixel: Subpixel::Unknown,
+                subpixel: match conn_info.subpixel() {
+                    connector::SubPixel::HorizontalRgb => Subpixel::HorizontalRgb,
+                    connector::SubPixel::HorizontalBgr => Subpixel::HorizontalBgr,
+                    connector::SubPixel::VerticalRgb => Subpixel::VerticalRgb,
+                    connector::SubPixel::VerticalBgr => Subpixel::VerticalBgr,
+                    connector::SubPixel::None => Subpixel::None,
+                    _ => Subpixel::Unknown,
+                },
                 make: edid_info
                     .as_ref()
                     .map(|info| info.manufacturer.clone())
