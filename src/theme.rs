@@ -70,16 +70,16 @@ pub fn watch_theme(handle: LoopHandle<'_, State>) -> Result<(), cosmic_config::E
 
         if theme.theme_type != new_theme.theme_type {
             *theme = new_theme;
+            let gaps = theme.cosmic().gaps;
+            state.common.shell.set_gaps((gaps.0 as u8, gaps.1 as u8));
+            drop(theme);
+            state.common.shell.workspaces.spaces().for_each(|s| {
+                s.mapped().for_each(|m| {
+                    m.set_theme();
+                    m.force_redraw();
+                })
+            });
         }
-        let gaps = theme.cosmic().gaps;
-        state.common.shell.set_gaps((gaps.0 as u8, gaps.1 as u8));
-        drop(theme);
-        state.common.shell.workspaces.spaces().for_each(|s| {
-            s.mapped().for_each(|m| {
-                m.set_theme();
-                m.force_redraw();
-            })
-        });
     }) {
         tracing::error!("{e}");
     };
