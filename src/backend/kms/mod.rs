@@ -68,6 +68,7 @@ use smithay::{
     utils::{DeviceFd, Size, Transform},
     wayland::{
         dmabuf::{get_dmabuf, DmabufFeedbackBuilder, DmabufGlobal},
+        drm_lease::{DrmLease, DrmLeaseState},
         relative_pointer::RelativePointerManagerState,
         seat::WaylandFocus,
         shm::{shm_format_to_fourcc, with_buffer_contents},
@@ -96,7 +97,7 @@ const MIN_RENDER_TIME: Duration = Duration::from_millis(3);
 
 #[derive(Debug)]
 pub struct KmsState {
-    devices: HashMap<DrmNode, Device>,
+    pub devices: HashMap<DrmNode, Device>,
     pub input_devices: HashMap<String, input::Device>,
     pub api: GpuManager<GbmGlesBackend<GlowRenderer>>,
     pub primary: DrmNode,
@@ -107,11 +108,14 @@ pub struct KmsState {
 pub struct Device {
     render_node: DrmNode,
     surfaces: HashMap<crtc::Handle, Surface>,
-    drm: DrmDevice,
+    pub drm: DrmDevice,
     gbm: GbmDevice<DrmDeviceFd>,
     allocator: Box<dyn Allocator<Buffer = Dmabuf, Error = AnyError>>,
     formats: HashSet<Format>,
     supports_atomic: bool,
+    pub non_desktop_connectors: Vec<(connector::Handle, crtc::Handle)>,
+    pub leasing_global: Option<DrmLeaseState>,
+    pub active_leases: Vec<DrmLease>,
     event_token: Option<RegistrationToken>,
     socket: Option<Socket>,
 }
@@ -126,6 +130,9 @@ impl fmt::Debug for Device {
             .field("allocator", &"...")
             .field("formats", &self.formats)
             .field("supports_atomic", &self.supports_atomic)
+            .field("non_desktop_connectors", &self.non_desktop_connectors)
+            .field("leasing_global", &self.leasing_global)
+            .field("active_leases", &self.active_leases)
             .field("event_token", &self.event_token)
             .field("socket", &self.socket)
             .finish()
@@ -272,8 +279,11 @@ pub fn init_backend(
                 if let Err(err) = libinput_context.resume() {
                     error!(?err, "Failed to resume libinput context.");
                 }
-                for device in state.backend.kms().devices.values() {
+                for device in state.backend.kms().devices.values_mut() {
                     device.drm.activate();
+                    if let Some(lease_state) = device.leasing_global.as_mut() {
+                        lease_state.resume::<State>();
+                    }
                 }
                 let dispatcher = dispatcher.clone();
                 handle.insert_idle(move |state| {
@@ -341,6 +351,9 @@ pub fn init_backend(
                 libinput_context.suspend();
                 for device in state.backend.kms().devices.values_mut() {
                     device.drm.pause();
+                    if let Some(lease_state) = device.leasing_global.as_mut() {
+                        lease_state.suspend();
+                    }
                     for surface in device.surfaces.values_mut() {
                         surface.surface = None;
                         if let Some(token) = surface.render_timer_token.take() {
@@ -593,6 +606,18 @@ impl State {
             drm,
             formats,
             supports_atomic,
+            non_desktop_connectors: Vec::new(),
+            leasing_global: DrmLeaseState::new::<State>(dh, &drm_node)
+                .map_err(|err| {
+                    // TODO: replace with inspect_err, once stable
+                    warn!(
+                        ?err,
+                        "Failed to initialize drm lease global for: {}", drm_node
+                    );
+                    err
+                })
+                .ok(),
+            active_leases: Vec::new(),
             event_token: Some(token),
             socket,
         };
@@ -624,19 +649,62 @@ impl State {
             init_shaders(&mut renderer).expect("Failed to initialize renderer");
 
             for (crtc, conn) in outputs {
-                match device.setup_surface(crtc, conn, (w, 0), &mut renderer) {
-                    Ok(output) => {
-                        w += output
-                            .user_data()
-                            .get::<RefCell<OutputConfig>>()
-                            .unwrap()
-                            .borrow()
-                            .mode_size()
-                            .w;
-                        wl_outputs.push(output);
+                let non_desktop =
+                    match drm_helpers::get_property_val(&device.drm, conn, "non-desktop") {
+                        Ok((val_type, value)) => {
+                            val_type.convert_value(value).as_boolean().unwrap()
+                        }
+                        Err(err) => {
+                            warn!(
+                            ?err,
+                            "Failed to determine if connector is meant desktop usage, assuming so."
+                        );
+                            false
+                        }
+                    };
+
+                if non_desktop {
+                    let Ok(output_name) = drm_helpers::interface_name(&device.drm, conn) else {
+                        continue
+                    };
+                    let drm_helpers::EdidInfo {
+                        model,
+                        manufacturer,
+                    } = match drm_helpers::edid_info(&device.drm, conn) {
+                        Ok(info) => info,
+                        Err(_) => drm_helpers::EdidInfo {
+                            model: "Unknown".into(),
+                            manufacturer: "Unknown".into(),
+                        },
+                    };
+
+                    device.non_desktop_connectors.push((conn, crtc));
+                    info!(
+                        "Connector {} is non-desktop, setting up for leasing",
+                        output_name
+                    );
+                    if let Some(lease_state) = device.leasing_global.as_mut() {
+                        lease_state.add_connector::<State>(
+                            conn,
+                            output_name,
+                            format!("{} {}", manufacturer, model),
+                        );
                     }
-                    Err(err) => warn!(?err, "Failed to initialize output."),
-                };
+                } else {
+                    match device.setup_surface(crtc, conn, (w, 0), &mut renderer) {
+                        Ok(output) => {
+                            w += output
+                                .user_data()
+                                .get::<RefCell<OutputConfig>>()
+                                .unwrap()
+                                .borrow()
+                                .mode_size()
+                                .w;
+                            wl_outputs.push(output);
+                        }
+                        Err(err) => warn!(?err, "Failed to initialize output."),
+                    };
+                }
             }
             backend.devices.insert(drm_node, device);
         }
@@ -714,7 +782,16 @@ impl State {
                 let changes = device.enumerate_surfaces()?;
                 let mut w = self.common.shell.global_space().size.w;
                 for crtc in changes.removed {
-                    if let Some(surface) = device.surfaces.remove(&crtc) {
+                    if let Some(pos) = device
+                        .non_desktop_connectors
+                        .iter()
+                        .position(|(_, handle)| *handle == crtc)
+                    {
+                        let (conn, _) = device.non_desktop_connectors.remove(pos);
+                        if let Some(leasing_state) = device.leasing_global.as_mut() {
+                            leasing_state.withdraw_connector(conn);
+                        }
+                    } else if let Some(surface) = device.surfaces.remove(&crtc) {
                         if let Some(token) = surface.render_timer_token {
                             self.common.event_loop_handle.remove(token);
                         }
@@ -723,26 +800,69 @@ impl State {
                     }
                 }
                 for (crtc, conn) in changes.added {
-                    let mut renderer = match backend.api.single_renderer(&device.render_node) {
-                        Ok(renderer) => renderer,
-                        Err(err) => {
-                            warn!(?err, "Failed to initialize output.");
-                            continue;
+                    let non_desktop =
+                        match drm_helpers::get_property_val(&device.drm, conn, "non-desktop") {
+                            Ok((val_type, value)) => {
+                                val_type.convert_value(value).as_boolean().unwrap()
+                            }
+                            Err(err) => {
+                                warn!(
+                            ?err,
+                            "Failed to determine if connector is meant desktop usage, assuming so."
+                        );
+                                false
+                            }
+                        };
+
+                    if non_desktop {
+                        let Ok(output_name) = drm_helpers::interface_name(&device.drm, conn) else {
+                            continue
+                        };
+                        let drm_helpers::EdidInfo {
+                            model,
+                            manufacturer,
+                        } = match drm_helpers::edid_info(&device.drm, conn) {
+                            Ok(info) => info,
+                            Err(_) => drm_helpers::EdidInfo {
+                                model: "Unknown".into(),
+                                manufacturer: "Unknown".into(),
+                            },
+                        };
+
+                        device.non_desktop_connectors.push((conn, crtc));
+                        info!(
+                            "Connector {} is non-desktop, setting up for leasing",
+                            output_name
+                        );
+                        if let Some(lease_state) = device.leasing_global.as_mut() {
+                            lease_state.add_connector::<State>(
+                                conn,
+                                output_name,
+                                format!("{} {}", manufacturer, model),
+                            );
                         }
-                    };
-                    match device.setup_surface(crtc, conn, (w, 0), &mut renderer) {
-                        Ok(output) => {
-                            w += output
-                                .user_data()
-                                .get::<RefCell<OutputConfig>>()
-                                .unwrap()
-                                .borrow()
-                                .mode_size()
-                                .w;
-                            outputs_added.push(output);
-                        }
-                        Err(err) => warn!(?err, "Failed to initialize output."),
-                    };
+                    } else {
+                        let mut renderer = match backend.api.single_renderer(&device.render_node) {
+                            Ok(renderer) => renderer,
+                            Err(err) => {
+                                warn!(?err, "Failed to initialize output.");
+                                continue;
+                            }
+                        };
+                        match device.setup_surface(crtc, conn, (w, 0), &mut renderer) {
+                            Ok(output) => {
+                                w += output
+                                    .user_data()
+                                    .get::<RefCell<OutputConfig>>()
+                                    .unwrap()
+                                    .borrow()
+                                    .mode_size()
+                                    .w;
+                                outputs_added.push(output);
+                            }
+                            Err(err) => warn!(?err, "Failed to initialize output."),
+                        };
+                    }
                 }
             }
         }
@@ -779,6 +899,9 @@ impl State {
         let mut outputs_removed = Vec::new();
         let backend = self.backend.kms();
         if let Some(mut device) = backend.devices.remove(&drm_node) {
+            if let Some(mut leasing_global) = device.leasing_global.take() {
+                leasing_global.disable_global::<State>();
+            }
             backend.api.as_mut().remove_node(&device.render_node);
             for surface in device.surfaces.values_mut() {
                 if let Some(token) = surface.render_timer_token.take() {
@@ -837,6 +960,11 @@ impl Device {
             .surfaces
             .iter()
             .map(|(c, s)| (*c, s.connector))
+            .chain(
+                self.non_desktop_connectors
+                    .iter()
+                    .map(|(conn, crtc)| (*crtc, *conn)),
+            )
             .collect::<HashMap<crtc::Handle, connector::Handle>>();
 
         let added = config
