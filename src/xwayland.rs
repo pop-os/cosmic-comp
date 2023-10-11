@@ -12,7 +12,7 @@ use smithay::{
     desktop::space::SpaceElement,
     reexports::x11rb::protocol::xproto::Window as X11Window,
     utils::{Logical, Point, Rectangle, Size},
-    wayland::{
+    wayland::selection::{
         data_device::{
             clear_data_device_selection, current_data_device_selection_userdata,
             request_data_device_client_selection, set_data_device_selection,
@@ -21,9 +21,10 @@ use smithay::{
             clear_primary_selection, current_primary_selection_userdata,
             request_primary_client_selection, set_primary_selection,
         },
+        SelectionTarget,
     },
     xwayland::{
-        xwm::{Reorder, SelectionType, XwmId},
+        xwm::{Reorder, XwmId},
         X11Surface, X11Wm, XWayland, XWaylandEvent, XwmHandler,
     },
 };
@@ -411,13 +412,13 @@ impl XwmHandler for State {
     fn send_selection(
         &mut self,
         _xwm: XwmId,
-        selection: SelectionType,
+        selection: SelectionTarget,
         mime_type: String,
         fd: OwnedFd,
     ) {
         let seat = self.common.last_active_seat();
         match selection {
-            SelectionType::Clipboard => {
+            SelectionTarget::Clipboard => {
                 if let Err(err) = request_data_device_client_selection(seat, mime_type, fd) {
                     error!(
                         ?err,
@@ -425,7 +426,7 @@ impl XwmHandler for State {
                     );
                 }
             }
-            SelectionType::Primary => {
+            SelectionTarget::Primary => {
                 if let Err(err) = request_primary_client_selection(seat, mime_type, fd) {
                     error!(
                         ?err,
@@ -436,35 +437,35 @@ impl XwmHandler for State {
         }
     }
 
-    fn allow_selection_access(&mut self, xwm: XwmId, _selection: SelectionType) -> bool {
+    fn allow_selection_access(&mut self, xwm: XwmId, _selection: SelectionTarget) -> bool {
         self.common.is_x_focused(xwm)
     }
 
-    fn new_selection(&mut self, xwm: XwmId, selection: SelectionType, mime_types: Vec<String>) {
+    fn new_selection(&mut self, xwm: XwmId, selection: SelectionTarget, mime_types: Vec<String>) {
         trace!(?selection, ?mime_types, "Got Selection from Xwayland",);
 
         if self.common.is_x_focused(xwm) {
             let seat = self.common.last_active_seat();
             match selection {
-                SelectionType::Clipboard => {
+                SelectionTarget::Clipboard => {
                     set_data_device_selection(&self.common.display_handle, &seat, mime_types, xwm)
                 }
-                SelectionType::Primary => {
+                SelectionTarget::Primary => {
                     set_primary_selection(&self.common.display_handle, &seat, mime_types, xwm)
                 }
             }
         }
     }
 
-    fn cleared_selection(&mut self, xwm: XwmId, selection: SelectionType) {
+    fn cleared_selection(&mut self, xwm: XwmId, selection: SelectionTarget) {
         for seat in self.common.seats() {
             match selection {
-                SelectionType::Clipboard => {
+                SelectionTarget::Clipboard => {
                     if current_data_device_selection_userdata(seat).as_deref() == Some(&xwm) {
                         clear_data_device_selection(&self.common.display_handle, seat)
                     }
                 }
-                SelectionType::Primary => {
+                SelectionTarget::Primary => {
                     if current_primary_selection_userdata(seat).as_deref() == Some(&xwm) {
                         clear_primary_selection(&self.common.display_handle, seat)
                     }
