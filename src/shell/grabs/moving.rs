@@ -77,6 +77,11 @@ impl MoveGrabState {
         } else {
             1.0
         };
+        let alpha = if &seat.active_output() == output {
+            1.0
+        } else {
+            0.4
+        };
 
         let cursor_at = seat.get_pointer().unwrap().current_location();
 
@@ -115,7 +120,7 @@ impl MoveGrabState {
                     .as_local(),
                     self.indicator_thickness,
                     output_scale.x,
-                    1.0,
+                    alpha,
                 ))
                 .into(),
             )
@@ -130,7 +135,7 @@ impl MoveGrabState {
                 (render_location - self.window.geometry().loc)
                     .to_physical_precise_round(output_scale),
                 output_scale,
-                1.0,
+                alpha,
             );
 
         self.stacking_indicator
