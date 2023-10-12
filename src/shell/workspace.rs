@@ -346,7 +346,7 @@ impl Workspace {
             .unwrap_or(false)
             .then(|| self.fullscreen.take().unwrap());
 
-        if mapped.is_maximized(true) {
+        if mapped.maximized_state.lock().unwrap().is_some() {
             // If surface is maximized then unmaximize it, so it is assigned to only one layer
             let _ = self.unmaximize_request(&mapped.active_window());
         }
@@ -657,7 +657,7 @@ impl Workspace {
             .loc
             .to_global(&self.output);
 
-        if mapped.is_maximized(true) {
+        if mapped.maximized_state.lock().unwrap().is_some() {
             // If surface is maximized then unmaximize it
             let new_size = self.unmaximize_request(window);
             let ratio = pos.x / output.geometry().size.w as f64;
@@ -669,7 +669,7 @@ impl Workspace {
         }
 
         let was_floating = self.floating_layer.unmap(&mapped);
-        let was_tiled = dbg!(self.tiling_layer.unmap_as_placeholder(&mapped));
+        let was_tiled = self.tiling_layer.unmap_as_placeholder(&mapped);
         assert!(was_floating != was_tiled.is_some());
 
         Some(MoveGrab::new(
