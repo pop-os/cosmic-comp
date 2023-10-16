@@ -13,7 +13,7 @@ use crate::{
         Direction, FocusResult, MoveResult, OverviewMode, ResizeDirection, ResizeMode, Trigger,
         Workspace,
     },
-    state::Common,
+    state::{Common, SessionLock},
     utils::prelude::*,
     wayland::{handlers::screencopy::ScreencopySessions, protocols::screencopy::Session},
 };
@@ -565,6 +565,7 @@ impl State {
                         &self.common.shell.override_redirect_windows,
                         overview.0.clone(),
                         workspace,
+                        self.common.session_lock.as_ref(),
                     )
                     .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -646,6 +647,7 @@ impl State {
                         &self.common.shell.override_redirect_windows,
                         overview.0,
                         workspace,
+                        self.common.session_lock.as_ref(),
                     )
                     .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -776,6 +778,7 @@ impl State {
                         &self.common.shell.override_redirect_windows,
                         overview.0,
                         workspace,
+                        self.common.session_lock.as_ref(),
                     )
                     .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -852,7 +855,12 @@ impl State {
                             let workspace = self.common.shell.active_space_mut(&output);
                             let mut under = None;
 
-                            if let Some(window) = workspace.get_fullscreen() {
+                            if let Some(session_lock) = self.common.session_lock.as_ref() {
+                                under = session_lock
+                                    .surfaces
+                                    .get(&output)
+                                    .map(|lock| lock.clone().into());
+                            } else if let Some(window) = workspace.get_fullscreen() {
                                 let layers = layer_map_for_output(&output);
                                 if let Some(layer) =
                                     layers.layer_under(WlrLayer::Overlay, relative_pos.as_logical())
@@ -1153,6 +1161,14 @@ impl State {
         pattern: KeyPattern,
         direction: Option<Direction>,
     ) {
+        // TODO: Detect if started from login manager or tty, and only allow
+        // `Terminate` if it will return to login manager.
+        if self.common.session_lock.is_some()
+            && !matches!(action, Action::Terminate | Action::Debug)
+        {
+            return;
+        }
+
         match action {
             Action::Terminate => {
                 self.common.should_stop = true;
@@ -1718,9 +1734,19 @@ impl State {
         override_redirect_windows: &[X11Surface],
         overview: OverviewMode,
         workspace: &mut Workspace,
+        session_lock: Option<&SessionLock>,
     ) -> Option<(PointerFocusTarget, Point<i32, Global>)> {
         let relative_pos = global_pos.to_local(output);
         let output_geo = output.geometry();
+
+        if let Some(session_lock) = session_lock {
+            return session_lock.surfaces.get(output).map(|surface| {
+                (
+                    PointerFocusTarget::LockSurface(surface.clone()),
+                    output_geo.loc,
+                )
+            });
+        }
 
         if let Some(window) = workspace.get_fullscreen() {
             let layers = layer_map_for_output(output);

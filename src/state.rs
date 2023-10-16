@@ -70,6 +70,7 @@ use smithay::{
         seat::WaylandFocus,
         security_context::{SecurityContext, SecurityContextState},
         selection::{data_device::DataDeviceState, primary_selection::PrimarySelectionState},
+        session_lock::{LockSurface, SessionLockManagerState},
         shell::{kde::decoration::KdeDecorationState, xdg::decoration::XdgDecorationState},
         shm::ShmState,
         viewporter::ViewporterState,
@@ -79,7 +80,10 @@ use smithay::{
 use tracing::error;
 
 use std::{cell::RefCell, ffi::OsString, time::Duration};
-use std::{collections::VecDeque, time::Instant};
+use std::{
+    collections::{HashMap, VecDeque},
+    time::Instant,
+};
 
 #[derive(RustEmbed)]
 #[folder = "resources/i18n"]
@@ -154,11 +158,14 @@ pub struct Common {
     pub primary_selection_state: PrimarySelectionState,
     pub screencopy_state: ScreencopyState,
     pub seat_state: SeatState<State>,
+    pub session_lock_manager_state: SessionLockManagerState,
     pub shm_state: ShmState,
     pub wl_drm_state: WlDrmState,
     pub viewporter_state: ViewporterState,
     pub kde_decoration_state: KdeDecorationState,
     pub xdg_decoration_state: XdgDecorationState,
+
+    pub session_lock: Option<SessionLock>,
 
     // xwayland state
     pub xwayland_state: Option<XWaylandState>,
@@ -178,6 +185,11 @@ pub enum BackendData {
 pub struct SurfaceDmabufFeedback {
     pub render_feedback: DmabufFeedback,
     pub scanout_feedback: DmabufFeedback,
+}
+
+#[derive(Debug)]
+pub struct SessionLock {
+    pub surfaces: HashMap<Output, LockSurface>,
 }
 
 impl BackendData {
@@ -309,6 +321,8 @@ impl State {
         let wl_drm_state = WlDrmState;
         let kde_decoration_state = KdeDecorationState::new::<Self>(&dh, Mode::Client);
         let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
+        let session_lock_manager_state =
+            SessionLockManagerState::new::<Self, _>(&dh, client_has_security_context);
         XWaylandKeyboardGrabState::new::<Self>(&dh);
         PointerConstraintsState::new::<Self>(&dh);
         PointerGesturesState::new::<Self>(&dh);
@@ -350,6 +364,7 @@ impl State {
                 screencopy_state,
                 shm_state,
                 seat_state,
+                session_lock_manager_state,
                 keyboard_shortcuts_inhibit_state,
                 output_state,
                 output_configuration_state,
@@ -359,6 +374,8 @@ impl State {
                 wl_drm_state,
                 kde_decoration_state,
                 xdg_decoration_state,
+
+                session_lock: None,
 
                 xwayland_state: None,
             },
@@ -458,6 +475,42 @@ impl Common {
     ) {
         let time = self.clock.now();
         let throttle = Some(Duration::from_secs(1));
+
+        if let Some(session_lock) = self.session_lock.as_ref() {
+            if let Some(lock_surface) = session_lock.surfaces.get(output) {
+                with_surfaces_surface_tree(lock_surface.wl_surface(), |_surface, states| {
+                    with_fractional_scale(states, |fraction_scale| {
+                        fraction_scale
+                            .set_preferred_scale(output.current_scale().fractional_scale());
+                    });
+                });
+                send_frames_surface_tree(
+                    lock_surface.wl_surface(),
+                    output,
+                    time,
+                    Some(Duration::ZERO),
+                    surface_primary_scanout_output,
+                );
+                if let Some(feedback) =
+                    source_node_for_surface(lock_surface.wl_surface(), &self.display_handle)
+                        .and_then(|source| dmabuf_feedback(source))
+                {
+                    send_dmabuf_feedback_surface_tree(
+                        &lock_surface.wl_surface(),
+                        output,
+                        surface_primary_scanout_output,
+                        |surface, _| {
+                            select_dmabuf_feedback(
+                                surface,
+                                render_element_states,
+                                &feedback.render_feedback,
+                                &feedback.scanout_feedback,
+                            )
+                        },
+                    )
+                }
+            }
+        }
 
         for seat in self.seats.iter() {
             if &seat.active_output() == output {

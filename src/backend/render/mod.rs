@@ -16,7 +16,7 @@ use crate::{
         focus::target::WindowGroup, grabs::SeatMoveGrabState, layout::tiling::ANIMATION_DURATION,
         CosmicMapped, CosmicMappedRenderElement, OverviewMode, Trigger, WorkspaceRenderElement,
     },
-    state::{Common, Fps},
+    state::{Common, Fps, SessionLock},
     utils::prelude::*,
     wayland::{
         handlers::{
@@ -42,7 +42,7 @@ use smithay::{
             buffer_dimensions,
             damage::{Error as RenderError, OutputDamageTracker, RenderOutputResult},
             element::{
-                surface::render_elements_from_surface_tree,
+                surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
                 utils::{Relocate, RelocateRenderElement},
                 Element, Id, Kind, RenderElement,
             },
@@ -487,6 +487,16 @@ where
         }
     }
 
+    // If session locked, only show session lock surfaces
+    if let Some(session_lock) = &state.session_lock {
+        elements.extend(
+            session_lock_elements(renderer, output, session_lock)
+                .into_iter()
+                .map(|x| WorkspaceRenderElement::from(x).into()),
+        );
+        return Ok(elements);
+    }
+
     let overview = state.shell.overview_mode();
     let (resize_mode, resize_indicator) = state.shell.resize_mode();
     let resize_indicator = resize_indicator.map(|indicator| (resize_mode, indicator));
@@ -781,6 +791,30 @@ where
     layer_elements.extend(more.0);
     popup_elements.extend(more.1);
     (layer_elements, popup_elements)
+}
+
+fn session_lock_elements<R>(
+    renderer: &mut R,
+    output: &Output,
+    session_lock: &SessionLock,
+) -> Vec<WaylandSurfaceRenderElement<R>>
+where
+    R: Renderer + ImportAll,
+    <R as Renderer>::TextureId: Clone + 'static,
+{
+    if let Some(surface) = session_lock.surfaces.get(output) {
+        let scale = Scale::from(output.current_scale().fractional_scale());
+        render_elements_from_surface_tree(
+            renderer,
+            surface.wl_surface(),
+            (0, 0),
+            scale,
+            1.0,
+            Kind::Unspecified,
+        )
+    } else {
+        Vec::new()
+    }
 }
 
 pub fn render_output<R, Target, OffTarget, Source>(
