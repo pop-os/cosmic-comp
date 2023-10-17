@@ -248,6 +248,14 @@ where
 }
 
 impl State {
+    fn next_tab_animation(&self) -> Option<&TabAnimationState> {
+        let now = Instant::now();
+
+        self.tab_animations
+            .iter()
+            .find(|anim| now.duration_since(anim.start_time) <= TAB_ANIMATION_DURATION)
+    }
+
     pub fn offset(&self, bounds: Rectangle, content_bounds: Size) -> Vector {
         if let Some(animation) = self.scroll_animation {
             let percentage = {
@@ -275,19 +283,41 @@ impl State {
     }
 
     pub fn cleanup_old_animations(&mut self) {
+        let start_time = Instant::now();
+
         if let Some(animation) = self.scroll_animation.as_ref() {
-            if Instant::now().duration_since(animation.start_time) > SCROLL_ANIMATION_DURATION {
+            if start_time.duration_since(animation.start_time) > SCROLL_ANIMATION_DURATION {
                 self.scroll_animation.take();
             }
         }
 
-        if let Some(animation) = self.tab_animations.front() {
-            if Instant::now().duration_since(animation.start_time) > TAB_ANIMATION_DURATION {
-                self.tab_animations.pop_front();
-                if let Some(next_animation) = self.tab_animations.front_mut() {
-                    next_animation.start_time = Instant::now();
+        Self::discard_expired_tab_animations(&mut self.tab_animations, start_time);
+    }
+
+    /// Remove expired tab animations from the queue.
+    fn discard_expired_tab_animations(
+        tab_animations: &mut VecDeque<TabAnimationState>,
+        start_time: Instant,
+    ) {
+        if let Some(mut animation) = tab_animations.pop_front() {
+            let mut set_next_start = false;
+
+            while start_time.duration_since(animation.start_time) > TAB_ANIMATION_DURATION {
+                set_next_start = true;
+
+                if let Some(next) = tab_animations.pop_front() {
+                    animation = next;
+                    continue;
                 }
+
+                return;
             }
+
+            if set_next_start {
+                animation.start_time = start_time;
+            }
+
+            tab_animations.push_front(animation);
         }
     }
 }
@@ -532,7 +562,9 @@ where
 
         renderer.with_layer(bounds, |renderer| {
             renderer.with_translation(Vector::new(-offset.x, -offset.y), |renderer| {
-                let percentage = if let Some(animation) = state.tab_animations.front() {
+                let tab_animation = state.next_tab_animation();
+
+                let percentage = if let Some(animation) = tab_animation {
                     let percentage = Instant::now()
                         .duration_since(animation.start_time)
                         .as_millis() as f32
@@ -547,7 +579,7 @@ where
                     .zip(tree.children.iter().skip(2))
                     .zip(layout.children().skip(2))
                 {
-                    let bounds = if let Some(animation) = state.tab_animations.front() {
+                    let bounds = if let Some(animation) = tab_animation {
                         let id = tab.as_widget().id().unwrap();
                         let previous =
                             animation
@@ -755,11 +787,15 @@ where
 
         if unknown_keys || changes.is_some() {
             if !scrolling || !matches!(changes, Some(Difference::Focus)) {
+                let start_time = Instant::now();
+
+                State::discard_expired_tab_animations(&mut state.tab_animations, start_time);
+
                 // new tab_animation
                 state.tab_animations.push_back(TabAnimationState {
                     previous_bounds: last_state.clone(),
                     next_bounds: current_state.clone(),
-                    start_time: Instant::now(),
+                    start_time,
                 });
             }
 
