@@ -3,7 +3,7 @@
 #[cfg(feature = "debug")]
 use crate::backend::render::element::AsGlowRenderer;
 use crate::{
-    backend::render::workspace_elements,
+    backend::render::{workspace_elements, CLEAR_COLOR},
     config::OutputConfig,
     shell::Shell,
     state::{BackendData, ClientState, Common, Fps, SurfaceDmabufFeedback},
@@ -1241,11 +1241,10 @@ impl Surface {
         })?;
         self.fps.elements();
 
-        let theme = state.theme.cosmic();
         let res = compositor.render_frame::<_, _, GlesTexture>(
             &mut renderer,
             &elements,
-            crate::theme::clear_color(&theme),
+            CLEAR_COLOR, // TODO use a theme neutral color
         );
         self.fps.render();
 

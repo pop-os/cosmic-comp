@@ -43,7 +43,7 @@ use crate::{
     backend::render::{
         cursor,
         element::{AsGlowRenderer, CosmicElement},
-        render_output, render_workspace, CursorMode,
+        render_output, render_workspace, CursorMode, CLEAR_COLOR,
     },
     shell::{CosmicMappedRenderElement, CosmicSurface, WorkspaceRenderElement},
     state::{BackendData, ClientState, Common, State},
@@ -1019,7 +1019,7 @@ pub fn render_window_to_buffer(
             renderer,
             age,
             &elements,
-            crate::theme::clear_color(common.theme.cosmic()),
+            CLEAR_COLOR, // TODO use a theme neutral color
         )
     }
 

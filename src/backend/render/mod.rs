@@ -78,6 +78,7 @@ pub type GlMultiFrame<'a, 'b, 'frame> =
     MultiFrame<'a, 'a, 'b, 'frame, GbmGlesBackend<GlowRenderer>, GbmGlesBackend<GlowRenderer>>;
 pub type GlMultiError = MultiError<GbmGlesBackend<GlowRenderer>, GbmGlesBackend<GlowRenderer>>;
 
+pub static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
 pub static OUTLINE_SHADER: &str = include_str!("./shaders/rounded_outline.frag");
 pub static RECTANGLE_SHADER: &str = include_str!("./shaders/rounded_rectangle.frag");
 
@@ -918,7 +919,7 @@ where
         renderer,
         age,
         &elements,
-        crate::theme::clear_color(state.theme.cosmic()),
+        CLEAR_COLOR, // TODO use a theme neutral color
     );
 
     if let Some(fps) = fps.as_mut() {
