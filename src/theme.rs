@@ -10,16 +10,6 @@ use cosmic::cosmic_theme::{
 
 use crate::state::State;
 
-pub(crate) fn clear_color(theme: &Theme<Srgba>) -> [f32; 4] {
-    let neutral_2 = theme.palette.neutral_2;
-    [
-        neutral_2.red,
-        neutral_2.green,
-        neutral_2.blue,
-        neutral_2.alpha,
-    ]
-}
-
 pub(crate) fn group_color(theme: &Theme<Srgba>) -> [f32; 3] {
     let neutral_8 = theme.palette.neutral_8;
     [neutral_8.red, neutral_8.green, neutral_8.blue]
