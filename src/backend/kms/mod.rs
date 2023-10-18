@@ -386,9 +386,9 @@ pub fn init_backend(
     state.launch_xwayland(Some(primary));
 
     for (dev, path) in udev_dispatcher.as_source_ref().device_list() {
-        state
-            .device_added(dev, path.into(), dh, false)
-            .with_context(|| format!("Failed to add drm device: {}", path.display()))?;
+        if let Err(err) = state.device_added(dev, path.into(), dh, false) {
+            warn!("Failed to add device {}: {:?}", path.display(), err);
+        }
     }
 
     // HACK: amdgpu doesn't like us initializing vulkan too early..
