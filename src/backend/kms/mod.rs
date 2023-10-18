@@ -1241,8 +1241,11 @@ impl Surface {
         })?;
         self.fps.elements();
 
-        let res =
-            compositor.render_frame::<_, _, GlesTexture>(&mut renderer, &elements, CLEAR_COLOR);
+        let res = compositor.render_frame::<_, _, GlesTexture>(
+            &mut renderer,
+            &elements,
+            CLEAR_COLOR, // TODO use a theme neutral color
+        );
         self.fps.render();
 
         match res {

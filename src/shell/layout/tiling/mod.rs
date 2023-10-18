@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::render::{
-        element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, Usage, ACTIVE_GROUP_COLOR,
-        GROUP_COLOR,
-    },
+    backend::render::{element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, Usage},
     shell::{
         element::{
             resize_indicator::ResizeIndicator,
@@ -25,6 +22,7 @@ use crate::{
         CosmicSurface, Direction, FocusResult, MoveResult, OutputNotMapped, OverviewMode,
         ResizeDirection, ResizeMode, Trigger,
     },
+    theme::group_color,
     utils::{prelude::*, tween::EaseRectangle},
     wayland::{
         handlers::xdg_shell::popup::get_popup_toplevel,
@@ -116,13 +114,13 @@ impl TreeQueue {
 
 #[derive(Debug, Clone)]
 pub struct TilingLayout {
-    gaps: (i32, i32),
     output: Output,
     queue: TreeQueue,
     pending_blockers: Vec<TilingBlocker>,
     placeholder_id: Id,
     swapping_stack_surface_id: Id,
     last_overview_hover: Option<(Option<Instant>, TargetZone)>,
+    pub theme: cosmic::Theme,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -317,9 +315,8 @@ enum FocusedNodeData {
 }
 
 impl TilingLayout {
-    pub fn new(gaps: (u8, u8), output: &Output) -> TilingLayout {
+    pub fn new(theme: cosmic::Theme, output: &Output) -> TilingLayout {
         TilingLayout {
-            gaps: (gaps.0 as i32, gaps.1 as i32),
             queue: TreeQueue {
                 trees: {
                     let mut queue = VecDeque::new();
@@ -333,10 +330,12 @@ impl TilingLayout {
             placeholder_id: Id::new(),
             swapping_stack_surface_id: Id::new(),
             last_overview_hover: None,
+            theme,
         }
     }
 
     pub fn set_output(&mut self, output: &Output) {
+        let gaps = self.gaps();
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
 
         for node in tree
@@ -355,7 +354,7 @@ impl TilingLayout {
             }
         }
 
-        let blocker = TilingLayout::update_positions(output, &mut tree, self.gaps);
+        let blocker = TilingLayout::update_positions(output, &mut tree, gaps);
         self.queue.push_tree(tree, None, blocker);
         self.output = output.clone();
     }
@@ -377,9 +376,11 @@ impl TilingLayout {
         focus_stack: Option<impl Iterator<Item = &'a CosmicMapped> + 'a>,
         direction: Option<Direction>,
     ) {
+        let gaps = self.gaps();
+
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
         TilingLayout::map_to_tree(&mut tree, window, &self.output, focus_stack, direction);
-        let blocker = TilingLayout::update_positions(&self.output, &mut tree, self.gaps);
+        let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
         self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
     }
 
@@ -466,6 +467,7 @@ impl TilingLayout {
     }
 
     pub fn replace_window(&mut self, old: &CosmicMapped, new: &CosmicMapped) {
+        let gaps = self.gaps();
         let Some(old_id) = old.tiling_node_id.lock().unwrap().clone() else { return };
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
 
@@ -484,7 +486,7 @@ impl TilingLayout {
             old.output_leave(&self.output);
             new.output_enter(&self.output, new.bbox());
 
-            let blocker = TilingLayout::update_positions(&self.output, &mut tree, self.gaps);
+            let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
             self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
         }
     }
@@ -513,7 +515,8 @@ impl TilingLayout {
                 }
 
                 let mapped: CosmicMapped =
-                    CosmicWindow::new(stack_surface, this_stack.loop_handle()).into();
+                    CosmicWindow::new(stack_surface, this_stack.loop_handle(), this.theme.clone())
+                        .into();
                 if this.output != other.output {
                     mapped.output_leave(&this.output);
                     mapped.output_enter(&other.output, mapped.bbox());
@@ -635,13 +638,15 @@ impl TilingLayout {
                         );
                     }
                 }
+                let this_gaps = this.gaps();
+                let other_gaps = other.gaps();
 
                 let blocker =
-                    TilingLayout::update_positions(&this.output, &mut this_tree, this.gaps);
+                    TilingLayout::update_positions(&this.output, &mut this_tree, this_gaps);
                 this.queue.push_tree(this_tree, ANIMATION_DURATION, blocker);
 
                 let blocker =
-                    TilingLayout::update_positions(&other.output, &mut other_tree, other.gaps);
+                    TilingLayout::update_positions(&other.output, &mut other_tree, other_gaps);
                 other
                     .queue
                     .push_tree(other_tree, ANIMATION_DURATION, blocker);
@@ -900,8 +905,12 @@ impl TilingLayout {
                 }
                 this_stack.remove_window(&this_surface);
 
-                let mapped: CosmicMapped =
-                    CosmicWindow::new(this_surface.clone(), this_stack.loop_handle()).into();
+                let mapped: CosmicMapped = CosmicWindow::new(
+                    this_surface.clone(),
+                    this_stack.loop_handle(),
+                    this.theme.clone(),
+                )
+                .into();
                 mapped.set_tiled(true);
                 mapped.refresh();
                 if this.output != other_output {
@@ -977,8 +986,12 @@ impl TilingLayout {
                 }
                 other_stack.remove_window(&other_surface);
 
-                let mapped: CosmicMapped =
-                    CosmicWindow::new(other_surface.clone(), other_stack.loop_handle()).into();
+                let mapped: CosmicMapped = CosmicWindow::new(
+                    other_surface.clone(),
+                    other_stack.loop_handle(),
+                    this.theme.clone(),
+                )
+                .into();
                 mapped.set_tiled(true);
                 mapped.refresh();
                 if this.output != other_output {
@@ -1063,15 +1076,17 @@ impl TilingLayout {
             }
         }
 
-        let blocker = TilingLayout::update_positions(&this.output, &mut this_tree, this.gaps);
+        let this_gaps = this.gaps();
+        let blocker = TilingLayout::update_positions(&this.output, &mut this_tree, this_gaps);
         this.queue.push_tree(this_tree, ANIMATION_DURATION, blocker);
 
         let has_other_tree = other_tree.is_some();
         if let Some(mut other_tree) = other_tree {
             let (other_queue, gaps) = if let Some(other) = other.as_mut() {
-                (&mut other.queue, other.gaps)
+                let other_gaps = other.gaps();
+                (&mut other.queue, other_gaps)
             } else {
-                (&mut this.queue, this.gaps)
+                (&mut this.queue, this_gaps)
             };
             let blocker = TilingLayout::update_positions(&other_output, &mut other_tree, gaps);
             other_queue.push_tree(other_tree, ANIMATION_DURATION, blocker);
@@ -1144,6 +1159,8 @@ impl TilingLayout {
 
     fn unmap_window_internal(&mut self, mapped: &CosmicMapped) -> bool {
         let tiling_node_id = mapped.tiling_node_id.lock().unwrap().as_ref().cloned();
+        let gaps = self.gaps();
+
         if let Some(node_id) = tiling_node_id {
             if self
                 .queue
@@ -1159,7 +1176,7 @@ impl TilingLayout {
 
                 TilingLayout::unmap_internal(&mut tree, &node_id);
 
-                let blocker = TilingLayout::update_positions(&self.output, &mut tree, self.gaps);
+                let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
                 self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
 
                 return true;
@@ -1241,6 +1258,8 @@ impl TilingLayout {
         direction: Direction,
         seat: &Seat<State>,
     ) -> MoveResult {
+        let gaps = self.gaps();
+
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
 
         let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
@@ -1257,7 +1276,8 @@ impl TilingLayout {
             match window.handle_move(direction) {
                 StackMoveResult::Handled => return MoveResult::Done,
                 StackMoveResult::MoveOut(surface, loop_handle) => {
-                    let mapped: CosmicMapped = CosmicWindow::new(surface, loop_handle).into();
+                    let mapped: CosmicMapped =
+                        CosmicWindow::new(surface, loop_handle, self.theme.clone()).into();
                     mapped.output_enter(&self.output, mapped.bbox());
                     let orientation = match direction {
                         Direction::Left | Direction::Right => Orientation::Vertical,
@@ -1280,8 +1300,7 @@ impl TilingLayout {
                     .unwrap();
                     *mapped.tiling_node_id.lock().unwrap() = Some(new_id);
 
-                    let blocker =
-                        TilingLayout::update_positions(&self.output, &mut tree, self.gaps);
+                    let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
                     self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
                     return MoveResult::ShiftFocus(mapped.into());
                 }
@@ -1357,7 +1376,7 @@ impl TilingLayout {
                     .data_mut()
                     .remove_window(og_idx);
 
-                let blocker = TilingLayout::update_positions(&self.output, &mut tree, self.gaps);
+                let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
                 self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
                 return MoveResult::Done;
             }
@@ -1383,7 +1402,7 @@ impl TilingLayout {
                     .data_mut()
                     .remove_window(og_idx);
 
-                let blocker = TilingLayout::update_positions(&self.output, &mut tree, self.gaps);
+                let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
                 self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
                 return MoveResult::Done;
             }
@@ -1539,7 +1558,7 @@ impl TilingLayout {
                     MoveResult::Done
                 };
 
-                let blocker = TilingLayout::update_positions(&self.output, &mut tree, self.gaps);
+                let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
                 self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
                 return result;
             }
@@ -1836,6 +1855,8 @@ impl TilingLayout {
         new_orientation: Option<Orientation>,
         seat: &Seat<State>,
     ) {
+        let gaps = self.gaps();
+
         let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
             return;
         };
@@ -1871,8 +1892,7 @@ impl TilingLayout {
 
                     *orientation = new_orientation;
 
-                    let blocker =
-                        TilingLayout::update_positions(&self.output, &mut tree, self.gaps);
+                    let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
                     self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
                 }
             }
@@ -1880,6 +1900,8 @@ impl TilingLayout {
     }
 
     pub fn toggle_stacking<'a>(&mut self, seat: &Seat<State>, mut focus_stack: FocusStackMut) {
+        let gaps = self.gaps();
+
         let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
             return;
         };
@@ -1894,7 +1916,10 @@ impl TilingLayout {
                         // if it is just a window
                         match tree.get_mut(&last_active).unwrap().data_mut() {
                             Data::Mapped { mapped, .. } => {
-                                mapped.convert_to_stack((&self.output, mapped.bbox()));
+                                mapped.convert_to_stack(
+                                    (&self.output, mapped.bbox()),
+                                    self.theme.clone(),
+                                );
                                 focus_stack.append(&mapped);
                             }
                             _ => unreachable!(),
@@ -1907,7 +1932,11 @@ impl TilingLayout {
                         let handle = match tree.get_mut(&last_active).unwrap().data_mut() {
                             Data::Mapped { mapped, .. } => {
                                 let handle = mapped.loop_handle();
-                                mapped.convert_to_surface(first, (&self.output, mapped.bbox()));
+                                mapped.convert_to_surface(
+                                    first,
+                                    (&self.output, mapped.bbox()),
+                                    self.theme.clone(),
+                                );
                                 focus_stack.append(&mapped);
                                 handle
                             }
@@ -1918,8 +1947,11 @@ impl TilingLayout {
                         for other in surfaces {
                             other.try_force_undecorated(false);
                             other.set_tiled(false);
-                            let window =
-                                CosmicMapped::from(CosmicWindow::new(other, handle.clone()));
+                            let window = CosmicMapped::from(CosmicWindow::new(
+                                other,
+                                handle.clone(),
+                                self.theme.clone(),
+                            ));
                             window.output_enter(&self.output, window.bbox());
 
                             {
@@ -1960,7 +1992,7 @@ impl TilingLayout {
                         return;
                     }
                     let handle = handle.unwrap();
-                    let stack = CosmicStack::new(surfaces.into_iter(), handle);
+                    let stack = CosmicStack::new(surfaces.into_iter(), handle, self.theme.clone());
 
                     for child in tree
                         .children_ids(&last_active)
@@ -1992,14 +2024,16 @@ impl TilingLayout {
                 }
             }
 
-            let blocker = TilingLayout::update_positions(&self.output, &mut tree, self.gaps);
+            let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
             self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
         }
     }
 
     pub fn recalculate(&mut self) {
+        let gaps = self.gaps();
+
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
-        let blocker = TilingLayout::update_positions(&self.output, &mut tree, self.gaps);
+        let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
         self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
     }
 
@@ -2136,6 +2170,8 @@ impl TilingLayout {
         edges: ResizeEdge,
         amount: i32,
     ) -> bool {
+        let gaps = self.gaps();
+
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
         let Some(root_id) = tree.root_node_id() else { return false };
         let Some(mut node_id) =
@@ -2214,7 +2250,7 @@ impl TilingLayout {
                 }
                 _ => unreachable!(),
             }
-            let blocker = TilingLayout::update_positions(&self.output, &mut tree, self.gaps);
+            let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
             self.queue.push_tree(tree, None, blocker);
 
             return true;
@@ -2234,6 +2270,8 @@ impl TilingLayout {
     }
 
     pub fn cleanup_drag(&mut self) {
+        let gaps = self.gaps();
+
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
 
         if let Some(root) = tree.root_node_id() {
@@ -2252,12 +2290,14 @@ impl TilingLayout {
                 }
             }
 
-            let blocker = TilingLayout::update_positions(&self.output, &mut tree, self.gaps);
+            let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
             self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
         }
     }
 
     pub fn drop_window(&mut self, window: CosmicMapped) -> (CosmicMapped, Point<i32, Local>) {
+        let gaps = self.gaps();
+
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
 
         window.output_enter(&self.output, window.bbox());
@@ -2358,7 +2398,7 @@ impl TilingLayout {
             Some(TargetZone::WindowStack(window_id, _)) if tree.get(&window_id).is_ok() => {
                 match tree.get_mut(window_id).unwrap().data_mut() {
                     Data::Mapped { mapped, .. } => {
-                        mapped.convert_to_stack((&self.output, mapped.bbox()));
+                        mapped.convert_to_stack((&self.output, mapped.bbox()), self.theme.clone());
                         let Some(stack) = mapped.stack_ref_mut() else {
                             unreachable!()
                         };
@@ -2399,7 +2439,7 @@ impl TilingLayout {
             }
         }
 
-        let blocker = TilingLayout::update_positions(&self.output, &mut tree, self.gaps);
+        let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
         self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
 
         let location = self.element_geometry(&mapped).unwrap().loc;
@@ -2728,9 +2768,9 @@ impl TilingLayout {
         location: Point<f64, Local>,
         overview: OverviewMode,
     ) -> Option<(PointerFocusTarget, Point<i32, Local>)> {
+        let gaps = self.gaps();
         let last_overview_hover = &mut self.last_overview_hover;
         let placeholder_id = &self.placeholder_id;
-        let gaps = &self.gaps;
         let tree = &self.queue.trees.back().unwrap().0;
         let root = tree.root_node_id()?;
         let location = location.to_i32_round();
@@ -2850,6 +2890,7 @@ impl TilingLayout {
                 Some(None),
                 None,
                 None,
+                self.theme.cosmic(),
             )
             .0;
 
@@ -3275,7 +3316,7 @@ impl TilingLayout {
                                     let blocker = TilingLayout::update_positions(
                                         &self.output,
                                         &mut tree,
-                                        *gaps,
+                                        gaps,
                                     );
                                     self.queue.push_tree(tree, duration, blocker);
                                 }
@@ -3372,6 +3413,8 @@ impl TilingLayout {
     }
 
     pub fn merge(&mut self, mut other: TilingLayout) {
+        let gaps = self.gaps();
+
         let src = other.queue.trees.pop_back().unwrap().0;
         let mut dst = self.queue.trees.back().unwrap().0.copy_clone();
 
@@ -3381,7 +3424,7 @@ impl TilingLayout {
         };
         TilingLayout::merge_trees(src, &mut dst, orientation);
 
-        let blocker = TilingLayout::update_positions(&self.output, &mut dst, self.gaps);
+        let blocker = TilingLayout::update_positions(&self.output, &mut dst, gaps);
         self.queue.push_tree(dst, ANIMATION_DURATION, blocker);
     }
 
@@ -3432,6 +3475,7 @@ impl TilingLayout {
         overview: (OverviewMode, Option<(SwapIndicator, Option<&Tree<Data>>)>),
         resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
         indicator_thickness: u8,
+        theme: &cosmic::theme::CosmicTheme,
     ) -> Result<
         (
             Vec<CosmicMappedRenderElement<R>>,
@@ -3502,6 +3546,7 @@ impl TilingLayout {
                     is_mouse_tiling,
                     swap_desc.clone(),
                     overview.1.as_ref().and_then(|(_, tree)| tree.clone()),
+                    theme,
                 ))
             } else {
                 None
@@ -3539,6 +3584,7 @@ impl TilingLayout {
                 is_mouse_tiling,
                 swap_desc.clone(),
                 overview.1.as_ref().and_then(|(_, tree)| tree.clone()),
+                theme,
             ))
         } else {
             None
@@ -3573,6 +3619,7 @@ impl TilingLayout {
             swap_desc.clone(),
             &self.swapping_stack_surface_id,
             &self.placeholder_id,
+            theme,
         );
         window_elements.extend(w_elements);
         popup_elements.extend(p_elements);
@@ -3583,6 +3630,11 @@ impl TilingLayout {
         }
 
         Ok((window_elements, popup_elements))
+    }
+
+    fn gaps(&self) -> (i32, i32) {
+        let g = self.theme.cosmic().gaps;
+        (g.0 as i32, g.1 as i32)
     }
 }
 
@@ -3631,6 +3683,7 @@ fn geometries_for_groupview<'a, R>(
     mouse_tiling: Option<Option<&TargetZone>>,
     swap_desc: Option<NodeDesc>,
     swap_tree: Option<&Tree<Data>>,
+    theme: &cosmic::theme::CosmicTheme,
 ) -> (
     HashMap<NodeId, Rectangle<i32, Local>>,
     Vec<CosmicMappedRenderElement<R>>,
@@ -3788,6 +3841,8 @@ where
                 )
             };
 
+            let group_color = group_color(theme);
+
             match data {
                 Data::Group {
                     orientation,
@@ -3825,7 +3880,7 @@ where
                                     if render_active_child { 16 } else { 8 },
                                     alpha * if render_potential_group { 0.40 } else { 1.0 },
                                     output_scale,
-                                    GROUP_COLOR,
+                                    group_color,
                                 )
                                 .into(),
                             );
@@ -3843,7 +3898,7 @@ where
                                     8,
                                     alpha * 0.40,
                                     output_scale,
-                                    GROUP_COLOR,
+                                    group_color,
                                 )
                                 .into(),
                             );
@@ -3907,7 +3962,7 @@ where
                                         8,
                                         alpha * 0.15,
                                         output_scale,
-                                        GROUP_COLOR,
+                                        group_color,
                                     )
                                     .into(),
                                 );
@@ -3971,7 +4026,7 @@ where
                                         pill_geo,
                                         8.,
                                         alpha * 0.4,
-                                        GROUP_COLOR,
+                                        group_color,
                                     )
                                     .into(),
                                 );
@@ -4001,7 +4056,7 @@ where
                                         } else {
                                             0.15
                                         },
-                                    GROUP_COLOR,
+                                    group_color,
                                 )
                                 .into(),
                             );
@@ -4077,7 +4132,7 @@ where
                                                         ),
                                                         8.,
                                                         alpha * 0.4,
-                                                        GROUP_COLOR,
+                                                        group_color,
                                                     )
                                                     .into(),
                                                 );
@@ -4119,7 +4174,7 @@ where
                                                         ),
                                                         8.,
                                                         alpha * 0.4,
-                                                        GROUP_COLOR,
+                                                        group_color,
                                                     )
                                                     .into(),
                                                 );
@@ -4150,13 +4205,15 @@ where
                                     8,
                                     alpha * 0.40,
                                     output_scale,
-                                    GROUP_COLOR,
+                                    group_color,
                                 )
                                 .into(),
                             );
                             geo.loc += (gap, gap).into();
                             geo.size -= (gap * 2, gap * 2).into();
                         }
+
+                        let accent = theme.accent.base;
 
                         if focused
                             .as_ref()
@@ -4172,9 +4229,9 @@ where
                                 Some(Some(TargetZone::WindowStack(stack_id, _)))
                                     if *stack_id == node_id =>
                                 {
-                                    ACTIVE_GROUP_COLOR
+                                    [accent.red, accent.green, accent.blue]
                                 }
-                                _ => GROUP_COLOR,
+                                _ => group_color,
                             };
                             geo.loc += (WINDOW_BACKDROP_BORDER, WINDOW_BACKDROP_BORDER).into();
                             geo.size -=
@@ -4189,7 +4246,9 @@ where
                                         * if focused
                                             .as_ref()
                                             .map(|focused_id| focused_id == &node_id)
-                                            .unwrap_or(color == ACTIVE_GROUP_COLOR)
+                                            .unwrap_or(
+                                                color == [accent.red, accent.green, accent.blue],
+                                            )
                                         {
                                             0.4
                                         } else {
@@ -4243,7 +4302,7 @@ where
                                 geo,
                                 8.,
                                 alpha * 0.4,
-                                GROUP_COLOR,
+                                group_color,
                             )
                             .into(),
                         );
@@ -4417,6 +4476,7 @@ fn render_new_tree<R>(
     swap_desc: Option<NodeDesc>,
     swapping_stack_surface_id: &Id,
     placeholder_id: &Id,
+    theme: &cosmic::theme::CosmicTheme,
 ) -> (
     Vec<CosmicMappedRenderElement<R>>,
     Vec<CosmicMappedRenderElement<R>>,
@@ -4476,7 +4536,8 @@ where
     let (swap_indicator, swap_tree) = overview.1.unzip();
     let swap_tree = swap_tree.flatten().filter(|_| is_active_output);
     let swap_desc = swap_desc.filter(|_| is_active_output);
-
+    let window_hint = crate::theme::active_window_hint(theme);
+    let group_color = group_color(theme);
     // render placeholder, if we are swapping to an empty workspace
     if target_tree.root_node_id().is_none() && swap_desc.is_some() {
         window_elements.push(
@@ -4486,7 +4547,7 @@ where
                 focused_geo,
                 8.,
                 transition.unwrap_or(1.0) * 0.4,
-                GROUP_COLOR,
+                group_color,
             )
             .into(),
         );
@@ -4518,6 +4579,7 @@ where
             4,
             output_scale,
             transition.unwrap_or(1.0),
+            [window_hint.red, window_hint.green, window_hint.blue],
         ));
 
         let render_loc =
@@ -4679,7 +4741,7 @@ where
                             geo,
                             8.,
                             0.4,
-                            GROUP_COLOR,
+                            group_color,
                         ));
                     }
 
@@ -4706,6 +4768,7 @@ where
                             },
                             output_scale,
                             1.0,
+                            [window_hint.red, window_hint.green, window_hint.blue],
                         ));
                     }
 
@@ -4825,7 +4888,7 @@ where
                             geo,
                             0.0,
                             0.3,
-                            GROUP_COLOR,
+                            group_color,
                         )),
                     )
                 }

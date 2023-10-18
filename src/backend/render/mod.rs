@@ -79,10 +79,6 @@ pub type GlMultiFrame<'a, 'b, 'frame> =
 pub type GlMultiError = MultiError<GbmGlesBackend<GlowRenderer>, GbmGlesBackend<GlowRenderer>>;
 
 pub static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
-pub static GROUP_COLOR: [f32; 3] = [0.788, 0.788, 0.788];
-pub static ACTIVE_GROUP_COLOR: [f32; 3] = [0.58, 0.922, 0.922];
-pub static FOCUS_INDICATOR_COLOR: [f32; 3] = [0.580, 0.921, 0.921];
-
 pub static OUTLINE_SHADER: &str = include_str!("./shaders/rounded_outline.frag");
 pub static RECTANGLE_SHADER: &str = include_str!("./shaders/rounded_rectangle.frag");
 
@@ -164,6 +160,7 @@ impl IndicatorShader {
         thickness: u8,
         scale: f64,
         alpha: f32,
+        active_window_hint: [f32; 3],
     ) -> PixelShaderElement {
         let t = thickness as i32;
         element_geo.loc -= (t, t).into();
@@ -177,7 +174,7 @@ impl IndicatorShader {
             thickness * 2,
             alpha,
             scale,
-            FOCUS_INDICATOR_COLOR,
+            active_window_hint,
         )
     }
 
@@ -413,13 +410,14 @@ where
             );
         }
 
+        let theme = state.theme.cosmic();
         if let Some(grab_elements) = seat
             .user_data()
             .get::<SeatMoveGrabState>()
             .unwrap()
             .borrow()
             .as_ref()
-            .map(|state| state.render::<E, R>(renderer, seat, output))
+            .map(|state| state.render::<E, R>(renderer, seat, output, theme))
         {
             elements.extend(grab_elements);
         }
@@ -449,6 +447,7 @@ where
     #[cfg(feature = "debug")]
     puffin::profile_function!();
 
+    let theme = state.theme.cosmic();
     let mut elements = cursor_elements(renderer, state, output, cursor_mode);
 
     #[cfg(feature = "debug")]
@@ -544,6 +543,7 @@ where
     } else {
         Vec::new()
     };
+    let active_hint = theme.active_hint as u8;
 
     let offset = match previous.as_ref() {
         Some((previous, previous_idx, start)) => {
@@ -584,7 +584,8 @@ where
                     (!move_active && is_active_space).then_some(&last_active_seat),
                     overview.clone(),
                     resize_indicator.clone(),
-                    state.config.static_conf.active_hint,
+                    active_hint,
+                    theme,
                 )
                 .map_err(|_| OutputNoMode)?;
             elements.extend(p_elements.into_iter().map(|p_element| {
@@ -641,7 +642,8 @@ where
             (!move_active && is_active_space).then_some(&last_active_seat),
             overview,
             resize_indicator,
-            state.config.static_conf.active_hint,
+            active_hint,
+            theme,
         )
         .map_err(|_| OutputNoMode)?;
     elements.extend(p_elements.into_iter().map(|p_element| {
@@ -913,7 +915,12 @@ where
     }
 
     renderer.bind(target).map_err(RenderError::Rendering)?;
-    let res = damage_tracker.render_output(renderer, age, &elements, CLEAR_COLOR);
+    let res = damage_tracker.render_output(
+        renderer,
+        age,
+        &elements,
+        CLEAR_COLOR, // TODO use a theme neutral color
+    );
 
     if let Some(fps) = fps.as_mut() {
         fps.render();

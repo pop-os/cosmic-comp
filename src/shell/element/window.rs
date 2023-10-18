@@ -114,6 +114,7 @@ impl CosmicWindow {
     pub fn new(
         window: impl Into<CosmicSurface>,
         handle: LoopHandle<'static, crate::state::State>,
+        theme: cosmic::Theme,
     ) -> CosmicWindow {
         let window = window.into();
         let width = window.geometry().size.w;
@@ -129,6 +130,7 @@ impl CosmicWindow {
             },
             (width, SSD_HEIGHT),
             handle,
+            theme,
         ))
     }
 
@@ -212,6 +214,14 @@ impl CosmicWindow {
             window_elements.into_iter().map(C::from).collect(),
             popup_elements.into_iter().map(C::from).collect(),
         )
+    }
+
+    pub(crate) fn set_theme(&self, theme: cosmic::Theme) {
+        self.0.set_theme(theme);
+    }
+
+    pub(crate) fn force_redraw(&self) {
+        self.0.force_redraw();
     }
 }
 

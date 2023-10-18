@@ -137,6 +137,8 @@ pub struct Common {
     pub clock: Clock<Monotonic>,
     pub should_stop: bool,
 
+    pub theme: cosmic::Theme,
+
     #[cfg(feature = "debug")]
     pub egui: Egui,
 
@@ -329,6 +331,8 @@ impl State {
 
                 clock,
                 should_stop: false,
+
+                theme: cosmic::theme::system_preference(),
 
                 #[cfg(feature = "debug")]
                 egui: Egui {

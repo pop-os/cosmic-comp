@@ -1015,7 +1015,12 @@ pub fn render_window_to_buffer(
             renderer.bind(render_buffer).map_err(DTError::Rendering)?;
         }
 
-        dt.render_output(renderer, age, &elements, CLEAR_COLOR)
+        dt.render_output(
+            renderer,
+            age,
+            &elements,
+            CLEAR_COLOR, // TODO use a theme neutral color
+        )
     }
 
     let node = node_from_params(&params, &mut state.backend, None);
