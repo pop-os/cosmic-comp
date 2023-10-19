@@ -2,7 +2,7 @@
 
 use smithay::reexports::{
     calloop::{generic::Generic, Interest, LoopHandle, Mode, PostAction},
-    nix::{fcntl, unistd},
+    rustix,
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -50,20 +50,24 @@ impl From<UnixStream> for StreamWrapper {
     }
 }
 
+unsafe fn set_cloexec(fd: RawFd) -> rustix::io::Result<()> {
+    if fd == -1 {
+        return Err(rustix::io::Errno::BADF);
+    }
+    let fd = BorrowedFd::borrow_raw(fd);
+    let flags = rustix::io::fcntl_getfd(fd)?;
+    rustix::io::fcntl_setfd(fd, flags | rustix::io::FdFlags::CLOEXEC)
+}
+
 pub fn setup_socket(handle: LoopHandle<State>, state: &State) -> Result<()> {
     if let Ok(fd_num) = std::env::var("COSMIC_SESSION_SOCK") {
         if let Ok(fd) = fd_num.parse::<RawFd>() {
-            // set CLOEXEC
-            let flags = fcntl::fcntl(fd, fcntl::FcntlArg::F_GETFD);
-            let result = flags
-                .map(|f| fcntl::FdFlag::from_bits(f).unwrap() | fcntl::FdFlag::FD_CLOEXEC)
-                .and_then(|f| fcntl::fcntl(fd, fcntl::FcntlArg::F_SETFD(f)));
-            let mut session_socket = match result {
+            let mut session_socket = match unsafe { set_cloexec(fd) } {
                 // CLOEXEC worked and we can startup with session IPC
                 Ok(_) => unsafe { UnixStream::from_raw_fd(fd) },
                 // CLOEXEC didn't work, something is wrong with the fd, just close it
                 Err(err) => {
-                    let _ = unistd::close(fd);
+                    unsafe { rustix::io::close(fd) };
                     return Err(err).with_context(|| "Failed to setup session socket");
                 }
             };
