@@ -327,17 +327,18 @@ fn format_pointer_focus(focus: Option<PointerFocusTarget>) -> String {
         },
         Some(Fullscreen(x)) => format!(
             "Fullscreen {} ({})",
-            match x.surface() {
+            match &x {
                 CosmicSurface::Wayland(w) => w.toplevel().wl_surface().id().protocol_id(),
                 CosmicSurface::X11(x) => x.window_id(),
                 _ => unreachable!(),
             },
-            x.surface().title()
+            x.title()
         ),
         Some(LayerSurface(x)) => format!("LayerSurface {}", x.wl_surface().id().protocol_id()),
         Some(Popup(x)) => format!("Popup {}", x.wl_surface().id().protocol_id()),
         Some(OverrideRedirect(x)) => format!("Override Redirect {}", x.window_id()),
         Some(PointerFocusTarget::ResizeFork(x)) => format!("Resize Fork {:?}", x.node),
+        Some(LockSurface(x)) => format!("LockSurface {}", x.wl_surface().id().protocol_id()),
         None => format!("None"),
     }
 }
@@ -369,16 +370,17 @@ fn format_keyboard_focus(focus: Option<KeyboardFocusTarget>) -> String {
         },
         Some(Fullscreen(x)) => format!(
             "Fullscreen {} ({})",
-            match x.surface() {
+            match &x {
                 CosmicSurface::Wayland(w) => w.toplevel().wl_surface().id().protocol_id(),
                 CosmicSurface::X11(x) => x.window_id(),
                 _ => unreachable!(),
             },
-            x.surface().title()
+            x.title()
         ),
         Some(LayerSurface(x)) => format!("LayerSurface {}", x.wl_surface().id().protocol_id()),
         Some(Popup(x)) => format!("Popup {}", x.wl_surface().id().protocol_id()),
         Some(Group(_)) => format!("Window Group"),
+        Some(LockSurface(x)) => format!("LockSurface {}", x.wl_surface().id().protocol_id()),
         None => format!("None"),
     }
 }

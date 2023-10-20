@@ -447,7 +447,6 @@ where
     #[cfg(feature = "debug")]
     puffin::profile_function!();
 
-    let theme = state.theme.cosmic();
     let mut elements = cursor_elements(renderer, state, output, cursor_mode);
 
     #[cfg(feature = "debug")]
@@ -472,11 +471,11 @@ where
             elements.push(fps_overlay.into());
         }
 
-        if state.shell.outputs.first() == Some(output) {
+        if state.shell.outputs().next() == Some(output) {
             if let Some(profiler_overlay) = profiler_ui(
                 state,
                 renderer.glow_renderer_mut(),
-                Rectangle::from_loc_and_size((0, 0), output_geo.size),
+                Rectangle::from_loc_and_size((0, 0), output_geo.size).as_logical(),
                 scale,
             )
             .map_err(<R as Renderer>::Error::from)
@@ -496,6 +495,8 @@ where
         );
         return Ok(elements);
     }
+
+    let theme = state.theme.cosmic();
 
     let overview = state.shell.overview_mode();
     let (resize_mode, resize_indicator) = state.shell.resize_mode();
