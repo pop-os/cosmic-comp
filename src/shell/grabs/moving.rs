@@ -545,7 +545,7 @@ impl MoveGrab {
             None
         };
 
-        handle.unset_grab(state, serial, time);
+        handle.unset_grab(state, serial, time, true);
 
         {
             let cursor_state = self.seat.user_data().get::<CursorState>().unwrap();

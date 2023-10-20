@@ -58,7 +58,7 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
 
         // It is impossible to get `min_size` and `max_size` of dead toplevel, so we return early.
         if !self.window.alive() {
-            handle.unset_grab(data, event.serial, event.time);
+            handle.unset_grab(data, event.serial, event.time, true);
             return;
         }
 
@@ -129,7 +129,7 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
         handle.button(data, event);
         if handle.current_pressed().is_empty() {
             // No more buttons are pressed, release the grab.
-            handle.unset_grab(data, event.serial, event.time);
+            handle.unset_grab(data, event.serial, event.time, true);
 
             // If toplevel is dead, we can't resize it, so we return early.
             if !self.window.alive() {

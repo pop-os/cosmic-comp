@@ -155,7 +155,7 @@ impl PointerGrab<State> for ResizeForkGrab {
                 let first_elem = iter.next();
                 let second_elem = iter.next();
                 if first_elem.is_none() || second_elem.is_none() {
-                    return handle.unset_grab(data, event.serial, event.time);
+                    return handle.unset_grab(data, event.serial, event.time, true);
                 };
 
                 match tree.get_mut(&self.node).unwrap().data_mut() {
@@ -196,7 +196,7 @@ impl PointerGrab<State> for ResizeForkGrab {
                 let blocker = TilingLayout::update_positions(&output, tree, gaps);
                 tiling_layer.pending_blockers.extend(blocker);
             } else {
-                handle.unset_grab(data, event.serial, event.time);
+                handle.unset_grab(data, event.serial, event.time, true);
             }
         }
     }
@@ -221,7 +221,7 @@ impl PointerGrab<State> for ResizeForkGrab {
         handle.button(data, event);
         if handle.current_pressed().is_empty() {
             // No more buttons are pressed, release the grab.
-            handle.unset_grab(data, event.serial, event.time);
+            handle.unset_grab(data, event.serial, event.time, true);
         }
     }
 

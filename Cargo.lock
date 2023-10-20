@@ -376,7 +376,7 @@ dependencies = [
  "bitflags 2.4.0",
  "log",
  "polling",
- "rustix 0.38.17",
+ "rustix 0.38.20",
  "slab",
  "thiserror",
 ]
@@ -536,6 +536,7 @@ dependencies = [
  "indexmap 2.0.2",
  "keyframe",
  "lazy_static",
+ "libc",
  "libcosmic",
  "libsystemd",
  "log-panics",
@@ -1100,23 +1101,12 @@ checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 
 [[package]]
 name = "errno"
-version = "0.3.4"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "add4f07d43996f76ef320709726a556a9d4f965d9410d8d0271132d2f8293480"
+checksum = "ac3e13f66a2f95e32a39eaa81f6b95d42878ca0e1db0c7543723dfe12557e860"
 dependencies = [
- "errno-dragonfly",
  "libc",
  "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "errno-dragonfly"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa68f1b12764fab894d2755d2518754e71b4fd80ecfb822714a1206c2aab39bf"
-dependencies = [
- "cc",
- "libc",
 ]
 
 [[package]]
@@ -2235,9 +2225,9 @@ checksum = "03087c2bad5e1034e8cace5926dec053fb3790248370865f5117a7d0213354c8"
 
 [[package]]
 name = "libc"
-version = "0.2.148"
+version = "0.2.149"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cdc71e17332e86d2e1d38c1f99edcb6288ee11b815fb1a4b049eaa2114d369b"
+checksum = "a08173bc88b7955d1b3145aa561539096c421ac8debde8cbc3612ec635fee29b"
 
 [[package]]
 name = "libcosmic"
@@ -2729,7 +2719,6 @@ dependencies = [
  "bitflags 2.4.0",
  "cfg-if",
  "libc",
- "memoffset 0.9.0",
 ]
 
 [[package]]
@@ -3245,7 +3234,7 @@ dependencies = [
  "cfg-if",
  "concurrent-queue",
  "pin-project-lite",
- "rustix 0.38.17",
+ "rustix 0.38.20",
  "tracing",
  "windows-sys 0.48.0",
 ]
@@ -3696,9 +3685,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "0.38.17"
+version = "0.38.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f25469e9ae0f3d0047ca8b93fc56843f38e6774f0914a107ff8b41be8be8e0b7"
+checksum = "67ce50cb2e16c2903e30d1cbccfd8387a74b9d4c938b6a4c5ec6cc7556f7a8a0"
 dependencies = [
  "bitflags 2.4.0",
  "errno",
@@ -3896,7 +3885,7 @@ checksum = "942b4a808e05215192e39f4ab80813e599068285906cc91aa64f923db842bd5a"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/smithay//smithay?rev=d60b1b83e#d60b1b83e71ae73aecad799025e3ea30e844c229"
+source = "git+https://github.com/smithay//smithay?rev=988c94d7e#988c94d7e9db357350b3c43f7f727d5b4b523aa9"
 dependencies = [
  "appendlist",
  "ash",
@@ -3910,6 +3899,7 @@ dependencies = [
  "drm-ffi",
  "drm-fourcc",
  "encoding_rs",
+ "errno",
  "gbm",
  "gl_generator",
  "glow",
@@ -3924,6 +3914,7 @@ dependencies = [
  "pkg-config",
  "profiling",
  "rand",
+ "rustix 0.38.20",
  "scan_fmt",
  "scopeguard",
  "smallvec",
@@ -4143,7 +4134,7 @@ dependencies = [
  "cfg-if",
  "fastrand 2.0.1",
  "redox_syscall 0.3.5",
- "rustix 0.38.17",
+ "rustix 0.38.20",
  "windows-sys 0.48.0",
 ]
 

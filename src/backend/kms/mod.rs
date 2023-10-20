@@ -16,6 +16,7 @@ use crate::{
 
 use anyhow::{Context, Result};
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::FailureReason;
+use libc::dev_t;
 use smithay::{
     backend::{
         allocator::{
@@ -58,7 +59,7 @@ use smithay::{
             Device as _,
         },
         input::{self, Libinput},
-        nix::{fcntl::OFlag, sys::stat::dev_t},
+        rustix::fs::OFlags,
         wayland_protocols::wp::{
             linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1,
             presentation_time::server::wp_presentation_feedback,
@@ -82,7 +83,6 @@ use std::{
     collections::{HashMap, HashSet},
     ffi::CStr,
     fmt,
-    os::unix::io::FromRawFd,
     path::PathBuf,
     time::Duration,
 };
@@ -418,23 +418,21 @@ impl State {
             return Ok(());
         }
 
-        let fd = DrmDeviceFd::new(unsafe {
-            DeviceFd::from_raw_fd(
-                self.backend
-                    .kms()
-                    .session
-                    .open(
-                        &path,
-                        OFlag::O_RDWR | OFlag::O_CLOEXEC | OFlag::O_NOCTTY | OFlag::O_NONBLOCK,
+        let fd = DrmDeviceFd::new(DeviceFd::from(
+            self.backend
+                .kms()
+                .session
+                .open(
+                    &path,
+                    OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK,
+                )
+                .with_context(|| {
+                    format!(
+                        "Failed to optain file descriptor for drm device: {}",
+                        path.display()
                     )
-                    .with_context(|| {
-                        format!(
-                            "Failed to optain file descriptor for drm device: {}",
-                            path.display()
-                        )
-                    })?,
-            )
-        });
+                })?,
+        ));
         let (drm, notifier) = DrmDevice::new(fd.clone(), false)
             .with_context(|| format!("Failed to initialize drm device for: {}", path.display()))?;
         let drm_node = DrmNode::from_dev_id(dev)?;
