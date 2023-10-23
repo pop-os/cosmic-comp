@@ -26,7 +26,7 @@ use smithay::{
             Allocator, Format, Fourcc,
         },
         drm::{
-            compositor::{BlitFrameResultError, DrmCompositor, FrameError},
+            compositor::{BlitFrameResultError, DrmCompositor, FrameError, PrimaryPlaneElement},
             DrmDevice, DrmDeviceFd, DrmEvent, DrmEventTime, DrmNode, NodeType,
         },
         egl::{EGLContext, EGLDevice, EGLDisplay},
@@ -1254,6 +1254,11 @@ impl Surface {
                     None
                 };
 
+                if frame_result.needs_sync() {
+                    if let PrimaryPlaneElement::Swapchain(elem) = &frame_result.primary_element {
+                        elem.sync.wait();
+                    }
+                }
                 match compositor.queue_frame(feedback) {
                     Ok(()) | Err(FrameError::EmptyFrame) => {}
                     Err(err) => {

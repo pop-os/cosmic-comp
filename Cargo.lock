@@ -3885,7 +3885,7 @@ checksum = "942b4a808e05215192e39f4ab80813e599068285906cc91aa64f923db842bd5a"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/smithay//smithay?rev=988c94d7e#988c94d7e9db357350b3c43f7f727d5b4b523aa9"
+source = "git+https://github.com/smithay//smithay?rev=dfa75ea#dfa75eaa3d8e9865f8e5cebd04258b8f51cad1cb"
 dependencies = [
  "appendlist",
  "ash",
@@ -4117,7 +4117,7 @@ dependencies = [
 [[package]]
 name = "taffy"
 version = "0.3.11"
-source = "git+https://github.com/DioxusLabs/taffy#daa07e0f4e3e009f5b0c11ada5df9785efd4b2c2"
+source = "git+https://github.com/DioxusLabs/taffy#d4374b93f0ec2c0ace42d3feafec22d3af1940d8"
 dependencies = [
  "arrayvec",
  "grid",
