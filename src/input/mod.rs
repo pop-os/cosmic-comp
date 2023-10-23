@@ -6,7 +6,10 @@ use crate::{
     shell::{
         focus::{target::PointerFocusTarget, FocusDirection},
         grabs::{ResizeEdge, SeatMoveGrabState},
-        layout::tiling::{SwapWindowGrab, TilingLayout},
+        layout::{
+            floating::ResizeGrabMarker,
+            tiling::{SwapWindowGrab, TilingLayout},
+        },
         Direction, FocusResult, MoveResult, OverviewMode, ResizeDirection, ResizeMode, Trigger,
         Workspace,
     },
@@ -620,6 +623,20 @@ impl State {
                         .find(|output| output.geometry().to_f64().contains(position))
                         .cloned()
                         .unwrap_or(current_output.clone());
+
+                    if ptr.is_grabbed()
+                        && seat
+                            .user_data()
+                            .get::<ResizeGrabMarker>()
+                            .map(|marker| marker.get())
+                            .unwrap_or(false)
+                    {
+                        if output != current_output {
+                            ptr.frame(self);
+                            return;
+                        }
+                    }
+
                     let output_geometry = output.geometry();
 
                     let workspace = self.common.shell.workspaces.active_mut(&output);

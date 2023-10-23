@@ -188,6 +188,7 @@ impl FloatingLayout {
                 edges,
                 location,
                 size,
+                seat,
             ))
         } else {
             None
