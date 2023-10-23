@@ -123,6 +123,16 @@ impl CosmicSurface {
         }
     }
 
+    pub fn pending_size(&self) -> Option<Size<i32, Logical>> {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                window.toplevel().with_pending_state(|state| state.size)
+            }
+            CosmicSurface::X11(surface) => Some(surface.geometry().size),
+            _ => unreachable!(),
+        }
+    }
+
     pub fn set_geometry(&self, geo: Rectangle<i32, Global>) {
         match self {
             CosmicSurface::Wayland(window) => window

@@ -408,6 +408,16 @@ impl CosmicStack {
         Point::from((0, TAB_HEIGHT))
     }
 
+    pub fn pending_size(&self) -> Option<Size<i32, Logical>> {
+        self.0.with_program(|p| {
+            p.geometry
+                .lock()
+                .unwrap()
+                .clone()
+                .map(|geo| geo.size.as_logical())
+        })
+    }
+
     pub fn set_geometry(&self, geo: Rectangle<i32, Global>) {
         self.0.with_program(|p| {
             let loc = (geo.loc.x, geo.loc.y + TAB_HEIGHT);

@@ -157,8 +157,15 @@ impl FloatingLayout {
     pub fn unmap(&mut self, window: &CosmicMapped) -> bool {
         if !window.is_maximized(true) || !window.is_fullscreen(true) {
             if let Some(location) = self.space.element_location(window) {
-                *window.last_geometry.lock().unwrap() =
-                    Some(Rectangle::from_loc_and_size(location, window.geometry().size).as_local());
+                *window.last_geometry.lock().unwrap() = Some(
+                    Rectangle::from_loc_and_size(
+                        location,
+                        window
+                            .pending_size()
+                            .unwrap_or_else(|| window.geometry().size),
+                    )
+                    .as_local(),
+                )
             }
         }
 

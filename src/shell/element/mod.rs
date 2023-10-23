@@ -370,6 +370,14 @@ impl CosmicMapped {
         window.is_activated(pending)
     }
 
+    pub fn pending_size(&self) -> Option<Size<i32, Logical>> {
+        match &self.element {
+            CosmicMappedInternal::Stack(s) => s.pending_size(),
+            CosmicMappedInternal::Window(w) => w.pending_size(),
+            _ => unreachable!(),
+        }
+    }
+
     pub fn set_geometry(&self, geo: Rectangle<i32, Global>) {
         match &self.element {
             CosmicMappedInternal::Stack(s) => s.set_geometry(geo),
