@@ -134,6 +134,16 @@ impl CosmicWindow {
         ))
     }
 
+    pub fn pending_size(&self) -> Option<Size<i32, Logical>> {
+        self.0.with_program(|p| {
+            let mut size = p.window.pending_size()?;
+            if p.has_ssd(true) {
+                size.h += SSD_HEIGHT;
+            }
+            Some(size)
+        })
+    }
+
     pub fn set_geometry(&self, geo: Rectangle<i32, Global>) {
         self.0.with_program(|p| {
             let loc = (
