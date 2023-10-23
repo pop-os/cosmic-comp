@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use crate::{
     shell::{
         element::CosmicMapped, focus::target::PointerFocusTarget, grabs::ResizeEdge, CosmicSurface,
@@ -8,11 +10,15 @@ use crate::{
 };
 use smithay::{
     desktop::space::SpaceElement,
-    input::pointer::{
-        AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
-        GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent,
-        GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData as PointerGrabStartData,
-        MotionEvent, PointerGrab, PointerInnerHandle, RelativeMotionEvent,
+    input::{
+        pointer::{
+            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
+            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
+            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
+            GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab, PointerInnerHandle,
+            RelativeMotionEvent,
+        },
+        Seat,
     },
     utils::{IsAlive, Logical, Point, Rectangle, Size},
 };
@@ -39,6 +45,7 @@ pub enum ResizeState {
 
 pub struct ResizeSurfaceGrab {
     start_data: PointerGrabStartData<State>,
+    seat: Seat<State>,
     window: CosmicMapped,
     edges: ResizeEdge,
     initial_window_size: Size<i32, Logical>,
@@ -58,6 +65,12 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
 
         // It is impossible to get `min_size` and `max_size` of dead toplevel, so we return early.
         if !self.window.alive() {
+            self.seat
+                .user_data()
+                .get::<ResizeGrabMarker>()
+                .unwrap()
+                .0
+                .store(false, Ordering::SeqCst);
             handle.unset_grab(data, event.serial, event.time, true);
             return;
         }
@@ -129,6 +142,12 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
         handle.button(data, event);
         if handle.current_pressed().is_empty() {
             // No more buttons are pressed, release the grab.
+            self.seat
+                .user_data()
+                .get::<ResizeGrabMarker>()
+                .unwrap()
+                .0
+                .store(false, Ordering::SeqCst);
             handle.unset_grab(data, event.serial, event.time, true);
 
             // If toplevel is dead, we can't resize it, so we return early.
@@ -245,6 +264,14 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
     }
 }
 
+pub struct ResizeGrabMarker(AtomicBool);
+
+impl ResizeGrabMarker {
+    pub fn get(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
 impl ResizeSurfaceGrab {
     pub fn new(
         start_data: PointerGrabStartData<State>,
@@ -252,6 +279,7 @@ impl ResizeSurfaceGrab {
         edges: ResizeEdge,
         initial_window_location: Point<i32, Logical>,
         initial_window_size: Size<i32, Logical>,
+        seat: &Seat<State>,
     ) -> ResizeSurfaceGrab {
         let resize_state = ResizeState::Resizing(ResizeData {
             edges,
@@ -260,9 +288,14 @@ impl ResizeSurfaceGrab {
         });
 
         *mapped.resize_state.lock().unwrap() = Some(resize_state);
+        seat.user_data()
+            .get_or_insert::<ResizeGrabMarker, _>(|| ResizeGrabMarker(AtomicBool::new(true)))
+            .0
+            .store(true, Ordering::SeqCst);
 
         ResizeSurfaceGrab {
             start_data,
+            seat: seat.clone(),
             window: mapped,
             edges,
             initial_window_size,
