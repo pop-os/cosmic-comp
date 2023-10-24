@@ -88,7 +88,4 @@ debug = true
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/smithay//smithay", rev = "dfa75ea" }
-
-[patch.crates-io]
-calloop = { git = "https://github.com/Smithay/calloop", rev = "71b6e633b1" }
+smithay = { git = "https://github.com/smithay//smithay", rev = "bf0d4cb" }
