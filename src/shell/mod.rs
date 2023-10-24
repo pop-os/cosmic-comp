@@ -1526,7 +1526,7 @@ impl Shell {
             None
         };
 
-        let to_workspace = state
+        let mut to_workspace = state
             .common
             .shell
             .workspaces
@@ -1541,8 +1541,39 @@ impl Shell {
                 .map(mapped.clone(), Some(focus_stack.iter()), direction);
         }
         let focus_target = if let Some(f) = window_state.was_fullscreen {
+            if to_workspace.fullscreen.is_some() {
+                if let Some((mapped, layer, previous_workspace)) = to_workspace.remove_fullscreen()
+                {
+                    let old_handle = to_workspace.handle.clone();
+                    let new_workspace_handle = state
+                        .common
+                        .shell
+                        .space_for_handle(&previous_workspace)
+                        .is_some()
+                        .then_some(previous_workspace)
+                        .unwrap_or(old_handle);
+
+                    state.common.shell.remap_unfullscreened_window(
+                        mapped,
+                        &old_handle,
+                        &new_workspace_handle,
+                        layer,
+                    );
+                    to_workspace = state
+                        .common
+                        .shell
+                        .workspaces
+                        .get_mut(to_idx, to_output)
+                        .unwrap(); // checked above
+                }
+            }
+
             to_workspace.fullscreen_request(&mapped.active_window(), f.previously);
-            KeyboardFocusTarget::from(to_workspace.get_fullscreen().unwrap().clone())
+            to_workspace
+                .fullscreen
+                .as_ref()
+                .map(|f| KeyboardFocusTarget::from(f.surface.clone()))
+                .unwrap_or_else(|| KeyboardFocusTarget::from(mapped.clone()))
         } else {
             KeyboardFocusTarget::from(mapped.clone())
         };

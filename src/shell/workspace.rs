@@ -479,7 +479,12 @@ impl Workspace {
         window: &CosmicSurface,
         previously: Option<(ManagedLayer, WorkspaceHandle)>,
     ) {
-        if self.fullscreen.is_some() {
+        if self
+            .fullscreen
+            .as_ref()
+            .filter(|f| f.ended_at.is_none())
+            .is_some()
+        {
             return;
         }
 
@@ -516,7 +521,11 @@ impl Workspace {
         &mut self,
         window: &CosmicSurface,
     ) -> Option<(ManagedLayer, WorkspaceHandle)> {
-        if let Some(f) = self.fullscreen.as_mut().filter(|f| &f.surface == window) {
+        if let Some(f) = self
+            .fullscreen
+            .as_mut()
+            .filter(|f| &f.surface == window && f.ended_at.is_none())
+        {
             window.set_fullscreen(false);
             window.set_geometry(f.original_geometry);
 
