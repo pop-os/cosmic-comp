@@ -503,7 +503,7 @@ impl FloatingLayout {
                 alpha,
             );
 
-            if focused == Some(elem) {
+            if focused == Some(elem) && !elem.is_maximized(false) {
                 let mut indicator_geometry = Rectangle::from_loc_and_size(
                     self.space.element_location(elem).unwrap(),
                     elem.geometry().size,
