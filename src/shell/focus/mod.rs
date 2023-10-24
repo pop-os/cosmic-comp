@@ -280,6 +280,31 @@ impl Common {
                         }
                     };
                 } else {
+                    if let KeyboardFocusTarget::Popup(_) = target {
+                        if let Some(popup_grab) = seat
+                            .user_data()
+                            .get::<PopupGrabData>()
+                            .and_then(|x| x.take())
+                        {
+                            if !popup_grab.has_ended() {
+                                if let Some(new) = popup_grab.current_grab() {
+                                    trace!("restore focus to previous popup grab");
+                                    if let Some(keyboard) = seat.get_keyboard() {
+                                        keyboard.set_focus(
+                                            state,
+                                            Some(new.clone()),
+                                            SERIAL_COUNTER.next_serial(),
+                                        );
+                                    }
+                                    ActiveFocus::set(&seat, Some(new));
+                                    seat.user_data()
+                                        .get_or_insert::<PopupGrabData, _>(PopupGrabData::default)
+                                        .set(Some(popup_grab));
+                                    continue;
+                                }
+                            }
+                        }
+                    }
                     trace!("Surface dead, focus fixup");
                 }
             } else {
