@@ -838,7 +838,7 @@ impl Workspaces {
     }
 
     pub fn active(&self, output: &Output) -> (Option<(&Workspace, Instant)>, &Workspace) {
-        let set = self.sets.get(output).unwrap();
+        let set = self.sets.get(output).or(self.backup_set.as_ref()).unwrap();
         (
             set.previously_active
                 .map(|(idx, start)| (&set.workspaces[idx], start)),
@@ -847,12 +847,16 @@ impl Workspaces {
     }
 
     pub fn active_mut(&mut self, output: &Output) -> &mut Workspace {
-        let set = self.sets.get_mut(output).unwrap();
+        let set = self
+            .sets
+            .get_mut(output)
+            .or(self.backup_set.as_mut())
+            .unwrap();
         &mut set.workspaces[set.active]
     }
 
     pub fn active_num(&self, output: &Output) -> (Option<usize>, usize) {
-        let set = self.sets.get(output).unwrap();
+        let set = self.sets.get(output).or(self.backup_set.as_ref()).unwrap();
         (set.previously_active.map(|(idx, _)| idx), set.active)
     }
 
