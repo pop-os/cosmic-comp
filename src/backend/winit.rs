@@ -26,6 +26,7 @@ use smithay::{
         calloop::{ping, EventLoop},
         wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
         wayland_server::DisplayHandle,
+        winit::platform::pump_events::PumpStatus,
     },
     utils::Transform,
     wayland::dmabuf::DmabufFeedbackBuilder,
@@ -125,12 +126,9 @@ impl WinitState {
             .get::<RefCell<OutputConfig>>()
             .unwrap()
             .borrow_mut();
-        if dbg!(config.mode.0) != dbg!((size.physical_size.w as i32, size.physical_size.h as i32)) {
+        if dbg!(config.mode.0) != dbg!((size.w as i32, size.h as i32)) {
             if !test_only {
-                config.mode = (
-                    (size.physical_size.w as i32, size.physical_size.h as i32),
-                    None,
-                );
+                config.mode = ((size.w as i32, size.h as i32), None);
             }
             Err(anyhow::anyhow!("Cannot set window size"))
         } else {
@@ -165,7 +163,7 @@ pub fn init_backend(
         model: name.clone(),
     };
     let mode = Mode {
-        size: (size.physical_size.w as i32, size.physical_size.h as i32).into(),
+        size: (size.w as i32, size.h as i32).into(),
         refresh: 60_000,
     };
     let output = Output::new(name, props);
@@ -179,10 +177,7 @@ pub fn init_backend(
     );
     output.user_data().insert_if_missing(|| {
         RefCell::new(OutputConfig {
-            mode: (
-                (size.physical_size.w as i32, size.physical_size.h as i32),
-                None,
-            ),
+            mode: ((size.w as i32, size.h as i32), None),
             transform: Transform::Flipped180.into(),
             ..Default::default()
         })
@@ -212,11 +207,11 @@ pub fn init_backend(
             match input
                 .dispatch_new_events(|event| state.process_winit_event(event, &render_ping_handle))
             {
-                Ok(_) => {
+                PumpStatus::Continue => {
                     event_ping_handle.ping();
                     render_ping_handle.ping();
                 }
-                Err(winit::WinitError::WindowClosed) => {
+                PumpStatus::Exit(_) => {
                     let output = state.backend.winit().output.clone();
                     let seats = state.common.seats().cloned().collect::<Vec<_>>();
                     state.common.shell.remove_output(&output, seats.into_iter());
@@ -351,7 +346,7 @@ impl State {
                 self.common.output_configuration_state.update();
                 render_ping.ping();
             }
-            WinitEvent::Refresh => render_ping.ping(),
+            WinitEvent::Redraw => render_ping.ping(),
             WinitEvent::Input(event) => self.process_input_event(event, false),
             _ => {}
         };

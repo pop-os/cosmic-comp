@@ -285,7 +285,7 @@ impl State {
             .with_context(|| "Failed to load languages")
             .unwrap();
 
-        let clock = Clock::new().expect("Failed to initialize clock");
+        let clock = Clock::new();
         let config = Config::load(&handle);
         let compositor_state = CompositorState::new::<Self>(dh);
         let data_device_state = DataDeviceState::new::<Self>(dh);
