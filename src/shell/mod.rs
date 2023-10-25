@@ -217,13 +217,13 @@ fn create_workspace(
 impl WorkspaceSet {
     fn new(
         state: &mut WorkspaceUpdateGuard<'_, State>,
-        group_handle: WorkspaceGroupHandle,
         output: &Output,
         amount: WorkspaceAmount,
         idx: usize,
         tiling_enabled: bool,
         theme: cosmic::Theme,
     ) -> WorkspaceSet {
+        let group_handle = state.create_workspace_group();
         let workspaces = match amount {
             WorkspaceAmount::Dynamic => {
                 let workspace = create_workspace(
@@ -491,17 +491,8 @@ impl Workspaces {
                 set
             })
             .unwrap_or_else(|| {
-                let group_handle = match self.mode {
-                    WorkspaceMode::Global => self
-                        .sets
-                        .first()
-                        .map(|(_, w)| w.group.clone())
-                        .unwrap_or(workspace_state.create_workspace_group()),
-                    WorkspaceMode::OutputBound => workspace_state.create_workspace_group(),
-                };
                 WorkspaceSet::new(
                     workspace_state,
-                    group_handle,
                     &output,
                     self.amount,
                     self.sets.len(),
@@ -607,36 +598,7 @@ impl Workspaces {
 
         match (self.mode, config.static_conf.workspace_mode) {
             (WorkspaceMode::Global, WorkspaceMode::OutputBound) => {
-                // we need to create new separate workspace groups
-                let old_group = self.sets.first().map(|(_, w)| w.group.clone()).unwrap();
-                for (i, set) in self.sets.values_mut().enumerate() {
-                    let new_group = workspace_state.create_workspace_group();
-                    workspace_state.add_group_output(&new_group, &set.output);
-
-                    for workspace in &mut set.workspaces {
-                        // TODO: new protocol version allows workspaces to be reassigned,
-                        // that would also avoid updating toplevel-info
-                        let old_workspace_handle = workspace.handle;
-                        workspace_state.remove_workspace(old_workspace_handle);
-                        workspace.handle = workspace_state.create_workspace(&new_group).unwrap();
-                        workspace_state.set_workspace_capabilities(
-                            &workspace.handle,
-                            [WorkspaceCapabilities::Activate].into_iter(),
-                        );
-
-                        for window in workspace.mapped() {
-                            for (surface, _) in window.windows() {
-                                toplevel_info_state
-                                    .toplevel_leave_workspace(&surface, &old_workspace_handle);
-                                toplevel_info_state
-                                    .toplevel_enter_workspace(&surface, &workspace.handle);
-                            }
-                        }
-                    }
-
-                    set.update_idx(workspace_state, i);
-                    workspace_state.remove_workspace_group(old_group);
-                }
+                // We basically just unlink the existing spaces, so nothing needs to be updated
             }
             (WorkspaceMode::OutputBound, WorkspaceMode::Global) => {
                 // lets construct an iterator of all the pairs of workspaces we have to "merge"
@@ -660,12 +622,6 @@ impl Workspaces {
                     }
                 }
 
-                let group = workspace_state.create_workspace_group();
-                for output in self.sets.keys() {
-                    workspace_state.add_group_output(&group, output);
-                }
-
-                let old_workspace_groups = self.sets.values().map(|w| w.group).collect::<Vec<_>>();
                 for (j, pair) in pairs.iter().enumerate() {
                     for (i, x) in pair.iter().enumerate() {
                         // Fill up sets, where necessary
@@ -677,41 +633,19 @@ impl Workspaces {
                                 create_workspace(
                                     workspace_state,
                                     output,
-                                    &group,
+                                    &set.group,
                                     false,
                                     config.static_conf.tiling_enabled,
                                     self.theme.clone(),
                                 ),
                             );
-                        // Otherwise just update
-                        } else {
-                            let set = &mut self.sets[i];
-                            let workspace = &mut set.workspaces[j];
-                            let old_workspace_handle = workspace.handle;
-                            workspace_state.remove_workspace(old_workspace_handle);
-                            workspace.handle = workspace_state.create_workspace(&group).unwrap();
-                            workspace_state.set_workspace_capabilities(
-                                &workspace.handle,
-                                [WorkspaceCapabilities::Activate].into_iter(),
-                            );
-
-                            for window in workspace.mapped() {
-                                for (surface, _) in window.windows() {
-                                    toplevel_info_state
-                                        .toplevel_leave_workspace(&surface, &old_workspace_handle);
-                                    toplevel_info_state
-                                        .toplevel_enter_workspace(&surface, &workspace.handle);
-                                }
-                            }
                         }
+                        // Otherwise we are fine
                     }
                 }
+                // fixup indices
                 for (i, set) in self.sets.values_mut().enumerate() {
-                    set.group = group.clone();
                     set.update_idx(workspace_state, i);
-                }
-                for old_group in old_workspace_groups {
-                    workspace_state.remove_workspace_group(old_group);
                 }
             }
             _ => {}
