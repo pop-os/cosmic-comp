@@ -1072,7 +1072,7 @@ impl Workspace {
 
         if let Some(xwm) = xwm_state.and_then(|state| state.xwm.as_mut()) {
             if let Err(err) =
-                xwm.update_stacking_order_upwards(window_elements.iter().map(|e| e.id()))
+                xwm.update_stacking_order_upwards(window_elements.iter().rev().map(|e| e.id()))
             {
                 warn!(
                     wm_id = ?xwm.id(),

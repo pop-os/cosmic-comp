@@ -6,7 +6,6 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
-use tracing::warn;
 use wayland_backend::server::ClientId;
 
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State as WState;
@@ -1400,19 +1399,6 @@ impl Shell {
 
         if should_be_fullscreen {
             workspace.fullscreen_request(&mapped.active_window(), None);
-        }
-
-        if let CosmicSurface::X11(ref surface) = window {
-            if let Some(xwm) = state
-                .common
-                .xwayland_state
-                .as_mut()
-                .and_then(|state| state.xwm.as_mut())
-            {
-                if let Err(err) = xwm.raise_window(surface) {
-                    warn!(?err, "Failed to update Xwayland stacking order.");
-                }
-            }
         }
 
         Shell::set_focus(state, Some(&KeyboardFocusTarget::from(mapped)), &seat, None);
