@@ -15,6 +15,7 @@ use crate::{
 };
 
 use anyhow::{Context, Result};
+use calloop::{generic::Generic, Interest, PostAction};
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::FailureReason;
 use libc::dev_t;
 use smithay::{
@@ -140,6 +141,7 @@ impl fmt::Debug for Device {
 #[derive(Debug)]
 pub struct Surface {
     surface: Option<GbmDrmCompositor>,
+    crtc: crtc::Handle,
     connector: connector::Handle,
     output: Output,
     refresh_rate: u32,
@@ -995,6 +997,7 @@ impl Device {
         let data = Surface {
             output: output.clone(),
             surface: None,
+            crtc,
             connector: conn,
             vrr,
             refresh_rate,
@@ -1184,23 +1187,78 @@ impl Surface {
 
         match res {
             Ok(frame_result) => {
-                let feedback = if frame_result.damage.is_some() {
+                let mut feedback = if frame_result.damage.is_some() {
                     Some(state.take_presentation_feedback(&self.output, &frame_result.states))
                 } else {
                     None
                 };
 
-                if frame_result.needs_sync() {
+                let sync_point = if frame_result.needs_sync() {
                     if let PrimaryPlaneElement::Swapchain(elem) = &frame_result.primary_element {
-                        elem.sync.wait();
+                        let fd = elem.sync.export();
+                        if fd.is_none() {
+                            trace!("Can export fence fd, forcing block.");
+                            elem.sync.wait();
+                        }
+                        fd
+                    } else {
+                        warn!("Needs sync, but no primary plane compositing has happened?");
+                        None
                     }
-                }
-                match compositor.queue_frame(feedback) {
-                    Ok(()) | Err(FrameError::EmptyFrame) => {}
-                    Err(err) => {
-                        return Err(err).with_context(|| "Failed to submit result for display")
-                    }
+                } else {
+                    None
                 };
+
+                if let Some(syncfd) = sync_point {
+                    let crtc = self.crtc;
+                    let target_node = target_node.clone();
+                    let output = self.output.clone();
+                    state.event_loop_handle.insert_source(
+                        Generic::new(syncfd, Interest::READ, calloop::Mode::Level),
+                        move |_, _, state: &mut State| {
+                            if let Some(surface) = state
+                                .backend
+                                .kms()
+                                .devices
+                                .get_mut(&target_node)
+                                .and_then(|device| device.surfaces.get_mut(&crtc))
+                            {
+                                if let Some(compositor) = surface.surface.as_mut() {
+                                    match compositor.queue_frame(feedback.take()) {
+                                        Ok(()) | Err(FrameError::EmptyFrame) => {}
+                                        Err(err) => {
+                                            error!(
+                                                ?err,
+                                                "Failed to submit frame late for display, rescheduling"
+                                            );
+                                            surface.pending = false;
+                                            if let Err(err) = state.backend.kms().schedule_render(
+                                                &state.common.event_loop_handle,
+                                                &output,
+                                                None,
+                                                None,
+                                            ) {
+                                                error!(
+                                                    ?err,
+                                                    "Error scheduling event loop for output {}.",
+                                                    output.name(),
+                                                );
+                                            }
+                                        }
+                                    };
+                                }
+                            }
+                            Ok(PostAction::Remove)
+                        },
+                    ).with_context(|| "Failed to submit result for display")?;
+                } else {
+                    match compositor.queue_frame(feedback) {
+                        Ok(()) | Err(FrameError::EmptyFrame) => {}
+                        Err(err) => {
+                            return Err(err).with_context(|| "Failed to submit result for display")
+                        }
+                    };
+                }
 
                 if let Some(screencopy) = screencopy {
                     for (session, params) in screencopy {
