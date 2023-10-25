@@ -492,15 +492,11 @@ where
     let (resize_mode, resize_indicator) = state.shell.resize_mode();
     let resize_indicator = resize_indicator.map(|indicator| (resize_mode, indicator));
     let swap_tree = if let OverviewMode::Started(Trigger::KeyboardSwap(_, desc), _) = &overview.0 {
-        if let Some(desc_output) = desc.output.upgrade() {
-            if output != &desc_output || current.0 != desc.handle {
-                state
-                    .shell
-                    .space_for_handle(&desc.handle)
-                    .and_then(|w| w.tiling_layer.tree_for_output(&desc_output))
-            } else {
-                None
-            }
+        if current.0 != desc.handle {
+            state
+                .shell
+                .space_for_handle(&desc.handle)
+                .map(|w| w.tiling_layer.tree())
         } else {
             None
         }
@@ -530,9 +526,9 @@ where
 
     let has_fullscreen = workspace
         .fullscreen
-        .get(output)
+        .as_ref()
         .filter(|f| !f.is_animating())
-        .map(|f| f.exclusive);
+        .is_some();
     let (overlay_elements, overlay_popups) =
         split_layer_elements(renderer, output, Layer::Overlay, exclude_workspace_overview);
 
@@ -540,7 +536,7 @@ where
     elements.extend(overlay_popups.into_iter().map(Into::into));
     elements.extend(overlay_elements.into_iter().map(Into::into));
 
-    let mut window_elements = if !has_fullscreen.unwrap_or(false) {
+    let mut window_elements = if !has_fullscreen {
         let (top_elements, top_popups) =
             split_layer_elements(renderer, output, Layer::Top, exclude_workspace_overview);
         elements.extend(top_popups.into_iter().map(Into::into));
@@ -557,7 +553,7 @@ where
                 .shell
                 .space_for_handle(&previous)
                 .ok_or(OutputNoMode)?;
-            let has_fullscreen = workspace.fullscreen.contains_key(output);
+            let has_fullscreen = workspace.fullscreen.is_some();
             let is_active_space = workspace.outputs().any(|o| o == &active_output);
 
             let percentage = {
@@ -581,9 +577,8 @@ where
             });
 
             let (w_elements, p_elements) = workspace
-                .render_output::<R>(
+                .render::<R>(
                     renderer,
-                    output,
                     &state.shell.override_redirect_windows,
                     state.xwayland_state.as_mut(),
                     (!move_active && is_active_space).then_some(&last_active_seat),
@@ -639,9 +634,8 @@ where
     let is_active_space = workspace.outputs().any(|o| o == &active_output);
 
     let (w_elements, p_elements) = workspace
-        .render_output::<R>(
+        .render::<R>(
             renderer,
-            output,
             &state.shell.override_redirect_windows,
             state.xwayland_state.as_mut(),
             (!move_active && is_active_space).then_some(&last_active_seat),
@@ -665,7 +659,7 @@ where
         ))
     }));
 
-    if has_fullscreen.is_none() {
+    if !has_fullscreen {
         let (w_elements, p_elements) =
             background_layer_elements(renderer, output, exclude_workspace_overview);
 

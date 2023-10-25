@@ -39,7 +39,7 @@ use smithay::{
         input::event::pointer::PointerAxisEvent as LibinputPointerAxisEvent,
         wayland_server::DisplayHandle,
     },
-    utils::{Logical, Point, Rectangle, Serial, SERIAL_COUNTER},
+    utils::{Point, Serial, SERIAL_COUNTER},
     wayland::{
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
         pointer_constraints::{with_pointer_constraint, PointerConstraint},
@@ -1539,9 +1539,6 @@ impl State {
             Action::Move(direction) => {
                 let current_output = seat.active_output();
                 let workspace = self.common.shell.active_space_mut(&current_output);
-                if workspace.get_fullscreen(&current_output).is_some() {
-                    return; // TODO, is this what we want? How do we indicate the switch?
-                }
 
                 match workspace.move_current_element(direction, seat) {
                     MoveResult::MoveFurther(_move_further) => {
@@ -1602,7 +1599,7 @@ impl State {
             Action::SwapWindow => {
                 let current_output = seat.active_output();
                 let workspace = self.common.shell.active_space_mut(&current_output);
-                if workspace.get_fullscreen(&current_output).is_some() {
+                if workspace.get_fullscreen().is_some() {
                     return; // TODO, is this what we want? Maybe disengage fullscreen instead?
                 }
 
@@ -1624,11 +1621,7 @@ impl State {
                 let focus_stack = workspace.focus_stack.get(seat);
                 let focused_window = focus_stack.last();
                 if let Some(window) = focused_window.map(|f| f.active_window()) {
-                    workspace.maximize_toggle(
-                        &window,
-                        &current_output,
-                        self.common.event_loop_handle.clone(),
-                    );
+                    workspace.maximize_toggle(&window);
                 }
             }
             Action::Resizing(direction) => self.common.shell.set_resize_mode(
@@ -1791,7 +1784,7 @@ impl State {
 
 fn sessions_for_output(state: &Common, output: &Output) -> impl Iterator<Item = Session> {
     let workspace = state.shell.active_space(&output);
-    let maybe_fullscreen = workspace.get_fullscreen(&output);
+    let maybe_fullscreen = workspace.get_fullscreen();
     workspace
         .screencopy_sessions
         .iter()
@@ -1800,7 +1793,7 @@ fn sessions_for_output(state: &Common, output: &Output) -> impl Iterator<Item = 
             maybe_fullscreen
                 .as_ref()
                 .and_then(|w| {
-                    if let Some(sessions) = w.surface().user_data().get::<ScreencopySessions>() {
+                    if let Some(sessions) = w.user_data().get::<ScreencopySessions>() {
                         Some(
                             sessions
                                 .0

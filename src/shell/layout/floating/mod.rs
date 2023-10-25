@@ -68,6 +68,21 @@ impl FloatingLayout {
         self.map_internal(mapped, position, None)
     }
 
+    pub fn map_maximized(&mut self, mapped: CosmicMapped) {
+        let output = self.space.outputs().next().unwrap().clone();
+        let layers = layer_map_for_output(&output);
+        let geometry = layers.non_exclusive_zone().as_local();
+
+        mapped.set_bounds(geometry.size.as_logical());
+        mapped.set_tiled(true);
+        mapped.set_maximized(true);
+        mapped.set_geometry(geometry.to_global(&output));
+        mapped.configure();
+
+        self.space
+            .map_element(mapped, geometry.loc.as_logical(), true);
+    }
+
     pub(in crate::shell) fn map_internal(
         &mut self,
         mapped: CosmicMapped,
@@ -140,10 +155,7 @@ impl FloatingLayout {
     }
 
     pub fn unmap(&mut self, window: &CosmicMapped) -> bool {
-        #[allow(irrefutable_let_patterns)]
-        let is_maximized = window.is_maximized(true);
-
-        if !is_maximized {
+        if !window.is_maximized(true) || !window.is_fullscreen(true) {
             if let Some(location) = self.space.element_location(window) {
                 *window.last_geometry.lock().unwrap() =
                     Some(Rectangle::from_loc_and_size(location, window.geometry().size).as_local());
@@ -157,54 +169,6 @@ impl FloatingLayout {
 
     pub fn element_geometry(&self, elem: &CosmicMapped) -> Option<Rectangle<i32, Local>> {
         self.space.element_geometry(elem).map(RectExt::as_local)
-    }
-
-    pub fn maximize_request(&mut self, window: &CosmicSurface) {
-        if let Some(mapped) = self
-            .space
-            .elements()
-            .find(|m| m.windows().any(|(w, _)| &w == window))
-        {
-            if let Some(location) = self.space.element_location(mapped) {
-                *mapped.last_geometry.lock().unwrap() = Some(Rectangle::from_loc_and_size(
-                    location,
-                    mapped.geometry().size,
-                ));
-            }
-        }
-    }
-
-    pub fn unmaximize_request(&mut self, window: &CosmicSurface) -> Option<Size<i32, Logical>> {
-        let maybe_mapped = self
-            .space
-            .elements()
-            .find(|m| m.windows().any(|(w, _)| &w == window))
-            .cloned();
-
-        if let Some(mapped) = maybe_mapped {
-            let last_geometry = mapped.last_geometry.lock().unwrap().clone();
-            let last_size = last_geometry.map(|g| g.size).expect("No previous size?");
-            let last_location = last_geometry.map(|g| g.loc).expect("No previous location?");
-            let output = self
-                .space
-                .output_under(last_location.to_f64())
-                .next()
-                .unwrap_or(self.space.outputs().next().unwrap());
-            let offset = output.geometry().loc
-                - self
-                    .space
-                    .output_geometry(output)
-                    .map(|g| g.loc)
-                    .unwrap_or_default();
-            mapped.set_geometry(Rectangle::from_loc_and_size(
-                last_location + offset,
-                last_size,
-            ));
-            self.space.map_element(mapped, last_location, true);
-            Some(last_size)
-        } else {
-            None
-        }
     }
 
     pub fn resize_request(
@@ -247,6 +211,9 @@ impl FloatingLayout {
         else {
             return false;
         };
+        if mapped.is_maximized(true) {
+            return false;
+        }
 
         let Some(original_geo) = self.space.element_geometry(mapped) else {
             return false; // we don't have that window

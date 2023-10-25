@@ -100,11 +100,9 @@ impl Shell {
         // update FocusStack and notify layouts about new focus (if any window)
         let element = match target {
             Some(KeyboardFocusTarget::Element(mapped)) => Some(mapped.clone()),
-            Some(KeyboardFocusTarget::Fullscreen(window)) => state
-                .common
-                .shell
-                .element_for_surface(&window.surface())
-                .cloned(),
+            Some(KeyboardFocusTarget::Fullscreen(window)) => {
+                state.common.shell.element_for_surface(window).cloned()
+            }
             _ => None,
         };
 
@@ -237,7 +235,7 @@ impl Common {
                             let workspace = state.common.shell.active_space(&output);
                             let focus_stack = workspace.focus_stack.get(&seat);
                             if focus_stack.last().map(|m| m == &mapped).unwrap_or(false)
-                                && workspace.get_fullscreen(&output).is_none()
+                                && workspace.get_fullscreen().is_none()
                             {
                                 continue; // Focus is valid
                             } else {
@@ -268,9 +266,9 @@ impl Common {
 
                             if focus_stack
                                 .last()
-                                .map(|m| m.has_active_window(&window.surface()))
+                                .map(|m| m.has_active_window(&window))
                                 .unwrap_or(false)
-                                && workspace.get_fullscreen(&output).is_some()
+                                && workspace.get_fullscreen().is_some()
                             {
                                 continue; // Focus is valid
                             } else {
@@ -313,7 +311,7 @@ impl Common {
                     .common
                     .shell
                     .active_space(&output)
-                    .get_fullscreen(&output)
+                    .get_fullscreen()
                     .cloned()
                     .map(KeyboardFocusTarget::Fullscreen)
                     .or_else(|| {

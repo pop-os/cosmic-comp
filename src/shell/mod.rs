@@ -43,11 +43,11 @@ use crate::{
     wayland::{
         handlers::output,
         protocols::{
-        toplevel_info::ToplevelInfoState,
-        toplevel_management::{ManagementCapabilities, ToplevelManagementState},
-        workspace::{
-            WorkspaceCapabilities, WorkspaceGroupHandle, WorkspaceHandle, WorkspaceState,
-            WorkspaceUpdateGuard,
+            toplevel_info::ToplevelInfoState,
+            toplevel_management::{ManagementCapabilities, ToplevelManagementState},
+            workspace::{
+                WorkspaceCapabilities, WorkspaceGroupHandle, WorkspaceHandle, WorkspaceState,
+                WorkspaceUpdateGuard,
             },
         },
     },
@@ -318,26 +318,26 @@ impl WorkspaceSet {
     }
 
     fn add_empty_workspace(&mut self, state: &mut WorkspaceUpdateGuard<State>) {
-            let mut workspace = create_workspace(
+        let mut workspace = create_workspace(
             state,
             &self.output,
-                &self.group,
-                false,
-                self.tiling_enabled,
-                self.gaps,
-            );
-            workspace_set_idx(
+            &self.group,
+            false,
+            self.tiling_enabled,
+            self.gaps,
+        );
+        workspace_set_idx(
             state,
-                self.workspaces.len() as u8 + 1,
-                self.idx,
-                &workspace.handle,
-            );
-            state.set_workspace_capabilities(
-                &workspace.handle,
-                [WorkspaceCapabilities::Activate].into_iter(),
-            );
-            self.workspaces.push(workspace);
-        }
+            self.workspaces.len() as u8 + 1,
+            self.idx,
+            &workspace.handle,
+        );
+        state.set_workspace_capabilities(
+            &workspace.handle,
+            [WorkspaceCapabilities::Activate].into_iter(),
+        );
+        self.workspaces.push(workspace);
+    }
 
     fn ensure_last_empty<'a>(&mut self, state: &mut WorkspaceUpdateGuard<State>) {
         // add empty at the end, if necessary
@@ -460,10 +460,10 @@ impl WorkspaceSet {
 pub struct Workspaces {
     sets: IndexMap<Output, WorkspaceSet>,
     backup_set: Option<WorkspaceSet>,
-        amount: WorkspaceAmount,
+    amount: WorkspaceAmount,
     mode: WorkspaceMode,
-        tiling_enabled: bool,
-        gaps: (u8, u8),
+    tiling_enabled: bool,
+    gaps: (u8, u8),
 }
 
 impl Workspaces {
@@ -534,7 +534,7 @@ impl Workspaces {
                     if &seat.active_output() == output {
                         seat.set_active_output(&new_output);
                     }
-    }
+                }
 
                 let new_set = self.sets.get_mut(&new_output).unwrap();
                 let workspace_group = new_set.group;
@@ -692,33 +692,33 @@ impl Workspaces {
 
     pub fn get_mut(&mut self, num: usize, output: &Output) -> Option<&mut Workspace> {
         self.sets
-                .get_mut(output)
+            .get_mut(output)
             .and_then(|set| set.workspaces.get_mut(num))
     }
 
     pub fn active(&self, output: &Output) -> (Option<(&Workspace, Instant)>, &Workspace) {
         let set = self.sets.get(output).unwrap();
-                (
-                    set.previously_active
-                        .map(|(idx, start)| (&set.workspaces[idx], start)),
-                    &set.workspaces[set.active],
-                )
+        (
+            set.previously_active
+                .map(|(idx, start)| (&set.workspaces[idx], start)),
+            &set.workspaces[set.active],
+        )
     }
 
     pub fn active_mut(&mut self, output: &Output) -> &mut Workspace {
         let set = self.sets.get_mut(output).unwrap();
-                &mut set.workspaces[set.active]
+        &mut set.workspaces[set.active]
     }
 
     pub fn active_num(&self, output: &Output) -> (Option<usize>, usize) {
         let set = self.sets.get(output).unwrap();
-                (set.previously_active.map(|(idx, _)| idx), set.active)
+        (set.previously_active.map(|(idx, _)| idx), set.active)
     }
 
     pub fn len(&self, output: &Output) -> usize {
         let set = self.sets.get(output).unwrap();
-                set.workspaces.len()
-            }
+        set.workspaces.len()
+    }
 
     pub fn iter(&self) -> impl Iterator<Item = (&Output, &WorkspaceSet)> {
         self.sets.iter()
@@ -731,7 +731,7 @@ impl Workspaces {
     pub fn spaces_for_output(&self, output: &Output) -> impl Iterator<Item = &Workspace> {
         self.sets
             .get(output)
-                    .into_iter()
+            .into_iter()
             .flat_map(|set| set.workspaces.iter())
     }
 
@@ -745,7 +745,7 @@ impl Workspaces {
 
     pub fn update_tiling_status(&mut self, seat: &Seat<State>, tiling: bool) {
         for set in self.sets.values_mut() {
-                    set.update_tiling_status(seat, tiling)
+            set.update_tiling_status(seat, tiling)
         }
     }
 }
@@ -802,7 +802,7 @@ impl Shell {
 
     pub fn add_output(&mut self, output: &Output) {
         self.workspaces.add_output(
-                        output,
+            output,
             &mut self.workspace_state.update(),
             &mut self.toplevel_info_state,
         );
@@ -815,8 +815,8 @@ impl Shell {
             &mut self.workspace_state.update(),
             &mut self.toplevel_info_state,
         );
-                self.refresh(); // cleans up excess of workspaces and empty workspaces
-            }
+        self.refresh(); // cleans up excess of workspaces and empty workspaces
+    }
 
     /*
     pub fn set_mode(&mut self, mode: ConfigMode) {
@@ -1061,13 +1061,13 @@ impl Shell {
                     }
                     set.activate(idx, &mut self.workspace_state.update())?;
 
-            let output_geo = output.geometry();
-            Ok(Some(
+                    let output_geo = output.geometry();
+                    Ok(Some(
                         output_geo.loc
                             + Point::from((output_geo.size.w / 2, output_geo.size.h / 2)),
-            ))
-        } else {
-            Ok(None)
+                    ))
+                } else {
+                    Ok(None)
                 }
             }
             WorkspaceMode::Global => {
@@ -1320,7 +1320,7 @@ impl Shell {
 
         self.workspaces.refresh(
             &mut self.workspace_state.update(),
-                        &mut self.toplevel_info_state,
+            &mut self.toplevel_info_state,
         );
 
         for output in self.outputs() {
@@ -1348,7 +1348,7 @@ impl Shell {
         let (window, seat) = state.common.shell.pending_windows.remove(pos);
 
         let workspace = state.common.shell.workspaces.active_mut(output);
-        workspace.remove_fullscreen(output);
+        workspace.remove_fullscreen();
         state.common.shell.toplevel_info_state.new_toplevel(&window);
         state
             .common
@@ -1372,6 +1372,15 @@ impl Shell {
         if layout::should_be_floating(&window) || !workspace.tiling_enabled {
             workspace.floating_layer.map(mapped.clone(), None);
         } else {
+            for mapped in workspace
+                .mapped()
+                .filter(|m| m.maximized_state.lock().unwrap().is_some())
+                .cloned()
+                .collect::<Vec<_>>()
+                .into_iter()
+            {
+                workspace.unmaximize_request(&mapped.active_window());
+            }
             let focus_stack = workspace.focus_stack.get(&seat);
             workspace
                 .tiling_layer
@@ -1514,44 +1523,17 @@ impl Shell {
             .unwrap(); // checked above
         let focus_stack = to_workspace.focus_stack.get(&seat);
         if window_state.layer == ManagedLayer::Floating {
-            to_workspace.floating_layer.map(mapped.clone(), &seat, None);
+            to_workspace.floating_layer.map(mapped.clone(), None);
         } else {
             to_workspace
                 .tiling_layer
-                .map(mapped.clone(), &seat, focus_stack.iter(), direction);
+                .map(mapped.clone(), focus_stack.iter(), direction);
         }
-        let focus_target = match window_state.was_fullscreen {
-            Some(true) => {
-                to_workspace.fullscreen_request(
-                    &mapped.active_window(),
-                    &to_output,
-                    state.common.event_loop_handle.clone(),
-                );
-                KeyboardFocusTarget::from(
-                    to_workspace
-                        .fullscreen
-                        .get(to_output)
-                        .unwrap()
-                        .window
-                        .clone(),
-                )
-            }
-            Some(false) => {
-                to_workspace.maximize_request(
-                    &mapped.active_window(),
-                    &to_output,
-                    state.common.event_loop_handle.clone(),
-                );
-                KeyboardFocusTarget::from(
-                    to_workspace
-                        .fullscreen
-                        .get(to_output)
-                        .unwrap()
-                        .window
-                        .clone(),
-                )
-            }
-            None => KeyboardFocusTarget::from(mapped.clone()),
+        let focus_target = if window_state.was_fullscreen.is_some() {
+            to_workspace.fullscreen_request(&mapped.active_window());
+            KeyboardFocusTarget::from(to_workspace.get_fullscreen().unwrap().clone())
+        } else {
+            KeyboardFocusTarget::from(mapped.clone())
         };
 
         for (toplevel, _) in mapped.windows() {

@@ -74,7 +74,7 @@ use tracing::debug;
 use super::{
     focus::FocusDirection,
     layout::{floating::ResizeState, tiling::NodeDesc},
-    Direction,
+    Direction, ManagedLayer,
 };
 
 space_elements! {
@@ -84,12 +84,19 @@ space_elements! {
     Stack=CosmicStack,
 }
 
+#[derive(Debug, Clone)]
+pub struct MaximizedState {
+    pub original_geometry: Rectangle<i32, Local>,
+    pub original_layer: ManagedLayer,
+}
+
 #[derive(Clone)]
 pub struct CosmicMapped {
     element: CosmicMappedInternal,
 
     // associated data
     last_cursor_position: Arc<Mutex<HashMap<usize, Point<f64, Logical>>>>,
+    pub maximized_state: Arc<Mutex<Option<MaximizedState>>>,
 
     //tiling
     pub tiling_node_id: Arc<Mutex<Option<NodeId>>>,
@@ -106,6 +113,7 @@ impl fmt::Debug for CosmicMapped {
         f.debug_struct("CosmicMapped")
             .field("element", &self.element)
             .field("last_cursor_position", &self.last_cursor_position)
+            .field("maximized_state", &self.maximized_state)
             .field("tiling_node_id", &self.tiling_node_id)
             .field("resize_state", &self.resize_state)
             .field("last_geometry", &self.last_geometry)
@@ -1064,6 +1072,7 @@ impl From<CosmicWindow> for CosmicMapped {
         CosmicMapped {
             element: CosmicMappedInternal::Window(w),
             last_cursor_position: Arc::new(Mutex::new(HashMap::new())),
+            maximized_state: Arc::new(Mutex::new(None)),
             tiling_node_id: Arc::new(Mutex::new(None)),
             resize_state: Arc::new(Mutex::new(None)),
             last_geometry: Arc::new(Mutex::new(None)),
@@ -1078,6 +1087,7 @@ impl From<CosmicStack> for CosmicMapped {
         CosmicMapped {
             element: CosmicMappedInternal::Stack(s),
             last_cursor_position: Arc::new(Mutex::new(HashMap::new())),
+            maximized_state: Arc::new(Mutex::new(None)),
             tiling_node_id: Arc::new(Mutex::new(None)),
             resize_state: Arc::new(Mutex::new(None)),
             last_geometry: Arc::new(Mutex::new(None)),

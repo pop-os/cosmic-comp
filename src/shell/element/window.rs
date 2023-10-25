@@ -241,27 +241,20 @@ impl Program for CosmicWindowInternal {
                 }
             }
             Message::Maximize => {
-                if let Some((seat, _serial)) = self.last_seat.lock().unwrap().clone() {
-                    if let Some(surface) = self.window.wl_surface() {
-                        loop_handle.insert_idle(move |state| {
-                            if let Some(mapped) =
-                                state.common.shell.element_for_wl_surface(&surface).cloned()
-                            {
-                                if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
-                                    let output = seat.active_output();
-                                    let (window, _) = mapped
-                                        .windows()
-                                        .find(|(w, _)| w.wl_surface().as_ref() == Some(&surface))
-                                        .unwrap();
-                                    workspace.maximize_toggle(
-                                        &window,
-                                        &output,
-                                        state.common.event_loop_handle.clone(),
-                                    )
-                                }
+                if let Some(surface) = self.window.wl_surface() {
+                    loop_handle.insert_idle(move |state| {
+                        if let Some(mapped) =
+                            state.common.shell.element_for_wl_surface(&surface).cloned()
+                        {
+                            if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
+                                let (window, _) = mapped
+                                    .windows()
+                                    .find(|(w, _)| w.wl_surface().as_ref() == Some(&surface))
+                                    .unwrap();
+                                workspace.maximize_toggle(&window)
                             }
-                        });
-                    }
+                        }
+                    });
                 }
             }
             Message::Close => self.window.close(),
