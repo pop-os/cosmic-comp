@@ -670,7 +670,7 @@ impl Workspace {
         if mapped.maximized_state.lock().unwrap().is_some() {
             // If surface is maximized then unmaximize it
             let new_size = self.unmaximize_request(window);
-            let ratio = pos.x / output.geometry().size.w as f64;
+            let ratio = pos.to_local(&self.output).x / output.geometry().size.w as f64;
 
             initial_window_location = new_size
                 .map(|size| (pos.x - (size.w as f64 * ratio), pos.y).into())
