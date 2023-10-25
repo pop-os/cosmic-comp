@@ -350,7 +350,7 @@ impl State {
                                                     if let Some(old_workspace) = old_w.get_mut(0) {
                                                         if let Some(new_workspace) = other_w.iter_mut().find(|w| w.handle == new_workspace) {
                                                             if new_workspace.tiling_layer.windows().next().is_none() {
-                                                                if let Some(focus) = TilingLayout::move_tree(&mut old_workspace.tiling_layer, &mut new_workspace.tiling_layer, &current_output, &new_workspace.handle, &seat, new_workspace.focus_stack.get(&seat).iter(), old_descriptor, &mut data.common.shell.toplevel_info_state) {
+                                                                if let Some(focus) = TilingLayout::move_tree(&mut old_workspace.tiling_layer, &mut new_workspace.tiling_layer, &new_workspace.handle, &seat, new_workspace.focus_stack.get(&seat).iter(), old_descriptor, &mut data.common.shell.toplevel_info_state) {
                                                                     let seat = seat.clone();
                                                                     data.common.event_loop_handle.insert_idle(move |state| {
                                                                         Common::set_focus(state, Some(&focus), &seat, None);
@@ -1333,16 +1333,15 @@ impl State {
             }
             Action::NextOutput => {
                 let current_output = seat.active_output();
-                if let Some(next_output) = self
+                let next_output = self
                     .common
                     .shell
-                    .outputs
-                    .iter()
+                    .outputs()
                     .skip_while(|o| *o != &current_output)
                     .skip(1)
                     .next()
-                    .cloned()
-                {
+                    .cloned();
+                if let Some(next_output) = next_output {
                     let idx = self.common.shell.workspaces.active_num(&next_output).1;
                     match self.common.shell.activate(&next_output, idx) {
                         Ok(Some(new_pos)) => {
@@ -1369,17 +1368,16 @@ impl State {
             }
             Action::PreviousOutput => {
                 let current_output = seat.active_output();
-                if let Some(prev_output) = self
+                let prev_output = self
                     .common
                     .shell
-                    .outputs
-                    .iter()
+                    .outputs()
                     .rev()
                     .skip_while(|o| *o != &current_output)
                     .skip(1)
                     .next()
-                    .cloned()
-                {
+                    .cloned();
+                if let Some(prev_output) = prev_output {
                     let idx = self.common.shell.workspaces.active_num(&prev_output).1;
                     match self.common.shell.activate(&prev_output, idx) {
                         Ok(Some(new_pos)) => {
@@ -1406,16 +1404,15 @@ impl State {
             }
             x @ Action::MoveToNextOutput | x @ Action::SendToNextOutput => {
                 let current_output = seat.active_output();
-                if let Some(next_output) = self
+                let next_output = self
                     .common
                     .shell
-                    .outputs
-                    .iter()
+                    .outputs()
                     .skip_while(|o| *o != &current_output)
                     .skip(1)
                     .next()
-                    .cloned()
-                {
+                    .cloned();
+                if let Some(next_output) = next_output {
                     if let Ok(Some(new_pos)) = Shell::move_current_window(
                         self,
                         seat,
@@ -1441,17 +1438,16 @@ impl State {
             }
             x @ Action::MoveToPreviousOutput | x @ Action::SendToPreviousOutput => {
                 let current_output = seat.active_output();
-                if let Some(prev_output) = self
+                let prev_output = self
                     .common
                     .shell
-                    .outputs
-                    .iter()
+                    .outputs()
                     .rev()
                     .skip_while(|o| *o != &current_output)
                     .skip(1)
                     .next()
-                    .cloned()
-                {
+                    .cloned();
+                if let Some(prev_output) = prev_output {
                     if let Ok(Some(new_pos)) = Shell::move_current_window(
                         self,
                         seat,

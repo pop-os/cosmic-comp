@@ -229,7 +229,7 @@ impl PointerGrab<State> for MoveGrab {
                 .workspaces
                 .active_mut(&self.cursor_output)
                 .tiling_layer
-                .cleanup_drag(&self.cursor_output);
+                .cleanup_drag();
             self.cursor_output = current_output.clone();
         }
 

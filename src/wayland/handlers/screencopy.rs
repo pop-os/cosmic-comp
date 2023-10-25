@@ -1296,7 +1296,7 @@ pub fn schedule_offscreen_workspace_session(
         if !session.alive() {
             return;
         }
-        if !state.common.shell.outputs.contains(&output) {
+        if !state.common.shell.outputs().any(|o| o == &output) {
             return;
         }
         match render_workspace_to_buffer(

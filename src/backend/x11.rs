@@ -448,7 +448,6 @@ pub fn init_backend(
                     output.set_preferred(mode);
                     layer_map_for_output(output).arrange();
                     state.common.output_configuration_state.update();
-                    state.common.shell.refresh_outputs();
                     surface.dirty = true;
                     if !surface.pending {
                         surface.render.ping();

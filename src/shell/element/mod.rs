@@ -492,7 +492,7 @@ impl CosmicMapped {
 
     pub fn convert_to_stack<'a>(
         &mut self,
-        outputs: impl Iterator<Item = (&'a Output, Rectangle<i32, Logical>)>,
+        (output, overlap): (&'a Output, Rectangle<i32, Logical>),
     ) {
         match &self.element {
             CosmicMappedInternal::Window(window) => {
@@ -518,7 +518,7 @@ impl CosmicMapped {
     pub fn convert_to_surface<'a>(
         &mut self,
         surface: CosmicSurface,
-        outputs: impl Iterator<Item = (&'a Output, Rectangle<i32, Logical>)>,
+        (output, overlap): (&'a Output, Rectangle<i32, Logical>),
     ) {
         let handle = self.loop_handle();
         surface.try_force_undecorated(false);

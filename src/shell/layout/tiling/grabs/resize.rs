@@ -137,67 +137,64 @@ impl PointerGrab<State> for ResizeForkGrab {
 
         if let Some(output) = self.output.upgrade() {
             let tiling_layer = &mut data.common.shell.active_space_mut(&output).tiling_layer;
-            if let Some(queue) = tiling_layer.queues.get_mut(&output) {
-                let tree = &mut queue.trees.back_mut().unwrap().0;
-                if tree.get(&self.node).is_ok() {
-                    let delta = match self.orientation {
-                        Orientation::Vertical => delta.x,
-                        Orientation::Horizontal => delta.y,
-                    }
-                    .round() as i32;
-
-                    // check that we are still alive
-                    let mut iter = tree
-                        .children_ids(&self.node)
-                        .unwrap()
-                        .skip(self.left_up_idx);
-                    let first_elem = iter.next();
-                    let second_elem = iter.next();
-                    if first_elem.is_none() || second_elem.is_none() {
-                        return handle.unset_grab(data, event.serial, event.time);
-                    };
-
-                    match tree.get_mut(&self.node).unwrap().data_mut() {
-                        Data::Group {
-                            sizes, orientation, ..
-                        } => {
-                            if sizes[self.left_up_idx] + sizes[self.left_up_idx + 1]
-                                < match orientation {
-                                    Orientation::Vertical => 720,
-                                    Orientation::Horizontal => 480,
-                                }
-                            {
-                                return;
-                            };
-
-                            let old_size = sizes[self.left_up_idx];
-                            sizes[self.left_up_idx] = (old_size + delta).max(
-                                if self.orientation == Orientation::Vertical {
-                                    360
-                                } else {
-                                    240
-                                },
-                            );
-                            let diff = old_size - sizes[self.left_up_idx];
-                            let next_size = sizes[self.left_up_idx + 1] + diff;
-                            sizes[self.left_up_idx + 1] =
-                                next_size.max(if self.orientation == Orientation::Vertical {
-                                    360
-                                } else {
-                                    240
-                                });
-                            let next_diff = next_size - sizes[self.left_up_idx + 1];
-                            sizes[self.left_up_idx] += next_diff;
-                        }
-                        _ => unreachable!(),
-                    }
-
-                    self.last_loc = event.location;
-                    let blocker = TilingLayout::update_positions(&output, tree, tiling_layer.gaps);
-                    tiling_layer.pending_blockers.extend(blocker);
-                } else {
-                    handle.unset_grab(data, event.serial, event.time);
+            let tree = &mut tiling_layer.queue.trees.back_mut().unwrap().0;
+            if tree.get(&self.node).is_ok() {
+                let delta = match self.orientation {
+                    Orientation::Vertical => delta.x,
+                    Orientation::Horizontal => delta.y,
                 }
+                .round() as i32;
+
+                // check that we are still alive
+                let mut iter = tree
+                    .children_ids(&self.node)
+                    .unwrap()
+                    .skip(self.left_up_idx);
+                let first_elem = iter.next();
+                let second_elem = iter.next();
+                if first_elem.is_none() || second_elem.is_none() {
+                    return handle.unset_grab(data, event.serial, event.time);
+                };
+
+                match tree.get_mut(&self.node).unwrap().data_mut() {
+                    Data::Group {
+                        sizes, orientation, ..
+                    } => {
+                        if sizes[self.left_up_idx] + sizes[self.left_up_idx + 1]
+                            < match orientation {
+                                Orientation::Vertical => 720,
+                                Orientation::Horizontal => 480,
+                            }
+                        {
+                            return;
+                        };
+
+                        let old_size = sizes[self.left_up_idx];
+                        sizes[self.left_up_idx] =
+                            (old_size + delta).max(if self.orientation == Orientation::Vertical {
+                                360
+                            } else {
+                                240
+                            });
+                        let diff = old_size - sizes[self.left_up_idx];
+                        let next_size = sizes[self.left_up_idx + 1] + diff;
+                        sizes[self.left_up_idx + 1] =
+                            next_size.max(if self.orientation == Orientation::Vertical {
+                                360
+                            } else {
+                                240
+                            });
+                        let next_diff = next_size - sizes[self.left_up_idx + 1];
+                        sizes[self.left_up_idx] += next_diff;
+                    }
+                    _ => unreachable!(),
+                }
+
+                self.last_loc = event.location;
+                let blocker = TilingLayout::update_positions(&output, tree, tiling_layer.gaps);
+                tiling_layer.pending_blockers.extend(blocker);
+            } else {
+                handle.unset_grab(data, event.serial, event.time);
             }
         }
     }

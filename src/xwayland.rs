@@ -363,14 +363,11 @@ impl XwmHandler for State {
     }
 
     fn maximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let seat = self.common.last_active_seat();
-        let output = seat.active_output();
         let surface = CosmicSurface::X11(window);
-
         if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
                 let (window, _) = mapped.windows().find(|(w, _)| w == &surface).unwrap();
-                workspace.maximize_request(&window, &output, self.common.event_loop_handle.clone())
+                workspace.maximize_request(&window);
             }
         }
     }
@@ -386,18 +383,10 @@ impl XwmHandler for State {
     }
 
     fn fullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let seat = self.common.last_active_seat();
-        let output = seat.active_output();
         let surface = CosmicSurface::X11(window);
-
         if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
-                let (window, _) = mapped.windows().find(|(w, _)| w == &surface).unwrap();
-                workspace.fullscreen_request(
-                    &window,
-                    &output,
-                    self.common.event_loop_handle.clone(),
-                )
+                workspace.fullscreen_request(&surface)
             }
         }
     }

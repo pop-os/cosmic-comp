@@ -76,6 +76,7 @@ const FULLSCREEN_ANIMATION_DURATION: Duration = Duration::from_millis(200);
 
 #[derive(Debug)]
 pub struct Workspace {
+    pub output: Output,
     pub tiling_layer: TilingLayout,
     pub floating_layer: FloatingLayout,
     pub tiling_enabled: bool,
@@ -84,6 +85,7 @@ pub struct Workspace {
     pub focus_stack: FocusStacks,
     pub pending_buffers: Vec<(ScreencopySession, BufferParams)>,
     pub screencopy_sessions: Vec<DropableSession>,
+    pub output_stack: VecDeque<String>,
     pub(super) backdrop_id: Id,
     pub dirty: AtomicBool,
 }
@@ -198,16 +200,26 @@ impl MoveResult {
 }
 
 impl Workspace {
-    pub fn new(handle: WorkspaceHandle, tiling_enabled: bool, gaps: (u8, u8)) -> Workspace {
+    pub fn new(
+        handle: WorkspaceHandle,
+        output: Output,
+        tiling_enabled: bool,
+        gaps: (u8, u8),
+    ) -> Workspace {
+        let tiling_layer = TilingLayout::new(gaps, &output);
+        let floating_layer = FloatingLayout::new(&output);
+
         Workspace {
-            tiling_layer: TilingLayout::new(gaps),
-            floating_layer: FloatingLayout::new(),
+            output,
+            tiling_layer,
+            floating_layer,
             tiling_enabled,
             fullscreen: HashMap::new(),
             handle,
             focus_stack: FocusStacks::default(),
             pending_buffers: Vec::new(),
             screencopy_sessions: Vec::new(),
+            output_stack: VecDeque::new(),
             backdrop_id: Id::new(),
             dirty: AtomicBool::new(false),
         }
@@ -299,27 +311,29 @@ impl Workspace {
         }
     }
 
-    pub fn map_output(&mut self, output: &Output, position: Point<i32, Logical>) {
-        self.tiling_layer.map_output(output, position);
-        self.floating_layer.map_output(output, position);
+    pub fn output(&self) -> &Output {
+        &self.output
     }
 
-    pub fn unmap_output(
+    pub fn set_output(
         &mut self,
         output: &Output,
         toplevel_info: &mut ToplevelInfoState<State, CosmicSurface>,
     ) {
-        if let Some(dead_output_fullscreen) = self.fullscreen.remove(output) {
-            self.unfullscreen_request(&dead_output_fullscreen.window.surface());
+        self.tiling_layer.set_output(output);
+        self.floating_layer.set_output(output);
+        for mapped in self.mapped() {
+            for (surface, _) in mapped.windows() {
+                toplevel_info.toplevel_leave_output(&surface, &self.output);
+                toplevel_info.toplevel_enter_output(&surface, output);
+            }
         }
-        self.tiling_layer.unmap_output(output, toplevel_info);
-        self.floating_layer.unmap_output(output, toplevel_info);
-        self.refresh();
+        self.output = output.clone();
     }
 
     pub fn unmap(&mut self, mapped: &CosmicMapped) -> Option<ManagedState> {
         let was_floating = self.floating_layer.unmap(&mapped);
-        let was_tiling = self.tiling_layer.unmap(&mapped).is_some();
+        let was_tiling = self.tiling_layer.unmap(&mapped);
         if was_floating || was_tiling {
             assert!(was_floating != was_tiling);
         }
@@ -363,67 +377,32 @@ impl Workspace {
             .find(|e| {
                 e.windows()
                     .any(|(w, _)| w.wl_surface().as_ref() == Some(surface))
-            })
-    }
-
-    pub fn outputs_for_element(&self, elem: &CosmicMapped) -> impl Iterator<Item = Output> {
-        self.floating_layer
-            .space
-            .outputs_for_element(elem)
-            .into_iter()
-            .chain(self.tiling_layer.output_for_element(elem).cloned())
-    }
-
-    pub fn output_under(&self, point: Point<i32, Logical>) -> Option<&Output> {
-        let space = &self.floating_layer.space;
-        space.outputs().find(|o| {
-            let internal_output_geo = space.output_geometry(o).unwrap();
-            let external_output_geo = o.geometry();
-            internal_output_geo.contains(point - external_output_geo.loc + internal_output_geo.loc)
         })
     }
 
     pub fn element_under(
         &mut self,
-        location: Point<f64, Logical>,
+        location: Point<f64, Global>,
         overview: OverviewMode,
-    ) -> Option<(PointerFocusTarget, Point<i32, Logical>)> {
+    ) -> Option<(PointerFocusTarget, Point<i32, Global>)> {
+        let location = location.to_local(&self.output);
         self.floating_layer
             .space
-            .element_under(location)
-            .map(|(mapped, p)| (mapped.clone().into(), p))
+            .element_under(location.as_logical())
+            .map(|(mapped, p)| (mapped.clone().into(), p.as_local()))
             .or_else(|| self.tiling_layer.element_under(location, overview))
+            .map(|(m, p)| (m, p.to_global(&self.output)))
     }
 
-    pub fn element_geometry(&self, elem: &CosmicMapped) -> Option<Rectangle<i32, Logical>> {
-        let space = &self.floating_layer.space;
-        let outputs = space.outputs().collect::<Vec<_>>();
-        let offset = if outputs.len() == 1
-            && space.output_geometry(&outputs[0]).unwrap().loc == Point::from((0, 0))
-        {
-            outputs[0].geometry().loc
-        } else {
-            (0, 0).into()
-        };
-
+    pub fn element_geometry(&self, elem: &CosmicMapped) -> Option<Rectangle<i32, Local>> {
         self.floating_layer
-            .space
             .element_geometry(elem)
             .or_else(|| self.tiling_layer.element_geometry(elem))
-            .map(|mut geo| {
-                geo.loc += offset;
-                geo
-            })
     }
 
-    pub fn recalculate(&mut self, output: &Output) {
-        if let Some(f) = self.fullscreen.get(output) {
-            if !f.exclusive {
-                f.window
-                    .set_geometry(layer_map_for_output(output).non_exclusive_zone());
-            }
-        }
-        self.tiling_layer.recalculate(output);
+    pub fn recalculate(&mut self) {
+        self.tiling_layer.recalculate();
+        self.floating_layer.refresh();
     }
 
     pub fn maximize_request(
@@ -574,7 +553,7 @@ impl Workspace {
                 }
             }
 
-            result
+            Some(f.original_geometry.size.as_logical())
         } else {
             None
         }
@@ -730,7 +709,7 @@ impl Workspace {
         }
 
         let was_floating = self.floating_layer.unmap(&mapped);
-        let was_tiled = self.tiling_layer.unmap_as_placeholder(&mapped);
+        let was_tiled = dbg!(self.tiling_layer.unmap_as_placeholder(&mapped));
         assert!(was_floating != was_tiled.is_some());
 
         Some(MoveGrab::new(
@@ -754,7 +733,7 @@ impl Workspace {
                 .into_iter()
             {
                 self.tiling_layer.unmap(&window);
-                self.floating_layer.map(window, seat, None);
+                self.floating_layer.map(window, None);
             }
             self.tiling_enabled = false;
         } else {
@@ -767,8 +746,7 @@ impl Workspace {
                 .into_iter()
             {
                 self.floating_layer.unmap(&window);
-                self.tiling_layer
-                    .map(window, seat, focus_stack.iter(), None)
+                self.tiling_layer.map(window, focus_stack.iter(), None)
             }
             self.tiling_enabled = true;
         }
@@ -779,12 +757,11 @@ impl Workspace {
             if let Some(window) = self.focus_stack.get(seat).iter().next().cloned() {
                 if self.tiling_layer.mapped().any(|(_, m, _)| m == &window) {
                     self.tiling_layer.unmap(&window);
-                    self.floating_layer.map(window, seat, None);
+                    self.floating_layer.map(window, None);
                 } else if self.floating_layer.mapped().any(|w| w == &window) {
                     let focus_stack = self.focus_stack.get(seat);
                     self.floating_layer.unmap(&window);
-                    self.tiling_layer
-                        .map(window, seat, focus_stack.iter(), None)
+                    self.tiling_layer.map(window, focus_stack.iter(), None)
                 }
             }
         }
@@ -837,8 +814,8 @@ impl Workspace {
     pub fn node_desc(&self, focus: KeyboardFocusTarget) -> Option<NodeDesc> {
         match focus {
             KeyboardFocusTarget::Element(mapped) => {
-                self.tiling_layer.mapped().find_map(|(output, m, _)| {
-                    (m == &mapped).then_some(output.clone()).and_then(|output| {
+                self.tiling_layer.mapped().find_map(|(_, m, _)| {
+                    if m == &mapped {
                         mapped
                             .tiling_node_id
                             .lock()
@@ -846,7 +823,6 @@ impl Workspace {
                             .clone()
                             .map(|node_id| NodeDesc {
                                 handle: self.handle.clone(),
-                                output: output.downgrade(),
                                 node: node_id,
                                 stack_window: if mapped
                                     .stack_ref()
@@ -858,12 +834,13 @@ impl Workspace {
                                     None
                                 },
                             })
-                    })
+                    } else {
+                        None
+                    }
                 })
             }
-            KeyboardFocusTarget::Group(WindowGroup { output, node, .. }) => Some(NodeDesc {
+            KeyboardFocusTarget::Group(WindowGroup { node, .. }) => Some(NodeDesc {
                 handle: self.handle.clone(),
-                output,
                 node,
                 stack_window: None,
             }),
@@ -904,10 +881,9 @@ impl Workspace {
         }
     }
 
-    pub fn render_output<'a, R>(
+    pub fn render<'a, R>(
         &self,
         renderer: &mut R,
-        output: &Output,
         override_redirect_windows: &[X11Surface],
         xwm_state: Option<&'a mut XWaylandState>,
         draw_focus_indicator: Option<&Seat<State>>,
@@ -1089,9 +1065,8 @@ impl Workspace {
                 OverviewMode::None => 1.0,
             };
 
-            let (w_elements, p_elements) = self.floating_layer.render_output::<R>(
+            let (w_elements, p_elements) = self.floating_layer.render::<R>(
                 renderer,
-                output,
                 focused.as_ref(),
                 resize_indicator.clone(),
                 indicator_thickness,
@@ -1113,11 +1088,10 @@ impl Workspace {
             };
 
             //tiling surfaces
-            let (w_elements, p_elements) = self.tiling_layer.render_output::<R>(
+            let (w_elements, p_elements) = self.tiling_layer.render::<R>(
                 renderer,
-                output,
                 draw_focus_indicator,
-                layer_map.non_exclusive_zone(),
+                zone,
                 overview,
                 resize_indicator,
                 indicator_thickness,

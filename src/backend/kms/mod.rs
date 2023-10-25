@@ -1507,7 +1507,6 @@ impl KmsState {
             false
         };
 
-        shell.refresh_outputs();
         if recreated {
             let sessions = output.pending_buffers().collect::<Vec<_>>();
             if let Err(err) = self.schedule_render(

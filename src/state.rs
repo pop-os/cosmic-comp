@@ -511,50 +511,34 @@ impl Common {
 
         let active = self.shell.active_space(output);
         active.mapped().for_each(|mapped| {
-            let outputs_for_element: Vec<_> = active.outputs_for_element(mapped).collect();
-            if outputs_for_element.contains(&output) {
-                let window = mapped.active_window();
-                window.with_surfaces(|surface, states| {
-                    let primary_scanout_output = update_surface_primary_scanout_output(
-                        surface,
-                        output,
-                        states,
-                        render_element_states,
-                        |current_output, current_state, next_output, next_state| {
-                            if outputs_for_element.contains(current_output) {
-                                default_primary_scanout_output_compare(
-                                    current_output,
-                                    current_state,
-                                    next_output,
-                                    next_state,
-                                )
-                            } else {
-                                next_output
-                            }
-                        },
-                    );
-                    if let Some(output) = primary_scanout_output {
-                        with_fractional_scale(states, |fraction_scale| {
-                            fraction_scale
-                                .set_preferred_scale(output.current_scale().fractional_scale());
-                        });
-                    }
-                });
-                window.send_frame(output, time, throttle, surface_primary_scanout_output);
-                if let Some(feedback) = window
-                    .wl_surface()
-                    .and_then(|wl_surface| {
-                        source_node_for_surface(&wl_surface, &self.display_handle)
-                    })
-                    .and_then(|source| dmabuf_feedback(source))
-                {
-                    window.send_dmabuf_feedback(
-                        output,
-                        &feedback,
-                        render_element_states,
-                        surface_primary_scanout_output,
-                    );
+            let window = mapped.active_window();
+            window.with_surfaces(|surface, states| {
+                let primary_scanout_output = update_surface_primary_scanout_output(
+                    surface,
+                    output,
+                    states,
+                    render_element_states,
+                    |_current_output, _current_state, next_output, _next_state| next_output,
+                );
+                if let Some(output) = primary_scanout_output {
+                    with_fractional_scale(states, |fraction_scale| {
+                        fraction_scale
+                            .set_preferred_scale(output.current_scale().fractional_scale());
+                    });
                 }
+            });
+            window.send_frame(output, time, throttle, surface_primary_scanout_output);
+            if let Some(feedback) = window
+                .wl_surface()
+                .and_then(|wl_surface| source_node_for_surface(&wl_surface, &self.display_handle))
+                .and_then(|source| dmabuf_feedback(source))
+            {
+                window.send_dmabuf_feedback(
+                    output,
+                    &feedback,
+                    render_element_states,
+                    surface_primary_scanout_output,
+                );
             }
         });
 
@@ -565,10 +549,8 @@ impl Common {
             .filter(|w| w.handle != active.handle)
         {
             space.mapped().for_each(|mapped| {
-                if space.outputs_for_element(mapped).any(|o| &o == output) {
-                    let window = mapped.active_window();
-                    window.send_frame(output, time, throttle, |_, _| None);
-                }
+                let window = mapped.active_window();
+                window.send_frame(space.output(), time, throttle, |_, _| None);
             });
         }
 

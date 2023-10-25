@@ -87,16 +87,13 @@ impl KeyboardFocusTarget {
 #[derive(Debug, Clone)]
 pub struct WindowGroup {
     pub node: NodeId,
-    pub output: WeakOutput,
     pub alive: Weak<()>,
     pub focus_stack: Vec<NodeId>,
 }
 
 impl PartialEq for WindowGroup {
     fn eq(&self, other: &Self) -> bool {
-        self.node == other.node
-            && self.output == other.output
-            && Weak::ptr_eq(&self.alive, &other.alive)
+        self.node == other.node && Weak::ptr_eq(&self.alive, &other.alive)
     }
 }
 

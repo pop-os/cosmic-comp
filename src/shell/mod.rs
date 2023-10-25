@@ -1,4 +1,5 @@
 use calloop::LoopHandle;
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::{
     cell::RefCell,
@@ -36,15 +37,18 @@ use smithay::{
 };
 
 use crate::{
-    config::{Config, KeyModifiers, KeyPattern, OutputConfig, WorkspaceMode as ConfigMode},
+    config::{Config, KeyModifiers, KeyPattern, OutputConfig, WorkspaceMode},
     state::client_has_security_context,
     utils::prelude::*,
-    wayland::protocols::{
+    wayland::{
+        handlers::output,
+        protocols::{
         toplevel_info::ToplevelInfoState,
         toplevel_management::{ManagementCapabilities, ToplevelManagementState},
         workspace::{
             WorkspaceCapabilities, WorkspaceGroupHandle, WorkspaceHandle, WorkspaceState,
             WorkspaceUpdateGuard,
+            },
         },
     },
 };
@@ -143,12 +147,18 @@ impl ResizeMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MaximizeMode {
+    Floating,
+    OnTop,
+}
+
 #[derive(Debug)]
 pub struct Shell {
+    pub workspaces: Workspaces,
+
     pub popups: PopupManager,
-    pub outputs: Vec<Output>,
-    pub workspaces: WorkspaceMode,
-    pub tiling_enabled: bool,
+    pub maximize_mode: MaximizeMode,
     pub pending_windows: Vec<(CosmicSurface, Seat<State>)>,
     pub pending_layers: Vec<(LayerSurface, Output, Seat<State>)>,
     pub override_redirect_windows: Vec<X11Surface>,
@@ -160,7 +170,6 @@ pub struct Shell {
     pub xdg_shell_state: XdgShellState,
     pub workspace_state: WorkspaceState<State>,
 
-    gaps: (u8, u8),
     overview_mode: OverviewMode,
     swap_indicator: Option<SwapIndicator>,
     resize_mode: ResizeMode,
@@ -179,11 +188,11 @@ pub struct Shell {
 pub struct WorkspaceSet {
     previously_active: Option<(usize, Instant)>,
     active: usize,
-    amount: WorkspaceAmount,
     group: WorkspaceGroupHandle,
     idx: usize,
     tiling_enabled: bool,
     gaps: (u8, u8),
+    output: Output,
     pub(crate) workspaces: Vec<Workspace>,
 }
 
@@ -195,6 +204,7 @@ pub enum WorkspaceAmount {
 
 fn create_workspace(
     state: &mut WorkspaceUpdateGuard<'_, State>,
+    output: &Output,
     group_handle: &WorkspaceGroupHandle,
     active: bool,
     tiling: bool,
@@ -208,12 +218,13 @@ fn create_workspace(
         &workspace_handle,
         [WorkspaceCapabilities::Activate].into_iter(),
     );
-    Workspace::new(workspace_handle, tiling, gaps)
+    Workspace::new(workspace_handle, output.clone(), tiling, gaps)
 }
 
 impl WorkspaceSet {
     fn new(
         state: &mut WorkspaceUpdateGuard<'_, State>,
+        output: &Output,
         amount: WorkspaceAmount,
         idx: usize,
         tiling_enabled: bool,
@@ -223,7 +234,8 @@ impl WorkspaceSet {
 
         let workspaces = match amount {
             WorkspaceAmount::Dynamic => {
-                let workspace = create_workspace(state, &group_handle, true, tiling_enabled, gaps);
+                let workspace =
+                    create_workspace(state, output, &group_handle, true, tiling_enabled, gaps);
                 workspace_set_idx(state, 1, idx, &workspace.handle);
                 state.set_workspace_capabilities(
                     &workspace.handle,
@@ -233,8 +245,14 @@ impl WorkspaceSet {
             }
             WorkspaceAmount::Static(len) => (0..len)
                 .map(|i| {
-                    let workspace =
-                        create_workspace(state, &group_handle, i == 0, tiling_enabled, gaps);
+                    let workspace = create_workspace(
+                        state,
+                        output,
+                        &group_handle,
+                        i == 0,
+                        tiling_enabled,
+                        gaps,
+                    );
                     workspace_set_idx(state, i + 1, idx, &workspace.handle);
                     state.set_workspace_capabilities(
                         &workspace.handle,
@@ -248,12 +266,12 @@ impl WorkspaceSet {
         WorkspaceSet {
             previously_active: None,
             active: 0,
-            amount,
             group: group_handle,
             idx,
             tiling_enabled,
             gaps,
             workspaces,
+            output: output.clone(),
         }
     }
 
@@ -278,46 +296,38 @@ impl WorkspaceSet {
         }
     }
 
-    fn refresh<'a>(
+    fn set_output(
         &mut self,
-        state: &mut WorkspaceState<State>,
+        new_output: &Output,
         toplevel_info: &mut ToplevelInfoState<State, CosmicSurface>,
-        outputs: impl Iterator<Item = (&'a Output, Point<i32, Logical>)>,
     ) {
+        for workspace in &mut self.workspaces {
+            workspace.set_output(new_output, toplevel_info);
+        }
+        self.output = new_output.clone();
+    }
+
+    fn refresh<'a>(&mut self) {
         if let Some((_, start)) = self.previously_active {
             if Instant::now().duration_since(start).as_millis() >= ANIMATION_DURATION.as_millis() {
                 self.previously_active = None;
             }
         } else {
-            match self.amount {
-                WorkspaceAmount::Dynamic => self.ensure_last_empty(state, outputs),
-                WorkspaceAmount::Static(len) => {
-                    self.ensure_static(len as usize, state, toplevel_info, outputs)
-                }
-            }
-
             self.workspaces[self.active].refresh();
         }
     }
 
-    fn ensure_last_empty<'a>(
-        &mut self,
-        state: &mut WorkspaceState<State>,
-        outputs: impl Iterator<Item = (&'a Output, Point<i32, Logical>)>,
-    ) {
-        let mut state = state.update();
-
-        // add empty at the end, if necessary
-        if self.workspaces.last().unwrap().windows().next().is_some() {
+    fn add_empty_workspace(&mut self, state: &mut WorkspaceUpdateGuard<State>) {
             let mut workspace = create_workspace(
-                &mut state,
+            state,
+            &self.output,
                 &self.group,
                 false,
                 self.tiling_enabled,
                 self.gaps,
             );
             workspace_set_idx(
-                &mut state,
+            state,
                 self.workspaces.len() as u8 + 1,
                 self.idx,
                 &workspace.handle,
@@ -326,15 +336,23 @@ impl WorkspaceSet {
                 &workspace.handle,
                 [WorkspaceCapabilities::Activate].into_iter(),
             );
-            for (output, location) in outputs {
-                workspace.map_output(output, location);
-            }
             self.workspaces.push(workspace);
         }
 
+    fn ensure_last_empty<'a>(&mut self, state: &mut WorkspaceUpdateGuard<State>) {
+        // add empty at the end, if necessary
+        if self
+            .workspaces
+            .last()
+            .map(|last| last.windows().next().is_some())
+            .unwrap_or(true)
+        {
+            self.add_empty_workspace(state);
+        }
+
+        // remove empty workspaces in between, if they are not active
         let len = self.workspaces.len();
         let mut keep = vec![true; len];
-        // remove empty workspaces in between, if they are not active
         for (i, workspace) in self.workspaces.iter().enumerate() {
             let has_windows = workspace.windows().next().is_some();
 
@@ -354,20 +372,18 @@ impl WorkspaceSet {
 
         if keep.iter().any(|val| *val == false) {
             for (i, workspace) in self.workspaces.iter().enumerate() {
-                workspace_set_idx(&mut state, i as u8 + 1, self.idx, &workspace.handle);
+                workspace_set_idx(state, i as u8 + 1, self.idx, &workspace.handle);
             }
         }
     }
 
-    fn ensure_static<'a>(
+    fn ensure_static(
         &mut self,
         amount: usize,
-        state: &mut WorkspaceState<State>,
+        state: &mut WorkspaceUpdateGuard<State>,
         toplevel_info: &mut ToplevelInfoState<State, CosmicSurface>,
-        outputs: impl Iterator<Item = (&'a Output, Point<i32, Logical>)>,
     ) {
         if amount < self.workspaces.len() {
-            let mut state = state.update();
             // merge last ones
             let overflow = self.workspaces.split_off(amount);
             if self.active >= self.workspaces.len() {
@@ -376,7 +392,11 @@ impl WorkspaceSet {
             }
             let last_space = self.workspaces.last_mut().unwrap();
 
-            for workspace in overflow {
+            for mut workspace in overflow {
+                if last_space.fullscreen.is_some() {
+                    workspace.remove_fullscreen();
+                }
+
                 for element in workspace.mapped() {
                     // fixup toplevel state
                     for (toplevel, _) in element.windows() {
@@ -386,27 +406,26 @@ impl WorkspaceSet {
                 }
                 last_space.tiling_layer.merge(workspace.tiling_layer);
                 last_space.floating_layer.merge(workspace.floating_layer);
-                last_space
-                    .fullscreen
-                    .extend(workspace.fullscreen.into_iter());
+                if workspace.fullscreen.is_some() {
+                    last_space.fullscreen = workspace.fullscreen;
+                }
                 state.remove_workspace(workspace.handle);
             }
 
             last_space.refresh();
         } else if amount > self.workspaces.len() {
-            let mut state = state.update();
             // add empty ones
-            let outputs = outputs.collect::<Vec<_>>();
             while amount > self.workspaces.len() {
-                let mut workspace = create_workspace(
-                    &mut state,
+                let workspace = create_workspace(
+                    state,
+                    &self.output,
                     &self.group,
                     false,
                     self.tiling_enabled,
                     self.gaps,
                 );
                 workspace_set_idx(
-                    &mut state,
+                    state,
                     self.workspaces.len() as u8 + 1,
                     self.idx,
                     &workspace.handle,
@@ -415,9 +434,6 @@ impl WorkspaceSet {
                     &workspace.handle,
                     [WorkspaceCapabilities::Activate].into_iter(),
                 );
-                for &(output, location) in outputs.iter() {
-                    workspace.map_output(output, location);
-                }
                 self.workspaces.push(workspace);
             }
         }
@@ -441,138 +457,295 @@ impl WorkspaceSet {
 }
 
 #[derive(Debug)]
-pub enum WorkspaceMode {
-    OutputBound(HashMap<Output, WorkspaceSet>, WorkspaceAmount),
-    Global(WorkspaceSet),
-}
-
-impl WorkspaceMode {
-    pub fn new(
-        config: crate::config::WorkspaceMode,
+pub struct Workspaces {
+    sets: IndexMap<Output, WorkspaceSet>,
+    backup_set: Option<WorkspaceSet>,
         amount: WorkspaceAmount,
-        state: &mut WorkspaceUpdateGuard<'_, State>,
+    mode: WorkspaceMode,
         tiling_enabled: bool,
         gaps: (u8, u8),
-    ) -> WorkspaceMode {
-        match config {
-            crate::config::WorkspaceMode::Global => {
-                WorkspaceMode::Global(WorkspaceSet::new(state, amount, 0, tiling_enabled, gaps))
+}
+
+impl Workspaces {
+    pub fn new(config: &Config) -> Workspaces {
+        Workspaces {
+            sets: IndexMap::new(),
+            backup_set: None,
+            amount: config.static_conf.workspace_amount,
+            mode: config.static_conf.workspace_mode,
+            tiling_enabled: config.static_conf.tiling_enabled,
+            gaps: config.static_conf.gaps,
+        }
+    }
+
+    pub fn add_output(
+        &mut self,
+        output: &Output,
+        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+        toplevel_info_state: &mut ToplevelInfoState<State, CosmicSurface>,
+    ) {
+        if self.sets.contains_key(output) {
+            return;
+        }
+
+        let set = self.backup_set.take().unwrap_or_else(|| {
+            WorkspaceSet::new(
+                workspace_state,
+                &output,
+                self.amount,
+                self.sets.len(),
+                self.tiling_enabled,
+                self.gaps,
+            )
+        });
+        workspace_state.add_group_output(&set.group, &output);
+
+        self.sets.insert(output.clone(), set);
+        for workspace in &mut self.sets.get_mut(output).unwrap().workspaces {
+            workspace.set_output(output, toplevel_info_state);
+        }
+    }
+
+    pub fn remove_output(
+        &mut self,
+        output: &Output,
+        seats: impl Iterator<Item = Seat<State>>,
+        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+        toplevel_info_state: &mut ToplevelInfoState<State, CosmicSurface>,
+    ) {
+        if !self.sets.contains_key(output) {
+            return;
+        }
+
+        if let Some(set) = self.sets.remove(output) {
+            {
+                let map = layer_map_for_output(output);
+                for surface in map.layers() {
+                    surface.layer_surface().send_close();
+                }
             }
-            crate::config::WorkspaceMode::OutputBound => {
-                WorkspaceMode::OutputBound(HashMap::new(), amount)
+
+            // TODO: Heuristic which output to move to.
+            // It is supposed to be the *most* internal, we just pick the first one for now
+            // and hope enumeration order works in our favor.
+            let new_output = self.sets.get_index(0).map(|(o, _)| o.clone());
+            if let Some(new_output) = new_output {
+                for seat in seats {
+                    if &seat.active_output() == output {
+                        seat.set_active_output(&new_output);
+                    }
+    }
+
+                let new_set = self.sets.get_mut(&new_output).unwrap();
+                let workspace_group = new_set.group;
+                for mut workspace in set.workspaces {
+                    // update workspace protocol state
+                    workspace_state.remove_workspace(workspace.handle);
+                    let workspace_handle =
+                        workspace_state.create_workspace(&workspace_group).unwrap();
+                    workspace_state.set_workspace_capabilities(
+                        &workspace_handle,
+                        [WorkspaceCapabilities::Activate].into_iter(),
+                    );
+                    let old_workspace_handle = workspace.handle;
+                    workspace.handle = workspace_handle;
+
+                    for window in workspace.mapped() {
+                        for (surface, _) in window.windows() {
+                            toplevel_info_state
+                                .toplevel_leave_workspace(&surface, &old_workspace_handle);
+                            toplevel_info_state
+                                .toplevel_enter_workspace(&surface, &workspace.handle);
+                        }
+                    }
+
+                    // update mapping
+                    workspace.set_output(&new_output, toplevel_info_state);
+                    workspace.refresh();
+
+                    // TODO: merge if mode = static
+                    new_set.workspaces.push(workspace);
+                }
+                workspace_state.remove_workspace_group(set.group);
+
+                for (i, set) in self.sets.values_mut().enumerate() {
+                    set.update_idx(workspace_state, i);
+                }
+            } else {
+                workspace_state.remove_group_output(&set.group, output);
+                self.backup_set = Some(set);
             }
+        }
+    }
+
+    //pub fn update_mode
+
+    pub fn refresh(
+        &mut self,
+        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+        toplevel_info_state: &mut ToplevelInfoState<State, CosmicSurface>,
+    ) {
+        match self.mode {
+            WorkspaceMode::Global => {
+                match self.amount {
+                    WorkspaceAmount::Dynamic => {
+                        // this should never happen
+                        let max = self
+                            .sets
+                            .values()
+                            .map(|set| set.workspaces.len())
+                            .max()
+                            .unwrap_or_default();
+                        for set in self
+                            .sets
+                            .values_mut()
+                            .filter(|set| set.workspaces.len() < max)
+                        {
+                            while set.workspaces.len() < max {
+                                set.add_empty_workspace(workspace_state)
+                            }
+                        }
+
+                        // add empty at the end, if necessary
+                        if self
+                            .sets
+                            .values()
+                            .flat_map(|set| set.workspaces.last())
+                            .any(|w| w.mapped().next().is_some())
+                        {
+                            for set in self.sets.values_mut() {
+                                set.add_empty_workspace(workspace_state);
+                            }
+                        }
+
+                        // remove empty workspaces in between, if they are not active
+                        let len = self.sets[0].workspaces.len();
+                        let mut active = self.sets[0].active;
+                        let mut keep = vec![true; len];
+                        for i in 0..len {
+                            let has_windows = self
+                                .sets
+                                .values()
+                                .any(|s| s.workspaces[i].windows().next().is_some());
+
+                            if !has_windows && i != active && i != len - 1 {
+                                for workspace in self.sets.values().map(|s| &s.workspaces[i]) {
+                                    workspace_state.remove_workspace(workspace.handle);
+                                }
+                                keep[i] = false;
+                            }
+                        }
+
+                        self.sets.values_mut().for_each(|s| {
+                            let mut iter = keep.iter();
+                            s.workspaces.retain(|_| *iter.next().unwrap());
+                        });
+                        active -= keep.iter().take(active + 1).filter(|keep| !**keep).count();
+                        self.sets.values_mut().for_each(|s| {
+                            s.active = active;
+                        });
+
+                        if keep.iter().any(|val| *val == false) {
+                            for set in self.sets.values_mut() {
+                                for (i, workspace) in set.workspaces.iter().enumerate() {
+                                    workspace_set_idx(
+                                        workspace_state,
+                                        i as u8 + 1,
+                                        set.idx,
+                                        &workspace.handle,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    WorkspaceAmount::Static(amount) => {
+                        for set in self.sets.values_mut() {
+                            set.ensure_static(amount as usize, workspace_state, toplevel_info_state)
+                        }
+                    }
+                }
+            }
+            WorkspaceMode::OutputBound => match self.amount {
+                WorkspaceAmount::Dynamic => {
+                    for set in self.sets.values_mut() {
+                        set.ensure_last_empty(workspace_state);
+                    }
+                }
+                WorkspaceAmount::Static(amount) => {
+                    for set in self.sets.values_mut() {
+                        set.ensure_static(amount as usize, workspace_state, toplevel_info_state)
+                    }
+                }
+            },
+        }
+
+        for set in self.sets.values_mut() {
+            set.refresh()
         }
     }
 
     pub fn get(&self, num: usize, output: &Output) -> Option<&Workspace> {
-        match self {
-            WorkspaceMode::Global(set) => set.workspaces.get(num),
-            WorkspaceMode::OutputBound(sets, _) => {
-                sets.get(output).and_then(|set| set.workspaces.get(num))
-            }
-        }
+        self.sets
+            .get(output)
+            .and_then(|set| set.workspaces.get(num))
     }
 
     pub fn get_mut(&mut self, num: usize, output: &Output) -> Option<&mut Workspace> {
-        match self {
-            WorkspaceMode::Global(set) => set.workspaces.get_mut(num),
-            WorkspaceMode::OutputBound(sets, _) => sets
+        self.sets
                 .get_mut(output)
-                .and_then(|set| set.workspaces.get_mut(num)),
-        }
+            .and_then(|set| set.workspaces.get_mut(num))
     }
 
     pub fn active(&self, output: &Output) -> (Option<(&Workspace, Instant)>, &Workspace) {
-        match self {
-            WorkspaceMode::Global(set) => (
-                set.previously_active
-                    .map(|(idx, start)| (&set.workspaces[idx], start)),
-                &set.workspaces[set.active],
-            ),
-            WorkspaceMode::OutputBound(sets, _) => {
-                let set = sets.get(output).unwrap();
+        let set = self.sets.get(output).unwrap();
                 (
                     set.previously_active
                         .map(|(idx, start)| (&set.workspaces[idx], start)),
                     &set.workspaces[set.active],
                 )
-            }
-        }
     }
 
     pub fn active_mut(&mut self, output: &Output) -> &mut Workspace {
-        match self {
-            WorkspaceMode::Global(set) => &mut set.workspaces[set.active],
-            WorkspaceMode::OutputBound(sets, _) => {
-                let set = sets.get_mut(output).unwrap();
+        let set = self.sets.get_mut(output).unwrap();
                 &mut set.workspaces[set.active]
-            }
-        }
     }
 
     pub fn active_num(&self, output: &Output) -> (Option<usize>, usize) {
-        match self {
-            WorkspaceMode::Global(set) => (set.previously_active.map(|(idx, _)| idx), set.active),
-            WorkspaceMode::OutputBound(sets, _) => {
-                let set = sets.get(output).unwrap();
+        let set = self.sets.get(output).unwrap();
                 (set.previously_active.map(|(idx, _)| idx), set.active)
-            }
-        }
     }
 
     pub fn len(&self, output: &Output) -> usize {
-        match self {
-            WorkspaceMode::Global(set) => set.workspaces.len(),
-            WorkspaceMode::OutputBound(sets, _) => {
-                let set = sets.get(output).unwrap();
+        let set = self.sets.get(output).unwrap();
                 set.workspaces.len()
             }
-        }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&Output, &WorkspaceSet)> {
+        self.sets.iter()
     }
 
     pub fn spaces(&self) -> impl Iterator<Item = &Workspace> {
-        match self {
-            WorkspaceMode::Global(set) => {
-                Box::new(set.workspaces.iter()) as Box<dyn Iterator<Item = &Workspace>>
-            }
-            WorkspaceMode::OutputBound(sets, _) => {
-                Box::new(sets.values().flat_map(|set| set.workspaces.iter()))
-            }
-        }
+        self.sets.values().flat_map(|set| set.workspaces.iter())
     }
 
     pub fn spaces_for_output(&self, output: &Output) -> impl Iterator<Item = &Workspace> {
-        match self {
-            WorkspaceMode::Global(set) => {
-                Box::new(set.workspaces.iter()) as Box<dyn Iterator<Item = &Workspace>>
-            }
-            WorkspaceMode::OutputBound(sets, _) => Box::new(
-                sets.get(output)
+        self.sets
+            .get(output)
                     .into_iter()
-                    .flat_map(|set| set.workspaces.iter()),
-            ),
-        }
+            .flat_map(|set| set.workspaces.iter())
     }
 
     pub fn spaces_mut(&mut self) -> impl Iterator<Item = &mut Workspace> {
-        match self {
-            WorkspaceMode::Global(set) => {
-                Box::new(set.workspaces.iter_mut()) as Box<dyn Iterator<Item = &mut Workspace>>
-            }
-            WorkspaceMode::OutputBound(sets, _) => {
-                Box::new(sets.values_mut().flat_map(|set| set.workspaces.iter_mut()))
-            }
-        }
+        Box::new(
+            self.sets
+                .values_mut()
+                .flat_map(|set| set.workspaces.iter_mut()),
+        )
     }
 
     pub fn update_tiling_status(&mut self, seat: &Seat<State>, tiling: bool) {
-        match self {
-            WorkspaceMode::Global(set) => set.update_tiling_status(seat, tiling),
-            WorkspaceMode::OutputBound(sets, _) => {
-                for set in sets.values_mut() {
+        for set in self.sets.values_mut() {
                     set.update_tiling_status(seat, tiling)
-                }
-            }
         }
     }
 }
@@ -598,26 +771,16 @@ impl Shell {
             //|client| client.get_data::<ClientState>().map_or(false, |s| s.privileged),
             client_has_security_context,
         );
-        let mut workspace_state = WorkspaceState::new(
+        let workspace_state = WorkspaceState::new(
             dh,
             //|client| client.get_data::<ClientState>().map_or(false, |s| s.privileged),
             client_has_security_context,
         );
 
-        let tiling_enabled = config.static_conf.tiling_enabled;
-        let mode = WorkspaceMode::new(
-            config.static_conf.workspace_mode,
-            config.static_conf.workspace_amount,
-            &mut workspace_state.update(),
-            tiling_enabled,
-            config.static_conf.gaps,
-        );
-
         Shell {
             popups: PopupManager::default(),
-            outputs: Vec::new(),
-            workspaces: mode,
-            tiling_enabled,
+            workspaces: Workspaces::new(config),
+            maximize_mode: MaximizeMode::Floating,
 
             pending_windows: Vec::new(),
             pending_layers: Vec::new(),
@@ -629,7 +792,6 @@ impl Shell {
             xdg_shell_state,
             workspace_state,
 
-            gaps: config.static_conf.gaps,
             overview_mode: OverviewMode::None,
             swap_indicator: None,
             resize_mode: ResizeMode::None,
@@ -639,148 +801,24 @@ impl Shell {
     }
 
     pub fn add_output(&mut self, output: &Output) {
-        if self.outputs.contains(output) {
-            return;
-        }
-
-        self.outputs.push(output.clone());
-        let mut state = self.workspace_state.update();
-
-        match &mut self.workspaces {
-            WorkspaceMode::OutputBound(sets, amount) => {
-                // TODO: Restore previously assigned workspaces, if possible!
-                if !sets.contains_key(output) {
-                    let set = WorkspaceSet::new(
-                        &mut state,
-                        *amount,
-                        sets.len(),
-                        self.tiling_enabled,
-                        self.gaps,
-                    );
-                    state.add_group_output(&set.group, &output);
-                    sets.insert(output.clone(), set);
-                }
-                for workspace in &mut sets.get_mut(output).unwrap().workspaces {
-                    workspace.map_output(output, (0, 0).into());
-                }
-            }
-            WorkspaceMode::Global(set) => {
-                // TODO: Restore any window positions from previous outputs ???
-                state.add_group_output(&set.group, output);
-                for workspace in &mut set.workspaces {
-                    workspace.map_output(
+        self.workspaces.add_output(
                         output,
-                        output
-                            .user_data()
-                            .get::<RefCell<OutputConfig>>()
-                            .unwrap()
-                            .borrow()
-                            .position
-                            .into(),
-                    );
-                }
-            }
-        }
+            &mut self.workspace_state.update(),
+            &mut self.toplevel_info_state,
+        );
     }
 
     pub fn remove_output(&mut self, output: &Output, seats: impl Iterator<Item = Seat<State>>) {
-        if let Some(first_output) = self.outputs.get(0) {
-            for seat in seats {
-                if &seat.active_output() == output {
-                    seat.set_active_output(first_output);
-                }
-            }
-        }
-
-        if !self.outputs.contains(output) {
-            return;
-        }
-
-        {
-            let map = layer_map_for_output(output);
-            for surface in map.layers() {
-                surface.layer_surface().send_close();
-            }
-        }
-
-        let mut state = self.workspace_state.update();
-        self.outputs.retain(|o| o != output);
-
-        match &mut self.workspaces {
-            WorkspaceMode::OutputBound(sets, _) => {
-                // TODO:
-                // If amount::static merge them instead of appending
-
-                if let Some(set) = sets.remove(output) {
-                    // TODO: Heuristic which output to move to.
-                    // It is supposed to be the *most* internal, we just pick the first one for now
-                    // and hope enumeration order works in our favor.
-                    if let Some(new_output) = self.outputs.get(0) {
-                        let new_set = sets.get_mut(new_output).unwrap();
-                        let workspace_group = new_set.group;
-                        for mut workspace in set.workspaces {
-                            // update workspace protocol state
-                            state.remove_workspace(workspace.handle);
-                            let workspace_handle =
-                                state.create_workspace(&workspace_group).unwrap();
-                            state.set_workspace_capabilities(
-                                &workspace_handle,
-                                [WorkspaceCapabilities::Activate].into_iter(),
-                            );
-                            workspace.handle = workspace_handle;
-                            for window in workspace.mapped() {
-                                for (surface, _) in window.windows() {
-                                    self.toplevel_info_state
-                                        .toplevel_enter_workspace(&surface, &workspace.handle);
-                                }
-                            }
-
-                            // update mapping
-                            workspace.map_output(new_output, (0, 0).into());
-                            workspace.unmap_output(output, &mut self.toplevel_info_state);
-                            workspace.refresh();
-
-                            new_set.workspaces.push(workspace);
-                        }
-                        state.remove_workspace_group(set.group);
-                    }
-                    // if there is no output, we are going to quit anyway, just drop the workspace set
-                }
-                for (i, set) in sets.values_mut().enumerate() {
-                    set.update_idx(&mut state, i);
-                }
-                std::mem::drop(state);
+        self.workspaces.remove_output(
+            output,
+            seats,
+            &mut self.workspace_state.update(),
+            &mut self.toplevel_info_state,
+        );
                 self.refresh(); // cleans up excess of workspaces and empty workspaces
             }
-            WorkspaceMode::Global(set) => {
-                state.remove_group_output(&set.group, output);
-                for workspace in &mut set.workspaces {
-                    workspace.unmap_output(output, &mut self.toplevel_info_state);
-                    workspace.refresh();
-                }
-            }
-        };
-    }
 
-    pub fn refresh_outputs(&mut self) {
-        if let WorkspaceMode::Global(set) = &mut self.workspaces {
-            for workspace in &mut set.workspaces {
-                for output in self.outputs.iter() {
-                    workspace.map_output(
-                        output,
-                        output
-                            .user_data()
-                            .get::<RefCell<OutputConfig>>()
-                            .unwrap()
-                            .borrow()
-                            .position
-                            .into(),
-                    );
-                }
-            }
-        }
-    }
-
+    /*
     pub fn set_mode(&mut self, mode: ConfigMode) {
         let mut state = self.workspace_state.update();
 
@@ -1005,34 +1043,39 @@ impl Shell {
         std::mem::drop(state);
         self.refresh(); // get rid of empty workspaces and enforce potential maximum
     }
+    */
 
     pub fn activate(
         &mut self,
         output: &Output,
         idx: usize,
-    ) -> Result<Option<Point<i32, Logical>>, InvalidWorkspaceIndex> {
-        if match &mut self.workspaces {
-            WorkspaceMode::OutputBound(sets, _) => {
-                if let Some(set) = sets.get_mut(output) {
+    ) -> Result<Option<Point<i32, Global>>, InvalidWorkspaceIndex> {
+        match &mut self.workspaces.mode {
+            WorkspaceMode::OutputBound => {
+                if let Some(set) = self.workspaces.sets.get_mut(output) {
                     if matches!(
                         self.overview_mode,
                         OverviewMode::Started(Trigger::Pointer(_), _)
                     ) {
-                        set.workspaces[set.active].tiling_layer.cleanup_drag(output);
+                        set.workspaces[set.active].tiling_layer.cleanup_drag();
                     }
-                    set.activate(idx, &mut self.workspace_state.update())?
-                } else {
-                    false
-                }
-            }
-            WorkspaceMode::Global(set) => set.activate(idx, &mut self.workspace_state.update())?,
-        } {
+                    set.activate(idx, &mut self.workspace_state.update())?;
+
             let output_geo = output.geometry();
             Ok(Some(
-                output_geo.loc + Point::from((output_geo.size.w / 2, output_geo.size.h / 2)),
+                        output_geo.loc
+                            + Point::from((output_geo.size.w / 2, output_geo.size.h / 2)),
             ))
         } else {
             Ok(None)
+                }
+            }
+            WorkspaceMode::Global => {
+                for set in self.workspaces.sets.values_mut() {
+                    set.activate(idx, &mut self.workspace_state.update())?;
+                }
+                Ok(None)
+            }
         }
     }
 
@@ -1049,8 +1092,7 @@ impl Shell {
         surface: &'a WlSurface,
     ) -> impl Iterator<Item = Output> + 'a {
         match self
-            .outputs
-            .iter()
+            .outputs()
             .find(|o| {
                 let map = layer_map_for_output(o);
                 map.layer_for_surface(surface, WindowSurfaceType::ALL)
@@ -1086,8 +1128,8 @@ impl Shell {
                     .chain(self.outputs().map(|o| self.active_space(o)).flat_map(|w| {
                         w.mapped()
                             .find(|e| e.has_surface(surface, WindowSurfaceType::ALL))
+                            .map(|_| w.output().clone())
                             .into_iter()
-                            .flat_map(|e| w.outputs_for_element(e))
                     })),
             ),
         }
@@ -1097,7 +1139,7 @@ impl Shell {
         &self,
         surface: &WlSurface,
     ) -> impl Iterator<Item = (WorkspaceHandle, Output)> {
-        match self.outputs.iter().find(|o| {
+        match self.outputs().find(|o| {
             let map = layer_map_for_output(o);
             map.layer_for_surface(surface, WindowSurfaceType::ALL)
                 .is_some()
@@ -1105,31 +1147,16 @@ impl Shell {
             Some(output) => self
                 .workspaces
                 .spaces()
-                .filter(move |workspace| {
-                    workspace
-                        .floating_layer
-                        .space
-                        .outputs()
-                        .any(|o| o == output)
-                })
-                .map(|w| (w.handle.clone(), output.clone()))
-                .collect::<Vec<_>>(),
+                .find(move |workspace| workspace.output() == output)
+                .map(|w| (w.handle.clone(), output.clone())),
             None => self
                 .workspaces
                 .spaces()
-                .filter_map(|w| {
-                    if let Some(mapped) = w
-                        .mapped()
-                        .find(|e| e.has_surface(surface, WindowSurfaceType::ALL))
-                    {
-                        let outputs = w.outputs_for_element(mapped);
-                        Some(std::iter::repeat(w.handle.clone()).zip(outputs).fuse())
-                    } else {
-                        None
-                    }
+                .find(|w| {
+                    w.mapped()
+                        .any(|e| e.has_surface(surface, WindowSurfaceType::ALL))
                 })
-                .flatten()
-                .collect::<Vec<_>>(),
+                .map(|w| (w.handle.clone(), w.output().clone())),
         }
         .into_iter()
     }
@@ -1166,44 +1193,34 @@ impl Shell {
         self.workspaces.spaces_mut().find(|w| &w.handle == handle)
     }
 
-    pub fn outputs(&self) -> impl Iterator<Item = &Output> {
-        self.outputs.iter()
+    pub fn outputs(&self) -> impl DoubleEndedIterator<Item = &Output> {
+        self.workspaces.sets.keys().chain(
+            self.workspaces
+                .backup_set
+                .as_ref()
+                .into_iter()
+                .map(|set| &set.output),
+        )
     }
 
-    pub fn global_space(&self) -> Rectangle<i32, Logical> {
-        self.outputs
-            .iter()
+    pub fn global_space(&self) -> Rectangle<i32, Global> {
+        self.outputs()
             .fold(
-                Option::<Rectangle<i32, Logical>>::None,
+                Option::<Rectangle<i32, Global>>::None,
                 |maybe_geo, output| match maybe_geo {
                     Some(rect) => Some(rect.merge(output.geometry())),
                     None => Some(output.geometry()),
                 },
             )
-            .unwrap_or_else(|| Rectangle::from_loc_and_size((0, 0), (0, 0)))
-    }
-
-    pub fn map_global_to_space<C: smithay::utils::Coordinate>(
-        &self,
-        global_loc: impl Into<Point<C, Logical>>,
-        output: &Output,
-    ) -> Point<C, Logical> {
-        match self.workspaces {
-            WorkspaceMode::Global(_) => global_loc.into(),
-            WorkspaceMode::OutputBound(_, _) => {
-                let p = global_loc.into().to_f64() - output.current_location().to_f64();
-                (C::from_f64(p.x), C::from_f64(p.y)).into()
-            }
-        }
+            .unwrap_or_else(Rectangle::default)
     }
 
     pub fn animations_going(&self) -> bool {
-        (match &self.workspaces {
-            WorkspaceMode::Global(set) => set.previously_active.is_some(),
-            WorkspaceMode::OutputBound(sets, _) => {
-                sets.values().any(|set| set.previously_active.is_some())
-            }
-        }) || !matches!(self.overview_mode, OverviewMode::None)
+        self.workspaces
+            .sets
+            .values()
+            .any(|set| set.previously_active.is_some())
+            || !matches!(self.overview_mode, OverviewMode::None)
             || !matches!(self.resize_mode, ResizeMode::None)
             || self
                 .workspaces
@@ -1301,24 +1318,12 @@ impl Shell {
 
         self.popups.cleanup();
 
-        match &mut self.workspaces {
-            WorkspaceMode::OutputBound(sets, _) => {
-                for (output, set) in sets.iter_mut() {
-                    set.refresh(
-                        &mut self.workspace_state,
+        self.workspaces.refresh(
+            &mut self.workspace_state.update(),
                         &mut self.toplevel_info_state,
-                        std::iter::once((output, (0, 0).into())),
-                    );
-                }
-            }
-            WorkspaceMode::Global(set) => set.refresh(
-                &mut self.workspace_state,
-                &mut self.toplevel_info_state,
-                self.outputs.iter().map(|o| (o, o.current_location())),
-            ),
-        }
+        );
 
-        for output in &self.outputs {
+        for output in self.outputs() {
             let mut map = layer_map_for_output(output);
             map.cleanup();
         }
@@ -1365,12 +1370,12 @@ impl Shell {
             mapped.set_debug(state.common.egui.active);
         }
         if layout::should_be_floating(&window) || !workspace.tiling_enabled {
-            workspace.floating_layer.map(mapped.clone(), &seat, None);
+            workspace.floating_layer.map(mapped.clone(), None);
         } else {
             let focus_stack = workspace.focus_stack.get(&seat);
             workspace
                 .tiling_layer
-                .map(mapped.clone(), &seat, focus_stack.iter(), None);
+                .map(mapped.clone(), focus_stack.iter(), None);
         }
 
         if let CosmicSurface::X11(surface) = window {
@@ -1431,7 +1436,7 @@ impl Shell {
             map.map_layer(&layer_surface).unwrap();
         }
         for workspace in state.common.shell.workspaces.spaces_mut() {
-            workspace.tiling_layer.recalculate(&output);
+            workspace.tiling_layer.recalculate();
         }
 
         if wants_focus {
