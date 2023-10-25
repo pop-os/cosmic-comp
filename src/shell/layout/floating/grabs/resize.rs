@@ -101,10 +101,10 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
         self.window.set_resizing(true);
         self.window.set_geometry(Rectangle::from_loc_and_size(
             match self.window.active_window() {
-                CosmicSurface::X11(s) => s.geometry().loc,
+                CosmicSurface::X11(s) => s.geometry().loc.as_global(),
                 _ => (0, 0).into(),
             },
-            self.last_window_size,
+            self.last_window_size.as_global(),
         ));
         self.window.configure();
     }
@@ -139,10 +139,10 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
             self.window.set_resizing(false);
             self.window.set_geometry(Rectangle::from_loc_and_size(
                 match self.window.active_window() {
-                    CosmicSurface::X11(s) => s.geometry().loc,
+                    CosmicSurface::X11(s) => s.geometry().loc.as_global(),
                     _ => (0, 0).into(),
                 },
-                self.last_window_size,
+                self.last_window_size.as_global(),
             ));
             self.window.configure();
 
@@ -271,7 +271,13 @@ impl ResizeSurfaceGrab {
     }
 
     pub fn apply_resize_to_location(window: CosmicMapped, space: &mut Workspace) {
-        if let Some(location) = space.floating_layer.space.element_location(&window) {
+        if let Some(location) = space
+            .floating_layer
+            .space
+            .element_location(&window)
+            .map(PointExt::as_local)
+            .map(|p| p.to_global(space.output()))
+        {
             let mut new_location = None;
 
             let mut resize_state = window.resize_state.lock().unwrap();
@@ -316,13 +322,13 @@ impl ResizeSurfaceGrab {
                         CosmicSurface::Wayland(window) => {
                             update_reactive_popups(
                                 &window,
-                                new_location + offset,
+                                new_location + offset.as_global(),
                                 space.floating_layer.space.outputs(),
                             );
                         }
                         CosmicSurface::X11(surface) => {
                             let mut geometry = surface.geometry();
-                            geometry.loc += location - new_location;
+                            geometry.loc += (location - new_location).as_logical();
                             let _ = surface.configure(geometry);
                         }
                         _ => unreachable!(),
@@ -331,7 +337,7 @@ impl ResizeSurfaceGrab {
                 space
                     .floating_layer
                     .space
-                    .map_element(window, new_location, false);
+                    .map_element(window, new_location.as_logical(), false);
             }
         }
     }

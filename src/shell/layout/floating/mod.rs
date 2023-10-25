@@ -471,7 +471,7 @@ impl FloatingLayout {
                     })
                     .then_some(pos);
 
-                self.map_internal(mapped.clone(), &output, position);
+                self.map_internal(mapped.clone(), position.map(PointExt::as_local), None);
                 return MoveResult::ShiftFocus(KeyboardFocusTarget::Element(mapped));
             }
             StackMoveResult::Default => {}

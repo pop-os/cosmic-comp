@@ -935,20 +935,28 @@ impl Workspace {
         let mut window_elements = Vec::new();
         let mut popup_elements = Vec::new();
 
-        let output_scale = output.current_scale().fractional_scale();
-        let layer_map = layer_map_for_output(output);
-        let zone = layer_map.non_exclusive_zone();
+        let output_scale = self.output.current_scale().fractional_scale();
+        let zone = {
+            let layer_map = layer_map_for_output(&self.output);
+            layer_map.non_exclusive_zone().as_local()
+        };
 
         // OR windows above all
         popup_elements.extend(
             override_redirect_windows
                 .iter()
-                .filter(|or| (*or).geometry().intersection(output.geometry()).is_some())
+                .filter(|or| {
+                    (*or)
+                        .geometry()
+                        .as_global()
+                        .intersection(self.output.geometry())
+                        .is_some()
+                })
                 .flat_map(|or| {
                     AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
                         or,
                         renderer,
-                        (or.geometry().loc - output.geometry().loc)
+                        (or.geometry().loc - self.output.geometry().loc.as_logical())
                             .to_physical_precise_round(output_scale),
                         Scale::from(output_scale),
                         1.0,
@@ -1027,7 +1035,10 @@ impl Workspace {
                 (None, None) => (full_geo, 1.0),
             };
 
-            let render_loc = target_geo.loc.to_physical_precise_round(output_scale);
+            let render_loc = target_geo
+                .loc
+                .as_logical()
+                .to_physical_precise_round(output_scale);
             let scale = Scale {
                 x: target_geo.size.w as f64 / bbox.size.w as f64,
                 y: target_geo.size.h as f64 / bbox.size.h as f64,

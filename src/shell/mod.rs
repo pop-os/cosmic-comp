@@ -1073,7 +1073,10 @@ impl Shell {
                     .filter(|o| {
                         self.override_redirect_windows.iter().any(|or| {
                             if or.wl_surface().as_ref() == Some(surface) {
-                                or.geometry().intersection(o.geometry()).is_some()
+                                or.geometry()
+                                    .as_global()
+                                    .intersection(o.geometry())
+                                    .is_some()
                             } else {
                                 false
                             }
@@ -1393,13 +1396,12 @@ impl Shell {
 
     pub fn map_override_redirect(state: &mut State, window: X11Surface) {
         let geo = window.geometry();
-        for (output, overlap) in state
-            .common
-            .shell
-            .outputs()
-            .cloned()
-            .filter_map(|o| o.geometry().intersection(geo).map(|overlap| (o, overlap)))
-        {
+        for (output, overlap) in state.common.shell.outputs().cloned().filter_map(|o| {
+            o.geometry()
+                .as_logical()
+                .intersection(geo)
+                .map(|overlap| (o, overlap))
+        }) {
             window.output_enter(&output, overlap);
         }
 
@@ -1444,7 +1446,7 @@ impl Shell {
         to: (&Output, Option<usize>),
         follow: bool,
         direction: Option<Direction>,
-    ) -> Result<Option<Point<i32, Logical>>, InvalidWorkspaceIndex> {
+    ) -> Result<Option<Point<i32, Global>>, InvalidWorkspaceIndex> {
         let (to_output, to_idx) = to;
         let to_idx = to_idx.unwrap_or(state.common.shell.workspaces.active_num(to_output).1);
         if state
@@ -1578,14 +1580,18 @@ impl Shell {
 
     pub fn update_reactive_popups(&self, mapped: &CosmicMapped) {
         if let Some(workspace) = self.space_for(mapped) {
-            let element_loc = workspace.element_geometry(mapped).unwrap().loc;
+            let element_loc = workspace
+                .element_geometry(mapped)
+                .unwrap()
+                .loc
+                .to_global(&workspace.output);
             for (toplevel, offset) in mapped.windows() {
                 if let CosmicSurface::Wayland(toplevel) = toplevel {
-                    let window_geo_offset = toplevel.geometry().loc;
+                    let window_geo_offset = toplevel.geometry().loc.as_global();
                     update_reactive_popups(
                         &toplevel,
-                        element_loc + offset + window_geo_offset,
-                        self.outputs.iter(),
+                        element_loc + offset.as_global() + window_geo_offset,
+                        self.outputs(),
                     );
                 }
             }

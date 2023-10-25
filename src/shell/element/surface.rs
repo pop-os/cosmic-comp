@@ -51,6 +51,7 @@ use smithay::{
 
 use crate::{
     state::{State, SurfaceDmabufFeedback},
+    utils::prelude::*,
     wayland::handlers::decoration::PreferredDecorationMode,
 };
 
@@ -122,13 +123,13 @@ impl CosmicSurface {
         }
     }
 
-    pub fn set_geometry(&self, geo: Rectangle<i32, Logical>) {
+    pub fn set_geometry(&self, geo: Rectangle<i32, Global>) {
         match self {
             CosmicSurface::Wayland(window) => window
                 .toplevel()
-                .with_pending_state(|state| state.size = Some(geo.size)),
+                .with_pending_state(|state| state.size = Some(geo.size.as_logical())),
             CosmicSurface::X11(surface) => {
-                let _ = surface.configure(geo);
+                let _ = surface.configure(geo.as_logical());
             }
             _ => {}
         }

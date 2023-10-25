@@ -17,7 +17,7 @@ use crate::{
         CosmicMapped, CosmicMappedRenderElement, OverviewMode, Trigger, WorkspaceRenderElement,
     },
     state::{Common, Fps},
-    utils::prelude::{OutputExt, SeatExt},
+    utils::prelude::*,
     wayland::{
         handlers::{
             data_device::get_dnd_icon,
@@ -160,7 +160,7 @@ impl IndicatorShader {
     pub fn focus_element<R: AsGlowRenderer>(
         renderer: &R,
         key: impl Into<Key>,
-        mut element_geo: Rectangle<i32, Logical>,
+        mut element_geo: Rectangle<i32, Local>,
         thickness: u8,
         scale: f64,
         alpha: f32,
@@ -184,7 +184,7 @@ impl IndicatorShader {
     pub fn element<R: AsGlowRenderer>(
         renderer: &R,
         key: impl Into<Key>,
-        geo: Rectangle<i32, Logical>,
+        geo: Rectangle<i32, Local>,
         thickness: u8,
         radius: u8,
         alpha: f32,
@@ -223,7 +223,7 @@ impl IndicatorShader {
 
             let elem = PixelShaderElement::new(
                 shader,
-                geo,
+                geo.as_logical(),
                 None, //TODO
                 alpha,
                 vec![
@@ -240,8 +240,8 @@ impl IndicatorShader {
         }
 
         let elem = &mut cache.get_mut(&key).unwrap().1;
-        if elem.geometry(1.0.into()).to_logical(1) != geo {
-            elem.resize(geo, None);
+        if elem.geometry(1.0.into()).to_logical(1) != geo.as_logical() {
+            elem.resize(geo.as_logical(), None);
         }
         elem.clone()
     }
@@ -271,7 +271,7 @@ impl BackdropShader {
     pub fn element<R: AsGlowRenderer>(
         renderer: &R,
         key: impl Into<Key>,
-        geo: Rectangle<i32, Logical>,
+        geo: Rectangle<i32, Local>,
         radius: f32,
         alpha: f32,
         color: [f32; 3],
@@ -304,7 +304,7 @@ impl BackdropShader {
 
             let elem = PixelShaderElement::new(
                 shader,
-                geo,
+                geo.as_logical(),
                 None, // TODO
                 alpha,
                 vec![
@@ -320,8 +320,8 @@ impl BackdropShader {
         }
 
         let elem = &mut cache.get_mut(&key).unwrap().1;
-        if elem.geometry(1.0.into()).to_logical(1) != geo {
-            elem.resize(geo, None);
+        if elem.geometry(1.0.into()).to_logical(1) != geo.as_logical() {
+            elem.resize(geo.as_logical(), None);
         }
         elem.clone()
     }

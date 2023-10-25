@@ -3,7 +3,7 @@ use crate::{
     state::State,
     utils::{
         iced::{IcedElement, Program},
-        prelude::SeatExt,
+        prelude::*,
     },
     wayland::handlers::screencopy::ScreencopySessions,
 };
@@ -132,7 +132,7 @@ impl CosmicWindow {
         ))
     }
 
-    pub fn set_geometry(&self, geo: Rectangle<i32, Logical>) {
+    pub fn set_geometry(&self, geo: Rectangle<i32, Global>) {
         self.0.with_program(|p| {
             let loc = (
                 geo.loc.x,

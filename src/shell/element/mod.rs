@@ -4,7 +4,7 @@ use crate::{
         GlMultiError, GlMultiFrame, GlMultiRenderer,
     },
     state::State,
-    utils::prelude::SeatExt,
+    utils::prelude::*,
 };
 use calloop::LoopHandle;
 use id_tree::NodeId;
@@ -94,8 +94,8 @@ pub struct CosmicMapped {
     //tiling
     pub tiling_node_id: Arc<Mutex<Option<NodeId>>>,
     //floating
-    pub(super) last_geometry: Arc<Mutex<Option<Rectangle<i32, Logical>>>>,
     pub(super) resize_state: Arc<Mutex<Option<ResizeState>>>,
+    pub last_geometry: Arc<Mutex<Option<Rectangle<i32, Local>>>>,
 
     #[cfg(feature = "debug")]
     debug: Arc<Mutex<Option<smithay_egui::EguiState>>>,
@@ -108,6 +108,7 @@ impl fmt::Debug for CosmicMapped {
             .field("last_cursor_position", &self.last_cursor_position)
             .field("tiling_node_id", &self.tiling_node_id)
             .field("resize_state", &self.resize_state)
+            .field("last_geometry", &self.last_geometry)
             .finish()
     }
 }
@@ -361,7 +362,7 @@ impl CosmicMapped {
         window.is_activated(pending)
     }
 
-    pub fn set_geometry(&self, geo: Rectangle<i32, Logical>) {
+    pub fn set_geometry(&self, geo: Rectangle<i32, Global>) {
         match &self.element {
             CosmicMappedInternal::Stack(s) => s.set_geometry(geo),
             CosmicMappedInternal::Window(w) => w.set_geometry(geo),
@@ -501,11 +502,9 @@ impl CosmicMapped {
 
                 let stack = CosmicStack::new(std::iter::once(surface), handle);
                 if let Some(geo) = self.last_geometry.lock().unwrap().clone() {
-                    stack.set_geometry(geo);
+                    stack.set_geometry(geo.to_global(&output));
                 }
-                for (output, overlap) in outputs {
-                    stack.output_enter(output, overlap);
-                }
+                stack.output_enter(output, overlap);
                 stack.set_activate(activated);
                 stack.active().send_configure();
                 stack.refresh();
@@ -527,11 +526,9 @@ impl CosmicMapped {
         let window = CosmicWindow::new(surface, handle);
 
         if let Some(geo) = self.last_geometry.lock().unwrap().clone() {
-            window.set_geometry(geo);
+            window.set_geometry(geo.to_global(&output));
         }
-        for (output, overlap) in outputs {
-            window.output_enter(output, overlap);
-        }
+        window.output_enter(output, overlap);
         window.set_activate(self.is_activated(true));
         window.surface().send_configure();
         window.refresh();
@@ -1068,8 +1065,8 @@ impl From<CosmicWindow> for CosmicMapped {
             element: CosmicMappedInternal::Window(w),
             last_cursor_position: Arc::new(Mutex::new(HashMap::new())),
             tiling_node_id: Arc::new(Mutex::new(None)),
-            last_geometry: Arc::new(Mutex::new(None)),
             resize_state: Arc::new(Mutex::new(None)),
+            last_geometry: Arc::new(Mutex::new(None)),
             #[cfg(feature = "debug")]
             debug: Arc::new(Mutex::new(None)),
         }
@@ -1082,8 +1079,8 @@ impl From<CosmicStack> for CosmicMapped {
             element: CosmicMappedInternal::Stack(s),
             last_cursor_position: Arc::new(Mutex::new(HashMap::new())),
             tiling_node_id: Arc::new(Mutex::new(None)),
-            last_geometry: Arc::new(Mutex::new(None)),
             resize_state: Arc::new(Mutex::new(None)),
+            last_geometry: Arc::new(Mutex::new(None)),
             #[cfg(feature = "debug")]
             debug: Arc::new(Mutex::new(None)),
         }

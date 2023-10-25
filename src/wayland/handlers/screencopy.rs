@@ -47,7 +47,7 @@ use crate::{
     },
     shell::{CosmicMappedRenderElement, CosmicSurface, WorkspaceRenderElement},
     state::{BackendData, ClientState, Common, State},
-    utils::prelude::OutputExt,
+    utils::prelude::{OutputExt, PointExt},
     wayland::protocols::{
         screencopy::{
             delegate_screencopy, BufferInfo, BufferParams, CursorMode as ScreencopyCursorMode,
@@ -106,7 +106,7 @@ impl ScreencopyHandler for State {
             if let Some(pointer) = seat.get_pointer() {
                 if output
                     .geometry()
-                    .contains(pointer.current_location().to_i32_round())
+                    .contains(pointer.current_location().to_i32_round().as_global())
                 {
                     session.cursor_enter(seat, InputType::Pointer);
                 }

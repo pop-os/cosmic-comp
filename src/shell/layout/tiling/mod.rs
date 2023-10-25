@@ -116,7 +116,7 @@ pub struct NodeDesc {
 enum TargetZone {
     Initial,
     InitialPlaceholder(NodeId),
-    WindowStack(NodeId, Rectangle<i32, Logical>),
+    WindowStack(NodeId, Rectangle<i32, Local>),
     WindowSplit(NodeId, Direction),
     GroupEdge(NodeId, Direction),
     GroupInterior(NodeId, usize),
@@ -171,22 +171,22 @@ pub enum Data {
     Group {
         orientation: Orientation,
         sizes: Vec<i32>,
-        last_geometry: Rectangle<i32, Logical>,
+        last_geometry: Rectangle<i32, Local>,
         alive: Arc<()>,
         pill_indicator: Option<PillIndicator>,
     },
     Mapped {
         mapped: CosmicMapped,
-        last_geometry: Rectangle<i32, Logical>,
+        last_geometry: Rectangle<i32, Local>,
     },
     Placeholder {
-        last_geometry: Rectangle<i32, Logical>,
+        last_geometry: Rectangle<i32, Local>,
         initial_placeholder: bool,
     },
 }
 
 impl Data {
-    fn new_group(orientation: Orientation, geo: Rectangle<i32, Logical>) -> Data {
+    fn new_group(orientation: Orientation, geo: Rectangle<i32, Local>) -> Data {
         Data::Group {
             orientation,
             sizes: vec![
@@ -296,7 +296,7 @@ impl Data {
         }
     }
 
-    fn geometry(&self) -> &Rectangle<i32, Logical> {
+    fn geometry(&self) -> &Rectangle<i32, Local> {
         match self {
             Data::Group { last_geometry, .. } => last_geometry,
             Data::Mapped { last_geometry, .. } => last_geometry,
@@ -304,7 +304,7 @@ impl Data {
         }
     }
 
-    fn update_geometry(&mut self, geo: Rectangle<i32, Logical>) {
+    fn update_geometry(&mut self, geo: Rectangle<i32, Local>) {
         match self {
             Data::Group {
                 orientation,
@@ -2816,7 +2816,9 @@ impl TilingLayout {
             let mut configures = Vec::new();
 
             let (outer, inner) = gaps;
-            let mut geo = layer_map_for_output(&output).non_exclusive_zone();
+            let mut geo = layer_map_for_output(&output)
+                .non_exclusive_zone()
+                .as_local();
             geo.loc.x += outer;
             geo.loc.y += outer;
             geo.size.w -= outer * 2;
@@ -3861,8 +3863,8 @@ fn swap_factor(size: Size<i32, Logical>) -> f64 {
 
 fn swap_geometry(
     size: Size<i32, Logical>,
-    relative_to: Rectangle<i32, Logical>,
-) -> Rectangle<i32, Logical> {
+    relative_to: Rectangle<i32, Local>,
+) -> Rectangle<i32, Local> {
     let factor = swap_factor(size);
 
     let new_size = Size::from((
@@ -3881,7 +3883,7 @@ fn swap_geometry(
 fn geometries_for_groupview<'a, R>(
     tree: &Tree<Data>,
     renderer: impl Into<Option<&'a mut R>>,
-    non_exclusive_zone: Rectangle<i32, Logical>,
+    non_exclusive_zone: Rectangle<i32, Local>,
     seat: Option<&Seat<State>>,
     alpha: f32,
     transition: f32,
@@ -3891,7 +3893,7 @@ fn geometries_for_groupview<'a, R>(
     swap_desc: Option<NodeDesc>,
     swap_tree: Option<&Tree<Data>>,
 ) -> (
-    HashMap<NodeId, Rectangle<i32, Logical>>,
+    HashMap<NodeId, Rectangle<i32, Local>>,
     Vec<CosmicMappedRenderElement<R>>,
 )
 where
@@ -3921,7 +3923,7 @@ where
     }
 
     let mut elements = Vec::new();
-    let mut geometries: HashMap<NodeId, Rectangle<i32, Logical>> = HashMap::new();
+    let mut geometries: HashMap<NodeId, Rectangle<i32, Local>> = HashMap::new();
     let alpha = alpha * transition;
 
     let focused = seat
@@ -4268,7 +4270,7 @@ where
                             );
                         }
                         let swap_geo = swap_geometry(
-                            geo.size,
+                            geo.size.as_logical(),
                             focused_geo.unwrap_or({
                                 let mut geo = non_exclusive_zone;
                                 geo.loc += (WINDOW_BACKDROP_BORDER, WINDOW_BACKDROP_BORDER).into();
@@ -4469,7 +4471,7 @@ where
                     if matches!(swap_desc, Some(ref desc) if &desc.node == &node_id && desc.stack_window.is_none())
                     {
                         let swap_geo = swap_geometry(
-                            geo.size,
+                            geo.size.as_logical(),
                             focused_geo.unwrap_or({
                                 let mut geo = non_exclusive_zone;
                                 geo.loc += (WINDOW_BACKDROP_BORDER, WINDOW_BACKDROP_BORDER).into();
@@ -4523,7 +4525,7 @@ fn render_old_tree<R>(
     reference_tree: &Tree<Data>,
     target_tree: &Tree<Data>,
     renderer: &mut R,
-    geometries: Option<HashMap<NodeId, Rectangle<i32, Logical>>>,
+    geometries: Option<HashMap<NodeId, Rectangle<i32, Local>>>,
     output_scale: f64,
     percentage: f32,
     is_swap_mode: bool,
@@ -4585,7 +4587,10 @@ where
                     .unwrap_or(*original_geo);
 
                 let crop_rect = geo.clone();
-                let original_location = original_geo.loc.to_physical_precise_round(output_scale)
+                let original_location = original_geo
+                    .loc
+                    .as_logical()
+                    .to_physical_precise_round(output_scale)
                     - mapped
                         .geometry()
                         .loc
@@ -4605,7 +4610,9 @@ where
                             let cropped = CropRenderElement::from_element(
                                 elem,
                                 output_scale,
-                                crop_rect.to_physical_precise_round(output_scale),
+                                crop_rect
+                                    .as_logical()
+                                    .to_physical_precise_round(output_scale),
                             )?;
                             let rescaled = RescaleRenderElement::from_element(
                                 cropped,
@@ -4615,6 +4622,7 @@ where
                             let relocated = RelocateRenderElement::from_element(
                                 rescaled,
                                 (geo.loc - original_geo.loc)
+                                    .as_logical()
                                     .to_physical_precise_round(output_scale),
                                 Relocate::Relative,
                             );
@@ -4626,7 +4634,9 @@ where
                             let cropped = CropRenderElement::from_element(
                                 elem,
                                 output_scale,
-                                crop_rect.to_physical_precise_round(output_scale),
+                                crop_rect
+                                    .as_logical()
+                                    .to_physical_precise_round(output_scale),
                             )?;
                             let rescaled = RescaleRenderElement::from_element(
                                 cropped,
@@ -4636,6 +4646,7 @@ where
                             let relocated = RelocateRenderElement::from_element(
                                 rescaled,
                                 (geo.loc - original_geo.loc)
+                                    .as_logical()
                                     .to_physical_precise_round(output_scale),
                                 Relocate::Relative,
                             );
@@ -4655,9 +4666,9 @@ fn render_new_tree<R>(
     target_tree: &Tree<Data>,
     reference_tree: Option<&Tree<Data>>,
     renderer: &mut R,
-    non_exclusive_zone: Rectangle<i32, Logical>,
-    geometries: Option<HashMap<NodeId, Rectangle<i32, Logical>>>,
-    old_geometries: Option<HashMap<NodeId, Rectangle<i32, Logical>>>,
+    non_exclusive_zone: Rectangle<i32, Local>,
+    geometries: Option<HashMap<NodeId, Rectangle<i32, Local>>>,
+    old_geometries: Option<HashMap<NodeId, Rectangle<i32, Local>>>,
     is_overview: bool,
     seat: Option<&Seat<State>>,
     output: &Output,
@@ -4685,13 +4696,7 @@ where
             seat.get_keyboard()
                 .unwrap()
                 .current_focus()
-                .and_then(|target| {
-                    TilingLayout::currently_focused_node(
-                        &target_tree,
-                        &seat.active_output(),
-                        target,
-                    )
-                })
+                .and_then(|target| TilingLayout::currently_focused_node(&target_tree, target))
         })
         .map(|(id, _)| id);
     let focused_geo = if let Some(focused) = focused.as_ref() {
@@ -4778,7 +4783,8 @@ where
             transition.unwrap_or(1.0),
         ));
 
-        let render_loc = (swap_geo.loc - window_geo.loc).to_physical_precise_round(output_scale);
+        let render_loc =
+            (swap_geo.loc.as_logical() - window_geo.loc).to_physical_precise_round(output_scale);
 
         swap_elements.extend(
             window
@@ -4792,7 +4798,10 @@ where
                 .map(|window| {
                     CosmicMappedRenderElement::GrabbedWindow(RescaleRenderElement::from_element(
                         window,
-                        swap_geo.loc.to_physical_precise_round(output_scale),
+                        swap_geo
+                            .loc
+                            .as_logical()
+                            .to_physical_precise_round(output_scale),
                         ease(
                             Linear,
                             1.0,
@@ -4985,12 +4994,12 @@ where
                                 .unwrap_or(false))
                     {
                         if let Some(swap) = swap_indicator.as_ref() {
-                            swap.resize(geo.size);
-                            swap.output_enter(output, output_geo);
+                            swap.resize(geo.size.as_logical());
+                            swap.output_enter(output, output_geo.as_logical());
                             swap_elements.extend(
                                 swap.render_elements::<CosmicWindowRenderElement<R>>(
                                     renderer,
-                                    geo.loc.to_physical_precise_round(output_scale),
+                                    geo.loc.as_logical().to_physical_precise_round(output_scale),
                                     output_scale.into(),
                                     alpha * overview.0.alpha().unwrap_or(1.0),
                                 )
@@ -5006,8 +5015,8 @@ where
                     geo.loc -= (18, 18).into();
                     geo.size += (36, 36).into();
 
-                    resize.resize(geo.size);
-                    resize.output_enter(output, output_geo);
+                    resize.resize(geo.size.as_logical());
+                    resize.output_enter(output, output_geo.as_logical());
                     let possible_edges =
                         TilingLayout::possible_resizes(target_tree, node_id.clone());
                     if !possible_edges.is_empty() {
@@ -5026,7 +5035,7 @@ where
                             resize
                                 .render_elements::<CosmicWindowRenderElement<R>>(
                                     renderer,
-                                    geo.loc.to_physical_precise_round(output_scale),
+                                    geo.loc.as_logical().to_physical_precise_round(output_scale),
                                     output_scale.into(),
                                     alpha * mode.alpha().unwrap_or(1.0),
                                 )
@@ -5039,7 +5048,7 @@ where
             }
 
             if let Data::Mapped { mapped, .. } = data {
-                let original_location = (original_geo.loc - mapped.geometry().loc)
+                let original_location = (original_geo.loc.as_logical() - mapped.geometry().loc)
                     .to_physical_precise_round(output_scale);
 
                 let (mut w_elements, p_elements) = mapped
@@ -5069,7 +5078,7 @@ where
                     })
                     .unwrap_or(false)
                 {
-                    let mut geo = mapped.active_window_geometry();
+                    let mut geo = mapped.active_window_geometry().as_local();
                     geo.loc += original_geo.loc;
                     w_elements.insert(
                         0,
@@ -5090,16 +5099,22 @@ where
                             let cropped = CropRenderElement::from_element(
                                 elem,
                                 output_scale,
-                                crop_rect.to_physical_precise_round(output_scale),
+                                crop_rect
+                                    .as_logical()
+                                    .to_physical_precise_round(output_scale),
                             )?;
                             let rescaled = RescaleRenderElement::from_element(
                                 cropped,
-                                original_geo.loc.to_physical_precise_round(output_scale),
+                                original_geo
+                                    .loc
+                                    .as_logical()
+                                    .to_physical_precise_round(output_scale),
                                 scale,
                             );
                             let relocated = RelocateRenderElement::from_element(
                                 rescaled,
                                 (geo.loc - original_geo.loc)
+                                    .as_logical()
                                     .to_physical_precise_round(output_scale),
                                 Relocate::Relative,
                             );
@@ -5111,16 +5126,22 @@ where
                             let cropped = CropRenderElement::from_element(
                                 elem,
                                 output_scale,
-                                crop_rect.to_physical_precise_round(output_scale),
+                                crop_rect
+                                    .as_logical()
+                                    .to_physical_precise_round(output_scale),
                             )?;
                             let rescaled = RescaleRenderElement::from_element(
                                 cropped,
-                                original_geo.loc.to_physical_precise_round(output_scale),
+                                original_geo
+                                    .loc
+                                    .as_logical()
+                                    .to_physical_precise_round(output_scale),
                                 scale,
                             );
                             let relocated = RelocateRenderElement::from_element(
                                 rescaled,
                                 (geo.loc - original_geo.loc)
+                                    .as_logical()
                                     .to_physical_precise_round(output_scale),
                                 Relocate::Relative,
                             );
@@ -5132,16 +5153,22 @@ where
                             let cropped = CropRenderElement::from_element(
                                 elem,
                                 output_scale,
-                                crop_rect.to_physical_precise_round(output_scale),
+                                crop_rect
+                                    .as_logical()
+                                    .to_physical_precise_round(output_scale),
                             )?;
                             let rescaled = RescaleRenderElement::from_element(
                                 cropped,
-                                original_geo.loc.to_physical_precise_round(output_scale),
+                                original_geo
+                                    .loc
+                                    .as_logical()
+                                    .to_physical_precise_round(output_scale),
                                 scale,
                             );
                             let relocated = RelocateRenderElement::from_element(
                                 rescaled,
                                 (geo.loc - original_geo.loc)
+                                    .as_logical()
                                     .to_physical_precise_round(output_scale),
                                 Relocate::Relative,
                             );
@@ -5187,10 +5214,10 @@ where
     (window_elements, popup_elements)
 }
 
-fn scale_to_center(
-    old_geo: &Rectangle<i32, Logical>,
-    new_geo: &Rectangle<i32, Logical>,
-) -> (f64, Point<i32, Logical>) {
+fn scale_to_center<C>(
+    old_geo: &Rectangle<i32, C>,
+    new_geo: &Rectangle<i32, C>,
+) -> (f64, Point<i32, C>) {
     let scale_w = new_geo.size.w as f64 / old_geo.size.w as f64;
     let scale_h = new_geo.size.h as f64 / old_geo.size.h as f64;
 
