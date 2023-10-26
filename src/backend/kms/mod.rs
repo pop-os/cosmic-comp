@@ -16,6 +16,7 @@ use crate::{
 
 use anyhow::{Context, Result};
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::FailureReason;
+use libc::dev_t;
 use smithay::{
     backend::{
         allocator::{
@@ -25,7 +26,7 @@ use smithay::{
             Allocator, Format, Fourcc,
         },
         drm::{
-            compositor::{BlitFrameResultError, DrmCompositor, FrameError},
+            compositor::{BlitFrameResultError, DrmCompositor, FrameError, PrimaryPlaneElement},
             DrmDevice, DrmDeviceFd, DrmEvent, DrmEventTime, DrmNode, NodeType,
         },
         egl::{EGLContext, EGLDevice, EGLDisplay},
@@ -58,7 +59,7 @@ use smithay::{
             Device as _,
         },
         input::{self, Libinput},
-        nix::{fcntl::OFlag, sys::stat::dev_t},
+        rustix::fs::OFlags,
         wayland_protocols::wp::{
             linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1,
             presentation_time::server::wp_presentation_feedback,
@@ -82,7 +83,6 @@ use std::{
     collections::{HashMap, HashSet},
     ffi::CStr,
     fmt,
-    os::unix::io::FromRawFd,
     path::PathBuf,
     time::Duration,
 };
@@ -418,23 +418,21 @@ impl State {
             return Ok(());
         }
 
-        let fd = DrmDeviceFd::new(unsafe {
-            DeviceFd::from_raw_fd(
-                self.backend
-                    .kms()
-                    .session
-                    .open(
-                        &path,
-                        OFlag::O_RDWR | OFlag::O_CLOEXEC | OFlag::O_NOCTTY | OFlag::O_NONBLOCK,
+        let fd = DrmDeviceFd::new(DeviceFd::from(
+            self.backend
+                .kms()
+                .session
+                .open(
+                    &path,
+                    OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK,
+                )
+                .with_context(|| {
+                    format!(
+                        "Failed to optain file descriptor for drm device: {}",
+                        path.display()
                     )
-                    .with_context(|| {
-                        format!(
-                            "Failed to optain file descriptor for drm device: {}",
-                            path.display()
-                        )
-                    })?,
-            )
-        });
+                })?,
+        ));
         let (drm, notifier) = DrmDevice::new(fd.clone(), false)
             .with_context(|| format!("Failed to initialize drm device for: {}", path.display()))?;
         let drm_node = DrmNode::from_dev_id(dev)?;
@@ -1014,8 +1012,14 @@ impl Device {
             interface,
             PhysicalProperties {
                 size: (phys_w as i32, phys_h as i32).into(),
-                // TODO: We need to read that from the connector properties
-                subpixel: Subpixel::Unknown,
+                subpixel: match conn_info.subpixel() {
+                    connector::SubPixel::HorizontalRgb => Subpixel::HorizontalRgb,
+                    connector::SubPixel::HorizontalBgr => Subpixel::HorizontalBgr,
+                    connector::SubPixel::VerticalRgb => Subpixel::VerticalRgb,
+                    connector::SubPixel::VerticalBgr => Subpixel::VerticalBgr,
+                    connector::SubPixel::None => Subpixel::None,
+                    _ => Subpixel::Unknown,
+                },
                 make: edid_info
                     .as_ref()
                     .map(|info| info.manufacturer.clone())
@@ -1093,8 +1097,8 @@ fn render_node_for_output(
 ) -> DrmNode {
     let workspace = shell.active_space(output);
     let nodes = workspace
-        .get_fullscreen(output)
-        .map(|w| vec![w.surface()])
+        .get_fullscreen()
+        .map(|w| vec![w.clone()])
         .unwrap_or_else(|| workspace.windows().collect::<Vec<_>>())
         .into_iter()
         .flat_map(|w| w.wl_surface().and_then(|s| source_node_for_surface(&s, dh)))
@@ -1235,8 +1239,11 @@ impl Surface {
         })?;
         self.fps.elements();
 
-        let res =
-            compositor.render_frame::<_, _, GlesTexture>(&mut renderer, &elements, CLEAR_COLOR);
+        let res = compositor.render_frame::<_, _, GlesTexture>(
+            &mut renderer,
+            &elements,
+            CLEAR_COLOR, // TODO use a theme neutral color
+        );
         self.fps.render();
 
         match res {
@@ -1247,6 +1254,11 @@ impl Surface {
                     None
                 };
 
+                if frame_result.needs_sync() {
+                    if let PrimaryPlaneElement::Swapchain(elem) = &frame_result.primary_element {
+                        elem.sync.wait();
+                    }
+                }
                 match compositor.queue_frame(feedback) {
                     Ok(()) | Err(FrameError::EmptyFrame) => {}
                     Err(err) => {
@@ -1507,7 +1519,6 @@ impl KmsState {
             false
         };
 
-        shell.refresh_outputs();
         if recreated {
             let sessions = output.pending_buffers().collect::<Vec<_>>();
             if let Err(err) = self.schedule_render(

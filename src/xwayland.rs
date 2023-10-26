@@ -151,16 +151,19 @@ impl XwmHandler for State {
         }
 
         let seat = self.common.last_active_seat().clone();
-        self.common.shell.pending_windows.push((surface, seat));
+        self.common
+            .shell
+            .pending_windows
+            .push((surface, seat, None));
     }
 
     fn map_window_notify(&mut self, _xwm: XwmId, surface: X11Surface) {
-        if let Some((window, seat)) = self
+        if let Some((window, _, _)) = self
             .common
             .shell
             .pending_windows
             .iter()
-            .find(|(window, _)| {
+            .find(|(window, _, _)| {
                 if let CosmicSurface::X11(window) = window {
                     window == &surface
                 } else {
@@ -169,8 +172,7 @@ impl XwmHandler for State {
             })
             .cloned()
         {
-            let output = seat.active_output();
-            Shell::map_window(self, &window, &output);
+            Shell::map_window(self, &window);
         }
     }
 
@@ -277,13 +279,16 @@ impl XwmHandler for State {
         {
             let space = self.common.shell.space_for(mapped).unwrap();
             if space.is_floating(mapped) {
-                mapped.set_geometry(Rectangle::from_loc_and_size(
-                    current_geo.loc,
-                    (
-                        w.map(|w| w as i32).unwrap_or(current_geo.size.w),
-                        h.map(|h| h as i32).unwrap_or(current_geo.size.h),
-                    ),
-                ))
+                mapped.set_geometry(
+                    Rectangle::from_loc_and_size(
+                        current_geo.loc,
+                        (
+                            w.map(|w| w as i32).unwrap_or(current_geo.size.w),
+                            h.map(|h| h as i32).unwrap_or(current_geo.size.h),
+                        ),
+                    )
+                    .as_global(),
+                )
             }
         } else {
             if let Some(x) = x {
@@ -325,13 +330,13 @@ impl XwmHandler for State {
                 }
             }
 
-            let geo = window.geometry();
+            let geo = window.geometry().as_global();
             for (output, overlap) in self.common.shell.outputs().cloned().map(|o| {
                 let intersection = o.geometry().intersection(geo);
                 (o, intersection)
             }) {
                 if let Some(overlap) = overlap {
-                    window.output_enter(&output, overlap);
+                    window.output_enter(&output, overlap.as_logical());
                 } else {
                     window.output_leave(&output);
                 }
@@ -360,14 +365,11 @@ impl XwmHandler for State {
     }
 
     fn maximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let seat = self.common.last_active_seat();
-        let output = seat.active_output();
         let surface = CosmicSurface::X11(window);
-
         if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
                 let (window, _) = mapped.windows().find(|(w, _)| w == &surface).unwrap();
-                workspace.maximize_request(&window, &output, self.common.event_loop_handle.clone())
+                workspace.maximize_request(&window);
             }
         }
     }
@@ -383,18 +385,10 @@ impl XwmHandler for State {
     }
 
     fn fullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let seat = self.common.last_active_seat();
-        let output = seat.active_output();
         let surface = CosmicSurface::X11(window);
-
         if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
-                let (window, _) = mapped.windows().find(|(w, _)| w == &surface).unwrap();
-                workspace.fullscreen_request(
-                    &window,
-                    &output,
-                    self.common.event_loop_handle.clone(),
-                )
+                workspace.fullscreen_request(&surface, None)
             }
         }
     }
@@ -404,7 +398,8 @@ impl XwmHandler for State {
         if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
                 let (window, _) = mapped.windows().find(|(w, _)| w == &surface).unwrap();
-                workspace.unfullscreen_request(&window);
+                let previous = workspace.unfullscreen_request(&window);
+                assert!(previous.is_none());
             }
         }
     }

@@ -17,6 +17,7 @@ use crate::{
     utils::prelude::*,
 };
 
+use cosmic::theme::CosmicTheme;
 use smithay::{
     backend::renderer::{
         element::{utils::RescaleRenderElement, AsRenderElements, RenderElement},
@@ -58,7 +59,13 @@ pub struct MoveGrabState {
 }
 
 impl MoveGrabState {
-    pub fn render<I, R>(&self, renderer: &mut R, seat: &Seat<State>, output: &Output) -> Vec<I>
+    pub fn render<I, R>(
+        &self,
+        renderer: &mut R,
+        seat: &Seat<State>,
+        output: &Output,
+        theme: &CosmicTheme,
+    ) -> Vec<I>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         <R as Renderer>::TextureId: 'static,
@@ -77,21 +84,33 @@ impl MoveGrabState {
         } else {
             1.0
         };
+        let alpha = if &seat.active_output() == output {
+            1.0
+        } else {
+            0.4
+        };
 
         let cursor_at = seat.get_pointer().unwrap().current_location();
 
         let mut window_geo = self.window.geometry();
         window_geo.loc += cursor_at.to_i32_round() + self.window_offset;
-        if !output.geometry().intersection(window_geo).is_some() {
+        if !output
+            .geometry()
+            .as_logical()
+            .intersection(window_geo)
+            .is_some()
+        {
             return Vec::new();
         }
 
         let output_scale: Scale<f64> = output.current_scale().fractional_scale().into();
         let scaling_offset =
             self.window_offset - self.window_offset.to_f64().upscale(scale).to_i32_round();
-        let render_location =
-            cursor_at.to_i32_round() - output.geometry().loc + self.window_offset - scaling_offset;
+        let render_location = cursor_at.to_i32_round() - output.geometry().loc.as_logical()
+            + self.window_offset
+            - scaling_offset;
 
+        let active_window_hint = crate::theme::active_window_hint(theme);
         let focus_element = if self.indicator_thickness > 0 {
             Some(
                 CosmicMappedRenderElement::from(IndicatorShader::focus_element(
@@ -105,10 +124,16 @@ impl MoveGrabState {
                             .to_f64()
                             .upscale(scale)
                             .to_i32_round(),
-                    ),
+                    )
+                    .as_local(),
                     self.indicator_thickness,
                     output_scale.x,
-                    1.0,
+                    alpha,
+                    [
+                        active_window_hint.red,
+                        active_window_hint.green,
+                        active_window_hint.blue,
+                    ],
                 ))
                 .into(),
             )
@@ -123,7 +148,7 @@ impl MoveGrabState {
                 (render_location - self.window.geometry().loc)
                     .to_physical_precise_round(output_scale),
                 output_scale,
-                1.0,
+                alpha,
             );
 
         self.stacking_indicator
@@ -208,6 +233,7 @@ impl PointerGrab<State> for MoveGrab {
             .find(|output| {
                 output
                     .geometry()
+                    .as_logical()
                     .contains(handle.current_location().to_i32_round())
             })
             .cloned()
@@ -221,7 +247,7 @@ impl PointerGrab<State> for MoveGrab {
                 .workspaces
                 .active_mut(&self.cursor_output)
                 .tiling_layer
-                .cleanup_drag(&self.cursor_output);
+                .cleanup_drag();
             self.cursor_output = current_output.clone();
         }
 
@@ -233,8 +259,8 @@ impl PointerGrab<State> for MoveGrab {
         if let Some(grab_state) = borrow.as_mut().and_then(|s| s.as_mut()) {
             let mut window_geo = self.window.geometry();
             window_geo.loc += event.location.to_i32_round() + grab_state.window_offset;
-            for output in &state.common.shell.outputs {
-                if let Some(overlap) = output.geometry().intersection(window_geo) {
+            for output in state.common.shell.outputs() {
+                if let Some(overlap) = output.geometry().as_logical().intersection(window_geo) {
                     if self.window_outputs.insert(output.clone()) {
                         self.window.output_enter(output, overlap);
                         if let Some(indicator) =
@@ -261,11 +287,21 @@ impl PointerGrab<State> for MoveGrab {
 
                 if indicator_location.is_some() != grab_state.stacking_indicator.is_some() {
                     grab_state.stacking_indicator = indicator_location.map(|geo| {
-                        let element = stack_hover(state.common.event_loop_handle.clone(), geo.size);
+                        let element = stack_hover(
+                            state.common.event_loop_handle.clone(),
+                            geo.size.as_logical(),
+                            state.common.theme.clone(),
+                        );
                         for output in &self.window_outputs {
-                            element.output_enter(output, output.geometry());
+                            element.output_enter(
+                                output,
+                                Rectangle::from_loc_and_size(
+                                    (0, 0),
+                                    output.geometry().size.as_logical(),
+                                ),
+                            );
                         }
-                        (element, geo.loc)
+                        (element, geo.loc.as_logical())
                     });
                 }
             }
@@ -397,8 +433,8 @@ impl MoveGrab {
         start_data: PointerGrabStartData<State>,
         window: CosmicMapped,
         seat: &Seat<State>,
-        initial_cursor_location: Point<f64, Logical>,
-        initial_window_location: Point<i32, Logical>,
+        initial_cursor_location: Point<f64, Global>,
+        initial_window_location: Point<i32, Global>,
         indicator_thickness: u8,
         was_tiled: bool,
     ) -> MoveGrab {
@@ -409,7 +445,8 @@ impl MoveGrab {
 
         let grab_state = MoveGrabState {
             window: window.clone(),
-            window_offset: initial_window_location - initial_cursor_location.to_i32_round(),
+            window_offset: (initial_window_location - initial_cursor_location.to_i32_round())
+                .as_logical(),
             indicator_thickness,
             start: Instant::now(),
             stacking_indicator: None,
@@ -451,16 +488,16 @@ impl MoveGrab {
         // No more buttons are pressed, release the grab.
         let output = self.seat.active_output();
 
-        let position = if let Some(grab_state) = self
+        let position: Option<(CosmicMapped, Point<i32, Global>)> = if let Some(grab_state) = self
             .seat
             .user_data()
             .get::<SeatMoveGrabState>()
             .and_then(|s| s.borrow_mut().take())
         {
             if grab_state.window.alive() {
-                let window_location = handle.current_location().to_i32_round()
-                    - output.geometry().loc
-                    + grab_state.window_offset;
+                let window_location = (handle.current_location().to_i32_round()
+                    + grab_state.window_offset)
+                    .as_global();
 
                 let workspace_handle = state.common.shell.active_space(&output).handle;
                 for old_output in self.window_outputs.iter().filter(|o| *o != &output) {
@@ -480,41 +517,26 @@ impl MoveGrab {
                 }
 
                 if self.tiling {
-                    Some(
-                        state
-                            .common
-                            .shell
-                            .active_space_mut(&output)
-                            .tiling_layer
-                            .drop_window(grab_state.window, &output, handle.current_location()),
-                    )
-                } else {
-                    let offset = state
-                        .common
-                        .shell
-                        .active_space(&output)
-                        .floating_layer
-                        .space
-                        .output_geometry(&output)
-                        .unwrap()
-                        .loc;
-                    grab_state.window.set_geometry(Rectangle::from_loc_and_size(
-                        window_location + offset,
-                        grab_state.window.geometry().size,
-                    ));
-                    state
+                    let (window, location) = state
                         .common
                         .shell
                         .active_space_mut(&output)
-                        .floating_layer
-                        .map_internal(grab_state.window, &output, Some(window_location + offset));
+                        .tiling_layer
+                        .drop_window(grab_state.window);
+                    Some((window, location.to_global(&output)))
+                } else {
+                    grab_state.window.set_geometry(Rectangle::from_loc_and_size(
+                        window_location,
+                        grab_state.window.geometry().size.as_global(),
+                    ));
+                    let workspace = state.common.shell.active_space_mut(&output);
+                    workspace.floating_layer.map_internal(
+                        grab_state.window,
+                        Some(window_location.to_local(&workspace.output)),
+                        None,
+                    );
 
-                    let pointer_pos = handle.current_location();
-                    let relative_pos = state.common.shell.map_global_to_space(pointer_pos, &output);
-                    Some((
-                        self.window.clone(),
-                        window_location + offset + (pointer_pos - relative_pos).to_i32_round(),
-                    ))
+                    Some((self.window.clone(), window_location))
                 }
             } else {
                 None
@@ -523,7 +545,7 @@ impl MoveGrab {
             None
         };
 
-        handle.unset_grab(state, serial, time);
+        handle.unset_grab(state, serial, time, true);
 
         {
             let cursor_state = self.seat.user_data().get::<CursorState>().unwrap();
@@ -535,7 +557,7 @@ impl MoveGrab {
                 state,
                 Some((
                     PointerFocusTarget::from(mapped.clone()),
-                    position - self.window.geometry().loc,
+                    position.as_logical() - self.window.geometry().loc,
                 )),
                 &MotionEvent {
                     location: handle.current_location(),

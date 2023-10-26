@@ -50,10 +50,6 @@ pub struct StaticConfig {
     #[serde(default = "default_workspace_layout")]
     pub workspace_layout: WorkspaceLayout,
     pub tiling_enabled: bool,
-    #[serde(default = "default_active_hint")]
-    pub active_hint: u8,
-    #[serde(default = "default_gaps")]
-    pub gaps: (u8, u8),
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -98,14 +94,6 @@ impl From<Output> for OutputInfo {
 
 fn default_enabled() -> bool {
     true
-}
-
-fn default_active_hint() -> u8 {
-    4
-}
-
-fn default_gaps() -> (u8, u8) {
-    (0, 4)
 }
 
 fn default_workspace_layout() -> WorkspaceLayout {
@@ -219,8 +207,6 @@ impl Config {
             workspace_amount: WorkspaceAmount::Dynamic,
             workspace_layout: WorkspaceLayout::Vertical,
             tiling_enabled: false,
-            active_hint: default_active_hint(),
-            gaps: default_gaps(),
         }
     }
 

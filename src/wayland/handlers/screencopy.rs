@@ -47,7 +47,7 @@ use crate::{
     },
     shell::{CosmicMappedRenderElement, CosmicSurface, WorkspaceRenderElement},
     state::{BackendData, ClientState, Common, State},
-    utils::prelude::OutputExt,
+    utils::prelude::{OutputExt, PointExt},
     wayland::protocols::{
         screencopy::{
             delegate_screencopy, BufferInfo, BufferParams, CursorMode as ScreencopyCursorMode,
@@ -106,7 +106,7 @@ impl ScreencopyHandler for State {
             if let Some(pointer) = seat.get_pointer() {
                 if output
                     .geometry()
-                    .contains(pointer.current_location().to_i32_round())
+                    .contains(pointer.current_location().to_i32_round().as_global())
                 {
                     session.cursor_enter(seat, InputType::Pointer);
                 }
@@ -1015,7 +1015,12 @@ pub fn render_window_to_buffer(
             renderer.bind(render_buffer).map_err(DTError::Rendering)?;
         }
 
-        dt.render_output(renderer, age, &elements, CLEAR_COLOR)
+        dt.render_output(
+            renderer,
+            age,
+            &elements,
+            CLEAR_COLOR, // TODO use a theme neutral color
+        )
     }
 
     let node = node_from_params(&params, &mut state.backend, None);
@@ -1296,7 +1301,7 @@ pub fn schedule_offscreen_workspace_session(
         if !session.alive() {
             return;
         }
-        if !state.common.shell.outputs.contains(&output) {
+        if !state.common.shell.outputs().any(|o| o == &output) {
             return;
         }
         match render_workspace_to_buffer(

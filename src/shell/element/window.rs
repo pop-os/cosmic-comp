@@ -3,7 +3,7 @@ use crate::{
     state::State,
     utils::{
         iced::{IcedElement, Program},
-        prelude::SeatExt,
+        prelude::*,
     },
     wayland::handlers::screencopy::ScreencopySessions,
 };
@@ -114,6 +114,7 @@ impl CosmicWindow {
     pub fn new(
         window: impl Into<CosmicSurface>,
         handle: LoopHandle<'static, crate::state::State>,
+        theme: cosmic::Theme,
     ) -> CosmicWindow {
         let window = window.into();
         let width = window.geometry().size.w;
@@ -129,10 +130,21 @@ impl CosmicWindow {
             },
             (width, SSD_HEIGHT),
             handle,
+            theme,
         ))
     }
 
-    pub fn set_geometry(&self, geo: Rectangle<i32, Logical>) {
+    pub fn pending_size(&self) -> Option<Size<i32, Logical>> {
+        self.0.with_program(|p| {
+            let mut size = p.window.pending_size()?;
+            if p.has_ssd(true) {
+                size.h += SSD_HEIGHT;
+            }
+            Some(size)
+        })
+    }
+
+    pub fn set_geometry(&self, geo: Rectangle<i32, Global>) {
         self.0.with_program(|p| {
             let loc = (
                 geo.loc.x,
@@ -213,6 +225,14 @@ impl CosmicWindow {
             popup_elements.into_iter().map(C::from).collect(),
         )
     }
+
+    pub(crate) fn set_theme(&self, theme: cosmic::Theme) {
+        self.0.set_theme(theme);
+    }
+
+    pub(crate) fn force_redraw(&self) {
+        self.0.force_redraw();
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -241,27 +261,20 @@ impl Program for CosmicWindowInternal {
                 }
             }
             Message::Maximize => {
-                if let Some((seat, _serial)) = self.last_seat.lock().unwrap().clone() {
-                    if let Some(surface) = self.window.wl_surface() {
-                        loop_handle.insert_idle(move |state| {
-                            if let Some(mapped) =
-                                state.common.shell.element_for_wl_surface(&surface).cloned()
-                            {
-                                if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
-                                    let output = seat.active_output();
-                                    let (window, _) = mapped
-                                        .windows()
-                                        .find(|(w, _)| w.wl_surface().as_ref() == Some(&surface))
-                                        .unwrap();
-                                    workspace.maximize_toggle(
-                                        &window,
-                                        &output,
-                                        state.common.event_loop_handle.clone(),
-                                    )
-                                }
+                if let Some(surface) = self.window.wl_surface() {
+                    loop_handle.insert_idle(move |state| {
+                        if let Some(mapped) =
+                            state.common.shell.element_for_wl_surface(&surface).cloned()
+                        {
+                            if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
+                                let (window, _) = mapped
+                                    .windows()
+                                    .find(|(w, _)| w.wl_surface().as_ref() == Some(&surface))
+                                    .unwrap();
+                                workspace.maximize_toggle(&window)
                             }
-                        });
-                    }
+                        }
+                    });
                 }
             }
             Message::Close => self.window.close(),

@@ -17,7 +17,7 @@ use crate::{
         CosmicMapped, CosmicMappedRenderElement, OverviewMode, Trigger, WorkspaceRenderElement,
     },
     state::{Common, Fps},
-    utils::prelude::{OutputExt, SeatExt},
+    utils::prelude::*,
     wayland::{
         handlers::{
             data_device::get_dnd_icon,
@@ -79,10 +79,6 @@ pub type GlMultiFrame<'a, 'b, 'frame> =
 pub type GlMultiError = MultiError<GbmGlesBackend<GlowRenderer>, GbmGlesBackend<GlowRenderer>>;
 
 pub static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
-pub static GROUP_COLOR: [f32; 3] = [0.788, 0.788, 0.788];
-pub static ACTIVE_GROUP_COLOR: [f32; 3] = [0.58, 0.922, 0.922];
-pub static FOCUS_INDICATOR_COLOR: [f32; 3] = [0.580, 0.921, 0.921];
-
 pub static OUTLINE_SHADER: &str = include_str!("./shaders/rounded_outline.frag");
 pub static RECTANGLE_SHADER: &str = include_str!("./shaders/rounded_rectangle.frag");
 
@@ -160,10 +156,11 @@ impl IndicatorShader {
     pub fn focus_element<R: AsGlowRenderer>(
         renderer: &R,
         key: impl Into<Key>,
-        mut element_geo: Rectangle<i32, Logical>,
+        mut element_geo: Rectangle<i32, Local>,
         thickness: u8,
         scale: f64,
         alpha: f32,
+        active_window_hint: [f32; 3],
     ) -> PixelShaderElement {
         let t = thickness as i32;
         element_geo.loc -= (t, t).into();
@@ -177,14 +174,14 @@ impl IndicatorShader {
             thickness * 2,
             alpha,
             scale,
-            FOCUS_INDICATOR_COLOR,
+            active_window_hint,
         )
     }
 
     pub fn element<R: AsGlowRenderer>(
         renderer: &R,
         key: impl Into<Key>,
-        geo: Rectangle<i32, Logical>,
+        geo: Rectangle<i32, Local>,
         thickness: u8,
         radius: u8,
         alpha: f32,
@@ -223,7 +220,7 @@ impl IndicatorShader {
 
             let elem = PixelShaderElement::new(
                 shader,
-                geo,
+                geo.as_logical(),
                 None, //TODO
                 alpha,
                 vec![
@@ -240,8 +237,8 @@ impl IndicatorShader {
         }
 
         let elem = &mut cache.get_mut(&key).unwrap().1;
-        if elem.geometry(1.0.into()).to_logical(1) != geo {
-            elem.resize(geo, None);
+        if elem.geometry(1.0.into()).to_logical(1) != geo.as_logical() {
+            elem.resize(geo.as_logical(), None);
         }
         elem.clone()
     }
@@ -271,7 +268,7 @@ impl BackdropShader {
     pub fn element<R: AsGlowRenderer>(
         renderer: &R,
         key: impl Into<Key>,
-        geo: Rectangle<i32, Logical>,
+        geo: Rectangle<i32, Local>,
         radius: f32,
         alpha: f32,
         color: [f32; 3],
@@ -304,7 +301,7 @@ impl BackdropShader {
 
             let elem = PixelShaderElement::new(
                 shader,
-                geo,
+                geo.as_logical(),
                 None, // TODO
                 alpha,
                 vec![
@@ -320,8 +317,8 @@ impl BackdropShader {
         }
 
         let elem = &mut cache.get_mut(&key).unwrap().1;
-        if elem.geometry(1.0.into()).to_logical(1) != geo {
-            elem.resize(geo, None);
+        if elem.geometry(1.0.into()).to_logical(1) != geo.as_logical() {
+            elem.resize(geo.as_logical(), None);
         }
         elem.clone()
     }
@@ -413,13 +410,14 @@ where
             );
         }
 
+        let theme = state.theme.cosmic();
         if let Some(grab_elements) = seat
             .user_data()
             .get::<SeatMoveGrabState>()
             .unwrap()
             .borrow()
             .as_ref()
-            .map(|state| state.render::<E, R>(renderer, seat, output))
+            .map(|state| state.render::<E, R>(renderer, seat, output, theme))
         {
             elements.extend(grab_elements);
         }
@@ -449,6 +447,7 @@ where
     #[cfg(feature = "debug")]
     puffin::profile_function!();
 
+    let theme = state.theme.cosmic();
     let mut elements = cursor_elements(renderer, state, output, cursor_mode);
 
     #[cfg(feature = "debug")]
@@ -492,15 +491,11 @@ where
     let (resize_mode, resize_indicator) = state.shell.resize_mode();
     let resize_indicator = resize_indicator.map(|indicator| (resize_mode, indicator));
     let swap_tree = if let OverviewMode::Started(Trigger::KeyboardSwap(_, desc), _) = &overview.0 {
-        if let Some(desc_output) = desc.output.upgrade() {
-            if output != &desc_output || current.0 != desc.handle {
-                state
-                    .shell
-                    .space_for_handle(&desc.handle)
-                    .and_then(|w| w.tiling_layer.tree_for_output(&desc_output))
-            } else {
-                None
-            }
+        if current.0 != desc.handle {
+            state
+                .shell
+                .space_for_handle(&desc.handle)
+                .map(|w| w.tiling_layer.tree())
         } else {
             None
         }
@@ -530,9 +525,9 @@ where
 
     let has_fullscreen = workspace
         .fullscreen
-        .get(output)
+        .as_ref()
         .filter(|f| !f.is_animating())
-        .map(|f| f.exclusive);
+        .is_some();
     let (overlay_elements, overlay_popups) =
         split_layer_elements(renderer, output, Layer::Overlay, exclude_workspace_overview);
 
@@ -540,7 +535,7 @@ where
     elements.extend(overlay_popups.into_iter().map(Into::into));
     elements.extend(overlay_elements.into_iter().map(Into::into));
 
-    let mut window_elements = if !has_fullscreen.unwrap_or(false) {
+    let mut window_elements = if !has_fullscreen {
         let (top_elements, top_popups) =
             split_layer_elements(renderer, output, Layer::Top, exclude_workspace_overview);
         elements.extend(top_popups.into_iter().map(Into::into));
@@ -548,6 +543,7 @@ where
     } else {
         Vec::new()
     };
+    let active_hint = theme.active_hint as u8;
 
     let offset = match previous.as_ref() {
         Some((previous, previous_idx, start)) => {
@@ -557,7 +553,7 @@ where
                 .shell
                 .space_for_handle(&previous)
                 .ok_or(OutputNoMode)?;
-            let has_fullscreen = workspace.fullscreen.contains_key(output);
+            let has_fullscreen = workspace.fullscreen.is_some();
             let is_active_space = workspace.outputs().any(|o| o == &active_output);
 
             let percentage = {
@@ -581,15 +577,15 @@ where
             });
 
             let (w_elements, p_elements) = workspace
-                .render_output::<R>(
+                .render::<R>(
                     renderer,
-                    output,
                     &state.shell.override_redirect_windows,
                     state.xwayland_state.as_mut(),
                     (!move_active && is_active_space).then_some(&last_active_seat),
                     overview.clone(),
                     resize_indicator.clone(),
-                    state.config.static_conf.active_hint,
+                    active_hint,
+                    theme,
                 )
                 .map_err(|_| OutputNoMode)?;
             elements.extend(p_elements.into_iter().map(|p_element| {
@@ -639,15 +635,15 @@ where
     let is_active_space = workspace.outputs().any(|o| o == &active_output);
 
     let (w_elements, p_elements) = workspace
-        .render_output::<R>(
+        .render::<R>(
             renderer,
-            output,
             &state.shell.override_redirect_windows,
             state.xwayland_state.as_mut(),
             (!move_active && is_active_space).then_some(&last_active_seat),
             overview,
             resize_indicator,
-            state.config.static_conf.active_hint,
+            active_hint,
+            theme,
         )
         .map_err(|_| OutputNoMode)?;
     elements.extend(p_elements.into_iter().map(|p_element| {
@@ -665,7 +661,7 @@ where
         ))
     }));
 
-    if has_fullscreen.is_none() {
+    if !has_fullscreen {
         let (w_elements, p_elements) =
             background_layer_elements(renderer, output, exclude_workspace_overview);
 
@@ -919,7 +915,12 @@ where
     }
 
     renderer.bind(target).map_err(RenderError::Rendering)?;
-    let res = damage_tracker.render_output(renderer, age, &elements, CLEAR_COLOR);
+    let res = damage_tracker.render_output(
+        renderer,
+        age,
+        &elements,
+        CLEAR_COLOR, // TODO use a theme neutral color
+    );
 
     if let Some(fps) = fps.as_mut() {
         fps.render();

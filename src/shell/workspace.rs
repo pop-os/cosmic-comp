@@ -21,7 +21,7 @@ use crate::{
     xwayland::XWaylandState,
 };
 
-use calloop::LoopHandle;
+use cosmic::theme::CosmicTheme;
 use id_tree::Tree;
 use indexmap::IndexSet;
 use keyframe::{ease, functions::EaseInOutCubic};
@@ -47,7 +47,7 @@ use smithay::{
     xwayland::X11Surface,
 };
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -61,7 +61,7 @@ use super::{
     element::{
         resize_indicator::ResizeIndicator, stack::CosmicStackRenderElement,
         swap_indicator::SwapIndicator, window::CosmicWindowRenderElement, CosmicMapped,
-        CosmicWindow,
+        MaximizedState,
     },
     focus::{
         target::{KeyboardFocusTarget, PointerFocusTarget, WindowGroup},
@@ -76,26 +76,35 @@ const FULLSCREEN_ANIMATION_DURATION: Duration = Duration::from_millis(200);
 
 #[derive(Debug)]
 pub struct Workspace {
+    pub output: Output,
     pub tiling_layer: TilingLayout,
     pub floating_layer: FloatingLayout,
     pub tiling_enabled: bool,
-    pub fullscreen: HashMap<Output, FullscreenSurface>,
+    pub fullscreen: Option<FullscreenSurface>,
+
     pub handle: WorkspaceHandle,
     pub focus_stack: FocusStacks,
     pub pending_buffers: Vec<(ScreencopySession, BufferParams)>,
     pub screencopy_sessions: Vec<DropableSession>,
+    pub output_stack: VecDeque<String>,
     pub(super) backdrop_id: Id,
     pub dirty: AtomicBool,
 }
 
 #[derive(Debug, Clone)]
 pub struct FullscreenSurface {
-    pub window: CosmicWindow,
-    pub exclusive: bool,
-    original_size: Size<i32, Logical>,
+    pub surface: CosmicSurface,
+    pub previously: Option<(ManagedLayer, WorkspaceHandle)>,
+    original_geometry: Rectangle<i32, Global>,
     start_at: Option<Instant>,
     ended_at: Option<Instant>,
     animation_signal: Option<Arc<AtomicBool>>,
+}
+
+impl PartialEq for FullscreenSurface {
+    fn eq(&self, other: &Self) -> bool {
+        self.surface == other.surface
+    }
 }
 
 struct FullscreenBlocker {
@@ -120,17 +129,17 @@ impl FullscreenSurface {
 
 impl IsAlive for FullscreenSurface {
     fn alive(&self) -> bool {
-        self.window.alive()
+        self.surface.alive()
     }
 }
 
 #[derive(Debug, Default)]
 pub struct FocusStacks(HashMap<Seat<State>, IndexSet<CosmicMapped>>);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ManagedState {
     pub layer: ManagedLayer,
-    pub was_fullscreen: Option<bool>,
+    pub was_fullscreen: Option<FullscreenSurface>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ManagedLayer {
@@ -198,16 +207,26 @@ impl MoveResult {
 }
 
 impl Workspace {
-    pub fn new(handle: WorkspaceHandle, tiling_enabled: bool, gaps: (u8, u8)) -> Workspace {
+    pub fn new(
+        handle: WorkspaceHandle,
+        output: Output,
+        tiling_enabled: bool,
+        theme: cosmic::Theme,
+    ) -> Workspace {
+        let tiling_layer = TilingLayout::new(theme, &output);
+        let floating_layer = FloatingLayout::new(&output);
+
         Workspace {
-            tiling_layer: TilingLayout::new(gaps),
-            floating_layer: FloatingLayout::new(),
+            output,
+            tiling_layer,
+            floating_layer,
             tiling_enabled,
-            fullscreen: HashMap::new(),
+            fullscreen: None,
             handle,
             focus_stack: FocusStacks::default(),
             pending_buffers: Vec::new(),
             screencopy_sessions: Vec::new(),
+            output_stack: VecDeque::new(),
             backdrop_id: Id::new(),
             dirty: AtomicBool::new(false),
         }
@@ -217,7 +236,11 @@ impl Workspace {
         #[cfg(feature = "debug")]
         puffin::profile_function!();
 
-        self.fullscreen.retain(|_, w| w.alive());
+        // TODO: `Option::take_if` once stabilitized
+        if self.fullscreen.as_ref().is_some_and(|w| !w.alive()) {
+            let _ = self.fullscreen.take();
+        };
+
         self.floating_layer.refresh();
         self.tiling_layer.refresh();
     }
@@ -233,15 +256,15 @@ impl Workspace {
         self.tiling_layer.animations_going()
             || self
                 .fullscreen
-                .values()
-                .any(|f| f.start_at.is_some() || f.ended_at.is_some())
+                .as_ref()
+                .is_some_and(|f| f.start_at.is_some() || f.ended_at.is_some())
             || self.dirty.swap(false, Ordering::SeqCst)
     }
 
     pub fn update_animations(&mut self) -> HashMap<ClientId, Client> {
         let mut clients = HashMap::new();
 
-        for f in self.fullscreen.values_mut() {
+        if let Some(f) = self.fullscreen.as_mut() {
             if let Some(start) = f.start_at.as_ref() {
                 let duration_since = Instant::now().duration_since(*start);
                 if duration_since > FULLSCREEN_ANIMATION_DURATION {
@@ -252,36 +275,32 @@ impl Workspace {
                     if let Some(signal) = f.animation_signal.take() {
                         signal.store(true, Ordering::SeqCst);
                         if let Some(client) =
-                            f.window.wl_surface().as_ref().and_then(Resource::client)
+                            f.surface.wl_surface().as_ref().and_then(Resource::client)
                         {
                             clients.insert(client.id(), client);
                         }
                     }
                 }
             }
-        }
 
-        let len = self.fullscreen.len();
-        self.fullscreen.retain(|_, f| match f.ended_at {
-            None => true,
-            Some(instant) => {
-                let duration_since = Instant::now().duration_since(instant);
+            if let Some(end) = f.ended_at {
+                let duration_since = Instant::now().duration_since(end);
                 if duration_since * 2 > FULLSCREEN_ANIMATION_DURATION {
                     if let Some(signal) = f.animation_signal.take() {
                         signal.store(true, Ordering::SeqCst);
                         if let Some(client) =
-                            f.window.wl_surface().as_ref().and_then(Resource::client)
+                            f.surface.wl_surface().as_ref().and_then(Resource::client)
                         {
                             clients.insert(client.id(), client);
                         }
                     }
                 }
 
-                duration_since < FULLSCREEN_ANIMATION_DURATION
+                if duration_since >= FULLSCREEN_ANIMATION_DURATION {
+                    let _ = self.fullscreen.take();
+                    self.dirty.store(true, Ordering::SeqCst);
+                }
             }
-        });
-        if len != self.fullscreen.len() {
-            self.dirty.store(true, Ordering::SeqCst);
         }
 
         clients.extend(self.tiling_layer.update_animation_state());
@@ -299,35 +318,44 @@ impl Workspace {
         }
     }
 
-    pub fn map_output(&mut self, output: &Output, position: Point<i32, Logical>) {
-        self.tiling_layer.map_output(output, position);
-        self.floating_layer.map_output(output, position);
+    pub fn output(&self) -> &Output {
+        &self.output
     }
 
-    pub fn unmap_output(
+    pub fn set_output(
         &mut self,
         output: &Output,
         toplevel_info: &mut ToplevelInfoState<State, CosmicSurface>,
     ) {
-        if let Some(dead_output_fullscreen) = self.fullscreen.remove(output) {
-            self.unfullscreen_request(&dead_output_fullscreen.window.surface());
+        self.tiling_layer.set_output(output);
+        self.floating_layer.set_output(output);
+        for mapped in self.mapped() {
+            for (surface, _) in mapped.windows() {
+                toplevel_info.toplevel_leave_output(&surface, &self.output);
+                toplevel_info.toplevel_enter_output(&surface, output);
+            }
         }
-        self.tiling_layer.unmap_output(output, toplevel_info);
-        self.floating_layer.unmap_output(output, toplevel_info);
-        self.refresh();
+        self.output = output.clone();
     }
 
     pub fn unmap(&mut self, mapped: &CosmicMapped) -> Option<ManagedState> {
-        let was_floating = self.floating_layer.unmap(&mapped);
-        let was_tiling = self.tiling_layer.unmap(&mapped).is_some();
-        if was_floating || was_tiling {
-            assert!(was_floating != was_tiling);
+        let was_fullscreen = self
+            .fullscreen
+            .as_ref()
+            .filter(|f| f.ended_at.is_none())
+            .map(|f| mapped.windows().any(|(w, _)| w == f.surface))
+            .unwrap_or(false)
+            .then(|| self.fullscreen.take().unwrap());
+
+        if mapped.maximized_state.lock().unwrap().is_some() {
+            // If surface is maximized then unmaximize it, so it is assigned to only one layer
+            let _ = self.unmaximize_request(&mapped.active_window());
         }
 
-        let was_maximized = mapped.is_maximized(true);
-        let was_fullscreen = mapped.is_fullscreen(true);
-        if was_maximized || was_fullscreen {
-            self.unmaximize_request(&mapped.active_window());
+        let was_floating = self.floating_layer.unmap(&mapped);
+        let was_tiling = self.tiling_layer.unmap(&mapped);
+        if was_floating || was_tiling {
+            assert!(was_floating != was_tiling);
         }
 
         self.focus_stack
@@ -337,12 +365,12 @@ impl Workspace {
         if was_floating {
             Some(ManagedState {
                 layer: ManagedLayer::Floating,
-                was_fullscreen: (was_fullscreen || was_maximized).then_some(was_fullscreen),
+                was_fullscreen,
             })
         } else if was_tiling {
             Some(ManagedState {
                 layer: ManagedLayer::Tiling,
-                was_fullscreen: (was_fullscreen || was_maximized).then_some(was_fullscreen),
+                was_fullscreen,
             })
         } else {
             None
@@ -366,140 +394,103 @@ impl Workspace {
             })
     }
 
-    pub fn outputs_for_element(&self, elem: &CosmicMapped) -> impl Iterator<Item = Output> {
-        self.floating_layer
-            .space
-            .outputs_for_element(elem)
-            .into_iter()
-            .chain(self.tiling_layer.output_for_element(elem).cloned())
-    }
-
-    pub fn output_under(&self, point: Point<i32, Logical>) -> Option<&Output> {
-        let space = &self.floating_layer.space;
-        space.outputs().find(|o| {
-            let internal_output_geo = space.output_geometry(o).unwrap();
-            let external_output_geo = o.geometry();
-            internal_output_geo.contains(point - external_output_geo.loc + internal_output_geo.loc)
-        })
-    }
-
     pub fn element_under(
         &mut self,
-        location: Point<f64, Logical>,
+        location: Point<f64, Global>,
         overview: OverviewMode,
-    ) -> Option<(PointerFocusTarget, Point<i32, Logical>)> {
+    ) -> Option<(PointerFocusTarget, Point<i32, Global>)> {
+        let location = location.to_local(&self.output);
         self.floating_layer
             .space
-            .element_under(location)
-            .map(|(mapped, p)| (mapped.clone().into(), p))
+            .element_under(location.as_logical())
+            .map(|(mapped, p)| (mapped.clone().into(), p.as_local()))
             .or_else(|| self.tiling_layer.element_under(location, overview))
+            .map(|(m, p)| (m, p.to_global(&self.output)))
     }
 
-    pub fn element_geometry(&self, elem: &CosmicMapped) -> Option<Rectangle<i32, Logical>> {
-        let space = &self.floating_layer.space;
-        let outputs = space.outputs().collect::<Vec<_>>();
-        let offset = if outputs.len() == 1
-            && space.output_geometry(&outputs[0]).unwrap().loc == Point::from((0, 0))
-        {
-            outputs[0].geometry().loc
-        } else {
-            (0, 0).into()
-        };
-
+    pub fn element_geometry(&self, elem: &CosmicMapped) -> Option<Rectangle<i32, Local>> {
         self.floating_layer
-            .space
             .element_geometry(elem)
             .or_else(|| self.tiling_layer.element_geometry(elem))
-            .map(|mut geo| {
-                geo.loc += offset;
-                geo
-            })
     }
 
-    pub fn recalculate(&mut self, output: &Output) {
-        if let Some(f) = self.fullscreen.get(output) {
-            if !f.exclusive {
-                f.window
-                    .set_geometry(layer_map_for_output(output).non_exclusive_zone());
-            }
-        }
-        self.tiling_layer.recalculate(output);
+    pub fn recalculate(&mut self) {
+        self.tiling_layer.recalculate();
+        self.floating_layer.refresh();
     }
 
-    pub fn maximize_request(
-        &mut self,
-        window: &CosmicSurface,
-        output: &Output,
-        evlh: LoopHandle<'static, crate::state::State>,
-    ) {
-        if self.fullscreen.contains_key(output) {
+    pub fn maximize_request(&mut self, window: &CosmicSurface) {
+        if self.fullscreen.is_some() {
             return;
         }
 
-        self.floating_layer.maximize_request(window);
-
-        window.set_fullscreen(false);
-        window.set_maximized(true);
-        self.set_fullscreen(window, output, false, evlh)
+        if let Some(elem) = self.element_for_surface(window).cloned() {
+            let mut state = elem.maximized_state.lock().unwrap();
+            if state.is_none() {
+                *state = Some(MaximizedState {
+                    original_geometry: self.element_geometry(&elem).unwrap(),
+                    original_layer: if self.is_floating(&elem) {
+                        ManagedLayer::Floating
+                    } else {
+                        ManagedLayer::Tiling
+                    },
+                });
+                std::mem::drop(state);
+                self.floating_layer.map_maximized(elem);
+            }
+        }
     }
 
     pub fn unmaximize_request(&mut self, window: &CosmicSurface) -> Option<Size<i32, Logical>> {
-        if self
-            .fullscreen
-            .values()
-            .any(|f| &f.window.surface() == window)
-        {
-            self.unfullscreen_request(window)
-        } else {
-            None
+        if let Some(elem) = self.element_for_surface(window).cloned() {
+            let mut state = elem.maximized_state.lock().unwrap();
+            if let Some(state) = state.take() {
+                match state.original_layer {
+                    ManagedLayer::Tiling => {
+                        // should still be mapped in tiling
+                        self.floating_layer.unmap(&elem);
+                        elem.output_enter(&self.output, elem.bbox());
+                        elem.set_maximized(false);
+                        elem.set_geometry(state.original_geometry.to_global(&self.output));
+                        elem.configure();
+                        self.tiling_layer.recalculate();
+                        return self
+                            .tiling_layer
+                            .element_geometry(&elem)
+                            .map(|geo| geo.size.as_logical());
+                    }
+                    ManagedLayer::Floating => {
+                        elem.set_maximized(false);
+                        self.floating_layer.map_internal(
+                            elem.clone(),
+                            Some(state.original_geometry.loc),
+                            Some(state.original_geometry.size.as_logical()),
+                        );
+                        return Some(state.original_geometry.size.as_logical());
+                    }
+                }
+            }
         }
+        None
     }
 
     pub fn fullscreen_request(
         &mut self,
         window: &CosmicSurface,
-        output: &Output,
-        evlh: LoopHandle<'static, crate::state::State>,
+        previously: Option<(ManagedLayer, WorkspaceHandle)>,
     ) {
         if self
             .fullscreen
-            .get(output)
-            .map(|f| &f.window.surface() != window)
-            .unwrap_or(false)
+            .as_ref()
+            .filter(|f| f.ended_at.is_none())
+            .is_some()
         {
             return;
         }
 
-        if !window.is_maximized(true) {
-            self.floating_layer.maximize_request(window);
-        }
-
-        window.set_maximized(false);
         window.set_fullscreen(true);
-        self.set_fullscreen(window, output, true, evlh)
-    }
-
-    fn set_fullscreen<'a>(
-        &mut self,
-        window: &'a CosmicSurface,
-        output: &Output,
-        exclusive: bool,
-        evlh: LoopHandle<'static, crate::state::State>,
-    ) {
-        if let Some(mapped) = self
-            .mapped()
-            .find(|m| m.windows().any(|(w, _)| &w == window))
-        {
-            mapped.set_active(window);
-        }
-
-        let window = CosmicWindow::new(window.clone(), evlh);
-        let geo = if exclusive {
-            output.geometry()
-        } else {
-            layer_map_for_output(output).non_exclusive_zone()
-        };
-        let original_size = window.geometry().size;
+        let geo = self.output.geometry();
+        let original_geometry = window.geometry().as_global();
         let signal = if let Some(surface) = window.wl_surface() {
             let signal = Arc::new(AtomicBool::new(false));
             add_blocker(
@@ -513,35 +504,35 @@ impl Workspace {
             None
         };
         window.set_geometry(geo);
-        window.output_enter(output, Rectangle::from_loc_and_size((0, 0), geo.size));
-        window.surface().send_configure();
+        window.send_configure();
 
-        self.fullscreen.insert(
-            output.clone(),
-            FullscreenSurface {
-                window: window.clone(),
-                exclusive,
-                original_size,
-                start_at: Some(Instant::now()),
-                ended_at: None,
-                animation_signal: signal,
-            },
-        );
+        self.fullscreen = Some(FullscreenSurface {
+            surface: window.clone(),
+            previously,
+            original_geometry,
+            start_at: Some(Instant::now()),
+            ended_at: None,
+            animation_signal: signal,
+        });
     }
 
-    pub fn unfullscreen_request(&mut self, window: &CosmicSurface) -> Option<Size<i32, Logical>> {
-        if let Some((output, f)) = self
+    #[must_use]
+    pub fn unfullscreen_request(
+        &mut self,
+        window: &CosmicSurface,
+    ) -> Option<(ManagedLayer, WorkspaceHandle)> {
+        if let Some(f) = self
             .fullscreen
-            .iter_mut()
-            .find(|(_, f)| &f.window.surface() == window)
+            .as_mut()
+            .filter(|f| &f.surface == window && f.ended_at.is_none())
         {
-            f.window.output_leave(output);
-            window.set_maximized(false);
             window.set_fullscreen(false);
-            let result = self.floating_layer.unmaximize_request(window);
+            window.set_geometry(f.original_geometry);
+
             self.floating_layer.refresh();
-            self.tiling_layer.recalculate(output);
+            self.tiling_layer.recalculate();
             self.tiling_layer.refresh();
+
             let signal = if let Some(surface) = window.wl_surface() {
                 let signal = Arc::new(AtomicBool::new(false));
                 add_blocker(
@@ -574,90 +565,36 @@ impl Workspace {
                 }
             }
 
-            result
+            f.previously
         } else {
             None
         }
     }
 
-    pub fn remove_fullscreen(&mut self, output: &Output) {
-        if let Some(FullscreenSurface {
-            window,
-            ended_at,
-            start_at,
-            animation_signal,
-            ..
-        }) = self.fullscreen.get_mut(output)
-        {
-            window.output_leave(output);
-            let surface = window.surface();
-            surface.set_maximized(false);
-            surface.set_fullscreen(false);
-            self.floating_layer.unmaximize_request(&surface);
-            self.floating_layer.refresh();
-            self.tiling_layer.recalculate(output);
-            self.tiling_layer.refresh();
-            let signal = if let Some(surface) = surface.wl_surface() {
-                let signal = Arc::new(AtomicBool::new(false));
-                add_blocker(
-                    &surface,
-                    FullscreenBlocker {
-                        signal: signal.clone(),
-                    },
-                );
-                Some(signal)
-            } else {
-                None
-            };
-            surface.send_configure();
-
-            *ended_at = Some(
-                Instant::now()
-                    - (FULLSCREEN_ANIMATION_DURATION
-                        - start_at
-                            .take()
-                            .map(|earlier| {
-                                Instant::now()
-                                    .duration_since(earlier)
-                                    .min(FULLSCREEN_ANIMATION_DURATION)
-                            })
-                            .unwrap_or(FULLSCREEN_ANIMATION_DURATION)),
-            );
-            if let Some(new_signal) = signal {
-                if let Some(old_signal) = animation_signal.replace(new_signal) {
-                    old_signal.store(true, Ordering::SeqCst);
-                }
-            }
+    #[must_use]
+    pub fn remove_fullscreen(&mut self) -> Option<(CosmicMapped, ManagedLayer, WorkspaceHandle)> {
+        if let Some(surface) = self.fullscreen.as_ref().map(|f| f.surface.clone()) {
+            self.unfullscreen_request(&surface)
+                .map(|(l, h)| (self.element_for_surface(&surface).unwrap().clone(), l, h))
+        } else {
+            None
         }
     }
 
-    pub fn maximize_toggle(
-        &mut self,
-        window: &CosmicSurface,
-        output: &Output,
-        evlh: LoopHandle<'static, crate::state::State>,
-    ) {
-        if self.fullscreen.contains_key(output) {
+    pub fn maximize_toggle(&mut self, window: &CosmicSurface) {
+        if window.is_maximized(true) {
             self.unmaximize_request(window);
         } else {
-            self.maximize_request(window, output, evlh);
+            self.maximize_request(window);
         }
     }
 
-    pub fn get_fullscreen(&self, output: &Output) -> Option<&CosmicWindow> {
+    pub fn get_fullscreen(&self) -> Option<&CosmicSurface> {
         self.fullscreen
-            .get(output)
-            .filter(|f| f.alive() && f.exclusive)
+            .as_ref()
+            .filter(|f| f.alive())
             .filter(|f| f.ended_at.is_none() && f.start_at.is_none())
-            .map(|f| &f.window)
-    }
-
-    pub fn get_maximized(&self, output: &Output) -> Option<&CosmicWindow> {
-        self.fullscreen
-            .get(output)
-            .filter(|f| f.alive() && !f.exclusive)
-            .filter(|f| f.ended_at.is_none() && f.start_at.is_none())
-            .map(|f| &f.window)
+            .map(|f| &f.surface)
     }
 
     pub fn resize_request(
@@ -690,8 +627,8 @@ impl Workspace {
         if let Some(toplevel) = focused.toplevel() {
             if self
                 .fullscreen
-                .values()
-                .any(|f| f.window.surface().wl_surface().as_ref() == Some(&toplevel))
+                .as_ref()
+                .is_some_and(|f| f.surface.wl_surface().as_ref() == Some(&toplevel))
             {
                 return false;
             }
@@ -713,15 +650,27 @@ impl Workspace {
         indicator_thickness: u8,
     ) -> Option<MoveGrab> {
         let pointer = seat.get_pointer().unwrap();
-        let pos = pointer.current_location();
+        let pos = pointer.current_location().as_global();
+
+        if self
+            .fullscreen
+            .as_ref()
+            .is_some_and(|f| &f.surface == window)
+        {
+            let _ = self.remove_fullscreen(); // We are moving this window, we don't need to send it back to it's original workspace
+        }
 
         let mapped = self.element_for_surface(&window)?.clone();
-        let mut initial_window_location = self.element_geometry(&mapped).unwrap().loc;
+        let mut initial_window_location = self
+            .element_geometry(&mapped)
+            .unwrap()
+            .loc
+            .to_global(&self.output);
 
-        if mapped.is_fullscreen(true) || mapped.is_maximized(true) {
+        if mapped.maximized_state.lock().unwrap().is_some() {
             // If surface is maximized then unmaximize it
             let new_size = self.unmaximize_request(window);
-            let ratio = pos.x / output.geometry().size.w as f64;
+            let ratio = pos.to_local(&self.output).x / output.geometry().size.w as f64;
 
             initial_window_location = new_size
                 .map(|size| (pos.x - (size.w as f64 * ratio), pos.y).into())
@@ -754,7 +703,7 @@ impl Workspace {
                 .into_iter()
             {
                 self.tiling_layer.unmap(&window);
-                self.floating_layer.map(window, seat, None);
+                self.floating_layer.map(window, None);
             }
             self.tiling_enabled = false;
         } else {
@@ -768,7 +717,7 @@ impl Workspace {
             {
                 self.floating_layer.unmap(&window);
                 self.tiling_layer
-                    .map(window, seat, focus_stack.iter(), None)
+                    .map(window, Some(focus_stack.iter()), None)
             }
             self.tiling_enabled = true;
         }
@@ -779,12 +728,12 @@ impl Workspace {
             if let Some(window) = self.focus_stack.get(seat).iter().next().cloned() {
                 if self.tiling_layer.mapped().any(|(_, m, _)| m == &window) {
                     self.tiling_layer.unmap(&window);
-                    self.floating_layer.map(window, seat, None);
+                    self.floating_layer.map(window, None);
                 } else if self.floating_layer.mapped().any(|w| w == &window) {
                     let focus_stack = self.focus_stack.get(seat);
                     self.floating_layer.unmap(&window);
                     self.tiling_layer
-                        .map(window, seat, focus_stack.iter(), None)
+                        .map(window, Some(focus_stack.iter()), None)
                 }
             }
         }
@@ -808,37 +757,23 @@ impl Workspace {
 
     pub fn is_fullscreen(&self, mapped: &CosmicMapped) -> bool {
         self.fullscreen
-            .values()
-            .any(|f| f.exclusive && f.window.surface() == mapped.active_window())
-    }
-
-    pub fn is_maximized(&self, mapped: &CosmicMapped) -> bool {
-        self.fullscreen
-            .values()
-            .any(|f| !f.exclusive && f.window.surface() == mapped.active_window())
+            .as_ref()
+            .is_some_and(|f| f.surface == mapped.active_window())
     }
 
     pub fn is_floating(&self, mapped: &CosmicMapped) -> bool {
-        !self
-            .fullscreen
-            .values()
-            .any(|f| f.window.surface() == mapped.active_window())
-            && self.floating_layer.mapped().any(|m| m == mapped)
+        !self.is_fullscreen(mapped) && self.floating_layer.mapped().any(|m| m == mapped)
     }
 
     pub fn is_tiled(&self, mapped: &CosmicMapped) -> bool {
-        !self
-            .fullscreen
-            .values()
-            .any(|f| f.window.surface() == mapped.active_window())
-            && self.tiling_layer.mapped().any(|(_, m, _)| m == mapped)
+        !self.is_fullscreen(mapped) && self.tiling_layer.mapped().any(|(_, m, _)| m == mapped)
     }
 
     pub fn node_desc(&self, focus: KeyboardFocusTarget) -> Option<NodeDesc> {
         match focus {
             KeyboardFocusTarget::Element(mapped) => {
-                self.tiling_layer.mapped().find_map(|(output, m, _)| {
-                    (m == &mapped).then_some(output.clone()).and_then(|output| {
+                self.tiling_layer.mapped().find_map(|(_, m, _)| {
+                    if m == &mapped {
                         mapped
                             .tiling_node_id
                             .lock()
@@ -846,7 +781,6 @@ impl Workspace {
                             .clone()
                             .map(|node_id| NodeDesc {
                                 handle: self.handle.clone(),
-                                output: output.downgrade(),
                                 node: node_id,
                                 stack_window: if mapped
                                     .stack_ref()
@@ -858,12 +792,13 @@ impl Workspace {
                                     None
                                 },
                             })
-                    })
+                    } else {
+                        None
+                    }
                 })
             }
-            KeyboardFocusTarget::Group(WindowGroup { output, node, .. }) => Some(NodeDesc {
+            KeyboardFocusTarget::Group(WindowGroup { node, .. }) => Some(NodeDesc {
                 handle: self.handle.clone(),
-                output,
                 node,
                 stack_window: None,
             }),
@@ -877,7 +812,7 @@ impl Workspace {
         seat: &Seat<State>,
         swap_desc: Option<NodeDesc>,
     ) -> FocusResult {
-        if self.fullscreen.contains_key(&seat.active_output()) {
+        if self.fullscreen.is_some() {
             return FocusResult::None;
         }
 
@@ -895,25 +830,25 @@ impl Workspace {
         direction: Direction,
         seat: &Seat<State>,
     ) -> MoveResult {
-        if let Some(f) = self.fullscreen.get(&seat.active_output()) {
-            MoveResult::MoveFurther(KeyboardFocusTarget::Fullscreen(f.window.clone()))
+        if let Some(f) = self.fullscreen.as_ref() {
+            MoveResult::MoveFurther(KeyboardFocusTarget::Fullscreen(f.surface.clone()))
         } else {
             self.floating_layer
-                .move_current_element(direction, seat)
+                .move_current_element(direction, seat, self.tiling_layer.theme.clone())
                 .or_else(|| self.tiling_layer.move_current_node(direction, seat))
         }
     }
 
-    pub fn render_output<'a, R>(
+    pub fn render<'a, R>(
         &self,
         renderer: &mut R,
-        output: &Output,
         override_redirect_windows: &[X11Surface],
         xwm_state: Option<&'a mut XWaylandState>,
         draw_focus_indicator: Option<&Seat<State>>,
         overview: (OverviewMode, Option<(SwapIndicator, Option<&Tree<Data>>)>),
         resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
         indicator_thickness: u8,
+        theme: &CosmicTheme,
     ) -> Result<
         (
             Vec<WorkspaceRenderElement<R>>,
@@ -935,20 +870,28 @@ impl Workspace {
         let mut window_elements = Vec::new();
         let mut popup_elements = Vec::new();
 
-        let output_scale = output.current_scale().fractional_scale();
-        let layer_map = layer_map_for_output(output);
-        let zone = layer_map.non_exclusive_zone();
+        let output_scale = self.output.current_scale().fractional_scale();
+        let zone = {
+            let layer_map = layer_map_for_output(&self.output);
+            layer_map.non_exclusive_zone().as_local()
+        };
 
         // OR windows above all
         popup_elements.extend(
             override_redirect_windows
                 .iter()
-                .filter(|or| (*or).geometry().intersection(output.geometry()).is_some())
+                .filter(|or| {
+                    (*or)
+                        .geometry()
+                        .as_global()
+                        .intersection(self.output.geometry())
+                        .is_some()
+                })
                 .flat_map(|or| {
                     AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
                         or,
                         renderer,
-                        (or.geometry().loc - output.geometry().loc)
+                        (or.geometry().loc - self.output.geometry().loc.as_logical())
                             .to_physical_precise_round(output_scale),
                         Scale::from(output_scale),
                         1.0,
@@ -956,32 +899,27 @@ impl Workspace {
                 }),
         );
 
-        if let Some(fullscreen) = self.fullscreen.get(output) {
+        if let Some(fullscreen) = self.fullscreen.as_ref() {
             // fullscreen window
-            let bbox = fullscreen.window.bbox();
+            let bbox = fullscreen.surface.bbox().as_local();
             let element_geo = Rectangle::from_loc_and_size(
-                self.element_for_surface(&fullscreen.window.surface())
+                self.element_for_surface(&fullscreen.surface)
                     .and_then(|elem| {
                         self.floating_layer
-                            .space
                             .element_geometry(elem)
                             .or_else(|| self.tiling_layer.element_geometry(elem))
                             .map(|mut geo| {
-                                geo.loc -= elem.geometry().loc;
+                                geo.loc -= elem.geometry().loc.as_local();
                                 geo
                             })
                     })
                     .unwrap_or(bbox)
                     .loc,
-                fullscreen.original_size,
+                fullscreen.original_geometry.size.as_local(),
             );
 
-            let mut full_geo = if fullscreen.exclusive {
-                Rectangle::from_loc_and_size((0, 0), output.geometry().size)
-            } else {
-                layer_map.non_exclusive_zone()
-            };
-
+            let mut full_geo =
+                Rectangle::from_loc_and_size((0, 0), self.output.geometry().size.as_local());
             if fullscreen.start_at.is_none() {
                 if bbox != full_geo {
                     if bbox.size.w < full_geo.size.w {
@@ -1027,14 +965,17 @@ impl Workspace {
                 (None, None) => (full_geo, 1.0),
             };
 
-            let render_loc = target_geo.loc.to_physical_precise_round(output_scale);
+            let render_loc = target_geo
+                .loc
+                .as_logical()
+                .to_physical_precise_round(output_scale);
             let scale = Scale {
                 x: target_geo.size.w as f64 / bbox.size.w as f64,
                 y: target_geo.size.h as f64 / bbox.size.h as f64,
             };
 
             let (w_elements, p_elements) = fullscreen
-                .window
+                .surface
                 .split_render_elements::<R, CosmicWindowRenderElement<R>>(
                     renderer,
                     render_loc,
@@ -1052,12 +993,12 @@ impl Workspace {
 
         if self
             .fullscreen
-            .get(output)
+            .as_ref()
             .map(|f| f.start_at.is_some() || f.ended_at.is_some())
             .unwrap_or(true)
         {
             let focused = draw_focus_indicator
-                .filter(|_| !self.fullscreen.contains_key(output))
+                .filter(|_| !self.fullscreen.is_some())
                 .and_then(|seat| self.focus_stack.get(seat).last().cloned());
 
             // floating surfaces
@@ -1078,13 +1019,13 @@ impl Workspace {
                 OverviewMode::None => 1.0,
             };
 
-            let (w_elements, p_elements) = self.floating_layer.render_output::<R>(
+            let (w_elements, p_elements) = self.floating_layer.render::<R>(
                 renderer,
-                output,
                 focused.as_ref(),
                 resize_indicator.clone(),
                 indicator_thickness,
                 alpha,
+                theme,
             );
             popup_elements.extend(p_elements.into_iter().map(WorkspaceRenderElement::from));
             window_elements.extend(w_elements.into_iter().map(WorkspaceRenderElement::from));
@@ -1102,14 +1043,14 @@ impl Workspace {
             };
 
             //tiling surfaces
-            let (w_elements, p_elements) = self.tiling_layer.render_output::<R>(
+            let (w_elements, p_elements) = self.tiling_layer.render::<R>(
                 renderer,
-                output,
                 draw_focus_indicator,
-                layer_map.non_exclusive_zone(),
+                zone,
                 overview,
                 resize_indicator,
                 indicator_thickness,
+                theme,
             )?;
             popup_elements.extend(p_elements.into_iter().map(WorkspaceRenderElement::from));
             window_elements.extend(w_elements.into_iter().map(WorkspaceRenderElement::from));
@@ -1131,7 +1072,7 @@ impl Workspace {
 
         if let Some(xwm) = xwm_state.and_then(|state| state.xwm.as_mut()) {
             if let Err(err) =
-                xwm.update_stacking_order_upwards(window_elements.iter().map(|e| e.id()))
+                xwm.update_stacking_order_upwards(window_elements.iter().rev().map(|e| e.id()))
             {
                 warn!(
                     wm_id = ?xwm.id(),

@@ -18,8 +18,9 @@ pub type StackHover = IcedElement<StackHoverInternal>;
 pub fn stack_hover(
     evlh: LoopHandle<'static, crate::state::State>,
     size: Size<i32, Logical>,
+    theme: cosmic::Theme,
 ) -> StackHover {
-    StackHover::new(StackHoverInternal, size, evlh)
+    StackHover::new(StackHoverInternal, size, evlh, theme)
 }
 
 pub struct StackHoverInternal;
