@@ -5,7 +5,7 @@ use crate::{
     shell::{focus::target::PointerFocusTarget, layout::Orientation},
     utils::prelude::*,
 };
-use id_tree::NodeId;
+use id_tree::{NodeId, Tree};
 use smithay::{
     backend::input::ButtonState,
     input::{
@@ -80,6 +80,8 @@ impl PointerTarget<State> for ResizeForkTarget {
                             button,
                             location,
                         },
+                        old_tree: None,
+                        accumulated_delta: 0.0,
                         last_loc: location,
                         node,
                         output,
@@ -116,6 +118,8 @@ impl PointerTarget<State> for ResizeForkTarget {
 pub struct ResizeForkGrab {
     start_data: PointerGrabStartData<State>,
     last_loc: Point<f64, Logical>,
+    old_tree: Option<Tree<Data>>,
+    accumulated_delta: f64,
     node: NodeId,
     output: WeakOutput,
     left_up_idx: usize,
@@ -140,12 +144,49 @@ impl PointerGrab<State> for ResizeForkGrab {
             let gaps = tiling_layer.gaps();
 
             let tree = &mut tiling_layer.queue.trees.back_mut().unwrap().0;
+            match &mut self.old_tree {
+                Some(old_tree) => {
+                    // it would be so nice to just `zip` here, but `zip` just returns `None` once either returns `None`.
+                    let mut iter_a = old_tree
+                        .root_node_id()
+                        .into_iter()
+                        .flat_map(|root_id| old_tree.traverse_pre_order_ids(root_id).unwrap());
+                    let mut iter_b = tree
+                        .root_node_id()
+                        .into_iter()
+                        .flat_map(|root_id| tree.traverse_pre_order_ids(root_id).unwrap());
+
+                    // so lets do it manually
+                    let mut equal = true;
+                    let mut a = iter_a.next();
+                    let mut b = iter_b.next();
+                    while a.is_some() || b.is_some() {
+                        equal = a == b;
+                        if !equal {
+                            break;
+                        }
+                        a = iter_a.next();
+                        b = iter_b.next();
+                    }
+
+                    if !equal {
+                        *old_tree = tree.copy_clone();
+                        self.accumulated_delta = 0.0;
+                    } else {
+                        *tree = old_tree.copy_clone();
+                    }
+                }
+                x @ None => {
+                    *x = Some(tree.copy_clone());
+                }
+            };
             if tree.get(&self.node).is_ok() {
                 let delta = match self.orientation {
                     Orientation::Vertical => delta.x,
                     Orientation::Horizontal => delta.y,
                 }
-                .round() as i32;
+                .round();
+                self.accumulated_delta += delta;
 
                 // check that we are still alive
                 let mut iter = tree
@@ -172,8 +213,9 @@ impl PointerGrab<State> for ResizeForkGrab {
                         };
 
                         let old_size = sizes[self.left_up_idx];
-                        sizes[self.left_up_idx] =
-                            (old_size + delta).max(if self.orientation == Orientation::Vertical {
+                        sizes[self.left_up_idx] = (old_size
+                            + self.accumulated_delta.round() as i32)
+                            .max(if self.orientation == Orientation::Vertical {
                                 360
                             } else {
                                 240
