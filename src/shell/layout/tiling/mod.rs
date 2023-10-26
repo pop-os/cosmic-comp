@@ -289,8 +289,11 @@ impl Data {
                         .round() as i32;
                 });
                 let sum: i32 = sizes.iter().sum();
-                if sum < new_length {
-                    *sizes.last_mut().unwrap() += new_length - sum;
+
+                // fix rounding issues
+                if sum != new_length {
+                    let diff = new_length - sum;
+                    *sizes.last_mut().unwrap() += diff;
                 }
                 *last_geometry = geo;
             }
