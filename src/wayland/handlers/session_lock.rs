@@ -7,7 +7,7 @@ use crate::{
 use smithay::{
     delegate_session_lock,
     output::Output,
-    reexports::wayland_server::protocol::wl_output::WlOutput,
+    reexports::wayland_server::{protocol::wl_output::WlOutput, Resource},
     utils::Size,
     wayland::session_lock::{
         LockSurface, SessionLockHandler, SessionLockManagerState, SessionLocker,
@@ -21,12 +21,24 @@ impl SessionLockHandler for State {
     }
 
     fn lock(&mut self, locker: SessionLocker) {
-        if self.common.session_lock.is_none() {
-            locker.lock();
-            self.common.session_lock = Some(SessionLock {
-                surfaces: HashMap::new(),
-            });
+        // Reject lock if sesion lock exists and is still valid
+        if let Some(session_lock) = self.common.session_lock.as_ref() {
+            if self
+                .common
+                .display_handle
+                .get_client(session_lock.ext_session_lock.id())
+                .is_ok()
+            {
+                return;
+            }
         }
+
+        let ext_session_lock = locker.ext_session_lock().clone();
+        locker.lock();
+        self.common.session_lock = Some(SessionLock {
+            ext_session_lock,
+            surfaces: HashMap::new(),
+        });
     }
 
     fn unlock(&mut self) {
