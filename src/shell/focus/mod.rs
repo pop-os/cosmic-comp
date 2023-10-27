@@ -8,6 +8,7 @@ use indexmap::IndexSet;
 use smithay::{
     desktop::{layer_map_for_output, PopupUngrabStrategy},
     input::Seat,
+    output::Output,
     utils::{IsAlive, Serial, SERIAL_COUNTER},
     wayland::seat::WaylandFocus,
 };
@@ -217,55 +218,11 @@ impl Common {
 
             if let Some(target) = last_known_focus {
                 if target.alive() {
-                    match target {
-                        KeyboardFocusTarget::Element(mapped) => {
-                            let workspace = state.common.shell.active_space(&output);
-                            let focus_stack = workspace.focus_stack.get(&seat);
-                            if focus_stack.last().map(|m| m == &mapped).unwrap_or(false)
-                                && workspace.get_fullscreen().is_none()
-                            {
-                                continue; // Focus is valid
-                            } else {
-                                trace!("Wrong Window, focus fixup");
-                            }
-                        }
-                        KeyboardFocusTarget::LayerSurface(layer) => {
-                            if layer_map_for_output(&output).layers().any(|l| l == &layer) {
-                                continue; // Focus is valid
-                            }
-                        }
-                        KeyboardFocusTarget::Group(WindowGroup { node, .. }) => {
-                            if state
-                                .common
-                                .shell
-                                .workspaces
-                                .active(&output)
-                                .1
-                                .tiling_layer
-                                .has_node(&node)
-                            {
-                                continue; // Focus is valid,
-                            }
-                        }
-                        KeyboardFocusTarget::Fullscreen(window) => {
-                            let workspace = state.common.shell.active_space(&output);
-                            let focus_stack = workspace.focus_stack.get(&seat);
-
-                            if focus_stack
-                                .last()
-                                .map(|m| m.has_active_window(&window))
-                                .unwrap_or(false)
-                                && workspace.get_fullscreen().is_some()
-                            {
-                                continue; // Focus is valid
-                            } else {
-                                trace!("Wrong Window, focus fixup");
-                            }
-                        }
-                        KeyboardFocusTarget::Popup(_) => {
-                            continue; // Focus is valid
-                        }
-                    };
+                    if focus_target_is_valid(state, &seat, &output, target) {
+                        continue; // Focus is valid
+                    } else {
+                        trace!("Wrong Window, focus fixup");
+                    }
                 } else {
                     if let KeyboardFocusTarget::Popup(_) = target {
                         if let Some(popup_grab) = seat
@@ -319,24 +276,7 @@ impl Common {
                 }
 
                 // update keyboard focus
-                let target = state
-                    .common
-                    .shell
-                    .active_space(&output)
-                    .get_fullscreen()
-                    .cloned()
-                    .map(KeyboardFocusTarget::Fullscreen)
-                    .or_else(|| {
-                        state
-                            .common
-                            .shell
-                            .active_space(&output)
-                            .focus_stack
-                            .get(&seat)
-                            .last()
-                            .cloned()
-                            .map(KeyboardFocusTarget::from)
-                    });
+                let target = update_focus_target(state, &seat, &output);
                 if let Some(keyboard) = seat.get_keyboard() {
                     debug!("Restoring focus to {:?}", target.as_ref());
                     keyboard.set_focus(state, target.clone(), SERIAL_COUNTER.next_serial());
@@ -347,5 +287,74 @@ impl Common {
 
         let seats = state.common.seats().cloned().collect::<Vec<_>>();
         state.common.shell.update_active(seats.iter())
+    }
+}
+
+fn focus_target_is_valid(
+    state: &mut State,
+    seat: &Seat<State>,
+    output: &Output,
+    target: KeyboardFocusTarget,
+) -> bool {
+    if state.common.session_lock.is_some() {
+        return matches!(target, KeyboardFocusTarget::LockSurface(_));
+    }
+
+    match target {
+        KeyboardFocusTarget::Element(mapped) => {
+            let workspace = state.common.shell.active_space(&output);
+            let focus_stack = workspace.focus_stack.get(&seat);
+            focus_stack.last().map(|m| m == &mapped).unwrap_or(false)
+                && workspace.get_fullscreen().is_none()
+        }
+        KeyboardFocusTarget::LayerSurface(layer) => {
+            layer_map_for_output(&output).layers().any(|l| l == &layer)
+        }
+        KeyboardFocusTarget::Group(WindowGroup { node, .. }) => state
+            .common
+            .shell
+            .workspaces
+            .active(&output)
+            .1
+            .tiling_layer
+            .has_node(&node),
+        KeyboardFocusTarget::Fullscreen(window) => {
+            let workspace = state.common.shell.active_space(&output);
+            let focus_stack = workspace.focus_stack.get(&seat);
+
+            focus_stack
+                .last()
+                .map(|m| m.has_active_window(&window))
+                .unwrap_or(false)
+                && workspace.get_fullscreen().is_some()
+        }
+        KeyboardFocusTarget::Popup(_) => true,
+        KeyboardFocusTarget::LockSurface(_) => false,
+    }
+}
+
+fn update_focus_target(
+    state: &mut State,
+    seat: &Seat<State>,
+    output: &Output,
+) -> Option<KeyboardFocusTarget> {
+    if let Some(session_lock) = &state.common.session_lock {
+        session_lock
+            .surfaces
+            .get(output)
+            .cloned()
+            .map(KeyboardFocusTarget::from)
+    } else if let Some(surface) = state.common.shell.active_space(&output).get_fullscreen() {
+        Some(KeyboardFocusTarget::Fullscreen(surface.clone()))
+    } else {
+        state
+            .common
+            .shell
+            .active_space(&output)
+            .focus_stack
+            .get(&seat)
+            .last()
+            .cloned()
+            .map(KeyboardFocusTarget::from)
     }
 }
