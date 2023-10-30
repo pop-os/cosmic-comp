@@ -1,6 +1,5 @@
 use calloop::LoopHandle;
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     sync::atomic::{AtomicBool, Ordering},
@@ -8,6 +7,7 @@ use std::{
 };
 use wayland_backend::server::ClientId;
 
+use cosmic_comp_config::workspace::{WorkspaceAmount, WorkspaceMode};
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State as WState;
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
@@ -35,7 +35,7 @@ use smithay::{
 };
 
 use crate::{
-    config::{Config, KeyModifiers, KeyPattern, WorkspaceMode},
+    config::{Config, KeyModifiers, KeyPattern},
     state::client_has_security_context,
     utils::prelude::*,
     wayland::protocols::{
@@ -187,12 +187,6 @@ pub struct WorkspaceSet {
     output: Output,
     theme: cosmic::Theme,
     pub(crate) workspaces: Vec<Workspace>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum WorkspaceAmount {
-    Dynamic,
-    Static(u8),
 }
 
 fn create_workspace(
@@ -466,8 +460,8 @@ impl Workspaces {
         Workspaces {
             sets: IndexMap::new(),
             backup_set: None,
-            amount: config.static_conf.workspace_amount,
-            mode: config.static_conf.workspace_mode,
+            amount: config.workspace.workspace_amount,
+            mode: config.workspace.workspace_mode,
             tiling_enabled: config.static_conf.tiling_enabled,
             theme,
         }
@@ -592,11 +586,16 @@ impl Workspaces {
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
         toplevel_info_state: &mut ToplevelInfoState<State, CosmicSurface>,
     ) {
+        let old_mode = self.mode;
+
+        self.mode = config.workspace.workspace_mode;
+        self.amount = config.workspace.workspace_amount;
+
         if self.sets.len() <= 1 {
             return;
         }
 
-        match (self.mode, config.static_conf.workspace_mode) {
+        match (old_mode, self.mode) {
             (WorkspaceMode::Global, WorkspaceMode::OutputBound) => {
                 // We basically just unlink the existing spaces, so nothing needs to be updated
             }

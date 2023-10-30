@@ -2,7 +2,7 @@
 
 use crate::{
     backend::render::cursor::CursorState,
-    config::{xkb_config_to_wl, Action, Config, KeyPattern, WorkspaceLayout},
+    config::{xkb_config_to_wl, Action, Config, KeyPattern},
     shell::{
         focus::{target::PointerFocusTarget, FocusDirection},
         grabs::{ResizeEdge, SeatMoveGrabState},
@@ -18,6 +18,7 @@ use crate::{
     wayland::{handlers::screencopy::ScreencopySessions, protocols::screencopy::Session},
 };
 use calloop::{timer::Timer, RegistrationToken};
+use cosmic_comp_config::workspace::WorkspaceLayout;
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
 #[allow(deprecated)]
 use smithay::{
@@ -1518,7 +1519,7 @@ impl State {
 
                 match result {
                     FocusResult::None => {
-                        match (focus, self.common.config.static_conf.workspace_layout) {
+                        match (focus, self.common.config.workspace.workspace_layout) {
                             (FocusDirection::Left, WorkspaceLayout::Horizontal)
                             | (FocusDirection::Up, WorkspaceLayout::Vertical) => self
                                 .handle_action(
@@ -1574,7 +1575,7 @@ impl State {
 
                 match workspace.move_current_element(direction, seat) {
                     MoveResult::MoveFurther(_move_further) => {
-                        match (direction, self.common.config.static_conf.workspace_layout) {
+                        match (direction, self.common.config.workspace.workspace_layout) {
                             (Direction::Left, WorkspaceLayout::Horizontal)
                             | (Direction::Up, WorkspaceLayout::Vertical) => self.handle_action(
                                 Action::MoveToPreviousWorkspace,

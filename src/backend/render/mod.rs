@@ -11,7 +11,6 @@ use std::{
 #[cfg(feature = "debug")]
 use crate::debug::{fps_ui, profiler_ui};
 use crate::{
-    config::WorkspaceLayout,
     shell::{
         focus::target::WindowGroup, grabs::SeatMoveGrabState, layout::tiling::ANIMATION_DURATION,
         CosmicMapped, CosmicMappedRenderElement, OverviewMode, Trigger, WorkspaceRenderElement,
@@ -32,6 +31,7 @@ use crate::{
     },
 };
 
+use cosmic_comp_config::workspace::WorkspaceLayout;
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::FailureReason;
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
@@ -557,7 +557,7 @@ where
 
     let offset = match previous.as_ref() {
         Some((previous, previous_idx, start)) => {
-            let layout = state.config.static_conf.workspace_layout;
+            let layout = state.config.workspace.workspace_layout;
 
             let workspace = state
                 .shell
