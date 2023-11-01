@@ -748,15 +748,10 @@ impl State {
                     }
                     #[cfg(feature = "debug")]
                     if self.common.seats().position(|x| x == &seat).unwrap() == 0 {
-                        let location = if let Some(output) = self.common.shell.outputs.first() {
-                            self.common
-                                .shell
-                                .map_global_to_space(position, output)
-                                .to_i32_round()
-                        } else {
-                            position.to_i32_round()
-                        };
-                        self.common.egui.state.handle_pointer_motion(location);
+                        if let Some(output) = self.common.shell.outputs().next() {
+                            let location = position.to_local(&output).to_i32_round().as_logical();
+                            self.common.egui.state.handle_pointer_motion(location);
+                        }
                     }
                 }
             }
@@ -808,15 +803,10 @@ impl State {
                     ptr.frame(self);
                     #[cfg(feature = "debug")]
                     if self.common.seats().position(|x| x == &seat).unwrap() == 0 {
-                        let location = if let Some(output) = self.common.shell.outputs.first() {
-                            self.common
-                                .shell
-                                .map_global_to_space(position, output)
-                                .to_i32_round()
-                        } else {
-                            position.to_i32_round()
-                        };
-                        self.common.egui.state.handle_pointer_motion(location);
+                        if let Some(output) = self.common.shell.outputs().next() {
+                            let location = position.to_local(&output).to_i32_round().as_logical();
+                            self.common.egui.state.handle_pointer_motion(location);
+                        }
                     }
                 }
             }
