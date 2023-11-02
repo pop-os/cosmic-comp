@@ -10,7 +10,10 @@ use smithay::{
     input::Seat,
     output::Output,
     utils::{IsAlive, Serial, SERIAL_COUNTER},
-    wayland::seat::WaylandFocus,
+    wayland::{
+        seat::WaylandFocus,
+        shell::wlr_layer::{KeyboardInteractivity, Layer},
+    },
 };
 use std::cell::RefCell;
 use tracing::{debug, trace};
@@ -291,13 +294,25 @@ impl Common {
 }
 
 fn focus_target_is_valid(
-    state: &mut State,
+    state: &State,
     seat: &Seat<State>,
     output: &Output,
     target: KeyboardFocusTarget,
 ) -> bool {
+    // If a session lock is active, only lock surfaces can be focused
     if state.common.session_lock.is_some() {
         return matches!(target, KeyboardFocusTarget::LockSurface(_));
+    }
+
+    // If an exclusive layer shell surface exists (on any output), only exclusive
+    // shell surfaces can have focus, on the highest layer with exclusive surfaces.
+    if let Some(layer) = exclusive_layer_surface_layer(state) {
+        return if let KeyboardFocusTarget::LayerSurface(layer_surface) = target {
+            let data = layer_surface.cached_state();
+            (data.keyboard_interactivity, data.layer) == (KeyboardInteractivity::Exclusive, layer)
+        } else {
+            false
+        };
     }
 
     match target {
@@ -334,7 +349,7 @@ fn focus_target_is_valid(
 }
 
 fn update_focus_target(
-    state: &mut State,
+    state: &State,
     seat: &Seat<State>,
     output: &Output,
 ) -> Option<KeyboardFocusTarget> {
@@ -342,6 +357,16 @@ fn update_focus_target(
         session_lock
             .surfaces
             .get(output)
+            .cloned()
+            .map(KeyboardFocusTarget::from)
+    } else if let Some(layer) = exclusive_layer_surface_layer(state) {
+        layer_map_for_output(output)
+            .layers()
+            .find(|layer_surface| {
+                let data = layer_surface.cached_state();
+                (data.keyboard_interactivity, data.layer)
+                    == (KeyboardInteractivity::Exclusive, layer)
+            })
             .cloned()
             .map(KeyboardFocusTarget::from)
     } else if let Some(surface) = state.common.shell.active_space(&output).get_fullscreen() {
@@ -357,4 +382,21 @@ fn update_focus_target(
             .cloned()
             .map(KeyboardFocusTarget::from)
     }
+}
+
+// Get the top-most layer, if any, with at least one surface with exclusive keyboard interactivity.
+// Only considers surface in `Top` or `Overlay` layer.
+fn exclusive_layer_surface_layer(state: &State) -> Option<Layer> {
+    let mut layer = None;
+    for output in state.common.shell.outputs() {
+        for layer_surface in layer_map_for_output(output).layers() {
+            let data = layer_surface.cached_state();
+            if data.keyboard_interactivity == KeyboardInteractivity::Exclusive {
+                if data.layer as u32 >= layer.unwrap_or(Layer::Top) as u32 {
+                    layer = Some(data.layer);
+                }
+            }
+        }
+    }
+    layer
 }
