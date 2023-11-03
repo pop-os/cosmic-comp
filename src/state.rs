@@ -293,9 +293,9 @@ impl State {
         signal: LoopSignal,
     ) -> State {
         let requested_languages = DesktopLanguageRequester::requested_languages();
-        i18n_embed::select(&*LANG_LOADER, &Localizations, &requested_languages)
-            .with_context(|| "Failed to load languages")
-            .unwrap();
+        let _ = i18n_embed::select(&*LANG_LOADER, &Localizations, &requested_languages)
+            .with_context(|| "Failed to load languages");
+        //.unwrap();
 
         let clock = Clock::new();
         let config = Config::load(&handle);
@@ -395,6 +395,7 @@ impl State {
                                 .target_node_for_output(
                                     &self.common.last_active_seat().active_output(),
                                 )
+                                .map(|(node, _)| node)
                                 .unwrap_or(kms_state.primary),
                         ),
                         _ => Some(kms_state.primary),

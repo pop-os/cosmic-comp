@@ -36,7 +36,7 @@ use smithay::{
             buffer_dimensions,
             damage::{Error as RenderError, RenderOutputResult},
             element::Element,
-            gles::{GlesRenderbuffer, GlesTexture},
+            gles::{ffi, GlesRenderbuffer, GlesRenderer, GlesTexture},
             glow::GlowRenderer,
             multigpu::{gbm::GbmGlesBackend, Error as MultiError, GpuManager},
             sync::SyncPoint,
@@ -81,7 +81,7 @@ use tracing::{error, info, trace, warn};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
-    ffi::CStr,
+    ffi::{c_char, CStr},
     fmt,
     path::PathBuf,
     time::Duration,
@@ -111,6 +111,8 @@ pub struct Device {
     pub drm: DrmDevice,
     gbm: GbmDevice<DrmDeviceFd>,
     allocator: Box<dyn Allocator<Buffer = Dmabuf, Error = AnyError>>,
+    info: GlInfo,
+    bad_multigpu_target: bool,
     formats: HashSet<Format>,
     supports_atomic: bool,
     pub non_desktop_connectors: Vec<(connector::Handle, crtc::Handle)>,
@@ -118,6 +120,13 @@ pub struct Device {
     pub active_leases: Vec<DrmLease>,
     event_token: Option<RegistrationToken>,
     socket: Option<Socket>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct GlInfo {
+    pub vendor: String,
+    pub renderer: String,
+    pub version: String,
 }
 
 impl fmt::Debug for Device {
@@ -128,6 +137,7 @@ impl fmt::Debug for Device {
             .field("drm", &self.drm)
             .field("gbm", &self.gbm)
             .field("allocator", &"...")
+            .field("info", &self.info)
             .field("formats", &self.formats)
             .field("supports_atomic", &self.supports_atomic)
             .field("non_desktop_connectors", &self.non_desktop_connectors)
@@ -440,7 +450,7 @@ impl State {
 
         let gbm = GbmDevice::new(fd)
             .with_context(|| format!("Failed to initialize GBM device for {}", path.display()))?;
-        let (render_node, formats) = {
+        let (render_node, formats, info) = {
             let egl_display = EGLDisplay::new(gbm.clone()).with_context(|| {
                 format!("Failed to create EGLDisplay for device: {}", path.display())
             })?;
@@ -460,7 +470,26 @@ impl State {
                 )
             })?;
             let formats = egl_context.dmabuf_texture_formats().clone();
-            (render_node, formats)
+
+            let mut gl_renderer = unsafe { GlesRenderer::new(egl_context) }
+                .with_context(|| "Failed to create GL renderer")?;
+            let info = gl_renderer
+                .with_context(|gl| unsafe {
+                    GlInfo {
+                        vendor: CStr::from_ptr(gl.GetString(ffi::VENDOR) as *const c_char)
+                            .to_string_lossy()
+                            .into_owned(),
+                        renderer: CStr::from_ptr(gl.GetString(ffi::RENDERER) as *const c_char)
+                            .to_string_lossy()
+                            .into_owned(),
+                        version: CStr::from_ptr(gl.GetString(ffi::VERSION) as *const c_char)
+                            .to_string_lossy()
+                            .into_owned(),
+                    }
+                })
+                .with_context(|| "Failed to query GL information")?;
+
+            (render_node, formats, info)
             // NOTE: We need the to drop the EGL types here again,
             //  otherwise the EGLDisplay created below might share the same GBM context
         };
@@ -596,12 +625,18 @@ impl State {
             gbm.clone(),
             GbmBufferFlags::RENDERING,
         )));
+
+        let bad_multigpu_target = &info.vendor == "NVIDIA Corporation"
+            && !info.renderer.contains("RTX")
+            && !info.version.contains("Mesa");
         let mut device = Device {
             render_node,
             surfaces: HashMap::new(),
             gbm: gbm.clone(),
             allocator,
             drm,
+            info,
+            bad_multigpu_target,
             formats,
             supports_atomic,
             non_desktop_connectors: Vec::new(),
@@ -1093,8 +1128,13 @@ fn render_node_for_output(
     dh: &DisplayHandle,
     output: &Output,
     target_node: DrmNode,
+    bad_target: bool,
     shell: &Shell,
 ) -> DrmNode {
+    if bad_target {
+        return target_node;
+    }
+
     let workspace = shell.active_space(output);
     let nodes = workspace
         .get_fullscreen()
@@ -1124,6 +1164,7 @@ fn get_surface_dmabuf_feedback(
     render_node: DrmNode,
     render_formats: HashSet<Format>,
     target_formats: HashSet<Format>,
+    bad_target: bool,
     compositor: &GbmDrmCompositor,
 ) -> SurfaceDmabufFeedback {
     let combined_formats = render_formats
@@ -1153,17 +1194,17 @@ fn get_surface_dmabuf_feedback(
         .collect::<Vec<_>>();
 
     let target_node = surface.device_fd().dev_id().unwrap();
-    let mut builder = DmabufFeedbackBuilder::new(render_node.dev_id(), render_formats);
-    if target_node != render_node.dev_id() && !combined_formats.is_empty() {
+    let mut builder = DmabufFeedbackBuilder::new(render_node.dev_id(), render_formats.clone());
+    if !bad_target && target_node != render_node.dev_id() && !combined_formats.is_empty() {
         builder = builder.add_preference_tranche(
             target_node,
             Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
             combined_formats,
         );
     };
-    let render_feedback = builder.clone().build().unwrap();
+    let render_feedback = builder.build().unwrap();
 
-    let scanout_feedback = builder
+    let scanout_feedback = DmabufFeedbackBuilder::new(render_node.dev_id(), render_formats)
         .add_preference_tranche(
             target_node,
             Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
@@ -1187,6 +1228,7 @@ impl Surface {
             &mut dyn Allocator<Buffer = Dmabuf, Error = AnyError>,
         )>,
         target_node: &DrmNode,
+        bad_multigpu_target: bool,
         state: &mut Common,
         screencopy: Option<&[(ScreencopySession, BufferParams)]>,
     ) -> Result<()> {
@@ -1361,6 +1403,7 @@ impl Surface {
                                     source_node,
                                     render_formats,
                                     target_formats,
+                                    bad_multigpu_target,
                                     compositor,
                                 )
                             })
@@ -1540,12 +1583,11 @@ impl KmsState {
         }
         Ok(())
     }
-    pub fn target_node_for_output(&self, output: &Output) -> Option<DrmNode> {
+    pub fn target_node_for_output(&self, output: &Output) -> Option<(DrmNode, bool)> {
         self.devices
             .values()
             .find(|dev| dev.surfaces.values().any(|s| s.output == *output))
-            .map(|dev| &dev.render_node)
-            .copied()
+            .map(|dev| (dev.render_node, dev.bad_multigpu_target))
     }
 
     pub fn try_early_import(
@@ -1554,9 +1596,10 @@ impl KmsState {
         surface: &WlSurface,
         output: &Output,
         target: DrmNode,
+        bad_multigpu_target: bool,
         shell: &Shell,
     ) {
-        let render = render_node_for_output(dh, &output, target, &shell);
+        let render = render_node_for_output(dh, &output, target, bad_multigpu_target, &shell);
         if let Err(err) = self.api.early_import(
             if let Some(client) = dh.get_client(surface.id()).ok() {
                 if let Some(normal_client) = client.get_data::<ClientState>() {
@@ -1647,6 +1690,7 @@ impl KmsState {
                                 &state.common.display_handle,
                                 &surface.output,
                                 target_node,
+                                target_device.bad_multigpu_target,
                                 &state.common.shell,
                             );
                             let common = &mut state.common;
@@ -1664,6 +1708,7 @@ impl KmsState {
                                         render_device.allocator.as_mut(),
                                     )),
                                     &target_node,
+                                    target_device.bad_multigpu_target,
                                     common,
                                     screencopy_sessions.as_deref(),
                                 )
@@ -1672,6 +1717,7 @@ impl KmsState {
                                     &mut backend.api,
                                     None,
                                     &target_node,
+                                    target_device.bad_multigpu_target,
                                     common,
                                     screencopy_sessions.as_deref(),
                                 )

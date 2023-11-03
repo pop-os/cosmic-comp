@@ -38,13 +38,16 @@ impl State {
         let dh = &self.common.display_handle;
         for output in self.common.shell.visible_outputs_for_surface(&surface) {
             if let BackendData::Kms(ref mut kms_state) = &mut self.backend {
-                if let Some(target) = kms_state.target_node_for_output(&output) {
+                if let Some((target, bad_multigpu_target)) =
+                    kms_state.target_node_for_output(&output)
+                {
                     if import_nodes.insert(target) {
                         kms_state.try_early_import(
                             dh,
                             surface,
                             &output,
                             target,
+                            bad_multigpu_target,
                             &self.common.shell,
                         );
                     }

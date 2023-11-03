@@ -455,7 +455,10 @@ fn formats_for_output(
     let mut _kms_renderer = None;
     let renderer = match backend {
         BackendData::Kms(ref mut kms) => {
-            let node = kms.target_node_for_output(&output).unwrap_or(kms.primary);
+            let node = kms
+                .target_node_for_output(&output)
+                .map(|(node, _)| node)
+                .unwrap_or(kms.primary);
             _kms_renderer = Some(kms.api.single_renderer(&node).unwrap());
             _kms_renderer.as_mut().unwrap().as_mut()
         }
@@ -528,7 +531,7 @@ fn node_from_params(
         Some(BufferType::Shm) | Some(BufferType::Dma) => match backend {
             BackendData::Kms(kms) => Some(
                 output
-                    .and_then(|output| kms.target_node_for_output(output))
+                    .and_then(|output| kms.target_node_for_output(output).map(|(node, _)| node))
                     .unwrap_or(kms.primary),
             ),
             _ => None,
