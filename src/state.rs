@@ -279,10 +279,32 @@ impl BackendData {
     }
 }
 
-pub fn client_has_security_context(client: &Client) -> bool {
+pub fn client_has_no_security_context(client: &Client) -> bool {
     client
         .get_data::<ClientState>()
         .map_or(true, |client_state| client_state.security_context.is_none())
+}
+
+pub fn client_is_privileged(client: &Client) -> bool {
+    client
+        .get_data::<ClientState>()
+        .map_or(false, |client_state| client_state.privileged)
+}
+
+pub fn client_should_see_privileged_protocols(client: &Client) -> bool {
+    if std::env::var("COSMIC_ENABLE_WAYLAND_SECURITY")
+        .map(|x| {
+            x == "1"
+                || x.to_lowercase() == "true"
+                || x.to_lowercase() == "yes"
+                || x.to_lowercase() == "y"
+        })
+        .unwrap_or(false)
+    {
+        client_is_privileged(client)
+    } else {
+        client_has_no_security_context(client)
+    }
 }
 
 impl State {
@@ -306,14 +328,14 @@ impl State {
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<Self>(dh);
         let output_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
         let output_configuration_state =
-            OutputConfigurationState::new(dh, client_has_security_context);
+            OutputConfigurationState::new(dh, client_should_see_privileged_protocols);
         let presentation_state = PresentationState::new::<Self>(dh, clock.id() as u32);
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
         let screencopy_state = ScreencopyState::new::<Self, _, _>(
             dh,
             vec![CursorMode::Embedded, CursorMode::Hidden],
-            client_has_security_context,
-        ); // TODO: privileged
+            client_should_see_privileged_protocols,
+        );
         let shm_state =
             ShmState::new::<Self>(dh, vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888]);
         let seat_state = SeatState::<Self>::new();
@@ -322,11 +344,11 @@ impl State {
         let kde_decoration_state = KdeDecorationState::new::<Self>(&dh, Mode::Client);
         let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
         let session_lock_manager_state =
-            SessionLockManagerState::new::<Self, _>(&dh, client_has_security_context);
+            SessionLockManagerState::new::<Self, _>(&dh, client_should_see_privileged_protocols);
         XWaylandKeyboardGrabState::new::<Self>(&dh);
         PointerConstraintsState::new::<Self>(&dh);
         PointerGesturesState::new::<Self>(&dh);
-        SecurityContextState::new::<Self, _>(&dh, client_has_security_context);
+        SecurityContextState::new::<Self, _>(&dh, client_has_no_security_context);
 
         let shell = Shell::new(&config, dh);
 
