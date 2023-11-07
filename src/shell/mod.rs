@@ -1326,6 +1326,13 @@ impl Shell {
             .map(|(o, _)| o)
     }
 
+    pub fn builtin_output(&self) -> Option<&Output> {
+        self.outputs().find(|output| {
+            let name = output.name();
+            name.starts_with("eDP-") || name.starts_with("LVDS-") || name.starts_with("DSI-")
+        })
+    }
+
     pub fn global_space(&self) -> Rectangle<i32, Global> {
         self.outputs()
             .fold(
