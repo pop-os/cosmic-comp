@@ -312,7 +312,7 @@ impl XdgShellHandler for State {
             .visible_outputs_for_surface(surface.wl_surface())
             .collect::<Vec<_>>();
         for output in outputs.iter() {
-            self.common.shell.active_space_mut(output).refresh();
+            self.common.shell.refresh_active_space(output);
         }
 
         // animations might be unblocked now

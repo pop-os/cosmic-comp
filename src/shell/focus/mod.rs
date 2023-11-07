@@ -94,11 +94,10 @@ impl ActiveFocus {
 }
 
 impl Shell {
-    pub fn set_focus<'a>(
+    pub fn append_focus_stack(
         state: &mut State,
         target: Option<&KeyboardFocusTarget>,
         active_seat: &Seat<State>,
-        serial: Option<Serial>,
     ) {
         // update FocusStack and notify layouts about new focus (if any window)
         let element = match target {
@@ -128,6 +127,15 @@ impl Shell {
                 }
             }
         }
+    }
+
+    pub fn set_focus(
+        state: &mut State,
+        target: Option<&KeyboardFocusTarget>,
+        active_seat: &Seat<State>,
+        serial: Option<Serial>,
+    ) {
+        Self::append_focus_stack(state, target, active_seat);
 
         // update keyboard focus
         if let Some(keyboard) = active_seat.get_keyboard() {

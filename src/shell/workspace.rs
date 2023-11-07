@@ -43,11 +43,12 @@ use smithay::{
     wayland::{
         compositor::{add_blocker, Blocker, BlockerState},
         seat::WaylandFocus,
+        xdg_activation::{XdgActivationState, XdgActivationToken},
     },
     xwayland::X11Surface,
 };
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -87,6 +88,7 @@ pub struct Workspace {
     pub pending_buffers: Vec<(ScreencopySession, BufferParams)>,
     pub screencopy_sessions: Vec<DropableSession>,
     pub output_stack: VecDeque<String>,
+    pub pending_tokens: HashSet<XdgActivationToken>,
     pub(super) backdrop_id: Id,
     pub dirty: AtomicBool,
 }
@@ -227,12 +229,13 @@ impl Workspace {
             pending_buffers: Vec::new(),
             screencopy_sessions: Vec::new(),
             output_stack: VecDeque::new(),
+            pending_tokens: HashSet::new(),
             backdrop_id: Id::new(),
             dirty: AtomicBool::new(false),
         }
     }
 
-    pub fn refresh(&mut self) {
+    pub fn refresh(&mut self, xdg_activation_state: &XdgActivationState) {
         #[cfg(feature = "debug")]
         puffin::profile_function!();
 
@@ -243,6 +246,9 @@ impl Workspace {
 
         self.floating_layer.refresh();
         self.tiling_layer.refresh();
+
+        self.pending_tokens
+            .retain(|token| xdg_activation_state.data_for_token(token).is_some());
     }
 
     pub fn refresh_focus_stack(&mut self) {

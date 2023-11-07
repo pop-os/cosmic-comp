@@ -5,23 +5,29 @@ use crate::{
     shell::{focus::target::KeyboardFocusTarget, CosmicSurface, Shell},
     state::State,
     utils::prelude::*,
-    wayland::{handlers::screencopy::PendingScreencopyBuffers, protocols::screencopy::SessionType},
+    wayland::{
+        handlers::{screencopy::PendingScreencopyBuffers, xdg_activation::ActivationContext},
+        protocols::screencopy::SessionType,
+    },
 };
 use smithay::{
     backend::drm::DrmNode,
     desktop::space::SpaceElement,
     reexports::x11rb::protocol::xproto::Window as X11Window,
     utils::{Logical, Point, Rectangle, Size},
-    wayland::selection::{
-        data_device::{
-            clear_data_device_selection, current_data_device_selection_userdata,
-            request_data_device_client_selection, set_data_device_selection,
+    wayland::{
+        selection::{
+            data_device::{
+                clear_data_device_selection, current_data_device_selection_userdata,
+                request_data_device_client_selection, set_data_device_selection,
+            },
+            primary_selection::{
+                clear_primary_selection, current_primary_selection_userdata,
+                request_primary_client_selection, set_primary_selection,
+            },
+            SelectionTarget,
         },
-        primary_selection::{
-            clear_primary_selection, current_primary_selection_userdata,
-            request_primary_client_selection, set_primary_selection,
-        },
-        SelectionTarget,
+        xdg_activation::XdgActivationToken,
     },
     xwayland::{
         xwm::{Reorder, XwmId},
@@ -145,12 +151,29 @@ impl XwmHandler for State {
             warn!(?window, ?err, "Failed to send Xwayland Mapped-Event",);
         }
 
+        let startup_id = window.startup_id();
         let surface = CosmicSurface::X11(window.clone());
         if self.common.shell.element_for_surface(&surface).is_some() {
             return;
         }
 
         let seat = self.common.last_active_seat().clone();
+        if let Some(context) = startup_id
+            .map(XdgActivationToken::from)
+            .and_then(|token| {
+                self.common
+                    .shell
+                    .xdg_activation_state
+                    .data_for_token(&token)
+            })
+            .and_then(|data| data.user_data.get::<ActivationContext>())
+        {
+            self.common.shell.pending_activations.insert(
+                crate::shell::ActivationKey::X11(window.window_id()),
+                context.clone(),
+            );
+        }
+
         self.common
             .shell
             .pending_windows
@@ -172,6 +195,30 @@ impl XwmHandler for State {
             })
             .cloned()
         {
+            if !self
+                .common
+                .shell
+                .pending_activations
+                .contains_key(&crate::shell::ActivationKey::X11(surface.window_id()))
+            {
+                if let Some(startup_id) = match &window {
+                    CosmicSurface::X11(x11) => x11.startup_id(),
+                    _ => None,
+                } {
+                    if let Some(context) = self
+                        .common
+                        .shell
+                        .xdg_activation_state
+                        .data_for_token(&XdgActivationToken::from(startup_id))
+                        .and_then(|data| data.user_data.get::<ActivationContext>())
+                    {
+                        self.common.shell.pending_activations.insert(
+                            crate::shell::ActivationKey::X11(surface.window_id()),
+                            context.clone(),
+                        );
+                    }
+                }
+            }
             Shell::map_window(self, &window);
         }
     }
@@ -224,7 +271,7 @@ impl XwmHandler for State {
             self.common.shell.outputs().cloned().collect::<Vec<_>>()
         };
         for output in outputs.iter() {
-            self.common.shell.active_space_mut(output).refresh();
+            self.common.shell.refresh_active_space(output);
         }
 
         // screencopy
