@@ -36,7 +36,7 @@ use smithay::{
 
 use crate::{
     config::{Config, KeyModifiers, KeyPattern},
-    state::client_has_security_context,
+    state::client_should_see_privileged_protocols,
     utils::prelude::*,
     wayland::protocols::{
         toplevel_info::ToplevelInfoState,
@@ -849,28 +849,22 @@ pub struct InvalidWorkspaceIndex;
 
 impl Shell {
     pub fn new(config: &Config, dh: &DisplayHandle) -> Self {
-        // TODO: Privileged protocols
-        let layer_shell_state = WlrLayerShellState::new::<State>(dh);
-        let xdg_shell_state = XdgShellState::new::<State>(dh);
-        let toplevel_info_state = ToplevelInfoState::new(
+        let layer_shell_state = WlrLayerShellState::new_with_filter::<State, _>(
             dh,
-            //|client| client.get_data::<ClientState>().map_or(false, |s| s.privileged),
-            client_has_security_context,
+            client_should_see_privileged_protocols,
         );
+        let xdg_shell_state = XdgShellState::new::<State>(dh);
+        let toplevel_info_state =
+            ToplevelInfoState::new(dh, client_should_see_privileged_protocols);
         let toplevel_management_state = ToplevelManagementState::new::<State, _>(
             dh,
             vec![
                 ManagementCapabilities::Close,
                 ManagementCapabilities::Activate,
             ],
-            //|client| client.get_data::<ClientState>().map_or(false, |s| s.privileged),
-            client_has_security_context,
+            client_should_see_privileged_protocols,
         );
-        let workspace_state = WorkspaceState::new(
-            dh,
-            //|client| client.get_data::<ClientState>().map_or(false, |s| s.privileged),
-            client_has_security_context,
-        );
+        let workspace_state = WorkspaceState::new(dh, client_should_see_privileged_protocols);
         let theme = cosmic::theme::system_preference();
 
         Shell {
