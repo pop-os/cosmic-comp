@@ -50,6 +50,7 @@ use smithay::{
     output::{Mode as OutputMode, Output, Scale},
     reexports::{
         calloop::{LoopHandle, LoopSignal},
+        wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
         wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration_manager::Mode,
         wayland_server::{
             backend::{ClientData, ClientId, DisconnectReason},
@@ -189,6 +190,7 @@ pub struct SurfaceDmabufFeedback {
 
 #[derive(Debug)]
 pub struct SessionLock {
+    pub ext_session_lock: ExtSessionLockV1,
     pub surfaces: HashMap<Output, LockSurface>,
 }
 
