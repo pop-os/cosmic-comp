@@ -1006,10 +1006,7 @@ impl Shell {
         }
     }
 
-    pub fn workspaces_for_surface(
-        &self,
-        surface: &WlSurface,
-    ) -> impl Iterator<Item = (WorkspaceHandle, Output)> {
+    pub fn workspace_for_surface(&self, surface: &WlSurface) -> Option<(WorkspaceHandle, Output)> {
         match self.outputs().find(|o| {
             let map = layer_map_for_output(o);
             map.layer_for_surface(surface, WindowSurfaceType::ALL)
@@ -1029,7 +1026,6 @@ impl Shell {
                 })
                 .map(|w| (w.handle.clone(), w.output().clone())),
         }
-        .into_iter()
     }
 
     pub fn element_for_surface(&self, surface: &CosmicSurface) -> Option<&CosmicMapped> {
