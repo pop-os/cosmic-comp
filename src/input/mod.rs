@@ -25,9 +25,9 @@ use cosmic_comp_config::workspace::WorkspaceLayout;
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
 use smithay::{
     backend::input::{
-        Axis, AxisSource, Device, DeviceCapability, GestureBeginEvent, GestureEndEvent,
-        GesturePinchUpdateEvent as _, GestureSwipeUpdateEvent as _, InputBackend, InputEvent,
-        KeyState, PointerAxisEvent,
+        AbsolutePositionEvent, Axis, AxisSource, Device, DeviceCapability, GestureBeginEvent,
+        GestureEndEvent, GesturePinchUpdateEvent as _, GestureSwipeUpdateEvent as _, InputBackend,
+        InputEvent, KeyState, PointerAxisEvent, TouchEvent,
     },
     desktop::{layer_map_for_output, space::SpaceElement, WindowSurfaceType},
     input::{
@@ -205,6 +205,7 @@ pub fn add_seat(
             .expect("Failed to load xkb configuration files");
     }
     seat.add_pointer();
+    seat.add_touch();
 
     seat
 }
@@ -1164,7 +1165,98 @@ impl State {
                     );
                 }
             }
-            _ => { /* TODO e.g. tablet or touch events */ }
+            InputEvent::TouchDown { event, .. } => {
+                if let Some(seat) = self.common.seat_with_device(&event.device()).cloned() {
+                    // TODO: Configuration option for mapping touch device to output
+                    // Is it possible to determine mapping for external touchscreen?
+                    let Some(output) = self.common.shell.builtin_output().cloned() else {
+                        return;
+                    };
+
+                    let geometry = output.geometry();
+
+                    let position = geometry.loc.to_f64()
+                        + event
+                            .position_transformed(geometry.size.as_logical())
+                            .as_global();
+
+                    let overview = self.common.shell.overview_mode();
+                    let workspace = self.common.shell.workspaces.active_mut(&output);
+                    let under = State::surface_under(
+                        position,
+                        &output,
+                        &self.common.shell.override_redirect_windows,
+                        overview.0.clone(),
+                        workspace,
+                        self.common.shell.session_lock.as_ref(),
+                    )
+                    .map(|(target, pos)| (target, pos.as_logical()));
+
+                    if let Some((target, pos)) = under {
+                        if let Some(wl_surface) = target.wl_surface() {
+                            let serial = SERIAL_COUNTER.next_serial();
+                            let touch = seat.get_touch().unwrap();
+                            touch.down(
+                                serial,
+                                event.time_msec(),
+                                &wl_surface,
+                                position.as_logical() - pos.to_f64(),
+                                event.slot(),
+                            );
+                        }
+                    }
+                }
+            }
+            InputEvent::TouchMotion { event, .. } => {
+                if let Some(seat) = self.common.seat_with_device(&event.device()).cloned() {
+                    let Some(output) = self.common.shell.builtin_output().cloned() else {
+                        return;
+                    };
+
+                    let geometry = output.geometry();
+
+                    let position = geometry.loc.to_f64()
+                        + event
+                            .position_transformed(geometry.size.as_logical())
+                            .as_global();
+
+                    let overview = self.common.shell.overview_mode();
+                    let workspace = self.common.shell.workspaces.active_mut(&output);
+                    let under = State::surface_under(
+                        position,
+                        &output,
+                        &self.common.shell.override_redirect_windows,
+                        overview.0.clone(),
+                        workspace,
+                        self.common.shell.session_lock.as_ref(),
+                    )
+                    .map(|(target, pos)| (target, pos.as_logical()));
+
+                    if let Some((_target, pos)) = under {
+                        let touch = seat.get_touch().unwrap();
+                        touch.motion(
+                            event.time_msec(),
+                            event.slot(),
+                            position.as_logical() - pos.to_f64(),
+                        );
+                    }
+                }
+            }
+            InputEvent::TouchUp { event, .. } => {
+                if let Some(seat) = self.common.seat_with_device(&event.device()) {
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let touch = seat.get_touch().unwrap();
+                    touch.up(serial, event.time_msec(), event.slot());
+                }
+            }
+            InputEvent::TouchCancel { event, .. } => {
+                if let Some(seat) = self.common.seat_with_device(&event.device()) {
+                    let touch = seat.get_touch().unwrap();
+                    touch.cancel();
+                }
+            }
+            InputEvent::TouchFrame { event: _, .. } => {}
+            _ => { /* TODO e.g. tablet events */ }
         }
     }
 
