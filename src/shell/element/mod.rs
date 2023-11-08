@@ -50,7 +50,7 @@ use std::{
     collections::HashMap,
     fmt,
     hash::Hash,
-    sync::{Arc, Mutex},
+    sync::{atomic::AtomicBool, Arc, Mutex},
 };
 
 pub mod surface;
@@ -103,6 +103,7 @@ pub struct CosmicMapped {
     //floating
     pub(super) resize_state: Arc<Mutex<Option<ResizeState>>>,
     pub last_geometry: Arc<Mutex<Option<Rectangle<i32, Local>>>>,
+    pub moved_since_mapped: Arc<AtomicBool>,
 
     #[cfg(feature = "debug")]
     debug: Arc<Mutex<Option<smithay_egui::EguiState>>>,
@@ -117,6 +118,7 @@ impl fmt::Debug for CosmicMapped {
             .field("tiling_node_id", &self.tiling_node_id)
             .field("resize_state", &self.resize_state)
             .field("last_geometry", &self.last_geometry)
+            .field("moved_since_mapped", &self.moved_since_mapped)
             .finish()
     }
 }
@@ -224,7 +226,7 @@ impl CosmicMapped {
             }
 
             if surface_type.contains(WindowSurfaceType::SUBSURFACE) {
-                use std::sync::atomic::{AtomicBool, Ordering};
+                use std::sync::atomic::Ordering;
 
                 let found = AtomicBool::new(false);
                 with_surface_tree_downward(
@@ -1102,6 +1104,7 @@ impl From<CosmicWindow> for CosmicMapped {
             tiling_node_id: Arc::new(Mutex::new(None)),
             resize_state: Arc::new(Mutex::new(None)),
             last_geometry: Arc::new(Mutex::new(None)),
+            moved_since_mapped: Arc::new(AtomicBool::new(false)),
             #[cfg(feature = "debug")]
             debug: Arc::new(Mutex::new(None)),
         }
@@ -1117,6 +1120,8 @@ impl From<CosmicStack> for CosmicMapped {
             tiling_node_id: Arc::new(Mutex::new(None)),
             resize_state: Arc::new(Mutex::new(None)),
             last_geometry: Arc::new(Mutex::new(None)),
+            moved_since_mapped: Arc::new(AtomicBool::new(false)),
+            #[cfg(feature = "debug")]
             #[cfg(feature = "debug")]
             debug: Arc::new(Mutex::new(None)),
         }

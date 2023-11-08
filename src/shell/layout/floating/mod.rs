@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::sync::atomic::Ordering;
+
 use smithay::{
     backend::renderer::{
         element::{AsRenderElements, RenderElement},
@@ -36,6 +38,7 @@ pub use self::grabs::*;
 #[derive(Debug, Default)]
 pub struct FloatingLayout {
     pub(crate) space: Space<CosmicMapped>,
+    spawn_order: Vec<CosmicMapped>,
 }
 
 impl FloatingLayout {
@@ -79,6 +82,12 @@ impl FloatingLayout {
         mapped.set_geometry(geometry.to_global(&output));
         mapped.configure();
 
+        if let Some(pos) = self.spawn_order.iter().position(|m| m == &mapped) {
+            self.spawn_order.truncate(pos);
+        }
+
+        mapped.moved_since_mapped.store(true, Ordering::SeqCst);
+
         self.space
             .map_element(mapped, geometry.loc.as_logical(), true);
     }
@@ -93,9 +102,10 @@ impl FloatingLayout {
 
         let output = self.space.outputs().next().unwrap().clone();
         let layers = layer_map_for_output(&output);
-        let geometry = layers.non_exclusive_zone();
-        mapped.set_bounds(geometry.size);
+        let output_geometry = layers.non_exclusive_zone();
+        mapped.set_bounds(output_geometry.size);
         let last_geometry = mapped.last_geometry.lock().unwrap().clone();
+        let min_size = mapped.min_size().unwrap_or((320, 240).into());
 
         if let Some(size) = size
             .map(SizeExt::as_local)
@@ -103,13 +113,18 @@ impl FloatingLayout {
         {
             win_geo.size = size;
         } else {
-            let (min_size, max_size) = (
-                mapped.min_size().unwrap_or((0, 0).into()),
-                mapped.max_size().unwrap_or((0, 0).into()),
+            let max_size = mapped.max_size().unwrap_or(
+                (
+                    min_size.w.max(output_geometry.size.w / 3 * 2),
+                    min_size.h.max(output_geometry.size.h / 3 * 2),
+                )
+                    .into(),
             );
-            if win_geo.size.w > geometry.size.w / 3 * 2 {
+
+            // if the last_geometry is too large
+            if win_geo.size.w > output_geometry.size.w {
                 // try a more reasonable size
-                let mut width = geometry.size.w / 3 * 2;
+                let mut width = output_geometry.size.w / 3 * 2;
                 if max_size.w != 0 {
                     // don't go larger then the max_size ...
                     width = std::cmp::min(max_size.w, width);
@@ -119,11 +134,11 @@ impl FloatingLayout {
                     width = std::cmp::max(min_size.w, width);
                 }
                 // but no matter the supported sizes, don't be larger than our non-exclusive-zone
-                win_geo.size.w = std::cmp::min(width, geometry.size.w);
+                win_geo.size.w = std::cmp::min(width, output_geometry.size.w);
             }
-            if win_geo.size.h > geometry.size.h / 3 * 2 {
+            if win_geo.size.h > output_geometry.size.h {
                 // try a more reasonable size
-                let mut height = geometry.size.h / 3 * 2;
+                let mut height = output_geometry.size.h / 3 * 2;
                 if max_size.h != 0 {
                     // don't go larger then the max_size ...
                     height = std::cmp::min(max_size.h, height);
@@ -133,18 +148,139 @@ impl FloatingLayout {
                     height = std::cmp::max(min_size.h, height);
                 }
                 // but no matter the supported sizes, don't be larger than our non-exclusive-zone
-                win_geo.size.h = std::cmp::min(height, geometry.size.h);
+                win_geo.size.h = std::cmp::min(height, output_geometry.size.h);
             }
         }
 
         let position = position
             .or_else(|| last_geometry.map(|g| g.loc))
             .unwrap_or_else(|| {
-                (
-                    geometry.loc.x + (geometry.size.w / 2) - (win_geo.size.w / 2) + win_geo.loc.x,
-                    geometry.loc.y + (geometry.size.h / 2) - (win_geo.size.h / 2) + win_geo.loc.y,
-                )
-                    .into()
+                // cleanup moved windows
+                if let Some(pos) = self
+                    .spawn_order
+                    .iter()
+                    .position(|w| !w.alive() || w.moved_since_mapped.load(Ordering::SeqCst))
+                {
+                    self.spawn_order.truncate(pos);
+                }
+
+                let three_fours_width = (output_geometry.size.w / 4 * 3).max(360);
+
+                // figure out new position
+                let pos = self
+                    .spawn_order
+                    .last()
+                    .and_then(|window| self.space.element_geometry(window))
+                    .filter(|geo| {
+                        geo.size.w < three_fours_width && win_geo.size.w < three_fours_width
+                    })
+                    .map(|geometry| {
+                        let mut geometry: Rectangle<u32, Logical> = Rectangle::from_loc_and_size(
+                            (geometry.loc.x as u32, geometry.loc.y as u32),
+                            (geometry.size.w as u32, geometry.size.h as u32),
+                        );
+
+                        // move down
+                        geometry.loc.y += 48;
+
+                        // do we need to address the height?
+                        let new_column = if geometry.loc.y + min_size.h as u32
+                            <= (output_geometry.loc.y + output_geometry.size.h - 16) as u32
+                        {
+                            // alternate to the sides
+                            let offset = if self
+                                .spawn_order
+                                .iter()
+                                .flat_map(|w| self.space.element_geometry(w))
+                                .filter(|geo| geo.size.w < three_fours_width)
+                                .count()
+                                % 2
+                                == 0
+                            {
+                                (geometry.loc.x + geometry.size.w)
+                                    .checked_sub(96 + (win_geo.size.w as u32))
+                            } else {
+                                (geometry.loc.x + geometry.size.w)
+                                    .checked_sub((win_geo.size.w as u32).saturating_sub(48))
+                            };
+
+                            if let Some(offset) = offset {
+                                geometry.loc.x = offset;
+                                // do we need to resize?
+                                if geometry.loc.y as i32 + win_geo.size.h
+                                    <= output_geometry.loc.y + output_geometry.size.h - 16
+                                {
+                                    win_geo.size.h =
+                                        (output_geometry.loc.y + output_geometry.size.h - 16)
+                                            - geometry.loc.y as i32;
+                                }
+
+                                false
+                            } else {
+                                true
+                            }
+                        } else {
+                            true
+                        };
+
+                        if new_column {
+                            let min_y = self
+                                .spawn_order
+                                .iter()
+                                .flat_map(|w| {
+                                    self.space
+                                        .element_geometry(w)
+                                        .filter(|geo| geo.size.w < three_fours_width)
+                                        .map(|geo| geo.loc.y)
+                                })
+                                .min()
+                                .unwrap() as u32;
+                            geometry.loc.y = min_y.saturating_sub(16);
+
+                            match geometry.loc.x.checked_sub(144) {
+                                Some(new_x) => geometry.loc.x = new_x,
+                                None => {
+                                    // if we go out to the left, cycle around to the right
+                                    geometry.loc.x =
+                                        ((output_geometry.loc.x + output_geometry.size.w) as u32)
+                                            .saturating_sub(geometry.size.w + 16)
+                                }
+                            };
+                        }
+
+                        // check padding again
+                        if geometry.loc.x < (output_geometry.loc.x + 16) as u32 {
+                            geometry.loc.x = (output_geometry.loc.x + 16) as u32;
+                        }
+                        if geometry.loc.y < (output_geometry.loc.y + 16) as u32 {
+                            geometry.loc.y = (output_geometry.loc.y + 16) as u32;
+                        }
+                        // if the width would be too high, we wouldn't be here
+                        if geometry.loc.y as i32 + win_geo.size.h
+                            > (output_geometry.loc.y + output_geometry.size.h - 16)
+                        {
+                            win_geo.size.h = output_geometry.loc.y + output_geometry.size.h
+                                - 16
+                                - geometry.loc.y as i32;
+                        }
+
+                        Point::<i32, Logical>::from((geometry.loc.x as i32, geometry.loc.y as i32))
+                    })
+                    .unwrap_or_else(|| {
+                        (
+                            output_geometry.loc.x + output_geometry.size.w / 2 - win_geo.size.w / 2,
+                            output_geometry.loc.y
+                                + (output_geometry.size.h / 2 - win_geo.size.h / 2)
+                                .min(output_geometry.size.h / 8),
+                        )
+                            .into()
+                    })
+                    .as_local();
+
+                mapped.moved_since_mapped.store(false, Ordering::SeqCst);
+                self.spawn_order.push(mapped.clone());
+
+                pos
             });
 
         mapped.set_tiled(false);
@@ -171,6 +307,12 @@ impl FloatingLayout {
 
         let was_unmaped = self.space.elements().any(|e| e == window);
         self.space.unmap_elem(&window);
+        if was_unmaped {
+            if let Some(pos) = self.spawn_order.iter().position(|w| w == window) {
+                self.spawn_order.truncate(pos);
+            }
+            window.moved_since_mapped.store(true, Ordering::SeqCst);
+        }
         was_unmaped
     }
 
@@ -188,6 +330,7 @@ impl FloatingLayout {
         if seat.get_pointer().is_some() {
             let location = self.space.element_location(&mapped).unwrap();
             let size = mapped.geometry().size;
+            mapped.moved_since_mapped.store(true, Ordering::SeqCst);
 
             Some(grabs::ResizeSurfaceGrab::new(
                 start_data,
@@ -286,6 +429,7 @@ impl FloatingLayout {
             initial_window_size: original_geo.size,
         }));
 
+        mapped.moved_since_mapped.store(true, Ordering::SeqCst);
         mapped.set_resizing(true);
         mapped.set_geometry(
             geo.as_local()
@@ -439,6 +583,9 @@ impl FloatingLayout {
         puffin::profile_function!();
 
         self.space.refresh();
+        if let Some(pos) = self.spawn_order.iter().position(|w| !w.alive()) {
+            self.spawn_order.truncate(pos);
+        }
         for element in self
             .space
             .elements()
