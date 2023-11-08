@@ -42,6 +42,7 @@ use smithay::{
 use std::{
     cell::RefCell,
     collections::HashSet,
+    sync::atomic::Ordering,
     time::{Duration, Instant},
 };
 
@@ -442,6 +443,7 @@ impl MoveGrab {
         let mut outputs = HashSet::new();
         outputs.insert(output.clone());
         window.output_enter(&output, window.geometry()); // not accurate but...
+        window.moved_since_mapped.store(true, Ordering::SeqCst);
 
         let grab_state = MoveGrabState {
             window: window.clone(),
