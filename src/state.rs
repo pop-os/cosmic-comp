@@ -308,7 +308,7 @@ pub fn client_should_see_privileged_protocols(client: &Client) -> bool {
     {
         client_is_privileged(client)
     } else {
-        client_has_no_security_context(client)
+        client_is_privileged(client) || client_has_no_security_context(client)
     }
 }
 
