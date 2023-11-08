@@ -63,6 +63,7 @@ use smithay::{
         compositor::{CompositorClientState, CompositorState},
         dmabuf::{DmabufFeedback, DmabufState},
         fractional_scale::{with_fractional_scale, FractionalScaleManagerState},
+        input_method::InputMethodManagerState,
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState,
         output::OutputManagerState,
         pointer_constraints::PointerConstraintsState,
@@ -74,7 +75,9 @@ use smithay::{
         session_lock::{LockSurface, SessionLockManagerState},
         shell::{kde::decoration::KdeDecorationState, xdg::decoration::XdgDecorationState},
         shm::ShmState,
+        text_input::TextInputManagerState,
         viewporter::ViewporterState,
+        virtual_keyboard::VirtualKeyboardManagerState,
         xwayland_keyboard_grab::XWaylandKeyboardGrabState,
     },
 };
@@ -351,6 +354,9 @@ impl State {
         PointerConstraintsState::new::<Self>(&dh);
         PointerGesturesState::new::<Self>(&dh);
         SecurityContextState::new::<Self, _>(&dh, client_has_no_security_context);
+        InputMethodManagerState::new::<Self, _>(&dh, client_should_see_privileged_protocols);
+        TextInputManagerState::new::<Self>(&dh);
+        VirtualKeyboardManagerState::new::<State, _>(&dh, client_should_see_privileged_protocols);
 
         let shell = Shell::new(&config, dh);
 
