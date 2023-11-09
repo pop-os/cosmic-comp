@@ -1246,7 +1246,7 @@ impl State {
             .outputs()
             .map(|o| (o.clone(), self.common.shell.active_space(o).handle.clone()))
             .collect::<Vec<_>>();
-        for (handle, output) in self.common.shell.workspaces_for_surface(surface) {
+        if let Some((handle, output)) = self.common.shell.workspace_for_surface(surface) {
             let workspace = self.common.shell.space_for_handle_mut(&handle).unwrap();
             if !workspace.pending_buffers.is_empty() {
                 // TODO: replace with drain_filter....

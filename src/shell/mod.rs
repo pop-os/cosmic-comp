@@ -30,6 +30,7 @@ use smithay::{
             },
             xdg::XdgShellState,
         },
+        xdg_activation::XdgActivationState,
     },
     xwayland::X11Surface,
 };
@@ -38,12 +39,15 @@ use crate::{
     config::{Config, KeyModifiers, KeyPattern},
     state::client_should_see_privileged_protocols,
     utils::prelude::*,
-    wayland::protocols::{
-        toplevel_info::ToplevelInfoState,
-        toplevel_management::{ManagementCapabilities, ToplevelManagementState},
-        workspace::{
-            WorkspaceCapabilities, WorkspaceGroupHandle, WorkspaceHandle, WorkspaceState,
-            WorkspaceUpdateGuard,
+    wayland::{
+        handlers::xdg_activation::ActivationContext,
+        protocols::{
+            toplevel_info::ToplevelInfoState,
+            toplevel_management::{ManagementCapabilities, ToplevelManagementState},
+            workspace::{
+                WorkspaceCapabilities, WorkspaceGroupHandle, WorkspaceHandle, WorkspaceState,
+                WorkspaceUpdateGuard,
+            },
         },
     },
 };
@@ -145,6 +149,22 @@ pub enum MaximizeMode {
     OnTop,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ActivationKey {
+    Wayland(WlSurface),
+    X11(u32),
+}
+
+impl From<&CosmicSurface> for ActivationKey {
+    fn from(value: &CosmicSurface) -> Self {
+        match value {
+            CosmicSurface::Wayland(w) => ActivationKey::Wayland(w.toplevel().wl_surface().clone()),
+            CosmicSurface::X11(s) => ActivationKey::X11(s.window_id()),
+            _ => unreachable!(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Shell {
     pub workspaces: Workspaces,
@@ -153,6 +173,7 @@ pub struct Shell {
     pub maximize_mode: MaximizeMode,
     pub pending_windows: Vec<(CosmicSurface, Seat<State>, Option<Output>)>,
     pub pending_layers: Vec<(LayerSurface, Output, Seat<State>)>,
+    pub pending_activations: HashMap<ActivationKey, ActivationContext>,
     pub override_redirect_windows: Vec<X11Surface>,
 
     // wayland_state
@@ -160,6 +181,7 @@ pub struct Shell {
     pub toplevel_info_state: ToplevelInfoState<State, CosmicSurface>,
     pub toplevel_management_state: ToplevelManagementState,
     pub xdg_shell_state: XdgShellState,
+    pub xdg_activation_state: XdgActivationState,
     pub workspace_state: WorkspaceState<State>,
 
     theme: cosmic::Theme,
@@ -279,6 +301,8 @@ impl WorkspaceSet {
         if self.active != idx {
             let old_active = self.active;
             state.remove_workspace_state(&self.workspaces[old_active].handle, WState::Active);
+            state.remove_workspace_state(&self.workspaces[old_active].handle, WState::Urgent);
+            state.remove_workspace_state(&self.workspaces[idx].handle, WState::Urgent);
             state.add_workspace_state(&self.workspaces[idx].handle, WState::Active);
             self.previously_active = Some((old_active, Instant::now()));
             self.active = idx;
@@ -299,13 +323,13 @@ impl WorkspaceSet {
         self.output = new_output.clone();
     }
 
-    fn refresh<'a>(&mut self) {
+    fn refresh<'a>(&mut self, xdg_activation_state: &XdgActivationState) {
         if let Some((_, start)) = self.previously_active {
             if Instant::now().duration_since(start).as_millis() >= ANIMATION_DURATION.as_millis() {
                 self.previously_active = None;
             }
         } else {
-            self.workspaces[self.active].refresh();
+            self.workspaces[self.active].refresh(xdg_activation_state);
         }
     }
 
@@ -332,7 +356,7 @@ impl WorkspaceSet {
         if self
             .workspaces
             .last()
-            .map(|last| last.windows().next().is_some())
+            .map(|last| !last.pending_tokens.is_empty() || last.windows().next().is_some())
             .unwrap_or(true)
         {
             self.add_empty_workspace(state);
@@ -342,7 +366,8 @@ impl WorkspaceSet {
         let len = self.workspaces.len();
         let mut keep = vec![true; len];
         for (i, workspace) in self.workspaces.iter().enumerate() {
-            let has_windows = workspace.windows().next().is_some();
+            let has_windows =
+                !workspace.pending_tokens.is_empty() || workspace.windows().next().is_some();
 
             if !has_windows && i != self.active && i != len - 1 {
                 state.remove_workspace(workspace.handle);
@@ -370,6 +395,7 @@ impl WorkspaceSet {
         amount: usize,
         state: &mut WorkspaceUpdateGuard<State>,
         toplevel_info: &mut ToplevelInfoState<State, CosmicSurface>,
+        xdg_activation_state: &XdgActivationState,
     ) {
         if amount < self.workspaces.len() {
             // merge last ones
@@ -401,7 +427,7 @@ impl WorkspaceSet {
                 state.remove_workspace(workspace.handle);
             }
 
-            last_space.refresh();
+            last_space.refresh(xdg_activation_state);
         } else if amount > self.workspaces.len() {
             // add empty ones
             while amount > self.workspaces.len() {
@@ -508,6 +534,7 @@ impl Workspaces {
         seats: impl Iterator<Item = Seat<State>>,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
         toplevel_info_state: &mut ToplevelInfoState<State, CosmicSurface>,
+        xdg_activation_state: &XdgActivationState,
     ) {
         if !self.sets.contains_key(output) {
             return;
@@ -557,7 +584,7 @@ impl Workspaces {
 
                     // update mapping
                     workspace.set_output(&new_output, toplevel_info_state);
-                    workspace.refresh();
+                    workspace.refresh(xdg_activation_state);
 
                     // TODO: merge if mode = static
                     new_set.workspaces.push(workspace);
@@ -576,7 +603,7 @@ impl Workspaces {
                 self.backup_set = Some(set);
             }
 
-            self.refresh(workspace_state, toplevel_info_state)
+            self.refresh(workspace_state, toplevel_info_state, xdg_activation_state)
         }
     }
 
@@ -585,6 +612,7 @@ impl Workspaces {
         config: &Config,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
         toplevel_info_state: &mut ToplevelInfoState<State, CosmicSurface>,
+        xdg_activation_state: &XdgActivationState,
     ) {
         let old_mode = self.mode;
 
@@ -650,13 +678,14 @@ impl Workspaces {
             _ => {}
         };
 
-        self.refresh(workspace_state, toplevel_info_state)
+        self.refresh(workspace_state, toplevel_info_state, xdg_activation_state)
     }
 
     pub fn refresh(
         &mut self,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
         toplevel_info_state: &mut ToplevelInfoState<State, CosmicSurface>,
+        xdg_activation_state: &XdgActivationState,
     ) {
         match self.mode {
             WorkspaceMode::Global => {
@@ -696,10 +725,10 @@ impl Workspaces {
                         let mut active = self.sets[0].active;
                         let mut keep = vec![true; len];
                         for i in 0..len {
-                            let has_windows = self
-                                .sets
-                                .values()
-                                .any(|s| s.workspaces[i].windows().next().is_some());
+                            let has_windows = self.sets.values().any(|s| {
+                                !s.workspaces[i].pending_tokens.is_empty()
+                                    || s.workspaces[i].windows().next().is_some()
+                            });
 
                             if !has_windows && i != active && i != len - 1 {
                                 for workspace in self.sets.values().map(|s| &s.workspaces[i]) {
@@ -733,7 +762,12 @@ impl Workspaces {
                     }
                     WorkspaceAmount::Static(amount) => {
                         for set in self.sets.values_mut() {
-                            set.ensure_static(amount as usize, workspace_state, toplevel_info_state)
+                            set.ensure_static(
+                                amount as usize,
+                                workspace_state,
+                                toplevel_info_state,
+                                xdg_activation_state,
+                            )
                         }
                     }
                 }
@@ -746,14 +780,19 @@ impl Workspaces {
                 }
                 WorkspaceAmount::Static(amount) => {
                     for set in self.sets.values_mut() {
-                        set.ensure_static(amount as usize, workspace_state, toplevel_info_state)
+                        set.ensure_static(
+                            amount as usize,
+                            workspace_state,
+                            toplevel_info_state,
+                            xdg_activation_state,
+                        )
                     }
                 }
             },
         }
 
         for set in self.sets.values_mut() {
-            set.refresh()
+            set.refresh(xdg_activation_state)
         }
     }
 
@@ -826,7 +865,7 @@ impl Workspaces {
         }
     }
 
-    pub fn set_theme(&mut self, theme: cosmic::Theme) {
+    pub fn set_theme(&mut self, theme: cosmic::Theme, xdg_activation_state: &XdgActivationState) {
         for (_, s) in &mut self.sets {
             s.theme = theme.clone();
             for mut w in &mut s.workspaces {
@@ -837,7 +876,7 @@ impl Workspaces {
                     m.force_redraw();
                 });
 
-                w.refresh();
+                w.refresh(xdg_activation_state);
                 w.dirty.store(true, Ordering::Relaxed);
                 w.recalculate();
             }
@@ -854,6 +893,7 @@ impl Shell {
             client_should_see_privileged_protocols,
         );
         let xdg_shell_state = XdgShellState::new::<State>(dh);
+        let xdg_activation_state = XdgActivationState::new::<State>(dh);
         let toplevel_info_state =
             ToplevelInfoState::new(dh, client_should_see_privileged_protocols);
         let toplevel_management_state = ToplevelManagementState::new::<State, _>(
@@ -874,12 +914,14 @@ impl Shell {
 
             pending_windows: Vec::new(),
             pending_layers: Vec::new(),
+            pending_activations: HashMap::new(),
             override_redirect_windows: Vec::new(),
 
             layer_shell_state,
             toplevel_info_state,
             toplevel_management_state,
             xdg_shell_state,
+            xdg_activation_state,
             workspace_state,
 
             theme,
@@ -905,6 +947,7 @@ impl Shell {
             seats,
             &mut self.workspace_state.update(),
             &mut self.toplevel_info_state,
+            &self.xdg_activation_state,
         );
         self.refresh(); // cleans up excess of workspaces and empty workspaces
     }
@@ -912,8 +955,12 @@ impl Shell {
     pub fn update_config(&mut self, config: &Config) {
         let mut workspace_state = self.workspace_state.update();
         let toplevel_info_state = &mut self.toplevel_info_state;
-        self.workspaces
-            .update_config(config, &mut workspace_state, toplevel_info_state);
+        self.workspaces.update_config(
+            config,
+            &mut workspace_state,
+            toplevel_info_state,
+            &self.xdg_activation_state,
+        );
     }
 
     pub fn activate(
@@ -956,6 +1003,12 @@ impl Shell {
 
     pub fn active_space_mut(&mut self, output: &Output) -> &mut Workspace {
         self.workspaces.active_mut(output)
+    }
+
+    pub fn refresh_active_space(&mut self, output: &Output) {
+        self.workspaces
+            .active_mut(output)
+            .refresh(&self.xdg_activation_state)
     }
 
     pub fn visible_outputs_for_surface<'a>(
@@ -1006,10 +1059,7 @@ impl Shell {
         }
     }
 
-    pub fn workspaces_for_surface(
-        &self,
-        surface: &WlSurface,
-    ) -> impl Iterator<Item = (WorkspaceHandle, Output)> {
+    pub fn workspace_for_surface(&self, surface: &WlSurface) -> Option<(WorkspaceHandle, Output)> {
         match self.outputs().find(|o| {
             let map = layer_map_for_output(o);
             map.layer_for_surface(surface, WindowSurfaceType::ALL)
@@ -1029,7 +1079,6 @@ impl Shell {
                 })
                 .map(|w| (w.handle.clone(), w.output().clone())),
         }
-        .into_iter()
     }
 
     pub fn element_for_surface(&self, surface: &CosmicSurface) -> Option<&CosmicMapped> {
@@ -1194,9 +1243,13 @@ impl Shell {
 
         self.popups.cleanup();
 
+        self.xdg_activation_state.retain_tokens(|_, data| {
+            Instant::now().duration_since(data.timestamp) < Duration::from_secs(5)
+        });
         self.workspaces.refresh(
             &mut self.workspace_state.update(),
             &mut self.toplevel_info_state,
+            &self.xdg_activation_state,
         );
 
         for output in self.outputs() {
@@ -1262,10 +1315,42 @@ impl Shell {
             .unwrap();
         let (window, seat, output) = state.common.shell.pending_windows.remove(pos);
 
-        let should_be_fullscreen = output.is_some();
-        let output = output.unwrap_or_else(|| seat.active_output());
+        let pending_activation = state
+            .common
+            .shell
+            .pending_activations
+            .remove(&(&window).into());
+        let workspace_handle = match pending_activation {
+            Some(ActivationContext::Workspace(handle)) => Some(handle),
+            _ => None,
+        };
 
-        let workspace = state.common.shell.workspaces.active_mut(&output);
+        let should_be_fullscreen = output.is_some();
+        let mut output = output.unwrap_or_else(|| seat.active_output());
+
+        // this is beyond stupid, just to make the borrow checker happy
+        let workspace = if let Some(handle) = workspace_handle.filter(|handle| {
+            state
+                .common
+                .shell
+                .workspaces
+                .spaces()
+                .any(|space| &space.handle == handle)
+        }) {
+            state
+                .common
+                .shell
+                .workspaces
+                .spaces_mut()
+                .find(|space| space.handle == handle)
+                .unwrap()
+        } else {
+            state.common.shell.workspaces.active_mut(&output)
+        };
+        if output != workspace.output {
+            output = workspace.output.clone();
+        }
+
         if let Some((mapped, layer, previous_workspace)) = workspace.remove_fullscreen() {
             let old_handle = workspace.handle.clone();
             let new_workspace_handle = state
@@ -1284,7 +1369,26 @@ impl Shell {
             );
         };
 
-        let workspace = state.common.shell.workspaces.active_mut(&output);
+        let active_handle = state.common.shell.workspaces.active(&output).1.handle;
+        let workspace = if let Some(handle) = workspace_handle.filter(|handle| {
+            state
+                .common
+                .shell
+                .workspaces
+                .spaces()
+                .any(|space| &space.handle == handle)
+        }) {
+            state
+                .common
+                .shell
+                .workspaces
+                .spaces_mut()
+                .find(|space| space.handle == handle)
+                .unwrap()
+        } else {
+            state.common.shell.workspaces.active_mut(&output)
+        };
+
         state.common.shell.toplevel_info_state.new_toplevel(&window);
         state
             .common
@@ -1306,6 +1410,9 @@ impl Shell {
         {
             mapped.set_debug(state.common.egui.active);
         }
+
+        let workspace_empty = workspace.mapped().next().is_none();
+
         if layout::should_be_floating(&window) || !workspace.tiling_enabled {
             workspace.floating_layer.map(mapped.clone(), None);
         } else {
@@ -1328,7 +1435,14 @@ impl Shell {
             workspace.fullscreen_request(&mapped.active_window(), None);
         }
 
-        Shell::set_focus(state, Some(&KeyboardFocusTarget::from(mapped)), &seat, None);
+        if workspace.output == seat.active_output() && active_handle == workspace.handle {
+            // TODO: enforce focus stealing prevention by also checking the same rules as for the else case.
+            Shell::set_focus(state, Some(&KeyboardFocusTarget::from(mapped)), &seat, None);
+        } else if workspace_empty || workspace_handle.is_some() || should_be_fullscreen {
+            let handle = workspace.handle;
+            Shell::append_focus_stack(state, Some(&KeyboardFocusTarget::from(mapped)), &seat);
+            state.common.shell.set_urgent(&handle);
+        }
 
         let active_space = state.common.shell.active_space(&output);
         for mapped in active_space.mapped() {
@@ -1670,7 +1784,13 @@ impl Shell {
     pub(crate) fn set_theme(&mut self, theme: cosmic::Theme) {
         self.theme = theme.clone();
         self.refresh();
-        self.workspaces.set_theme(theme.clone());
+        self.workspaces
+            .set_theme(theme.clone(), &self.xdg_activation_state);
+    }
+
+    pub fn set_urgent(&mut self, workspace: &WorkspaceHandle) {
+        let mut workspace_guard = self.workspace_state.update();
+        workspace_guard.add_workspace_state(workspace, WState::Urgent);
     }
 }
 

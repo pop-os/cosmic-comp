@@ -206,7 +206,7 @@ impl<P: Program + Send + 'static> fmt::Debug for IcedElementInternal<P> {
             .field("size", &self.size)
             .field("pending_update", &self.pending_update)
             .field("cursor_pos", &self.cursor_pos)
-            .field("theme", &self.theme)
+            .field("theme", &"...")
             .field("renderer", &"...")
             .field("state", &"...")
             .field("debug", &self.debug)

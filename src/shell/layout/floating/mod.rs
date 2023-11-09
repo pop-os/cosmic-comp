@@ -35,7 +35,7 @@ pub use self::grabs::*;
 
 #[derive(Debug, Default)]
 pub struct FloatingLayout {
-    pub(in crate::shell) space: Space<CosmicMapped>,
+    pub(crate) space: Space<CosmicMapped>,
 }
 
 impl FloatingLayout {

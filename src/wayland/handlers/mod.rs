@@ -30,5 +30,6 @@ pub mod viewporter;
 pub mod virtual_keyboard;
 pub mod wl_drm;
 pub mod workspace;
+pub mod xdg_activation;
 pub mod xdg_shell;
 pub mod xwayland_keyboard_grab;

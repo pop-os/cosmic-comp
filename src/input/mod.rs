@@ -15,7 +15,10 @@ use crate::{
     },
     state::{Common, SessionLock},
     utils::prelude::*,
-    wayland::{handlers::screencopy::ScreencopySessions, protocols::screencopy::Session},
+    wayland::{
+        handlers::{screencopy::ScreencopySessions, xdg_activation::ActivationContext},
+        protocols::screencopy::Session,
+    },
 };
 use calloop::{timer::Timer, RegistrationToken};
 use cosmic_comp_config::workspace::WorkspaceLayout;
@@ -1688,8 +1691,22 @@ impl State {
                 workspace.toggle_floating_window(seat);
             }
             Action::Spawn(command) => {
-                let wayland_display = self.common.socket.clone();
+                let (token, data) = self
+                    .common
+                    .shell
+                    .xdg_activation_state
+                    .create_external_token(None);
+                let (token, data) = (token.clone(), data.clone());
 
+                let seat = self.common.last_active_seat();
+                let output = seat.active_output();
+                let workspace = self.common.shell.active_space_mut(&output);
+                workspace.pending_tokens.insert(token.clone());
+                let handle = workspace.handle;
+                data.user_data
+                    .insert_if_missing(move || ActivationContext::Workspace(handle));
+
+                let wayland_display = self.common.socket.clone();
                 let display = self
                     .common
                     .xwayland_state
@@ -1697,22 +1714,22 @@ impl State {
                     .map(|s| format!(":{}", s.display))
                     .unwrap_or_default();
 
-                std::thread::spawn(move || {
-                    let mut cmd = std::process::Command::new("/bin/sh");
+                let mut cmd = std::process::Command::new("/bin/sh");
 
-                    cmd.arg("-c")
-                        .arg(command.clone())
-                        .env("WAYLAND_DISPLAY", &wayland_display)
-                        .env("DISPLAY", &display)
-                        .env_remove("COSMIC_SESSION_SOCK");
+                cmd.arg("-c")
+                    .arg(command.clone())
+                    .env("WAYLAND_DISPLAY", &wayland_display)
+                    .env("DISPLAY", &display)
+                    .env("XDG_ACTIVATION_TOKEN", &*token)
+                    .env("DESKTOP_STARTUP_ID", &*token)
+                    .env_remove("COSMIC_SESSION_SOCK");
 
-                    match cmd.spawn() {
-                        Ok(mut child) => {
-                            let _res = child.wait();
-                        }
-                        Err(err) => {
-                            tracing::warn!(?err, "Failed to spawn \"{}\"", command);
-                        }
+                std::thread::spawn(move || match cmd.spawn() {
+                    Ok(mut child) => {
+                        let _res = child.wait();
+                    }
+                    Err(err) => {
+                        tracing::warn!(?err, "Failed to spawn \"{}\"", command);
                     }
                 });
             }
