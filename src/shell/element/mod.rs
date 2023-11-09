@@ -73,7 +73,10 @@ use tracing::debug;
 
 use super::{
     focus::FocusDirection,
-    layout::{floating::ResizeState, tiling::NodeDesc},
+    layout::{
+        floating::{ResizeState, TiledCorners},
+        tiling::NodeDesc,
+    },
     Direction, ManagedLayer,
 };
 
@@ -104,6 +107,7 @@ pub struct CosmicMapped {
     pub(super) resize_state: Arc<Mutex<Option<ResizeState>>>,
     pub last_geometry: Arc<Mutex<Option<Rectangle<i32, Local>>>>,
     pub moved_since_mapped: Arc<AtomicBool>,
+    pub floating_tiled: Arc<Mutex<Option<TiledCorners>>>,
 
     #[cfg(feature = "debug")]
     debug: Arc<Mutex<Option<smithay_egui::EguiState>>>,
@@ -119,6 +123,7 @@ impl fmt::Debug for CosmicMapped {
             .field("resize_state", &self.resize_state)
             .field("last_geometry", &self.last_geometry)
             .field("moved_since_mapped", &self.moved_since_mapped)
+            .field("floating_tiled", &self.floating_tiled)
             .finish()
     }
 }
@@ -1105,6 +1110,7 @@ impl From<CosmicWindow> for CosmicMapped {
             resize_state: Arc::new(Mutex::new(None)),
             last_geometry: Arc::new(Mutex::new(None)),
             moved_since_mapped: Arc::new(AtomicBool::new(false)),
+            floating_tiled: Arc::new(Mutex::new(None)),
             #[cfg(feature = "debug")]
             debug: Arc::new(Mutex::new(None)),
         }
@@ -1121,7 +1127,7 @@ impl From<CosmicStack> for CosmicMapped {
             resize_state: Arc::new(Mutex::new(None)),
             last_geometry: Arc::new(Mutex::new(None)),
             moved_since_mapped: Arc::new(AtomicBool::new(false)),
-            #[cfg(feature = "debug")]
+            floating_tiled: Arc::new(Mutex::new(None)),
             #[cfg(feature = "debug")]
             debug: Arc::new(Mutex::new(None)),
         }

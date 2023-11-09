@@ -10,7 +10,7 @@ use smithay::{
     desktop::{layer_map_for_output, space::SpaceElement, PopupKind, Space, WindowSurfaceType},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
-    utils::{Logical, Point, Rectangle, Size},
+    utils::{IsAlive, Logical, Point, Rectangle, Size},
     wayland::seat::WaylandFocus,
 };
 
@@ -41,6 +41,77 @@ pub struct FloatingLayout {
     spawn_order: Vec<CosmicMapped>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TiledCorners {
+    Top,
+    TopRight,
+    Right,
+    BottomRight,
+    Bottom,
+    BottomLeft,
+    Left,
+    TopLeft,
+}
+
+impl TiledCorners {
+    pub fn relative_geometry(
+        &self,
+        output_geometry: Rectangle<i32, Logical>,
+    ) -> Rectangle<i32, Local> {
+        let (loc, size) = match self {
+            TiledCorners::Bottom => (
+                Point::from((
+                    output_geometry.loc.x,
+                    output_geometry.loc.y + (output_geometry.size.h / 2),
+                )),
+                Size::from((output_geometry.size.w, output_geometry.size.h / 2)),
+            ),
+            TiledCorners::BottomLeft => (
+                Point::from((
+                    output_geometry.loc.x,
+                    output_geometry.loc.y + (output_geometry.size.h / 2),
+                )),
+                Size::from((output_geometry.size.w / 2, output_geometry.size.h / 2)),
+            ),
+            TiledCorners::BottomRight => (
+                Point::from((
+                    output_geometry.loc.x + (output_geometry.size.w / 2),
+                    output_geometry.loc.y + (output_geometry.size.h / 2),
+                )),
+                Size::from((output_geometry.size.w / 2, output_geometry.size.h / 2)),
+            ),
+            TiledCorners::Left => (
+                output_geometry.loc,
+                Size::from((output_geometry.size.w / 2, output_geometry.size.h)),
+            ),
+            TiledCorners::Top => (
+                output_geometry.loc,
+                Size::from((output_geometry.size.w, output_geometry.size.h / 2)),
+            ),
+            TiledCorners::TopLeft => (
+                output_geometry.loc,
+                Size::from((output_geometry.size.w / 2, output_geometry.size.h / 2)),
+            ),
+            TiledCorners::TopRight => (
+                Point::from((
+                    output_geometry.loc.x + (output_geometry.size.w / 2),
+                    output_geometry.loc.y,
+                )),
+                Size::from((output_geometry.size.w / 2, output_geometry.size.h / 2)),
+            ),
+            TiledCorners::Right => (
+                Point::from((
+                    output_geometry.loc.x + (output_geometry.size.w / 2),
+                    output_geometry.loc.y,
+                )),
+                Size::from((output_geometry.size.w / 2, output_geometry.size.h)),
+            ),
+        };
+
+        Rectangle::from_loc_and_size(loc, size).as_local()
+    }
+}
+
 impl FloatingLayout {
     pub fn new(output: &Output) -> FloatingLayout {
         let mut layout = Self::default();
@@ -53,9 +124,41 @@ impl FloatingLayout {
         self.space.unmap_output(&old_output);
         self.space.map_output(output, (0, 0));
 
-        /*
-        TODO: rescale all positions? (evem rescale windows?)
-         */
+        let old_output_geometry = {
+            let layers = layer_map_for_output(&old_output);
+            layers.non_exclusive_zone()
+        };
+        let output_geometry = {
+            let layers = layer_map_for_output(&output);
+            layers.non_exclusive_zone()
+        };
+
+        for mapped in self
+            .space
+            .elements()
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
+        {
+            let tiled_state = mapped.floating_tiled.lock().unwrap().clone();
+            if let Some(tiled_state) = tiled_state {
+                let geometry = tiled_state.relative_geometry(output_geometry);
+                self.map_internal(mapped, Some(geometry.loc), Some(geometry.size.as_logical()));
+            } else {
+                let geometry = self.space.element_geometry(&mapped).unwrap();
+                let new_loc = (
+                    geometry.loc.x.saturating_sub(old_output_geometry.loc.x)
+                        / old_output_geometry.size.w
+                        * output_geometry.size.w
+                        + output_geometry.loc.x,
+                    geometry.loc.y.saturating_sub(old_output_geometry.loc.y)
+                        / old_output_geometry.size.h
+                        * output_geometry.size.h
+                        + output_geometry.loc.y,
+                );
+                self.map_internal(mapped, Some(Point::from(new_loc)), None);
+            }
+        }
 
         self.refresh();
     }
@@ -271,7 +374,7 @@ impl FloatingLayout {
                             output_geometry.loc.x + output_geometry.size.w / 2 - win_geo.size.w / 2,
                             output_geometry.loc.y
                                 + (output_geometry.size.h / 2 - win_geo.size.h / 2)
-                                .min(output_geometry.size.h / 8),
+                                    .min(output_geometry.size.h / 8),
                         )
                             .into()
                     })
@@ -291,7 +394,19 @@ impl FloatingLayout {
     }
 
     pub fn unmap(&mut self, window: &CosmicMapped) -> bool {
-        if !window.is_maximized(true) || !window.is_fullscreen(true) {
+        if let Some(_) = window.floating_tiled.lock().unwrap().take() {
+            if let Some(last_size) = window.last_geometry.lock().unwrap().map(|geo| geo.size) {
+                if let Some(location) = self.space.element_location(window) {
+                    window.set_tiled(false);
+                    window.set_geometry(
+                        Rectangle::from_loc_and_size(location, last_size.as_logical())
+                            .as_local()
+                            .to_global(self.space.outputs().next().unwrap()),
+                    );
+                    window.configure();
+                }
+            }
+        } else if !window.is_maximized(true) || !window.is_fullscreen(true) {
             if let Some(location) = self.space.element_location(window) {
                 *window.last_geometry.lock().unwrap() = Some(
                     Rectangle::from_loc_and_size(
@@ -539,7 +654,7 @@ impl FloatingLayout {
         };
 
         match focused.handle_move(direction) {
-            StackMoveResult::Handled => return MoveResult::Done,
+            StackMoveResult::Handled => MoveResult::Done,
             StackMoveResult::MoveOut(surface, loop_handle) => {
                 let mapped: CosmicMapped = CosmicWindow::new(surface, loop_handle, theme).into();
                 let output = seat.active_output();
@@ -562,12 +677,87 @@ impl FloatingLayout {
                     .then_some(pos);
 
                 self.map_internal(mapped.clone(), position.map(PointExt::as_local), None);
-                return MoveResult::ShiftFocus(KeyboardFocusTarget::Element(mapped));
+                MoveResult::ShiftFocus(KeyboardFocusTarget::Element(mapped))
             }
-            StackMoveResult::Default => {}
-        };
+            StackMoveResult::Default => {
+                let mut tiled_state = focused.floating_tiled.lock().unwrap();
+                let new_state = match (direction, &*tiled_state) {
+                    // figure out if we are moving between workspaces/outputs
+                    (
+                        Direction::Up,
+                        Some(TiledCorners::Top)
+                        | Some(TiledCorners::TopLeft)
+                        | Some(TiledCorners::TopRight),
+                    )
+                    | (
+                        Direction::Down,
+                        Some(TiledCorners::Bottom)
+                        | Some(TiledCorners::BottomLeft)
+                        | Some(TiledCorners::BottomRight),
+                    )
+                    | (
+                        Direction::Left,
+                        Some(TiledCorners::Left)
+                        | Some(TiledCorners::TopLeft)
+                        | Some(TiledCorners::BottomLeft),
+                    )
+                    | (
+                        Direction::Right,
+                        Some(TiledCorners::Right)
+                        | Some(TiledCorners::TopRight)
+                        | Some(TiledCorners::BottomRight),
+                    ) => {
+                        return MoveResult::MoveFurther(KeyboardFocusTarget::Element(
+                            focused.clone(),
+                        ));
+                    }
 
-        MoveResult::MoveFurther(KeyboardFocusTarget::Element(focused.clone()))
+                    // figure out if we need to quater tile
+                    (Direction::Up, Some(TiledCorners::Left))
+                    | (Direction::Left, Some(TiledCorners::Top)) => TiledCorners::TopLeft,
+                    (Direction::Right, Some(TiledCorners::Top))
+                    | (Direction::Up, Some(TiledCorners::Right)) => TiledCorners::TopRight,
+                    (Direction::Down, Some(TiledCorners::Left))
+                    | (Direction::Left, Some(TiledCorners::Bottom)) => TiledCorners::BottomLeft,
+                    (Direction::Right, Some(TiledCorners::Bottom))
+                    | (Direction::Down, Some(TiledCorners::Right)) => TiledCorners::BottomRight,
+                    // figure out if we need to extend a quater tile
+                    (Direction::Up, Some(TiledCorners::BottomLeft))
+                    | (Direction::Down, Some(TiledCorners::TopLeft)) => TiledCorners::Left,
+                    (Direction::Up, Some(TiledCorners::BottomRight))
+                    | (Direction::Down, Some(TiledCorners::TopRight)) => TiledCorners::Right,
+                    (Direction::Left, Some(TiledCorners::TopRight))
+                    | (Direction::Right, Some(TiledCorners::TopLeft)) => TiledCorners::Top,
+                    (Direction::Left, Some(TiledCorners::BottomRight))
+                    | (Direction::Right, Some(TiledCorners::BottomLeft)) => TiledCorners::Bottom,
+                    // else we have a simple case
+                    (Direction::Up, _) => TiledCorners::Top,
+                    (Direction::Right, _) => TiledCorners::Right,
+                    (Direction::Down, _) => TiledCorners::Bottom,
+                    (Direction::Left, _) => TiledCorners::Left,
+                };
+
+                let output = self.space.outputs().next().unwrap().clone();
+                let layers = layer_map_for_output(&output);
+                let output_geometry = layers.non_exclusive_zone();
+                std::mem::drop(layers);
+
+                let new_geo = new_state.relative_geometry(output_geometry);
+                let (new_pos, new_size) = (new_geo.loc, new_geo.size);
+                focused.set_tiled(true); // TODO: More fine grained?
+
+                *tiled_state = Some(new_state);
+                std::mem::drop(tiled_state);
+
+                *focused.last_geometry.lock().unwrap() =
+                    self.space.element_geometry(focused).map(RectExt::as_local);
+                focused.moved_since_mapped.store(true, Ordering::SeqCst);
+                let focused = focused.clone();
+                self.map_internal(focused, Some(new_pos), Some(new_size.as_logical()));
+
+                MoveResult::Done
+            }
+        }
     }
 
     pub fn mapped(&self) -> impl Iterator<Item = &CosmicMapped> {
