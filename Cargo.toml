@@ -5,16 +5,22 @@ edition = "2021"
 license = "GPL-3.0-only"
 authors = ["Victoria Brekenfeld"]
 
+[workspace]
+members = [
+    "cosmic-comp-config"
+]
+
 [dependencies]
 anyhow = { version = "1.0.51", features = ["backtrace"] }
-bitflags = "1.3.2"
+bitflags = "2.4"
 bytemuck = "1.12"
-calloop = { version = "0.10.1", features = ["executor"] }
+calloop = { version = "0.12.2", features = ["executor"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sendfd = "0.4.1"
-egui = { version = "0.21.0", optional = true }
-renderdoc = { version = "0.10.1", optional = true }
+egui = { version = "0.23.0", optional = true }
+egui_plot = { version = "0.23.0", optional = true }
+renderdoc = { version = "0.11.0", optional = true }
 edid-rs = { version = "0.1" }
 png = "0.17.5"
 lazy_static = "1.4.0"
@@ -22,42 +28,54 @@ log-panics = { version = "2", features = ["with-backtrace"] }
 thiserror = "1.0.26"
 regex = "1"
 xcursor = "0.3.3"
-id_tree = "1.8.0"
-xkbcommon = "0.4"
-indexmap = "1.8.0"
+xkbcommon = "0.7"
+indexmap = "2.0"
 xdg = "^2.1"
-ron = "0.7"
-libsystemd = { version = "0.5", optional = true }
-wayland-backend = "0.1.0"
-wayland-scanner = "0.30.0"
+ron = "0.8"
+libsystemd = { version = "0.6", optional = true }
+wayland-backend = "0.3.2"
+wayland-scanner = "0.31.0"
+cosmic-comp-config = { path = "cosmic-comp-config" }
+cosmic-config = { git = "https://github.com/pop-os/libcosmic/", features = ["calloop", "macro"] }
 cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", branch = "main", default-features = false, features = ["server"] }
-libcosmic = { git = "https://github.com/pop-os/libcosmic", rev = "24709e9c3b", default-features = false, features = ["softbuffer"] }
-iced_softbuffer = { git = "https://github.com/pop-os/libcosmic", rev = "24709e9c3b" }
-ordered-float = "3.0"
-glow = "0.11.2"
+libcosmic = { git = "https://github.com/pop-os/libcosmic/", default-features = false }
+iced_tiny_skia = { git = "https://github.com/pop-os/libcosmic/" }
+tiny-skia = "0.10"
+ordered-float = "4.0"
+glow = "0.12.0"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter", "tracing-log"] }
 tracing-journald = "0.3.0"
 tracing = { version = "0.1.37", features = ["max_level_debug", "release_max_level_info"] }
-puffin = { version = "0.14.3", optional = true }
-puffin_egui = { version = "0.21.0", optional = true }
+puffin = { version = "0.17.0", optional = true }
+puffin_egui = { version = "0.23.0", optional = true }
+keyframe = "1.1.1"
+once_cell = "1.18.0"
+i18n-embed = { version = "0.14", features = ["fluent-system", "desktop-requester"] }
+i18n-embed-fl = "0.7"
+rust-embed = "8.0"
+libc = "0.2.149"
+
+[dependencies.id_tree]
+git = "https://github.com/Drakulix/id-tree.git"
+branch = "feature/copy_clone"
 
 [dependencies.smithay]
 version = "0.3"
 git = "https://github.com/smithay/smithay.git"
-rev = "9459ddd14e"
+rev = "74ef59a3f"
 default-features = false
 features = ["backend_drm", "backend_gbm", "backend_egl", "backend_libinput", "backend_session_libseat", "backend_udev", "backend_winit", "backend_vulkan", "backend_x11", "desktop", "use_system_lib", "renderer_glow", "renderer_multi", "wayland_frontend", "xwayland"]
 
 [dependencies.smithay-egui]
 git = "https://github.com/Smithay/smithay-egui.git"
-rev = "197606f400"
+rev = "cdc652e0"
 features = ["svg"]
 optional = true
 
 [features]
 default = ["systemd"]
 systemd = ["libsystemd"]
-debug = ["egui", "smithay-egui", "renderdoc", "puffin", "puffin_egui", "anyhow/backtrace"]
+debug = ["egui", "egui_plot", "smithay-egui", "renderdoc", "puffin", "puffin_egui", "anyhow/backtrace"]
 
 [profile.dev]
 lto = "thin"
@@ -70,4 +88,4 @@ debug = true
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/smithay//smithay", rev = "25d1176484" }
+smithay = { git = "https://github.com/smithay//smithay", rev = "d5b352b" }

@@ -41,8 +41,7 @@ impl WlrLayerShellHandler for State {
     }
 
     fn new_popup(&mut self, _parent: WlrLayerSurface, popup: PopupSurface) {
-        let positioner = popup.with_pending_state(|state| state.positioner);
-        self.common.shell.unconstrain_popup(&popup, &positioner);
+        self.common.shell.unconstrain_popup(&popup);
 
         if popup.send_configure().is_ok() {
             self.common
@@ -73,6 +72,10 @@ impl WlrLayerShellHandler for State {
                     .unwrap()
                     .clone();
                 map.unmap_layer(&layer);
+            }
+
+            for workspace in self.common.shell.workspaces.spaces_mut() {
+                workspace.recalculate();
             }
 
             // collect screencopy sessions needing an update

@@ -38,6 +38,7 @@ use tracing::trace;
 
 use std::{convert::TryFrom, path::PathBuf, sync::Arc};
 
+#[derive(Debug)]
 pub struct WlDrmState;
 
 /// Data associated with a drm global.

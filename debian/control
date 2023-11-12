@@ -4,17 +4,19 @@ Priority: optional
 Maintainer: Victoria Brekenfeld <victoria@system76.com>
 Build-Depends:
     cargo,
+    cmake,
     debhelper-compat (=10),
-    rustc (>=1.57),
-    libudev-dev,
     libegl1-mesa-dev,
+    libfontconfig-dev,
     libgbm-dev,
     libinput-dev,
+    libseat-dev,
+    libsystemd-dev,
+    libudev-dev,
     libwayland-dev,
     libxcb1-dev,
     libxkbcommon-dev,
-    libsystemd-dev,
-    libseat-dev
+    rustc (>=1.57),
 Standards-Version: 4.1.1
 Homepage: https://github.com/pop-os/cosmic-comp
 

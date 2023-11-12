@@ -21,6 +21,7 @@ pub use cosmic_protocols::workspace::v1::server::{
     zcosmic_workspace_handle_v1::ZcosmicWorkspaceCapabilitiesV1 as WorkspaceCapabilities,
 };
 
+#[derive(Debug)]
 pub struct WorkspaceState<D>
 where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
@@ -50,7 +51,7 @@ where
 crate::utils::id_gen!(next_group_id, GROUP_ID, GROUP_IDS);
 crate::utils::id_gen!(next_workspace_id, WORKSPACE_ID, WORKSPACE_IDS);
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct WorkspaceGroup {
     id: usize,
     instances: Vec<ZcosmicWorkspaceGroupHandleV1>,
@@ -69,10 +70,11 @@ pub struct WorkspaceGroupHandle {
 pub struct WorkspaceGroupDataInner {
     outputs: Vec<Output>,
     capabilities: Vec<GroupCapabilities>,
+    workspace_count: usize,
 }
 pub type WorkspaceGroupData = Mutex<WorkspaceGroupDataInner>;
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Workspace {
     id: usize,
     instances: Vec<ZcosmicWorkspaceHandleV1>,
@@ -210,11 +212,16 @@ where
         }
     }
 
-    fn destroyed(state: &mut D, _client: ClientId, resource: ObjectId, _data: &()) {
+    fn destroyed(
+        state: &mut D,
+        _client: ClientId,
+        resource: &ZcosmicWorkspaceManagerV1,
+        _data: &(),
+    ) {
         state
             .workspace_state_mut()
             .instances
-            .retain(|i| i.id() != resource);
+            .retain(|i| i != resource);
     }
 }
 
@@ -267,9 +274,14 @@ where
         }
     }
 
-    fn destroyed(state: &mut D, _client: ClientId, resource: ObjectId, _data: &WorkspaceGroupData) {
+    fn destroyed(
+        state: &mut D,
+        _client: ClientId,
+        resource: &ZcosmicWorkspaceGroupHandleV1,
+        _data: &WorkspaceGroupData,
+    ) {
         for group in &mut state.workspace_state_mut().groups {
-            group.instances.retain(|i| i.id() != resource)
+            group.instances.retain(|i| i != resource)
         }
     }
 }
@@ -360,10 +372,15 @@ where
         }
     }
 
-    fn destroyed(state: &mut D, _client: ClientId, resource: ObjectId, _data: &WorkspaceData) {
+    fn destroyed(
+        state: &mut D,
+        _client: ClientId,
+        resource: &ZcosmicWorkspaceHandleV1,
+        _data: &WorkspaceData,
+    ) {
         for group in &mut state.workspace_state_mut().groups {
             for workspace in &mut group.workspaces {
-                workspace.instances.retain(|i| i.id() != resource)
+                workspace.instances.retain(|i| i != resource)
             }
         }
     }
@@ -853,6 +870,11 @@ where
         handle_state.capabilities = group.capabilities.clone();
         changed = true;
     }
+
+    if handle_state.workspace_count != group.workspaces.len() {
+        changed = true;
+    }
+    handle_state.workspace_count = group.workspaces.len();
 
     for workspace in &mut group.workspaces {
         if send_workspace_to_client::<D>(dh, instance, workspace) {

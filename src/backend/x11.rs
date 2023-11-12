@@ -4,7 +4,7 @@ use crate::{
     backend::render,
     config::OutputConfig,
     input::Devices,
-    state::{BackendData, Common, Data},
+    state::{BackendData, Common},
     utils::prelude::*,
     wayland::protocols::screencopy::{BufferParams, Session as ScreencopySession},
 };
@@ -20,8 +20,10 @@ use smithay::{
         egl::{EGLContext, EGLDevice, EGLDisplay},
         input::{Event, InputEvent},
         renderer::{
-            damage::OutputDamageTracker, gles::GlesRenderbuffer, glow::GlowRenderer, Bind,
-            ImportDma, ImportEgl,
+            damage::{OutputDamageTracker, RenderOutputResult},
+            gles::GlesRenderbuffer,
+            glow::GlowRenderer,
+            Bind, ImportDma, ImportEgl,
         },
         vulkan::{version::Version, Instance, PhysicalDevice},
         x11::{Window, WindowBuilder, X11Backend, X11Event, X11Handle, X11Input, X11Surface},
@@ -37,7 +39,7 @@ use smithay::{
     utils::{DeviceFd, Transform},
     wayland::dmabuf::DmabufFeedbackBuilder,
 };
-use std::{cell::RefCell, os::unix::io::OwnedFd};
+use std::{cell::RefCell, os::unix::io::OwnedFd, time::Duration};
 use tracing::{debug, error, info, warn};
 
 #[cfg(feature = "debug")]
@@ -45,11 +47,13 @@ use crate::state::Fps;
 
 use super::render::init_shaders;
 
+#[derive(Debug)]
 enum Allocator {
     Gbm(GbmAllocator<DrmDeviceFd>),
     Vulkan(PhysicalDevice),
 }
 
+#[derive(Debug)]
 pub struct X11State {
     allocator: Allocator,
     _egl: EGLDisplay,
@@ -59,7 +63,7 @@ pub struct X11State {
 }
 
 impl X11State {
-    pub fn add_window(&mut self, handle: LoopHandle<'_, Data>) -> Result<Output> {
+    pub fn add_window(&mut self, handle: LoopHandle<'_, State>) -> Result<Output> {
         let window = WindowBuilder::new()
             .title("COSMIC")
             .build(&self.handle)
@@ -120,15 +124,15 @@ impl X11State {
         let (ping, source) =
             ping::make_ping().with_context(|| "Failed to create output event loop source")?;
         let _token = handle
-            .insert_source(source, move |_, _, data| {
-                let x11_state = data.state.backend.x11();
+            .insert_source(source, move |_, _, state| {
+                let x11_state = state.backend.x11();
                 if let Some(surface) = x11_state
                     .surfaces
                     .iter_mut()
                     .find(|s| s.output == output_ref)
                 {
                     if let Err(err) =
-                        surface.render_output(&mut x11_state.renderer, &mut data.state.common)
+                        surface.render_output(&mut x11_state.renderer, &mut state.common)
                     {
                         error!(?err, "Error rendering.");
                     }
@@ -202,6 +206,7 @@ impl X11State {
     }
 }
 
+#[derive(Debug)]
 pub struct Surface {
     window: Window,
     damage_tracker: OutputDamageTracker,
@@ -240,7 +245,7 @@ impl Surface {
             #[cfg(feature = "debug")]
             Some(&mut self.fps),
         ) {
-            Ok((damage, states)) => {
+            Ok(RenderOutputResult { damage, states, .. }) => {
                 self.screencopy.clear();
                 self.surface
                     .submit()
@@ -255,7 +260,7 @@ impl Surface {
                         state.clock.now(),
                         self.output
                             .current_mode()
-                            .map(|mode| mode.refresh as u32)
+                            .map(|mode| Duration::from_secs_f64(1_000.0 / mode.refresh as f64))
                             .unwrap_or_default(),
                         0,
                         wp_presentation_feedback::Kind::Vsync,
@@ -328,7 +333,7 @@ fn try_gbm_allocator(fd: OwnedFd) -> Option<Allocator> {
 
 pub fn init_backend(
     dh: &DisplayHandle,
-    event_loop: &mut EventLoop<Data>,
+    event_loop: &mut EventLoop<State>,
     state: &mut State,
 ) -> Result<()> {
     let backend = X11Backend::new().with_context(|| "Failed to initilize X11 backend")?;
@@ -386,12 +391,11 @@ pub fn init_backend(
 
     event_loop
         .handle()
-        .insert_source(backend, move |event, _, data| match event {
+        .insert_source(backend, move |event, _, state| match event {
             X11Event::CloseRequested { window_id } => {
                 // TODO: drain_filter
                 let mut outputs_removed = Vec::new();
-                for surface in data
-                    .state
+                for surface in state
                     .backend
                     .x11()
                     .surfaces
@@ -401,13 +405,13 @@ pub fn init_backend(
                     surface.window.unmap();
                     outputs_removed.push(surface.output.clone());
                 }
-                data.state
+                state
                     .backend
                     .x11()
                     .surfaces
                     .retain(|s| s.window.id() != window_id);
                 for output in outputs_removed.into_iter() {
-                    data.state
+                    state
                         .common
                         .shell
                         .remove_output(&output, seats.iter().cloned());
@@ -422,8 +426,7 @@ pub fn init_backend(
                     size,
                     refresh: 60_000,
                 };
-                if let Some(surface) = data
-                    .state
+                if let Some(surface) = state
                     .backend
                     .x11()
                     .surfaces
@@ -444,8 +447,7 @@ pub fn init_backend(
                     output.change_current_state(Some(mode), None, None, None);
                     output.set_preferred(mode);
                     layer_map_for_output(output).arrange();
-                    data.state.common.output_configuration_state.update();
-                    data.state.common.shell.refresh_outputs();
+                    state.common.output_configuration_state.update();
                     surface.dirty = true;
                     if !surface.pending {
                         surface.render.ping();
@@ -453,8 +455,7 @@ pub fn init_backend(
                 }
             }
             X11Event::Refresh { window_id } | X11Event::PresentCompleted { window_id } => {
-                if let Some(surface) = data
-                    .state
+                if let Some(surface) = state
                     .backend
                     .x11()
                     .surfaces
@@ -468,7 +469,7 @@ pub fn init_backend(
                     }
                 }
             }
-            X11Event::Input(event) => data.state.process_x11_event(event),
+            X11Event::Input(event) => state.process_x11_event(event),
         })
         .map_err(|_| anyhow::anyhow!("Failed to insert X11 Backend into event loop"))?;
 
@@ -533,7 +534,7 @@ impl State {
             _ => {}
         };
 
-        self.process_input_event(event);
+        self.process_input_event(event, false);
         // TODO actually figure out the output
         for output in self.common.shell.outputs() {
             self.backend.x11().schedule_render(output, None);

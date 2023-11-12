@@ -1,30 +1,31 @@
 use std::{cell::RefCell, sync::Mutex, time::Duration};
 
 use crate::{
-    backend::render::cursor::CursorState,
+    backend::render::cursor::{CursorShape, CursorState},
     input::{ActiveOutput, SeatId},
 };
 use smithay::{
     desktop::utils::bbox_from_surface_tree,
     input::{
-        pointer::{CursorImageAttributes, CursorImageStatus},
+        pointer::{CursorIcon, CursorImageAttributes, CursorImageStatus},
         Seat,
     },
     output::Output,
-    utils::{Buffer, IsAlive, Logical, Monotonic, Point, Rectangle, Time, Transform},
+    utils::{Buffer, IsAlive, Monotonic, Point, Rectangle, Time, Transform},
     wayland::compositor::with_states,
 };
 
+pub use super::geometry::*;
 pub use crate::shell::{Shell, Workspace};
 pub use crate::state::{Common, State};
 pub use crate::wayland::handlers::xdg_shell::popup::update_reactive_popups;
 
 pub trait OutputExt {
-    fn geometry(&self) -> Rectangle<i32, Logical>;
+    fn geometry(&self) -> Rectangle<i32, Global>;
 }
 
 impl OutputExt for Output {
-    fn geometry(&self) -> Rectangle<i32, Logical> {
+    fn geometry(&self) -> Rectangle<i32, Global> {
         Rectangle::from_loc_and_size(self.current_location(), {
             Transform::from(self.current_transform())
                 .transform_size(
@@ -36,6 +37,7 @@ impl OutputExt for Output {
                 .to_logical(self.current_scale().fractional_scale())
                 .to_i32_round()
         })
+        .as_global()
     }
 }
 
@@ -86,12 +88,12 @@ impl SeatExt for Seat<State> {
                 let mut cursor_status = cell.borrow_mut();
                 if let CursorImageStatus::Surface(ref surface) = *cursor_status {
                     if !surface.alive() {
-                        *cursor_status = CursorImageStatus::Default;
+                        *cursor_status = CursorImageStatus::default_named();
                     }
                 }
                 cursor_status.clone()
             })
-            .unwrap_or(CursorImageStatus::Default);
+            .unwrap_or(CursorImageStatus::default_named());
 
         match cursor_status {
             CursorImageStatus::Surface(surface) => {
@@ -111,12 +113,14 @@ impl SeatExt for Seat<State> {
                 );
                 Some((buffer_geo, (hotspot.x, hotspot.y).into()))
             }
-            CursorImageStatus::Default => {
+            CursorImageStatus::Named(CursorIcon::Default) => {
                 let seat_userdata = self.user_data();
                 seat_userdata.insert_if_missing(CursorState::default);
                 let state = seat_userdata.get::<CursorState>().unwrap();
                 let frame = state
-                    .cursor
+                    .cursors
+                    .get(&CursorShape::Default)
+                    .unwrap()
                     .get_image(1, Into::<Duration>::into(time).as_millis() as u32);
 
                 Some((
@@ -126,6 +130,10 @@ impl SeatExt for Seat<State> {
                     ),
                     (frame.xhot as i32, frame.yhot as i32).into(),
                 ))
+            }
+            CursorImageStatus::Named(_) => {
+                // TODO: Handle for `cursor_shape_v1` protocol
+                None
             }
             CursorImageStatus::Hidden => None,
         }

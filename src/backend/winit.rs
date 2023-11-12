@@ -4,7 +4,7 @@ use crate::{
     backend::render,
     config::OutputConfig,
     input::Devices,
-    state::{BackendData, Common, Data},
+    state::{BackendData, Common},
     utils::prelude::*,
     wayland::protocols::screencopy::{BufferParams, Session as ScreencopySession},
 };
@@ -13,8 +13,10 @@ use smithay::{
     backend::{
         egl::EGLDevice,
         renderer::{
-            damage::OutputDamageTracker, gles::GlesRenderbuffer, glow::GlowRenderer, ImportDma,
-            ImportEgl,
+            damage::{OutputDamageTracker, RenderOutputResult},
+            gles::GlesRenderbuffer,
+            glow::GlowRenderer,
+            ImportDma, ImportEgl,
         },
         winit::{self, WinitEvent, WinitGraphicsBackend, WinitVirtualDevice},
     },
@@ -24,11 +26,12 @@ use smithay::{
         calloop::{ping, EventLoop},
         wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
         wayland_server::DisplayHandle,
+        winit::platform::pump_events::PumpStatus,
     },
     utils::Transform,
     wayland::dmabuf::DmabufFeedbackBuilder,
 };
-use std::cell::RefCell;
+use std::{cell::RefCell, time::Duration};
 use tracing::{error, info, warn};
 
 #[cfg(feature = "debug")]
@@ -36,6 +39,7 @@ use crate::state::Fps;
 
 use super::render::{init_shaders, CursorMode};
 
+#[derive(Debug)]
 pub struct WinitState {
     // The winit backend currently has no notion of multiple windows
     pub backend: WinitGraphicsBackend<GlowRenderer>,
@@ -73,7 +77,7 @@ impl WinitState {
             #[cfg(feature = "debug")]
             Some(&mut self.fps),
         ) {
-            Ok((damage, states)) => {
+            Ok(RenderOutputResult { damage, states, .. }) => {
                 self.backend
                     .bind()
                     .with_context(|| "Failed to bind display")?;
@@ -91,11 +95,11 @@ impl WinitState {
                         state.clock.now(),
                         self.output
                             .current_mode()
-                            .map(|mode| mode.refresh as u32)
+                            .map(|mode| Duration::from_secs_f64(1_000.0 / mode.refresh as f64))
                             .unwrap_or_default(),
                         0,
                         wp_presentation_feedback::Kind::Vsync,
-                    )
+                    );
                 }
             }
             Err(err) => {
@@ -122,12 +126,9 @@ impl WinitState {
             .get::<RefCell<OutputConfig>>()
             .unwrap()
             .borrow_mut();
-        if dbg!(config.mode.0) != dbg!((size.physical_size.w as i32, size.physical_size.h as i32)) {
+        if dbg!(config.mode.0) != dbg!((size.w as i32, size.h as i32)) {
             if !test_only {
-                config.mode = (
-                    (size.physical_size.w as i32, size.physical_size.h as i32),
-                    None,
-                );
+                config.mode = ((size.w as i32, size.h as i32), None);
             }
             Err(anyhow::anyhow!("Cannot set window size"))
         } else {
@@ -144,7 +145,7 @@ impl WinitState {
 
 pub fn init_backend(
     dh: &DisplayHandle,
-    event_loop: &mut EventLoop<Data>,
+    event_loop: &mut EventLoop<State>,
     state: &mut State,
 ) -> Result<()> {
     let (mut backend, mut input) =
@@ -162,7 +163,7 @@ pub fn init_backend(
         model: name.clone(),
     };
     let mode = Mode {
-        size: (size.physical_size.w as i32, size.physical_size.h as i32).into(),
+        size: (size.w as i32, size.h as i32).into(),
         refresh: 60_000,
     };
     let output = Output::new(name, props);
@@ -176,10 +177,7 @@ pub fn init_backend(
     );
     output.user_data().insert_if_missing(|| {
         RefCell::new(OutputConfig {
-            mode: (
-                (size.physical_size.w as i32, size.physical_size.h as i32),
-                None,
-            ),
+            mode: ((size.w as i32, size.h as i32), None),
             transform: Transform::Flipped180.into(),
             ..Default::default()
         })
@@ -194,13 +192,8 @@ pub fn init_backend(
     let mut token = Some(
         event_loop
             .handle()
-            .insert_source(render_source, move |_, _, data| {
-                if let Err(err) = data
-                    .state
-                    .backend
-                    .winit()
-                    .render_output(&mut data.state.common)
-                {
+            .insert_source(render_source, move |_, _, state| {
+                if let Err(err) = state.backend.winit().render_output(&mut state.common) {
                     error!(?err, "Failed to render frame.");
                     render_ping.ping();
                 }
@@ -210,21 +203,18 @@ pub fn init_backend(
     let event_loop_handle = event_loop.handle();
     event_loop
         .handle()
-        .insert_source(event_source, move |_, _, data| {
-            match input.dispatch_new_events(|event| {
-                data.state.process_winit_event(event, &render_ping_handle)
-            }) {
-                Ok(_) => {
+        .insert_source(event_source, move |_, _, state| {
+            match input
+                .dispatch_new_events(|event| state.process_winit_event(event, &render_ping_handle))
+            {
+                PumpStatus::Continue => {
                     event_ping_handle.ping();
                     render_ping_handle.ping();
                 }
-                Err(winit::WinitError::WindowClosed) => {
-                    let output = data.state.backend.winit().output.clone();
-                    let seats = data.state.common.seats().cloned().collect::<Vec<_>>();
-                    data.state
-                        .common
-                        .shell
-                        .remove_output(&output, seats.into_iter());
+                PumpStatus::Exit(_) => {
+                    let output = state.backend.winit().output.clone();
+                    let seats = state.common.seats().cloned().collect::<Vec<_>>();
+                    state.common.shell.remove_output(&output, seats.into_iter());
                     if let Some(token) = token.take() {
                         event_loop_handle.remove(token);
                     }
@@ -354,11 +344,10 @@ impl State {
                 output.change_current_state(Some(mode), None, None, None);
                 layer_map_for_output(output).arrange();
                 self.common.output_configuration_state.update();
-                self.common.shell.refresh_outputs();
                 render_ping.ping();
             }
-            WinitEvent::Refresh => render_ping.ping(),
-            WinitEvent::Input(event) => self.process_input_event(event),
+            WinitEvent::Redraw => render_ping.ping(),
+            WinitEvent::Input(event) => self.process_input_event(event, false),
             _ => {}
         };
     }

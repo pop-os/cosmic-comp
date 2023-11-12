@@ -4,7 +4,7 @@ use smithay::{
     input::{Seat, SeatHandler},
     output::Output,
     reexports::wayland_server::{
-        backend::{ClientId, GlobalId, ObjectId},
+        backend::{ClientId, GlobalId},
         protocol::wl_surface::WlSurface,
         Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
     },
@@ -18,6 +18,7 @@ use cosmic_protocols::toplevel_management::v1::server::zcosmic_toplevel_manager_
 
 use super::toplevel_info::{window_from_handle, ToplevelInfoHandler, ToplevelState, Window};
 
+#[derive(Debug)]
 pub struct ToplevelManagementState {
     instances: Vec<ZcosmicToplevelManagerV1>,
     capabilities: Vec<ManagementCapabilities>,
@@ -224,9 +225,9 @@ where
         }
     }
 
-    fn destroyed(state: &mut D, client: ClientId, resource: ObjectId, _data: &()) {
+    fn destroyed(state: &mut D, client: ClientId, resource: &ZcosmicToplevelManagerV1, _data: &()) {
         let mng_state = state.toplevel_management_state();
-        mng_state.instances.retain(|i| i.id() != resource);
+        mng_state.instances.retain(|i| i != resource);
         if !mng_state
             .instances
             .iter()

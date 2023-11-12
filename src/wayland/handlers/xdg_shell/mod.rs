@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{shell::CosmicSurface, utils::prelude::*, wayland::protocols::screencopy::SessionType};
+use crate::{
+    shell::{element::CosmicWindow, CosmicMapped, CosmicSurface, ManagedLayer},
+    utils::prelude::*,
+    wayland::protocols::screencopy::SessionType,
+};
 use smithay::{
     delegate_xdg_shell,
     desktop::{
@@ -24,7 +28,7 @@ use smithay::{
 use std::cell::Cell;
 use tracing::warn;
 
-use super::screencopy::PendingScreencopyBuffers;
+use super::{compositor::client_compositor_state, screencopy::PendingScreencopyBuffers};
 
 pub mod popup;
 
@@ -38,7 +42,7 @@ impl XdgShellHandler for State {
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         let seat = self.common.last_active_seat().clone();
         let window = CosmicSurface::Wayland(Window::new(surface));
-        self.common.shell.pending_windows.push((window, seat));
+        self.common.shell.pending_windows.push((window, seat, None));
         // We will position the window after the first commit, when we know its size hints
     }
 
@@ -50,7 +54,7 @@ impl XdgShellHandler for State {
 
         if surface.get_parent_surface().is_some() {
             // let other shells deal with their popups
-            self.common.shell.unconstrain_popup(&surface, &positioner);
+            self.common.shell.unconstrain_popup(&surface);
 
             if surface.send_configure().is_ok() {
                 self.common
@@ -123,7 +127,7 @@ impl XdgShellHandler for State {
             state.positioner = positioner;
         });
 
-        self.common.shell.unconstrain_popup(&surface, &positioner);
+        self.common.shell.unconstrain_popup(&surface);
         surface.send_repositioned(token);
         if let Err(err) = surface.send_configure() {
             warn!(
@@ -150,9 +154,6 @@ impl XdgShellHandler for State {
     }
 
     fn maximize_request(&mut self, surface: ToplevelSurface) {
-        let seat = self.common.last_active_seat();
-        let output = seat.active_output();
-
         if let Some(mapped) = self
             .common
             .shell
@@ -164,7 +165,7 @@ impl XdgShellHandler for State {
                     .windows()
                     .find(|(w, _)| w.wl_surface().as_ref() == Some(surface.wl_surface()))
                     .unwrap();
-                workspace.maximize_request(&window, &output)
+                workspace.maximize_request(&window)
             }
         }
     }
@@ -187,13 +188,14 @@ impl XdgShellHandler for State {
     }
 
     fn fullscreen_request(&mut self, surface: ToplevelSurface, output: Option<WlOutput>) {
+        let active_output = {
+            let seat = self.common.last_active_seat();
+            seat.active_output()
+        };
         let output = output
             .as_ref()
             .and_then(Output::from_resource)
-            .unwrap_or_else(|| {
-                let seat = self.common.last_active_seat();
-                seat.active_output()
-            });
+            .unwrap_or_else(|| active_output.clone());
 
         if let Some(mapped) = self
             .common
@@ -202,11 +204,70 @@ impl XdgShellHandler for State {
             .cloned()
         {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
-                let (window, _) = mapped
-                    .windows()
-                    .find(|(w, _)| w.wl_surface().as_ref() == Some(surface.wl_surface()))
-                    .unwrap();
-                workspace.fullscreen_request(&window, &output)
+                if workspace.output != output {
+                    let (mapped, layer) = if mapped
+                        .stack_ref()
+                        .map(|stack| stack.len() > 1)
+                        .unwrap_or(false)
+                    {
+                        let stack = mapped.stack_ref().unwrap();
+                        let surface = stack
+                            .surfaces()
+                            .find(|s| s.wl_surface().as_ref() == Some(surface.wl_surface()))
+                            .unwrap();
+                        stack.remove_window(&surface);
+                        (
+                            CosmicMapped::from(CosmicWindow::new(
+                                surface,
+                                self.common.event_loop_handle.clone(),
+                                self.common.theme.clone(),
+                            )),
+                            if workspace.is_tiled(&mapped) {
+                                ManagedLayer::Tiling
+                            } else {
+                                ManagedLayer::Floating
+                            },
+                        )
+                    } else {
+                        let layer = workspace.unmap(&mapped).unwrap().layer;
+                        (mapped, layer)
+                    };
+                    let handle = workspace.handle.clone();
+                    std::mem::drop(workspace);
+
+                    let workspace_handle = self.common.shell.active_space(&output).handle.clone();
+                    for (window, _) in mapped.windows() {
+                        self.common
+                            .shell
+                            .toplevel_info_state
+                            .toplevel_enter_output(&window, &output);
+                        self.common
+                            .shell
+                            .toplevel_info_state
+                            .toplevel_enter_workspace(&window, &workspace_handle);
+                    }
+
+                    let workspace = self.common.shell.active_space_mut(&output);
+                    workspace.floating_layer.map(mapped.clone(), None);
+                    workspace.fullscreen_request(&mapped.active_window(), Some((layer, handle)));
+                } else {
+                    let (window, _) = mapped
+                        .windows()
+                        .find(|(w, _)| w.wl_surface().as_ref() == Some(surface.wl_surface()))
+                        .unwrap();
+                    workspace.fullscreen_request(&window, None)
+                }
+            }
+        } else {
+            if let Some(o) = self
+                .common
+                .shell
+                .pending_windows
+                .iter_mut()
+                .find(|(s, _, _)| s.wl_surface().as_ref() == Some(surface.wl_surface()))
+                .map(|(_, _, o)| o)
+            {
+                *o = Some(output);
             }
         }
     }
@@ -223,7 +284,23 @@ impl XdgShellHandler for State {
                     .windows()
                     .find(|(w, _)| w.wl_surface().as_ref() == Some(surface.wl_surface()))
                     .unwrap();
-                workspace.unfullscreen_request(&window)
+                if let Some((layer, previous_workspace)) = workspace.unfullscreen_request(&window) {
+                    let old_handle = workspace.handle.clone();
+                    let new_workspace_handle = self
+                        .common
+                        .shell
+                        .space_for_handle(&previous_workspace)
+                        .is_some()
+                        .then_some(previous_workspace)
+                        .unwrap_or(old_handle); // if the workspace doesn't exist anymore, we can still remap on the right layer
+
+                    self.common.shell.remap_unfullscreened_window(
+                        mapped,
+                        &old_handle,
+                        &new_workspace_handle,
+                        layer,
+                    );
+                }
             }
         }
     }
@@ -235,7 +312,16 @@ impl XdgShellHandler for State {
             .visible_outputs_for_surface(surface.wl_surface())
             .collect::<Vec<_>>();
         for output in outputs.iter() {
-            self.common.shell.active_space_mut(output).refresh();
+            self.common.shell.refresh_active_space(output);
+        }
+
+        // animations might be unblocked now
+        let clients = self.common.shell.update_animations();
+        {
+            let dh = self.common.display_handle.clone();
+            for client in clients.values() {
+                client_compositor_state(&client).blocker_cleared(self, &dh);
+            }
         }
 
         // screencopy

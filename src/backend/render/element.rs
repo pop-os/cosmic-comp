@@ -2,7 +2,10 @@ use crate::shell::{CosmicMappedRenderElement, WorkspaceRenderElement};
 
 use smithay::{
     backend::renderer::{
-        element::{Element, RenderElement, UnderlyingStorage},
+        element::{
+            utils::{Relocate, RelocateRenderElement},
+            Element, RenderElement, UnderlyingStorage,
+        },
         glow::{GlowFrame, GlowRenderer},
         Frame, ImportAll, ImportMem, Renderer,
     },
@@ -10,11 +13,9 @@ use smithay::{
 };
 
 #[cfg(feature = "debug")]
-use smithay::backend::renderer::{
-    element::texture::TextureRenderElement, gles::GlesTexture, multigpu::Error as MultiError,
-};
+use smithay::backend::renderer::{element::texture::TextureRenderElement, gles::GlesTexture};
 
-use super::{cursor::CursorRenderElement, GlMultiFrame, GlMultiRenderer};
+use super::{cursor::CursorRenderElement, GlMultiError, GlMultiFrame, GlMultiRenderer};
 
 pub enum CosmicElement<R>
 where
@@ -22,7 +23,7 @@ where
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
-    Workspace(WorkspaceRenderElement<R>),
+    Workspace(RelocateRenderElement<WorkspaceRenderElement<R>>),
     Cursor(CursorRenderElement<R>),
     MoveGrab(CosmicMappedRenderElement<R>),
     #[cfg(feature = "debug")]
@@ -118,6 +119,16 @@ where
             CosmicElement::Egui(elem) => elem.opaque_regions(scale),
         }
     }
+
+    fn alpha(&self) -> f32 {
+        match self {
+            CosmicElement::Workspace(elem) => elem.alpha(),
+            CosmicElement::Cursor(elem) => elem.alpha(),
+            CosmicElement::MoveGrab(elem) => elem.alpha(),
+            #[cfg(feature = "debug")]
+            CosmicElement::Egui(elem) => elem.alpha(),
+        }
+    }
 }
 
 impl RenderElement<GlowRenderer> for CosmicElement<GlowRenderer> {
@@ -157,7 +168,7 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>> for CosmicElement<GlMultiRen
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
-    ) -> Result<(), <GlMultiRenderer<'a, 'b> as Renderer>::Error> {
+    ) -> Result<(), GlMultiError> {
         match self {
             CosmicElement::Workspace(elem) => elem.draw(frame, src, dst, damage),
             CosmicElement::Cursor(elem) => elem.draw(frame, src, dst, damage),
@@ -167,7 +178,7 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>> for CosmicElement<GlMultiRen
                 let elem = {
                     let glow_frame = frame.glow_frame_mut();
                     RenderElement::<GlowRenderer>::draw(elem, glow_frame, src, dst, damage)
-                        .map_err(|err| MultiError::Render(err))
+                        .map_err(|err| GlMultiError::Render(err))
                 };
                 elem
             }
@@ -203,7 +214,11 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: WorkspaceRenderElement<R>) -> Self {
-        Self::Workspace(elem)
+        Self::Workspace(RelocateRenderElement::from_element(
+            elem,
+            (0, 0),
+            Relocate::Relative,
+        ))
     }
 }
 

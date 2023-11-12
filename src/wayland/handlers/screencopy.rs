@@ -17,17 +17,14 @@ use smithay::{
         egl::EGLDevice,
         renderer::{
             buffer_dimensions, buffer_type,
-            damage::{Error as DTError, OutputDamageTracker, OutputNoMode},
-            element::{
-                surface::WaylandSurfaceRenderElement, AsRenderElements, RenderElement,
-                RenderElementStates,
-            },
+            damage::{Error as DTError, OutputDamageTracker, RenderOutputResult},
+            element::{surface::WaylandSurfaceRenderElement, AsRenderElements, RenderElement},
             gles::{Capability, GlesError, GlesRenderbuffer, GlesRenderer},
             Bind, Blit, BufferType, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
         },
     },
     desktop::{layer_map_for_output, space::SpaceElement},
-    output::Output,
+    output::{Output, OutputNoMode},
     reexports::wayland_server::{
         protocol::{wl_buffer::WlBuffer, wl_shm::Format as ShmFormat, wl_surface::WlSurface},
         Resource,
@@ -48,9 +45,9 @@ use crate::{
         element::{AsGlowRenderer, CosmicElement},
         render_output, render_workspace, CursorMode, CLEAR_COLOR,
     },
-    shell::{element::window::CosmicWindowRenderElement, CosmicMappedRenderElement, CosmicSurface},
-    state::{BackendData, ClientState, Common, Data, State},
-    utils::prelude::OutputExt,
+    shell::{CosmicMappedRenderElement, CosmicSurface, WorkspaceRenderElement},
+    state::{BackendData, ClientState, Common, State},
+    utils::prelude::{OutputExt, PointExt},
     wayland::protocols::{
         screencopy::{
             delegate_screencopy, BufferInfo, BufferParams, CursorMode as ScreencopyCursorMode,
@@ -109,7 +106,7 @@ impl ScreencopyHandler for State {
             if let Some(pointer) = seat.get_pointer() {
                 if output
                     .geometry()
-                    .contains(pointer.current_location().to_i32_round())
+                    .contains(pointer.current_location().to_i32_round().as_global())
                 {
                     session.cursor_enter(seat, InputType::Pointer);
                 }
@@ -167,7 +164,9 @@ impl ScreencopyHandler for State {
     }
 
     fn capture_toplevel(&mut self, toplevel: CosmicSurface, session: Session) -> Vec<BufferInfo> {
-        let Some(surface) = toplevel.wl_surface() else { return Vec::new() };
+        let Some(surface) = toplevel.wl_surface() else {
+            return Vec::new();
+        };
         let size = toplevel.geometry().size.to_buffer(1, Transform::Normal);
 
         let mut _kms_renderer = None;
@@ -369,7 +368,13 @@ impl ScreencopyHandler for State {
                     render_output_to_buffer(self, &session, params, &output)
                 }
                 SessionType::Workspace(output, handle) => {
-                    render_workspace_to_buffer(self, &session, params, &output, &handle)
+                    render_workspace_to_buffer(
+                        self,
+                        &session,
+                        params,
+                        &output,
+                        (handle, 0), /* TODO: hack, we should have the index */
+                    )
                 }
                 SessionType::Window(window) => {
                     render_window_to_buffer(self, &session, params, &window)
@@ -600,8 +605,7 @@ where
         &mut R,
         &mut OutputDamageTracker,
         usize,
-    )
-        -> Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), DTError<R>>,
+    ) -> Result<RenderOutputResult, DTError<R>>,
 {
     #[cfg(feature = "debug")]
     puffin::profile_function!();
@@ -616,7 +620,11 @@ where
         params.age as usize,
     )?;
 
-    if let (Some(damage), _) = res {
+    if let RenderOutputResult {
+        damage: Some(damage),
+        ..
+    } = res
+    {
         submit_buffer(session, &params.buffer, renderer, transform, damage)
             .map_err(DTError::Rendering)?;
         Ok(true)
@@ -648,7 +656,7 @@ pub fn render_output_to_buffer(
         common: &mut Common,
         session: &Session,
         output: &Output,
-    ) -> Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), DTError<R>>
+    ) -> Result<RenderOutputResult, DTError<R>>
     where
         R: Renderer
             + ImportAll
@@ -662,7 +670,7 @@ pub fn render_output_to_buffer(
         <R as Renderer>::Error: From<GlesError>,
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
-        CosmicWindowRenderElement<R>: RenderElement<R>,
+        WorkspaceRenderElement<R>: RenderElement<R>,
     {
         let cursor_mode = match session.cursor_mode() {
             ScreencopyCursorMode::Embedded => CursorMode::All,
@@ -760,7 +768,7 @@ pub fn render_workspace_to_buffer(
     session: &Session,
     params: BufferParams,
     output: &Output,
-    handle: &WorkspaceHandle,
+    handle: (WorkspaceHandle, usize),
 ) -> Result<bool, (FailureReason, anyhow::Error)> {
     let mode = output
         .current_mode()
@@ -779,8 +787,8 @@ pub fn render_workspace_to_buffer(
         common: &mut Common,
         session: &Session,
         output: &Output,
-        handle: &WorkspaceHandle,
-    ) -> Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), DTError<R>>
+        handle: (WorkspaceHandle, usize),
+    ) -> Result<RenderOutputResult, DTError<R>>
     where
         R: Renderer
             + ImportAll
@@ -794,7 +802,7 @@ pub fn render_workspace_to_buffer(
         <R as Renderer>::Error: From<GlesError>,
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
-        CosmicWindowRenderElement<R>: RenderElement<R>,
+        WorkspaceRenderElement<R>: RenderElement<R>,
     {
         let cursor_mode = match session.cursor_mode() {
             ScreencopyCursorMode::Embedded => CursorMode::All,
@@ -809,6 +817,7 @@ pub fn render_workspace_to_buffer(
                 age,
                 common,
                 &output,
+                None,
                 handle,
                 cursor_mode,
                 None,
@@ -832,6 +841,7 @@ pub fn render_workspace_to_buffer(
                 age,
                 common,
                 &output,
+                None,
                 handle,
                 cursor_mode,
                 None,
@@ -926,7 +936,7 @@ pub fn render_window_to_buffer(
         common: &mut Common,
         window: &CosmicSurface,
         geometry: Rectangle<i32, Logical>,
-    ) -> Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), DTError<R>>
+    ) -> Result<RenderOutputResult, DTError<R>>
     where
         R: Renderer
             + ImportAll
@@ -947,6 +957,7 @@ pub fn render_window_to_buffer(
             renderer,
             (-geometry.loc.x, -geometry.loc.y).into(),
             Scale::from(1.0),
+            1.0,
         );
 
         for seat in common.seats() {
@@ -1004,7 +1015,12 @@ pub fn render_window_to_buffer(
             renderer.bind(render_buffer).map_err(DTError::Rendering)?;
         }
 
-        dt.render_output(renderer, age, &elements, CLEAR_COLOR)
+        dt.render_output(
+            renderer,
+            age,
+            &elements,
+            CLEAR_COLOR, // TODO use a theme neutral color
+        )
     }
 
     let node = node_from_params(&params, &mut state.backend, None);
@@ -1162,19 +1178,14 @@ impl State {
             if active.wl_surface().as_ref() == Some(surface) {
                 for (session, params) in active.pending_buffers() {
                     let window = active.clone();
-                    self.common.event_loop_handle.insert_idle(move |data| {
+                    self.common.event_loop_handle.insert_idle(move |state| {
                         if !session.alive() {
                             return;
                         }
 
-                        match render_window_to_buffer(
-                            &mut data.state,
-                            &session,
-                            params.clone(),
-                            &window,
-                        ) {
+                        match render_window_to_buffer(state, &session, params.clone(), &window) {
                             // rendering yielded no damage, buffer is still pending
-                            Ok(false) => data.state.common.still_pending(session, params),
+                            Ok(false) => state.common.still_pending(session, params),
                             Ok(true) => {} // success
                             Err((reason, err)) => {
                                 warn!(?err, "Screencopy session failed");
@@ -1235,7 +1246,7 @@ impl State {
             .outputs()
             .map(|o| (o.clone(), self.common.shell.active_space(o).handle.clone()))
             .collect::<Vec<_>>();
-        for (handle, output) in self.common.shell.workspaces_for_surface(surface) {
+        if let Some((handle, output)) = self.common.shell.workspace_for_surface(surface) {
             let workspace = self.common.shell.space_for_handle_mut(&handle).unwrap();
             if !workspace.pending_buffers.is_empty() {
                 // TODO: replace with drain_filter....
@@ -1280,29 +1291,29 @@ impl State {
 }
 
 pub fn schedule_offscreen_workspace_session(
-    event_loop_handle: &LoopHandle<'static, Data>,
+    event_loop_handle: &LoopHandle<'static, State>,
     session: Session,
     params: BufferParams,
     output: Output,
     handle: WorkspaceHandle,
 ) {
-    event_loop_handle.insert_idle(move |data| {
+    event_loop_handle.insert_idle(move |state| {
         if !session.alive() {
             return;
         }
-        if !data.state.common.shell.outputs.contains(&output) {
+        if !state.common.shell.outputs().any(|o| o == &output) {
             return;
         }
         match render_workspace_to_buffer(
-            &mut data.state,
+            state,
             &session,
             params.clone(),
             &output,
-            &handle,
+            (handle, 0), /* TODO: Hack, we should know the idx */
         ) {
             Ok(false) => {
                 // rendering yielded no new damage, buffer still pending
-                data.state.common.still_pending(session, params);
+                state.common.still_pending(session, params);
             }
             Ok(true) => {}
             Err((reason, err)) => {

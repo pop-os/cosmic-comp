@@ -2,5 +2,7 @@
 
 mod ids;
 pub(crate) use self::ids::id_gen;
+pub mod geometry;
 pub mod iced;
 pub mod prelude;
+pub mod tween;

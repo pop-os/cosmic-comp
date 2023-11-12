@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use crate::{
     shell::{
         element::CosmicMapped, focus::target::PointerFocusTarget, grabs::ResizeEdge, CosmicSurface,
@@ -8,9 +10,15 @@ use crate::{
 };
 use smithay::{
     desktop::space::SpaceElement,
-    input::pointer::{
-        AxisFrame, ButtonEvent, GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab,
-        PointerInnerHandle, RelativeMotionEvent,
+    input::{
+        pointer::{
+            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
+            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
+            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
+            GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab, PointerInnerHandle,
+            RelativeMotionEvent,
+        },
+        Seat,
     },
     utils::{IsAlive, Logical, Point, Rectangle, Size},
 };
@@ -19,11 +27,11 @@ use smithay::{
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct ResizeData {
     /// The edges the surface is being resized with.
-    edges: ResizeEdge,
+    pub edges: ResizeEdge,
     /// The initial window location.
-    initial_window_location: Point<i32, Logical>,
+    pub initial_window_location: Point<i32, Logical>,
     /// The initial window size (geometry width and height).
-    initial_window_size: Size<i32, Logical>,
+    pub initial_window_size: Size<i32, Logical>,
 }
 
 /// State of the resize operation.
@@ -37,6 +45,7 @@ pub enum ResizeState {
 
 pub struct ResizeSurfaceGrab {
     start_data: PointerGrabStartData<State>,
+    seat: Seat<State>,
     window: CosmicMapped,
     edges: ResizeEdge,
     initial_window_size: Size<i32, Logical>,
@@ -56,7 +65,13 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
 
         // It is impossible to get `min_size` and `max_size` of dead toplevel, so we return early.
         if !self.window.alive() {
-            handle.unset_grab(data, event.serial, event.time);
+            self.seat
+                .user_data()
+                .get::<ResizeGrabMarker>()
+                .unwrap()
+                .0
+                .store(false, Ordering::SeqCst);
+            handle.unset_grab(data, event.serial, event.time, true);
             return;
         }
 
@@ -86,8 +101,8 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
 
         let (min_size, max_size) = (self.window.min_size(), self.window.max_size());
 
-        let min_width = min_size.map(|s| s.w).unwrap_or(1);
-        let min_height = min_size.map(|s| s.h).unwrap_or(1);
+        let min_width = min_size.map(|s| s.w).unwrap_or(360);
+        let min_height = min_size.map(|s| s.h).unwrap_or(240);
         let max_width = max_size.map(|s| s.w).unwrap_or(i32::max_value());
         let max_height = max_size.map(|s| s.h).unwrap_or(i32::max_value());
 
@@ -99,10 +114,10 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
         self.window.set_resizing(true);
         self.window.set_geometry(Rectangle::from_loc_and_size(
             match self.window.active_window() {
-                CosmicSurface::X11(s) => s.geometry().loc,
+                CosmicSurface::X11(s) => s.geometry().loc.as_global(),
                 _ => (0, 0).into(),
             },
-            self.last_window_size,
+            self.last_window_size.as_global(),
         ));
         self.window.configure();
     }
@@ -127,7 +142,13 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
         handle.button(data, event);
         if handle.current_pressed().is_empty() {
             // No more buttons are pressed, release the grab.
-            handle.unset_grab(data, event.serial, event.time);
+            self.seat
+                .user_data()
+                .get::<ResizeGrabMarker>()
+                .unwrap()
+                .0
+                .store(false, Ordering::SeqCst);
+            handle.unset_grab(data, event.serial, event.time, true);
 
             // If toplevel is dead, we can't resize it, so we return early.
             if !self.window.alive() {
@@ -137,10 +158,10 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
             self.window.set_resizing(false);
             self.window.set_geometry(Rectangle::from_loc_and_size(
                 match self.window.active_window() {
-                    CosmicSurface::X11(s) => s.geometry().loc,
+                    CosmicSurface::X11(s) => s.geometry().loc.as_global(),
                     _ => (0, 0).into(),
                 },
-                self.last_window_size,
+                self.last_window_size.as_global(),
             ));
             self.window.configure();
 
@@ -162,8 +183,92 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
         handle.axis(data, details)
     }
 
+    fn frame(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>) {
+        handle.frame(data)
+    }
+
+    fn gesture_swipe_begin(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureSwipeBeginEvent,
+    ) {
+        handle.gesture_swipe_begin(data, event)
+    }
+
+    fn gesture_swipe_update(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureSwipeUpdateEvent,
+    ) {
+        handle.gesture_swipe_update(data, event)
+    }
+
+    fn gesture_swipe_end(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureSwipeEndEvent,
+    ) {
+        handle.gesture_swipe_end(data, event)
+    }
+
+    fn gesture_pinch_begin(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GesturePinchBeginEvent,
+    ) {
+        handle.gesture_pinch_begin(data, event)
+    }
+
+    fn gesture_pinch_update(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GesturePinchUpdateEvent,
+    ) {
+        handle.gesture_pinch_update(data, event)
+    }
+
+    fn gesture_pinch_end(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GesturePinchEndEvent,
+    ) {
+        handle.gesture_pinch_end(data, event)
+    }
+
+    fn gesture_hold_begin(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureHoldBeginEvent,
+    ) {
+        handle.gesture_hold_begin(data, event)
+    }
+
+    fn gesture_hold_end(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureHoldEndEvent,
+    ) {
+        handle.gesture_hold_end(data, event)
+    }
+
     fn start_data(&self) -> &PointerGrabStartData<State> {
         &self.start_data
+    }
+}
+
+pub struct ResizeGrabMarker(AtomicBool);
+
+impl ResizeGrabMarker {
+    pub fn get(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
     }
 }
 
@@ -174,6 +279,7 @@ impl ResizeSurfaceGrab {
         edges: ResizeEdge,
         initial_window_location: Point<i32, Logical>,
         initial_window_size: Size<i32, Logical>,
+        seat: &Seat<State>,
     ) -> ResizeSurfaceGrab {
         let resize_state = ResizeState::Resizing(ResizeData {
             edges,
@@ -182,9 +288,14 @@ impl ResizeSurfaceGrab {
         });
 
         *mapped.resize_state.lock().unwrap() = Some(resize_state);
+        seat.user_data()
+            .get_or_insert::<ResizeGrabMarker, _>(|| ResizeGrabMarker(AtomicBool::new(true)))
+            .0
+            .store(true, Ordering::SeqCst);
 
         ResizeSurfaceGrab {
             start_data,
+            seat: seat.clone(),
             window: mapped,
             edges,
             initial_window_size,
@@ -193,7 +304,13 @@ impl ResizeSurfaceGrab {
     }
 
     pub fn apply_resize_to_location(window: CosmicMapped, space: &mut Workspace) {
-        if let Some(location) = space.floating_layer.space.element_location(&window) {
+        if let Some(location) = space
+            .floating_layer
+            .space
+            .element_location(&window)
+            .map(PointExt::as_local)
+            .map(|p| p.to_global(space.output()))
+        {
             let mut new_location = None;
 
             let mut resize_state = window.resize_state.lock().unwrap();
@@ -226,7 +343,7 @@ impl ResizeSurfaceGrab {
 
             // Finish resizing.
             if let Some(ResizeState::WaitingForCommit(_)) = *resize_state {
-                if !window.is_resizing().unwrap_or(false) {
+                if !window.is_resizing(false).unwrap_or(false) {
                     *resize_state = None;
                 }
             }
@@ -238,13 +355,13 @@ impl ResizeSurfaceGrab {
                         CosmicSurface::Wayland(window) => {
                             update_reactive_popups(
                                 &window,
-                                new_location + offset,
+                                new_location + offset.as_global(),
                                 space.floating_layer.space.outputs(),
                             );
                         }
                         CosmicSurface::X11(surface) => {
                             let mut geometry = surface.geometry();
-                            geometry.loc += location - new_location;
+                            geometry.loc += (location - new_location).as_logical();
                             let _ = surface.configure(geometry);
                         }
                         _ => unreachable!(),
@@ -253,7 +370,7 @@ impl ResizeSurfaceGrab {
                 space
                     .floating_layer
                     .space
-                    .map_element(window, new_location, false);
+                    .map_element(window, new_location.as_logical(), false);
             }
         }
     }

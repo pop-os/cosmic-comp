@@ -25,24 +25,10 @@
         (modifiers: [Super, Shift], key: "9"): MoveToWorkspace(9),
         (modifiers: [Super, Shift], key: "0"): MoveToLastWorkspace,
 
-        // TODO: Depends on workspace orientation
-        (modifiers: [Super, Ctrl], key: "Right"): NextWorkspace,
-        (modifiers: [Super, Ctrl], key: "Left"): PreviousWorkspace,
-        (modifiers: [Super, Ctrl, Shift], key: "Right"): MoveToNextWorkspace,
-        (modifiers: [Super, Ctrl, Shift], key: "Left"): MoveToPreviousWorkspace,
-        (modifiers: [Super, Ctrl], key: "l"): NextWorkspace,
-        (modifiers: [Super, Ctrl], key: "h"): PreviousWorkspace,
-        (modifiers: [Super, Ctrl, Shift], key: "l"): MoveToNextWorkspace,
-        (modifiers: [Super, Ctrl, Shift], key: "h"): MoveToPreviousWorkspace,
-
-        (modifiers: [Super, Ctrl], key: "Down"): NextOutput,
-        (modifiers: [Super, Ctrl], key: "Up"): PreviousOutput,
-        (modifiers: [Super, Ctrl, Alt], key: "Down"): NextOutput,
-        (modifiers: [Super, Ctrl, Alt], key: "Up"): PreviousOutput,
-        (modifiers: [Super, Ctrl], key: "j"): NextOutput,
-        (modifiers: [Super, Ctrl], key: "k"): PreviousOutput,
-        (modifiers: [Super, Ctrl, Alt], key: "j"): NextOutput,
-        (modifiers: [Super, Ctrl, Alt], key: "k"): PreviousOutput,
+        (modifiers: [Super, Ctrl, Alt], key: "Down"): MoveToNextOutput,
+        (modifiers: [Super, Ctrl, Alt], key: "Up"): MoveToPreviousOutput,
+        (modifiers: [Super, Ctrl, Alt], key: "j"): MoveToNextOutput,
+        (modifiers: [Super, Ctrl, Alt], key: "k"): MoveToPreviousOutput,
 
         (modifiers: [Super], key: "Period"): NextOutput,
         (modifiers: [Super], key: "Comma"): PreviousOutput,
@@ -57,6 +43,8 @@
         (modifiers: [Super], key: "j"): Focus(Down),
         (modifiers: [Super], key: "k"): Focus(Up),
         (modifiers: [Super], key: "l"): Focus(Right),
+        (modifiers: [Super], key: "u"): Focus(Out),
+        (modifiers: [Super], key: "i"): Focus(In),
 
         (modifiers: [Super, Shift], key: "Left"): Move(Left),
         (modifiers: [Super, Shift], key: "Right"): Move(Right),
@@ -68,22 +56,24 @@
         (modifiers: [Super, Shift], key: "l"): Move(Right),
 
         (modifiers: [Super], key: "o"): ToggleOrientation,
-        
+        (modifiers: [Super], key: "s"): ToggleStacking,
         (modifiers: [Super], key: "y"): ToggleTiling,
         (modifiers: [Super], key: "g"): ToggleWindowFloating,
-        
-        (modifiers: [Super], key: "m"): Maximize,
+        (modifiers: [Super], key: "x"): SwapWindow,
 
-        //TODO: ability to select default web browser
-        (modifiers: [Super], key: "b"): Spawn("firefox"),
-        //TODO: ability to select default file browser
-        (modifiers: [Super], key: "f"): Spawn("nautilus"),
+        (modifiers: [Super], key: "m"): Maximize,
+        (modifiers: [Super], key: "r"): Resizing(Outwards),
+        (modifiers: [Super, Shift], key: "r"): Resizing(Inwards),
+
+        (modifiers: [Super], key: "b"): Spawn("xdg-open http://"),
+        (modifiers: [Super], key: "f"): Spawn("xdg-open ~"),
         //TODO: ability to select default terminal
         (modifiers: [Super], key: "t"): Spawn("gnome-terminal"),
-        
+
         (modifiers: [Super], key: "a"): Spawn("busctl --user call com.system76.CosmicAppLibrary /com/system76/CosmicAppLibrary com.system76.CosmicAppLibrary Toggle"),
         (modifiers: [Super], key: "w"): Spawn("busctl --user call com.system76.CosmicWorkspaces /com/system76/CosmicWorkspaces com.system76.CosmicWorkspaces Toggle"),
         (modifiers: [Super], key: "slash"): Spawn("busctl --user call com.system76.CosmicLauncher /com/system76/CosmicLauncher com.system76.CosmicLauncher Toggle"),
+        (modifiers: [Super]): Spawn("busctl --user call com.system76.CosmicLauncher /com/system76/CosmicLauncher com.system76.CosmicLauncher Toggle"),
 
         (modifiers: [], key: "XF86AudioRaiseVolume"): Spawn("amixer sset Master 5%+"),
         (modifiers: [], key: "XF86AudioLowerVolume"): Spawn("amixer sset Master 5%-"),
@@ -91,7 +81,5 @@
         (modifiers: [], key: "XF86MonBrightnessUp"): Spawn("busctl --user call com.system76.CosmicSettingsDaemon /com/system76/CosmicSettingsDaemon com.system76.CosmicSettingsDaemon IncreaseDisplayBrightness"),
         (modifiers: [], key: "XF86MonBrightnessDown"): Spawn("busctl --user call com.system76.CosmicSettingsDaemon /com/system76/CosmicSettingsDaemon com.system76.CosmicSettingsDaemon DecreaseDisplayBrightness"),
     },
-    workspace_mode: OutputBound,
-    workspace_amount: Dynamic,
     tiling_enabled: false,
 )

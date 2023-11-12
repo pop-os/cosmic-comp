@@ -3,8 +3,10 @@ use std::time::Duration;
 use smithay::{
     backend::renderer::{
         element::{
-            surface::WaylandSurfaceRenderElement, utils::select_dmabuf_feedback, AsRenderElements,
-            RenderElementStates,
+            self,
+            surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
+            utils::select_dmabuf_feedback,
+            AsRenderElements, RenderElementStates,
         },
         ImportAll, Renderer,
     },
@@ -14,9 +16,18 @@ use smithay::{
             take_presentation_feedback_surface_tree, with_surfaces_surface_tree,
             OutputPresentationFeedback,
         },
-        Window,
+        PopupManager, Window,
     },
-    input::{keyboard::KeyboardTarget, pointer::PointerTarget},
+    input::{
+        keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
+        pointer::{
+            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
+            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
+            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
+            PointerTarget, RelativeMotionEvent,
+        },
+        Seat,
+    },
     output::Output,
     reexports::{
         wayland_protocols::{
@@ -29,16 +40,20 @@ use smithay::{
         wayland_server::protocol::wl_surface::WlSurface,
     },
     space_elements,
-    utils::{user_data::UserDataMap, Logical, Rectangle, Size},
+    utils::{user_data::UserDataMap, Logical, Rectangle, Serial, Size},
     wayland::{
         compositor::{with_states, SurfaceData},
         seat::WaylandFocus,
-        shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData},
+        shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceData},
     },
     xwayland::{xwm::X11Relatable, X11Surface},
 };
 
-use crate::state::SurfaceDmabufFeedback;
+use crate::{
+    state::{State, SurfaceDmabufFeedback},
+    utils::prelude::*,
+    wayland::handlers::decoration::PreferredDecorationMode,
+};
 
 space_elements! {
     #[derive(Debug, Clone, PartialEq)]
@@ -108,13 +123,23 @@ impl CosmicSurface {
         }
     }
 
-    pub fn set_geometry(&self, geo: Rectangle<i32, Logical>) {
+    pub fn pending_size(&self) -> Option<Size<i32, Logical>> {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                window.toplevel().with_pending_state(|state| state.size)
+            }
+            CosmicSurface::X11(surface) => Some(surface.geometry().size),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn set_geometry(&self, geo: Rectangle<i32, Global>) {
         match self {
             CosmicSurface::Wayland(window) => window
                 .toplevel()
-                .with_pending_state(|state| state.size = Some(geo.size)),
+                .with_pending_state(|state| state.size = Some(geo.size.as_logical())),
             CosmicSurface::X11(surface) => {
-                let _ = surface.configure(geo);
+                let _ = surface.configure(geo.as_logical());
             }
             _ => {}
         }
@@ -129,13 +154,21 @@ impl CosmicSurface {
         }
     }
 
-    pub fn is_activated(&self) -> bool {
+    pub fn is_activated(&self, pending: bool) -> bool {
         match self {
-            CosmicSurface::Wayland(window) => window
-                .toplevel()
-                .current_state()
-                .states
-                .contains(ToplevelState::Activated),
+            CosmicSurface::Wayland(window) => {
+                if pending {
+                    window.toplevel().with_pending_state(|pending| {
+                        pending.states.contains(ToplevelState::Activated)
+                    })
+                } else {
+                    window
+                        .toplevel()
+                        .current_state()
+                        .states
+                        .contains(ToplevelState::Activated)
+                }
+            }
             CosmicSurface::X11(surface) => surface.is_activated(),
             _ => unreachable!(),
         }
@@ -157,29 +190,69 @@ impl CosmicSurface {
         }
     }
 
-    pub fn is_decorated(&self) -> bool {
+    pub fn is_decorated(&self, pending: bool) -> bool {
         match self {
-            CosmicSurface::Wayland(window) => window
-                .toplevel()
-                .current_state()
-                .decoration_mode
-                .map(|mode| mode == DecorationMode::ClientSide)
-                .unwrap_or(true),
+            CosmicSurface::Wayland(window) => {
+                if pending {
+                    window.toplevel().with_pending_state(|pending| {
+                        pending
+                            .decoration_mode
+                            .map(|mode| mode == DecorationMode::ClientSide)
+                            .unwrap_or(true)
+                    })
+                } else {
+                    window
+                        .toplevel()
+                        .current_state()
+                        .decoration_mode
+                        .map(|mode| mode == DecorationMode::ClientSide)
+                        .unwrap_or(true)
+                }
+            }
             CosmicSurface::X11(surface) => surface.is_decorated(),
             _ => unreachable!(),
         }
     }
 
-    pub fn is_resizing(&self) -> Option<bool> {
+    pub fn try_force_undecorated(&self, enable: bool) {
         match self {
             CosmicSurface::Wayland(window) => {
-                let xdg = window.toplevel();
-                Some(
-                    xdg.current_state().states.contains(ToplevelState::Resizing)
-                        || xdg.with_pending_state(|states| {
-                            states.states.contains(ToplevelState::Resizing)
-                        }),
-                )
+                if enable {
+                    let previous_decoration_state =
+                        window.toplevel().current_state().decoration_mode.clone();
+                    if PreferredDecorationMode::is_unset(window) {
+                        PreferredDecorationMode::update(window, previous_decoration_state);
+                    }
+                    window.toplevel().with_pending_state(|pending| {
+                        pending.decoration_mode = Some(DecorationMode::ServerSide);
+                    });
+                } else {
+                    let previous_mode = PreferredDecorationMode::mode(window);
+                    window.toplevel().with_pending_state(|pending| {
+                        pending.decoration_mode = previous_mode;
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn is_resizing(&self, pending: bool) -> Option<bool> {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                if pending {
+                    Some(window.toplevel().with_pending_state(|pending| {
+                        pending.states.contains(ToplevelState::Resizing)
+                    }))
+                } else {
+                    Some(
+                        window
+                            .toplevel()
+                            .current_state()
+                            .states
+                            .contains(ToplevelState::Resizing),
+                    )
+                }
             }
             _ => None,
         }
@@ -198,15 +271,23 @@ impl CosmicSurface {
         }
     }
 
-    pub fn is_tiled(&self) -> Option<bool> {
+    pub fn is_tiled(&self, pending: bool) -> Option<bool> {
         match self {
-            CosmicSurface::Wayland(window) => Some(
-                window
-                    .toplevel()
-                    .current_state()
-                    .states
-                    .contains(ToplevelState::TiledLeft),
-            ),
+            CosmicSurface::Wayland(window) => {
+                if pending {
+                    Some(window.toplevel().with_pending_state(|pending| {
+                        pending.states.contains(ToplevelState::TiledLeft)
+                    }))
+                } else {
+                    Some(
+                        window
+                            .toplevel()
+                            .current_state()
+                            .states
+                            .contains(ToplevelState::TiledLeft),
+                    )
+                }
+            }
             _ => None,
         }
     }
@@ -230,16 +311,20 @@ impl CosmicSurface {
         }
     }
 
-    pub fn is_fullscreen(&self) -> bool {
+    pub fn is_fullscreen(&self, pending: bool) -> bool {
         match self {
             CosmicSurface::Wayland(window) => {
-                let xdg = window.toplevel();
-                xdg.current_state()
-                    .states
-                    .contains(ToplevelState::Fullscreen)
-                    || xdg.with_pending_state(|state| {
-                        state.states.contains(ToplevelState::Fullscreen)
+                if pending {
+                    window.toplevel().with_pending_state(|pending| {
+                        pending.states.contains(ToplevelState::Fullscreen)
                     })
+                } else {
+                    window
+                        .toplevel()
+                        .current_state()
+                        .states
+                        .contains(ToplevelState::Fullscreen)
+                }
             }
             CosmicSurface::X11(surface) => surface.is_fullscreen(),
             _ => unreachable!(),
@@ -262,15 +347,20 @@ impl CosmicSurface {
         }
     }
 
-    pub fn is_maximized(&self) -> bool {
+    pub fn is_maximized(&self, pending: bool) -> bool {
         match self {
             CosmicSurface::Wayland(window) => {
-                let xdg = window.toplevel();
-                xdg.current_state()
-                    .states
-                    .contains(ToplevelState::Maximized)
-                    || xdg
-                        .with_pending_state(|state| state.states.contains(ToplevelState::Maximized))
+                if pending {
+                    window.toplevel().with_pending_state(|pending| {
+                        pending.states.contains(ToplevelState::Maximized)
+                    })
+                } else {
+                    window
+                        .toplevel()
+                        .current_state()
+                        .states
+                        .contains(ToplevelState::Maximized)
+                }
             }
             CosmicSurface::X11(surface) => surface.is_maximized(),
             _ => unreachable!(),
@@ -297,13 +387,7 @@ impl CosmicSurface {
         match self {
             CosmicSurface::Wayland(window) => {
                 Some(with_states(window.toplevel().wl_surface(), |states| {
-                    let attrs = states
-                        .data_map
-                        .get::<XdgToplevelSurfaceData>()
-                        .unwrap()
-                        .lock()
-                        .unwrap();
-                    attrs.min_size
+                    states.cached_state.current::<SurfaceCachedState>().min_size
                 }))
                 .filter(|size| !(size.w == 0 && size.h == 0))
             }
@@ -311,7 +395,7 @@ impl CosmicSurface {
             _ => unreachable!(),
         }
         .map(|size| {
-            if self.is_decorated() {
+            if self.is_decorated(false) {
                 size + (0, SSD_HEIGHT).into()
             } else {
                 size
@@ -323,13 +407,7 @@ impl CosmicSurface {
         match self {
             CosmicSurface::Wayland(window) => {
                 Some(with_states(window.toplevel().wl_surface(), |states| {
-                    let attrs = states
-                        .data_map
-                        .get::<XdgToplevelSurfaceData>()
-                        .unwrap()
-                        .lock()
-                        .unwrap();
-                    attrs.max_size
+                    states.cached_state.current::<SurfaceCachedState>().max_size
                 }))
                 .filter(|size| !(size.w == 0 && size.h == 0))
             }
@@ -337,7 +415,7 @@ impl CosmicSurface {
             _ => unreachable!(),
         }
         .map(|size| {
-            if self.is_decorated() {
+            if self.is_decorated(false) {
                 size + (0, SSD_HEIGHT).into()
             } else {
                 size
@@ -345,11 +423,44 @@ impl CosmicSurface {
         })
     }
 
-    pub fn send_configure(&self) {
+    pub fn serial_acked(&self, serial: &Serial) -> bool {
         match self {
-            CosmicSurface::Wayland(window) => window.toplevel().send_configure(),
+            CosmicSurface::Wayland(window) => {
+                with_states(window.toplevel().wl_surface(), |states| {
+                    let attrs = states
+                        .data_map
+                        .get::<XdgToplevelSurfaceData>()
+                        .unwrap()
+                        .lock()
+                        .unwrap();
+                    attrs
+                        .configure_serial
+                        .as_ref()
+                        .map(|s| s >= serial)
+                        .unwrap_or(false)
+                })
+            }
+            _ => true,
+        }
+    }
+
+    pub fn force_configure(&self) -> Option<Serial> {
+        match self {
+            CosmicSurface::Wayland(window) => Some(window.toplevel().send_configure()),
             CosmicSurface::X11(surface) => {
                 let _ = surface.configure(None);
+                None
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn send_configure(&self) -> Option<Serial> {
+        match self {
+            CosmicSurface::Wayland(window) => window.toplevel().send_pending_configure(),
+            CosmicSurface::X11(surface) => {
+                let _ = surface.configure(None);
+                None
             }
             _ => unreachable!(),
         }
@@ -493,14 +604,65 @@ impl CosmicSurface {
             _ => unreachable!(),
         }
     }
+
+    pub fn split_render_elements<R, C>(
+        &self,
+        renderer: &mut R,
+        location: smithay::utils::Point<i32, smithay::utils::Physical>,
+        scale: smithay::utils::Scale<f64>,
+        alpha: f32,
+    ) -> (Vec<C>, Vec<C>)
+    where
+        R: Renderer + ImportAll,
+        <R as Renderer>::TextureId: 'static,
+        C: From<WaylandSurfaceRenderElement<R>>,
+    {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                let surface = window.toplevel().wl_surface();
+
+                let popup_render_elements = PopupManager::popups_for_surface(surface)
+                    .flat_map(|(popup, popup_offset)| {
+                        let offset = (window.geometry().loc + popup_offset - popup.geometry().loc)
+                            .to_physical_precise_round(scale);
+
+                        render_elements_from_surface_tree(
+                            renderer,
+                            popup.wl_surface(),
+                            location + offset,
+                            scale,
+                            alpha,
+                            element::Kind::Unspecified,
+                        )
+                    })
+                    .collect();
+
+                let window_render_elements = render_elements_from_surface_tree(
+                    renderer,
+                    surface,
+                    location,
+                    scale,
+                    alpha,
+                    element::Kind::Unspecified,
+                );
+
+                (window_render_elements, popup_render_elements)
+            }
+            CosmicSurface::X11(surface) => (
+                surface.render_elements(renderer, location, scale, alpha),
+                Vec::new(),
+            ),
+            _ => unreachable!(),
+        }
+    }
 }
 
-impl KeyboardTarget<crate::state::State> for CosmicSurface {
+impl KeyboardTarget<State> for CosmicSurface {
     fn enter(
         &self,
-        seat: &smithay::input::Seat<crate::state::State>,
-        data: &mut crate::state::State,
-        keys: Vec<smithay::input::keyboard::KeysymHandle<'_>>,
+        seat: &Seat<State>,
+        data: &mut State,
+        keys: Vec<KeysymHandle<'_>>,
         serial: smithay::utils::Serial,
     ) {
         match self {
@@ -514,12 +676,7 @@ impl KeyboardTarget<crate::state::State> for CosmicSurface {
         }
     }
 
-    fn leave(
-        &self,
-        seat: &smithay::input::Seat<crate::state::State>,
-        data: &mut crate::state::State,
-        serial: smithay::utils::Serial,
-    ) {
+    fn leave(&self, seat: &Seat<State>, data: &mut State, serial: smithay::utils::Serial) {
         match self {
             CosmicSurface::Wayland(window) => KeyboardTarget::leave(window, seat, data, serial),
             CosmicSurface::X11(surface) => KeyboardTarget::leave(surface, seat, data, serial),
@@ -529,9 +686,9 @@ impl KeyboardTarget<crate::state::State> for CosmicSurface {
 
     fn key(
         &self,
-        seat: &smithay::input::Seat<crate::state::State>,
-        data: &mut crate::state::State,
-        key: smithay::input::keyboard::KeysymHandle<'_>,
+        seat: &Seat<State>,
+        data: &mut State,
+        key: KeysymHandle<'_>,
         state: smithay::backend::input::KeyState,
         serial: smithay::utils::Serial,
         time: u32,
@@ -549,9 +706,9 @@ impl KeyboardTarget<crate::state::State> for CosmicSurface {
 
     fn modifiers(
         &self,
-        seat: &smithay::input::Seat<crate::state::State>,
-        data: &mut crate::state::State,
-        modifiers: smithay::input::keyboard::ModifiersState,
+        seat: &Seat<State>,
+        data: &mut State,
+        modifiers: ModifiersState,
         serial: smithay::utils::Serial,
     ) {
         match self {
@@ -566,13 +723,8 @@ impl KeyboardTarget<crate::state::State> for CosmicSurface {
     }
 }
 
-impl PointerTarget<crate::state::State> for CosmicSurface {
-    fn enter(
-        &self,
-        seat: &smithay::input::Seat<crate::state::State>,
-        data: &mut crate::state::State,
-        event: &smithay::input::pointer::MotionEvent,
-    ) {
+impl PointerTarget<State> for CosmicSurface {
+    fn enter(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
         match self {
             CosmicSurface::Wayland(window) => PointerTarget::enter(window, seat, data, event),
             CosmicSurface::X11(surface) => PointerTarget::enter(surface, seat, data, event),
@@ -580,12 +732,7 @@ impl PointerTarget<crate::state::State> for CosmicSurface {
         }
     }
 
-    fn motion(
-        &self,
-        seat: &smithay::input::Seat<crate::state::State>,
-        data: &mut crate::state::State,
-        event: &smithay::input::pointer::MotionEvent,
-    ) {
+    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
         match self {
             CosmicSurface::Wayland(window) => PointerTarget::motion(window, seat, data, event),
             CosmicSurface::X11(surface) => PointerTarget::motion(surface, seat, data, event),
@@ -593,12 +740,7 @@ impl PointerTarget<crate::state::State> for CosmicSurface {
         }
     }
 
-    fn relative_motion(
-        &self,
-        seat: &smithay::input::Seat<crate::state::State>,
-        data: &mut crate::state::State,
-        event: &smithay::input::pointer::RelativeMotionEvent,
-    ) {
+    fn relative_motion(&self, seat: &Seat<State>, data: &mut State, event: &RelativeMotionEvent) {
         match self {
             CosmicSurface::Wayland(window) => {
                 PointerTarget::relative_motion(window, seat, data, event)
@@ -610,12 +752,7 @@ impl PointerTarget<crate::state::State> for CosmicSurface {
         }
     }
 
-    fn button(
-        &self,
-        seat: &smithay::input::Seat<crate::state::State>,
-        data: &mut crate::state::State,
-        event: &smithay::input::pointer::ButtonEvent,
-    ) {
+    fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
         match self {
             CosmicSurface::Wayland(window) => PointerTarget::button(window, seat, data, event),
             CosmicSurface::X11(surface) => PointerTarget::button(surface, seat, data, event),
@@ -623,12 +760,7 @@ impl PointerTarget<crate::state::State> for CosmicSurface {
         }
     }
 
-    fn axis(
-        &self,
-        seat: &smithay::input::Seat<crate::state::State>,
-        data: &mut crate::state::State,
-        frame: smithay::input::pointer::AxisFrame,
-    ) {
+    fn axis(&self, seat: &Seat<State>, data: &mut State, frame: AxisFrame) {
         match self {
             CosmicSurface::Wayland(window) => PointerTarget::axis(window, seat, data, frame),
             CosmicSurface::X11(surface) => PointerTarget::axis(surface, seat, data, frame),
@@ -636,10 +768,18 @@ impl PointerTarget<crate::state::State> for CosmicSurface {
         }
     }
 
+    fn frame(&self, seat: &Seat<State>, data: &mut State) {
+        match self {
+            CosmicSurface::Wayland(window) => PointerTarget::frame(window, seat, data),
+            CosmicSurface::X11(surface) => PointerTarget::frame(surface, seat, data),
+            _ => unreachable!(),
+        }
+    }
+
     fn leave(
         &self,
-        seat: &smithay::input::Seat<crate::state::State>,
-        data: &mut crate::state::State,
+        seat: &Seat<State>,
+        data: &mut State,
         serial: smithay::utils::Serial,
         time: u32,
     ) {
@@ -651,6 +791,137 @@ impl PointerTarget<crate::state::State> for CosmicSurface {
             _ => unreachable!(),
         }
     }
+
+    fn gesture_swipe_begin(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GestureSwipeBeginEvent,
+    ) {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                PointerTarget::gesture_swipe_begin(window, seat, data, event)
+            }
+            CosmicSurface::X11(surface) => {
+                PointerTarget::gesture_swipe_begin(surface, seat, data, event)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn gesture_swipe_update(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GestureSwipeUpdateEvent,
+    ) {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                PointerTarget::gesture_swipe_update(window, seat, data, event)
+            }
+            CosmicSurface::X11(surface) => {
+                PointerTarget::gesture_swipe_update(surface, seat, data, event)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn gesture_swipe_end(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GestureSwipeEndEvent,
+    ) {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                PointerTarget::gesture_swipe_end(window, seat, data, event)
+            }
+            CosmicSurface::X11(surface) => {
+                PointerTarget::gesture_swipe_end(surface, seat, data, event)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn gesture_pinch_begin(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GesturePinchBeginEvent,
+    ) {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                PointerTarget::gesture_pinch_begin(window, seat, data, event)
+            }
+            CosmicSurface::X11(surface) => {
+                PointerTarget::gesture_pinch_begin(surface, seat, data, event)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn gesture_pinch_update(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GesturePinchUpdateEvent,
+    ) {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                PointerTarget::gesture_pinch_update(window, seat, data, event)
+            }
+            CosmicSurface::X11(surface) => {
+                PointerTarget::gesture_pinch_update(surface, seat, data, event)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn gesture_pinch_end(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GesturePinchEndEvent,
+    ) {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                PointerTarget::gesture_pinch_end(window, seat, data, event)
+            }
+            CosmicSurface::X11(surface) => {
+                PointerTarget::gesture_pinch_end(surface, seat, data, event)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn gesture_hold_begin(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &GestureHoldBeginEvent,
+    ) {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                PointerTarget::gesture_hold_begin(window, seat, data, event)
+            }
+            CosmicSurface::X11(surface) => {
+                PointerTarget::gesture_hold_begin(surface, seat, data, event)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn gesture_hold_end(&self, seat: &Seat<State>, data: &mut State, event: &GestureHoldEndEvent) {
+        match self {
+            CosmicSurface::Wayland(window) => {
+                PointerTarget::gesture_hold_end(window, seat, data, event)
+            }
+            CosmicSurface::X11(surface) => {
+                PointerTarget::gesture_hold_end(surface, seat, data, event)
+            }
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl WaylandFocus for CosmicSurface {
@@ -659,6 +930,15 @@ impl WaylandFocus for CosmicSurface {
             CosmicSurface::Wayland(window) => window.wl_surface(),
             CosmicSurface::X11(surface) => surface.wl_surface(),
             _ => unreachable!(),
+        }
+    }
+}
+
+impl X11Relatable for CosmicSurface {
+    fn is_window(&self, window: &X11Surface) -> bool {
+        match self {
+            CosmicSurface::X11(surface) => surface == window,
+            _ => false,
         }
     }
 }
@@ -675,20 +955,16 @@ where
         renderer: &mut R,
         location: smithay::utils::Point<i32, smithay::utils::Physical>,
         scale: smithay::utils::Scale<f64>,
+        alpha: f32,
     ) -> Vec<C> {
         match self {
-            CosmicSurface::Wayland(window) => window.render_elements(renderer, location, scale),
-            CosmicSurface::X11(surface) => surface.render_elements(renderer, location, scale),
+            CosmicSurface::Wayland(window) => {
+                window.render_elements(renderer, location, scale, alpha)
+            }
+            CosmicSurface::X11(surface) => {
+                surface.render_elements(renderer, location, scale, alpha)
+            }
             _ => unreachable!(),
-        }
-    }
-}
-
-impl X11Relatable for CosmicSurface {
-    fn is_window(&self, window: &X11Surface) -> bool {
-        match self {
-            CosmicSurface::X11(surface) => surface == window,
-            _ => false,
         }
     }
 }

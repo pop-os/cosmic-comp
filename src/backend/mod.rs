@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::state::{Data, State};
+use crate::state::State;
 use anyhow::{Context, Result};
 use smithay::reexports::{calloop::EventLoop, wayland_server::DisplayHandle};
 use tracing::{info, warn};
@@ -15,7 +15,7 @@ pub mod x11;
 
 pub fn init_backend_auto(
     dh: &DisplayHandle,
-    event_loop: &mut EventLoop<'static, Data>,
+    event_loop: &mut EventLoop<'static, State>,
     state: &mut State,
 ) -> Result<()> {
     let res = match std::env::var("COSMIC_BACKEND") {

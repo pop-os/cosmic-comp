@@ -1,29 +1,33 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt,
     hash::{Hash, Hasher},
     sync::{mpsc::Receiver, Arc, Mutex},
+    time::{Duration, Instant},
 };
 
-pub use cosmic::Renderer as IcedRenderer;
-use cosmic::Theme;
 use cosmic::{
-    iced_native::{
-        command::Action,
+    iced::{
         event::Event,
         keyboard::{Event as KeyboardEvent, Modifiers as IcedModifiers},
-        mouse::{Button as MouseButton, Event as MouseEvent, ScrollDelta},
-        program::{Program as IcedProgram, State},
-        renderer::Style,
+        mouse::{Button as MouseButton, Cursor, Event as MouseEvent, ScrollDelta},
         window::{Event as WindowEvent, Id},
-        Command, Debug, Point as IcedPoint, Size as IcedSize,
+        Command, Point as IcedPoint, Rectangle as IcedRectangle, Size as IcedSize,
     },
-    Element,
+    iced_core::{clipboard::Null as NullClipboard, renderer::Style, Color},
+    iced_renderer::{graphics::Renderer as IcedGraphicsRenderer, Renderer as IcedRenderer},
+    iced_runtime::{
+        command::Action,
+        program::{Program as IcedProgram, State},
+        Debug,
+    },
+    Theme,
 };
-use iced_softbuffer::{
-    native::{raqote::DrawTarget, *},
-    Backend,
+use iced_tiny_skia::{
+    graphics::{damage, Viewport},
+    Backend, Primitive,
 };
+pub type Element<'a, Message> = cosmic::iced::Element<'a, Message, IcedRenderer<Theme>>;
 
 use ordered_float::OrderedFloat;
 use smithay::{
@@ -33,7 +37,7 @@ use smithay::{
         renderer::{
             element::{
                 memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
-                AsRenderElements,
+                AsRenderElements, Kind,
             },
             ImportMem, Renderer,
         },
@@ -41,17 +45,30 @@ use smithay::{
     desktop::space::{RenderZindex, SpaceElement},
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
-        pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget, RelativeMotionEvent},
+        pointer::{
+            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
+            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
+            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
+            PointerTarget, RelativeMotionEvent,
+        },
         Seat,
     },
     output::Output,
     reexports::calloop::RegistrationToken,
     reexports::calloop::{self, futures::Scheduler, LoopHandle},
-    utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size, Transform},
+    utils::{
+        Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
+        Transform,
+    },
 };
 
-#[derive(Debug)]
 pub struct IcedElement<P: Program + Send + 'static>(Arc<Mutex<IcedElementInternal<P>>>);
+
+impl<P: Program + Send + 'static> fmt::Debug for IcedElement<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.0, f)
+    }
+}
 
 // SAFETY: We cannot really be sure about `iced_native::program::State` sadly,
 // but the rest should be fine.
@@ -81,39 +98,46 @@ pub trait Program {
     fn update(
         &mut self,
         message: Self::Message,
-        loop_handle: &LoopHandle<'static, crate::state::Data>,
+        loop_handle: &LoopHandle<'static, crate::state::State>,
     ) -> Command<Self::Message> {
         let _ = (message, loop_handle);
         Command::none()
     }
     fn view(&self) -> Element<'_, Self::Message>;
 
-    fn background(&self, target: &mut DrawTarget<&mut [u32]>) {
-        let _ = target;
+    fn background_color(&self) -> Color {
+        Color::TRANSPARENT
     }
-    fn foreground(&self, target: &mut DrawTarget<&mut [u32]>) {
-        let _ = target;
+
+    fn foreground(
+        &self,
+        pixels: &mut tiny_skia::PixmapMut<'_>,
+        damage: &[Rectangle<i32, BufferCoords>],
+        scale: f32,
+    ) {
+        let _ = (pixels, damage, scale);
     }
 }
 
-struct ProgramWrapper<P: Program>(P, LoopHandle<'static, crate::state::Data>);
+struct ProgramWrapper<P: Program>(P, LoopHandle<'static, crate::state::State>);
 impl<P: Program> IcedProgram for ProgramWrapper<P> {
     type Message = <P as Program>::Message;
-    type Renderer = IcedRenderer;
+    type Renderer = IcedRenderer<Theme>;
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         self.0.update(message, &self.1)
     }
 
-    fn view(&self) -> Element<'_, Self::Message> {
+    fn view(&self, _id: Id) -> Element<'_, Self::Message> {
         self.0.view()
     }
 }
 
 struct IcedElementInternal<P: Program + Send + 'static> {
     // draw buffer
-    outputs: Vec<Output>,
-    buffers: HashMap<OrderedFloat<f64>, (MemoryRenderBuffer, bool)>,
+    outputs: HashSet<Output>,
+    buffers: HashMap<OrderedFloat<f64>, (MemoryRenderBuffer, Option<(Vec<Primitive>, Color)>)>,
+    pending_update: Option<Instant>,
 
     // state
     size: Size<i32, Logical>,
@@ -121,15 +145,58 @@ struct IcedElementInternal<P: Program + Send + 'static> {
 
     // iced
     theme: Theme,
-    renderer: IcedRenderer,
+    renderer: IcedRenderer<Theme>,
     state: State<ProgramWrapper<P>>,
     debug: Debug,
 
     // futures
-    handle: LoopHandle<'static, crate::state::Data>,
+    handle: LoopHandle<'static, crate::state::State>,
     scheduler: Scheduler<<P as Program>::Message>,
     executor_token: Option<RegistrationToken>,
     rx: Receiver<<P as Program>::Message>,
+}
+
+impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
+    fn clone(&self) -> Self {
+        let handle = self.handle.clone();
+        let (executor, scheduler) = calloop::futures::executor().expect("Out of file descriptors");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let executor_token = handle
+            .insert_source(executor, move |message, _, _| {
+                let _ = tx.send(message);
+            })
+            .ok();
+
+        if !self.state.is_queue_empty() {
+            tracing::warn!("Missing force_update call");
+        }
+        let mut renderer =
+            IcedRenderer::TinySkia(IcedGraphicsRenderer::new(Backend::new(Default::default())));
+        let mut debug = Debug::new();
+        let state = State::new(
+            Id(0),
+            ProgramWrapper(self.state.program().0.clone(), handle.clone()),
+            IcedSize::new(self.size.w as f32, self.size.h as f32),
+            &mut renderer,
+            &mut debug,
+        );
+
+        IcedElementInternal {
+            outputs: self.outputs.clone(),
+            buffers: self.buffers.clone(),
+            pending_update: self.pending_update.clone(),
+            size: self.size.clone(),
+            cursor_pos: self.cursor_pos.clone(),
+            theme: self.theme.clone(),
+            renderer,
+            state,
+            debug,
+            handle,
+            scheduler,
+            executor_token,
+            rx,
+        }
+    }
 }
 
 impl<P: Program + Send + 'static> fmt::Debug for IcedElementInternal<P> {
@@ -137,8 +204,9 @@ impl<P: Program + Send + 'static> fmt::Debug for IcedElementInternal<P> {
         f.debug_struct("IcedElementInternal")
             .field("buffers", &"...")
             .field("size", &self.size)
+            .field("pending_update", &self.pending_update)
             .field("cursor_pos", &self.cursor_pos)
-            .field("theme", &self.theme)
+            .field("theme", &"...")
             .field("renderer", &"...")
             .field("state", &"...")
             .field("debug", &self.debug)
@@ -160,13 +228,16 @@ impl<P: Program + Send + 'static> IcedElement<P> {
     pub fn new(
         program: P,
         size: impl Into<Size<i32, Logical>>,
-        handle: LoopHandle<'static, crate::state::Data>,
+        handle: LoopHandle<'static, crate::state::State>,
+        theme: cosmic::Theme,
     ) -> IcedElement<P> {
         let size = size.into();
-        let mut renderer = IcedRenderer::new(Backend::new());
+        let mut renderer =
+            IcedRenderer::TinySkia(IcedGraphicsRenderer::new(Backend::new(Default::default())));
         let mut debug = Debug::new();
 
         let state = State::new(
+            Id(0),
             ProgramWrapper(program, handle.clone()),
             IcedSize::new(size.w as f32, size.h as f32),
             &mut renderer,
@@ -182,11 +253,12 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             .ok();
 
         let mut internal = IcedElementInternal {
-            outputs: Vec::new(),
+            outputs: HashSet::new(),
             buffers: HashMap::new(),
+            pending_update: None,
             size,
             cursor_pos: None,
-            theme: Theme::dark(), // TODO
+            theme,
             renderer,
             state,
             debug,
@@ -205,7 +277,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         func(&internal.state.program().0)
     }
 
-    pub fn loop_handle(&self) -> LoopHandle<'static, crate::state::Data> {
+    pub fn loop_handle(&self) -> LoopHandle<'static, crate::state::State> {
         self.0.lock().unwrap().handle.clone()
     }
 
@@ -217,7 +289,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         }
 
         internal_ref.size = size;
-        for (scale, (buffer, needs_redraw)) in internal_ref.buffers.iter_mut() {
+        for (scale, (buffer, old_primitives)) in internal_ref.buffers.iter_mut() {
             let buffer_size = internal_ref
                 .size
                 .to_f64()
@@ -225,17 +297,39 @@ impl<P: Program + Send + 'static> IcedElement<P> {
                 .to_i32_round();
             *buffer =
                 MemoryRenderBuffer::new(Fourcc::Argb8888, buffer_size, 1, Transform::Normal, None);
-            *needs_redraw = true;
+            *old_primitives = None;
         }
-        internal_ref.update(true);
+
+        if internal_ref.pending_update.is_none() {
+            internal_ref.pending_update = Some(Instant::now());
+        }
     }
 
     pub fn force_update(&self) {
+        self.0.lock().unwrap().update(true);
+    }
+
+    pub fn set_theme(&self, theme: cosmic::Theme) {
+        let mut guard = self.0.lock().unwrap();
+        guard.theme = theme.clone();
+    }
+
+    pub fn force_redraw(&self) {
         let mut internal = self.0.lock().unwrap();
-        for (_buffer, ref mut needs_redraw) in internal.buffers.values_mut() {
-            *needs_redraw = true;
+        for (_buffer, ref mut old_primitives) in internal.buffers.values_mut() {
+            *old_primitives = None;
         }
         internal.update(true);
+    }
+}
+
+impl<P: Program + Send + 'static + Clone> IcedElement<P> {
+    pub fn deep_clone(&self) -> Self {
+        let internal = self.0.lock().unwrap();
+        if !internal.state.is_queue_empty() {
+            self.force_update();
+        }
+        IcedElement(Arc::new(Mutex::new(internal.clone())))
     }
 }
 
@@ -250,30 +344,30 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
             return Vec::new();
         }
 
-        let cursor_pos = self.cursor_pos.unwrap_or(Point::from((-1.0, -1.0)));
+        let cursor = self
+            .cursor_pos
+            .map(|p| IcedPoint::new(p.x as f32, p.y as f32))
+            .map(Cursor::Available)
+            .unwrap_or(Cursor::Unavailable);
 
         let actions = self
             .state
             .update(
+                Id(0),
                 IcedSize::new(self.size.w as f32, self.size.h as f32),
-                IcedPoint::new(cursor_pos.x as f32, cursor_pos.y as f32),
+                cursor,
                 &mut self.renderer,
                 &self.theme,
                 &Style {
+                    scale_factor: 1.0, //TODO: why is this
+                    icon_color: self.theme.cosmic().on_bg_color().into(),
                     text_color: self.theme.cosmic().on_bg_color().into(),
                 },
-                &mut cosmic::iced_native::clipboard::Null,
+                &mut NullClipboard,
                 &mut self.debug,
             )
-            .1
-            .map(|command| command.actions());
+            .1;
 
-        if actions.is_some() {
-            for (_buffer, ref mut needs_redraw) in self.buffers.values_mut() {
-                *needs_redraw = true;
-            }
-        }
-        let actions = actions.unwrap_or_default();
         actions
             .into_iter()
             .filter_map(|action| {
@@ -341,7 +435,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
             0x110 => MouseButton::Left,
             0x111 => MouseButton::Right,
             0x112 => MouseButton::Middle,
-            x => MouseButton::Other(x as u8),
+            x => MouseButton::Other(x as u16),
         };
         internal.state.queue_event(Event::Mouse(match event.state {
             ButtonState::Pressed => MouseEvent::ButtonPressed(button),
@@ -375,6 +469,8 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         let _ = internal.update(true);
     }
 
+    fn frame(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State) {}
+
     fn leave(
         &self,
         _seat: &Seat<crate::state::State>,
@@ -387,6 +483,63 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorLeft));
         let _ = internal.update(true);
+    }
+
+    fn gesture_swipe_begin(
+        &self,
+        _: &Seat<crate::state::State>,
+        _: &mut crate::state::State,
+        _: &GestureSwipeBeginEvent,
+    ) {
+    }
+    fn gesture_swipe_update(
+        &self,
+        _: &Seat<crate::state::State>,
+        _: &mut crate::state::State,
+        _: &GestureSwipeUpdateEvent,
+    ) {
+    }
+    fn gesture_swipe_end(
+        &self,
+        _: &Seat<crate::state::State>,
+        _: &mut crate::state::State,
+        _: &GestureSwipeEndEvent,
+    ) {
+    }
+    fn gesture_pinch_begin(
+        &self,
+        _: &Seat<crate::state::State>,
+        _: &mut crate::state::State,
+        _: &GesturePinchBeginEvent,
+    ) {
+    }
+    fn gesture_pinch_update(
+        &self,
+        _: &Seat<crate::state::State>,
+        _: &mut crate::state::State,
+        _: &GesturePinchUpdateEvent,
+    ) {
+    }
+    fn gesture_pinch_end(
+        &self,
+        _: &Seat<crate::state::State>,
+        _: &mut crate::state::State,
+        _: &GesturePinchEndEvent,
+    ) {
+    }
+    fn gesture_hold_begin(
+        &self,
+        _: &Seat<crate::state::State>,
+        _: &mut crate::state::State,
+        _: &GestureHoldBeginEvent,
+    ) {
+    }
+    fn gesture_hold_end(
+        &self,
+        _: &Seat<crate::state::State>,
+        _: &mut crate::state::State,
+        _: &GestureHoldEndEvent,
+    ) {
     }
 }
 
@@ -468,7 +621,7 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
     fn set_activate(&self, activated: bool) {
         let mut internal = self.0.lock().unwrap();
         internal.state.queue_event(Event::Window(
-            Id::MAIN,
+            Id(0),
             if activated {
                 WindowEvent::Focused
             } else {
@@ -497,15 +650,15 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
                         Transform::Normal,
                         None,
                     ),
-                    true,
+                    None,
                 ),
             );
         }
-        internal.outputs.push(output.clone());
+        internal.outputs.insert(output.clone());
     }
 
     fn output_leave(&self, output: &Output) {
-        self.0.lock().unwrap().outputs.retain(|o| o != output);
+        self.0.lock().unwrap().outputs.remove(output);
         self.refresh();
     }
 
@@ -547,10 +700,11 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
                         Transform::Normal,
                         None,
                     ),
-                    true,
+                    None,
                 ),
             );
         }
+        internal.update(true);
     }
 }
 
@@ -567,78 +721,106 @@ where
         renderer: &mut R,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
+        alpha: f32,
     ) -> Vec<C> {
         let mut internal = self.0.lock().unwrap();
-
-        let _ = internal.update(false); // TODO
-
         // makes partial borrows easier
         let internal_ref = &mut *internal;
-        if let Some((buffer, ref mut needs_redraw)) =
+        let force = if matches!(
+            internal_ref.pending_update,
+            Some(instant) if Instant::now().duration_since(instant) > Duration::from_millis(25)
+        ) {
+            true
+        } else {
+            false
+        };
+        let _ = internal_ref.update(force);
+
+        if let Some((buffer, ref mut old_primitives)) =
             internal_ref.buffers.get_mut(&OrderedFloat(scale.x))
         {
-            let size = internal_ref
+            let size: Size<i32, BufferCoords> = internal_ref
                 .size
                 .to_f64()
                 .to_buffer(scale.x, Transform::Normal)
                 .to_i32_round();
 
-            if *needs_redraw && size.w > 0 && size.h > 0 {
-                let renderer = &mut internal_ref.renderer;
+            if size.w > 0 && size.h > 0 {
+                let IcedRenderer::TinySkia(renderer) = &mut internal_ref.renderer;
                 let state_ref = &internal_ref.state;
+                let mut clip_mask = tiny_skia::Mask::new(size.w as u32, size.h as u32).unwrap();
+                let overlay = internal_ref.debug.overlay();
+
                 buffer
                     .render()
                     .draw(move |buf| {
-                        let mut target = raqote::DrawTarget::from_backing(
-                            size.w,
-                            size.h,
-                            bytemuck::cast_slice_mut::<_, u32>(buf),
-                        );
-
-                        target.clear(raqote::SolidSource::from_unpremultiplied_argb(0, 0, 0, 0));
-                        state_ref.program().0.background(&mut target);
-
-                        let draw_options = raqote::DrawOptions {
-                            // Default to antialiasing off for now
-                            antialias: raqote::AntialiasMode::None,
-                            ..Default::default()
-                        };
-
-                        // Having at least one clip fixes some font rendering issues
-                        target.push_clip_rect(raqote::IntRect::new(
-                            raqote::IntPoint::new(0, 0),
-                            raqote::IntPoint::new(size.w, size.h),
-                        ));
+                        let mut pixels =
+                            tiny_skia::PixmapMut::from_bytes(buf, size.w as u32, size.h as u32)
+                                .expect("Failed to create pixel map");
 
                         renderer.with_primitives(|backend, primitives| {
-                            for primitive in primitives.iter() {
-                                draw_primitive(
-                                    &mut target,
-                                    &draw_options,
-                                    backend,
-                                    scale.x as f32,
-                                    primitive,
-                                );
-                            }
-                        });
+                            let background_color = state_ref.program().0.background_color();
+                            let bounds = IcedSize::new(size.w as u32, size.h as u32);
+                            let viewport = Viewport::with_physical_size(bounds, scale.x);
 
-                        state_ref.program().0.foreground(&mut target);
-                        Result::<_, ()>::Ok(vec![Rectangle::from_loc_and_size((0, 0), size)])
+                            let mut damage = old_primitives
+                                .as_ref()
+                                .and_then(|(last_primitives, last_color)| {
+                                    (last_color == &background_color)
+                                        .then(|| damage::list(last_primitives, primitives))
+                                })
+                                .unwrap_or_else(|| {
+                                    vec![IcedRectangle::with_size(viewport.logical_size())]
+                                });
+                            damage = damage::group(damage, scale.x as f32, bounds);
+
+                            if !damage.is_empty() {
+                                backend.draw(
+                                    &mut pixels,
+                                    &mut clip_mask,
+                                    primitives,
+                                    &viewport,
+                                    &damage,
+                                    background_color,
+                                    &overlay,
+                                );
+
+                                *old_primitives = Some((primitives.to_vec(), background_color));
+                            }
+
+                            let damage = damage
+                                .into_iter()
+                                .map(|x| x.snap())
+                                .map(|damage_rect| {
+                                    Rectangle::from_loc_and_size(
+                                        (damage_rect.x as i32, damage_rect.y as i32),
+                                        (damage_rect.width as i32, damage_rect.height as i32),
+                                    )
+                                })
+                                .collect::<Vec<_>>();
+
+                            state_ref
+                                .program()
+                                .0
+                                .foreground(&mut pixels, &damage, scale.x as f32);
+
+                            Result::<_, ()>::Ok(damage)
+                        })
                     })
                     .unwrap();
-                *needs_redraw = false;
             }
 
             if let Ok(buffer) = MemoryRenderBufferRenderElement::from_buffer(
                 renderer,
                 location.to_f64(),
                 &buffer,
-                None,
+                Some(alpha),
                 Some(Rectangle::from_loc_and_size(
                     (0., 0.),
                     size.to_f64().to_logical(1.0, Transform::Normal),
                 )),
                 Some(internal_ref.size),
+                Kind::Unspecified,
             ) {
                 return vec![C::from(buffer)];
             }

@@ -5,7 +5,7 @@ use std::{collections::HashMap, sync::Mutex};
 use smithay::{
     output::Output,
     reexports::wayland_server::{
-        backend::{ClientId, GlobalId, ObjectId},
+        backend::{ClientId, GlobalId},
         protocol::wl_surface::WlSurface,
         Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
     },
@@ -29,6 +29,7 @@ pub trait Window: IsAlive + Clone + Send {
     fn user_data(&self) -> &UserDataMap;
 }
 
+#[derive(Debug)]
 pub struct ToplevelInfoState<D, W: Window> {
     dh: DisplayHandle,
     pub(super) toplevels: Vec<W>,
@@ -138,11 +139,11 @@ where
         }
     }
 
-    fn destroyed(state: &mut D, _client: ClientId, resource: ObjectId, _data: &()) {
+    fn destroyed(state: &mut D, _client: ClientId, resource: &ZcosmicToplevelInfoV1, _data: &()) {
         state
             .toplevel_info_state_mut()
             .instances
-            .retain(|i| i.id() != resource);
+            .retain(|i| i != resource);
     }
 }
 
@@ -173,16 +174,12 @@ where
     fn destroyed(
         state: &mut D,
         _client: ClientId,
-        resource: ObjectId,
+        resource: &ZcosmicToplevelHandleV1,
         _data: &ToplevelHandleState<W>,
     ) {
         for toplevel in &state.toplevel_info_state_mut().toplevels {
             if let Some(state) = toplevel.user_data().get::<ToplevelState>() {
-                state
-                    .lock()
-                    .unwrap()
-                    .instances
-                    .retain(|i| i.id() != resource);
+                state.lock().unwrap().instances.retain(|i| i != resource);
             }
         }
     }

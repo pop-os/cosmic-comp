@@ -6,7 +6,7 @@ use crate::{
     backend::render::{workspace_elements, CLEAR_COLOR},
     config::OutputConfig,
     shell::Shell,
-    state::{BackendData, ClientState, Common, Data, Fps, SurfaceDmabufFeedback},
+    state::{BackendData, ClientState, Common, Fps, SurfaceDmabufFeedback},
     utils::prelude::*,
     wayland::{
         handlers::screencopy::{render_session, UserdataExt},
@@ -16,6 +16,7 @@ use crate::{
 
 use anyhow::{Context, Result};
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::FailureReason;
+use libc::dev_t;
 use smithay::{
     backend::{
         allocator::{
@@ -25,7 +26,7 @@ use smithay::{
             Allocator, Format, Fourcc,
         },
         drm::{
-            compositor::{BlitFrameResultError, DrmCompositor, FrameError},
+            compositor::{BlitFrameResultError, DrmCompositor, FrameError, PrimaryPlaneElement},
             DrmDevice, DrmDeviceFd, DrmEvent, DrmEventTime, DrmNode, NodeType,
         },
         egl::{EGLContext, EGLDevice, EGLDisplay},
@@ -33,11 +34,12 @@ use smithay::{
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
             buffer_dimensions,
-            damage::{Error as RenderError, OutputNoMode},
+            damage::{Error as RenderError, RenderOutputResult},
             element::Element,
             gles::{GlesRenderbuffer, GlesTexture},
             glow::GlowRenderer,
             multigpu::{gbm::GbmGlesBackend, Error as MultiError, GpuManager},
+            sync::SyncPoint,
             Bind, ImportDma, Offscreen,
         },
         session::{libseat::LibSeatSession, Event as SessionEvent, Session},
@@ -46,7 +48,7 @@ use smithay::{
     },
     desktop::utils::OutputPresentationFeedback,
     input::Seat,
-    output::{Mode as OutputMode, Output, PhysicalProperties, Subpixel},
+    output::{Mode as OutputMode, Output, OutputNoMode, PhysicalProperties, Subpixel},
     reexports::{
         calloop::{
             timer::{TimeoutAction, Timer},
@@ -56,8 +58,8 @@ use smithay::{
             control::{connector, crtc, Device as ControlDevice, ModeTypeFlags},
             Device as _,
         },
-        input::Libinput,
-        nix::{fcntl::OFlag, sys::stat::dev_t},
+        input::{self, Libinput},
+        rustix::fs::OFlags,
         wayland_protocols::wp::{
             linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1,
             presentation_time::server::wp_presentation_feedback,
@@ -67,6 +69,7 @@ use smithay::{
     utils::{DeviceFd, Size, Transform},
     wayland::{
         dmabuf::{get_dmabuf, DmabufFeedbackBuilder, DmabufGlobal},
+        drm_lease::{DrmLease, DrmLeaseState},
         relative_pointer::RelativePointerManagerState,
         seat::WaylandFocus,
         shm::{shm_format_to_fourcc, with_buffer_contents},
@@ -79,7 +82,7 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     ffi::CStr,
-    os::unix::io::FromRawFd,
+    fmt,
     path::PathBuf,
     time::Duration,
 };
@@ -92,8 +95,10 @@ use super::render::{init_shaders, CursorMode, GlMultiRenderer};
 // for now we assume we need at least 3ms
 const MIN_RENDER_TIME: Duration = Duration::from_millis(3);
 
+#[derive(Debug)]
 pub struct KmsState {
-    devices: HashMap<DrmNode, Device>,
+    pub devices: HashMap<DrmNode, Device>,
+    pub input_devices: HashMap<String, input::Device>,
     pub api: GpuManager<GbmGlesBackend<GlowRenderer>>,
     pub primary: DrmNode,
     session: LibSeatSession,
@@ -103,15 +108,38 @@ pub struct KmsState {
 pub struct Device {
     render_node: DrmNode,
     surfaces: HashMap<crtc::Handle, Surface>,
-    drm: DrmDevice,
+    pub drm: DrmDevice,
     gbm: GbmDevice<DrmDeviceFd>,
     allocator: Box<dyn Allocator<Buffer = Dmabuf, Error = AnyError>>,
     formats: HashSet<Format>,
     supports_atomic: bool,
+    pub non_desktop_connectors: Vec<(connector::Handle, crtc::Handle)>,
+    pub leasing_global: Option<DrmLeaseState>,
+    pub active_leases: Vec<DrmLease>,
     event_token: Option<RegistrationToken>,
     socket: Option<Socket>,
 }
 
+impl fmt::Debug for Device {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Device")
+            .field("render_node", &self.render_node)
+            .field("surfaces", &self.surfaces)
+            .field("drm", &self.drm)
+            .field("gbm", &self.gbm)
+            .field("allocator", &"...")
+            .field("formats", &self.formats)
+            .field("supports_atomic", &self.supports_atomic)
+            .field("non_desktop_connectors", &self.non_desktop_connectors)
+            .field("leasing_global", &self.leasing_global)
+            .field("active_leases", &self.active_leases)
+            .field("event_token", &self.event_token)
+            .field("socket", &self.socket)
+            .finish()
+    }
+}
+
+#[derive(Debug)]
 pub struct Surface {
     surface: Option<GbmDrmCompositor>,
     connector: connector::Handle,
@@ -121,6 +149,7 @@ pub struct Surface {
     scheduled: bool,
     pending: bool,
     dirty: bool,
+    last_animation_state: bool,
     render_timer_token: Option<RegistrationToken>,
     fps: Fps,
     feedback: HashMap<DrmNode, SurfaceDmabufFeedback>,
@@ -135,7 +164,7 @@ pub type GbmDrmCompositor = DrmCompositor<
 
 pub fn init_backend(
     dh: &DisplayHandle,
-    event_loop: &mut EventLoop<'static, Data>,
+    event_loop: &mut EventLoop<'static, State>,
     state: &mut State,
 ) -> Result<()> {
     let (session, notifier) = LibSeatSession::new().context("Failed to acquire session")?;
@@ -150,14 +179,21 @@ pub fn init_backend(
 
     let libinput_event_source = event_loop
         .handle()
-        .insert_source(libinput_backend, move |mut event, _, data| {
-            if let &mut InputEvent::DeviceAdded { ref mut device } = &mut event {
-                data.state.common.config.read_device(device);
+        .insert_source(libinput_backend, move |mut event, _, state| {
+            if let InputEvent::DeviceAdded { ref mut device } = &mut event {
+                state.common.config.read_device(device);
+                state
+                    .backend
+                    .kms()
+                    .input_devices
+                    .insert(device.name().into(), device.clone());
+            } else if let InputEvent::DeviceRemoved { device } = &event {
+                state.backend.kms().input_devices.remove(device.name());
             }
-            data.state.process_input_event(event);
-            for output in data.state.common.shell.outputs() {
-                if let Err(err) = data.state.backend.kms().schedule_render(
-                    &data.state.common.event_loop_handle,
+            state.process_input_event(event, true);
+            for output in state.common.shell.outputs() {
+                if let Err(err) = state.backend.kms().schedule_render(
+                    &state.common.event_loop_handle,
                     output,
                     None,
                     None,
@@ -207,19 +243,17 @@ pub fn init_backend(
     };
     info!("Using {} as primary gpu for rendering.", primary);
 
-    let udev_dispatcher = Dispatcher::new(udev_backend, move |event, _, data: &mut Data| {
+    let udev_dispatcher = Dispatcher::new(udev_backend, move |event, _, state: &mut State| {
+        let dh = state.common.display_handle.clone();
         match match event {
-            UdevEvent::Added { device_id, path } => data
-                .state
-                .device_added(device_id, path, &data.display.handle(), true)
+            UdevEvent::Added { device_id, path } => state
+                .device_added(device_id, path, &dh, true)
                 .with_context(|| format!("Failed to add drm device: {}", device_id)),
-            UdevEvent::Changed { device_id } => data
-                .state
+            UdevEvent::Changed { device_id } => state
                 .device_changed(device_id)
                 .with_context(|| format!("Failed to update drm device: {}", device_id)),
-            UdevEvent::Removed { device_id } => data
-                .state
-                .device_removed(device_id, &data.display.handle())
+            UdevEvent::Removed { device_id } => state
+                .device_removed(device_id, &dh)
                 .with_context(|| format!("Failed to remove drm device: {}", device_id)),
         } {
             Ok(()) => {
@@ -240,16 +274,19 @@ pub fn init_backend(
     let dispatcher = udev_dispatcher.clone();
     let session_event_source = event_loop
         .handle()
-        .insert_source(notifier, move |event, &mut (), data| match event {
+        .insert_source(notifier, move |event, &mut (), state| match event {
             SessionEvent::ActivateSession => {
                 if let Err(err) = libinput_context.resume() {
                     error!(?err, "Failed to resume libinput context.");
                 }
-                for device in data.state.backend.kms().devices.values() {
+                for device in state.backend.kms().devices.values_mut() {
                     device.drm.activate();
+                    if let Some(lease_state) = device.leasing_global.as_mut() {
+                        lease_state.resume::<State>();
+                    }
                 }
                 let dispatcher = dispatcher.clone();
-                handle.insert_idle(move |data| {
+                handle.insert_idle(move |state| {
                     for (dev, path) in dispatcher.as_source_ref().device_list() {
                         let drm_node = match DrmNode::from_dev_id(dev) {
                             Ok(node) => node,
@@ -258,32 +295,27 @@ pub fn init_backend(
                                 continue;
                             }
                         };
-                        if data.state.backend.kms().devices.contains_key(&drm_node) {
-                            if let Err(err) = data.state.device_changed(dev) {
+                        if state.backend.kms().devices.contains_key(&drm_node) {
+                            if let Err(err) = state.device_changed(dev) {
                                 error!(?err, "Failed to update drm device {}.", path.display(),);
                             }
                         } else {
-                            if let Err(err) = data.state.device_added(
-                                dev,
-                                path.into(),
-                                &data.display.handle(),
-                                true,
-                            ) {
+                            let dh = state.common.display_handle.clone();
+                            if let Err(err) = state.device_added(dev, path.into(), &dh, true) {
                                 error!(?err, "Failed to add drm device {}.", path.display(),);
                             }
                         }
                     }
 
-                    let seats = data.state.common.seats().cloned().collect::<Vec<_>>();
-                    data.state.common.config.read_outputs(
-                        &mut data.state.common.output_configuration_state,
-                        &mut data.state.backend,
-                        &mut data.state.common.shell,
+                    let seats = state.common.seats().cloned().collect::<Vec<_>>();
+                    state.common.config.read_outputs(
+                        &mut state.common.output_configuration_state,
+                        &mut state.backend,
+                        &mut state.common.shell,
                         seats.into_iter(),
-                        &data.state.common.event_loop_handle,
+                        &state.common.event_loop_handle,
                     );
-                    for surface in data
-                        .state
+                    for surface in state
                         .backend
                         .kms()
                         .devices
@@ -293,10 +325,10 @@ pub fn init_backend(
                         surface.scheduled = false;
                         surface.pending = false;
                     }
-                    for output in data.state.common.shell.outputs() {
+                    for output in state.common.shell.outputs() {
                         let sessions = output.pending_buffers().collect::<Vec<_>>();
-                        if let Err(err) = data.state.backend.kms().schedule_render(
-                            &data.state.common.event_loop_handle,
+                        if let Err(err) = state.backend.kms().schedule_render(
+                            &state.common.event_loop_handle,
                             output,
                             None,
                             if !sessions.is_empty() {
@@ -317,12 +349,15 @@ pub fn init_backend(
             }
             SessionEvent::PauseSession => {
                 libinput_context.suspend();
-                for device in data.state.backend.kms().devices.values_mut() {
+                for device in state.backend.kms().devices.values_mut() {
                     device.drm.pause();
+                    if let Some(lease_state) = device.leasing_global.as_mut() {
+                        lease_state.suspend();
+                    }
                     for surface in device.surfaces.values_mut() {
                         surface.surface = None;
                         if let Some(token) = surface.render_timer_token.take() {
-                            data.state.common.event_loop_handle.remove(token);
+                            state.common.event_loop_handle.remove(token);
                         }
                         surface.scheduled = false;
                     }
@@ -342,6 +377,7 @@ pub fn init_backend(
         primary,
         session,
         devices: HashMap::new(),
+        input_devices: HashMap::new(),
     });
 
     // Create relative pointer global
@@ -350,9 +386,9 @@ pub fn init_backend(
     state.launch_xwayland(Some(primary));
 
     for (dev, path) in udev_dispatcher.as_source_ref().device_list() {
-        state
-            .device_added(dev, path.into(), dh, false)
-            .with_context(|| format!("Failed to add drm device: {}", path.display()))?;
+        if let Err(err) = state.device_added(dev, path.into(), dh, false) {
+            warn!("Failed to add device {}: {:?}", path.display(), err);
+        }
     }
 
     // HACK: amdgpu doesn't like us initializing vulkan too early..
@@ -382,23 +418,21 @@ impl State {
             return Ok(());
         }
 
-        let fd = DrmDeviceFd::new(unsafe {
-            DeviceFd::from_raw_fd(
-                self.backend
-                    .kms()
-                    .session
-                    .open(
-                        &path,
-                        OFlag::O_RDWR | OFlag::O_CLOEXEC | OFlag::O_NOCTTY | OFlag::O_NONBLOCK,
+        let fd = DrmDeviceFd::new(DeviceFd::from(
+            self.backend
+                .kms()
+                .session
+                .open(
+                    &path,
+                    OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK,
+                )
+                .with_context(|| {
+                    format!(
+                        "Failed to optain file descriptor for drm device: {}",
+                        path.display()
                     )
-                    .with_context(|| {
-                        format!(
-                            "Failed to optain file descriptor for drm device: {}",
-                            path.display()
-                        )
-                    })?,
-            )
-        });
+                })?,
+        ));
         let (drm, notifier) = DrmDevice::new(fd.clone(), false)
             .with_context(|| format!("Failed to initialize drm device for: {}", path.display()))?;
         let drm_node = DrmNode::from_dev_id(dev)?;
@@ -436,12 +470,13 @@ impl State {
             .event_loop_handle
             .insert_source(
                 notifier,
-                move |event, metadata, data: &mut Data| match event {
+                move |event, metadata, state: &mut State| match event {
                     DrmEvent::VBlank(crtc) => {
                         let rescheduled = if let Some(device) =
-                            data.state.backend.kms().devices.get_mut(&drm_node)
+                            state.backend.kms().devices.get_mut(&drm_node)
                         {
                             if let Some(surface) = device.surfaces.get_mut(&crtc) {
+                                trace!(?crtc, "VBlank");
                                 #[cfg(feature = "debug")]
                                 surface.fps.displayed();
 
@@ -467,7 +502,7 @@ impl State {
                                             )
                                             } else {
                                                 (
-                                                    data.state.common.clock.now(),
+                                                    state.common.clock.now(),
                                                     wp_presentation_feedback::Kind::Vsync,
                                                 )
                                             };
@@ -477,7 +512,11 @@ impl State {
                                                 surface
                                                     .output
                                                     .current_mode()
-                                                    .map(|mode| mode.refresh as u32)
+                                                    .map(|mode| {
+                                                        Duration::from_secs_f64(
+                                                            1_000.0 / mode.refresh as f64,
+                                                        )
+                                                    })
                                                     .unwrap_or_default(),
                                                 seq as u64,
                                                 flags,
@@ -485,9 +524,20 @@ impl State {
                                         }
 
                                         surface.pending = false;
-                                        surface.dirty.then(|| {
-                                            (surface.output.clone(), surface.fps.avg_rendertime(5))
-                                        })
+                                        let animations_going =
+                                            state.common.shell.animations_going();
+                                        let animation_diff = std::mem::replace(
+                                            &mut surface.last_animation_state,
+                                            animations_going,
+                                        ) != animations_going;
+                                        (surface.dirty || animations_going || animation_diff).then(
+                                            || {
+                                                (
+                                                    surface.output.clone(),
+                                                    surface.fps.avg_rendertime(5),
+                                                )
+                                            },
+                                        )
                                     }
                                     Some(Err(err)) => {
                                         warn!(?err, "Failed to submit frame.");
@@ -504,7 +554,7 @@ impl State {
 
                         if let Some((output, avg_rendertime)) = rescheduled {
                             let mut scheduled_sessions =
-                                data.state.workspace_session_for_output(&output);
+                                state.workspace_session_for_output(&output);
                             let mut output_sessions = output.pending_buffers().peekable();
                             if output_sessions.peek().is_some() {
                                 scheduled_sessions
@@ -514,8 +564,8 @@ impl State {
 
                             let estimated_rendertime =
                                 std::cmp::max(avg_rendertime, MIN_RENDER_TIME);
-                            if let Err(err) = data.state.backend.kms().schedule_render(
-                                &data.state.common.event_loop_handle,
+                            if let Err(err) = state.backend.kms().schedule_render(
+                                &state.common.event_loop_handle,
                                 &output,
                                 Some(estimated_rendertime),
                                 scheduled_sessions,
@@ -554,6 +604,18 @@ impl State {
             drm,
             formats,
             supports_atomic,
+            non_desktop_connectors: Vec::new(),
+            leasing_global: DrmLeaseState::new::<State>(dh, &drm_node)
+                .map_err(|err| {
+                    // TODO: replace with inspect_err, once stable
+                    warn!(
+                        ?err,
+                        "Failed to initialize drm lease global for: {}", drm_node
+                    );
+                    err
+                })
+                .ok(),
+            active_leases: Vec::new(),
             event_token: Some(token),
             socket,
         };
@@ -585,19 +647,62 @@ impl State {
             init_shaders(&mut renderer).expect("Failed to initialize renderer");
 
             for (crtc, conn) in outputs {
-                match device.setup_surface(crtc, conn, (w, 0), &mut renderer) {
-                    Ok(output) => {
-                        w += output
-                            .user_data()
-                            .get::<RefCell<OutputConfig>>()
-                            .unwrap()
-                            .borrow()
-                            .mode_size()
-                            .w;
-                        wl_outputs.push(output);
+                let non_desktop =
+                    match drm_helpers::get_property_val(&device.drm, conn, "non-desktop") {
+                        Ok((val_type, value)) => {
+                            val_type.convert_value(value).as_boolean().unwrap()
+                        }
+                        Err(err) => {
+                            warn!(
+                            ?err,
+                            "Failed to determine if connector is meant desktop usage, assuming so."
+                        );
+                            false
+                        }
+                    };
+
+                if non_desktop {
+                    let Ok(output_name) = drm_helpers::interface_name(&device.drm, conn) else {
+                        continue
+                    };
+                    let drm_helpers::EdidInfo {
+                        model,
+                        manufacturer,
+                    } = match drm_helpers::edid_info(&device.drm, conn) {
+                        Ok(info) => info,
+                        Err(_) => drm_helpers::EdidInfo {
+                            model: "Unknown".into(),
+                            manufacturer: "Unknown".into(),
+                        },
+                    };
+
+                    device.non_desktop_connectors.push((conn, crtc));
+                    info!(
+                        "Connector {} is non-desktop, setting up for leasing",
+                        output_name
+                    );
+                    if let Some(lease_state) = device.leasing_global.as_mut() {
+                        lease_state.add_connector::<State>(
+                            conn,
+                            output_name,
+                            format!("{} {}", manufacturer, model),
+                        );
                     }
-                    Err(err) => warn!(?err, "Failed to initialize output."),
-                };
+                } else {
+                    match device.setup_surface(crtc, conn, (w, 0), &mut renderer) {
+                        Ok(output) => {
+                            w += output
+                                .user_data()
+                                .get::<RefCell<OutputConfig>>()
+                                .unwrap()
+                                .borrow()
+                                .mode_size()
+                                .w;
+                            wl_outputs.push(output);
+                        }
+                        Err(err) => warn!(?err, "Failed to initialize output."),
+                    };
+                }
             }
             backend.devices.insert(drm_node, device);
         }
@@ -675,7 +780,16 @@ impl State {
                 let changes = device.enumerate_surfaces()?;
                 let mut w = self.common.shell.global_space().size.w;
                 for crtc in changes.removed {
-                    if let Some(surface) = device.surfaces.remove(&crtc) {
+                    if let Some(pos) = device
+                        .non_desktop_connectors
+                        .iter()
+                        .position(|(_, handle)| *handle == crtc)
+                    {
+                        let (conn, _) = device.non_desktop_connectors.remove(pos);
+                        if let Some(leasing_state) = device.leasing_global.as_mut() {
+                            leasing_state.withdraw_connector(conn);
+                        }
+                    } else if let Some(surface) = device.surfaces.remove(&crtc) {
                         if let Some(token) = surface.render_timer_token {
                             self.common.event_loop_handle.remove(token);
                         }
@@ -684,26 +798,69 @@ impl State {
                     }
                 }
                 for (crtc, conn) in changes.added {
-                    let mut renderer = match backend.api.single_renderer(&device.render_node) {
-                        Ok(renderer) => renderer,
-                        Err(err) => {
-                            warn!(?err, "Failed to initialize output.");
-                            continue;
+                    let non_desktop =
+                        match drm_helpers::get_property_val(&device.drm, conn, "non-desktop") {
+                            Ok((val_type, value)) => {
+                                val_type.convert_value(value).as_boolean().unwrap()
+                            }
+                            Err(err) => {
+                                warn!(
+                            ?err,
+                            "Failed to determine if connector is meant desktop usage, assuming so."
+                        );
+                                false
+                            }
+                        };
+
+                    if non_desktop {
+                        let Ok(output_name) = drm_helpers::interface_name(&device.drm, conn) else {
+                            continue
+                        };
+                        let drm_helpers::EdidInfo {
+                            model,
+                            manufacturer,
+                        } = match drm_helpers::edid_info(&device.drm, conn) {
+                            Ok(info) => info,
+                            Err(_) => drm_helpers::EdidInfo {
+                                model: "Unknown".into(),
+                                manufacturer: "Unknown".into(),
+                            },
+                        };
+
+                        device.non_desktop_connectors.push((conn, crtc));
+                        info!(
+                            "Connector {} is non-desktop, setting up for leasing",
+                            output_name
+                        );
+                        if let Some(lease_state) = device.leasing_global.as_mut() {
+                            lease_state.add_connector::<State>(
+                                conn,
+                                output_name,
+                                format!("{} {}", manufacturer, model),
+                            );
                         }
-                    };
-                    match device.setup_surface(crtc, conn, (w, 0), &mut renderer) {
-                        Ok(output) => {
-                            w += output
-                                .user_data()
-                                .get::<RefCell<OutputConfig>>()
-                                .unwrap()
-                                .borrow()
-                                .mode_size()
-                                .w;
-                            outputs_added.push(output);
-                        }
-                        Err(err) => warn!(?err, "Failed to initialize output."),
-                    };
+                    } else {
+                        let mut renderer = match backend.api.single_renderer(&device.render_node) {
+                            Ok(renderer) => renderer,
+                            Err(err) => {
+                                warn!(?err, "Failed to initialize output.");
+                                continue;
+                            }
+                        };
+                        match device.setup_surface(crtc, conn, (w, 0), &mut renderer) {
+                            Ok(output) => {
+                                w += output
+                                    .user_data()
+                                    .get::<RefCell<OutputConfig>>()
+                                    .unwrap()
+                                    .borrow()
+                                    .mode_size()
+                                    .w;
+                                outputs_added.push(output);
+                            }
+                            Err(err) => warn!(?err, "Failed to initialize output."),
+                        };
+                    }
                 }
             }
         }
@@ -740,6 +897,9 @@ impl State {
         let mut outputs_removed = Vec::new();
         let backend = self.backend.kms();
         if let Some(mut device) = backend.devices.remove(&drm_node) {
+            if let Some(mut leasing_global) = device.leasing_global.take() {
+                leasing_global.disable_global::<State>();
+            }
             backend.api.as_mut().remove_node(&device.render_node);
             for surface in device.surfaces.values_mut() {
                 if let Some(token) = surface.render_timer_token.take() {
@@ -798,6 +958,11 @@ impl Device {
             .surfaces
             .iter()
             .map(|(c, s)| (*c, s.connector))
+            .chain(
+                self.non_desktop_connectors
+                    .iter()
+                    .map(|(conn, crtc)| (*crtc, *conn)),
+            )
             .collect::<HashMap<crtc::Handle, connector::Handle>>();
 
         let added = config
@@ -847,8 +1012,14 @@ impl Device {
             interface,
             PhysicalProperties {
                 size: (phys_w as i32, phys_h as i32).into(),
-                // TODO: We need to read that from the connector properties
-                subpixel: Subpixel::Unknown,
+                subpixel: match conn_info.subpixel() {
+                    connector::SubPixel::HorizontalRgb => Subpixel::HorizontalRgb,
+                    connector::SubPixel::HorizontalBgr => Subpixel::HorizontalBgr,
+                    connector::SubPixel::VerticalRgb => Subpixel::VerticalRgb,
+                    connector::SubPixel::VerticalBgr => Subpixel::VerticalBgr,
+                    connector::SubPixel::None => Subpixel::None,
+                    _ => Subpixel::Unknown,
+                },
                 make: edid_info
                     .as_ref()
                     .map(|info| info.manufacturer.clone())
@@ -894,6 +1065,7 @@ impl Device {
             scheduled: false,
             pending: false,
             dirty: false,
+            last_animation_state: false,
             render_timer_token: None,
             fps: Fps::new(renderer.as_mut()),
             feedback: HashMap::new(),
@@ -925,7 +1097,7 @@ fn render_node_for_output(
 ) -> DrmNode {
     let workspace = shell.active_space(output);
     let nodes = workspace
-        .get_fullscreen(output)
+        .get_fullscreen()
         .map(|w| vec![w.clone()])
         .unwrap_or_else(|| workspace.windows().collect::<Vec<_>>())
         .into_iter()
@@ -960,19 +1132,20 @@ fn get_surface_dmabuf_feedback(
         .collect::<HashSet<_>>();
 
     let surface = compositor.surface();
-    let planes = surface.planes().unwrap();
+    let planes = surface.planes();
     // We limit the scan-out trache to formats we can also render from
     // so that there is always a fallback render path available in case
     // the supplied buffer can not be scanned out directly
-    let planes_formats = surface
-        .supported_formats(planes.primary.handle)
-        .unwrap()
-        .into_iter()
+    let planes_formats = planes
+        .primary
+        .formats
+        .iter()
+        .cloned()
         .chain(
             planes
                 .overlay
                 .iter()
-                .flat_map(|p| surface.supported_formats(p.handle).unwrap()),
+                .flat_map(|p| p.formats.iter().cloned()),
         )
         .collect::<HashSet<_>>()
         .intersection(&combined_formats)
@@ -982,7 +1155,11 @@ fn get_surface_dmabuf_feedback(
     let target_node = surface.device_fd().dev_id().unwrap();
     let mut builder = DmabufFeedbackBuilder::new(render_node.dev_id(), render_formats);
     if target_node != render_node.dev_id() && !combined_formats.is_empty() {
-        builder = builder.add_preference_tranche(target_node, None, combined_formats);
+        builder = builder.add_preference_tranche(
+            target_node,
+            Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
+            combined_formats,
+        );
     };
     let render_feedback = builder.clone().build().unwrap();
 
@@ -1039,13 +1216,20 @@ impl Surface {
             );
         }
 
-        let handle = state.shell.workspaces.active(&self.output).handle;
+        let (previous_workspace, workspace) = state.shell.workspaces.active(&self.output);
+        let (previous_idx, idx) = state.shell.workspaces.active_num(&self.output);
+        let previous_workspace = previous_workspace
+            .zip(previous_idx)
+            .map(|((w, start), idx)| (w.handle, idx, start));
+        let workspace = (workspace.handle, idx);
+
         let elements = workspace_elements(
             Some(&render_node),
             &mut renderer,
             state,
             &self.output,
-            &handle,
+            previous_workspace,
+            workspace,
             CursorMode::All,
             &mut Some(&mut self.fps),
             false,
@@ -1055,8 +1239,11 @@ impl Surface {
         })?;
         self.fps.elements();
 
-        let res =
-            compositor.render_frame::<_, _, GlesTexture>(&mut renderer, &elements, CLEAR_COLOR);
+        let res = compositor.render_frame::<_, _, GlesTexture>(
+            &mut renderer,
+            &elements,
+            CLEAR_COLOR, // TODO use a theme neutral color
+        );
         self.fps.render();
 
         match res {
@@ -1067,6 +1254,11 @@ impl Surface {
                     None
                 };
 
+                if frame_result.needs_sync() {
+                    if let PrimaryPlaneElement::Swapchain(elem) = &frame_result.primary_element {
+                        elem.sync.wait();
+                    }
+                }
                 match compositor.queue_frame(feedback) {
                     Ok(()) | Err(FrameError::EmptyFrame) => {}
                     Err(err) => {
@@ -1085,6 +1277,7 @@ impl Surface {
                             |_node, buffer, renderer, dt, age| {
                                 let res = dt.damage_output(age, &elements)?;
 
+                                let mut sync = SyncPoint::default();
                                 if let (Some(ref damage), _) = &res {
                                     if let Ok(dmabuf) = get_dmabuf(buffer) {
                                         renderer.bind(dmabuf).map_err(RenderError::Rendering)?;
@@ -1111,7 +1304,7 @@ impl Surface {
                                         self.output.current_scale().fractional_scale(),
                                         self.output.current_transform(),
                                     );
-                                    frame_result
+                                    sync = frame_result
                                         .blit_frame_result(
                                             output_size,
                                             output_transform,
@@ -1131,7 +1324,11 @@ impl Surface {
                                         })?;
                                 }
 
-                                Ok(res)
+                                Ok(RenderOutputResult {
+                                    damage: res.0,
+                                    states: res.1,
+                                    sync,
+                                })
                             },
                         ) {
                             Ok(true) => {} // success
@@ -1192,14 +1389,14 @@ impl KmsState {
         seats: impl Iterator<Item = Seat<State>>,
         shell: &mut Shell,
         test_only: bool,
-        loop_handle: &LoopHandle<'_, Data>,
+        loop_handle: &LoopHandle<'_, State>,
     ) -> Result<(), anyhow::Error> {
         let recreated = if let Some(device) = self
             .devices
             .values_mut()
             .find(|dev| dev.surfaces.values().any(|s| s.output == *output))
         {
-            let (crtc, mut surface) = device
+            let (crtc, surface) = device
                 .surfaces
                 .iter_mut()
                 .find(|(_, s)| s.output == *output)
@@ -1249,7 +1446,9 @@ impl KmsState {
                                 output_config.vrr,
                             )?;
                         }
-                        compositor.use_mode(*mode).unwrap();
+                        compositor
+                            .use_mode(*mode)
+                            .context("Failed to apply new mode")?;
                         false
                     } else {
                         surface.vrr = drm_helpers::set_vrr(drm, *crtc, conn, output_config.vrr)
@@ -1270,9 +1469,7 @@ impl KmsState {
                         let driver = drm
                             .get_driver()
                             .with_context(|| "Failed to query drm driver")?;
-                        let mut planes = drm_surface
-                            .planes()
-                            .with_context(|| "Failed to query drm planes")?;
+                        let mut planes = drm_surface.planes().clone();
                         // QUIRK: Using an overlay plane on a nvidia card breaks the display controller (wtf...)
                         if driver
                             .name()
@@ -1322,7 +1519,6 @@ impl KmsState {
             false
         };
 
-        shell.refresh_outputs();
         if recreated {
             let sessions = output.pending_buffers().collect::<Vec<_>>();
             if let Err(err) = self.schedule_render(
@@ -1401,7 +1597,7 @@ impl KmsState {
 
     pub fn schedule_render(
         &mut self,
-        loop_handle: &LoopHandle<'_, Data>,
+        loop_handle: &LoopHandle<'_, State>,
         output: &Output,
         estimated_rendertime: Option<Duration>,
         mut screencopy_sessions: Option<Vec<(ScreencopySession, BufferParams)>>,
@@ -1414,9 +1610,9 @@ impl KmsState {
         {
             if surface.surface.is_none() {
                 if let Some(sessions) = screencopy_sessions {
-                    loop_handle.insert_idle(move |data| {
+                    loop_handle.insert_idle(move |state| {
                         for (session, params) in sessions.into_iter() {
-                            data.state.common.still_pending(session, params);
+                            state.common.still_pending(session, params);
                         }
                     });
                 }
@@ -1437,8 +1633,8 @@ impl KmsState {
                                 .saturating_sub(estimated_rendertime.unwrap()),
                         )
                     },
-                    move |_time, _, data| {
-                        let backend = data.state.backend.kms();
+                    move |_time, _, state| {
+                        let backend = state.backend.kms();
                         let (mut device, mut other) = backend
                             .devices
                             .iter_mut()
@@ -1448,12 +1644,12 @@ impl KmsState {
                         if let Some(surface) = target_device.surfaces.get_mut(&crtc) {
                             let target_node = target_device.render_node;
                             let render_node = render_node_for_output(
-                                &data.display.handle(),
+                                &state.common.display_handle,
                                 &surface.output,
                                 target_node,
-                                &data.state.common.shell,
+                                &state.common.shell,
                             );
-                            let state = &mut data.state.common;
+                            let common = &mut state.common;
 
                             let result = if render_node != target_node {
                                 let render_device = &mut other
@@ -1468,7 +1664,7 @@ impl KmsState {
                                         render_device.allocator.as_mut(),
                                     )),
                                     &target_node,
-                                    state,
+                                    common,
                                     screencopy_sessions.as_deref(),
                                 )
                             } else {
@@ -1476,16 +1672,18 @@ impl KmsState {
                                     &mut backend.api,
                                     None,
                                     &target_node,
-                                    state,
+                                    common,
                                     screencopy_sessions.as_deref(),
                                 )
                             };
 
                             match result {
                                 Ok(_) => {
+                                    trace!(?crtc, "Frame pending");
                                     surface.dirty = false;
                                     surface.pending = true;
                                     surface.scheduled = false;
+                                    surface.render_timer_token = None;
                                     return TimeoutAction::Drop;
                                 }
                                 Err(err) => {
@@ -1501,18 +1699,19 @@ impl KmsState {
 
                         if let Some(sessions) = screencopy_sessions.as_mut() {
                             for (session, params) in sessions.drain(..) {
-                                data.state.common.still_pending(session, params);
+                                state.common.still_pending(session, params);
                             }
                         }
                         TimeoutAction::Drop
                     },
                 )?);
+                trace!(?surface.render_timer_token, ?crtc, "Frame scheduled");
                 surface.scheduled = true;
             } else {
                 if let Some(sessions) = screencopy_sessions {
-                    loop_handle.insert_idle(|data| {
+                    loop_handle.insert_idle(|state| {
                         for (session, params) in sessions.into_iter() {
-                            data.state.common.still_pending(session, params);
+                            state.common.still_pending(session, params);
                         }
                     });
                 }

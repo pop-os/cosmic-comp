@@ -38,6 +38,7 @@ use super::{
 };
 
 /// Screencopy global state
+#[derive(Debug)]
 pub struct ScreencopyState {
     global: GlobalId,
 }
@@ -625,7 +626,9 @@ where
                 output,
                 cursor,
             } => {
-                let Some(cursor) = check_cursor(cursor, &data, resource) else { return; };
+                let Some(cursor) = check_cursor(cursor, &data, resource) else {
+                    return;
+                };
 
                 match Output::from_resource(&output) {
                     Some(output) => {
@@ -663,7 +666,9 @@ where
                 toplevel,
                 cursor,
             } => {
-                let Some(cursor) = check_cursor(cursor, &data, resource) else { return; };
+                let Some(cursor) = check_cursor(cursor, &data, resource) else {
+                    return;
+                };
 
                 match window_from_handle::<<D as ToplevelInfoHandler>::Window>(toplevel) {
                     Some(window) => {
@@ -703,7 +708,9 @@ where
                 output,
                 cursor,
             } => {
-                let Some(cursor) = check_cursor(cursor, &data, resource) else { return; };
+                let Some(cursor) = check_cursor(cursor, &data, resource) else {
+                    return;
+                };
 
                 match Output::from_resource(&output) {
                     Some(output) => match state.workspace_state().workspace_handle(&workspace) {
@@ -876,18 +883,18 @@ where
     fn destroyed(
         state: &mut D,
         _client: wayland_backend::server::ClientId,
-        resource: wayland_backend::server::ObjectId,
+        resource: &ZcosmicScreencopySessionV1,
         data: &SessionData,
     ) {
         if data.inner.lock().unwrap().is_cursor() {
             let session = CursorSession {
-                obj: SessionResource::Destroyed(resource),
+                obj: SessionResource::Destroyed(resource.id()),
                 data: data.clone(),
             };
             state.cursor_session_destroyed(session)
         } else {
             let session = Session {
-                obj: SessionResource::Destroyed(resource),
+                obj: SessionResource::Destroyed(resource.id()),
                 data: data.clone(),
             };
             state.session_destroyed(session)
