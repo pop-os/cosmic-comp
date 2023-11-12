@@ -356,14 +356,14 @@ pub fn init_backend(
     let mut renderer =
         unsafe { GlowRenderer::new(context) }.with_context(|| "Failed to initialize renderer")?;
 
-    init_shaders(&mut renderer).expect("Failed to initialize renderer");
+    init_shaders(&mut renderer).context("Failed to initialize renderer")?;
     init_egl_client_side(dh, state, &drm_node, &mut renderer)?;
 
     state.backend = BackendData::X11(X11State {
         handle,
         allocator: try_vulkan_allocator(&drm_node)
             .or_else(|| try_gbm_allocator(fd))
-            .expect("Failed to create allocator for x11"),
+            .context("Failed to create allocator for x11")?,
         _egl: egl,
         renderer,
         surfaces: Vec::new(),
