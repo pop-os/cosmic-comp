@@ -149,8 +149,8 @@ pub fn init_backend(
     state: &mut State,
 ) -> Result<()> {
     let (mut backend, mut input) =
-        winit::init().map_err(|_| anyhow!("Failed to initilize winit backend"))?;
-    init_shaders(backend.renderer()).expect("Failed to initialize renderer");
+        winit::init().map_err(|e| anyhow!("Failed to initilize winit backend: {e:?}"))?;
+    init_shaders(backend.renderer()).context("Failed to initialize renderer")?;
 
     init_egl_client_side(dh, state, &mut backend)?;
 
