@@ -2,6 +2,7 @@
 
 pub mod buffer;
 pub mod compositor;
+pub mod data_control;
 pub mod data_device;
 pub mod decoration;
 pub mod dmabuf;

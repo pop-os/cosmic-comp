@@ -51,6 +51,7 @@ pub struct Config {
 pub struct StaticConfig {
     pub key_bindings: HashMap<key_bindings::KeyPattern, key_bindings::Action>,
     pub tiling_enabled: bool,
+    pub data_control_enabled: bool,
 }
 
 #[derive(Debug)]
@@ -191,6 +192,7 @@ impl Config {
         StaticConfig {
             key_bindings: HashMap::new(),
             tiling_enabled: false,
+            data_control_enabled: false,
         }
     }
 

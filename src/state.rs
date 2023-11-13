@@ -71,7 +71,10 @@ use smithay::{
         presentation::PresentationState,
         seat::WaylandFocus,
         security_context::{SecurityContext, SecurityContextState},
-        selection::{data_device::DataDeviceState, primary_selection::PrimarySelectionState},
+        selection::{
+            data_device::DataDeviceState, primary_selection::PrimarySelectionState,
+            wlr_data_control::DataControlState,
+        },
         session_lock::{LockSurface, SessionLockManagerState},
         shell::{kde::decoration::KdeDecorationState, xdg::decoration::XdgDecorationState},
         shm::ShmState,
@@ -160,6 +163,7 @@ pub struct Common {
     pub output_configuration_state: OutputConfigurationState<State>,
     pub presentation_state: PresentationState,
     pub primary_selection_state: PrimarySelectionState,
+    pub data_control_state: Option<DataControlState>,
     pub screencopy_state: ScreencopyState,
     pub seat_state: SeatState<State>,
     pub session_lock_manager_state: SessionLockManagerState,
@@ -358,6 +362,10 @@ impl State {
         TextInputManagerState::new::<Self>(&dh);
         VirtualKeyboardManagerState::new::<State, _>(&dh, client_should_see_privileged_protocols);
 
+        let data_control_state = config.static_conf.data_control_enabled.then(|| {
+            DataControlState::new::<Self, _>(dh, Some(&primary_selection_state), |_| true)
+        });
+
         let shell = Shell::new(&config, dh);
 
         State {
@@ -400,6 +408,7 @@ impl State {
                 output_configuration_state,
                 presentation_state,
                 primary_selection_state,
+                data_control_state,
                 viewporter_state,
                 wl_drm_state,
                 kde_decoration_state,
