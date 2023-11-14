@@ -260,6 +260,7 @@ impl Workspace {
 
     pub fn animations_going(&self) -> bool {
         self.tiling_layer.animations_going()
+            || self.floating_layer.animations_going()
             || self
                 .fullscreen
                 .as_ref()
@@ -310,6 +311,7 @@ impl Workspace {
         }
 
         clients.extend(self.tiling_layer.update_animation_state());
+        self.floating_layer.update_animation_state();
         clients
     }
 
