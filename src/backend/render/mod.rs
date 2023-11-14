@@ -13,9 +13,10 @@ use crate::debug::{fps_ui, profiler_ui};
 use crate::{
     shell::{
         focus::target::WindowGroup, grabs::SeatMoveGrabState, layout::tiling::ANIMATION_DURATION,
-        CosmicMapped, CosmicMappedRenderElement, OverviewMode, Trigger, WorkspaceRenderElement,
+        CosmicMapped, CosmicMappedRenderElement, OverviewMode, SessionLock, Trigger,
+        WorkspaceRenderElement,
     },
-    state::{Common, Fps, SessionLock},
+    state::{Common, Fps},
     utils::prelude::*,
     wayland::{
         handlers::{
@@ -487,7 +488,7 @@ where
     }
 
     // If session locked, only show session lock surfaces
-    if let Some(session_lock) = &state.session_lock {
+    if let Some(session_lock) = &state.shell.session_lock {
         elements.extend(
             session_lock_elements(renderer, output, session_lock)
                 .into_iter()

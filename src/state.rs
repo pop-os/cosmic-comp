@@ -50,7 +50,6 @@ use smithay::{
     output::{Mode as OutputMode, Output, Scale},
     reexports::{
         calloop::{LoopHandle, LoopSignal},
-        wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
         wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration_manager::Mode,
         wayland_server::{
             backend::{ClientData, ClientId, DisconnectReason},
@@ -75,7 +74,7 @@ use smithay::{
             data_device::DataDeviceState, primary_selection::PrimarySelectionState,
             wlr_data_control::DataControlState,
         },
-        session_lock::{LockSurface, SessionLockManagerState},
+        session_lock::SessionLockManagerState,
         shell::{kde::decoration::KdeDecorationState, xdg::decoration::XdgDecorationState},
         shm::ShmState,
         text_input::TextInputManagerState,
@@ -87,10 +86,7 @@ use smithay::{
 use tracing::error;
 
 use std::{cell::RefCell, ffi::OsString, time::Duration};
-use std::{
-    collections::{HashMap, VecDeque},
-    time::Instant,
-};
+use std::{collections::VecDeque, time::Instant};
 
 #[derive(RustEmbed)]
 #[folder = "resources/i18n"]
@@ -173,8 +169,6 @@ pub struct Common {
     pub kde_decoration_state: KdeDecorationState,
     pub xdg_decoration_state: XdgDecorationState,
 
-    pub session_lock: Option<SessionLock>,
-
     // xwayland state
     pub xwayland_state: Option<XWaylandState>,
 }
@@ -193,12 +187,6 @@ pub enum BackendData {
 pub struct SurfaceDmabufFeedback {
     pub render_feedback: DmabufFeedback,
     pub scanout_feedback: DmabufFeedback,
-}
-
-#[derive(Debug)]
-pub struct SessionLock {
-    pub ext_session_lock: ExtSessionLockV1,
-    pub surfaces: HashMap<Output, LockSurface>,
 }
 
 impl BackendData {
@@ -414,8 +402,6 @@ impl State {
                 kde_decoration_state,
                 xdg_decoration_state,
 
-                session_lock: None,
-
                 xwayland_state: None,
             },
             backend: BackendData::Unset,
@@ -515,7 +501,7 @@ impl Common {
         let time = self.clock.now();
         let throttle = Some(Duration::from_secs(1));
 
-        if let Some(session_lock) = self.session_lock.as_ref() {
+        if let Some(session_lock) = self.shell.session_lock.as_ref() {
             if let Some(lock_surface) = session_lock.surfaces.get(output) {
                 with_surfaces_surface_tree(lock_surface.wl_surface(), |_surface, states| {
                     with_fractional_scale(states, |fraction_scale| {

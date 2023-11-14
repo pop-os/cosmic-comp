@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{
-    state::{SessionLock, State},
-    utils::prelude::*,
-};
+use crate::{shell::SessionLock, state::State, utils::prelude::*};
 use smithay::{
     delegate_session_lock,
     output::Output,
@@ -22,7 +19,7 @@ impl SessionLockHandler for State {
 
     fn lock(&mut self, locker: SessionLocker) {
         // Reject lock if sesion lock exists and is still valid
-        if let Some(session_lock) = self.common.session_lock.as_ref() {
+        if let Some(session_lock) = self.common.shell.session_lock.as_ref() {
             if self
                 .common
                 .display_handle
@@ -35,18 +32,18 @@ impl SessionLockHandler for State {
 
         let ext_session_lock = locker.ext_session_lock().clone();
         locker.lock();
-        self.common.session_lock = Some(SessionLock {
+        self.common.shell.session_lock = Some(SessionLock {
             ext_session_lock,
             surfaces: HashMap::new(),
         });
     }
 
     fn unlock(&mut self) {
-        self.common.session_lock = None;
+        self.common.shell.session_lock = None;
     }
 
     fn new_surface(&mut self, lock_surface: LockSurface, wl_output: WlOutput) {
-        if let Some(session_lock) = &mut self.common.session_lock {
+        if let Some(session_lock) = &mut self.common.shell.session_lock {
             if let Some(output) = Output::from_resource(&wl_output) {
                 lock_surface.with_pending_state(|states| {
                     let size = output.geometry().size;
