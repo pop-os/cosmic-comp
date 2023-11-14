@@ -36,10 +36,20 @@ impl SessionLockHandler for State {
             ext_session_lock,
             surfaces: HashMap::new(),
         });
+
+        for output in self.common.shell.outputs() {
+            self.backend
+                .schedule_render(&self.common.event_loop_handle, &output, None);
+        }
     }
 
     fn unlock(&mut self) {
         self.common.shell.session_lock = None;
+
+        for output in self.common.shell.outputs() {
+            self.backend
+                .schedule_render(&self.common.event_loop_handle, &output, None);
+        }
     }
 
     fn new_surface(&mut self, lock_surface: LockSurface, wl_output: WlOutput) {
