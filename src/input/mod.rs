@@ -10,10 +10,10 @@ use crate::{
             floating::ResizeGrabMarker,
             tiling::{SwapWindowGrab, TilingLayout},
         },
-        Direction, FocusResult, MoveResult, OverviewMode, ResizeDirection, ResizeMode, Trigger,
-        Workspace,
+        Direction, FocusResult, MoveResult, OverviewMode, ResizeDirection, ResizeMode, SessionLock,
+        Trigger, Workspace,
     },
-    state::{Common, SessionLock},
+    state::Common,
     utils::prelude::*,
     wayland::{
         handlers::{screencopy::ScreencopySessions, xdg_activation::ActivationContext},
@@ -569,7 +569,7 @@ impl State {
                         &self.common.shell.override_redirect_windows,
                         overview.0.clone(),
                         workspace,
-                        self.common.session_lock.as_ref(),
+                        self.common.shell.session_lock.as_ref(),
                     )
                     .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -651,7 +651,7 @@ impl State {
                         &self.common.shell.override_redirect_windows,
                         overview.0,
                         workspace,
-                        self.common.session_lock.as_ref(),
+                        self.common.shell.session_lock.as_ref(),
                     )
                     .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -777,7 +777,7 @@ impl State {
                         &self.common.shell.override_redirect_windows,
                         overview.0,
                         workspace,
-                        self.common.session_lock.as_ref(),
+                        self.common.shell.session_lock.as_ref(),
                     )
                     .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -843,18 +843,20 @@ impl State {
                             && !seat.get_keyboard().map(|k| k.is_grabbed()).unwrap_or(false)
                         {
                             let output = seat.active_output();
+
                             let pos = seat.get_pointer().unwrap().current_location().as_global();
                             let relative_pos = pos.to_local(&output);
                             let overview = self.common.shell.overview_mode();
-                            let workspace = self.common.shell.active_space_mut(&output);
                             let mut under = None;
 
-                            if let Some(session_lock) = self.common.session_lock.as_ref() {
+                            if let Some(session_lock) = self.common.shell.session_lock.as_ref() {
                                 under = session_lock
                                     .surfaces
                                     .get(&output)
                                     .map(|lock| lock.clone().into());
-                            } else if let Some(window) = workspace.get_fullscreen() {
+                            } else if let Some(window) =
+                                self.common.shell.active_space(&output).get_fullscreen()
+                            {
                                 let layers = layer_map_for_output(&output);
                                 if let Some(layer) =
                                     layers.layer_under(WlrLayer::Overlay, relative_pos.as_logical())
@@ -874,6 +876,7 @@ impl State {
                                     under = Some(window.clone().into());
                                 }
                             } else {
+                                let workspace = self.common.shell.active_space_mut(&output);
                                 let done = {
                                     let layers = layer_map_for_output(&output);
                                     if let Some(layer) = layers
@@ -1157,7 +1160,7 @@ impl State {
     ) {
         // TODO: Detect if started from login manager or tty, and only allow
         // `Terminate` if it will return to login manager.
-        if self.common.session_lock.is_some()
+        if self.common.shell.session_lock.is_some()
             && !matches!(action, Action::Terminate | Action::Debug)
         {
             return;

@@ -19,11 +19,15 @@ use smithay::{
         Seat,
     },
     output::Output,
-    reexports::wayland_server::{protocol::wl_surface::WlSurface, Client, DisplayHandle},
+    reexports::{
+        wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
+        wayland_server::{protocol::wl_surface::WlSurface, Client, DisplayHandle},
+    },
     utils::{Point, Rectangle, Serial, SERIAL_COUNTER},
     wayland::{
         compositor::with_states,
         seat::WaylandFocus,
+        session_lock::LockSurface,
         shell::{
             wlr_layer::{
                 KeyboardInteractivity, Layer, LayerSurfaceCachedState, WlrLayerShellState,
@@ -175,6 +179,7 @@ pub struct Shell {
     pub pending_layers: Vec<(LayerSurface, Output, Seat<State>)>,
     pub pending_activations: HashMap<ActivationKey, ActivationContext>,
     pub override_redirect_windows: Vec<X11Surface>,
+    pub session_lock: Option<SessionLock>,
 
     // wayland_state
     pub layer_shell_state: WlrLayerShellState,
@@ -197,6 +202,12 @@ pub struct Shell {
         Output,
     )>,
     resize_indicator: Option<ResizeIndicator>,
+}
+
+#[derive(Debug)]
+pub struct SessionLock {
+    pub ext_session_lock: ExtSessionLockV1,
+    pub surfaces: HashMap<Output, LockSurface>,
 }
 
 #[derive(Debug)]
@@ -916,6 +927,7 @@ impl Shell {
             pending_layers: Vec::new(),
             pending_activations: HashMap::new(),
             override_redirect_windows: Vec::new(),
+            session_lock: None,
 
             layer_shell_state,
             toplevel_info_state,
@@ -1015,6 +1027,15 @@ impl Shell {
         &'a self,
         surface: &'a WlSurface,
     ) -> impl Iterator<Item = Output> + 'a {
+        if let Some(session_lock) = &self.session_lock {
+            let output = session_lock
+                .surfaces
+                .iter()
+                .find(|(_, v)| v.wl_surface() == surface)
+                .map(|(k, _)| k.clone());
+            return Box::new(output.into_iter()) as Box<dyn Iterator<Item = Output>>;
+        }
+
         match self
             .outputs()
             .find(|o| {

@@ -308,7 +308,7 @@ fn focus_target_is_valid(
     target: KeyboardFocusTarget,
 ) -> bool {
     // If a session lock is active, only lock surfaces can be focused
-    if state.common.session_lock.is_some() {
+    if state.common.shell.session_lock.is_some() {
         return matches!(target, KeyboardFocusTarget::LockSurface(_));
     }
 
@@ -361,7 +361,7 @@ fn update_focus_target(
     seat: &Seat<State>,
     output: &Output,
 ) -> Option<KeyboardFocusTarget> {
-    if let Some(session_lock) = &state.common.session_lock {
+    if let Some(session_lock) = &state.common.shell.session_lock {
         session_lock
             .surfaces
             .get(output)
