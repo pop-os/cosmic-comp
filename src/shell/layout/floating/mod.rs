@@ -1,16 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::sync::atomic::Ordering;
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicBool, Ordering},
+    time::{Duration, Instant},
+};
 
+use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     backend::renderer::{
-        element::{AsRenderElements, RenderElement},
+        element::{
+            utils::{Relocate, RelocateRenderElement, RescaleRenderElement},
+            AsRenderElements, RenderElement,
+        },
         ImportAll, ImportMem, Renderer,
     },
     desktop::{layer_map_for_output, space::SpaceElement, PopupKind, Space, WindowSurfaceType},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
-    utils::{IsAlive, Logical, Point, Rectangle, Size},
+    utils::{IsAlive, Logical, Point, Rectangle, Scale, Size},
     wayland::seat::WaylandFocus,
 };
 
@@ -28,17 +36,21 @@ use crate::{
         CosmicSurface, Direction, FocusResult, MoveResult, ResizeDirection, ResizeMode,
     },
     state::State,
-    utils::prelude::*,
+    utils::{prelude::*, tween::EaseRectangle},
     wayland::handlers::xdg_shell::popup::get_popup_toplevel,
 };
 
 mod grabs;
 pub use self::grabs::*;
 
+pub const ANIMATION_DURATION: Duration = Duration::from_millis(200);
+
 #[derive(Debug, Default)]
 pub struct FloatingLayout {
     pub(crate) space: Space<CosmicMapped>,
     spawn_order: Vec<CosmicMapped>,
+    tiling_animations: HashMap<CosmicMapped, (Instant, Rectangle<i32, Local>)>,
+    dirty: AtomicBool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -746,11 +758,47 @@ impl FloatingLayout {
                 let (new_pos, new_size) = (new_geo.loc, new_geo.size);
                 focused.set_tiled(true); // TODO: More fine grained?
 
+                let start_rectangle = if let Some((previous_start, previous_rect)) =
+                    self.tiling_animations.remove(focused)
+                {
+                    if let Some(target_rect) = tiled_state
+                        .as_ref()
+                        .map(|state| state.relative_geometry(output_geometry))
+                    {
+                        ease(
+                            EaseInOutCubic,
+                            EaseRectangle(previous_rect),
+                            EaseRectangle(target_rect),
+                            Instant::now()
+                                .duration_since(previous_start)
+                                .max(ANIMATION_DURATION)
+                                .as_secs_f64()
+                                / ANIMATION_DURATION.as_secs_f64(),
+                        )
+                        .unwrap()
+                    } else {
+                        self.space
+                            .element_geometry(focused)
+                            .map(RectExt::as_local)
+                            .unwrap()
+                    }
+                } else {
+                    self.space
+                        .element_geometry(focused)
+                        .map(RectExt::as_local)
+                        .unwrap()
+                };
+
+                if tiled_state.is_none() {
+                    *focused.last_geometry.lock().unwrap() =
+                        self.space.element_geometry(focused).map(RectExt::as_local);
+                }
+
+                self.tiling_animations
+                    .insert(focused.clone(), (Instant::now(), start_rectangle));
                 *tiled_state = Some(new_state);
                 std::mem::drop(tiled_state);
 
-                *focused.last_geometry.lock().unwrap() =
-                    self.space.element_geometry(focused).map(RectExt::as_local);
                 focused.moved_since_mapped.store(true, Ordering::SeqCst);
                 let focused = focused.clone();
                 self.map_internal(focused, Some(new_pos), Some(new_size.as_logical()));
@@ -773,9 +821,11 @@ impl FloatingLayout {
         puffin::profile_function!();
 
         self.space.refresh();
+
         if let Some(pos) = self.spawn_order.iter().position(|w| !w.alive()) {
             self.spawn_order.truncate(pos);
         }
+
         for element in self
             .space
             .elements()
@@ -787,6 +837,18 @@ impl FloatingLayout {
             // TODO what about windows leaving to the top with no headerbar to drag? can that happen? (Probably if the user is moving outputs down)
             *element.last_geometry.lock().unwrap() = None;
             self.map_internal(element, None, None);
+        }
+    }
+
+    pub fn animations_going(&self) -> bool {
+        self.dirty.swap(false, Ordering::SeqCst) || !self.tiling_animations.is_empty()
+    }
+
+    pub fn update_animation_state(&mut self) {
+        self.tiling_animations
+            .retain(|_, (start, _)| Instant::now().duration_since(*start) < ANIMATION_DURATION);
+        if self.tiling_animations.is_empty() {
+            self.dirty.store(true, Ordering::SeqCst);
         }
     }
 
@@ -826,37 +888,120 @@ impl FloatingLayout {
         puffin::profile_function!();
 
         let output = self.space.outputs().next().unwrap();
+        let output_geometry = {
+            let layers = layer_map_for_output(output);
+            layers.non_exclusive_zone()
+        };
         let output_scale = output.current_scale().fractional_scale();
 
         let mut window_elements = Vec::new();
         let mut popup_elements = Vec::new();
 
         self.space.elements().rev().for_each(|elem| {
-            let render_location = self.space.element_location(elem).unwrap() - elem.geometry().loc;
-            let (w_elements, p_elements) = elem.split_render_elements(
+            let mut geometry = self
+                .tiling_animations
+                .get(elem)
+                .map(|(_, rect)| *rect)
+                .unwrap_or_else(|| self.space.element_geometry(elem).unwrap().as_local());
+
+            let render_location = geometry.loc - elem.geometry().loc.as_local();
+            let (mut w_elements, p_elements) = elem.split_render_elements(
                 renderer,
-                render_location.to_physical_precise_round(output_scale),
+                render_location
+                    .as_logical()
+                    .to_physical_precise_round(output_scale),
                 output_scale.into(),
                 alpha,
             );
 
-            if focused == Some(elem) && !elem.is_maximized(false) {
-                let mut indicator_geometry = Rectangle::from_loc_and_size(
-                    self.space.element_location(elem).unwrap(),
-                    elem.geometry().size,
-                )
-                .as_local();
+            if let Some((start, original_geo)) = self.tiling_animations.get(elem) {
+                if let Some(target_rect) = elem
+                    .floating_tiled
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .map(|state| state.relative_geometry(output_geometry))
+                {
+                    geometry = ease(
+                        EaseInOutCubic,
+                        EaseRectangle(original_geo.clone()),
+                        EaseRectangle(target_rect),
+                        Instant::now()
+                            .duration_since(*start)
+                            .min(ANIMATION_DURATION)
+                            .as_millis() as f32
+                            / ANIMATION_DURATION.as_millis() as f32,
+                    )
+                    .unwrap();
 
+                    let buffer_size = elem.geometry().size;
+                    let scale = Scale {
+                        x: geometry.size.w as f64 / buffer_size.w as f64,
+                        y: geometry.size.h as f64 / buffer_size.h as f64,
+                    };
+
+                    w_elements = w_elements
+                        .into_iter()
+                        .map(|element| match element {
+                            CosmicMappedRenderElement::Stack(elem) => {
+                                CosmicMappedRenderElement::MovingStack({
+                                    let rescaled = RescaleRenderElement::from_element(
+                                        elem,
+                                        original_geo
+                                            .loc
+                                            .as_logical()
+                                            .to_physical_precise_round(output_scale),
+                                        scale,
+                                    );
+                                    let relocated = RelocateRenderElement::from_element(
+                                        rescaled,
+                                        (geometry.loc - original_geo.loc)
+                                            .as_logical()
+                                            .to_physical_precise_round(output_scale),
+                                        Relocate::Relative,
+                                    );
+                                    relocated
+                                })
+                            }
+                            CosmicMappedRenderElement::Window(elem) => {
+                                CosmicMappedRenderElement::MovingWindow({
+                                    let rescaled = RescaleRenderElement::from_element(
+                                        elem,
+                                        original_geo
+                                            .loc
+                                            .as_logical()
+                                            .to_physical_precise_round(output_scale),
+                                        scale,
+                                    );
+                                    let relocated = RelocateRenderElement::from_element(
+                                        rescaled,
+                                        (geometry.loc - original_geo.loc)
+                                            .as_logical()
+                                            .to_physical_precise_round(output_scale),
+                                        Relocate::Relative,
+                                    );
+                                    relocated
+                                })
+                            }
+                            x => x,
+                        })
+                        .collect();
+                }
+            }
+
+            if focused == Some(elem) && !elem.is_maximized(false) {
                 if let Some((mode, resize)) = resize_indicator.as_mut() {
-                    indicator_geometry.loc -= (18, 18).into();
-                    indicator_geometry.size += (36, 36).into();
-                    resize.resize(indicator_geometry.size.as_logical());
+                    let mut resize_geometry = geometry.clone();
+                    resize_geometry.loc -= (18, 18).into();
+                    resize_geometry.size += (36, 36).into();
+
+                    resize.resize(resize_geometry.size.as_logical());
                     resize.output_enter(output, Rectangle::default() /* unused */);
                     window_elements.extend(
                         resize
                             .render_elements::<CosmicWindowRenderElement<R>>(
                                 renderer,
-                                indicator_geometry
+                                resize_geometry
                                     .loc
                                     .as_logical()
                                     .to_physical_precise_round(output_scale),
@@ -874,7 +1019,7 @@ impl FloatingLayout {
                     let element = IndicatorShader::focus_element(
                         renderer,
                         Key::Window(Usage::FocusIndicator, elem.clone()),
-                        indicator_geometry,
+                        geometry,
                         indicator_thickness,
                         output_scale,
                         alpha,

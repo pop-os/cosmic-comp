@@ -1154,6 +1154,12 @@ where
     TiledOverlay(
         RelocateRenderElement<RescaleRenderElement<CropRenderElement<PixelShaderElement>>>,
     ),
+    MovingStack(
+        RelocateRenderElement<RescaleRenderElement<self::stack::CosmicStackRenderElement<R>>>,
+    ),
+    MovingWindow(
+        RelocateRenderElement<RescaleRenderElement<self::window::CosmicWindowRenderElement<R>>>,
+    ),
     GrabbedStack(RescaleRenderElement<self::stack::CosmicStackRenderElement<R>>),
     GrabbedWindow(RescaleRenderElement<self::window::CosmicWindowRenderElement<R>>),
     FocusIndicator(PixelShaderElement),
@@ -1175,6 +1181,8 @@ where
             CosmicMappedRenderElement::TiledStack(elem) => elem.id(),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.id(),
             CosmicMappedRenderElement::TiledOverlay(elem) => elem.id(),
+            CosmicMappedRenderElement::MovingStack(elem) => elem.id(),
+            CosmicMappedRenderElement::MovingWindow(elem) => elem.id(),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.id(),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.id(),
             CosmicMappedRenderElement::FocusIndicator(elem) => elem.id(),
@@ -1192,6 +1200,8 @@ where
             CosmicMappedRenderElement::TiledStack(elem) => elem.current_commit(),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.current_commit(),
             CosmicMappedRenderElement::TiledOverlay(elem) => elem.current_commit(),
+            CosmicMappedRenderElement::MovingStack(elem) => elem.current_commit(),
+            CosmicMappedRenderElement::MovingWindow(elem) => elem.current_commit(),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.current_commit(),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.current_commit(),
             CosmicMappedRenderElement::FocusIndicator(elem) => elem.current_commit(),
@@ -1209,6 +1219,8 @@ where
             CosmicMappedRenderElement::TiledStack(elem) => elem.src(),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.src(),
             CosmicMappedRenderElement::TiledOverlay(elem) => elem.src(),
+            CosmicMappedRenderElement::MovingStack(elem) => elem.src(),
+            CosmicMappedRenderElement::MovingWindow(elem) => elem.src(),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.src(),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.src(),
             CosmicMappedRenderElement::FocusIndicator(elem) => elem.src(),
@@ -1226,6 +1238,8 @@ where
             CosmicMappedRenderElement::TiledStack(elem) => elem.geometry(scale),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.geometry(scale),
             CosmicMappedRenderElement::TiledOverlay(elem) => elem.geometry(scale),
+            CosmicMappedRenderElement::MovingStack(elem) => elem.geometry(scale),
+            CosmicMappedRenderElement::MovingWindow(elem) => elem.geometry(scale),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.geometry(scale),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.geometry(scale),
             CosmicMappedRenderElement::FocusIndicator(elem) => elem.geometry(scale),
@@ -1243,6 +1257,8 @@ where
             CosmicMappedRenderElement::TiledStack(elem) => elem.location(scale),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.location(scale),
             CosmicMappedRenderElement::TiledOverlay(elem) => elem.location(scale),
+            CosmicMappedRenderElement::MovingStack(elem) => elem.location(scale),
+            CosmicMappedRenderElement::MovingWindow(elem) => elem.location(scale),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.location(scale),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.location(scale),
             CosmicMappedRenderElement::FocusIndicator(elem) => elem.location(scale),
@@ -1260,6 +1276,8 @@ where
             CosmicMappedRenderElement::TiledStack(elem) => elem.transform(),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.transform(),
             CosmicMappedRenderElement::TiledOverlay(elem) => elem.transform(),
+            CosmicMappedRenderElement::MovingStack(elem) => elem.transform(),
+            CosmicMappedRenderElement::MovingWindow(elem) => elem.transform(),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.transform(),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.transform(),
             CosmicMappedRenderElement::FocusIndicator(elem) => elem.transform(),
@@ -1281,6 +1299,8 @@ where
             CosmicMappedRenderElement::TiledStack(elem) => elem.damage_since(scale, commit),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.damage_since(scale, commit),
             CosmicMappedRenderElement::TiledOverlay(elem) => elem.damage_since(scale, commit),
+            CosmicMappedRenderElement::MovingStack(elem) => elem.damage_since(scale, commit),
+            CosmicMappedRenderElement::MovingWindow(elem) => elem.damage_since(scale, commit),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.damage_since(scale, commit),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.damage_since(scale, commit),
             CosmicMappedRenderElement::FocusIndicator(elem) => elem.damage_since(scale, commit),
@@ -1300,6 +1320,8 @@ where
             CosmicMappedRenderElement::TiledStack(elem) => elem.opaque_regions(scale),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.opaque_regions(scale),
             CosmicMappedRenderElement::TiledOverlay(elem) => elem.opaque_regions(scale),
+            CosmicMappedRenderElement::MovingStack(elem) => elem.opaque_regions(scale),
+            CosmicMappedRenderElement::MovingWindow(elem) => elem.opaque_regions(scale),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.opaque_regions(scale),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.opaque_regions(scale),
             CosmicMappedRenderElement::FocusIndicator(elem) => elem.opaque_regions(scale),
@@ -1317,6 +1339,8 @@ where
             CosmicMappedRenderElement::TiledStack(elem) => elem.alpha(),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.alpha(),
             CosmicMappedRenderElement::TiledOverlay(elem) => elem.alpha(),
+            CosmicMappedRenderElement::MovingStack(elem) => elem.alpha(),
+            CosmicMappedRenderElement::MovingWindow(elem) => elem.alpha(),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.alpha(),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.alpha(),
             CosmicMappedRenderElement::FocusIndicator(elem) => elem.alpha(),
@@ -1344,6 +1368,8 @@ impl RenderElement<GlowRenderer> for CosmicMappedRenderElement<GlowRenderer> {
             CosmicMappedRenderElement::TiledOverlay(elem) => {
                 RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage)
             }
+            CosmicMappedRenderElement::MovingStack(elem) => elem.draw(frame, src, dst, damage),
+            CosmicMappedRenderElement::MovingWindow(elem) => elem.draw(frame, src, dst, damage),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.draw(frame, src, dst, damage),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.draw(frame, src, dst, damage),
             CosmicMappedRenderElement::FocusIndicator(elem) => {
@@ -1369,6 +1395,8 @@ impl RenderElement<GlowRenderer> for CosmicMappedRenderElement<GlowRenderer> {
             CosmicMappedRenderElement::TiledStack(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::TiledWindow(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::TiledOverlay(elem) => elem.underlying_storage(renderer),
+            CosmicMappedRenderElement::MovingStack(elem) => elem.underlying_storage(renderer),
+            CosmicMappedRenderElement::MovingWindow(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::FocusIndicator(elem) => elem.underlying_storage(renderer),
@@ -1401,6 +1429,8 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>>
                 RenderElement::<GlowRenderer>::draw(elem, frame.glow_frame_mut(), src, dst, damage)
                     .map_err(|err| GlMultiError::Render(err))
             }
+            CosmicMappedRenderElement::MovingStack(elem) => elem.draw(frame, src, dst, damage),
+            CosmicMappedRenderElement::MovingWindow(elem) => elem.draw(frame, src, dst, damage),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.draw(frame, src, dst, damage),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.draw(frame, src, dst, damage),
             CosmicMappedRenderElement::FocusIndicator(elem) => {
@@ -1435,6 +1465,8 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>>
             CosmicMappedRenderElement::TiledOverlay(elem) => {
                 elem.underlying_storage(renderer.glow_renderer_mut())
             }
+            CosmicMappedRenderElement::MovingStack(elem) => elem.underlying_storage(renderer),
+            CosmicMappedRenderElement::MovingWindow(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::GrabbedStack(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::GrabbedWindow(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::FocusIndicator(elem) => {
