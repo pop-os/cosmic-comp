@@ -2,7 +2,7 @@ use calloop::LoopHandle;
 use indexmap::IndexMap;
 use std::{
     collections::HashMap,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::Ordering,
     time::{Duration, Instant},
 };
 use wayland_backend::server::ClientId;
@@ -1024,11 +1024,13 @@ impl Shell {
             })
             .or_else(|| {
                 self.pending_layers.iter().find_map(|(l, output, _)| {
-                    let found = AtomicBool::new(false);
+                    let mut found = false;
                     l.with_surfaces(|s, _| {
-                        found.fetch_or(s == surface, Ordering::SeqCst);
+                        if s == surface {
+                            found = true;
+                        }
                     });
-                    found.load(Ordering::SeqCst).then_some(output)
+                    found.then_some(output)
                 })
             }) {
             Some(output) => {

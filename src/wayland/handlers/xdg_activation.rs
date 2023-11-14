@@ -128,6 +128,20 @@ impl XdgActivationHandler for State {
                                 .raise_element(&element, true);
                         }
 
+                        if element.is_stack() {
+                            if let Some((window, _)) = element.windows().find(|(window, _)| {
+                                let mut found = false;
+                                window.with_surfaces(|wl_surface, _| {
+                                    if wl_surface == &surface {
+                                        found = true;
+                                    }
+                                });
+                                found
+                            }) {
+                                element.set_active(&window);
+                            }
+                        }
+
                         let target = element.into();
                         if workspace == &current_workspace.handle {
                             Shell::set_focus(self, Some(&target), &seat, None);
