@@ -287,7 +287,9 @@ impl FloatingLayout {
                     .last()
                     .and_then(|window| self.space.element_geometry(window))
                     .filter(|geo| {
-                        geo.size.w < three_fours_width && win_geo.size.w < three_fours_width
+                        geo.size.w < three_fours_width
+                            && win_geo.size.w < three_fours_width
+                            && output_geometry.contains_rect(*geo)
                     })
                     .map(|geometry| {
                         let mut geometry: Rectangle<u32, Logical> = Rectangle::from_loc_and_size(
