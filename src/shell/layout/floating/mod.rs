@@ -695,70 +695,11 @@ impl FloatingLayout {
             }
             StackMoveResult::Default => {
                 let mut tiled_state = focused.floating_tiled.lock().unwrap();
-                let new_state = match (direction, &*tiled_state) {
-                    // figure out if we are moving between workspaces/outputs
-                    (
-                        Direction::Up,
-                        Some(TiledCorners::Top)
-                        | Some(TiledCorners::TopLeft)
-                        | Some(TiledCorners::TopRight),
-                    )
-                    | (
-                        Direction::Down,
-                        Some(TiledCorners::Bottom)
-                        | Some(TiledCorners::BottomLeft)
-                        | Some(TiledCorners::BottomRight),
-                    )
-                    | (
-                        Direction::Left,
-                        Some(TiledCorners::Left)
-                        | Some(TiledCorners::TopLeft)
-                        | Some(TiledCorners::BottomLeft),
-                    )
-                    | (
-                        Direction::Right,
-                        Some(TiledCorners::Right)
-                        | Some(TiledCorners::TopRight)
-                        | Some(TiledCorners::BottomRight),
-                    ) => {
-                        return MoveResult::MoveFurther(KeyboardFocusTarget::Element(
-                            focused.clone(),
-                        ));
-                    }
-
-                    // figure out if we need to quater tile
-                    (Direction::Up, Some(TiledCorners::Left))
-                    | (Direction::Left, Some(TiledCorners::Top)) => TiledCorners::TopLeft,
-                    (Direction::Right, Some(TiledCorners::Top))
-                    | (Direction::Up, Some(TiledCorners::Right)) => TiledCorners::TopRight,
-                    (Direction::Down, Some(TiledCorners::Left))
-                    | (Direction::Left, Some(TiledCorners::Bottom)) => TiledCorners::BottomLeft,
-                    (Direction::Right, Some(TiledCorners::Bottom))
-                    | (Direction::Down, Some(TiledCorners::Right)) => TiledCorners::BottomRight,
-                    // figure out if we need to extend a quater tile
-                    (Direction::Up, Some(TiledCorners::BottomLeft))
-                    | (Direction::Down, Some(TiledCorners::TopLeft)) => TiledCorners::Left,
-                    (Direction::Up, Some(TiledCorners::BottomRight))
-                    | (Direction::Down, Some(TiledCorners::TopRight)) => TiledCorners::Right,
-                    (Direction::Left, Some(TiledCorners::TopRight))
-                    | (Direction::Right, Some(TiledCorners::TopLeft)) => TiledCorners::Top,
-                    (Direction::Left, Some(TiledCorners::BottomRight))
-                    | (Direction::Right, Some(TiledCorners::BottomLeft)) => TiledCorners::Bottom,
-                    // else we have a simple case
-                    (Direction::Up, _) => TiledCorners::Top,
-                    (Direction::Right, _) => TiledCorners::Right,
-                    (Direction::Down, _) => TiledCorners::Bottom,
-                    (Direction::Left, _) => TiledCorners::Left,
-                };
 
                 let output = self.space.outputs().next().unwrap().clone();
                 let layers = layer_map_for_output(&output);
                 let output_geometry = layers.non_exclusive_zone();
                 std::mem::drop(layers);
-
-                let new_geo = new_state.relative_geometry(output_geometry);
-                let (new_pos, new_size) = (new_geo.loc, new_geo.size);
-                focused.set_tiled(true); // TODO: More fine grained?
 
                 let start_rectangle = if let Some((previous_start, previous_rect)) =
                     self.tiling_animations.remove(focused)
@@ -791,7 +732,82 @@ impl FloatingLayout {
                         .unwrap()
                 };
 
-                if tiled_state.is_none() {
+                let new_state = match (direction, &*tiled_state) {
+                    // figure out if we are moving between workspaces/outputs
+                    (
+                        Direction::Up,
+                        Some(TiledCorners::Top)
+                        | Some(TiledCorners::TopLeft)
+                        | Some(TiledCorners::TopRight),
+                    )
+                    | (
+                        Direction::Down,
+                        Some(TiledCorners::Bottom)
+                        | Some(TiledCorners::BottomLeft)
+                        | Some(TiledCorners::BottomRight),
+                    )
+                    | (
+                        Direction::Left,
+                        Some(TiledCorners::Left)
+                        | Some(TiledCorners::TopLeft)
+                        | Some(TiledCorners::BottomLeft),
+                    )
+                    | (
+                        Direction::Right,
+                        Some(TiledCorners::Right)
+                        | Some(TiledCorners::TopRight)
+                        | Some(TiledCorners::BottomRight),
+                    ) => {
+                        return MoveResult::MoveFurther(KeyboardFocusTarget::Element(
+                            focused.clone(),
+                        ));
+                    }
+
+                    // to we go maximized?
+                    (Direction::Up, Some(TiledCorners::Bottom))
+                    | (Direction::Down, Some(TiledCorners::Top))
+                    | (Direction::Left, Some(TiledCorners::Right))
+                    | (Direction::Right, Some(TiledCorners::Left)) => {
+                        self.tiling_animations
+                            .insert(focused.clone(), (Instant::now(), start_rectangle));
+                        *tiled_state = None;
+                        std::mem::drop(tiled_state);
+
+                        self.map_maximized(focused.clone());
+                        return MoveResult::Done;
+                    }
+
+                    // figure out if we need to quater tile
+                    (Direction::Up, Some(TiledCorners::Left))
+                    | (Direction::Left, Some(TiledCorners::Top)) => TiledCorners::TopLeft,
+                    (Direction::Right, Some(TiledCorners::Top))
+                    | (Direction::Up, Some(TiledCorners::Right)) => TiledCorners::TopRight,
+                    (Direction::Down, Some(TiledCorners::Left))
+                    | (Direction::Left, Some(TiledCorners::Bottom)) => TiledCorners::BottomLeft,
+                    (Direction::Right, Some(TiledCorners::Bottom))
+                    | (Direction::Down, Some(TiledCorners::Right)) => TiledCorners::BottomRight,
+                    // figure out if we need to extend a quater tile
+                    (Direction::Up, Some(TiledCorners::BottomLeft))
+                    | (Direction::Down, Some(TiledCorners::TopLeft)) => TiledCorners::Left,
+                    (Direction::Up, Some(TiledCorners::BottomRight))
+                    | (Direction::Down, Some(TiledCorners::TopRight)) => TiledCorners::Right,
+                    (Direction::Left, Some(TiledCorners::TopRight))
+                    | (Direction::Right, Some(TiledCorners::TopLeft)) => TiledCorners::Top,
+                    (Direction::Left, Some(TiledCorners::BottomRight))
+                    | (Direction::Right, Some(TiledCorners::BottomLeft)) => TiledCorners::Bottom,
+                    // else we have a simple case
+                    (Direction::Up, _) => TiledCorners::Top,
+                    (Direction::Right, _) => TiledCorners::Right,
+                    (Direction::Down, _) => TiledCorners::Bottom,
+                    (Direction::Left, _) => TiledCorners::Left,
+                };
+
+                let new_geo = new_state.relative_geometry(output_geometry);
+                let (new_pos, new_size) = (new_geo.loc, new_geo.size);
+                focused.set_tiled(true); // TODO: More fine grained?
+                focused.set_maximized(false);
+
+                if tiled_state.is_none() && focused.is_maximized(false) {
                     *focused.last_geometry.lock().unwrap() =
                         self.space.element_geometry(focused).map(RectExt::as_local);
                 }
@@ -923,6 +939,10 @@ impl FloatingLayout {
                     .unwrap()
                     .as_ref()
                     .map(|state| state.relative_geometry(output_geometry))
+                    .or_else(|| {
+                        elem.is_maximized(true)
+                            .then_some(output_geometry.as_local())
+                    })
                 {
                     geometry = ease(
                         EaseInOutCubic,
