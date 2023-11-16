@@ -1146,6 +1146,41 @@ impl Shell {
         )
     }
 
+    pub fn next_output(&self, current_output: &Output, direction: Direction) -> Option<&Output> {
+        let current_output_geo = current_output.geometry();
+        self.outputs()
+            .filter(|o| *o != current_output)
+            .filter(|o| {
+                let geo = o.geometry();
+                match direction {
+                    Direction::Left | Direction::Right => {
+                        !(geo.loc.y + geo.size.h < current_output_geo.loc.y
+                            || geo.loc.y > current_output_geo.loc.y + current_output_geo.size.h)
+                    }
+                    Direction::Up | Direction::Down => {
+                        !(geo.loc.x + geo.size.w < current_output_geo.loc.x
+                            || geo.loc.x > current_output_geo.loc.x + current_output_geo.size.w)
+                    }
+                }
+            })
+            .filter_map(|o| {
+                let origin = o.geometry().loc;
+                let res = match direction {
+                    Direction::Up => current_output_geo.loc.y - origin.y,
+                    Direction::Down => origin.y - current_output_geo.loc.y,
+                    Direction::Left => current_output_geo.loc.x - origin.x,
+                    Direction::Right => origin.x - current_output_geo.loc.x,
+                };
+                if res > 0 {
+                    Some((o, res))
+                } else {
+                    None
+                }
+            })
+            .min_by_key(|(_, res)| *res)
+            .map(|(o, _)| o)
+    }
+
     pub fn global_space(&self) -> Rectangle<i32, Global> {
         self.outputs()
             .fold(
