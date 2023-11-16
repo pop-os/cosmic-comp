@@ -1221,7 +1221,16 @@ impl State {
                     .activate(&current_output, workspace)
                     .is_err()
                 {
-                    self.handle_action(Action::NextOutput, seat, serial, time, pattern, direction);
+                    if let Some(inferred) = pattern.inferred_direction() {
+                        self.handle_action(
+                            Action::SwitchOutput(inferred),
+                            seat,
+                            serial,
+                            time,
+                            pattern,
+                            direction,
+                        )
+                    };
                 }
             }
             Action::PreviousWorkspace => {
@@ -1239,14 +1248,16 @@ impl State {
                     .activate(&current_output, workspace)
                     .is_err()
                 {
-                    self.handle_action(
-                        Action::PreviousOutput,
-                        seat,
-                        serial,
-                        time,
-                        pattern,
-                        direction,
-                    );
+                    if let Some(inferred) = pattern.inferred_direction() {
+                        self.handle_action(
+                            Action::SwitchOutput(inferred),
+                            seat,
+                            serial,
+                            time,
+                            pattern,
+                            direction,
+                        )
+                    };
                 }
             }
             Action::LastWorkspace => {
@@ -1295,18 +1306,20 @@ impl State {
                 )
                 .is_err()
                 {
-                    self.handle_action(
-                        if matches!(x, Action::MoveToNextWorkspace) {
-                            Action::MoveToNextOutput
-                        } else {
-                            Action::SendToNextOutput
-                        },
-                        seat,
-                        serial,
-                        time,
-                        pattern,
-                        direction,
-                    )
+                    if let Some(inferred) = pattern.inferred_direction() {
+                        self.handle_action(
+                            if matches!(x, Action::MoveToNextWorkspace) {
+                                Action::MoveToOutput(inferred)
+                            } else {
+                                Action::SendToOutput(inferred)
+                            },
+                            seat,
+                            serial,
+                            time,
+                            pattern,
+                            direction,
+                        )
+                    }
                 }
             }
             x @ Action::MoveToPreviousWorkspace | x @ Action::SendToPreviousWorkspace => {
@@ -1329,18 +1342,20 @@ impl State {
                 )
                 .is_err()
                 {
-                    self.handle_action(
-                        if matches!(x, Action::MoveToNextWorkspace) {
-                            Action::MoveToPreviousOutput
-                        } else {
-                            Action::SendToPreviousOutput
-                        },
-                        seat,
-                        serial,
-                        time,
-                        pattern,
-                        direction,
-                    )
+                    if let Some(inferred) = pattern.inferred_direction() {
+                        self.handle_action(
+                            if matches!(x, Action::MoveToPreviousWorkspace) {
+                                Action::MoveToOutput(inferred)
+                            } else {
+                                Action::SendToOutput(inferred)
+                            },
+                            seat,
+                            serial,
+                            time,
+                            pattern,
+                            direction,
+                        )
+                    }
                 }
             }
             x @ Action::MoveToLastWorkspace | x @ Action::SendToLastWorkspace => {
@@ -1359,6 +1374,39 @@ impl State {
                     matches!(x, Action::MoveToLastWorkspace),
                     None,
                 );
+            }
+            Action::SwitchOutput(direction) => {
+                let current_output = seat.active_output();
+                let next_output = self
+                    .common
+                    .shell
+                    .next_output(&current_output, direction)
+                    .cloned();
+
+                if let Some(next_output) = next_output {
+                    let idx = self.common.shell.workspaces.active_num(&next_output).1;
+                    match self.common.shell.activate(&next_output, idx) {
+                        Ok(Some(new_pos)) => {
+                            seat.set_active_output(&next_output);
+                            if let Some(ptr) = seat.get_pointer() {
+                                ptr.motion(
+                                    self,
+                                    None,
+                                    &MotionEvent {
+                                        location: new_pos.to_f64().as_logical(),
+                                        serial,
+                                        time,
+                                    },
+                                );
+                                ptr.frame(self);
+                            }
+                        }
+                        Ok(None) => {
+                            seat.set_active_output(&next_output);
+                        }
+                        _ => {}
+                    }
+                }
             }
             Action::NextOutput => {
                 let current_output = seat.active_output();
@@ -1428,6 +1476,45 @@ impl State {
                             seat.set_active_output(&prev_output);
                         }
                         _ => {}
+                    }
+                }
+            }
+            action @ Action::MoveToOutput(_) | action @ Action::SendToOutput(_) => {
+                let is_move_action = matches!(action, Action::MoveToOutput(_));
+                let direction = match action {
+                    Action::MoveToOutput(dir) => dir,
+                    Action::SendToOutput(dir) => dir,
+                    _ => unreachable!(),
+                };
+
+                let current_output = seat.active_output();
+                let next_output = self
+                    .common
+                    .shell
+                    .next_output(&current_output, direction)
+                    .cloned();
+
+                if let Some(next_output) = next_output {
+                    if let Ok(Some(new_pos)) = Shell::move_current_window(
+                        self,
+                        seat,
+                        &current_output,
+                        (&next_output, None),
+                        is_move_action,
+                        Some(direction),
+                    ) {
+                        if let Some(ptr) = seat.get_pointer() {
+                            ptr.motion(
+                                self,
+                                None,
+                                &MotionEvent {
+                                    location: new_pos.to_f64().as_logical(),
+                                    serial,
+                                    time,
+                                },
+                            );
+                            ptr.frame(self);
+                        }
                     }
                 }
             }
@@ -1537,25 +1624,31 @@ impl State {
                                     direction,
                                 ),
                             (FocusDirection::Left, WorkspaceLayout::Vertical)
-                            | (FocusDirection::Up, WorkspaceLayout::Horizontal) => self
-                                .handle_action(
-                                    Action::PreviousOutput,
-                                    seat,
-                                    serial,
-                                    time,
-                                    pattern,
-                                    direction,
-                                ),
+                            | (FocusDirection::Up, WorkspaceLayout::Horizontal) => {
+                                if let Some(inferred) = pattern.inferred_direction() {
+                                    self.handle_action(
+                                        Action::SwitchOutput(inferred),
+                                        seat,
+                                        serial,
+                                        time,
+                                        pattern,
+                                        direction,
+                                    )
+                                }
+                            }
                             (FocusDirection::Right, WorkspaceLayout::Vertical)
-                            | (FocusDirection::Down, WorkspaceLayout::Horizontal) => self
-                                .handle_action(
-                                    Action::NextOutput,
-                                    seat,
-                                    serial,
-                                    time,
-                                    pattern,
-                                    direction,
-                                ),
+                            | (FocusDirection::Down, WorkspaceLayout::Horizontal) => {
+                                if let Some(inferred) = pattern.inferred_direction() {
+                                    self.handle_action(
+                                        Action::SwitchOutput(inferred),
+                                        seat,
+                                        serial,
+                                        time,
+                                        pattern,
+                                        direction,
+                                    )
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -1591,23 +1684,31 @@ impl State {
                                 Some(direction),
                             ),
                             (Direction::Left, WorkspaceLayout::Vertical)
-                            | (Direction::Up, WorkspaceLayout::Horizontal) => self.handle_action(
-                                Action::MoveToPreviousOutput,
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                Some(direction),
-                            ),
+                            | (Direction::Up, WorkspaceLayout::Horizontal) => {
+                                if let Some(inferred) = pattern.inferred_direction() {
+                                    self.handle_action(
+                                        Action::MoveToOutput(inferred),
+                                        seat,
+                                        serial,
+                                        time,
+                                        pattern,
+                                        Some(direction),
+                                    )
+                                }
+                            }
                             (Direction::Right, WorkspaceLayout::Vertical)
-                            | (Direction::Down, WorkspaceLayout::Horizontal) => self.handle_action(
-                                Action::MoveToNextOutput,
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                Some(direction),
-                            ),
+                            | (Direction::Down, WorkspaceLayout::Horizontal) => {
+                                if let Some(inferred) = pattern.inferred_direction() {
+                                    self.handle_action(
+                                        Action::MoveToOutput(inferred),
+                                        seat,
+                                        serial,
+                                        time,
+                                        pattern,
+                                        Some(direction),
+                                    )
+                                }
+                            }
                         }
                     }
                     MoveResult::ShiftFocus(shift) => {

@@ -101,6 +101,16 @@ impl KeyPattern {
             key,
         }
     }
+
+    pub fn inferred_direction(&self) -> Option<Direction> {
+        match self.key? {
+            Keysym::Left | Keysym::h | Keysym::H => Some(Direction::Left),
+            Keysym::Down | Keysym::j | Keysym::J => Some(Direction::Down),
+            Keysym::Up | Keysym::k | Keysym::K => Some(Direction::Up),
+            Keysym::Right | Keysym::l | Keysym::L => Some(Direction::Right),
+            _ => None,
+        }
+    }
 }
 
 impl ToString for KeyPattern {
@@ -153,6 +163,9 @@ pub enum Action {
     MoveToPreviousOutput,
     SendToNextOutput,
     SendToPreviousOutput,
+    SwitchOutput(Direction),
+    MoveToOutput(Direction),
+    SendToOutput(Direction),
 
     Focus(FocusDirection),
     Move(Direction),
@@ -195,19 +208,23 @@ pub fn add_default_bindings(
     key_bindings: &mut HashMap<KeyPattern, Action>,
     workspace_layout: WorkspaceLayout,
 ) {
-    let (workspace_previous, workspace_next, output_previous, output_next) = match workspace_layout
-    {
+    let (
+        workspace_previous,
+        workspace_next,
+        (output_previous, output_previous_dir),
+        (output_next, output_next_dir),
+    ) = match workspace_layout {
         WorkspaceLayout::Horizontal => (
             [Keysym::Left, Keysym::h],
             [Keysym::Right, Keysym::l],
-            [Keysym::Up, Keysym::k],
-            [Keysym::Down, Keysym::j],
+            ([Keysym::Up, Keysym::k], Direction::Up),
+            ([Keysym::Down, Keysym::j], Direction::Down),
         ),
         WorkspaceLayout::Vertical => (
             [Keysym::Up, Keysym::k],
             [Keysym::Down, Keysym::j],
-            [Keysym::Left, Keysym::h],
-            [Keysym::Right, Keysym::l],
+            ([Keysym::Left, Keysym::h], Direction::Left),
+            ([Keysym::Right, Keysym::l], Direction::Right),
         ),
     };
 
@@ -262,7 +279,7 @@ pub fn add_default_bindings(
             ..Default::default()
         },
         output_previous.iter().copied(),
-        Action::PreviousOutput,
+        Action::SwitchOutput(output_previous_dir),
     );
     insert_binding(
         key_bindings,
@@ -272,7 +289,7 @@ pub fn add_default_bindings(
             ..Default::default()
         },
         output_next.iter().copied(),
-        Action::NextOutput,
+        Action::SwitchOutput(output_next_dir),
     );
     insert_binding(
         key_bindings,
@@ -283,7 +300,7 @@ pub fn add_default_bindings(
             ..Default::default()
         },
         output_previous.iter().copied(),
-        Action::MoveToPreviousOutput,
+        Action::MoveToOutput(output_previous_dir),
     );
     insert_binding(
         key_bindings,
@@ -294,6 +311,6 @@ pub fn add_default_bindings(
             ..Default::default()
         },
         output_next.iter().copied(),
-        Action::MoveToNextOutput,
+        Action::MoveToOutput(output_next_dir),
     );
 }

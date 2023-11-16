@@ -25,10 +25,14 @@
         (modifiers: [Super, Shift], key: "9"): MoveToWorkspace(9),
         (modifiers: [Super, Shift], key: "0"): MoveToLastWorkspace,
 
-        (modifiers: [Super, Ctrl, Alt], key: "Down"): MoveToNextOutput,
-        (modifiers: [Super, Ctrl, Alt], key: "Up"): MoveToPreviousOutput,
-        (modifiers: [Super, Ctrl, Alt], key: "j"): MoveToNextOutput,
-        (modifiers: [Super, Ctrl, Alt], key: "k"): MoveToPreviousOutput,
+        (modifiers: [Super, Ctrl, Alt], key: "Left"): MoveToOutput(Left),
+        (modifiers: [Super, Ctrl, Alt], key: "Down"): MoveToOutput(Down),
+        (modifiers: [Super, Ctrl, Alt], key: "Up"): MoveToOutput(Up),
+        (modifiers: [Super, Ctrl, Alt], key: "Right"): MoveToOutput(Right),
+        (modifiers: [Super, Ctrl, Alt], key: "h"): MoveToOutput(Left),
+        (modifiers: [Super, Ctrl, Alt], key: "k"): MoveToOutput(Down),
+        (modifiers: [Super, Ctrl, Alt], key: "j"): MoveToOutput(Up),
+        (modifiers: [Super, Ctrl, Alt], key: "l"): MoveToOutput(Right),
 
         (modifiers: [Super], key: "Period"): NextOutput,
         (modifiers: [Super], key: "Comma"): PreviousOutput,
