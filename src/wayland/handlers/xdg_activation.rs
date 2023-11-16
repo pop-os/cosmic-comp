@@ -117,11 +117,12 @@ impl XdgActivationHandler for State {
                         let current_output = seat.active_output();
                         let current_workspace = self.common.shell.active_space_mut(&current_output);
 
-                        if current_workspace
+                        let in_current_workspace = current_workspace
                             .floating_layer
                             .mapped()
-                            .any(|m| m == &element)
-                        {
+                            .any(|m| m == &element);
+
+                        if in_current_workspace {
                             current_workspace
                                 .floating_layer
                                 .space
@@ -143,11 +144,14 @@ impl XdgActivationHandler for State {
                         }
 
                         let target = element.into();
-                        if workspace == &current_workspace.handle {
+                        if workspace == &current_workspace.handle && in_current_workspace {
                             Shell::set_focus(self, Some(&target), &seat, None);
-                        } else {
+                        } else if let Some((w, _)) = target
+                            .toplevel()
+                            .and_then(|t| self.common.shell.workspace_for_surface(&t))
+                        {
                             Shell::append_focus_stack(self, Some(&target), &seat);
-                            self.common.shell.set_urgent(workspace);
+                            self.common.shell.set_urgent(&w);
                         }
                     }
                 }
