@@ -1406,6 +1406,29 @@ impl State {
                         }
                         _ => {}
                     }
+                } else {
+                    match (direction, self.common.config.workspace.workspace_layout) {
+                        (Direction::Left, WorkspaceLayout::Horizontal)
+                        | (Direction::Up, WorkspaceLayout::Vertical) => self.handle_action(
+                            Action::PreviousWorkspace,
+                            seat,
+                            serial,
+                            time,
+                            pattern,
+                            Some(direction),
+                        ),
+                        (Direction::Right, WorkspaceLayout::Horizontal)
+                        | (Direction::Down, WorkspaceLayout::Vertical) => self.handle_action(
+                            Action::NextWorkspace,
+                            seat,
+                            serial,
+                            time,
+                            pattern,
+                            Some(direction),
+                        ),
+
+                        _ => {}
+                    }
                 }
             }
             Action::NextOutput => {
@@ -1516,6 +1539,29 @@ impl State {
                             ptr.frame(self);
                         }
                     }
+                } else {
+                    match (direction, self.common.config.workspace.workspace_layout) {
+                        (Direction::Left, WorkspaceLayout::Horizontal)
+                        | (Direction::Up, WorkspaceLayout::Vertical) => self.handle_action(
+                            Action::MoveToPreviousWorkspace,
+                            seat,
+                            serial,
+                            time,
+                            pattern,
+                            Some(direction),
+                        ),
+                        (Direction::Right, WorkspaceLayout::Horizontal)
+                        | (Direction::Down, WorkspaceLayout::Vertical) => self.handle_action(
+                            Action::MoveToNextWorkspace,
+                            seat,
+                            serial,
+                            time,
+                            pattern,
+                            Some(direction),
+                        ),
+
+                        _ => {}
+                    }
                 }
             }
             x @ Action::MoveToNextOutput | x @ Action::SendToNextOutput => {
@@ -1602,54 +1648,23 @@ impl State {
 
                 match result {
                     FocusResult::None => {
-                        match (focus, self.common.config.workspace.workspace_layout) {
-                            (FocusDirection::Left, WorkspaceLayout::Horizontal)
-                            | (FocusDirection::Up, WorkspaceLayout::Vertical) => self
-                                .handle_action(
-                                    Action::PreviousWorkspace,
-                                    seat,
-                                    serial,
-                                    time,
-                                    pattern,
-                                    direction,
-                                ),
-                            (FocusDirection::Right, WorkspaceLayout::Horizontal)
-                            | (FocusDirection::Down, WorkspaceLayout::Vertical) => self
-                                .handle_action(
-                                    Action::NextWorkspace,
-                                    seat,
-                                    serial,
-                                    time,
-                                    pattern,
-                                    direction,
-                                ),
-                            (FocusDirection::Left, WorkspaceLayout::Vertical)
-                            | (FocusDirection::Up, WorkspaceLayout::Horizontal) => {
-                                if let Some(inferred) = pattern.inferred_direction() {
-                                    self.handle_action(
-                                        Action::SwitchOutput(inferred),
-                                        seat,
-                                        serial,
-                                        time,
-                                        pattern,
-                                        direction,
-                                    )
-                                }
-                            }
-                            (FocusDirection::Right, WorkspaceLayout::Vertical)
-                            | (FocusDirection::Down, WorkspaceLayout::Horizontal) => {
-                                if let Some(inferred) = pattern.inferred_direction() {
-                                    self.handle_action(
-                                        Action::SwitchOutput(inferred),
-                                        seat,
-                                        serial,
-                                        time,
-                                        pattern,
-                                        direction,
-                                    )
-                                }
-                            }
-                            _ => {}
+                        let dir = match focus {
+                            FocusDirection::Down => Some(Direction::Down),
+                            FocusDirection::Up => Some(Direction::Up),
+                            FocusDirection::Left => Some(Direction::Left),
+                            FocusDirection::Right => Some(Direction::Right),
+                            _ => None,
+                        };
+
+                        if let Some(direction) = dir {
+                            self.handle_action(
+                                Action::SwitchOutput(direction),
+                                seat,
+                                serial,
+                                time,
+                                pattern,
+                                Some(direction),
+                            )
                         }
                     }
                     FocusResult::Handled => {}
@@ -1663,54 +1678,14 @@ impl State {
                 let workspace = self.common.shell.active_space_mut(&current_output);
 
                 match workspace.move_current_element(direction, seat) {
-                    MoveResult::MoveFurther(_move_further) => {
-                        match (direction, self.common.config.workspace.workspace_layout) {
-                            (Direction::Left, WorkspaceLayout::Horizontal)
-                            | (Direction::Up, WorkspaceLayout::Vertical) => self.handle_action(
-                                Action::MoveToPreviousWorkspace,
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                Some(direction),
-                            ),
-                            (Direction::Right, WorkspaceLayout::Horizontal)
-                            | (Direction::Down, WorkspaceLayout::Vertical) => self.handle_action(
-                                Action::MoveToNextWorkspace,
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                Some(direction),
-                            ),
-                            (Direction::Left, WorkspaceLayout::Vertical)
-                            | (Direction::Up, WorkspaceLayout::Horizontal) => {
-                                if let Some(inferred) = pattern.inferred_direction() {
-                                    self.handle_action(
-                                        Action::MoveToOutput(inferred),
-                                        seat,
-                                        serial,
-                                        time,
-                                        pattern,
-                                        Some(direction),
-                                    )
-                                }
-                            }
-                            (Direction::Right, WorkspaceLayout::Vertical)
-                            | (Direction::Down, WorkspaceLayout::Horizontal) => {
-                                if let Some(inferred) = pattern.inferred_direction() {
-                                    self.handle_action(
-                                        Action::MoveToOutput(inferred),
-                                        seat,
-                                        serial,
-                                        time,
-                                        pattern,
-                                        Some(direction),
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    MoveResult::MoveFurther(_move_further) => self.handle_action(
+                        Action::MoveToOutput(direction),
+                        seat,
+                        serial,
+                        time,
+                        pattern,
+                        Some(direction),
+                    ),
                     MoveResult::ShiftFocus(shift) => {
                         Common::set_focus(self, Some(&shift), seat, None);
                     }
