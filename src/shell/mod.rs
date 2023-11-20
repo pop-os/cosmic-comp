@@ -241,6 +241,27 @@ fn create_workspace(
     Workspace::new(workspace_handle, output.clone(), tiling, theme.clone())
 }
 
+fn move_workspace_to_group(
+    workspace: &mut Workspace,
+    group: &WorkspaceGroupHandle,
+    workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+    toplevel_info_state: &mut ToplevelInfoState<State, CosmicSurface>,
+) {
+    let old_workspace_handle = workspace.handle;
+    workspace.handle = workspace_state.create_workspace(group).unwrap();
+    workspace_state.set_workspace_capabilities(
+        &workspace.handle,
+        [WorkspaceCapabilities::Activate].into_iter(),
+    );
+    for window in workspace.mapped() {
+        for (surface, _) in window.windows() {
+            toplevel_info_state.toplevel_leave_workspace(&surface, &old_workspace_handle);
+            toplevel_info_state.toplevel_enter_workspace(&surface, &workspace.handle);
+        }
+    }
+    workspace_state.remove_workspace(old_workspace_handle);
+}
+
 impl WorkspaceSet {
     fn new(
         state: &mut WorkspaceUpdateGuard<'_, State>,
@@ -509,6 +530,7 @@ impl Workspaces {
         output: &Output,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
         toplevel_info_state: &mut ToplevelInfoState<State, CosmicSurface>,
+        xdg_activation_state: &XdgActivationState,
     ) {
         if self.sets.contains_key(output) {
             return;
@@ -546,20 +568,12 @@ impl Workspaces {
         {
             let set = self.sets.get_mut(output).unwrap();
             for workspace in &mut moved_workspaces {
-                workspace_state.remove_workspace(workspace.handle);
-                let old_workspace_handle = workspace.handle;
-                workspace.handle = workspace_state.create_workspace(&set.group).unwrap();
-                workspace_state.set_workspace_capabilities(
-                    &workspace.handle,
-                    [WorkspaceCapabilities::Activate].into_iter(),
+                move_workspace_to_group(
+                    workspace,
+                    &set.group,
+                    workspace_state,
+                    toplevel_info_state,
                 );
-                for window in workspace.mapped() {
-                    for (surface, _) in window.windows() {
-                        toplevel_info_state
-                            .toplevel_leave_workspace(&surface, &old_workspace_handle);
-                        toplevel_info_state.toplevel_enter_workspace(&surface, &workspace.handle);
-                    }
-                }
             }
             set.workspaces.extend(moved_workspaces);
             for workspace in &mut set.workspaces {
@@ -604,24 +618,12 @@ impl Workspaces {
                 let workspace_group = new_set.group;
                 for mut workspace in set.workspaces {
                     // update workspace protocol state
-                    workspace_state.remove_workspace(workspace.handle);
-                    let workspace_handle =
-                        workspace_state.create_workspace(&workspace_group).unwrap();
-                    workspace_state.set_workspace_capabilities(
-                        &workspace_handle,
-                        [WorkspaceCapabilities::Activate].into_iter(),
-                    );
-                    let old_workspace_handle = workspace.handle;
-                    workspace.handle = workspace_handle;
-
-                    for window in workspace.mapped() {
-                        for (surface, _) in window.windows() {
-                            toplevel_info_state
-                                .toplevel_leave_workspace(&surface, &old_workspace_handle);
-                            toplevel_info_state
-                                .toplevel_enter_workspace(&surface, &workspace.handle);
-                        }
-                    }
+                        move_workspace_to_group(
+                            &mut workspace,
+                            &workspace_group,
+                            workspace_state,
+                            toplevel_info_state,
+                        );
 
                     // update mapping
                     workspace.set_output(&new_output, toplevel_info_state);
@@ -980,6 +982,7 @@ impl Shell {
             output,
             &mut self.workspace_state.update(),
             &mut self.toplevel_info_state,
+            &self.xdg_activation_state,
         );
         self.refresh(); // fixes indicies of any moved workspaces
     }
