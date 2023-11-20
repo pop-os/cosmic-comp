@@ -1633,6 +1633,56 @@ impl State {
                     }
                 }
             }
+            Action::MigrateWorkspaceToNextOutput => {
+                let current_output = seat.active_output();
+                let active = self.common.shell.active_space(&current_output).handle;
+                let next_output = self
+                    .common
+                    .shell
+                    .outputs()
+                    .skip_while(|o| *o != &current_output)
+                    .skip(1)
+                    .next()
+                    .cloned();
+                if let Some(next_output) = next_output {
+                    self.common
+                        .shell
+                        .migrate_workspace(&current_output, &next_output, &active);
+                }
+            }
+            Action::MigrateWorkspaceToPreviousOutput => {
+                let current_output = seat.active_output();
+                let active = self.common.shell.active_space(&current_output).handle;
+                let prev_output = self
+                    .common
+                    .shell
+                    .outputs()
+                    .rev()
+                    .skip_while(|o| *o != &current_output)
+                    .skip(1)
+                    .next()
+                    .cloned();
+                if let Some(prev_output) = prev_output {
+                    self.common
+                        .shell
+                        .migrate_workspace(&current_output, &prev_output, &active);
+                }
+            }
+            Action::MigrateWorkspaceToOutput(direction) => {
+                let current_output = seat.active_output();
+                let active = self.common.shell.active_space(&current_output).handle;
+                let next_output = self
+                    .common
+                    .shell
+                    .next_output(&current_output, direction)
+                    .cloned();
+
+                if let Some(next_output) = next_output {
+                    self.common
+                        .shell
+                        .migrate_workspace(&current_output, &next_output, &active);
+                }
+            }
             Action::Focus(focus) => {
                 let current_output = seat.active_output();
                 let overview = self.common.shell.overview_mode().0;
