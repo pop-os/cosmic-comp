@@ -217,6 +217,7 @@ impl Workspace {
     ) -> Workspace {
         let tiling_layer = TilingLayout::new(theme, &output);
         let floating_layer = FloatingLayout::new(&output);
+        let output_name = output.name();
 
         Workspace {
             output,
@@ -228,7 +229,11 @@ impl Workspace {
             focus_stack: FocusStacks::default(),
             pending_buffers: Vec::new(),
             screencopy_sessions: Vec::new(),
-            output_stack: VecDeque::new(),
+            output_stack: {
+                let mut queue = VecDeque::new();
+                queue.push_back(output_name);
+                queue
+            },
             pending_tokens: HashSet::new(),
             backdrop_id: Id::new(),
             dirty: AtomicBool::new(false),
@@ -343,7 +348,21 @@ impl Workspace {
                 toplevel_info.toplevel_enter_output(&surface, output);
             }
         }
+        let output_name = output.name();
+        if let Some(pos) = self
+            .output_stack
+            .iter()
+            .position(|name| name == &output_name)
+        {
+            self.output_stack.truncate(pos + 1);
+        } else {
+            self.output_stack.push_back(output.name());
+        }
         self.output = output.clone();
+    }
+
+    pub fn preferrs_output(&self, output: &Output) -> bool {
+        self.output_stack.contains(&output.name())
     }
 
     pub fn unmap(&mut self, mapped: &CosmicMapped) -> Option<ManagedState> {

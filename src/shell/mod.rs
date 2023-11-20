@@ -534,8 +534,38 @@ impl Workspaces {
         workspace_state.add_group_output(&set.group, &output);
 
         self.sets.insert(output.clone(), set);
-        for workspace in &mut self.sets.get_mut(output).unwrap().workspaces {
-            workspace.set_output(output, toplevel_info_state);
+        let mut moved_workspaces = Vec::new();
+        for set in self.sets.values_mut() {
+            let (preferrs, doesnt) = set
+                .workspaces
+                .drain(..)
+                .partition(|w| w.preferrs_output(output));
+            moved_workspaces.extend(preferrs);
+            set.workspaces = doesnt;
+        }
+        {
+            let set = self.sets.get_mut(output).unwrap();
+            for workspace in &mut moved_workspaces {
+                workspace_state.remove_workspace(workspace.handle);
+                let old_workspace_handle = workspace.handle;
+                workspace.handle = workspace_state.create_workspace(&set.group).unwrap();
+                workspace_state.set_workspace_capabilities(
+                    &workspace.handle,
+                    [WorkspaceCapabilities::Activate].into_iter(),
+                );
+                for window in workspace.mapped() {
+                    for (surface, _) in window.windows() {
+                        toplevel_info_state
+                            .toplevel_leave_workspace(&surface, &old_workspace_handle);
+                        toplevel_info_state.toplevel_enter_workspace(&surface, &workspace.handle);
+                    }
+                }
+            }
+            set.workspaces.extend(moved_workspaces);
+            for workspace in &mut set.workspaces {
+                workspace.set_output(output, toplevel_info_state);
+                workspace.refresh(xdg_activation_state);
+            }
         }
     }
 
@@ -951,6 +981,7 @@ impl Shell {
             &mut self.workspace_state.update(),
             &mut self.toplevel_info_state,
         );
+        self.refresh(); // fixes indicies of any moved workspaces
     }
 
     pub fn remove_output(&mut self, output: &Output, seats: impl Iterator<Item = Seat<State>>) {
