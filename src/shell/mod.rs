@@ -633,7 +633,7 @@ impl Workspaces {
                             toplevel_info_state,
                         );
                     } else {
-                    // update workspace protocol state
+                        // update workspace protocol state
                         move_workspace_to_group(
                             &mut workspace,
                             &workspace_group,
@@ -641,10 +641,10 @@ impl Workspaces {
                             toplevel_info_state,
                         );
 
-                    // update mapping
-                    workspace.set_output(&new_output, toplevel_info_state);
-                    workspace.refresh(xdg_activation_state);
-                    new_set.workspaces.push(workspace);
+                        // update mapping
+                        workspace.set_output(&new_output, toplevel_info_state);
+                        workspace.refresh(xdg_activation_state);
+                        new_set.workspaces.push(workspace);
                     }
                 }
                 if self.mode == WorkspaceMode::OutputBound {
@@ -662,6 +662,46 @@ impl Workspaces {
             }
 
             self.refresh(workspace_state, toplevel_info_state, xdg_activation_state)
+        }
+    }
+
+    fn migrate_workspace(
+        &mut self,
+        from: &Output,
+        to: &Output,
+        handle: &WorkspaceHandle,
+        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+        toplevel_info_state: &mut ToplevelInfoState<State, CosmicSurface>,
+        xdg_activation_state: &XdgActivationState,
+    ) {
+        if !self.sets.contains_key(to) {
+            return;
+        }
+
+        if let Some(mut workspace) = self.sets.get_mut(from).and_then(|set| {
+            let pos = set.workspaces.iter().position(|w| &w.handle == handle)?;
+            Some(set.workspaces.remove(pos))
+        }) {
+            let new_set = self.sets.get_mut(to).unwrap();
+            match self.amount {
+                WorkspaceAmount::Dynamic => {
+                    move_workspace_to_group(
+                        &mut workspace,
+                        &new_set.group,
+                        workspace_state,
+                        toplevel_info_state,
+                    );
+                    workspace.set_output(to, toplevel_info_state);
+                    workspace.refresh(xdg_activation_state);
+                    new_set.workspaces.insert(new_set.active + 1, workspace)
+                }
+                WorkspaceAmount::Static(_) => merge_workspaces(
+                    workspace,
+                    &mut new_set.workspaces[new_set.active],
+                    workspace_state,
+                    toplevel_info_state,
+                ),
+            };
         }
     }
 
@@ -1011,6 +1051,22 @@ impl Shell {
             &self.xdg_activation_state,
         );
         self.refresh(); // cleans up excess of workspaces and empty workspaces
+    }
+
+    pub fn migrate_workspace(&mut self, from: &Output, to: &Output, handle: &WorkspaceHandle) {
+        if from == to {
+            return;
+        }
+
+        self.workspaces.migrate_workspace(
+            from,
+            to,
+            handle,
+            &mut self.workspace_state.update(),
+            &mut self.toplevel_info_state,
+            &self.xdg_activation_state,
+        );
+        self.refresh(); // fixes index of moved workspace
     }
 
     pub fn update_config(&mut self, config: &Config) {

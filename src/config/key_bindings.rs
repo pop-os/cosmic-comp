@@ -167,6 +167,10 @@ pub enum Action {
     MoveToOutput(Direction),
     SendToOutput(Direction),
 
+    MigrateWorkspaceToNextOutput,
+    MigrateWorkspaceToPreviousOutput,
+    MigrateWorkspaceToOutput(Direction),
+
     Focus(FocusDirection),
     Move(Direction),
 
