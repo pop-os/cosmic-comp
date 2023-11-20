@@ -74,10 +74,10 @@
         //TODO: ability to select default terminal
         (modifiers: [Super], key: "t"): Spawn("gnome-terminal"),
 
-        (modifiers: [Super], key: "a"): Spawn("busctl --user call com.system76.CosmicAppLibrary /com/system76/CosmicAppLibrary com.system76.CosmicAppLibrary Toggle"),
-        (modifiers: [Super], key: "w"): Spawn("busctl --user call com.system76.CosmicWorkspaces /com/system76/CosmicWorkspaces com.system76.CosmicWorkspaces Toggle"),
-        (modifiers: [Super], key: "slash"): Spawn("busctl --user call com.system76.CosmicLauncher /com/system76/CosmicLauncher com.system76.CosmicLauncher Toggle"),
-        (modifiers: [Super]): Spawn("busctl --user call com.system76.CosmicLauncher /com/system76/CosmicLauncher com.system76.CosmicLauncher Toggle"),
+        (modifiers: [Super], key: "a"): Spawn("cosmic-app-library"),
+        (modifiers: [Super], key: "w"): Spawn("cosmic-workspaces"),
+        (modifiers: [Super], key: "slash"): Spawn("cosmic-launcher"),
+        (modifiers: [Super]): Spawn("cosmic-launcher"),
 
         (modifiers: [], key: "XF86AudioRaiseVolume"): Spawn("amixer sset Master 5%+"),
         (modifiers: [], key: "XF86AudioLowerVolume"): Spawn("amixer sset Master 5%-"),
