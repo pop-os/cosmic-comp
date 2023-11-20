@@ -262,6 +262,29 @@ fn move_workspace_to_group(
     workspace_state.remove_workspace(old_workspace_handle);
 }
 
+fn merge_workspaces(
+    mut workspace: Workspace,
+    into: &mut Workspace,
+    workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+    toplevel_info_state: &mut ToplevelInfoState<State, CosmicSurface>,
+) {
+    if into.fullscreen.is_some() {
+        // Don't handle the returned original workspace, for this nieche case.
+        let _ = workspace.remove_fullscreen();
+    }
+
+    for element in workspace.mapped() {
+        // fixup toplevel state
+        for (toplevel, _) in element.windows() {
+            toplevel_info_state.toplevel_leave_workspace(&toplevel, &workspace.handle);
+            toplevel_info_state.toplevel_enter_workspace(&toplevel, &into.handle);
+        }
+    }
+    into.tiling_layer.merge(workspace.tiling_layer);
+    into.floating_layer.merge(workspace.floating_layer);
+    workspace_state.remove_workspace(workspace.handle);
+}
+
 impl WorkspaceSet {
     fn new(
         state: &mut WorkspaceUpdateGuard<'_, State>,
@@ -438,25 +461,8 @@ impl WorkspaceSet {
             }
             let last_space = self.workspaces.last_mut().unwrap();
 
-            for mut workspace in overflow {
-                if last_space.fullscreen.is_some() {
-                    // Don't handle the returned original workspace, for this nieche case.
-                    let _ = workspace.remove_fullscreen();
-                }
-
-                for element in workspace.mapped() {
-                    // fixup toplevel state
-                    for (toplevel, _) in element.windows() {
-                        toplevel_info.toplevel_leave_workspace(&toplevel, &workspace.handle);
-                        toplevel_info.toplevel_enter_workspace(&toplevel, &last_space.handle);
-                    }
-                }
-                last_space.tiling_layer.merge(workspace.tiling_layer);
-                last_space.floating_layer.merge(workspace.floating_layer);
-                if workspace.fullscreen.is_some() {
-                    last_space.fullscreen = workspace.fullscreen;
-                }
-                state.remove_workspace(workspace.handle);
+            for workspace in overflow {
+                merge_workspaces(workspace, last_space, state, toplevel_info);
             }
 
             last_space.refresh(xdg_activation_state);
@@ -616,7 +622,17 @@ impl Workspaces {
 
                 let new_set = self.sets.get_mut(&new_output).unwrap();
                 let workspace_group = new_set.group;
-                for mut workspace in set.workspaces {
+                for (i, mut workspace) in set.workspaces.into_iter().enumerate() {
+                    if matches!(self.amount, WorkspaceAmount::Static(_))
+                        && i < new_set.workspaces.len()
+                    {
+                        merge_workspaces(
+                            workspace,
+                            &mut new_set.workspaces[i],
+                            workspace_state,
+                            toplevel_info_state,
+                        );
+                    } else {
                     // update workspace protocol state
                         move_workspace_to_group(
                             &mut workspace,
@@ -628,9 +644,8 @@ impl Workspaces {
                     // update mapping
                     workspace.set_output(&new_output, toplevel_info_state);
                     workspace.refresh(xdg_activation_state);
-
-                    // TODO: merge if mode = static
                     new_set.workspaces.push(workspace);
+                    }
                 }
                 if self.mode == WorkspaceMode::OutputBound {
                     workspace_state.remove_workspace_group(set.group);
