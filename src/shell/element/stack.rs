@@ -541,10 +541,28 @@ impl CosmicStack {
         );
 
         let (window_elements, popup_elements) = self.0.with_program(|p| {
-            p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)]
+            let windows = p.windows.lock().unwrap();
+            let active = p.active.load(Ordering::SeqCst);
+
+            let (mut window_elements, popup_elements) = windows[active]
                 .split_render_elements::<R, CosmicStackRenderElement<R>>(
                     renderer, window_loc, scale, alpha,
-                )
+                );
+            // preparing the other windows will fix their x11 stacking order.
+            // they won't actually be drawn, but discarded due to the overlap anyway,
+            // the performance impact is neglible.
+            for window in windows
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != active)
+                .map(|(_, w)| w)
+            {
+                let (elements, _) =
+                    window.split_render_elements(renderer, window_loc, scale, alpha);
+                window_elements.extend(elements);
+            }
+
+            (window_elements, popup_elements)
         });
 
         (
