@@ -6,6 +6,7 @@ pub mod data_control;
 pub mod data_device;
 pub mod decoration;
 pub mod dmabuf;
+pub mod drm;
 pub mod drm_lease;
 pub mod fractional_scale;
 pub mod input_method;

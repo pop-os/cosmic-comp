@@ -30,6 +30,7 @@ use rust_embed::RustEmbed;
 use smithay::utils::Rectangle;
 use smithay::{
     backend::{
+        allocator::dmabuf::Dmabuf,
         drm::DrmNode,
         input::Device,
         renderer::{
@@ -38,6 +39,7 @@ use smithay::{
                 RenderElementStates,
             },
             glow::GlowRenderer,
+            ImportDma,
         },
     },
     desktop::utils::{
@@ -60,7 +62,7 @@ use smithay::{
     utils::{Clock, IsAlive, Monotonic},
     wayland::{
         compositor::{CompositorClientState, CompositorState},
-        dmabuf::{DmabufFeedback, DmabufState},
+        dmabuf::{DmabufFeedback, DmabufGlobal, DmabufState},
         fractional_scale::{with_fractional_scale, FractionalScaleManagerState},
         input_method::InputMethodManagerState,
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState,
@@ -273,6 +275,24 @@ impl BackendData {
             }
             _ => unreachable!("No backend was initialized"),
         }
+    }
+
+    pub fn dmabuf_imported(
+        &mut self,
+        global: &DmabufGlobal,
+        dmabuf: Dmabuf,
+    ) -> Result<(), anyhow::Error> {
+        match self {
+            BackendData::Kms(ref mut state) => state.dmabuf_imported(global, dmabuf)?,
+            BackendData::Winit(ref mut state) => {
+                state.backend.renderer().import_dmabuf(&dmabuf, None)?;
+            }
+            BackendData::X11(ref mut state) => {
+                state.renderer.import_dmabuf(&dmabuf, None)?;
+            }
+            _ => unreachable!("No backend set when importing dmabuf"),
+        }
+        Ok(())
     }
 }
 
