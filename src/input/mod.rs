@@ -1838,6 +1838,7 @@ impl State {
                 let wayland_display = self.common.socket.clone();
                 let display = self
                     .common
+                    .shell
                     .xwayland_state
                     .as_ref()
                     .map(|s| format!(":{}", s.display))

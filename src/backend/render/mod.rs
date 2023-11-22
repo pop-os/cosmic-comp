@@ -592,7 +592,7 @@ where
                 .render::<R>(
                     renderer,
                     &state.shell.override_redirect_windows,
-                    state.xwayland_state.as_mut(),
+                    state.shell.xwayland_state.as_mut(),
                     (!move_active && is_active_space).then_some(&last_active_seat),
                     overview.clone(),
                     resize_indicator.clone(),
@@ -650,7 +650,7 @@ where
         .render::<R>(
             renderer,
             &state.shell.override_redirect_windows,
-            state.xwayland_state.as_mut(),
+            state.shell.xwayland_state.as_mut(),
             (!move_active && is_active_space).then_some(&last_active_seat),
             overview,
             resize_indicator,

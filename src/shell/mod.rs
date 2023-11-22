@@ -54,6 +54,7 @@ use crate::{
             },
         },
     },
+    xwayland::XWaylandState,
 };
 
 pub mod element;
@@ -188,6 +189,7 @@ pub struct Shell {
     pub xdg_shell_state: XdgShellState,
     pub xdg_activation_state: XdgActivationState,
     pub workspace_state: WorkspaceState<State>,
+    pub xwayland_state: Option<XWaylandState>,
 
     theme: cosmic::Theme,
     overview_mode: OverviewMode,
@@ -1022,6 +1024,7 @@ impl Shell {
             xdg_shell_state,
             xdg_activation_state,
             workspace_state,
+            xwayland_state: None,
 
             theme,
             overview_mode: OverviewMode::None,

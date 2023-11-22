@@ -46,7 +46,7 @@ pub struct XWaylandState {
 
 impl State {
     pub fn launch_xwayland(&mut self, render_node: Option<DrmNode>) {
-        if self.common.xwayland_state.is_some() {
+        if self.common.shell.xwayland_state.is_some() {
             return;
         }
 
@@ -90,11 +90,11 @@ impl State {
                             );
                         }
 
-                        let xwayland_state = data.common.xwayland_state.as_mut().unwrap();
+                        let xwayland_state = data.common.shell.xwayland_state.as_mut().unwrap();
                         xwayland_state.xwm = Some(wm);
                     }
                     XWaylandEvent::Exited => {
-                        if let Some(mut xwayland_state) = data.common.xwayland_state.take() {
+                        if let Some(mut xwayland_state) = data.common.shell.xwayland_state.take() {
                             xwayland_state.xwm = None;
                         }
                     }
@@ -119,7 +119,7 @@ impl State {
             },
         ) {
             Ok(display) => {
-                self.common.xwayland_state = Some(XWaylandState {
+                self.common.shell.xwayland_state = Some(XWaylandState {
                     xwayland,
                     xwm: None,
                     display,
@@ -136,6 +136,7 @@ impl State {
 impl XwmHandler for State {
     fn xwm_state(&mut self, _xwm: XwmId) -> &mut X11Wm {
         self.common
+            .shell
             .xwayland_state
             .as_mut()
             .and_then(|state| state.xwm.as_mut())
