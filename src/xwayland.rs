@@ -337,6 +337,8 @@ impl XwmHandler for State {
                     )
                     .as_global(),
                 )
+            } else {
+                let _ = window.configure(None); // ack and force old state
             }
         } else {
             if let Some(x) = x {
