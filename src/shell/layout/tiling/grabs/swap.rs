@@ -74,6 +74,7 @@ impl KeyboardGrab<State> for SwapWindowGrab {
                 key: Some(Keysym::new(keycode)),
             },
             None,
+            true,
         );
     }
 
