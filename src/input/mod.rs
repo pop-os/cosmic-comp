@@ -438,7 +438,7 @@ impl State {
                                                     let start = Instant::now();
                                                     loop_handle.insert_source(Timer::from_duration(Duration::from_millis(200)), move |current, _, state| {
                                                         let duration = current.duration_since(start).as_millis();
-                                                        state.handle_action(action_clone.clone(), &seat_clone, serial, time.overflowing_add(duration as u32).0, key_pattern_clone.clone(), None);
+                                                        state.handle_action(action_clone.clone(), &seat_clone, serial, time.overflowing_add(duration as u32).0, key_pattern_clone.clone(), None, true);
                                                         calloop::timer::TimeoutAction::ToDuration(Duration::from_millis(25))
                                                     }).ok()
                                                 } else { None };
@@ -549,7 +549,7 @@ impl State {
                             )
                             .flatten()
                         {
-                            self.handle_action(action, &seat, serial, time, pattern, None)
+                            self.handle_action(action, &seat, serial, time, pattern, None, true)
                         }
                 }
             }
@@ -1157,6 +1157,7 @@ impl State {
         time: u32,
         pattern: KeyPattern,
         direction: Option<Direction>,
+        propagate: bool,
     ) {
         // TODO: Detect if started from login manager or tty, and only allow
         // `Terminate` if it will return to login manager.
@@ -1206,6 +1207,16 @@ impl State {
                     .shell
                     .activate(&current_output, workspace as usize);
             }
+            Action::LastWorkspace => {
+                let current_output = seat.active_output();
+                let workspace = self
+                    .common
+                    .shell
+                    .workspaces
+                    .len(&current_output)
+                    .saturating_sub(1);
+                let _ = self.common.shell.activate(&current_output, workspace);
+            }
             Action::NextWorkspace => {
                 let current_output = seat.active_output();
                 let workspace = self
@@ -1220,6 +1231,7 @@ impl State {
                     .shell
                     .activate(&current_output, workspace)
                     .is_err()
+                    && propagate
                 {
                     if let Some(inferred) = pattern.inferred_direction() {
                         self.handle_action(
@@ -1229,6 +1241,7 @@ impl State {
                             time,
                             pattern,
                             direction,
+                            false,
                         )
                     };
                 }
@@ -1247,6 +1260,7 @@ impl State {
                     .shell
                     .activate(&current_output, workspace)
                     .is_err()
+                    && propagate
                 {
                     if let Some(inferred) = pattern.inferred_direction() {
                         self.handle_action(
@@ -1256,19 +1270,10 @@ impl State {
                             time,
                             pattern,
                             direction,
+                            false,
                         )
                     };
                 }
-            }
-            Action::LastWorkspace => {
-                let current_output = seat.active_output();
-                let workspace = self
-                    .common
-                    .shell
-                    .workspaces
-                    .len(&current_output)
-                    .saturating_sub(1);
-                let _ = self.common.shell.activate(&current_output, workspace);
             }
             x @ Action::MoveToWorkspace(_) | x @ Action::SendToWorkspace(_) => {
                 let current_output = seat.active_output();
@@ -1284,6 +1289,23 @@ impl State {
                     &current_output,
                     (&current_output, Some(workspace as usize)),
                     follow,
+                    None,
+                );
+            }
+            x @ Action::MoveToLastWorkspace | x @ Action::SendToLastWorkspace => {
+                let current_output = seat.active_output();
+                let workspace = self
+                    .common
+                    .shell
+                    .workspaces
+                    .len(&current_output)
+                    .saturating_sub(1);
+                let _ = Shell::move_current_window(
+                    self,
+                    seat,
+                    &current_output,
+                    (&current_output, Some(workspace as usize)),
+                    matches!(x, Action::MoveToLastWorkspace),
                     None,
                 );
             }
@@ -1305,6 +1327,7 @@ impl State {
                     direction,
                 )
                 .is_err()
+                    && propagate
                 {
                     if let Some(inferred) = pattern.inferred_direction() {
                         self.handle_action(
@@ -1318,6 +1341,7 @@ impl State {
                             time,
                             pattern,
                             direction,
+                            false,
                         )
                     }
                 }
@@ -1341,6 +1365,7 @@ impl State {
                     direction,
                 )
                 .is_err()
+                    && propagate
                 {
                     if let Some(inferred) = pattern.inferred_direction() {
                         self.handle_action(
@@ -1354,26 +1379,10 @@ impl State {
                             time,
                             pattern,
                             direction,
+                            false,
                         )
                     }
                 }
-            }
-            x @ Action::MoveToLastWorkspace | x @ Action::SendToLastWorkspace => {
-                let current_output = seat.active_output();
-                let workspace = self
-                    .common
-                    .shell
-                    .workspaces
-                    .len(&current_output)
-                    .saturating_sub(1);
-                let _ = Shell::move_current_window(
-                    self,
-                    seat,
-                    &current_output,
-                    (&current_output, Some(workspace as usize)),
-                    matches!(x, Action::MoveToLastWorkspace),
-                    None,
-                );
             }
             Action::SwitchOutput(direction) => {
                 let current_output = seat.active_output();
@@ -1406,7 +1415,7 @@ impl State {
                         }
                         _ => {}
                     }
-                } else {
+                } else if propagate {
                     match (direction, self.common.config.workspace.workspace_layout) {
                         (Direction::Left, WorkspaceLayout::Horizontal)
                         | (Direction::Up, WorkspaceLayout::Vertical) => self.handle_action(
@@ -1416,6 +1425,7 @@ impl State {
                             time,
                             pattern,
                             Some(direction),
+                            false,
                         ),
                         (Direction::Right, WorkspaceLayout::Horizontal)
                         | (Direction::Down, WorkspaceLayout::Vertical) => self.handle_action(
@@ -1425,6 +1435,7 @@ impl State {
                             time,
                             pattern,
                             Some(direction),
+                            false,
                         ),
 
                         _ => {}
@@ -1539,7 +1550,7 @@ impl State {
                             ptr.frame(self);
                         }
                     }
-                } else {
+                } else if propagate {
                     match (direction, self.common.config.workspace.workspace_layout) {
                         (Direction::Left, WorkspaceLayout::Horizontal)
                         | (Direction::Up, WorkspaceLayout::Vertical) => self.handle_action(
@@ -1549,6 +1560,7 @@ impl State {
                             time,
                             pattern,
                             Some(direction),
+                            false,
                         ),
                         (Direction::Right, WorkspaceLayout::Horizontal)
                         | (Direction::Down, WorkspaceLayout::Vertical) => self.handle_action(
@@ -1558,6 +1570,7 @@ impl State {
                             time,
                             pattern,
                             Some(direction),
+                            false,
                         ),
 
                         _ => {}
@@ -1714,6 +1727,7 @@ impl State {
                                 time,
                                 pattern,
                                 Some(direction),
+                                true,
                             )
                         }
                     }
@@ -1735,6 +1749,7 @@ impl State {
                         time,
                         pattern,
                         Some(direction),
+                        true,
                     ),
                     MoveResult::ShiftFocus(shift) => {
                         Common::set_focus(self, Some(&shift), seat, None);
