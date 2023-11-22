@@ -20,7 +20,10 @@ use smithay::{
     },
     output::Output,
     reexports::{
-        wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
+        wayland_protocols::{
+            ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
+            xdg::shell::server::xdg_toplevel::WmCapabilities,
+        },
         wayland_server::{protocol::wl_surface::WlSurface, Client, DisplayHandle},
     },
     utils::{Point, Rectangle, Serial, SERIAL_COUNTER},
@@ -1000,7 +1003,10 @@ impl Shell {
             dh,
             client_should_see_privileged_protocols,
         );
-        let xdg_shell_state = XdgShellState::new::<State>(dh);
+        let xdg_shell_state = XdgShellState::new_with_capabilities::<State>(
+            dh,
+            [WmCapabilities::Fullscreen, WmCapabilities::Maximize],
+        );
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
         let toplevel_info_state =
             ToplevelInfoState::new(dh, client_should_see_privileged_protocols);
