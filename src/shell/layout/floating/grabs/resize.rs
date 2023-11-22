@@ -29,7 +29,7 @@ pub struct ResizeData {
     /// The edges the surface is being resized with.
     pub edges: ResizeEdge,
     /// The initial window location.
-    pub initial_window_location: Point<i32, Logical>,
+    pub initial_window_location: Point<i32, Local>,
     /// The initial window size (geometry width and height).
     pub initial_window_size: Size<i32, Logical>,
 }
@@ -277,7 +277,7 @@ impl ResizeSurfaceGrab {
         start_data: PointerGrabStartData<State>,
         mapped: CosmicMapped,
         edges: ResizeEdge,
-        initial_window_location: Point<i32, Logical>,
+        initial_window_location: Point<i32, Local>,
         initial_window_size: Size<i32, Logical>,
         seat: &Seat<State>,
     ) -> ResizeSurfaceGrab {
@@ -324,6 +324,7 @@ impl ResizeSurfaceGrab {
                         initial_window_location,
                         initial_window_size,
                     } = resize_data;
+                    let initial_window_location = initial_window_location.to_global(space.output());
 
                     if edges.intersects(ResizeEdge::TOP_LEFT) {
                         let size = window.geometry().size;

@@ -457,7 +457,7 @@ impl FloatingLayout {
         edges: ResizeEdge,
     ) -> Option<ResizeSurfaceGrab> {
         if seat.get_pointer().is_some() {
-            let location = self.space.element_location(&mapped).unwrap();
+            let location = self.space.element_location(&mapped).unwrap().as_local();
             let size = mapped.geometry().size;
             mapped.moved_since_mapped.store(true, Ordering::SeqCst);
 
@@ -502,7 +502,7 @@ impl FloatingLayout {
 
         if edge.contains(ResizeEdge::RIGHT) || edge.contains(ResizeEdge::LEFT) {
             if direction == ResizeDirection::Inwards {
-                geo.size.w -= amount;
+                geo.size.w = (geo.size.w as u32).saturating_sub(amount as u32) as i32;
             } else {
                 geo.size.w += amount;
             }
@@ -510,13 +510,13 @@ impl FloatingLayout {
                 if direction == ResizeDirection::Inwards {
                     geo.loc.x += amount;
                 } else {
-                    geo.loc.x -= amount;
+                    geo.loc.x = (geo.loc.x as u32).saturating_sub(amount as u32) as i32;
                 }
             }
         }
         if edge.contains(ResizeEdge::BOTTOM) || edge.contains(ResizeEdge::TOP) {
             if direction == ResizeDirection::Inwards {
-                geo.size.h -= amount;
+                geo.size.h = (geo.size.h as u32).saturating_sub(amount as u32) as i32;
             } else {
                 geo.size.h += amount;
             }
@@ -524,24 +524,15 @@ impl FloatingLayout {
                 if direction == ResizeDirection::Inwards {
                     geo.loc.y += amount;
                 } else {
-                    geo.loc.y -= amount;
+                    geo.loc.y = (geo.loc.y as u32).saturating_sub(amount as u32) as i32;
                 }
             }
         }
 
-        let Some(bounding_box) = self
+        let bounding_box = self
             .space
-            .outputs()
-            .map(|o| self.space.output_geometry(o).unwrap())
-            .filter(|output_geo| output_geo.overlaps(geo))
-            .fold(None, |res, output_geo| match res {
-                None => Some(output_geo),
-                Some(other) => Some(other.merge(output_geo)),
-            })
-        else {
-            return true;
-        };
-
+            .output_geometry(self.space.outputs().next().unwrap())
+            .unwrap();
         let (min_size, max_size) = (mapped.min_size(), mapped.max_size());
         let min_width = min_size.map(|s| s.w).unwrap_or(360);
         let min_height = min_size.map(|s| s.h).unwrap_or(240);
@@ -554,7 +545,7 @@ impl FloatingLayout {
 
         *mapped.resize_state.lock().unwrap() = Some(ResizeState::Resizing(ResizeData {
             edges: edge,
-            initial_window_location: original_geo.loc,
+            initial_window_location: original_geo.loc.as_local(),
             initial_window_size: original_geo.size,
         }));
 
