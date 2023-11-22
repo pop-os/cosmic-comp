@@ -458,10 +458,7 @@ impl CosmicSurface {
     pub fn send_configure(&self) -> Option<Serial> {
         match self {
             CosmicSurface::Wayland(window) => window.toplevel().send_pending_configure(),
-            CosmicSurface::X11(surface) => {
-                let _ = surface.configure(None);
-                None
-            }
+            CosmicSurface::X11(_) => None,
             _ => unreachable!(),
         }
     }
