@@ -634,6 +634,13 @@ impl CosmicMapped {
                                         CosmicSurface::X11(_) => "Protocol: X11",
                                         _ => unreachable!(),
                                     });
+                                    if let CosmicSurface::X11(ref surf) = window {
+                                        let geo = surf.geometry();
+                                        ui.label(format!(
+                                            "X11 Geo: {}x{}x{}x{}",
+                                            geo.loc.x, geo.loc.y, geo.size.w, geo.size.h
+                                        ));
+                                    }
                                     ui.horizontal(|ui| {
                                         ui.label("States: ");
                                         if window.is_maximized(true) {
