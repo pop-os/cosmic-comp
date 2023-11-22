@@ -4999,7 +4999,9 @@ where
                     } else {
                         window_elements.extend(w_elements);
                     }
-                    popup_elements.extend(p_elements)
+                    if !mapped.is_maximized(false) {
+                        popup_elements.extend(p_elements);
+                    }
                 }
             }
         });
