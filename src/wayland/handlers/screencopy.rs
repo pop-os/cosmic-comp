@@ -144,7 +144,7 @@ impl ScreencopyHandler for State {
             }
         };
 
-        let workspace = match self.common.shell.space_for_handle_mut(&handle) {
+        let workspace = match self.common.shell.workspaces.space_for_handle_mut(&handle) {
             Some(workspace) => workspace,
             None => {
                 session.failed(FailureReason::InvalidWorkspace);
@@ -343,7 +343,7 @@ impl ScreencopyHandler for State {
                         .push((session, params));
                 }
                 SessionType::Workspace(_output, handle) => {
-                    match self.common.shell.space_for_handle_mut(&handle) {
+                    match self.common.shell.workspaces.space_for_handle_mut(&handle) {
                         Some(workspace) => workspace.pending_buffers.push((session, params)),
                         None => session.failed(FailureReason::InvalidWorkspace),
                     };
@@ -422,7 +422,8 @@ impl ScreencopyHandler for State {
                 }
             }
             SessionType::Workspace(_, handle) => {
-                if let Some(workspace) = self.common.shell.space_for_handle_mut(&handle) {
+                if let Some(workspace) = self.common.shell.workspaces.space_for_handle_mut(&handle)
+                {
                     workspace.pending_buffers.retain(|(s, _)| s != &session);
                     workspace.screencopy_sessions.retain(|s| s != &session);
                 }
@@ -1092,7 +1093,7 @@ impl Common {
                 }
             }
             SessionType::Workspace(_output, handle) => {
-                if let Some(space) = self.shell.space_for_handle_mut(&handle) {
+                if let Some(space) = self.shell.workspaces.space_for_handle_mut(&handle) {
                     if space.screencopy_sessions.iter().any(|s| s == &session) {
                         space.pending_buffers.push((session, params));
                     }
@@ -1247,7 +1248,12 @@ impl State {
             .map(|o| (o.clone(), self.common.shell.active_space(o).handle.clone()))
             .collect::<Vec<_>>();
         if let Some((handle, output)) = self.common.shell.workspace_for_surface(surface) {
-            let workspace = self.common.shell.space_for_handle_mut(&handle).unwrap();
+            let workspace = self
+                .common
+                .shell
+                .workspaces
+                .space_for_handle_mut(&handle)
+                .unwrap();
             if !workspace.pending_buffers.is_empty() {
                 // TODO: replace with drain_filter....
                 let mut i = 0;

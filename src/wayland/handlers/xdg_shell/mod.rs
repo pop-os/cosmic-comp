@@ -289,6 +289,7 @@ impl XdgShellHandler for State {
                     let new_workspace_handle = self
                         .common
                         .shell
+                        .workspaces
                         .space_for_handle(&previous_workspace)
                         .is_some()
                         .then_some(previous_workspace)

@@ -944,6 +944,14 @@ impl Workspaces {
         self.sets.values().flat_map(|set| set.workspaces.iter())
     }
 
+    pub fn space_for_handle(&self, handle: &WorkspaceHandle) -> Option<&Workspace> {
+        self.spaces().find(|w| &w.handle == handle)
+    }
+
+    pub fn space_for_handle_mut(&mut self, handle: &WorkspaceHandle) -> Option<&mut Workspace> {
+        self.spaces_mut().find(|w| &w.handle == handle)
+    }
+
     pub fn spaces_for_output(&self, output: &Output) -> impl Iterator<Item = &Workspace> {
         self.sets
             .get(output)
@@ -1236,14 +1244,6 @@ impl Shell {
             .find(|workspace| workspace.mapped().any(|m| m == mapped))
     }
 
-    pub fn space_for_handle(&self, handle: &WorkspaceHandle) -> Option<&Workspace> {
-        self.workspaces.spaces().find(|w| &w.handle == handle)
-    }
-
-    pub fn space_for_handle_mut(&mut self, handle: &WorkspaceHandle) -> Option<&mut Workspace> {
-        self.workspaces.spaces_mut().find(|w| &w.handle == handle)
-    }
-
     pub fn outputs(&self) -> impl DoubleEndedIterator<Item = &Output> {
         self.workspaces.sets.keys().chain(
             self.workspaces
@@ -1439,16 +1439,21 @@ impl Shell {
         previous_workspace: &WorkspaceHandle,
         target_layer: ManagedLayer,
     ) {
-        if self.space_for_handle(previous_workspace).is_none() {
+        if self
+            .workspaces
+            .space_for_handle(previous_workspace)
+            .is_none()
+        {
             return;
         }
 
         {
-            let Some(workspace) = self.space_for_handle_mut(&current_workspace) else { return };
+            let Some(workspace) = self.workspaces.space_for_handle_mut(&current_workspace) else { return };
             let _ = workspace.unmap(&mapped);
         }
 
         let new_workspace_output = self
+            .workspaces
             .space_for_handle(&previous_workspace)
             .unwrap()
             .output()
@@ -1460,7 +1465,10 @@ impl Shell {
                 .toplevel_enter_workspace(&window, &previous_workspace);
         }
 
-        let new_workspace = self.space_for_handle_mut(&previous_workspace).unwrap();
+        let new_workspace = self
+            .workspaces
+            .space_for_handle_mut(&previous_workspace)
+            .unwrap();
         match target_layer {
             ManagedLayer::Floating => new_workspace.floating_layer.map(mapped, None),
             ManagedLayer::Tiling => {
@@ -1522,6 +1530,7 @@ impl Shell {
             let new_workspace_handle = state
                 .common
                 .shell
+                .workspaces
                 .space_for_handle(&previous_workspace)
                 .is_some()
                 .then_some(previous_workspace)
@@ -1745,6 +1754,7 @@ impl Shell {
                     let new_workspace_handle = state
                         .common
                         .shell
+                        .workspaces
                         .space_for_handle(&previous_workspace)
                         .is_some()
                         .then_some(previous_workspace)

@@ -506,6 +506,7 @@ where
         if current.0 != desc.handle {
             state
                 .shell
+                .workspaces
                 .space_for_handle(&desc.handle)
                 .map(|w| w.tiling_layer.tree())
         } else {
@@ -532,6 +533,7 @@ where
 
     let workspace = state
         .shell
+        .workspaces
         .space_for_handle(&current.0)
         .ok_or(OutputNoMode)?;
 
@@ -563,6 +565,7 @@ where
 
             let workspace = state
                 .shell
+                .workspaces
                 .space_for_handle(&previous)
                 .ok_or(OutputNoMode)?;
             let has_fullscreen = workspace.fullscreen.is_some();
