@@ -31,12 +31,22 @@ use smithay::{
     },
     wayland::{
         buffer::BufferHandler,
-        dmabuf::{DmabufGlobal, DmabufHandler, ImportError},
+        dmabuf::{DmabufGlobal, DmabufHandler},
     },
 };
 use tracing::trace;
 
 use std::{convert::TryFrom, path::PathBuf, sync::Arc};
+
+pub enum ImportError {
+    Failed,
+    InvalidFormat,
+}
+
+pub trait DrmHandler {
+    fn dmabuf_imported(&mut self, global: &DmabufGlobal, dmabuf: Dmabuf)
+        -> Result<(), ImportError>;
+}
 
 #[derive(Debug)]
 pub struct WlDrmState;
@@ -98,7 +108,7 @@ where
         + Dispatch<wl_drm::WlDrm, DrmInstanceData>
         + Dispatch<WlBuffer, Dmabuf>
         + BufferHandler
-        + DmabufHandler
+        + DrmHandler
         + 'static,
 {
     fn request(
@@ -163,7 +173,7 @@ where
                 match dma.build() {
                     Some(dmabuf) => {
                         match state.dmabuf_imported(&data.dmabuf_global, dmabuf.clone()) {
-                            Ok(_) => {
+                            Ok(()) => {
                                 // import was successful
                                 data_init.init(id, dmabuf);
                                 trace!("Created a new validated dma wl_buffer via wl_drm.");

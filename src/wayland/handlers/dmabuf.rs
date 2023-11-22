@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::state::{BackendData, State};
+use crate::state::State;
 use smithay::{
-    backend::{allocator::dmabuf::Dmabuf, renderer::ImportDma},
+    backend::allocator::dmabuf::Dmabuf,
     delegate_dmabuf,
-    wayland::dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportError},
+    wayland::dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
 };
 
 impl DmabufHandler for State {
@@ -16,23 +16,10 @@ impl DmabufHandler for State {
         &mut self,
         global: &DmabufGlobal,
         dmabuf: Dmabuf,
-    ) -> Result<(), ImportError> {
-        match &mut self.backend {
-            BackendData::Kms(ref mut state) => state
-                .dmabuf_imported(global, dmabuf)
-                .map_err(|_| ImportError::Failed),
-            BackendData::Winit(ref mut state) => state
-                .backend
-                .renderer()
-                .import_dmabuf(&dmabuf, None)
-                .map(|_| ())
-                .map_err(|_| ImportError::Failed),
-            BackendData::X11(ref mut state) => state
-                .renderer
-                .import_dmabuf(&dmabuf, None)
-                .map(|_| ())
-                .map_err(|_| ImportError::Failed),
-            _ => unreachable!("No backend set when importing dmabuf"),
+        import_notifier: ImportNotifier,
+    ) {
+        if self.backend.dmabuf_imported(global, dmabuf).is_err() {
+            import_notifier.failed();
         }
     }
 }
