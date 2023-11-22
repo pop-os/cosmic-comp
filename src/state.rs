@@ -16,7 +16,6 @@ use crate::{
         screencopy::{BufferParams, ScreencopyState, Session as ScreencopySession},
         workspace::WorkspaceClientState,
     },
-    xwayland::XWaylandState,
 };
 use anyhow::Context;
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_manager_v1::CursorMode;
@@ -170,9 +169,6 @@ pub struct Common {
     pub viewporter_state: ViewporterState,
     pub kde_decoration_state: KdeDecorationState,
     pub xdg_decoration_state: XdgDecorationState,
-
-    // xwayland state
-    pub xwayland_state: Option<XWaylandState>,
 }
 
 #[derive(Debug)]
@@ -421,8 +417,6 @@ impl State {
                 wl_drm_state,
                 kde_decoration_state,
                 xdg_decoration_state,
-
-                xwayland_state: None,
             },
             backend: BackendData::Unset,
         }
