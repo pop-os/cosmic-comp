@@ -1106,6 +1106,16 @@ impl Shell {
                         set.workspaces[set.active].tiling_layer.cleanup_drag();
                     }
                     set.activate(idx, &mut self.workspace_state.update())?;
+                    if let Some(xwm) = self
+                        .xwayland_state
+                        .as_mut()
+                        .and_then(|state| state.xwm.as_mut())
+                    {
+                        let _ = set.workspaces[idx].raise_x11_windows(xwm);
+                        for surface in &self.override_redirect_windows {
+                            let _ = xwm.raise_window(surface);
+                        }
+                    }
 
                     let output_geo = output.geometry();
                     Ok(Some(

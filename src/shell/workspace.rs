@@ -38,14 +38,17 @@ use smithay::{
     desktop::{layer_map_for_output, space::SpaceElement},
     input::{pointer::GrabStartData as PointerGrabStartData, Seat},
     output::Output,
-    reexports::wayland_server::{protocol::wl_surface::WlSurface, Client, Resource},
+    reexports::{
+        wayland_server::{protocol::wl_surface::WlSurface, Client, Resource},
+        x11rb::xcb_ffi::ConnectionError,
+    },
     utils::{Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Size},
     wayland::{
         compositor::{add_blocker, Blocker, BlockerState},
         seat::WaylandFocus,
         xdg_activation::{XdgActivationState, XdgActivationToken},
     },
-    xwayland::X11Surface,
+    xwayland::{X11Surface, X11Wm},
 };
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -864,6 +867,24 @@ impl Workspace {
                 .move_current_element(direction, seat, self.tiling_layer.theme.clone())
                 .or_else(|| self.tiling_layer.move_current_node(direction, seat))
         }
+    }
+
+    pub fn raise_x11_windows(&mut self, xwm: &mut X11Wm) -> Result<(), ConnectionError> {
+        for window in self
+            .tiling_layer
+            .mapped()
+            .map(|(_, w, _)| w)
+            .chain(self.floating_layer.space.elements())
+        {
+            if let CosmicSurface::X11(surf) = window.active_window() {
+                xwm.raise_window(&surf)?;
+            }
+        }
+        if let Some(CosmicSurface::X11(ref surf)) = self.fullscreen.as_ref().map(|f| &f.surface) {
+            xwm.raise_window(surf)?;
+        }
+
+        Ok(())
     }
 
     pub fn render<'a, R>(
