@@ -587,9 +587,13 @@ impl Workspaces {
                 );
             }
             set.workspaces.extend(moved_workspaces);
-            for workspace in &mut set.workspaces {
+            for (i, workspace) in set.workspaces.iter_mut().enumerate() {
                 workspace.set_output(output, toplevel_info_state);
                 workspace.refresh(xdg_activation_state);
+                workspace_set_idx(workspace_state, i as u8 + 1, set.idx, &workspace.handle);
+                if i == set.active {
+                    workspace_state.add_workspace_state(&workspace.handle, WState::Active);
+                }
             }
         }
     }
