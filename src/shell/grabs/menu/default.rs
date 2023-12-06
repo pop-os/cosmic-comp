@@ -65,7 +65,7 @@ fn move_prev_workspace(state: &mut State, mapped: &CosmicMapped) {
     if let Some(prev_handle) = maybe_handle {
         Shell::move_window(
             state,
-            &seat,
+            Some(&seat),
             mapped,
             &current_handle,
             &prev_handle,
@@ -93,7 +93,7 @@ fn move_next_workspace(state: &mut State, mapped: &CosmicMapped) {
     if let Some(next_handle) = maybe_handle {
         Shell::move_window(
             state,
-            &seat,
+            Some(&seat),
             mapped,
             &current_handle,
             &next_handle,

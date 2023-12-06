@@ -641,7 +641,7 @@ dependencies = [
 [[package]]
 name = "cosmic-protocols"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-protocols?branch=main#5faec87be0a1fd1d72e99431ac8e6647ff1dfd41"
+source = "git+https://github.com/pop-os/cosmic-protocols?branch=main#c1b651630c2b71cd8dfd2eb4ab47ede9dbd63840"
 dependencies = [
  "bitflags 2.4.1",
  "wayland-backend",
@@ -954,7 +954,7 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330c60081dcc4c72131f8eb70510f1ac07223e5d4163db481a04a0befcffa412"
 dependencies = [
- "libloading 0.8.1",
+ "libloading 0.7.4",
 ]
 
 [[package]]
