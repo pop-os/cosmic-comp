@@ -307,58 +307,36 @@ where
     ) {
         match request {
             zcosmic_workspace_handle_v1::Request::Activate => {
-                if let Some(id) = state
-                    .workspace_state()
-                    .groups
-                    .iter()
-                    .find_map(|g| g.workspaces.iter().find(|w| w.instances.contains(obj)))
-                    .map(|w| w.id)
-                {
+                if let Some(workspace_handle) = state.workspace_state().get_workspace_handle(obj) {
                     let mut state = client
                         .get_data::<<D as WorkspaceHandler>::Client>()
                         .unwrap()
                         .workspace_state()
                         .lock()
                         .unwrap();
-                    state
-                        .requests
-                        .push(Request::Activate(WorkspaceHandle { id }));
+                    state.requests.push(Request::Activate(workspace_handle));
                 }
             }
             zcosmic_workspace_handle_v1::Request::Deactivate => {
-                if let Some(id) = state
-                    .workspace_state()
-                    .groups
-                    .iter()
-                    .find_map(|g| g.workspaces.iter().find(|w| w.instances.contains(obj)))
-                    .map(|w| w.id)
-                {
+                if let Some(workspace_handle) = state.workspace_state().get_workspace_handle(obj) {
                     let mut state = client
                         .get_data::<<D as WorkspaceHandler>::Client>()
                         .unwrap()
                         .workspace_state()
                         .lock()
                         .unwrap();
-                    state
-                        .requests
-                        .push(Request::Deactivate(WorkspaceHandle { id }));
+                    state.requests.push(Request::Deactivate(workspace_handle));
                 }
             }
             zcosmic_workspace_handle_v1::Request::Remove => {
-                if let Some(id) = state
-                    .workspace_state()
-                    .groups
-                    .iter()
-                    .find_map(|g| g.workspaces.iter().find(|w| w.instances.contains(obj)))
-                    .map(|w| w.id)
-                {
+                if let Some(workspace_handle) = state.workspace_state().get_workspace_handle(obj) {
                     let mut state = client
                         .get_data::<<D as WorkspaceHandler>::Client>()
                         .unwrap()
                         .workspace_state()
                         .lock()
                         .unwrap();
-                    state.requests.push(Request::Remove(WorkspaceHandle { id }));
+                    state.requests.push(Request::Remove(workspace_handle));
                 }
             }
             zcosmic_workspace_handle_v1::Request::Destroy => {
@@ -554,6 +532,16 @@ where
                 instance.done();
             }
         }
+    }
+
+    pub fn get_workspace_handle(
+        &self,
+        handle: &ZcosmicWorkspaceHandleV1,
+    ) -> Option<WorkspaceHandle> {
+        self.groups
+            .iter()
+            .find_map(|g| g.workspaces.iter().find(|w| w.instances.contains(handle)))
+            .map(|w| WorkspaceHandle { id: w.id })
     }
 
     pub fn global_id(&self) -> GlobalId {

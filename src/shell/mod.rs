@@ -1710,7 +1710,7 @@ impl Shell {
 
     pub fn move_window(
         state: &mut State,
-        seat: &Seat<State>,
+        seat: Option<&Seat<State>>,
         mapped: &CosmicMapped,
         from: &WorkspaceHandle,
         to: &WorkspaceHandle,
@@ -1759,7 +1759,9 @@ impl Shell {
             state.common.shell.update_reactive_popups(&mapped);
         }
         let new_pos = if follow {
-            seat.set_active_output(&to_output);
+            if let Some(seat) = seat {
+                seat.set_active_output(&to_output);
+            }
             state
                 .common
                 .shell
@@ -1776,13 +1778,13 @@ impl Shell {
             .workspaces
             .space_for_handle_mut(to)
             .unwrap(); // checked above
-        let focus_stack = to_workspace.focus_stack.get(&seat);
+        let focus_stack = seat.map(|seat| to_workspace.focus_stack.get(&seat));
         if window_state.layer == ManagedLayer::Floating {
             to_workspace.floating_layer.map(mapped.clone(), None);
         } else {
             to_workspace.tiling_layer.map(
                 mapped.clone(),
-                Some(focus_stack.iter()),
+                focus_stack.as_ref().map(|x| x.iter()),
                 direction,
                 true,
             );
@@ -1852,7 +1854,9 @@ impl Shell {
         }
 
         if follow {
-            Common::set_focus(state, Some(&focus_target), &seat, None);
+            if let Some(seat) = seat {
+                Common::set_focus(state, Some(&focus_target), &seat, None);
+            }
         }
 
         new_pos
@@ -1893,7 +1897,13 @@ impl Shell {
         let from = from_workspace.handle;
 
         Ok(Shell::move_window(
-            state, seat, &mapped, &from, &to, follow, direction,
+            state,
+            Some(seat),
+            &mapped,
+            &from,
+            &to,
+            follow,
+            direction,
         ))
     }
 

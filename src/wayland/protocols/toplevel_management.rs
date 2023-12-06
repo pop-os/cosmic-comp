@@ -12,8 +12,11 @@ use smithay::{
 };
 
 pub use cosmic_protocols::toplevel_management::v1::server::zcosmic_toplevel_manager_v1::ZcosmicToplelevelManagementCapabilitiesV1 as ManagementCapabilities;
-use cosmic_protocols::toplevel_management::v1::server::zcosmic_toplevel_manager_v1::{
-    self, ZcosmicToplevelManagerV1,
+use cosmic_protocols::{
+    toplevel_management::v1::server::zcosmic_toplevel_manager_v1::{
+        self, ZcosmicToplevelManagerV1,
+    },
+    workspace::v1::server::zcosmic_workspace_handle_v1::ZcosmicWorkspaceHandleV1,
 };
 
 use super::toplevel_info::{window_from_handle, ToplevelInfoHandler, ToplevelState, Window};
@@ -58,6 +61,14 @@ where
     fn unmaximize(&mut self, dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {}
     fn minimize(&mut self, dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {}
     fn unminimize(&mut self, dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {}
+    fn move_to_workspace(
+        &mut self,
+        dh: &DisplayHandle,
+        window: &<Self as ToplevelInfoHandler>::Window,
+        workspace: ZcosmicWorkspaceHandleV1,
+        output: Output,
+    ) {
+    }
 }
 
 pub struct ToplevelManagerGlobalData {
@@ -79,7 +90,7 @@ impl ToplevelManagementState {
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
         let global = dh.create_global::<D, ZcosmicToplevelManagerV1, _>(
-            1,
+            2,
             ToplevelManagerGlobalData {
                 filter: Box::new(client_filter),
             },
@@ -219,6 +230,16 @@ where
                             );
                         }
                     }
+                }
+            }
+            zcosmic_toplevel_manager_v1::Request::MoveToWorkspace {
+                toplevel,
+                workspace,
+                output,
+            } => {
+                let window = window_from_handle(toplevel).unwrap();
+                if let Some(output) = Output::from_resource(&output) {
+                    state.move_to_workspace(dh, &window, workspace, output);
                 }
             }
             _ => unreachable!(),
