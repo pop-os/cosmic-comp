@@ -71,7 +71,7 @@ use super::{
         target::{KeyboardFocusTarget, PointerFocusTarget, WindowGroup},
         FocusDirection, FocusStack, FocusStackMut,
     },
-    grabs::{ResizeEdge, ResizeGrab},
+    grabs::{ReleaseMode, ResizeEdge, ResizeGrab},
     layout::tiling::{Data, NodeDesc},
     CosmicMappedRenderElement, CosmicSurface, ResizeDirection, ResizeMode,
 };
@@ -640,7 +640,13 @@ impl Workspace {
 
         if self.floating_layer.mapped().any(|m| m == mapped) {
             self.floating_layer
-                .resize_request(mapped, seat, start_data.clone(), edges)
+                .resize_request(
+                    mapped,
+                    seat,
+                    start_data.clone(),
+                    edges,
+                    ReleaseMode::NoMouseButtons,
+                )
                 .map(Into::into)
         } else {
             None
@@ -678,6 +684,7 @@ impl Workspace {
         output: &Output,
         start_data: PointerGrabStartData<State>,
         indicator_thickness: u8,
+        release: ReleaseMode,
     ) -> Option<MoveGrab> {
         let pointer = seat.get_pointer().unwrap();
         let pos = pointer.current_location().as_global();
@@ -720,6 +727,7 @@ impl Workspace {
             initial_window_location,
             indicator_thickness,
             was_tiled.is_some(),
+            release,
         ))
     }
 

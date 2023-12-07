@@ -2,7 +2,7 @@
 
 use crate::{
     backend::render::cursor::{CursorShape, CursorState},
-    shell::{focus::target::PointerFocusTarget, layout::Orientation},
+    shell::{focus::target::PointerFocusTarget, grabs::ReleaseMode, layout::Orientation},
     utils::prelude::*,
 };
 use id_tree::{NodeId, Tree};
@@ -74,20 +74,19 @@ impl PointerTarget<State> for ResizeForkTarget {
                 let location = pointer.current_location();
                 pointer.set_grab(
                     state,
-                    ResizeForkGrab {
-                        start_data: PointerGrabStartData {
+                    ResizeForkGrab::new(
+                        PointerGrabStartData {
                             focus: None,
                             button,
                             location,
                         },
-                        old_tree: None,
-                        accumulated_delta: 0.0,
-                        last_loc: location,
+                        location.as_global(),
                         node,
-                        output,
                         left_up_idx,
                         orientation,
-                    },
+                        output,
+                        ReleaseMode::NoMouseButtons,
+                    ),
                     serial,
                     Focus::Clear,
                 )
@@ -117,13 +116,38 @@ impl PointerTarget<State> for ResizeForkTarget {
 
 pub struct ResizeForkGrab {
     start_data: PointerGrabStartData<State>,
-    last_loc: Point<f64, Logical>,
+    last_loc: Point<f64, Global>,
     old_tree: Option<Tree<Data>>,
     accumulated_delta: f64,
     node: NodeId,
     output: WeakOutput,
     left_up_idx: usize,
     orientation: Orientation,
+    release: ReleaseMode,
+}
+
+impl ResizeForkGrab {
+    pub fn new(
+        start_data: PointerGrabStartData<State>,
+        pointer_loc: Point<f64, Global>,
+        node: NodeId,
+        idx: usize,
+        orientation: Orientation,
+        output: WeakOutput,
+        release: ReleaseMode,
+    ) -> ResizeForkGrab {
+        ResizeForkGrab {
+            start_data,
+            last_loc: pointer_loc,
+            old_tree: None,
+            accumulated_delta: 0.0,
+            node,
+            output,
+            left_up_idx: idx,
+            orientation,
+            release,
+        }
+    }
 }
 
 impl PointerGrab<State> for ResizeForkGrab {
@@ -137,7 +161,7 @@ impl PointerGrab<State> for ResizeForkGrab {
         // While the grab is active, no client has pointer focus
         handle.motion(data, None, event);
 
-        let delta = event.location - self.last_loc;
+        let delta = event.location - self.last_loc.as_logical();
 
         if let Some(output) = self.output.upgrade() {
             let tiling_layer = &mut data.common.shell.active_space_mut(&output).tiling_layer;
@@ -234,7 +258,7 @@ impl PointerGrab<State> for ResizeForkGrab {
                     _ => unreachable!(),
                 }
 
-                self.last_loc = event.location;
+                self.last_loc = event.location.as_global();
                 let blocker = TilingLayout::update_positions(&output, tree, gaps);
                 tiling_layer.pending_blockers.extend(blocker);
             } else {
@@ -261,9 +285,17 @@ impl PointerGrab<State> for ResizeForkGrab {
         event: &ButtonEvent,
     ) {
         handle.button(data, event);
-        if handle.current_pressed().is_empty() {
-            // No more buttons are pressed, release the grab.
-            handle.unset_grab(data, event.serial, event.time, true);
+        match self.release {
+            ReleaseMode::NoMouseButtons => {
+                if handle.current_pressed().is_empty() {
+                    handle.unset_grab(data, event.serial, event.time, true);
+                }
+            }
+            ReleaseMode::Click => {
+                if event.state == ButtonState::Pressed {
+                    handle.unset_grab(data, event.serial, event.time, true);
+                }
+            }
         }
     }
 

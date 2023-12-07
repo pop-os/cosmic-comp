@@ -4,11 +4,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::{
     shell::{
-        element::CosmicMapped, focus::target::PointerFocusTarget, grabs::ResizeEdge, CosmicSurface,
+        element::CosmicMapped,
+        focus::target::PointerFocusTarget,
+        grabs::{ReleaseMode, ResizeEdge},
+        CosmicSurface,
     },
     utils::prelude::*,
 };
 use smithay::{
+    backend::input::ButtonState,
     desktop::space::SpaceElement,
     input::{
         pointer::{
@@ -20,7 +24,7 @@ use smithay::{
         },
         Seat,
     },
-    utils::{IsAlive, Logical, Point, Rectangle, Size},
+    utils::{IsAlive, Logical, Point, Rectangle, Serial, Size},
 };
 
 /// Information about the resize operation.
@@ -50,6 +54,7 @@ pub struct ResizeSurfaceGrab {
     edges: ResizeEdge,
     initial_window_size: Size<i32, Logical>,
     last_window_size: Size<i32, Logical>,
+    release: ReleaseMode,
 }
 
 impl PointerGrab<State> for ResizeSurfaceGrab {
@@ -140,36 +145,16 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
         event: &ButtonEvent,
     ) {
         handle.button(data, event);
-        if handle.current_pressed().is_empty() {
-            // No more buttons are pressed, release the grab.
-            self.seat
-                .user_data()
-                .get::<ResizeGrabMarker>()
-                .unwrap()
-                .0
-                .store(false, Ordering::SeqCst);
-            handle.unset_grab(data, event.serial, event.time, true);
-
-            // If toplevel is dead, we can't resize it, so we return early.
-            if !self.window.alive() {
-                return;
+        match self.release {
+            ReleaseMode::NoMouseButtons => {
+                if handle.current_pressed().is_empty() {
+                    self.ungrab(data, handle, event.serial, event.time);
+                }
             }
-
-            self.window.set_resizing(false);
-            self.window.set_geometry(Rectangle::from_loc_and_size(
-                match self.window.active_window() {
-                    CosmicSurface::X11(s) => s.geometry().loc.as_global(),
-                    _ => (0, 0).into(),
-                },
-                self.last_window_size.as_global(),
-            ));
-            self.window.configure();
-
-            let mut resize_state = self.window.resize_state.lock().unwrap();
-            if let Some(ResizeState::Resizing(resize_data)) = *resize_state {
-                *resize_state = Some(ResizeState::WaitingForCommit(resize_data));
-            } else {
-                panic!("invalid resize state: {:?}", resize_state);
+            ReleaseMode::Click => {
+                if event.state == ButtonState::Pressed {
+                    self.ungrab(data, handle, event.serial, event.time);
+                }
             }
         }
     }
@@ -280,6 +265,7 @@ impl ResizeSurfaceGrab {
         initial_window_location: Point<i32, Local>,
         initial_window_size: Size<i32, Logical>,
         seat: &Seat<State>,
+        release: ReleaseMode,
     ) -> ResizeSurfaceGrab {
         let resize_state = ResizeState::Resizing(ResizeData {
             edges,
@@ -300,6 +286,7 @@ impl ResizeSurfaceGrab {
             edges,
             initial_window_size,
             last_window_size: initial_window_size,
+            release,
         }
     }
 
@@ -373,6 +360,45 @@ impl ResizeSurfaceGrab {
                     .space
                     .map_element(window, new_location.as_logical(), false);
             }
+        }
+    }
+
+    fn ungrab(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        serial: Serial,
+        time: u32,
+    ) {
+        // No more buttons are pressed, release the grab.
+        self.seat
+            .user_data()
+            .get::<ResizeGrabMarker>()
+            .unwrap()
+            .0
+            .store(false, Ordering::SeqCst);
+        handle.unset_grab(data, serial, time, true);
+
+        // If toplevel is dead, we can't resize it, so we return early.
+        if !self.window.alive() {
+            return;
+        }
+
+        self.window.set_resizing(false);
+        self.window.set_geometry(Rectangle::from_loc_and_size(
+            match self.window.active_window() {
+                CosmicSurface::X11(s) => s.geometry().loc.as_global(),
+                _ => (0, 0).into(),
+            },
+            self.last_window_size.as_global(),
+        ));
+        self.window.configure();
+
+        let mut resize_state = self.window.resize_state.lock().unwrap();
+        if let Some(ResizeState::Resizing(resize_data)) = *resize_state {
+            *resize_state = Some(ResizeState::WaitingForCommit(resize_data));
+        } else {
+            panic!("invalid resize state: {:?}", resize_state);
         }
     }
 }

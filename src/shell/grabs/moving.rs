@@ -19,9 +19,12 @@ use crate::{
 
 use cosmic::theme::CosmicTheme;
 use smithay::{
-    backend::renderer::{
-        element::{utils::RescaleRenderElement, AsRenderElements, RenderElement},
-        ImportAll, ImportMem, Renderer,
+    backend::{
+        input::ButtonState,
+        renderer::{
+            element::{utils::RescaleRenderElement, AsRenderElements, RenderElement},
+            ImportAll, ImportMem, Renderer,
+        },
     },
     desktop::space::SpaceElement,
     input::{
@@ -45,6 +48,8 @@ use std::{
     sync::atomic::Ordering,
     time::{Duration, Instant},
 };
+
+use super::ReleaseMode;
 
 pub type SeatMoveGrabState = RefCell<Option<MoveGrabState>>;
 
@@ -217,6 +222,7 @@ pub struct MoveGrab {
     cursor_output: Output,
     window_outputs: HashSet<Output>,
     tiling: bool,
+    release: ReleaseMode,
 }
 
 impl PointerGrab<State> for MoveGrab {
@@ -334,8 +340,17 @@ impl PointerGrab<State> for MoveGrab {
         event: &ButtonEvent,
     ) {
         handle.button(state, event);
-        if handle.current_pressed().is_empty() {
-            self.ungrab(state, handle, event.serial, event.time);
+        match self.release {
+            ReleaseMode::NoMouseButtons => {
+                if handle.current_pressed().is_empty() {
+                    self.ungrab(state, handle, event.serial, event.time);
+                }
+            }
+            ReleaseMode::Click => {
+                if event.state == ButtonState::Pressed {
+                    self.ungrab(state, handle, event.serial, event.time);
+                }
+            }
         }
     }
 
@@ -438,6 +453,7 @@ impl MoveGrab {
         initial_window_location: Point<i32, Global>,
         indicator_thickness: u8,
         was_tiled: bool,
+        release: ReleaseMode,
     ) -> MoveGrab {
         let output = seat.active_output();
         let mut outputs = HashSet::new();
@@ -473,6 +489,7 @@ impl MoveGrab {
             window_outputs: outputs,
             cursor_output: output,
             tiling: was_tiled,
+            release,
         }
     }
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    shell::{element::CosmicWindow, CosmicMapped, CosmicSurface, ManagedLayer},
+    shell::{element::CosmicWindow, grabs::ReleaseMode, CosmicMapped, CosmicSurface, ManagedLayer},
     utils::prelude::*,
     wayland::protocols::screencopy::SessionType,
 };
@@ -139,7 +139,13 @@ impl XdgShellHandler for State {
 
     fn move_request(&mut self, surface: ToplevelSurface, seat: WlSeat, serial: Serial) {
         let seat = Seat::from_resource(&seat).unwrap();
-        Shell::move_request(self, surface.wl_surface(), &seat, serial)
+        Shell::move_request(
+            self,
+            surface.wl_surface(),
+            &seat,
+            serial,
+            ReleaseMode::NoMouseButtons,
+        )
     }
 
     fn resize_request(
