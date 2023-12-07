@@ -1,5 +1,5 @@
 use crate::{
-    shell::Shell,
+    shell::{grabs::ReleaseMode, Shell},
     state::State,
     utils::{
         iced::{IcedElement, Program},
@@ -255,7 +255,13 @@ impl Program for CosmicWindowInternal {
                 if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
                     if let Some(surface) = self.window.wl_surface() {
                         loop_handle.insert_idle(move |state| {
-                            Shell::move_request(state, &surface, &seat, serial);
+                            Shell::move_request(
+                                state,
+                                &surface,
+                                &seat,
+                                serial,
+                                ReleaseMode::NoMouseButtons,
+                            );
                         });
                     }
                 }

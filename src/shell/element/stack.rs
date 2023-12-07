@@ -1,7 +1,10 @@
 use super::{CosmicMapped, CosmicSurface, CosmicWindow};
 use crate::{
     shell::{
-        focus::FocusDirection, grabs::MoveGrab, layout::tiling::NodeDesc, Direction, Shell, Trigger,
+        focus::FocusDirection,
+        grabs::{MoveGrab, ReleaseMode},
+        layout::tiling::NodeDesc,
+        Direction, Shell, Trigger,
     },
     state::State,
     utils::iced::{IcedElement, Program},
@@ -650,7 +653,13 @@ impl Program for CosmicStackInternal {
                     .wl_surface()
                     {
                         loop_handle.insert_idle(move |state| {
-                            Shell::move_request(state, &surface, &seat, serial);
+                            Shell::move_request(
+                                state,
+                                &surface,
+                                &seat,
+                                serial,
+                                ReleaseMode::NoMouseButtons,
+                            );
                         });
                     }
                 }
@@ -1113,6 +1122,7 @@ impl PointerTarget<State> for CosmicStack {
                                         pos.to_i32_round() - Point::from((elem_geo.size.w / 2, 24)),
                                         indicator_thickness,
                                         was_tiled,
+                                        ReleaseMode::NoMouseButtons,
                                     );
                                     if grab.is_tiling_grab() {
                                         data.common.shell.set_overview_mode(

@@ -1883,9 +1883,10 @@ impl Shell {
         surface: &WlSurface,
         seat: &Seat<State>,
         serial: impl Into<Option<Serial>>,
+        release: ReleaseMode,
     ) {
         let serial = serial.into();
-        if let Some(start_data) = check_grab_preconditions(&seat, surface, serial) {
+        if let Some(start_data) = check_grab_preconditions(&seat, surface, serial, release) {
             if let Some(mapped) = state.common.shell.element_for_wl_surface(surface).cloned() {
                 if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
                     let output = seat.active_output();
@@ -1901,6 +1902,7 @@ impl Shell {
                         &output,
                         start_data,
                         active_hint as u8,
+                        release,
                     ) {
                         let handle = workspace.handle;
                         state
@@ -1939,7 +1941,9 @@ impl Shell {
         edges: ResizeEdge,
     ) {
         let serial = serial.into();
-        if let Some(start_data) = check_grab_preconditions(&seat, surface, serial) {
+        if let Some(start_data) =
+            check_grab_preconditions(&seat, surface, serial, ReleaseMode::NoMouseButtons)
+        {
             if let Some(mapped) = state.common.shell.element_for_wl_surface(surface).cloned() {
                 if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
                     if let Some(grab) = workspace.resize_request(&mapped, &seat, start_data, edges)
@@ -2028,32 +2032,41 @@ pub fn check_grab_preconditions(
     seat: &Seat<State>,
     surface: &WlSurface,
     serial: Option<Serial>,
+    release: ReleaseMode,
 ) -> Option<PointerGrabStartData<State>> {
     use smithay::reexports::wayland_server::Resource;
 
     // TODO: touch resize.
     let pointer = seat.get_pointer().unwrap();
 
-    // Check that this surface has a click grab.
-    if !match serial {
-        Some(serial) => pointer.has_grab(serial),
-        None => pointer.is_grabbed(),
-    } {
-        return None;
-    }
+    let start_data = pointer
+        .grab_start_data()
+        .unwrap_or_else(|| PointerGrabStartData {
+            focus: pointer.current_focus().map(|f| (f, Point::from((0, 0)))),
+            button: 0x110,
+            location: pointer.current_location(),
+        });
 
-    let start_data = pointer.grab_start_data().unwrap();
+    if release == ReleaseMode::NoMouseButtons {
+        // Check that this surface has a click grab.
+        if !match serial {
+            Some(serial) => pointer.has_grab(serial),
+            None => pointer.is_grabbed(),
+        } {
+            return None;
+        }
 
-    // If the focus was for a different surface, ignore the request.
-    if start_data.focus.is_none()
-        || !start_data
-            .focus
-            .as_ref()
-            .unwrap()
-            .0
-            .same_client_as(&surface.id())
-    {
-        return None;
+        // If the focus was for a different surface, ignore the request.
+        if start_data.focus.is_none()
+            || !start_data
+                .focus
+                .as_ref()
+                .unwrap()
+                .0
+                .same_client_as(&surface.id())
+        {
+            return None;
+        }
     }
 
     Some(start_data)

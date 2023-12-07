@@ -17,6 +17,11 @@ use super::{
     layout::{floating::ResizeSurfaceGrab, tiling::ResizeForkGrab},
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ReleaseMode {
+    Click,
+    NoMouseButtons,
+}
 mod moving;
 pub use self::moving::*;
 

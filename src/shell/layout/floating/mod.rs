@@ -32,7 +32,7 @@ use crate::{
             CosmicMapped, CosmicMappedRenderElement, CosmicWindow,
         },
         focus::{target::KeyboardFocusTarget, FocusDirection, FocusStackMut},
-        grabs::ResizeEdge,
+        grabs::{ReleaseMode, ResizeEdge},
         CosmicSurface, Direction, FocusResult, MoveResult, ResizeDirection, ResizeMode,
     },
     state::State,
@@ -459,6 +459,7 @@ impl FloatingLayout {
         seat: &Seat<State>,
         start_data: PointerGrabStartData<State>,
         edges: ResizeEdge,
+        release: ReleaseMode,
     ) -> Option<ResizeSurfaceGrab> {
         if seat.get_pointer().is_some() {
             let location = self.space.element_location(&mapped).unwrap().as_local();
@@ -472,6 +473,7 @@ impl FloatingLayout {
                 location,
                 size,
                 seat,
+                release,
             ))
         } else {
             None
