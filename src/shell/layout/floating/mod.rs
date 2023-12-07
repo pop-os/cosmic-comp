@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
@@ -31,7 +31,7 @@ use crate::{
             window::CosmicWindowRenderElement,
             CosmicMapped, CosmicMappedRenderElement, CosmicWindow,
         },
-        focus::{target::KeyboardFocusTarget, FocusDirection},
+        focus::{target::KeyboardFocusTarget, FocusDirection, FocusStackMut},
         grabs::ResizeEdge,
         CosmicSurface, Direction, FocusResult, MoveResult, ResizeDirection, ResizeMode,
     },
@@ -51,6 +51,7 @@ pub struct FloatingLayout {
     spawn_order: Vec<CosmicMapped>,
     tiling_animations: HashMap<CosmicMapped, (Instant, Rectangle<i32, Local>)>,
     dirty: AtomicBool,
+    pub theme: cosmic::Theme,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -125,8 +126,11 @@ impl TiledCorners {
 }
 
 impl FloatingLayout {
-    pub fn new(output: &Output) -> FloatingLayout {
-        let mut layout = Self::default();
+    pub fn new(theme: cosmic::Theme, output: &Output) -> FloatingLayout {
+        let mut layout = Self {
+            theme,
+            ..Default::default()
+        };
         layout.space.map_output(output, (0, 0));
         layout
     }
@@ -630,6 +634,69 @@ impl FloatingLayout {
 
         next.map(|elem| FocusResult::Some(KeyboardFocusTarget::Element(elem.clone())))
             .unwrap_or(FocusResult::None)
+    }
+
+    pub fn toggle_stacking(&mut self, mapped: &CosmicMapped) -> Option<KeyboardFocusTarget> {
+        if !self.space.elements().any(|m| m == mapped) {
+            return None;
+        }
+
+        let output = self.space.outputs().next().unwrap().clone();
+        let mut mapped = mapped.clone();
+        let geo = self.space.element_geometry(&mapped).unwrap();
+        let location = geo.loc;
+
+        if mapped.is_window() {
+            // if it is just a window
+            self.space.unmap_elem(&mapped);
+            mapped.convert_to_stack((&output, mapped.bbox()), self.theme.clone());
+            self.map_internal(mapped.clone(), Some(location.as_local()), Some(geo.size));
+            Some(KeyboardFocusTarget::Element(mapped))
+        } else {
+            // if we have a stack
+            let mut surfaces = mapped.windows().map(|(s, _)| s).collect::<VecDeque<_>>();
+            let first = surfaces.pop_front().expect("Stack without a window?");
+
+            self.space.unmap_elem(&mapped);
+            let handle = mapped.loop_handle();
+            mapped.convert_to_surface(first, (&output, mapped.bbox()), self.theme.clone());
+
+            // map the rest
+            for other in surfaces {
+                other.try_force_undecorated(false);
+                other.set_tiled(false);
+                let window = CosmicMapped::from(CosmicWindow::new(
+                    other,
+                    handle.clone(),
+                    self.theme.clone(),
+                ));
+                window.output_enter(&output, window.bbox());
+
+                {
+                    let layer_map = layer_map_for_output(&output);
+                    window.set_bounds(layer_map.non_exclusive_zone().size);
+                }
+
+                self.map(window, None);
+            }
+            self.space.map_element(mapped.clone(), location, false);
+
+            Some(KeyboardFocusTarget::Element(mapped))
+        }
+    }
+
+    pub fn toggle_stacking_focused<'a>(
+        &mut self,
+        seat: &Seat<State>,
+        mut focus_stack: FocusStackMut,
+    ) -> Option<KeyboardFocusTarget> {
+        let Some(KeyboardFocusTarget::Element(elem)) = seat.get_keyboard().unwrap().current_focus() else {
+            return None;
+        };
+
+        let res = self.toggle_stacking(&elem);
+        focus_stack.append(&elem);
+        res
     }
 
     pub fn move_current_element<'a>(
