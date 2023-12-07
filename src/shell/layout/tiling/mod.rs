@@ -2209,6 +2209,43 @@ impl TilingLayout {
         edges
     }
 
+    pub fn menu_resize(
+        &self,
+        mut node_id: NodeId,
+        edge: ResizeEdge,
+    ) -> Option<(NodeId, usize, Orientation)> {
+        let tree = self.tree();
+
+        while let Some(group_id) = tree.get(&node_id).unwrap().parent().cloned() {
+            let orientation = tree.get(&group_id).unwrap().data().orientation();
+            let node_idx = tree
+                .children_ids(&group_id)
+                .unwrap()
+                .position(|id| id == &node_id)
+                .unwrap();
+            let total = tree.children_ids(&group_id).unwrap().count();
+            if orientation == Orientation::Vertical {
+                if node_idx > 0 && edge.contains(ResizeEdge::LEFT) {
+                    return Some((group_id, node_idx - 1, orientation));
+                }
+                if node_idx < total - 1 && edge.contains(ResizeEdge::RIGHT) {
+                    return Some((group_id, node_idx, orientation));
+                }
+            } else {
+                if node_idx > 0 && edge.contains(ResizeEdge::TOP) {
+                    return Some((group_id, node_idx - 1, orientation));
+                }
+                if node_idx < total - 1 && edge.contains(ResizeEdge::BOTTOM) {
+                    return Some((group_id, node_idx, orientation));
+                }
+            }
+
+            node_id = group_id;
+        }
+
+        None
+    }
+
     pub fn resize(
         &mut self,
         focused: &KeyboardFocusTarget,

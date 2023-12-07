@@ -5,7 +5,7 @@ use crate::{
     config::{xkb_config_to_wl, Action, Config, KeyPattern},
     shell::{
         focus::{target::PointerFocusTarget, FocusDirection},
-        grabs::{ResizeEdge, SeatMoveGrabState},
+        grabs::{ResizeEdge, SeatMenuGrabState, SeatMoveGrabState},
         layout::{
             floating::ResizeGrabMarker,
             tiling::{SwapWindowGrab, TilingLayout},
@@ -185,6 +185,7 @@ pub fn add_seat(
     userdata.insert_if_missing(SupressedKeys::default);
     userdata.insert_if_missing(ModifiersShortcutQueue::default);
     userdata.insert_if_missing(SeatMoveGrabState::default);
+    userdata.insert_if_missing(SeatMenuGrabState::default);
     userdata.insert_if_missing(CursorState::default);
     userdata.insert_if_missing(|| ActiveOutput(RefCell::new(output.clone())));
     userdata.insert_if_missing(|| RefCell::new(CursorImageStatus::default_named()));

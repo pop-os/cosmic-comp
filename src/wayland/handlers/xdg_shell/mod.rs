@@ -17,7 +17,7 @@ use smithay::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::protocol::{wl_output::WlOutput, wl_seat::WlSeat},
     },
-    utils::Serial,
+    utils::{Logical, Point, Serial},
     wayland::{
         seat::WaylandFocus,
         shell::xdg::{
@@ -358,6 +358,17 @@ impl XdgShellHandler for State {
                 }),
             );
         }
+    }
+
+    fn show_window_menu(
+        &mut self,
+        surface: ToplevelSurface,
+        seat: WlSeat,
+        serial: Serial,
+        location: Point<i32, Logical>,
+    ) {
+        let seat = Seat::from_resource(&seat).unwrap();
+        Shell::menu_request(self, surface.wl_surface(), &seat, serial, location)
     }
 }
 

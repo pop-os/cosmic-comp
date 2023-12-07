@@ -22,6 +22,9 @@ pub enum ReleaseMode {
     Click,
     NoMouseButtons,
 }
+
+mod menu;
+pub use self::menu::*;
 mod moving;
 pub use self::moving::*;
 
