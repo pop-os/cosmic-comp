@@ -12,9 +12,9 @@ use cosmic::{
         keyboard::{Event as KeyboardEvent, Modifiers as IcedModifiers},
         mouse::{Button as MouseButton, Cursor, Event as MouseEvent, ScrollDelta},
         window::{Event as WindowEvent, Id},
-        Command, Point as IcedPoint, Rectangle as IcedRectangle, Size as IcedSize,
+        Command, Limits, Point as IcedPoint, Rectangle as IcedRectangle, Size as IcedSize,
     },
-    iced_core::{clipboard::Null as NullClipboard, renderer::Style, Color},
+    iced_core::{clipboard::Null as NullClipboard, renderer::Style, Color, Length},
     iced_renderer::{graphics::Renderer as IcedGraphicsRenderer, Renderer as IcedRenderer},
     iced_runtime::{
         command::Action,
@@ -275,6 +275,21 @@ impl<P: Program + Send + 'static> IcedElement<P> {
     pub fn with_program<R>(&self, func: impl FnOnce(&P) -> R) -> R {
         let internal = self.0.lock().unwrap();
         func(&internal.state.program().0)
+    }
+
+    pub fn minimum_size(&self) -> Size<i32, Logical> {
+        let internal = self.0.lock().unwrap();
+        let element = internal.state.program().0.view();
+        let node = element
+            .as_widget()
+            .layout(
+                &internal.renderer,
+                &Limits::new(IcedSize::ZERO, IcedSize::INFINITY)
+                    .width(Length::Shrink)
+                    .height(Length::Shrink),
+            )
+            .size();
+        Size::from((node.width.ceil() as i32, node.height.ceil() as i32))
     }
 
     pub fn loop_handle(&self) -> LoopHandle<'static, crate::state::State> {
