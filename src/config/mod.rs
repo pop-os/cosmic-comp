@@ -54,6 +54,36 @@ pub struct StaticConfig {
     pub data_control_enabled: bool,
 }
 
+impl StaticConfig {
+    pub fn get_shortcut_for_action(&self, action: &Action) -> Option<String> {
+        let possible_variants = self
+            .key_bindings
+            .iter()
+            .filter(|(_, a)| *a == action)
+            .map(|(b, _)| b)
+            .collect::<Vec<_>>();
+
+        possible_variants
+            .iter()
+            .find(|b| b.key.is_none()) // prefer short bindings
+            .or_else(|| {
+                possible_variants
+                    .iter() // prefer bindings containing arrow keys
+                    .find(|b| {
+                        matches!(
+                            b.key,
+                            Some(Keysym::Down)
+                                | Some(Keysym::Up)
+                                | Some(Keysym::Left)
+                                | Some(Keysym::Right)
+                        )
+                    })
+            })
+            .or_else(|| possible_variants.first()) // take the first one
+            .map(|binding| binding.to_string())
+    }
+}
+
 #[derive(Debug)]
 pub struct DynamicConfig {
     outputs: (Option<PathBuf>, OutputsConfig),
