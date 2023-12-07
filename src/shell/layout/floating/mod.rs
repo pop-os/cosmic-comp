@@ -240,8 +240,8 @@ impl FloatingLayout {
                     .into(),
             );
 
-            // if the last_geometry is too large
-            if win_geo.size.w > output_geometry.size.w {
+            // if the current geometry is too large
+            if win_geo.size.w > max_size.w {
                 // try a more reasonable size
                 let mut width = output_geometry.size.w / 3 * 2;
                 if max_size.w != 0 {
@@ -255,7 +255,7 @@ impl FloatingLayout {
                 // but no matter the supported sizes, don't be larger than our non-exclusive-zone
                 win_geo.size.w = std::cmp::min(width, output_geometry.size.w);
             }
-            if win_geo.size.h > output_geometry.size.h {
+            if win_geo.size.h > max_size.h {
                 // try a more reasonable size
                 let mut height = output_geometry.size.h / 3 * 2;
                 if max_size.h != 0 {
@@ -424,7 +424,7 @@ impl FloatingLayout {
                     window.configure();
                 }
             }
-        } else if !window.is_maximized(true) || !window.is_fullscreen(true) {
+        } else if !window.is_maximized(true) && !window.is_fullscreen(true) {
             if let Some(location) = self.space.element_location(window) {
                 *window.last_geometry.lock().unwrap() = Some(
                     Rectangle::from_loc_and_size(
