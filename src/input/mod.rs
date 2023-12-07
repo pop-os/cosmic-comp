@@ -1821,8 +1821,9 @@ impl State {
             Action::ToggleStacking => {
                 let output = seat.active_output();
                 let workspace = self.common.shell.active_space_mut(&output);
-                let focus_stack = workspace.focus_stack.get_mut(seat);
-                workspace.tiling_layer.toggle_stacking(seat, focus_stack);
+                if let Some(new_focus) = workspace.toggle_stacking_focused(seat) {
+                    Common::set_focus(self, Some(&new_focus), seat, Some(serial));
+                }
             }
             Action::ToggleTiling => {
                 let output = seat.active_output();
