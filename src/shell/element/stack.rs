@@ -590,6 +590,7 @@ impl CosmicStack {
 #[derive(Debug, Clone, Copy)]
 pub enum Message {
     DragStart,
+    Menu,
     PotentialTabDragStart(usize),
     Activate(usize),
     Close(usize),
@@ -684,6 +685,41 @@ impl Program for CosmicStackInternal {
             Message::Scrolled => {
                 self.scroll_to_focus.store(false, Ordering::SeqCst);
             }
+            Message::Menu => {
+                if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
+                    if let Some(surface) = self.windows.lock().unwrap()
+                        [self.active.load(Ordering::SeqCst)]
+                    .wl_surface()
+                    {
+                        loop_handle.insert_idle(move |state| {
+                            if let Some(mapped) =
+                                state.common.shell.element_for_wl_surface(&surface).cloned()
+                            {
+                                if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
+                                    let position = workspace
+                                        .element_geometry(&mapped)
+                                        .unwrap()
+                                        .loc
+                                        .to_global(&workspace.output);
+                                    let mut cursor = seat
+                                        .get_pointer()
+                                        .unwrap()
+                                        .current_location()
+                                        .to_i32_round();
+                                    cursor.y -= TAB_HEIGHT;
+                                    Shell::menu_request(
+                                        state,
+                                        &surface,
+                                        &seat,
+                                        serial,
+                                        cursor - position.as_logical(),
+                                    );
+                                }
+                            }
+                        });
+                    }
+                }
+            }
             _ => unreachable!(),
         }
         Command::none()
@@ -718,6 +754,7 @@ impl Program for CosmicStackInternal {
                 .center_y()
                 .apply(iced_widget::mouse_area)
                 .on_press(Message::DragStart)
+                .on_right_press(Message::Menu)
                 .into(),
             CosmicElement::new(
                 Tabs::new(
@@ -750,6 +787,7 @@ impl Program for CosmicStackInternal {
                 .padding([64, 24])
                 .apply(iced_widget::mouse_area)
                 .on_press(Message::DragStart)
+                .on_right_press(Message::Menu)
                 .into(),
         ];
 

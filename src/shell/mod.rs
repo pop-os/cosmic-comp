@@ -15,7 +15,7 @@ use smithay::{
         layer_map_for_output, space::SpaceElement, LayerSurface, PopupManager, WindowSurfaceType,
     },
     input::{
-        pointer::{Focus, GrabStartData as PointerGrabStartData},
+        pointer::{Focus, GrabStartData as PointerGrabStartData, MotionEvent},
         Seat,
     },
     output::Output,
@@ -26,7 +26,7 @@ use smithay::{
         },
         wayland_server::{protocol::wl_surface::WlSurface, Client, DisplayHandle},
     },
-    utils::{Point, Rectangle, Serial, SERIAL_COUNTER},
+    utils::{Logical, Point, Rectangle, Serial, SERIAL_COUNTER},
     wayland::{
         compositor::with_states,
         seat::WaylandFocus,
@@ -74,8 +74,11 @@ use self::{
         CosmicWindow,
     },
     focus::target::KeyboardFocusTarget,
-    grabs::ResizeEdge,
-    layout::{floating::ResizeState, tiling::NodeDesc},
+    grabs::{window_items, MenuGrab, ReleaseMode, ResizeEdge, ResizeGrab},
+    layout::{
+        floating::ResizeState,
+        tiling::{NodeDesc, ResizeForkGrab, TilingLayout},
+    },
 };
 
 const ANIMATION_DURATION: Duration = Duration::from_millis(200);
@@ -1008,6 +1011,7 @@ impl Workspaces {
     }
 }
 
+#[derive(Debug)]
 pub struct InvalidWorkspaceIndex;
 
 impl Shell {
@@ -1018,7 +1022,11 @@ impl Shell {
         );
         let xdg_shell_state = XdgShellState::new_with_capabilities::<State>(
             dh,
-            [WmCapabilities::Fullscreen, WmCapabilities::Maximize],
+            [
+                WmCapabilities::Fullscreen,
+                WmCapabilities::Maximize,
+                WmCapabilities::WindowMenu,
+            ],
         );
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
         let toplevel_info_state =
@@ -1708,10 +1716,27 @@ impl Shell {
         follow: bool,
         direction: Option<Direction>,
     ) -> Option<Point<i32, Global>> {
-        let from_output = state.common.shell.space_for_handle(from)?.output.clone();
-        let to_output = state.common.shell.space_for_handle(to)?.output.clone();
+        let from_output = state
+            .common
+            .shell
+            .workspaces
+            .space_for_handle(from)?
+            .output
+            .clone();
+        let to_output = state
+            .common
+            .shell
+            .workspaces
+            .space_for_handle(to)?
+            .output
+            .clone();
 
-        let from_workspace = state.common.shell.space_for_handle_mut(from).unwrap(); // checked above
+        let from_workspace = state
+            .common
+            .shell
+            .workspaces
+            .space_for_handle_mut(from)
+            .unwrap(); // checked above
         let window_state = from_workspace.unmap(mapped)?;
         let elements = from_workspace.mapped().cloned().collect::<Vec<_>>();
 
@@ -1744,7 +1769,12 @@ impl Shell {
             None
         };
 
-        let mut to_workspace = state.common.shell.space_for_handle_mut(to).unwrap(); // checked above
+        let mut to_workspace = state
+            .common
+            .shell
+            .workspaces
+            .space_for_handle_mut(to)
+            .unwrap(); // checked above
         let focus_stack = to_workspace.focus_stack.get(&seat);
         if window_state.layer == ManagedLayer::Floating {
             to_workspace.floating_layer.map(mapped.clone(), None);
@@ -1774,7 +1804,12 @@ impl Shell {
                         &new_workspace_handle,
                         layer,
                     );
-                    to_workspace = state.common.shell.space_for_handle_mut(to).unwrap();
+                    to_workspace = state
+                        .common
+                        .shell
+                        .workspaces
+                        .space_for_handle_mut(to)
+                        .unwrap();
                     // checked above
                 }
             }
@@ -1878,6 +1913,75 @@ impl Shell {
         }
     }
 
+    pub fn menu_request(
+        state: &mut State,
+        surface: &WlSurface,
+        seat: &Seat<State>,
+        serial: impl Into<Option<Serial>>,
+        location: Point<i32, Logical>,
+    ) {
+        let serial = serial.into();
+        if let Some(start_data) =
+            check_grab_preconditions(&seat, surface, serial, ReleaseMode::NoMouseButtons)
+        {
+            if let Some(mapped) = state.common.shell.element_for_wl_surface(surface).cloned() {
+                if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
+                    let output = seat.active_output();
+                    let (_, relative_loc) = mapped
+                        .windows()
+                        .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
+                        .unwrap();
+
+                    let global_position = (workspace.element_geometry(&mapped).unwrap().loc
+                        + relative_loc.as_local()
+                        + location.as_local())
+                    .to_global(&output);
+                    let is_tiled = workspace.is_tiled(&mapped);
+                    let edge = if is_tiled {
+                        mapped
+                            .tiling_node_id
+                            .lock()
+                            .unwrap()
+                            .clone()
+                            .map(|node_id| {
+                                TilingLayout::possible_resizes(
+                                    workspace.tiling_layer.tree(),
+                                    node_id,
+                                )
+                            })
+                            .unwrap_or(ResizeEdge::empty())
+                    } else {
+                        ResizeEdge::all()
+                    };
+                    let is_stacked = mapped.is_stack();
+                    let tiling_enabled = workspace.tiling_enabled;
+                    let grab = MenuGrab::new(
+                        start_data,
+                        seat,
+                        window_items(
+                            &mapped,
+                            is_tiled,
+                            is_stacked,
+                            tiling_enabled,
+                            edge,
+                            &state.common.config.static_conf,
+                        )
+                        .into_iter(),
+                        global_position,
+                        state.common.event_loop_handle.clone(),
+                        state.common.theme.clone(),
+                    );
+                    seat.get_pointer().unwrap().set_grab(
+                        state,
+                        grab,
+                        serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
+                        Focus::Keep,
+                    );
+                }
+            }
+        }
+    }
+
     pub fn move_request(
         state: &mut State,
         surface: &WlSurface,
@@ -1929,6 +2033,81 @@ impl Shell {
                         );
                     }
                 }
+            }
+        }
+    }
+
+    pub fn menu_resize_request(
+        state: &mut State,
+        mapped: &CosmicMapped,
+        seat: &Seat<State>,
+        edge: ResizeEdge,
+    ) {
+        let Some(surface) = mapped.active_window().wl_surface() else { return };
+        if let Some(start_data) =
+            check_grab_preconditions(&seat, &surface, None, ReleaseMode::Click)
+        {
+            if let Some(ws) = state.common.shell.space_for_mut(mapped) {
+                let geometry = ws.element_geometry(mapped).unwrap().to_global(ws.output());
+
+                let new_loc = if edge.contains(ResizeEdge::LEFT) {
+                    Point::<i32, Global>::from((
+                        geometry.loc.x,
+                        geometry.loc.y + (geometry.size.h / 2),
+                    ))
+                } else if edge.contains(ResizeEdge::RIGHT) {
+                    Point::<i32, Global>::from((
+                        geometry.loc.x + geometry.size.w,
+                        geometry.loc.y + (geometry.size.h / 2),
+                    ))
+                } else if edge.contains(ResizeEdge::TOP) {
+                    Point::<i32, Global>::from((
+                        geometry.loc.x + (geometry.size.w / 2),
+                        geometry.loc.y,
+                    ))
+                } else if edge.contains(ResizeEdge::BOTTOM) {
+                    Point::<i32, Global>::from((
+                        geometry.loc.x + (geometry.size.w / 2),
+                        geometry.loc.y + geometry.size.h,
+                    ))
+                } else {
+                    return;
+                };
+
+                let grab: ResizeGrab = if ws.is_floating(mapped) {
+                    let Some(grab) = ws.floating_layer.resize_request(mapped, seat, start_data, edge, ReleaseMode::Click) else {
+                        return
+                    };
+                    grab.into()
+                } else {
+                    let Some(node_id) = mapped.tiling_node_id.lock().unwrap().clone() else { return };
+                    let Some((node, left_up_idx, orientation)) =
+                        ws.tiling_layer.menu_resize(node_id, edge) else { return };
+                    ResizeForkGrab::new(
+                        start_data,
+                        new_loc.to_f64(),
+                        node,
+                        left_up_idx,
+                        orientation,
+                        ws.output.downgrade(),
+                        ReleaseMode::Click,
+                    )
+                    .into()
+                };
+
+                let ptr = seat.get_pointer().unwrap();
+                let serial = SERIAL_COUNTER.next_serial();
+                ptr.motion(
+                    state,
+                    Some((mapped.clone().into(), (new_loc - geometry.loc).as_logical())),
+                    &MotionEvent {
+                        location: new_loc.as_logical().to_f64(),
+                        serial,
+                        time: 0,
+                    },
+                );
+                ptr.frame(state);
+                ptr.set_grab(state, grab, serial, Focus::Keep);
             }
         }
     }

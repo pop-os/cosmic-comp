@@ -8,7 +8,7 @@ use crate::{
     wayland::handlers::screencopy::ScreencopySessions,
 };
 use calloop::LoopHandle;
-use cosmic::iced::Command;
+use cosmic::{iced::Command, widget::mouse_area, Apply};
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
 use smithay::{
     backend::{
@@ -240,6 +240,7 @@ pub enum Message {
     DragStart,
     Maximize,
     Close,
+    Menu,
 }
 
 impl Program for CosmicWindowInternal {
@@ -284,6 +285,38 @@ impl Program for CosmicWindowInternal {
                 }
             }
             Message::Close => self.window.close(),
+            Message::Menu => {
+                if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
+                    if let Some(surface) = self.window.wl_surface() {
+                        loop_handle.insert_idle(move |state| {
+                            if let Some(mapped) =
+                                state.common.shell.element_for_wl_surface(&surface).cloned()
+                            {
+                                if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
+                                    let position = workspace
+                                        .element_geometry(&mapped)
+                                        .unwrap()
+                                        .loc
+                                        .to_global(&workspace.output);
+                                    let mut cursor = seat
+                                        .get_pointer()
+                                        .unwrap()
+                                        .current_location()
+                                        .to_i32_round();
+                                    cursor.y -= SSD_HEIGHT;
+                                    Shell::menu_request(
+                                        state,
+                                        &surface,
+                                        &seat,
+                                        serial,
+                                        cursor - position.as_logical(),
+                                    );
+                                }
+                            }
+                        });
+                    }
+                }
+            }
         }
         Command::none()
     }
@@ -355,7 +388,9 @@ impl Program for CosmicWindowInternal {
             .on_drag(Message::DragStart)
             .on_maximize(Message::Maximize)
             .on_close(Message::Close)
-            .into_element()
+            .apply(mouse_area)
+            .on_right_press(Message::Menu)
+            .into()
     }
 }
 

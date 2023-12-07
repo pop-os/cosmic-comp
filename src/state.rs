@@ -84,6 +84,7 @@ use smithay::{
         xwayland_keyboard_grab::XWaylandKeyboardGrabState,
     },
 };
+use time::UtcOffset;
 use tracing::error;
 
 use std::{cell::RefCell, ffi::OsString, time::Duration};
@@ -144,6 +145,7 @@ pub struct Common {
 
     pub clock: Clock<Monotonic>,
     pub should_stop: bool,
+    pub local_offset: time::UtcOffset,
 
     pub theme: cosmic::Theme,
 
@@ -332,6 +334,7 @@ impl State {
             .with_context(|| "Failed to load languages")
             .unwrap();
 
+        let local_offset = UtcOffset::current_local_offset().expect("No yet multithreaded");
         let clock = Clock::new();
         let config = Config::load(&handle);
         let compositor_state = CompositorState::new::<Self>(dh);
@@ -384,6 +387,7 @@ impl State {
 
                 seats: Vec::new(),
                 last_active_seat: None,
+                local_offset,
 
                 clock,
                 should_stop: false,

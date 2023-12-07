@@ -12,7 +12,9 @@ use std::{
 use crate::debug::{fps_ui, profiler_ui};
 use crate::{
     shell::{
-        focus::target::WindowGroup, grabs::SeatMoveGrabState, layout::tiling::ANIMATION_DURATION,
+        focus::target::WindowGroup,
+        grabs::{SeatMenuGrabState, SeatMoveGrabState},
+        layout::tiling::ANIMATION_DURATION,
         CosmicMapped, CosmicMappedRenderElement, OverviewMode, SessionLock, Trigger,
         WorkspaceRenderElement,
     },
@@ -421,6 +423,17 @@ where
             .map(|state| state.render::<E, R>(renderer, seat, output, theme))
         {
             elements.extend(grab_elements);
+        }
+
+        if let Some(grab_elements) = seat
+            .user_data()
+            .get::<SeatMenuGrabState>()
+            .unwrap()
+            .borrow()
+            .as_ref()
+            .map(|state| state.render::<CosmicMappedRenderElement<R>, R>(renderer, output))
+        {
+            elements.extend(grab_elements.into_iter().map(Into::into));
         }
     }
 
