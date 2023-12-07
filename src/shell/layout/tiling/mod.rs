@@ -382,7 +382,9 @@ impl TilingLayout {
         let gaps = self.gaps();
 
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
-        TilingLayout::map_to_tree(&mut tree, window, &self.output, focus_stack, direction);
+        let last_active = focus_stack
+            .and_then(|focus_stack| TilingLayout::last_active_window(&mut tree, focus_stack));
+        TilingLayout::map_to_tree(&mut tree, window, &self.output, last_active, direction);
         let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
         self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
     }
@@ -391,7 +393,7 @@ impl TilingLayout {
         mut tree: &mut Tree<Data>,
         window: impl Into<CosmicMapped>,
         output: &Output,
-        focus_stack: Option<impl Iterator<Item = &'a CosmicMapped> + 'a>,
+        node: Option<(NodeId, CosmicMapped)>,
         direction: Option<Direction>,
     ) {
         let window = window.into();
@@ -422,10 +424,7 @@ impl TilingLayout {
                 tree.insert(new_window, InsertBehavior::AsRoot).unwrap()
             }
         } else {
-            let last_active = focus_stack
-                .and_then(|focus_stack| TilingLayout::last_active_window(&mut tree, focus_stack));
-
-            if let Some((ref node_id, mut last_active_window)) = last_active {
+            if let Some((ref node_id, mut last_active_window)) = node {
                 if window.is_window() && last_active_window.is_stack() {
                     let surface = window.active_window();
                     last_active_window
@@ -1902,11 +1901,107 @@ impl TilingLayout {
         }
     }
 
-    pub fn toggle_stacking<'a>(&mut self, seat: &Seat<State>, mut focus_stack: FocusStackMut) {
+    pub fn toggle_stacking(&mut self, mapped: &CosmicMapped) -> Option<KeyboardFocusTarget> {
+        let gaps = self.gaps();
+
+        let Some(node_id) = mapped.tiling_node_id.lock().unwrap().clone() else {
+            return None;
+        };
+
+        let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
+        if tree.get(&node_id).is_err() {
+            return None;
+        }
+
+        let result = if mapped.is_window() {
+            // if it is just a window
+            match tree.get_mut(&node_id).unwrap().data_mut() {
+                Data::Mapped { mapped, .. } => {
+                    mapped.convert_to_stack((&self.output, mapped.bbox()), self.theme.clone());
+                }
+                _ => unreachable!(),
+            };
+
+            KeyboardFocusTarget::Element(mapped.clone())
+        } else {
+            // if we have a stack
+            let mut surfaces = mapped.windows().map(|(s, _)| s);
+            let first = surfaces.next().expect("Stack without a window?");
+
+            let handle = match tree.get_mut(&node_id).unwrap().data_mut() {
+                Data::Mapped { mapped, .. } => {
+                    let handle = mapped.loop_handle();
+                    mapped.convert_to_surface(
+                        first,
+                        (&self.output, mapped.bbox()),
+                        self.theme.clone(),
+                    );
+                    handle
+                }
+                _ => unreachable!(),
+            };
+
+            // map the rest
+            let mut current_node = (node_id.clone(), mapped.clone());
+            for other in surfaces {
+                other.try_force_undecorated(false);
+                other.set_tiled(false);
+                let window = CosmicMapped::from(CosmicWindow::new(
+                    other,
+                    handle.clone(),
+                    self.theme.clone(),
+                ));
+                window.output_enter(&self.output, window.bbox());
+
+                {
+                    let layer_map = layer_map_for_output(&self.output);
+                    window.set_bounds(layer_map.non_exclusive_zone().size);
+                }
+
+                TilingLayout::map_to_tree(
+                    &mut tree,
+                    window.clone(),
+                    &self.output,
+                    Some(current_node),
+                    None,
+                );
+
+                let node = window.tiling_node_id.lock().unwrap().clone().unwrap();
+                current_node = (node, window);
+            }
+
+            // TODO: Focus the new group
+            if let Some(parent) = tree.get(&node_id).unwrap().parent() {
+                let Data::Group { alive, .. } = tree.get(&parent).unwrap().data() else { unreachable!() };
+                KeyboardFocusTarget::Group(WindowGroup {
+                    node: parent.clone(),
+                    alive: Arc::downgrade(alive),
+                    focus_stack: tree
+                        .children_ids(parent)
+                        .unwrap()
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                })
+            } else {
+                KeyboardFocusTarget::Element(mapped.clone())
+            }
+        };
+
+        let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+        self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
+
+        Some(result)
+    }
+
+    pub fn toggle_stacking_focused<'a>(
+        &mut self,
+        seat: &Seat<State>,
+        mut focus_stack: FocusStackMut,
+    ) -> Option<KeyboardFocusTarget> {
         let gaps = self.gaps();
 
         let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
-            return;
+            return None;
         };
 
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
@@ -1915,64 +2010,9 @@ impl TilingLayout {
         {
             match last_active_data {
                 FocusedNodeData::Window(mapped) => {
-                    if mapped.is_window() {
-                        // if it is just a window
-                        match tree.get_mut(&last_active).unwrap().data_mut() {
-                            Data::Mapped { mapped, .. } => {
-                                mapped.convert_to_stack(
-                                    (&self.output, mapped.bbox()),
-                                    self.theme.clone(),
-                                );
-                                focus_stack.append(&mapped);
-                            }
-                            _ => unreachable!(),
-                        };
-                    } else {
-                        // if we have a stack
-                        let mut surfaces = mapped.windows().map(|(s, _)| s);
-                        let first = surfaces.next().expect("Stack without a window?");
-
-                        let handle = match tree.get_mut(&last_active).unwrap().data_mut() {
-                            Data::Mapped { mapped, .. } => {
-                                let handle = mapped.loop_handle();
-                                mapped.convert_to_surface(
-                                    first,
-                                    (&self.output, mapped.bbox()),
-                                    self.theme.clone(),
-                                );
-                                focus_stack.append(&mapped);
-                                handle
-                            }
-                            _ => unreachable!(),
-                        };
-
-                        // map the rest
-                        for other in surfaces {
-                            other.try_force_undecorated(false);
-                            other.set_tiled(false);
-                            let window = CosmicMapped::from(CosmicWindow::new(
-                                other,
-                                handle.clone(),
-                                self.theme.clone(),
-                            ));
-                            window.output_enter(&self.output, window.bbox());
-
-                            {
-                                let layer_map = layer_map_for_output(&self.output);
-                                window.set_bounds(layer_map.non_exclusive_zone().size);
-                            }
-
-                            TilingLayout::map_to_tree(
-                                &mut tree,
-                                window,
-                                &self.output,
-                                Some(focus_stack.iter()),
-                                None,
-                            )
-                        }
-
-                        // TODO: Focus the new group
-                    }
+                    let res = self.toggle_stacking(&mapped);
+                    focus_stack.append(&mapped);
+                    return res;
                 }
                 FocusedNodeData::Group(_, _) => {
                     let mut handle = None;
@@ -1992,7 +2032,7 @@ impl TilingLayout {
                         .collect::<Vec<_>>();
 
                     if surfaces.is_empty() {
-                        return;
+                        return None;
                     }
                     let handle = handle.unwrap();
                     let stack = CosmicStack::new(surfaces.into_iter(), handle, self.theme.clone());
@@ -2010,7 +2050,6 @@ impl TilingLayout {
                     let data = tree.get_mut(&last_active).unwrap().data_mut();
 
                     let geo = *data.geometry();
-                    //stack.set_geometry(geo.as_local());
                     stack.output_enter(&self.output, stack.bbox());
                     stack.set_activate(true);
                     stack.active().send_configure();
@@ -2021,15 +2060,19 @@ impl TilingLayout {
                     *mapped.tiling_node_id.lock().unwrap() = Some(last_active);
                     focus_stack.append(&mapped);
                     *data = Data::Mapped {
-                        mapped,
+                        mapped: mapped.clone(),
                         last_geometry: geo,
                     };
+
+                    let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+                    self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
+
+                    return Some(KeyboardFocusTarget::Element(mapped));
                 }
             }
-
-            let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
-            self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
         }
+
+        None
     }
 
     pub fn recalculate(&mut self) {
@@ -2414,13 +2457,7 @@ impl TilingLayout {
                 }
             }
             _ => {
-                TilingLayout::map_to_tree(
-                    &mut tree,
-                    window.clone(),
-                    &self.output,
-                    Option::<std::iter::Empty<_>>::None,
-                    None,
-                );
+                TilingLayout::map_to_tree(&mut tree, window.clone(), &self.output, None, None);
                 window
             }
         };
