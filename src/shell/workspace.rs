@@ -753,19 +753,27 @@ impl Workspace {
         }
     }
 
-    pub fn toggle_floating_window(&mut self, seat: &Seat<State>) {
+    pub fn toggle_floating_window(&mut self, seat: &Seat<State>, window: &CosmicMapped) {
         if self.tiling_enabled {
-            if let Some(window) = self.focus_stack.get(seat).iter().next().cloned() {
-                if self.tiling_layer.mapped().any(|(_, m, _)| m == &window) {
-                    self.tiling_layer.unmap(&window);
-                    self.floating_layer.map(window, None);
-                } else if self.floating_layer.mapped().any(|w| w == &window) {
-                    let focus_stack = self.focus_stack.get(seat);
-                    self.floating_layer.unmap(&window);
-                    self.tiling_layer
-                        .map(window, Some(focus_stack.iter()), None)
-                }
+            if window.is_maximized(false) {
+                self.unmaximize_request(&window.active_window());
             }
+            if self.tiling_layer.mapped().any(|(_, m, _)| m == window) {
+                self.tiling_layer.unmap(window);
+                self.floating_layer.map(window.clone(), None);
+            } else if self.floating_layer.mapped().any(|w| w == window) {
+                let focus_stack = self.focus_stack.get(seat);
+                self.floating_layer.unmap(&window);
+                self.tiling_layer
+                    .map(window.clone(), Some(focus_stack.iter()), None)
+            }
+        }
+    }
+
+    pub fn toggle_floating_window_focused(&mut self, seat: &Seat<State>) {
+        let maybe_window = self.focus_stack.get(seat).iter().next().cloned();
+        if let Some(window) = maybe_window {
+            self.toggle_floating_window(seat, &window);
         }
     }
 

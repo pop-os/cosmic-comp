@@ -1832,7 +1832,7 @@ impl State {
             Action::ToggleWindowFloating => {
                 let output = seat.active_output();
                 let workspace = self.common.shell.active_space_mut(&output);
-                workspace.toggle_floating_window(seat);
+                workspace.toggle_floating_window_focused(seat);
             }
             Action::Spawn(command) => {
                 let (token, data) = self
