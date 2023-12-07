@@ -993,6 +993,7 @@ impl Workspaces {
             s.theme = theme.clone();
             for mut w in &mut s.workspaces {
                 w.tiling_layer.theme = theme.clone();
+                w.floating_layer.theme = theme.clone();
 
                 w.mapped().for_each(|m| {
                     m.update_theme(theme.clone());

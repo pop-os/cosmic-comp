@@ -218,8 +218,8 @@ impl Workspace {
         tiling_enabled: bool,
         theme: cosmic::Theme,
     ) -> Workspace {
-        let tiling_layer = TilingLayout::new(theme, &output);
-        let floating_layer = FloatingLayout::new(&output);
+        let tiling_layer = TilingLayout::new(theme.clone(), &output);
+        let floating_layer = FloatingLayout::new(theme, &output);
         let output_name = output.name();
 
         Workspace {
