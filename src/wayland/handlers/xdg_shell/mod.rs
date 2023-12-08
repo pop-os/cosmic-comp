@@ -19,9 +19,11 @@ use smithay::{
     },
     utils::{Logical, Point, Serial},
     wayland::{
+        compositor::with_states,
         seat::WaylandFocus,
         shell::xdg::{
-            PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
+            PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
+            XdgShellState,
         },
     },
 };
@@ -365,9 +367,14 @@ impl XdgShellHandler for State {
         surface: ToplevelSurface,
         seat: WlSeat,
         serial: Serial,
-        location: Point<i32, Logical>,
+        mut location: Point<i32, Logical>,
     ) {
         let seat = Seat::from_resource(&seat).unwrap();
+        location -= with_states(surface.wl_surface(), |states| {
+            states.cached_state.current::<SurfaceCachedState>().geometry
+        })
+        .unwrap_or_default()
+        .loc;
         Shell::menu_request(self, surface.wl_surface(), &seat, serial, location)
     }
 }
