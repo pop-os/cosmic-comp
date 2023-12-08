@@ -42,7 +42,7 @@ use smithay::{
         Seat,
     },
     output::Output,
-    utils::{Logical, Point, Scale, Size, Transform},
+    utils::{Logical, Point, Rectangle, Scale, Size, Transform},
     wayland::seat::WaylandFocus,
 };
 use tracing::warn;
@@ -60,7 +60,7 @@ use crate::{
     state::{BackendData, Common, State},
     utils::{
         iced::{IcedElement, Program},
-        prelude::{Global, PointGlobalExt, PointLocalExt, SeatExt},
+        prelude::{Global, OutputExt, PointGlobalExt, PointLocalExt, SeatExt, SizeExt},
     },
 };
 
@@ -239,22 +239,69 @@ impl Program for ContextMenu {
 
                         if let Some(grab_state) = &*grab_state {
                             let mut elements = grab_state.elements.lock().unwrap();
-                            let mut position = elements.last().unwrap().position;
-                            position.x += bounds.width.ceil() as i32;
-                            position.y += bounds.y.ceil() as i32;
 
+                            let position = elements.last().unwrap().position;
                             let element = IcedElement::new(
                                 ContextMenu::new(items),
                                 Size::default(),
                                 state.common.event_loop_handle.clone(),
                                 state.common.theme.clone(),
                             );
+
                             let min_size = element.minimum_size();
                             element.with_program(|p| {
                                 *p.row_width.lock().unwrap() = Some(min_size.w as f32);
                             });
                             element.resize(min_size);
-                            element.output_enter(&seat.active_output(), element.bbox());
+
+                            let output = seat.active_output();
+                            let position = [
+                                // to the right -> down
+                                Rectangle::from_loc_and_size(
+                                    position
+                                        + Point::from((
+                                            bounds.width.ceil() as i32,
+                                            bounds.y.ceil() as i32,
+                                        )),
+                                    min_size.as_global(),
+                                ),
+                                // to the right -> up
+                                Rectangle::from_loc_and_size(
+                                    position
+                                        + Point::from((
+                                            bounds.width.ceil() as i32,
+                                            bounds.y.ceil() as i32 + bounds.height.ceil() as i32
+                                                - min_size.h,
+                                        )),
+                                    min_size.as_global(),
+                                ),
+                                // to the left -> down
+                                Rectangle::from_loc_and_size(
+                                    position + Point::from((-min_size.w, bounds.y.ceil() as i32)),
+                                    min_size.as_global(),
+                                ),
+                                // to the left -> up
+                                Rectangle::from_loc_and_size(
+                                    position
+                                        + Point::from((
+                                            -min_size.w,
+                                            bounds.y.ceil() as i32 + bounds.height.ceil() as i32
+                                                - min_size.h,
+                                        )),
+                                    min_size.as_global(),
+                                ),
+                            ]
+                            .iter()
+                            .rev() // preference of max_by_key is backwards
+                            .max_by_key(|rect| {
+                                output
+                                    .geometry()
+                                    .intersection(**rect)
+                                    .map(|rect| rect.size.w * rect.size.h)
+                            })
+                            .unwrap()
+                            .loc;
+                            element.output_enter(&output, element.bbox());
 
                             elements.push(Element {
                                 iced: element,
@@ -611,7 +658,34 @@ impl MenuGrab {
         });
         element.resize(min_size);
 
-        element.output_enter(&seat.active_output(), element.bbox());
+        let output = seat.active_output();
+        let position = [
+            Rectangle::from_loc_and_size(position, min_size.as_global()), // normal
+            Rectangle::from_loc_and_size(
+                position - Point::from((min_size.w, 0)),
+                min_size.as_global(),
+            ), // flipped left
+            Rectangle::from_loc_and_size(
+                position - Point::from((0, min_size.h)),
+                min_size.as_global(),
+            ), // flipped up
+            Rectangle::from_loc_and_size(
+                position - Point::from((min_size.w, min_size.h)),
+                min_size.as_global(),
+            ), // flipped left & up
+        ]
+        .iter()
+        .rev() // preference of max_by_key is backwards
+        .max_by_key(|rect| {
+            output
+                .geometry()
+                .intersection(**rect)
+                .map(|rect| rect.size.w * rect.size.h)
+        })
+        .unwrap()
+        .loc;
+
+        element.output_enter(&output, element.bbox());
 
         let elements = Arc::new(Mutex::new(vec![Element {
             iced: element,

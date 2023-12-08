@@ -158,21 +158,27 @@ where
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) -> event::Status {
-        let is_over = cursor.is_over(layout.bounds());
+        let mut bounds = layout.bounds();
+
+        // fix padding 1 and event... don't ask.
+        bounds.x -= 1.;
+        bounds.width += 2.;
+
+        let is_over = cursor.is_over(bounds);
         let widget_state = state.state.downcast_mut::<State>();
         match event {
             Event::Mouse(mouse::Event::CursorEntered)
             | Event::Mouse(mouse::Event::CursorMoved { .. })
                 if is_over && !widget_state.cursor_over =>
             {
-                shell.publish(Message::cursor_entered(self.idx, layout.bounds()));
+                shell.publish(Message::cursor_entered(self.idx, bounds));
                 widget_state.cursor_over = true;
             }
             Event::Mouse(mouse::Event::CursorMoved { .. })
             | Event::Mouse(mouse::Event::CursorLeft)
                 if !is_over && widget_state.cursor_over =>
             {
-                shell.publish(Message::cursor_left(self.idx, layout.bounds()));
+                shell.publish(Message::cursor_left(self.idx, bounds));
                 widget_state.cursor_over = false;
             }
             _ => {}
