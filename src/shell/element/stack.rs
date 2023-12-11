@@ -1161,6 +1161,7 @@ impl PointerTarget<State> for CosmicStack {
                                         indicator_thickness,
                                         was_tiled,
                                         ReleaseMode::NoMouseButtons,
+                                        data.common.event_loop_handle.clone(),
                                     );
                                     if grab.is_tiling_grab() {
                                         data.common.shell.set_overview_mode(
