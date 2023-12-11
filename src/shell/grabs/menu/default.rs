@@ -1,0 +1,256 @@
+use smithay::wayland::seat::WaylandFocus;
+
+use crate::{
+    config::{Action, StaticConfig},
+    fl,
+    shell::{element::CosmicMapped, grabs::ReleaseMode, Shell},
+    state::{Common, State},
+    utils::screenshot::screenshot_window,
+};
+
+use super::{Item, ResizeEdge};
+
+fn unstack(state: &mut State, mapped: &CosmicMapped) {
+    let seat = state.common.last_active_seat().clone();
+    let Some(ws) = state.common.shell.space_for_mut(mapped) else { return };
+    if let Some(new_focus) = ws.toggle_stacking(mapped) {
+        Common::set_focus(state, Some(&new_focus), &seat, None);
+    }
+}
+
+fn stack(state: &mut State, mapped: &CosmicMapped) {
+    let seat = state.common.last_active_seat().clone();
+    let Some(ws) = state.common.shell.space_for_mut(&mapped) else { return };
+    if let Some(new_focus) = ws.toggle_stacking(&mapped) {
+        Common::set_focus(state, Some(&new_focus), &seat, None);
+    }
+}
+
+fn maximize_toggle(state: &mut State, mapped: &CosmicMapped) {
+    if let Some(space) = state.common.shell.space_for_mut(mapped) {
+        if mapped.is_maximized(false) {
+            space.unmaximize_request(&mapped.active_window());
+        } else {
+            space.maximize_request(&mapped.active_window());
+        }
+    }
+}
+
+fn move_prev_workspace(state: &mut State, mapped: &CosmicMapped) {
+    let seat = state.common.last_active_seat().clone();
+    let (current_handle, output) = {
+        let Some(ws) = state.common.shell.space_for(mapped) else { return };
+        (ws.handle, ws.output.clone())
+    };
+    let maybe_handle = state
+        .common
+        .shell
+        .workspaces
+        .spaces_for_output(&output)
+        .enumerate()
+        .find_map(|(i, space)| (space.handle == current_handle).then_some(i))
+        .and_then(|i| i.checked_sub(1))
+        .and_then(|i| {
+            state
+                .common
+                .shell
+                .workspaces
+                .get(i, &output)
+                .map(|s| s.handle)
+        });
+    if let Some(prev_handle) = maybe_handle {
+        Shell::move_window(
+            state,
+            &seat,
+            mapped,
+            &current_handle,
+            &prev_handle,
+            true,
+            None,
+        );
+    }
+}
+
+fn move_next_workspace(state: &mut State, mapped: &CosmicMapped) {
+    let seat = state.common.last_active_seat().clone();
+    let (current_handle, output) = {
+        let Some(ws) = state.common.shell.space_for(mapped) else { return };
+        (ws.handle, ws.output.clone())
+    };
+    let maybe_handle = state
+        .common
+        .shell
+        .workspaces
+        .spaces_for_output(&output)
+        .skip_while(|space| space.handle != current_handle)
+        .skip(1)
+        .next()
+        .map(|space| space.handle);
+    if let Some(next_handle) = maybe_handle {
+        Shell::move_window(
+            state,
+            &seat,
+            mapped,
+            &current_handle,
+            &next_handle,
+            true,
+            None,
+        );
+    }
+}
+
+pub fn window_items(
+    window: &CosmicMapped,
+    is_tiled: bool,
+    is_stacked: bool,
+    tiling_enabled: bool,
+    possible_resizes: ResizeEdge,
+    config: &StaticConfig,
+) -> impl Iterator<Item = Item> {
+    //let is_always_on_top = false; // TODO check window (potentially shell?)
+    //let is_always_on_visible_ws = false; // TODO check window (potentially shell?)
+
+    let maximize_clone = window.clone();
+    let tile_clone = window.clone();
+    let move_prev_clone = window.clone();
+    let move_next_clone = window.clone();
+    let move_clone = window.clone();
+    let resize_top_clone = window.clone();
+    let resize_left_clone = window.clone();
+    let resize_right_clone = window.clone();
+    let resize_bottom_clone = window.clone();
+    let unstack_clone = window.clone();
+    let screenshot_clone = window.clone();
+    let stack_clone = window.clone();
+    let close_clone = window.clone();
+
+    vec![
+        is_stacked.then_some(
+            Item::new(fl!("window-menu-unstack"), move |handle| {
+                let mapped = unstack_clone.clone();
+                let _ = handle.insert_idle(move |state| {
+                    unstack(state, &mapped);
+                });
+            })
+            .shortcut(config.get_shortcut_for_action(&Action::ToggleStacking)),
+        ),
+        is_stacked.then_some(Item::Separator),
+        //Some(Item::new(fl!("window-menu-minimize"), |handle| {})),
+        Some(
+            Item::new(fl!("window-menu-maximize"), move |handle| {
+                let mapped = maximize_clone.clone();
+                let _ = handle.insert_idle(move |state| maximize_toggle(state, &mapped));
+            })
+            .shortcut(config.get_shortcut_for_action(&Action::Maximize))
+            .toggled(window.is_maximized(false)),
+        ),
+        tiling_enabled.then_some(
+            Item::new(fl!("window-menu-tiled"), move |handle| {
+                let tile_clone = tile_clone.clone();
+                let _ = handle.insert_idle(move |state| {
+                    let seat = state.common.last_active_seat().clone();
+                    if let Some(ws) = state.common.shell.space_for_mut(&tile_clone) {
+                        ws.toggle_floating_window(&seat, &tile_clone);
+                    }
+                });
+            })
+            .shortcut(config.get_shortcut_for_action(&Action::ToggleWindowFloating))
+            .toggled(!is_tiled),
+        ),
+        Some(Item::Separator),
+        // TODO: Where to save?
+        Some(Item::new(fl!("window-menu-screenshot"), move |handle| {
+            let mapped = screenshot_clone.clone();
+            let _ = handle.insert_idle(move |state| screenshot_window(state, &mapped));
+        })),
+        Some(Item::Separator),
+        Some(Item::new(fl!("window-menu-move"), move |handle| {
+            let move_clone = move_clone.clone();
+            let _ = handle.insert_idle(move |state| {
+                if let Some(surface) = move_clone.wl_surface() {
+                    let seat = state.common.last_active_seat().clone();
+                    Shell::move_request(state, &surface, &seat, None, ReleaseMode::Click);
+                }
+            });
+        })),
+        Some(Item::new_submenu(
+            fl!("window-menu-resize"),
+            vec![
+                Item::new(fl!("window-menu-resize-edge-top"), move |handle| {
+                    let resize_clone = resize_top_clone.clone();
+                    let _ = handle.insert_idle(move |state| {
+                        let seat = state.common.last_active_seat().clone();
+                        Shell::menu_resize_request(state, &resize_clone, &seat, ResizeEdge::TOP);
+                    });
+                })
+                .disabled(!possible_resizes.contains(ResizeEdge::TOP)),
+                Item::new(fl!("window-menu-resize-edge-left"), move |handle| {
+                    let resize_clone = resize_left_clone.clone();
+                    let _ = handle.insert_idle(move |state| {
+                        let seat = state.common.last_active_seat().clone();
+                        Shell::menu_resize_request(state, &resize_clone, &seat, ResizeEdge::LEFT);
+                    });
+                })
+                .disabled(!possible_resizes.contains(ResizeEdge::LEFT)),
+                Item::new(fl!("window-menu-resize-edge-right"), move |handle| {
+                    let resize_clone = resize_right_clone.clone();
+                    let _ = handle.insert_idle(move |state| {
+                        let seat = state.common.last_active_seat().clone();
+                        Shell::menu_resize_request(state, &resize_clone, &seat, ResizeEdge::RIGHT);
+                    });
+                })
+                .disabled(!possible_resizes.contains(ResizeEdge::RIGHT)),
+                Item::new(fl!("window-menu-resize-edge-bottom"), move |handle| {
+                    let resize_clone = resize_bottom_clone.clone();
+                    let _ = handle.insert_idle(move |state| {
+                        let seat = state.common.last_active_seat().clone();
+                        Shell::menu_resize_request(state, &resize_clone, &seat, ResizeEdge::BOTTOM);
+                    });
+                })
+                .disabled(!possible_resizes.contains(ResizeEdge::BOTTOM)),
+            ],
+        )),
+        Some(
+            Item::new(fl!("window-menu-move-prev-workspace"), move |handle| {
+                let mapped = move_prev_clone.clone();
+                let _ = handle.insert_idle(move |state| move_prev_workspace(state, &mapped));
+            })
+            .shortcut(config.get_shortcut_for_action(&Action::MoveToPreviousWorkspace)),
+        ),
+        Some(
+            Item::new(fl!("window-menu-move-next-workspace"), move |handle| {
+                let mapped = move_next_clone.clone();
+                let _ = handle.insert_idle(move |state| move_next_workspace(state, &mapped));
+            })
+            .shortcut(config.get_shortcut_for_action(&Action::MoveToNextWorkspace)),
+        ),
+        (!is_stacked).then_some(
+            Item::new(fl!("window-menu-stack"), move |handle| {
+                let mapped = stack_clone.clone();
+                let _ = handle.insert_idle(move |state| stack(state, &mapped));
+            })
+            .shortcut(config.get_shortcut_for_action(&Action::ToggleStacking)),
+        ),
+        Some(Item::Separator),
+        //Some(Item::new(fl!("window-menu-always-on-top"), |handle| {}).toggled(is_always_on_top)),
+        //Some(Item::new(fl!("window-menu-always-on-visible-ws"), |handle| {})
+        //    .toggled(is_always_on_visible_ws)),
+        //Some(Item::Separator),
+        if is_stacked {
+            Some(Item::new(fl!("window-menu-close-all"), move |_handle| {
+                for (window, _) in close_clone.windows() {
+                    window.close();
+                }
+            }))
+        } else {
+            Some(
+                Item::new(fl!("window-menu-close"), move |_handle| {
+                    close_clone.send_close();
+                })
+                .shortcut(config.get_shortcut_for_action(&Action::Close)),
+            )
+        },
+    ]
+    .into_iter()
+    .flatten()
+}
