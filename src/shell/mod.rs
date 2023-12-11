@@ -2007,6 +2007,7 @@ impl Shell {
                         start_data,
                         active_hint as u8,
                         release,
+                        state.common.event_loop_handle.clone(),
                     ) {
                         let handle = workspace.handle;
                         state

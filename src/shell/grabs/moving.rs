@@ -17,6 +17,7 @@ use crate::{
     utils::prelude::*,
 };
 
+use calloop::LoopHandle;
 use cosmic::theme::CosmicTheme;
 use smithay::{
     backend::{
@@ -39,7 +40,7 @@ use smithay::{
     },
     output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::{IsAlive, Logical, Point, Rectangle, Scale, Serial},
+    utils::{IsAlive, Logical, Point, Rectangle, Scale, SERIAL_COUNTER},
     wayland::compositor::SurfaceData,
 };
 use std::{
@@ -215,6 +216,9 @@ impl MoveGrabState {
     }
 }
 
+struct NotSend<T>(pub T);
+unsafe impl<T> Send for NotSend<T> {}
+
 pub struct MoveGrab {
     window: CosmicMapped,
     start_data: PointerGrabStartData<State>,
@@ -223,6 +227,8 @@ pub struct MoveGrab {
     window_outputs: HashSet<Output>,
     tiling: bool,
     release: ReleaseMode,
+    // SAFETY: This is only used on drop which will always be on the main thread
+    evlh: NotSend<LoopHandle<'static, State>>,
 }
 
 impl PointerGrab<State> for MoveGrab {
@@ -318,7 +324,7 @@ impl PointerGrab<State> for MoveGrab {
         // While the grab is active, no client has pointer focus
         handle.motion(state, None, event);
         if !self.window.alive() {
-            self.ungrab(state, handle, event.serial, event.time);
+            handle.unset_grab(state, event.serial, event.time, true);
         }
     }
 
@@ -343,12 +349,12 @@ impl PointerGrab<State> for MoveGrab {
         match self.release {
             ReleaseMode::NoMouseButtons => {
                 if handle.current_pressed().is_empty() {
-                    self.ungrab(state, handle, event.serial, event.time);
+                    handle.unset_grab(state, event.serial, event.time, true);
                 }
             }
             ReleaseMode::Click => {
                 if event.state == ButtonState::Pressed {
-                    self.ungrab(state, handle, event.serial, event.time);
+                    handle.unset_grab(state, event.serial, event.time, true);
                 }
             }
         }
@@ -454,6 +460,7 @@ impl MoveGrab {
         indicator_thickness: u8,
         was_tiled: bool,
         release: ReleaseMode,
+        evlh: LoopHandle<'static, State>,
     ) -> MoveGrab {
         let output = seat.active_output();
         let mut outputs = HashSet::new();
@@ -490,106 +497,109 @@ impl MoveGrab {
             cursor_output: output,
             tiling: was_tiled,
             release,
+            evlh: NotSend(evlh),
         }
     }
 
     pub fn is_tiling_grab(&self) -> bool {
         self.tiling
     }
+}
 
-    fn ungrab(
-        &mut self,
-        state: &mut State,
-        handle: &mut PointerInnerHandle<'_, State>,
-        serial: Serial,
-        time: u32,
-    ) {
+impl Drop for MoveGrab {
+    fn drop(&mut self) {
         // No more buttons are pressed, release the grab.
         let output = self.seat.active_output();
+        let seat = self.seat.clone();
+        let window_outputs = self.window_outputs.drain().collect::<HashSet<_>>();
+        let tiling = self.tiling;
+        let window = self.window.clone();
 
-        let position: Option<(CosmicMapped, Point<i32, Global>)> = if let Some(grab_state) = self
-            .seat
-            .user_data()
-            .get::<SeatMoveGrabState>()
-            .and_then(|s| s.borrow_mut().take())
-        {
-            if grab_state.window.alive() {
-                let window_location = (handle.current_location().to_i32_round()
-                    + grab_state.window_offset)
-                    .as_global();
+        let _ = self.evlh.0.insert_idle(move |state| {
+            let pointer = seat.get_pointer().unwrap();
 
-                let workspace_handle = state.common.shell.active_space(&output).handle;
-                for old_output in self.window_outputs.iter().filter(|o| *o != &output) {
-                    grab_state.window.output_leave(old_output);
-                }
-                for (window, _) in grab_state.window.windows() {
-                    state
-                        .common
-                        .shell
-                        .toplevel_info_state
-                        .toplevel_enter_workspace(&window, &workspace_handle);
-                    state
-                        .common
-                        .shell
-                        .toplevel_info_state
-                        .toplevel_enter_output(&window, &output);
-                }
+            let position: Option<(CosmicMapped, Point<i32, Global>)> = if let Some(grab_state) =
+                seat.user_data()
+                    .get::<SeatMoveGrabState>()
+                    .and_then(|s| s.borrow_mut().take())
+            {
+                if grab_state.window.alive() {
+                    let window_location = (pointer.current_location().to_i32_round()
+                        + grab_state.window_offset)
+                        .as_global();
 
-                if self.tiling {
-                    let (window, location) = state
-                        .common
-                        .shell
-                        .active_space_mut(&output)
-                        .tiling_layer
-                        .drop_window(grab_state.window);
-                    Some((window, location.to_global(&output)))
+                    let workspace_handle = state.common.shell.active_space(&output).handle;
+                    for old_output in window_outputs.iter().filter(|o| *o != &output) {
+                        grab_state.window.output_leave(old_output);
+                    }
+                    for (window, _) in grab_state.window.windows() {
+                        state
+                            .common
+                            .shell
+                            .toplevel_info_state
+                            .toplevel_enter_workspace(&window, &workspace_handle);
+                        state
+                            .common
+                            .shell
+                            .toplevel_info_state
+                            .toplevel_enter_output(&window, &output);
+                    }
+
+                    if tiling {
+                        let (window, location) = state
+                            .common
+                            .shell
+                            .active_space_mut(&output)
+                            .tiling_layer
+                            .drop_window(grab_state.window);
+                        Some((window, location.to_global(&output)))
+                    } else {
+                        grab_state.window.set_geometry(Rectangle::from_loc_and_size(
+                            window_location,
+                            grab_state.window.geometry().size.as_global(),
+                        ));
+                        let workspace = state.common.shell.active_space_mut(&output);
+                        workspace.floating_layer.map_internal(
+                            grab_state.window,
+                            Some(window_location.to_local(&workspace.output)),
+                            None,
+                        );
+
+                        Some((window.clone(), window_location))
+                    }
                 } else {
-                    grab_state.window.set_geometry(Rectangle::from_loc_and_size(
-                        window_location,
-                        grab_state.window.geometry().size.as_global(),
-                    ));
-                    let workspace = state.common.shell.active_space_mut(&output);
-                    workspace.floating_layer.map_internal(
-                        grab_state.window,
-                        Some(window_location.to_local(&workspace.output)),
-                        None,
-                    );
-
-                    Some((self.window.clone(), window_location))
+                    None
                 }
             } else {
                 None
+            };
+
+            {
+                let cursor_state = seat.user_data().get::<CursorState>().unwrap();
+                cursor_state.set_shape(CursorShape::Default);
             }
-        } else {
-            None
-        };
 
-        handle.unset_grab(state, serial, time, true);
-
-        {
-            let cursor_state = self.seat.user_data().get::<CursorState>().unwrap();
-            cursor_state.set_shape(CursorShape::Default);
-        }
-
-        if let Some((mapped, position)) = position {
-            handle.motion(
-                state,
-                Some((
-                    PointerFocusTarget::from(mapped.clone()),
-                    position.as_logical() - self.window.geometry().loc,
-                )),
-                &MotionEvent {
-                    location: handle.current_location(),
-                    serial,
-                    time,
-                },
-            );
-            Common::set_focus(
-                state,
-                Some(&KeyboardFocusTarget::from(mapped)),
-                &self.seat,
-                Some(serial),
-            )
-        }
+            if let Some((mapped, position)) = position {
+                let serial = SERIAL_COUNTER.next_serial();
+                pointer.motion(
+                    state,
+                    Some((
+                        PointerFocusTarget::from(mapped.clone()),
+                        position.as_logical() - window.geometry().loc,
+                    )),
+                    &MotionEvent {
+                        location: pointer.current_location(),
+                        serial,
+                        time: 0,
+                    },
+                );
+                Common::set_focus(
+                    state,
+                    Some(&KeyboardFocusTarget::from(mapped)),
+                    &seat,
+                    Some(serial),
+                )
+            }
+        });
     }
 }

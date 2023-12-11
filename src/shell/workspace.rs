@@ -21,6 +21,7 @@ use crate::{
     xwayland::XWaylandState,
 };
 
+use calloop::LoopHandle;
 use cosmic::theme::CosmicTheme;
 use id_tree::Tree;
 use indexmap::IndexSet;
@@ -685,6 +686,7 @@ impl Workspace {
         start_data: PointerGrabStartData<State>,
         indicator_thickness: u8,
         release: ReleaseMode,
+        evlh: LoopHandle<'static, State>,
     ) -> Option<MoveGrab> {
         let pointer = seat.get_pointer().unwrap();
         let pos = pointer.current_location().as_global();
@@ -728,6 +730,7 @@ impl Workspace {
             indicator_thickness,
             was_tiled.is_some(),
             release,
+            evlh,
         ))
     }
 
