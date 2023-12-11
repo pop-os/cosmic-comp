@@ -6,7 +6,6 @@ use std::{
     },
 };
 
-use anyhow::Context;
 use calloop::LoopHandle;
 use cosmic::{
     iced::Background,
@@ -18,19 +17,13 @@ use cosmic::{
 };
 use smithay::{
     backend::{
-        allocator::Fourcc,
         input::ButtonState,
         renderer::{
-            damage::OutputDamageTracker,
-            element::{
-                memory::MemoryRenderBufferRenderElement, surface::WaylandSurfaceRenderElement,
-                AsRenderElements,
-            },
-            gles::GlesRenderbuffer,
-            ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
+            element::{memory::MemoryRenderBufferRenderElement, AsRenderElements},
+            ImportMem, Renderer,
         },
     },
-    desktop::{space::SpaceElement, utils::bbox_from_surface_tree},
+    desktop::space::SpaceElement,
     input::{
         pointer::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
@@ -42,22 +35,12 @@ use smithay::{
         Seat,
     },
     output::Output,
-    utils::{Logical, Point, Rectangle, Scale, Size, Transform},
-    wayland::seat::WaylandFocus,
+    utils::{Logical, Point, Rectangle, Size},
 };
-use tracing::warn;
 
 use crate::{
-    backend::kms::source_node_for_surface,
-    config::{Action, StaticConfig},
-    fl,
-    shell::{
-        element::{CosmicMapped, CosmicSurface},
-        focus::target::PointerFocusTarget,
-        grabs::ReleaseMode,
-        Shell,
-    },
-    state::{BackendData, Common, State},
+    shell::focus::target::PointerFocusTarget,
+    state::State,
     utils::{
         iced::{IcedElement, Program},
         prelude::{Global, OutputExt, PointGlobalExt, PointLocalExt, SeatExt, SizeExt},
@@ -66,7 +49,9 @@ use crate::{
 
 use super::ResizeEdge;
 
+mod default;
 mod item;
+pub use self::default::*;
 
 pub struct MenuGrabState {
     elements: Arc<Mutex<Vec<Element>>>,
@@ -720,304 +705,4 @@ impl Drop for MenuGrab {
             .borrow_mut()
             .take();
     }
-}
-
-pub fn window_items(
-    window: &CosmicMapped,
-    is_tiled: bool,
-    is_stacked: bool,
-    tiling_enabled: bool,
-    possible_resizes: ResizeEdge,
-    config: &StaticConfig,
-) -> impl Iterator<Item = Item> {
-    //let is_always_on_top = false; // TODO check window (potentially shell?)
-    //let is_always_on_visible_ws = false; // TODO check window (potentially shell?)
-
-    let maximize_clone = window.clone();
-    let tile_clone = window.clone();
-    let move_prev_clone = window.clone();
-    let move_next_clone = window.clone();
-    let move_clone = window.clone();
-    let resize_top_clone = window.clone();
-    let resize_left_clone = window.clone();
-    let resize_right_clone = window.clone();
-    let resize_bottom_clone = window.clone();
-    let unstack_clone = window.clone();
-    let screenshot_clone = window.clone();
-    let stack_clone = window.clone();
-    let close_clone = window.clone();
-
-    vec![
-        is_stacked.then_some(Item::new(fl!("window-menu-unstack"), move |handle| {
-            let unstack_clone = unstack_clone.clone();
-            let _ = handle.insert_idle(move |state| {
-                let seat = state.common.last_active_seat().clone();
-                let Some(ws) = state.common.shell.space_for_mut(&unstack_clone) else { return };
-                if let Some(new_focus) = ws.toggle_stacking(&unstack_clone) {
-                    Common::set_focus(state, Some(&new_focus), &seat, None);
-                }
-            });
-        })
-        .shortcut(config.get_shortcut_for_action(&Action::ToggleStacking))),
-        is_stacked.then_some(Item::Separator),
-        //Some(Item::new(fl!("window-menu-minimize"), |handle| {})),
-        Some(Item::new(fl!("window-menu-maximize"), move |handle| {
-            let maximize_clone = maximize_clone.clone();
-            let _ = handle.insert_idle(move |state| {
-                if let Some(space) = state.common.shell.space_for_mut(&maximize_clone) {
-                    if maximize_clone.is_maximized(false) {
-                        space.unmaximize_request(&maximize_clone.active_window());
-                    } else {
-                        space.maximize_request(&maximize_clone.active_window());
-                    }
-                }
-            });
-        })
-        .shortcut(config.get_shortcut_for_action(&Action::Maximize))
-        .toggled(window.is_maximized(false))),
-        tiling_enabled.then_some(Item::new(fl!("window-menu-tiled"), move |handle| {
-            let tile_clone = tile_clone.clone();
-            let _ = handle.insert_idle(move |state| {
-                let seat = state.common.last_active_seat().clone();
-                if let Some(ws) = state.common.shell.space_for_mut(&tile_clone) {
-                    ws.toggle_floating_window(&seat, &tile_clone);
-                }
-            });
-        })
-        .shortcut(config.get_shortcut_for_action(&Action::ToggleWindowFloating))
-        .toggled(!is_tiled)),
-        Some(Item::Separator),
-        // TODO: Where to save?
-        Some(Item::new(fl!("window-menu-screenshot"), move |handle| {
-            let screenshot_clone = screenshot_clone.clone();
-            let _ = handle.insert_idle(move |state| {
-                fn render_window<R>(
-                    renderer: &mut R,
-                    window: &CosmicSurface,
-                    offset: &time::UtcOffset,
-                ) -> anyhow::Result<()>
-                where
-                    R: Renderer
-                        + ImportAll
-                        + Offscreen<GlesRenderbuffer>
-                        + ExportMem,
-                    <R as Renderer>::TextureId: 'static,
-                    <R as Renderer>::Error: Send + Sync + 'static,
-                {
-                    let bbox = bbox_from_surface_tree(&window.wl_surface().unwrap(), (0, 0));
-                    let elements = AsRenderElements::<R>::render_elements::<WaylandSurfaceRenderElement<R>>(
-                        window,
-                        renderer,
-                        (-bbox.loc.x, -bbox.loc.y).into(),
-                        Scale::from(1.0),
-                        1.0,
-                    );
-
-                    // TODO: 10-bit
-                    let format = Fourcc::Abgr8888;
-                    let render_buffer =
-                        Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, bbox.size.to_buffer(1, Transform::Normal))?;
-                    renderer.bind(render_buffer)?;
-                    let mut output_damage_tracker = OutputDamageTracker::new(bbox.size.to_physical(1), 1.0, Transform::Normal);
-                    output_damage_tracker.render_output(renderer, 0, &elements, [0.0, 0.0, 0.0, 0.0]).map_err(|err| match err {
-                        smithay::backend::renderer::damage::Error::Rendering(err) => err,
-                        smithay::backend::renderer::damage::Error::OutputNoMode(_) => unreachable!(),
-                    })?;
-                    let mapping = renderer.copy_framebuffer(bbox.to_buffer(1, Transform::Normal, &bbox.size), format)?;
-                    let gl_data = renderer.map_texture(&mapping)?;
-
-                    if let Ok(Some(path)) = xdg_user::pictures() {
-                        let local_timestamp = time::OffsetDateTime::now_utc().to_offset(*offset);
-                        let mut title = window.title();
-                        title.truncate(227); // 255 - time - png
-                        let name = sanitize_filename::sanitize(format!("{}_{}.png",
-                            title,
-                            local_timestamp.format(time::macros::format_description!("[year]-[month]-[day]_[hour]:[minute]:[second]_[subsecond digits:4]")).unwrap(),
-                        ));
-                        let file = std::fs::File::create(path.join(name))?;
-
-                        let ref mut writer = std::io::BufWriter::new(file);
-                        let mut encoder = png::Encoder::new(writer, bbox.size.w as u32, bbox.size.h as u32);
-                        encoder.set_color(png::ColorType::Rgba);
-                        encoder.set_depth(png::BitDepth::Eight);
-                        encoder.set_source_gamma(png::ScaledFloat::new(1.0 / 2.2));     // 1.0 / 2.2, unscaled, but rounded
-                        let source_chromaticities = png::SourceChromaticities::new(     // Using unscaled instantiation here
-                            (0.31270, 0.32900),
-                            (0.64000, 0.33000),
-                            (0.30000, 0.60000),
-                            (0.15000, 0.06000)
-                        );
-                        encoder.set_source_chromaticities(source_chromaticities);
-                        let mut writer = encoder.write_header()?;
-                        writer.write_image_data(&gl_data)?;
-                    }
-
-                    Ok(())
-                }
-
-                if let Some(surface) = screenshot_clone.active_window().wl_surface() {
-                    let res = match &mut state.backend {
-                        BackendData::Kms(kms) => {
-                            let node = source_node_for_surface(&surface, &state.common.display_handle)
-                                .unwrap_or(kms.primary);
-                            kms
-                                .api
-                                .single_renderer(&node)
-                                .with_context(|| "Failed to get renderer for screenshot")
-                                .and_then(|mut multirenderer| render_window(&mut multirenderer, &screenshot_clone.active_window(), &state.common.local_offset))
-                        },
-                        BackendData::Winit(winit) => {
-                            render_window(winit.backend.renderer(), &screenshot_clone.active_window(), &state.common.local_offset)
-                        },
-                        BackendData::X11(x11) => {
-                            render_window(&mut x11.renderer, &screenshot_clone.active_window(), &state.common.local_offset)
-                        },
-                        BackendData::Unset => unreachable!(),
-                    };
-                    if let Err(err) =  res {
-                        warn!(?err, "Failed to take screenshot")
-                    }
-                }
-            });
-        })),
-        Some(Item::Separator),
-        Some(Item::new(fl!("window-menu-move"), move |handle| {
-            let move_clone = move_clone.clone();
-            let _ = handle.insert_idle(move |state| {
-                if let Some(surface) = move_clone.wl_surface() {
-                    let seat = state.common.last_active_seat().clone();
-                    Shell::move_request(state, &surface, &seat, None, ReleaseMode::Click);
-                }
-            });
-        })),
-        Some(Item::new_submenu(fl!("window-menu-resize"), vec![
-            Item::new(fl!("window-menu-resize-edge-top"), move |handle| {
-                let resize_clone = resize_top_clone.clone();
-                let _ = handle.insert_idle(move |state| {
-                    let seat = state.common.last_active_seat().clone();
-                    Shell::menu_resize_request(state, &resize_clone, &seat, ResizeEdge::TOP);
-                });
-            }).disabled(!possible_resizes.contains(ResizeEdge::TOP)),
-            Item::new(fl!("window-menu-resize-edge-left"), move |handle| {
-                let resize_clone = resize_left_clone.clone();
-                let _ = handle.insert_idle(move |state| {
-                    let seat = state.common.last_active_seat().clone();
-                    Shell::menu_resize_request(state, &resize_clone, &seat, ResizeEdge::LEFT);
-                });
-            }).disabled(!possible_resizes.contains(ResizeEdge::LEFT)),
-            Item::new(fl!("window-menu-resize-edge-right"), move |handle| {
-                let resize_clone = resize_right_clone.clone();
-                let _ = handle.insert_idle(move |state| {
-                    let seat = state.common.last_active_seat().clone();
-                    Shell::menu_resize_request(state, &resize_clone, &seat, ResizeEdge::RIGHT);
-                });
-            }).disabled(!possible_resizes.contains(ResizeEdge::RIGHT)),
-            Item::new(fl!("window-menu-resize-edge-bottom"), move |handle| {
-                let resize_clone = resize_bottom_clone.clone();
-                let _ = handle.insert_idle(move |state| {
-                    let seat = state.common.last_active_seat().clone();
-                    Shell::menu_resize_request(state, &resize_clone, &seat, ResizeEdge::BOTTOM);
-                });
-            }).disabled(!possible_resizes.contains(ResizeEdge::BOTTOM)),
-        ])),
-        Some(Item::new(fl!("window-menu-move-prev-workspace"), move |handle| {
-            let move_prev_clone = move_prev_clone.clone();
-            let _ = handle.insert_idle(move |state| {
-                let seat = state.common.last_active_seat().clone();
-                let (current_handle, output) = {
-                    let Some(ws) = state.common.shell.space_for(&move_prev_clone) else { return };
-                    (ws.handle, ws.output.clone())
-                };
-                let maybe_handle = state
-                    .common
-                    .shell
-                    .workspaces
-                    .spaces_for_output(&output)
-                    .enumerate()
-                    .find_map(|(i, space)| (space.handle == current_handle).then_some(i))
-                    .and_then(|i| i.checked_sub(1))
-                    .and_then(|i| {
-                        state
-                            .common
-                            .shell
-                            .workspaces
-                            .get(i, &output)
-                            .map(|s| s.handle)
-                    });
-                if let Some(prev_handle) = maybe_handle
-                {
-                    Shell::move_window(
-                        state,
-                        &seat,
-                        &move_prev_clone,
-                        &current_handle,
-                        &prev_handle,
-                        true,
-                        None,
-                    );
-                }
-            });
-        })
-        .shortcut(config.get_shortcut_for_action(&Action::MoveToPreviousWorkspace))),
-        Some(Item::new(fl!("window-menu-move-next-workspace"), move |handle| {
-            let move_next_clone = move_next_clone.clone();
-            let _ = handle.insert_idle(move |state| {
-                let seat = state.common.last_active_seat().clone();
-                let (current_handle, output) = {
-                    let Some(ws) = state.common.shell.space_for(&move_next_clone) else { return };
-                    (ws.handle, ws.output.clone())
-                };
-                let maybe_handle = state
-                    .common
-                    .shell
-                    .workspaces
-                    .spaces_for_output(&output)
-                    .skip_while(|space| space.handle != current_handle)
-                    .skip(1)
-                    .next()
-                    .map(|space| space.handle);
-                if let Some(next_handle) = maybe_handle
-                {
-                    Shell::move_window(
-                        state,
-                        &seat,
-                        &move_next_clone,
-                        &current_handle,
-                        &next_handle,
-                        true,
-                        None,
-                    );
-                }
-            });
-        })
-        .shortcut(config.get_shortcut_for_action(&Action::MoveToNextWorkspace))),
-        (!is_stacked).then_some(Item::new(fl!("window-menu-stack"), move |handle| {
-            let stack_clone = stack_clone.clone();
-            let _ = handle.insert_idle(move |state| {
-                let seat = state.common.last_active_seat().clone();
-                let Some(ws) = state.common.shell.space_for_mut(&stack_clone) else { return };
-                if let Some(new_focus) = ws.toggle_stacking(&stack_clone) {
-                    Common::set_focus(state, Some(&new_focus), &seat, None);
-                }
-            });
-        })
-        .shortcut(config.get_shortcut_for_action(&Action::ToggleStacking))),
-        Some(Item::Separator),
-        //Some(Item::new(fl!("window-menu-always-on-top"), |handle| {}).toggled(is_always_on_top)),
-        //Some(Item::new(fl!("window-menu-always-on-visible-ws"), |handle| {})
-        //    .toggled(is_always_on_visible_ws)),
-        //Some(Item::Separator),
-        if is_stacked {
-            Some(Item::new(fl!("window-menu-close-all"), move |_handle| {
-                for (window, _) in close_clone.windows() {
-                    window.close();
-                }
-            }))
-        } else {
-            Some(Item::new(fl!("window-menu-close"), move |_handle| {
-                close_clone.send_close();
-            })
-            .shortcut(config.get_shortcut_for_action(&Action::Close)))
-        },
-    ].into_iter().flatten()
 }
