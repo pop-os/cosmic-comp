@@ -1197,6 +1197,24 @@ impl State {
                     window.send_close();
                 }
             }
+            Action::Escape => {
+                self.common
+                    .shell
+                    .set_overview_mode(None, self.common.event_loop_handle.clone());
+                self.common.shell.set_resize_mode(
+                    None,
+                    &self.common.config,
+                    self.common.event_loop_handle.clone(),
+                );
+                let pointer = seat.get_pointer().unwrap();
+                let keyboard = seat.get_keyboard().unwrap();
+                if pointer.is_grabbed() {
+                    pointer.unset_grab(self, serial, time);
+                }
+                if keyboard.is_grabbed() {
+                    keyboard.unset_grab();
+                }
+            }
             Action::Workspace(key_num) => {
                 let current_output = seat.active_output();
                 let workspace = match key_num {
