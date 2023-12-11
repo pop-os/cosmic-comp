@@ -649,10 +649,8 @@ impl Program for CosmicStackInternal {
         match message {
             Message::DragStart => {
                 if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
-                    if let Some(surface) = self.windows.lock().unwrap()
-                        [self.active.load(Ordering::SeqCst)]
-                    .wl_surface()
-                    {
+                    let active = self.active.load(Ordering::SeqCst);
+                    if let Some(surface) = self.windows.lock().unwrap()[active].wl_surface() {
                         loop_handle.insert_idle(move |state| {
                             Shell::move_request(
                                 state,
@@ -687,10 +685,8 @@ impl Program for CosmicStackInternal {
             }
             Message::Menu => {
                 if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
-                    if let Some(surface) = self.windows.lock().unwrap()
-                        [self.active.load(Ordering::SeqCst)]
-                    .wl_surface()
-                    {
+                    let active = self.active.load(Ordering::SeqCst);
+                    if let Some(surface) = self.windows.lock().unwrap()[active].wl_surface() {
                         loop_handle.insert_idle(move |state| {
                             if let Some(mapped) =
                                 state.common.shell.element_for_wl_surface(&surface).cloned()
