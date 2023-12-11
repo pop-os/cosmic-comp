@@ -1372,7 +1372,7 @@ impl Shell {
                 self.overview_mode = OverviewMode::Started(trigger, Instant::now());
             }
         } else {
-            if !matches!(self.overview_mode, OverviewMode::Ended(_, _)) {
+            if matches!(self.overview_mode, OverviewMode::Started(_, _)) {
                 let (reverse_duration, trigger) =
                     if let OverviewMode::Started(trigger, start) = self.overview_mode.clone() {
                         (
