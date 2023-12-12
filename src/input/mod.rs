@@ -23,7 +23,6 @@ use crate::{
 use calloop::{timer::Timer, RegistrationToken};
 use cosmic_comp_config::workspace::WorkspaceLayout;
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
-#[allow(deprecated)]
 use smithay::{
     backend::input::{
         Axis, AxisSource, Device, DeviceCapability, GestureBeginEvent, GestureEndEvent,
@@ -42,10 +41,7 @@ use smithay::{
         Seat, SeatState,
     },
     output::Output,
-    reexports::{
-        input::event::pointer::PointerAxisEvent as LibinputPointerAxisEvent,
-        wayland_server::DisplayHandle,
-    },
+    reexports::wayland_server::DisplayHandle,
     utils::{Point, Serial, SERIAL_COUNTER},
     wayland::{
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
@@ -973,9 +969,8 @@ impl State {
                 }
             }
             InputEvent::PointerAxis { event, .. } => {
-                #[allow(deprecated)]
                 let scroll_factor = if let Some(event) =
-                    <dyn Any>::downcast_ref::<LibinputPointerAxisEvent>(&event)
+                    <dyn Any>::downcast_ref::<smithay::backend::libinput::PointerScrollAxis>(&event)
                 {
                     self.common.config.scroll_factor(&event.device())
                 } else {
@@ -1003,13 +998,13 @@ impl State {
                     }
 
                     let horizontal_amount = event.amount(Axis::Horizontal).unwrap_or_else(|| {
-                        event.amount_discrete(Axis::Horizontal).unwrap_or(0.0) * 3.0
+                        event.amount_v120(Axis::Horizontal).unwrap_or(0.0) * 3.0 / 120.
                     });
                     let vertical_amount = event.amount(Axis::Vertical).unwrap_or_else(|| {
-                        event.amount_discrete(Axis::Vertical).unwrap_or(0.0) * 3.0
+                        event.amount_v120(Axis::Vertical).unwrap_or(0.0) * 3.0 / 120.
                     });
-                    let horizontal_amount_discrete = event.amount_discrete(Axis::Horizontal);
-                    let vertical_amount_discrete = event.amount_discrete(Axis::Vertical);
+                    let horizontal_amount_discrete = event.amount_v120(Axis::Horizontal);
+                    let vertical_amount_discrete = event.amount_v120(Axis::Vertical);
 
                     {
                         let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
@@ -1017,7 +1012,7 @@ impl State {
                             frame =
                                 frame.value(Axis::Horizontal, scroll_factor * horizontal_amount);
                             if let Some(discrete) = horizontal_amount_discrete {
-                                frame = frame.discrete(Axis::Horizontal, discrete as i32);
+                                frame = frame.v120(Axis::Horizontal, discrete as i32);
                             }
                         } else if event.source() == AxisSource::Finger {
                             frame = frame.stop(Axis::Horizontal);
@@ -1025,7 +1020,7 @@ impl State {
                         if vertical_amount != 0.0 {
                             frame = frame.value(Axis::Vertical, scroll_factor * vertical_amount);
                             if let Some(discrete) = vertical_amount_discrete {
-                                frame = frame.discrete(Axis::Vertical, discrete as i32);
+                                frame = frame.v120(Axis::Vertical, discrete as i32);
                             }
                         } else if event.source() == AxisSource::Finger {
                             frame = frame.stop(Axis::Vertical);

@@ -469,10 +469,10 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         internal
             .state
             .queue_event(Event::Mouse(MouseEvent::WheelScrolled {
-                delta: if let Some(discrete) = frame.discrete {
+                delta: if let Some(discrete) = frame.v120 {
                     ScrollDelta::Lines {
-                        x: discrete.0 as f32,
-                        y: discrete.1 as f32,
+                        x: discrete.0 as f32 / 120.,
+                        y: discrete.1 as f32 / 120.,
                     }
                 } else {
                     ScrollDelta::Pixels {
