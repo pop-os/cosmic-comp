@@ -591,6 +591,7 @@ impl CosmicStack {
 pub enum Message {
     DragStart,
     Menu,
+    TabMenu(usize),
     PotentialTabDragStart(usize),
     Activate(usize),
     Close(usize),
@@ -709,6 +710,40 @@ impl Program for CosmicStackInternal {
                                         &seat,
                                         serial,
                                         cursor - position.as_logical(),
+                                        true,
+                                    );
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+            Message::TabMenu(idx) => {
+                if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
+                    if let Some(surface) = self.windows.lock().unwrap()[idx].wl_surface() {
+                        loop_handle.insert_idle(move |state| {
+                            if let Some(mapped) =
+                                state.common.shell.element_for_wl_surface(&surface).cloned()
+                            {
+                                if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
+                                    let position = workspace
+                                        .element_geometry(&mapped)
+                                        .unwrap()
+                                        .loc
+                                        .to_global(&workspace.output);
+                                    let mut cursor = seat
+                                        .get_pointer()
+                                        .unwrap()
+                                        .current_location()
+                                        .to_i32_round();
+                                    cursor.y -= TAB_HEIGHT;
+                                    Shell::menu_request(
+                                        state,
+                                        &surface,
+                                        &seat,
+                                        serial,
+                                        cursor - position.as_logical(),
+                                        false,
                                     );
                                 }
                             }
@@ -763,6 +798,7 @@ impl Program for CosmicStackInternal {
                             user_data.get::<Id>().unwrap().clone(),
                         )
                         .on_press(Message::PotentialTabDragStart(i))
+                        .on_right_click(Message::TabMenu(i))
                         .on_close(Message::Close(i))
                     }),
                     active,

@@ -758,7 +758,7 @@ impl Workspace {
             {
                 self.floating_layer.unmap(&window);
                 self.tiling_layer
-                    .map(window, Some(focus_stack.iter()), None)
+                    .map(window, Some(focus_stack.iter()), None, false)
             }
             self.tiling_enabled = true;
         }
@@ -776,7 +776,7 @@ impl Workspace {
                 let focus_stack = self.focus_stack.get(seat);
                 self.floating_layer.unmap(&window);
                 self.tiling_layer
-                    .map(window.clone(), Some(focus_stack.iter()), None)
+                    .map(window.clone(), Some(focus_stack.iter()), None, false)
             }
         }
     }

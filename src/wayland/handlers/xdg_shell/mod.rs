@@ -375,7 +375,7 @@ impl XdgShellHandler for State {
         })
         .unwrap_or_default()
         .loc;
-        Shell::menu_request(self, surface.wl_surface(), &seat, serial, location)
+        Shell::menu_request(self, surface.wl_surface(), &seat, serial, location, false)
     }
 }
 

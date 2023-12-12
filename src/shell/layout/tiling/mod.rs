@@ -367,10 +367,11 @@ impl TilingLayout {
         window: CosmicMapped,
         focus_stack: Option<impl Iterator<Item = &'a CosmicMapped> + 'a>,
         direction: Option<Direction>,
+        add_to_stack: bool,
     ) {
         window.output_enter(&self.output, window.bbox());
         window.set_bounds(self.output.geometry().size.as_logical());
-        self.map_internal(window, focus_stack, direction);
+        self.map_internal(window, focus_stack, direction, add_to_stack);
     }
 
     pub fn map_internal<'a>(
@@ -378,13 +379,21 @@ impl TilingLayout {
         window: impl Into<CosmicMapped>,
         focus_stack: Option<impl Iterator<Item = &'a CosmicMapped> + 'a>,
         direction: Option<Direction>,
+        add_to_stack: bool,
     ) {
         let gaps = self.gaps();
 
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
         let last_active = focus_stack
             .and_then(|focus_stack| TilingLayout::last_active_window(&mut tree, focus_stack));
-        TilingLayout::map_to_tree(&mut tree, window, &self.output, last_active, direction);
+        TilingLayout::map_to_tree(
+            &mut tree,
+            window,
+            &self.output,
+            last_active,
+            direction,
+            add_to_stack,
+        );
         let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
         self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
     }
@@ -395,6 +404,7 @@ impl TilingLayout {
         output: &Output,
         node: Option<(NodeId, CosmicMapped)>,
         direction: Option<Direction>,
+        add_to_stack: bool,
     ) {
         let window = window.into();
         let new_window = Node::new(Data::Mapped {
@@ -425,7 +435,7 @@ impl TilingLayout {
             }
         } else {
             if let Some((ref node_id, mut last_active_window)) = node {
-                if window.is_window() && last_active_window.is_stack() {
+                if add_to_stack && window.is_window() && last_active_window.is_stack() {
                     let surface = window.active_window();
                     last_active_window
                         .stack_ref_mut()
@@ -533,7 +543,7 @@ impl TilingLayout {
                 }
 
                 mapped.set_tiled(true);
-                other.map(mapped.clone(), Some(focus_stack), None);
+                other.map(mapped.clone(), Some(focus_stack), None, true);
                 return Some(KeyboardFocusTarget::Element(mapped));
             }
             None => {
@@ -1964,6 +1974,7 @@ impl TilingLayout {
                     &self.output,
                     Some(current_node),
                     None,
+                    false,
                 );
 
                 let node = window.tiling_node_id.lock().unwrap().clone().unwrap();
@@ -2494,7 +2505,14 @@ impl TilingLayout {
                 }
             }
             _ => {
-                TilingLayout::map_to_tree(&mut tree, window.clone(), &self.output, None, None);
+                TilingLayout::map_to_tree(
+                    &mut tree,
+                    window.clone(),
+                    &self.output,
+                    None,
+                    None,
+                    false,
+                );
                 window
             }
         };

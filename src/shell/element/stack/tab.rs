@@ -121,6 +121,7 @@ pub struct Tab<Message: TabMessage> {
     font: Font,
     close_message: Option<Message>,
     press_message: Option<Message>,
+    right_click_message: Option<Message>,
     rule_theme: TabRuleTheme,
     background_theme: TabBackgroundTheme,
     active: bool,
@@ -135,6 +136,7 @@ impl<Message: TabMessage> Tab<Message> {
             font: cosmic::font::FONT,
             close_message: None,
             press_message: None,
+            right_click_message: None,
             rule_theme: TabRuleTheme::Default,
             background_theme: TabBackgroundTheme::Default,
             active: false,
@@ -143,6 +145,11 @@ impl<Message: TabMessage> Tab<Message> {
 
     pub fn on_press(mut self, message: Message) -> Self {
         self.press_message = Some(message);
+        self
+    }
+
+    pub fn on_right_click(mut self, message: Message) -> Self {
+        self.right_click_message = Some(message);
         self
     }
 
@@ -238,6 +245,7 @@ impl<Message: TabMessage> Tab<Message> {
             background: self.background_theme.into(),
             elements: items,
             press_message: self.press_message,
+            right_click_message: self.right_click_message,
         }
     }
 }
@@ -256,6 +264,7 @@ pub(super) struct TabInternal<'a, Message: TabMessage, Renderer> {
     background: theme::Container,
     elements: Vec<Element<'a, Message, Renderer>>,
     press_message: Option<Message>,
+    right_click_message: Option<Message>,
 }
 
 impl<'a, Message, Renderer> Widget<Message, Renderer> for TabInternal<'a, Message, Renderer>
@@ -378,6 +387,15 @@ where
                 event::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
             ) {
                 if let Some(message) = self.press_message.clone() {
+                    shell.publish(message);
+                    return event::Status::Captured;
+                }
+            }
+            if matches!(
+                event,
+                event::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right))
+            ) {
+                if let Some(message) = self.right_click_message.clone() {
                     shell.publish(message);
                     return event::Status::Captured;
                 }
