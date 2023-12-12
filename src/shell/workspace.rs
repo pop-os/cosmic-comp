@@ -41,7 +41,7 @@ use smithay::{
     output::Output,
     reexports::{
         wayland_server::{protocol::wl_surface::WlSurface, Client, Resource},
-        x11rb::xcb_ffi::ConnectionError,
+        x11rb::errors::ConnectionError,
     },
     utils::{Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Size},
     wayland::{
