@@ -12,7 +12,7 @@ use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::{
 };
 use smithay::{
     backend::{
-        allocator::dmabuf::Dmabuf,
+        allocator::{dmabuf::Dmabuf, format::get_transparent},
         drm::DrmNode,
         egl::EGLDevice,
         renderer::{
@@ -565,6 +565,7 @@ where
             // ensure consistency, the SHM handler of smithay should ensure this
             assert!((offset + (height - 1) * stride + width * pixelsize) as usize <= len);
 
+            let format = get_transparent(format).unwrap_or(format);
             let mapping = renderer
                 .copy_framebuffer(Rectangle::from_loc_and_size((0, 0), buffer_size), format)?;
             let gl_data = renderer.map_texture(&mapping)?;
