@@ -985,13 +985,19 @@ impl State {
                         if self.common.egui.state.wants_pointer() {
                             self.common.egui.state.handle_pointer_axis(
                                 event
-                                    .amount_discrete(Axis::Horizontal)
-                                    .or_else(|| event.amount(Axis::Horizontal).map(|x| x * 3.0))
-                                    .unwrap_or(0.0),
+                                    .amount_v120(Axis::Horizontal)
+                                    .or_else(|| {
+                                        event.amount(Axis::Horizontal).map(|x| x * 3.0 * 120.0)
+                                    })
+                                    .unwrap_or(0.0)
+                                    / 120.0,
                                 event
-                                    .amount_discrete(Axis::Vertical)
-                                    .or_else(|| event.amount(Axis::Vertical).map(|x| x * 3.0))
-                                    .unwrap_or(0.0),
+                                    .amount_v120(Axis::Vertical)
+                                    .or_else(|| {
+                                        event.amount(Axis::Vertical).map(|x| x * 3.0 * 120.0)
+                                    })
+                                    .unwrap_or(0.0)
+                                    / 120.0,
                             );
                             return;
                         }
