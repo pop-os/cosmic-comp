@@ -74,7 +74,7 @@ use self::{
         CosmicWindow,
     },
     focus::target::KeyboardFocusTarget,
-    grabs::{window_items, MenuGrab, ReleaseMode, ResizeEdge, ResizeGrab},
+    grabs::{tab_items, window_items, Item, MenuGrab, ReleaseMode, ResizeEdge, ResizeGrab},
     layout::{
         floating::ResizeState,
         tiling::{NodeDesc, ResizeForkGrab, TilingLayout},
@@ -1508,11 +1508,12 @@ impl Shell {
             .unwrap();
         match target_layer {
             ManagedLayer::Floating => new_workspace.floating_layer.map(mapped, None),
-            ManagedLayer::Tiling => {
-                new_workspace
-                    .tiling_layer
-                    .map(mapped, Option::<std::iter::Empty<_>>::None, None)
-            }
+            ManagedLayer::Tiling => new_workspace.tiling_layer.map(
+                mapped,
+                Option::<std::iter::Empty<_>>::None,
+                None,
+                false,
+            ),
         };
     }
 
@@ -1640,7 +1641,7 @@ impl Shell {
             let focus_stack = workspace.focus_stack.get(&seat);
             workspace
                 .tiling_layer
-                .map(mapped.clone(), Some(focus_stack.iter()), None);
+                .map(mapped.clone(), Some(focus_stack.iter()), None, true);
         }
 
         if should_be_fullscreen {
@@ -1779,9 +1780,12 @@ impl Shell {
         if window_state.layer == ManagedLayer::Floating {
             to_workspace.floating_layer.map(mapped.clone(), None);
         } else {
-            to_workspace
-                .tiling_layer
-                .map(mapped.clone(), Some(focus_stack.iter()), direction);
+            to_workspace.tiling_layer.map(
+                mapped.clone(),
+                Some(focus_stack.iter()),
+                direction,
+                true,
+            );
         }
 
         let focus_target = if let Some(f) = window_state.was_fullscreen {
@@ -1919,6 +1923,7 @@ impl Shell {
         seat: &Seat<State>,
         serial: impl Into<Option<Serial>>,
         location: Point<i32, Logical>,
+        target_stack: bool,
     ) {
         let serial = serial.into();
         if let Some(start_data) =
@@ -1958,15 +1963,27 @@ impl Shell {
                     let grab = MenuGrab::new(
                         start_data,
                         seat,
-                        window_items(
-                            &mapped,
-                            is_tiled,
-                            is_stacked,
-                            tiling_enabled,
-                            edge,
-                            &state.common.config.static_conf,
-                        )
-                        .into_iter(),
+                        if target_stack || !is_stacked {
+                            Box::new(window_items(
+                                &mapped,
+                                is_tiled,
+                                is_stacked,
+                                tiling_enabled,
+                                edge,
+                                &state.common.config.static_conf,
+                            )) as Box<dyn Iterator<Item = Item>>
+                        } else {
+                            let (tab, _) = mapped
+                                .windows()
+                                .find(|(s, _)| s.wl_surface().as_ref() == Some(surface))
+                                .unwrap();
+                            Box::new(tab_items(
+                                &mapped,
+                                &tab,
+                                is_tiled,
+                                &state.common.config.static_conf,
+                            )) as Box<dyn Iterator<Item = Item>>
+                        },
                         global_position,
                         state.common.event_loop_handle.clone(),
                         state.common.theme.clone(),

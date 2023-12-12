@@ -3,9 +3,13 @@ use smithay::wayland::seat::WaylandFocus;
 use crate::{
     config::{Action, StaticConfig},
     fl,
-    shell::{element::CosmicMapped, grabs::ReleaseMode, Shell},
+    shell::{
+        element::{CosmicMapped, CosmicWindow},
+        grabs::ReleaseMode,
+        CosmicSurface, Shell,
+    },
     state::{Common, State},
-    utils::screenshot::screenshot_window,
+    utils::{prelude::SeatExt, screenshot::screenshot_window},
 };
 
 use super::{Item, ResizeEdge};
@@ -99,6 +103,66 @@ fn move_next_workspace(state: &mut State, mapped: &CosmicMapped) {
     }
 }
 
+pub fn tab_items(
+    stack: &CosmicMapped,
+    tab: &CosmicSurface,
+    is_tiled: bool,
+    config: &StaticConfig,
+) -> impl Iterator<Item = Item> {
+    let unstack_clone_stack = stack.clone();
+    let unstack_clone_tab = tab.clone();
+    let screenshot_clone = tab.clone();
+    let close_clone = tab.clone();
+
+    vec![
+        Item::new(fl!("window-menu-unstack"), move |handle| {
+            let mut mapped = unstack_clone_stack.clone();
+            let surface = unstack_clone_tab.clone();
+            let _ = handle.insert_idle(move |state| {
+                mapped.stack_ref_mut().unwrap().remove_window(&surface);
+                let mapped: CosmicMapped = CosmicWindow::new(
+                    surface,
+                    state.common.event_loop_handle.clone(),
+                    state.common.theme.clone(),
+                )
+                .into();
+
+                let seat = state.common.last_active_seat().clone();
+                let output = seat.active_output();
+                let workspace = state.common.shell.workspaces.active_mut(&output);
+                if is_tiled {
+                    for mapped in workspace
+                        .mapped()
+                        .filter(|m| m.maximized_state.lock().unwrap().is_some())
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                    {
+                        workspace.unmaximize_request(&mapped.active_window());
+                    }
+                    let focus_stack = workspace.focus_stack.get(&seat);
+                    workspace
+                        .tiling_layer
+                        .map(mapped, Some(focus_stack.iter()), None, false);
+                } else {
+                    workspace.floating_layer.map(mapped, None)
+                }
+            });
+        }),
+        Item::Separator,
+        Item::new(fl!("window-menu-screenshot"), move |handle| {
+            let tab = screenshot_clone.clone();
+            let _ = handle.insert_idle(move |state| screenshot_window(state, &tab));
+        }),
+        Item::Separator,
+        Item::new(fl!("window-menu-close"), move |_handle| {
+            close_clone.close();
+        })
+        .shortcut(config.get_shortcut_for_action(&Action::Close)),
+    ]
+    .into_iter()
+}
+
 pub fn window_items(
     window: &CosmicMapped,
     is_tiled: bool,
@@ -126,7 +190,7 @@ pub fn window_items(
 
     vec![
         is_stacked.then_some(
-            Item::new(fl!("window-menu-unstack"), move |handle| {
+            Item::new(fl!("window-menu-unstack-all"), move |handle| {
                 let mapped = unstack_clone.clone();
                 let _ = handle.insert_idle(move |state| {
                     unstack(state, &mapped);
@@ -161,7 +225,8 @@ pub fn window_items(
         // TODO: Where to save?
         Some(Item::new(fl!("window-menu-screenshot"), move |handle| {
             let mapped = screenshot_clone.clone();
-            let _ = handle.insert_idle(move |state| screenshot_window(state, &mapped));
+            let _ =
+                handle.insert_idle(move |state| screenshot_window(state, &mapped.active_window()));
         })),
         Some(Item::Separator),
         Some(Item::new(fl!("window-menu-move"), move |handle| {

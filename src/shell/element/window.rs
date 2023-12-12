@@ -310,6 +310,7 @@ impl Program for CosmicWindowInternal {
                                         &seat,
                                         serial,
                                         cursor - position.as_logical(),
+                                        false,
                                     );
                                 }
                             }

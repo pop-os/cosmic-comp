@@ -17,11 +17,11 @@ use tracing::warn;
 
 use crate::{
     backend::kms::source_node_for_surface,
-    shell::element::{CosmicMapped, CosmicSurface},
+    shell::element::CosmicSurface,
     state::{BackendData, State},
 };
 
-pub fn screenshot_window(state: &mut State, mapped: &CosmicMapped) {
+pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
     fn render_window<R>(
         renderer: &mut R,
         window: &CosmicSurface,
@@ -96,32 +96,26 @@ pub fn screenshot_window(state: &mut State, mapped: &CosmicMapped) {
         Ok(())
     }
 
-    if let Some(surface) = mapped.active_window().wl_surface() {
+    if let Some(wl_surface) = surface.wl_surface() {
         let res = match &mut state.backend {
             BackendData::Kms(kms) => {
-                let node = source_node_for_surface(&surface, &state.common.display_handle)
+                let node = source_node_for_surface(&wl_surface, &state.common.display_handle)
                     .unwrap_or(kms.primary);
                 kms.api
                     .single_renderer(&node)
                     .with_context(|| "Failed to get renderer for screenshot")
                     .and_then(|mut multirenderer| {
-                        render_window(
-                            &mut multirenderer,
-                            &mapped.active_window(),
-                            &state.common.local_offset,
-                        )
+                        render_window(&mut multirenderer, surface, &state.common.local_offset)
                     })
             }
             BackendData::Winit(winit) => render_window(
                 winit.backend.renderer(),
-                &mapped.active_window(),
+                surface,
                 &state.common.local_offset,
             ),
-            BackendData::X11(x11) => render_window(
-                &mut x11.renderer,
-                &mapped.active_window(),
-                &state.common.local_offset,
-            ),
+            BackendData::X11(x11) => {
+                render_window(&mut x11.renderer, surface, &state.common.local_offset)
+            }
             BackendData::Unset => unreachable!(),
         };
         if let Err(err) = res {
