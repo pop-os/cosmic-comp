@@ -2,7 +2,7 @@
 
 use crate::{
     backend::render::cursor::CursorState,
-    config::{xkb_config_to_wl, Action, Config, KeyPattern},
+    config::{xkb_config_to_wl, Action, Config, KeyPattern, KeyModifiers},
     shell::{
         focus::{target::PointerFocusTarget, FocusDirection},
         grabs::{ResizeEdge, SeatMenuGrabState, SeatMoveGrabState},
@@ -282,6 +282,8 @@ impl State {
                     let serial = SERIAL_COUNTER.next_serial();
                     let time = Event::time_msec(&event);
                     let keyboard = seat.get_keyboard().unwrap();
+                    let pointer = seat.get_pointer().unwrap();
+                    let is_grabbed = keyboard.is_grabbed() || pointer.is_grabbed();
                     let current_focus = keyboard.current_focus();
                     if let Some((action, pattern)) = keyboard
                             .input(
@@ -450,6 +452,28 @@ impl State {
                                                 key_pattern
                                             )));
                                         }
+                                    }
+
+                                    // cancel grabs
+                                    if is_grabbed
+                                        && handle.modified_sym() == Keysym::Escape
+                                        && state == KeyState::Pressed
+                                        && !modifiers.alt 
+                                        && !modifiers.ctrl
+                                        && !modifiers.logo
+                                        && !modifiers.shift
+                                    {
+                                        userdata
+                                                .get::<SupressedKeys>()
+                                                .unwrap()
+                                                .add(&handle, None);
+                                        return FilterResult::Intercept(Some((
+                                            Action::Escape,
+                                            KeyPattern {
+                                                modifiers: KeyModifiers::default(),
+                                                key: Some(Keysym::Escape),
+                                            }
+                                        )));
                                     }
 
                                     // Skip released events for initially surpressed keys

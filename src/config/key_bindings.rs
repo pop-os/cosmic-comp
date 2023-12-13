@@ -319,11 +319,4 @@ pub fn add_default_bindings(
         output_next.iter().copied(),
         Action::MoveToOutput(output_next_dir),
     );
-
-    insert_binding(
-        key_bindings,
-        KeyModifiers::default(),
-        std::iter::once(Keysym::Escape),
-        Action::Escape,
-    );
 }
