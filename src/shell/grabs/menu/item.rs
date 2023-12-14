@@ -66,8 +66,14 @@ where
         self.elem.as_widget().height()
     }
 
-    fn layout(&self, renderer: &Renderer, limits: &layout::Limits) -> layout::Node {
-        let node = self.elem.as_widget().layout(renderer, limits);
+    fn layout(
+        &self,
+        state: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        let state = &mut state.children[0];
+        let node = self.elem.as_widget().layout(state, renderer, limits);
         layout::Node::with_children(node.size(), vec![node])
     }
 

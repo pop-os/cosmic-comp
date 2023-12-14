@@ -9,7 +9,7 @@ use std::{
 use calloop::LoopHandle;
 use cosmic::{
     iced::Background,
-    iced_core::{alignment::Horizontal, Length, Rectangle as IcedRectangle},
+    iced_core::{alignment::Horizontal, Length, Pixels, Rectangle as IcedRectangle},
     iced_widget::{self, horizontal_rule, text::Appearance as TextAppearance, Column, Row},
     theme,
     widget::{button, horizontal_space, icon::from_name, text},
@@ -395,7 +395,7 @@ impl Program for ContextMenu {
                         if let Some(shortcut) = shortcut.as_ref() {
                             components.push(
                                 text(shortcut)
-                                    .line_height(20.)
+                                    .line_height(Pixels(20.))
                                     .size(14)
                                     .horizontal_alignment(Horizontal::Right)
                                     .width(Length::Shrink)

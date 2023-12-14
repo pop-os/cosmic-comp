@@ -293,7 +293,7 @@ where
         Length::Fill
     }
 
-    fn layout(&self, renderer: &Renderer, limits: &Limits) -> Node {
+    fn layout(&self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) -> Node {
         let min_size = Size {
             height: TAB_HEIGHT as f32,
             width: if self.active {
@@ -328,6 +328,7 @@ where
             } else {
                 &self.elements[0..2]
             },
+            &mut tree.children,
         )
     }
 

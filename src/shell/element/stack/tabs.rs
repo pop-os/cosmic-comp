@@ -359,7 +359,7 @@ where
         tree.diff_children(&mut self.elements)
     }
 
-    fn layout(&self, renderer: &Renderer, limits: &Limits) -> Node {
+    fn layout(&self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) -> Node {
         let limits = limits.width(self.width).height(self.height);
 
         // calculate the smallest possible size
@@ -372,7 +372,8 @@ where
 
         let mut nodes = self.elements[2..self.elements.len() - 2]
             .iter()
-            .map(|tab| tab.as_widget().layout(renderer, &child_limits))
+            .zip(tree.children.iter_mut())
+            .map(|(tab, tab_tree)| tab.as_widget().layout(tab_tree, renderer, &child_limits))
             .collect::<Vec<_>>();
 
         // sum up
@@ -401,6 +402,7 @@ where
                     0.,
                     cosmic::iced::Alignment::Center,
                     &self.elements[2..self.elements.len() - 2],
+                    &mut tree.children[2..self.elements.len() - 2],
                 )
                 .children()
                 .to_vec()
@@ -412,7 +414,8 @@ where
 
                 let mut nodes = self.elements[2..self.elements.len() - 3]
                     .iter()
-                    .map(|tab| {
+                    .zip(tree.children[2..].iter_mut())
+                    .map(|(tab, tab_tree)| {
                         let child_limits = Limits::new(
                             Size::new(min_width, limits.min().height),
                             Size::new(f32::INFINITY, limits.max().height),
@@ -420,7 +423,7 @@ where
                         .width(Length::Shrink)
                         .height(Length::Shrink);
 
-                        let mut node = tab.as_widget().layout(renderer, &child_limits);
+                        let mut node = tab.as_widget().layout(tab_tree, renderer, &child_limits);
                         node.move_to(Point::new(offset, 0.));
                         offset += node.bounds().width;
                         node
