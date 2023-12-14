@@ -3,19 +3,16 @@
 // update a Arc<Mutex<Theme>> in the state on change of the theme and mark all interfaces for a redraw.
 
 use calloop::LoopHandle;
-use cosmic::cosmic_theme::{
-    palette::{self, Srgba},
-    Theme, ThemeMode,
-};
+use cosmic::cosmic_theme::{palette, Theme, ThemeMode};
 
 use crate::state::State;
 
-pub(crate) fn group_color(theme: &Theme<Srgba>) -> [f32; 3] {
+pub(crate) fn group_color(theme: &Theme) -> [f32; 3] {
     let neutral_8 = theme.palette.neutral_8;
     [neutral_8.red, neutral_8.green, neutral_8.blue]
 }
 
-pub(crate) fn active_window_hint(theme: &Theme<Srgba>) -> palette::Srgba {
+pub(crate) fn active_window_hint(theme: &Theme) -> palette::Srgba {
     if let Some(hint) = theme.window_hint {
         palette::Srgba::from(hint)
     } else {
@@ -26,8 +23,8 @@ pub(crate) fn active_window_hint(theme: &Theme<Srgba>) -> palette::Srgba {
 pub fn watch_theme(handle: LoopHandle<'_, State>) -> Result<(), cosmic_config::Error> {
     let (ping_tx, ping_rx) = calloop::ping::make_ping().unwrap();
     let config_mode_helper = ThemeMode::config()?;
-    let config_dark_helper = Theme::<palette::Srgba>::dark_config()?;
-    let config_light_helper = Theme::<palette::Srgba>::light_config()?;
+    let config_dark_helper = Theme::dark_config()?;
+    let config_light_helper = Theme::light_config()?;
 
     if let Err(e) = handle.insert_source(ping_rx, move |_, _, state| {
         let new_theme = cosmic::theme::system_preference();

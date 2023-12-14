@@ -40,7 +40,7 @@ cosmic-config = { git = "https://github.com/pop-os/libcosmic/", features = ["cal
 cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", branch = "main", default-features = false, features = ["server"] }
 libcosmic = { git = "https://github.com/pop-os/libcosmic/", default-features = false }
 iced_tiny_skia = { git = "https://github.com/pop-os/libcosmic/" }
-tiny-skia = "0.10"
+tiny-skia = "0.11"
 ordered-float = "4.0"
 glow = "0.12.0"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter", "tracing-log"] }

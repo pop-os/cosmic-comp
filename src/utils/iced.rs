@@ -8,13 +8,14 @@ use std::{
 
 use cosmic::{
     iced::{
+        advanced::widget::Tree,
         event::Event,
         keyboard::{Event as KeyboardEvent, Modifiers as IcedModifiers},
         mouse::{Button as MouseButton, Cursor, Event as MouseEvent, ScrollDelta},
         window::{Event as WindowEvent, Id},
         Command, Limits, Point as IcedPoint, Rectangle as IcedRectangle, Size as IcedSize,
     },
-    iced_core::{clipboard::Null as NullClipboard, renderer::Style, Color, Length},
+    iced_core::{clipboard::Null as NullClipboard, renderer::Style, Color, Font, Length, Pixels},
     iced_renderer::{graphics::Renderer as IcedGraphicsRenderer, Renderer as IcedRenderer},
     iced_runtime::{
         command::Action,
@@ -128,7 +129,7 @@ impl<P: Program> IcedProgram for ProgramWrapper<P> {
         self.0.update(message, &self.1)
     }
 
-    fn view(&self, _id: Id) -> Element<'_, Self::Message> {
+    fn view(&self) -> Element<'_, Self::Message> {
         self.0.view()
     }
 }
@@ -170,11 +171,14 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
         if !self.state.is_queue_empty() {
             tracing::warn!("Missing force_update call");
         }
-        let mut renderer =
-            IcedRenderer::TinySkia(IcedGraphicsRenderer::new(Backend::new(Default::default())));
+        let mut renderer = IcedRenderer::TinySkia(IcedGraphicsRenderer::new(
+            Backend::new(),
+            Font::default(),
+            Pixels(16.0),
+        ));
         let mut debug = Debug::new();
         let state = State::new(
-            Id(0),
+            Id::MAIN,
             ProgramWrapper(self.state.program().0.clone(), handle.clone()),
             IcedSize::new(self.size.w as f32, self.size.h as f32),
             &mut renderer,
@@ -232,12 +236,15 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         theme: cosmic::Theme,
     ) -> IcedElement<P> {
         let size = size.into();
-        let mut renderer =
-            IcedRenderer::TinySkia(IcedGraphicsRenderer::new(Backend::new(Default::default())));
+        let mut renderer = IcedRenderer::TinySkia(IcedGraphicsRenderer::new(
+            Backend::new(),
+            Font::default(),
+            Pixels(16.0),
+        ));
         let mut debug = Debug::new();
 
         let state = State::new(
-            Id(0),
+            Id::MAIN,
             ProgramWrapper(program, handle.clone()),
             IcedSize::new(size.w as f32, size.h as f32),
             &mut renderer,
@@ -283,6 +290,8 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         let node = element
             .as_widget()
             .layout(
+                // TODO Avoid creating a new tree here?
+                &mut Tree::new(element.as_widget()),
                 &internal.renderer,
                 &Limits::new(IcedSize::ZERO, IcedSize::INFINITY)
                     .width(Length::Shrink)
@@ -368,7 +377,7 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
         let actions = self
             .state
             .update(
-                Id(0),
+                Id::MAIN,
                 IcedSize::new(self.size.w as f32, self.size.h as f32),
                 cursor,
                 &mut self.renderer,
@@ -636,7 +645,7 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
     fn set_activate(&self, activated: bool) {
         let mut internal = self.0.lock().unwrap();
         internal.state.queue_event(Event::Window(
-            Id(0),
+            Id::MAIN,
             if activated {
                 WindowEvent::Focused
             } else {
