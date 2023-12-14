@@ -20,6 +20,8 @@ impl DmabufHandler for State {
     ) {
         if self.backend.dmabuf_imported(global, dmabuf).is_err() {
             import_notifier.failed();
+        } else {
+            let _ = import_notifier.successful::<State>();
         }
     }
 }
