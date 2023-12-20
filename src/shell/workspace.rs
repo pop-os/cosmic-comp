@@ -17,7 +17,6 @@ use crate::{
             workspace::WorkspaceHandle,
         },
     },
-    xwayland::XWaylandState,
 };
 
 use cosmic::theme::CosmicTheme;
@@ -28,7 +27,7 @@ use smithay::{
     backend::renderer::{
         element::{
             surface::WaylandSurfaceRenderElement, texture::TextureRenderElement,
-            utils::RescaleRenderElement, AsRenderElements, Element, Id, RenderElement,
+            utils::RescaleRenderElement, Element, Id, RenderElement,
         },
         gles::{GlesError, GlesTexture},
         glow::{GlowFrame, GlowRenderer},
@@ -47,7 +46,7 @@ use smithay::{
         seat::WaylandFocus,
         xdg_activation::{XdgActivationState, XdgActivationToken},
     },
-    xwayland::{X11Surface, X11Wm},
+    xwayland::X11Wm,
 };
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -57,7 +56,6 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tracing::warn;
 use wayland_backend::server::ClientId;
 
 use super::{
@@ -794,8 +792,6 @@ impl Workspace {
     pub fn render<'a, R>(
         &self,
         renderer: &mut R,
-        override_redirect_windows: &[X11Surface],
-        xwm_state: Option<&'a mut XWaylandState>,
         draw_focus_indicator: Option<&Seat<State>>,
         overview: (OverviewMode, Option<(SwapIndicator, Option<&Tree<Data>>)>),
         resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
@@ -827,29 +823,6 @@ impl Workspace {
             let layer_map = layer_map_for_output(&self.output);
             layer_map.non_exclusive_zone().as_local()
         };
-
-        // OR windows above all
-        popup_elements.extend(
-            override_redirect_windows
-                .iter()
-                .filter(|or| {
-                    (*or)
-                        .geometry()
-                        .as_global()
-                        .intersection(self.output.geometry())
-                        .is_some()
-                })
-                .flat_map(|or| {
-                    AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
-                        or,
-                        renderer,
-                        (or.geometry().loc - self.output.geometry().loc.as_logical())
-                            .to_physical_precise_round(output_scale),
-                        Scale::from(output_scale),
-                        1.0,
-                    )
-                }),
-        );
 
         if let Some(fullscreen) = self.fullscreen.as_ref() {
             // fullscreen window
@@ -1019,18 +992,6 @@ impl Workspace {
                     ))
                     .into(),
                 )
-            }
-        }
-
-        if let Some(xwm) = xwm_state.and_then(|state| state.xwm.as_mut()) {
-            if let Err(err) =
-                xwm.update_stacking_order_upwards(window_elements.iter().rev().map(|e| e.id()))
-            {
-                warn!(
-                    wm_id = ?xwm.id(),
-                    ?err,
-                    "Failed to update Xwm stacking order.",
-                );
             }
         }
 

@@ -47,7 +47,7 @@ use smithay::{
             element::{
                 surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
                 utils::{Relocate, RelocateRenderElement},
-                Element, Id, Kind, RenderElement,
+                AsRenderElements, Element, Id, Kind, RenderElement,
             },
             gles::{
                 element::PixelShaderElement, GlesError, GlesPixelProgram, GlesRenderer, Uniform,
@@ -580,6 +580,40 @@ where
 
     let active_hint = theme.active_hint as u8;
 
+    // overlay redirect windows
+    // they need to be over sticky windows, because they could be popups of sticky windows,
+    // and we can't differenciate that.
+    elements.extend(
+        state
+            .shell
+            .override_redirect_windows
+            .iter()
+            .filter(|or| {
+                (*or)
+                    .geometry()
+                    .as_global()
+                    .intersection(workspace.output.geometry())
+                    .is_some()
+            })
+            .flat_map(|or| {
+                AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
+                    or,
+                    renderer,
+                    (or.geometry().loc - workspace.output.geometry().loc.as_logical())
+                        .to_physical_precise_round(output_scale),
+                    Scale::from(output_scale),
+                    1.0,
+                )
+            })
+            .map(|p_element| {
+                CosmicElement::Workspace(RelocateRenderElement::from_element(
+                    p_element,
+                    (0, 0),
+                    Relocate::Relative,
+                ))
+            }),
+    );
+
     // sticky windows
     if !has_fullscreen {
         let alpha = match &overview.0 {
@@ -663,8 +697,6 @@ where
             let (w_elements, p_elements) = workspace
                 .render::<R>(
                     renderer,
-                    &state.shell.override_redirect_windows,
-                    state.shell.xwayland_state.as_mut(),
                     (!move_active && is_active_space).then_some(&last_active_seat),
                     overview.clone(),
                     resize_indicator.clone(),
@@ -719,8 +751,6 @@ where
     let (w_elements, p_elements) = workspace
         .render::<R>(
             renderer,
-            &state.shell.override_redirect_windows,
-            state.shell.xwayland_state.as_mut(),
             (!move_active && is_active_space).then_some(&last_active_seat),
             overview,
             resize_indicator,
@@ -762,6 +792,24 @@ where
                 Relocate::Relative,
             ))
         }));
+    }
+
+    if let Some(xwm) = state
+        .shell
+        .xwayland_state
+        .as_mut()
+        .and_then(|state| state.xwm.as_mut())
+    {
+        // we don't include the popup elements, which contain the OR windows, because we are not supposed to restack them
+        if let Err(err) =
+            xwm.update_stacking_order_upwards(window_elements.iter().rev().map(|e| e.id()))
+        {
+            warn!(
+                wm_id = ?xwm.id(),
+                ?err,
+                "Failed to update Xwm stacking order.",
+            );
+        }
     }
 
     elements.extend(window_elements);
