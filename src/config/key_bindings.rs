@@ -182,6 +182,7 @@ pub enum Action {
     ToggleStacking,
     ToggleTiling,
     ToggleWindowFloating,
+    ToggleSticky,
     SwapWindow,
 
     Resizing(ResizeDirection),

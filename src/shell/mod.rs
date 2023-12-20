@@ -2360,6 +2360,19 @@ impl Shell {
         }
     }
 
+    pub fn toggle_sticky_current<'a>(
+        &mut self,
+        seats: impl Iterator<Item = &'a Seat<State>>,
+        seat: &Seat<State>,
+    ) {
+        let set = self.workspaces.sets.get_mut(&seat.active_output()).unwrap();
+        let workspace = &mut set.workspaces[set.active];
+        let maybe_window = workspace.focus_stack.get(seat).iter().next().cloned();
+        if let Some(mapped) = maybe_window {
+            self.toggle_sticky(seats, seat, &mapped);
+        }
+    }
+
     pub(crate) fn set_theme(&mut self, theme: cosmic::Theme) {
         self.theme = theme.clone();
         self.refresh();
