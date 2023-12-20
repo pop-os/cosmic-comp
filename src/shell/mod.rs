@@ -1264,15 +1264,32 @@ impl Shell {
     }
 
     pub fn element_for_surface(&self, surface: &CosmicSurface) -> Option<&CosmicMapped> {
-        self.workspaces
-            .spaces()
+        self.workspaces.sets.values().find_map(|set| {
+            set.sticky_layer
+                .mapped()
+                .find(|w| w.windows().any(|(s, _)| &s == surface))
+                .or_else(|| {
+                    set.workspaces
+                        .iter()
             .find_map(|w| w.element_for_surface(surface))
+                })
+        })
     }
 
     pub fn element_for_wl_surface(&self, surface: &WlSurface) -> Option<&CosmicMapped> {
-        self.workspaces
-            .spaces()
+        self.workspaces.sets.values().find_map(|set| {
+            set.sticky_layer
+                .mapped()
+                .find(|w| {
+                    w.windows()
+                        .any(|(s, _)| s.wl_surface().as_ref() == Some(surface))
+                })
+                .or_else(|| {
+                    set.workspaces
+                        .iter()
             .find_map(|w| w.element_for_wl_surface(surface))
+                })
+        })
     }
 
     pub fn space_for(&self, mapped: &CosmicMapped) -> Option<&Workspace> {
