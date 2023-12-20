@@ -1569,6 +1569,27 @@ impl Shell {
             .unwrap();
         let (window, seat, output) = state.common.shell.pending_windows.remove(pos);
 
+        let parent_is_sticky = match window.clone() {
+            CosmicSurface::Wayland(toplevel) => {
+                if let Some(parent) = toplevel.toplevel().parent() {
+                    if let Some(elem) = state.common.shell.element_for_wl_surface(&parent) {
+                        state
+                            .common
+                            .shell
+                            .workspaces
+                            .sets
+                            .values()
+                            .any(|set| set.sticky_layer.mapped().any(|m| m == elem))
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        };
+
         let pending_activation = state
             .common
             .shell
@@ -1678,7 +1699,7 @@ impl Shell {
                 .collect::<Vec<_>>()
                 .into_iter()
             {
-                workspace.unmaximize_request(&mapped.active_window());
+                workspace.unmaximize_request(&mapped);
             }
             let focus_stack = workspace.focus_stack.get(&seat);
             workspace
@@ -1686,17 +1707,39 @@ impl Shell {
                 .map(mapped.clone(), Some(focus_stack.iter()), None, true);
         }
 
-        if should_be_fullscreen {
+        if !parent_is_sticky && should_be_fullscreen {
             workspace.fullscreen_request(&mapped.active_window(), None);
         }
 
-        if workspace.output == seat.active_output() && active_handle == workspace.handle {
+        let was_activated = workspace_handle.is_some();
+        let workspace_handle = workspace.handle;
+        let workspace_output = workspace.output.clone();
+
+        if parent_is_sticky {
+            let seats = state.common.seats().cloned().collect::<Vec<_>>();
+            state
+                .common
+                .shell
+                .toggle_sticky(seats.iter(), &seat, &mapped);
+        }
+
+        if (workspace_output == seat.active_output() && active_handle == workspace_handle)
+            || parent_is_sticky
+        {
             // TODO: enforce focus stealing prevention by also checking the same rules as for the else case.
-            Shell::set_focus(state, Some(&KeyboardFocusTarget::from(mapped)), &seat, None);
-        } else if workspace_empty || workspace_handle.is_some() || should_be_fullscreen {
-            let handle = workspace.handle;
-            Shell::append_focus_stack(state, Some(&KeyboardFocusTarget::from(mapped)), &seat);
-            state.common.shell.set_urgent(&handle);
+            Shell::set_focus(
+                state,
+                Some(&KeyboardFocusTarget::from(mapped.clone())),
+                &seat,
+                None,
+            );
+        } else if workspace_empty || was_activated || should_be_fullscreen {
+            Shell::append_focus_stack(
+                state,
+                Some(&KeyboardFocusTarget::from(mapped.clone())),
+                &seat,
+            );
+            state.common.shell.set_urgent(&workspace_handle);
         }
 
         let active_space = state.common.shell.active_space(&output);
