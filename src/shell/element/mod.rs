@@ -108,6 +108,8 @@ pub struct CosmicMapped {
     pub last_geometry: Arc<Mutex<Option<Rectangle<i32, Local>>>>,
     pub moved_since_mapped: Arc<AtomicBool>,
     pub floating_tiled: Arc<Mutex<Option<TiledCorners>>>,
+    //sticky
+    pub previous_layer: Arc<Mutex<Option<ManagedLayer>>>,
 
     #[cfg(feature = "debug")]
     debug: Arc<Mutex<Option<smithay_egui::EguiState>>>,
@@ -1118,6 +1120,7 @@ impl From<CosmicWindow> for CosmicMapped {
             last_geometry: Arc::new(Mutex::new(None)),
             moved_since_mapped: Arc::new(AtomicBool::new(false)),
             floating_tiled: Arc::new(Mutex::new(None)),
+            previous_layer: Arc::new(Mutex::new(None)),
             #[cfg(feature = "debug")]
             debug: Arc::new(Mutex::new(None)),
         }
@@ -1135,6 +1138,7 @@ impl From<CosmicStack> for CosmicMapped {
             last_geometry: Arc::new(Mutex::new(None)),
             moved_since_mapped: Arc::new(AtomicBool::new(false)),
             floating_tiled: Arc::new(Mutex::new(None)),
+            previous_layer: Arc::new(Mutex::new(None)),
             #[cfg(feature = "debug")]
             debug: Arc::new(Mutex::new(None)),
         }
