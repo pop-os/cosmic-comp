@@ -308,20 +308,20 @@ impl Program for CosmicWindowInternal {
                                     return;
                                 };
 
-                                    let mut cursor = seat
-                                        .get_pointer()
-                                        .unwrap()
-                                        .current_location()
-                                        .to_i32_round();
-                                    cursor.y -= SSD_HEIGHT;
-                                    Shell::menu_request(
-                                        state,
-                                        &surface,
-                                        &seat,
-                                        serial,
-                                        cursor - position.as_logical(),
-                                        false,
-                                    );
+                                let mut cursor = seat
+                                    .get_pointer()
+                                    .unwrap()
+                                    .current_location()
+                                    .to_i32_round();
+                                cursor.y -= SSD_HEIGHT;
+                                Shell::menu_request(
+                                    state,
+                                    &surface,
+                                    &seat,
+                                    serial,
+                                    cursor - position.as_logical(),
+                                    false,
+                                );
                             }
                         });
                     }

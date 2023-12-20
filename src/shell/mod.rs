@@ -365,6 +365,7 @@ impl WorkspaceSet {
             state.remove_workspace_state(&self.workspaces[old_active].handle, WState::Urgent);
             state.remove_workspace_state(&self.workspaces[idx].handle, WState::Urgent);
             state.add_workspace_state(&self.workspaces[idx].handle, WState::Active);
+
             self.previously_active = Some((old_active, Instant::now()));
             self.active = idx;
             Ok(true)
@@ -1219,17 +1220,17 @@ impl Shell {
             // override redirect window?
             .or_else(|| {
                 self.outputs().find(|o| {
-                        self.override_redirect_windows.iter().any(|or| {
-                            if or.wl_surface().as_ref() == Some(surface) {
-                                or.geometry()
-                                    .as_global()
-                                    .intersection(o.geometry())
-                                    .is_some()
-                            } else {
-                                false
-                            }
-                        })
+                    self.override_redirect_windows.iter().any(|or| {
+                        if or.wl_surface().as_ref() == Some(surface) {
+                            or.geometry()
+                                .as_global()
+                                .intersection(o.geometry())
+                                .is_some()
+                        } else {
+                            false
+                        }
                     })
+                })
             })
             // sticky window ?
             .or_else(|| {
@@ -1280,7 +1281,7 @@ impl Shell {
                 .or_else(|| {
                     set.workspaces
                         .iter()
-            .find_map(|w| w.element_for_surface(surface))
+                        .find_map(|w| w.element_for_surface(surface))
                 })
         })
     }
@@ -1296,7 +1297,7 @@ impl Shell {
                 .or_else(|| {
                     set.workspaces
                         .iter()
-            .find_map(|w| w.element_for_wl_surface(surface))
+                        .find_map(|w| w.element_for_wl_surface(surface))
                 })
         })
     }
@@ -2049,10 +2050,10 @@ impl Shell {
             check_grab_preconditions(&seat, surface, serial, ReleaseMode::NoMouseButtons)
         {
             if let Some(mapped) = state.common.shell.element_for_wl_surface(surface).cloned() {
-                    let (_, relative_loc) = mapped
-                        .windows()
-                        .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
-                        .unwrap();
+                let (_, relative_loc) = mapped
+                    .windows()
+                    .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
+                    .unwrap();
 
                 let (global_position, edge, is_tiled, is_stacked, is_sticky, tiling_enabled) =
                     if let Some(set) = state
@@ -2080,27 +2081,27 @@ impl Shell {
                     } else if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
                         let output = seat.active_output();
 
-                    let global_position = (workspace.element_geometry(&mapped).unwrap().loc
-                        + relative_loc.as_local()
-                        + location.as_local())
-                    .to_global(&output);
-                    let is_tiled = workspace.is_tiled(&mapped);
-                    let edge = if is_tiled {
-                        mapped
-                            .tiling_node_id
-                            .lock()
-                            .unwrap()
-                            .clone()
-                            .map(|node_id| {
-                                TilingLayout::possible_resizes(
-                                    workspace.tiling_layer.tree(),
-                                    node_id,
-                                )
-                            })
-                            .unwrap_or(ResizeEdge::empty())
-                    } else {
-                        ResizeEdge::all()
-                    };
+                        let global_position = (workspace.element_geometry(&mapped).unwrap().loc
+                            + relative_loc.as_local()
+                            + location.as_local())
+                        .to_global(&output);
+                        let is_tiled = workspace.is_tiled(&mapped);
+                        let edge = if is_tiled {
+                            mapped
+                                .tiling_node_id
+                                .lock()
+                                .unwrap()
+                                .clone()
+                                .map(|node_id| {
+                                    TilingLayout::possible_resizes(
+                                        workspace.tiling_layer.tree(),
+                                        node_id,
+                                    )
+                                })
+                                .unwrap_or(ResizeEdge::empty())
+                        } else {
+                            ResizeEdge::all()
+                        };
 
                         (
                             global_position,
@@ -2114,41 +2115,41 @@ impl Shell {
                         return;
                     };
 
-                    let grab = MenuGrab::new(
-                        start_data,
-                        seat,
-                        if target_stack || !is_stacked {
-                            Box::new(window_items(
-                                &mapped,
-                                is_tiled,
-                                is_stacked,
+                let grab = MenuGrab::new(
+                    start_data,
+                    seat,
+                    if target_stack || !is_stacked {
+                        Box::new(window_items(
+                            &mapped,
+                            is_tiled,
+                            is_stacked,
                             is_sticky,
-                                tiling_enabled,
-                                edge,
-                                &state.common.config.static_conf,
-                            )) as Box<dyn Iterator<Item = Item>>
-                        } else {
-                            let (tab, _) = mapped
-                                .windows()
-                                .find(|(s, _)| s.wl_surface().as_ref() == Some(surface))
-                                .unwrap();
-                            Box::new(tab_items(
-                                &mapped,
-                                &tab,
-                                is_tiled,
-                                &state.common.config.static_conf,
-                            )) as Box<dyn Iterator<Item = Item>>
-                        },
-                        global_position,
-                        state.common.event_loop_handle.clone(),
-                        state.common.theme.clone(),
-                    );
-                    seat.get_pointer().unwrap().set_grab(
-                        state,
-                        grab,
-                        serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
-                        Focus::Keep,
-                    );
+                            tiling_enabled,
+                            edge,
+                            &state.common.config.static_conf,
+                        )) as Box<dyn Iterator<Item = Item>>
+                    } else {
+                        let (tab, _) = mapped
+                            .windows()
+                            .find(|(s, _)| s.wl_surface().as_ref() == Some(surface))
+                            .unwrap();
+                        Box::new(tab_items(
+                            &mapped,
+                            &tab,
+                            is_tiled,
+                            &state.common.config.static_conf,
+                        )) as Box<dyn Iterator<Item = Item>>
+                    },
+                    global_position,
+                    state.common.event_loop_handle.clone(),
+                    state.common.theme.clone(),
+                );
+                seat.get_pointer().unwrap().set_grab(
+                    state,
+                    grab,
+                    serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
+                    Focus::Keep,
+                );
             }
         }
     }
@@ -2162,7 +2163,7 @@ impl Shell {
         move_out_of_stack: bool,
     ) {
         let serial = serial.into();
-                    let output = seat.active_output();
+        let output = seat.active_output();
 
         if let Some(mut start_data) = check_grab_preconditions(&seat, surface, serial, release) {
             if let Some(mut old_mapped) =
@@ -2177,9 +2178,9 @@ impl Shell {
                 }
 
                 let (window, _) = old_mapped
-                        .windows()
-                        .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
-                        .unwrap();
+                    .windows()
+                    .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
+                    .unwrap();
 
                 let mapped = if move_out_of_stack {
                     let new_mapped: CosmicMapped = CosmicWindow::new(
@@ -2194,8 +2195,8 @@ impl Shell {
                     old_mapped.clone()
                 };
 
-                    let button = start_data.button;
-                    let active_hint = state.common.theme.cosmic().active_hint as u8;
+                let button = start_data.button;
+                let active_hint = state.common.theme.cosmic().active_hint as u8;
                 let pointer = seat.get_pointer().unwrap();
                 let pos = pointer.current_location().as_global();
 
@@ -2285,16 +2286,16 @@ impl Shell {
                         return;
                     };
 
-                        state
-                            .common
-                            .shell
-                            .toplevel_info_state
+                state
+                    .common
+                    .shell
+                    .toplevel_info_state
                     .toplevel_leave_workspace(&window, &workspace_handle);
-                        state
-                            .common
-                            .shell
-                            .toplevel_info_state
-                            .toplevel_leave_output(&window, &output);
+                state
+                    .common
+                    .shell
+                    .toplevel_info_state
+                    .toplevel_leave_output(&window, &output);
 
                 if move_out_of_stack {
                     old_mapped.stack_ref_mut().unwrap().remove_window(&window);
@@ -2319,19 +2320,19 @@ impl Shell {
                     state.common.event_loop_handle.clone(),
                 );
 
-                        if grab.is_tiling_grab() {
-                            state.common.shell.set_overview_mode(
-                                Some(Trigger::Pointer(button)),
-                                state.common.event_loop_handle.clone(),
-                            );
-                        }
+                if grab.is_tiling_grab() {
+                    state.common.shell.set_overview_mode(
+                        Some(Trigger::Pointer(button)),
+                        state.common.event_loop_handle.clone(),
+                    );
+                }
 
-                        seat.get_pointer().unwrap().set_grab(
-                            state,
-                            grab,
-                            serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
-                            Focus::Clear,
-                        );
+                seat.get_pointer().unwrap().set_grab(
+                    state,
+                    grab,
+                    serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
+                    Focus::Clear,
+                );
             }
         }
     }
@@ -2514,12 +2515,12 @@ impl Shell {
                     edges,
                     ReleaseMode::NoMouseButtons,
                 ) {
-                        seat.get_pointer().unwrap().set_grab(
-                            state,
-                            grab,
-                            serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
-                            Focus::Clear,
-                        );
+                    seat.get_pointer().unwrap().set_grab(
+                        state,
+                        grab,
+                        serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
+                        Focus::Clear,
+                    );
                 }
             }
         }
@@ -2531,13 +2532,13 @@ impl Shell {
         let Some(focused) = seat.get_keyboard().unwrap().current_focus() else {
             return;
         };
-            let amount = (self
-                .resize_state
-                .take()
-                .map(|(_, _, _, amount, _, _)| amount)
-                .unwrap_or(10)
-                + 2)
-            .min(20);
+        let amount = (self
+            .resize_state
+            .take()
+            .map(|(_, _, _, amount, _, _)| amount)
+            .unwrap_or(10)
+            + 2)
+        .min(20);
 
         if self
             .workspaces
@@ -2570,9 +2571,9 @@ impl Shell {
                     .or_else(|| {
                         let workspace = self.workspaces.get(idx, &output).unwrap();
                         workspace
-                    .mapped()
-                    .find(|m| m.has_surface(&toplevel, WindowSurfaceType::TOPLEVEL))
-                    .cloned()
+                            .mapped()
+                            .find(|m| m.has_surface(&toplevel, WindowSurfaceType::TOPLEVEL))
+                            .cloned()
                     })
                 else {
                     return
