@@ -1549,6 +1549,15 @@ impl Shell {
             .space_for_handle_mut(&previous_workspace)
             .unwrap();
         match target_layer {
+            ManagedLayer::Sticky => {
+                let output = new_workspace.output().clone();
+                self.workspaces
+                    .sets
+                    .get_mut(&output)
+                    .unwrap()
+                    .sticky_layer
+                    .map(mapped, None)
+            }
             ManagedLayer::Floating => new_workspace.floating_layer.map(mapped, None),
             ManagedLayer::Tiling => new_workspace.tiling_layer.map(
                 mapped,
