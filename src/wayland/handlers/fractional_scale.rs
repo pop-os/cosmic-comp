@@ -41,8 +41,8 @@ impl FractionalScaleHandler for State {
                 .or_else(|| {
                     self.common
                         .shell
-                        .visible_outputs_for_surface(&surface)
-                        .next()
+                        .visible_output_for_surface(&surface)
+                        .cloned()
                 })
         })
         .unwrap_or_else(|| {

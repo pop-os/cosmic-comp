@@ -36,7 +36,7 @@ impl State {
     fn early_import_surface(&mut self, surface: &WlSurface) {
         let mut import_nodes = std::collections::HashSet::new();
         let dh = &self.common.display_handle;
-        for output in self.common.shell.visible_outputs_for_surface(&surface) {
+        if let Some(output) = self.common.shell.visible_output_for_surface(&surface) {
             if let BackendData::Kms(ref mut kms_state) = &mut self.backend {
                 if let Some(target) = kms_state.target_node_for_output(&output) {
                     if import_nodes.insert(target) {
@@ -261,7 +261,7 @@ impl CompositorHandler for State {
         let mut scheduled_sessions = self.schedule_workspace_sessions(surface);
 
         // schedule a new render
-        for output in self.common.shell.visible_outputs_for_surface(surface) {
+        if let Some(output) = self.common.shell.visible_output_for_surface(surface) {
             if let Some(sessions) = output.user_data().get::<PendingScreencopyBuffers>() {
                 scheduled_sessions
                     .get_or_insert_with(Vec::new)
@@ -276,7 +276,7 @@ impl CompositorHandler for State {
                         .iter()
                         .filter(|(s, _)| match s.session_type() {
                             SessionType::Output(o) | SessionType::Workspace(o, _)
-                                if o == output =>
+                                if &o == output =>
                             {
                                 true
                             }
