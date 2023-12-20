@@ -2539,6 +2539,55 @@ impl Shell {
         }
     }
 
+    pub fn toggle_stacking(&mut self, window: &CosmicMapped) -> Option<KeyboardFocusTarget> {
+        if let Some(set) = self
+            .workspaces
+            .sets
+            .values_mut()
+            .find(|set| set.sticky_layer.mapped().any(|m| m == window))
+        {
+            set.sticky_layer.toggle_stacking(window)
+        } else if let Some(workspace) = self.space_for_mut(window) {
+            if workspace.tiling_layer.mapped().any(|(_, m, _)| m == window) {
+                workspace.tiling_layer.toggle_stacking(window)
+            } else if workspace.floating_layer.mapped().any(|w| w == window) {
+                workspace.floating_layer.toggle_stacking(window)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn toggle_stacking_focused(&mut self, seat: &Seat<State>) -> Option<KeyboardFocusTarget> {
+        let set = self.workspaces.sets.get_mut(&seat.active_output()).unwrap();
+        let workspace = &mut set.workspaces[set.active];
+        let maybe_window = workspace.focus_stack.get(seat).iter().next().cloned();
+        if let Some(window) = maybe_window {
+            if set.sticky_layer.mapped().any(|m| m == &window) {
+                set.sticky_layer
+                    .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat))
+            } else if workspace
+                .tiling_layer
+                .mapped()
+                .any(|(_, m, _)| m == &window)
+            {
+                workspace
+                    .tiling_layer
+                    .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat))
+            } else if workspace.floating_layer.mapped().any(|w| w == &window) {
+                workspace
+                    .floating_layer
+                    .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
     pub fn toggle_sticky<'a>(
         &mut self,
         seats: impl Iterator<Item = &'a Seat<State>>,
