@@ -167,13 +167,11 @@ pub fn window_items(
     window: &CosmicMapped,
     is_tiled: bool,
     is_stacked: bool,
+    is_sticky: bool,
     tiling_enabled: bool,
     possible_resizes: ResizeEdge,
     config: &StaticConfig,
 ) -> impl Iterator<Item = Item> {
-    //let is_always_on_top = false; // TODO check window (potentially shell?)
-    //let is_always_on_visible_ws = false; // TODO check window (potentially shell?)
-
     let maximize_clone = window.clone();
     let tile_clone = window.clone();
     let move_prev_clone = window.clone();
@@ -186,6 +184,7 @@ pub fn window_items(
     let unstack_clone = window.clone();
     let screenshot_clone = window.clone();
     let stack_clone = window.clone();
+    let sticky_clone = window.clone();
     let close_clone = window.clone();
 
     vec![
@@ -275,14 +274,14 @@ pub fn window_items(
                 .disabled(!possible_resizes.contains(ResizeEdge::BOTTOM)),
             ],
         )),
-        Some(
+        (!is_sticky).then_some(
             Item::new(fl!("window-menu-move-prev-workspace"), move |handle| {
                 let mapped = move_prev_clone.clone();
                 let _ = handle.insert_idle(move |state| move_prev_workspace(state, &mapped));
             })
             .shortcut(config.get_shortcut_for_action(&Action::MoveToPreviousWorkspace)),
         ),
-        Some(
+        (!is_sticky).then_some(
             Item::new(fl!("window-menu-move-next-workspace"), move |handle| {
                 let mapped = move_next_clone.clone();
                 let _ = handle.insert_idle(move |state| move_next_workspace(state, &mapped));
@@ -297,10 +296,21 @@ pub fn window_items(
             .shortcut(config.get_shortcut_for_action(&Action::ToggleStacking)),
         ),
         Some(Item::Separator),
-        //Some(Item::new(fl!("window-menu-always-on-top"), |handle| {}).toggled(is_always_on_top)),
-        //Some(Item::new(fl!("window-menu-always-on-visible-ws"), |handle| {})
-        //    .toggled(is_always_on_visible_ws)),
-        //Some(Item::Separator),
+        Some(
+            Item::new(fl!("window-menu-sticky"), move |handle| {
+                let mapped = sticky_clone.clone();
+                let _ = handle.insert_idle(move |state| {
+                    let seat = state.common.last_active_seat().clone();
+                    let seats = state.common.seats().cloned().collect::<Vec<_>>();
+                    state
+                        .common
+                        .shell
+                        .toggle_sticky(seats.iter(), &seat, &mapped);
+                });
+            })
+            .toggled(is_sticky),
+        ),
+        Some(Item::Separator),
         if is_stacked {
             Some(Item::new(fl!("window-menu-close-all"), move |_handle| {
                 for (window, _) in close_clone.windows() {

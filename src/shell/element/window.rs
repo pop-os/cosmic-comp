@@ -292,12 +292,27 @@ impl Program for CosmicWindowInternal {
                             if let Some(mapped) =
                                 state.common.shell.element_for_wl_surface(&surface).cloned()
                             {
-                                if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
-                                    let position = workspace
+                                let position = if let Some((output, set)) =
+                                    state.common.shell.workspaces.sets.iter().find(|(_, set)| {
+                                        set.sticky_layer.mapped().any(|m| m == &mapped)
+                                    }) {
+                                    set.sticky_layer
                                         .element_geometry(&mapped)
                                         .unwrap()
                                         .loc
-                                        .to_global(&workspace.output);
+                                        .to_global(output)
+                                } else if let Some(workspace) =
+                                    state.common.shell.space_for_mut(&mapped)
+                                {
+                                    workspace
+                                        .element_geometry(&mapped)
+                                        .unwrap()
+                                        .loc
+                                        .to_global(&workspace.output)
+                                } else {
+                                    return;
+                                };
+
                                     let mut cursor = seat
                                         .get_pointer()
                                         .unwrap()
@@ -312,7 +327,6 @@ impl Program for CosmicWindowInternal {
                                         cursor - position.as_logical(),
                                         false,
                                     );
-                                }
                             }
                         });
                     }

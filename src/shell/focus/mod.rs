@@ -58,6 +58,10 @@ impl<'a> FocusStackMut<'a> {
         self.0.insert(window.clone());
     }
 
+    pub fn remove(&mut self, window: &CosmicMapped) {
+        self.0.retain(|w| w != window);
+    }
+
     pub fn last(&self) -> Option<&CosmicMapped> {
         self.0.iter().rev().find(|w| w.alive())
     }

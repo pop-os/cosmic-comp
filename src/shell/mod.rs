@@ -1970,12 +1970,36 @@ impl Shell {
             check_grab_preconditions(&seat, surface, serial, ReleaseMode::NoMouseButtons)
         {
             if let Some(mapped) = state.common.shell.element_for_wl_surface(surface).cloned() {
-                if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
-                    let output = seat.active_output();
                     let (_, relative_loc) = mapped
                         .windows()
                         .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
                         .unwrap();
+
+                let (global_position, edge, is_tiled, is_stacked, is_sticky, tiling_enabled) =
+                    if let Some(set) = state
+                        .common
+                        .shell
+                        .workspaces
+                        .sets
+                        .values_mut()
+                        .find(|set| set.sticky_layer.mapped().any(|m| m == &mapped))
+                    {
+                        let output = set.output.clone();
+                        let global_position =
+                            (set.sticky_layer.element_geometry(&mapped).unwrap().loc
+                                + relative_loc.as_local()
+                                + location.as_local())
+                            .to_global(&output);
+                        (
+                            global_position,
+                            ResizeEdge::all(),
+                            false,
+                            mapped.is_stack(),
+                            true,
+                            false,
+                        )
+                    } else if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
+                        let output = seat.active_output();
 
                     let global_position = (workspace.element_geometry(&mapped).unwrap().loc
                         + relative_loc.as_local()
@@ -1998,8 +2022,19 @@ impl Shell {
                     } else {
                         ResizeEdge::all()
                     };
-                    let is_stacked = mapped.is_stack();
-                    let tiling_enabled = workspace.tiling_enabled;
+
+                        (
+                            global_position,
+                            edge,
+                            is_tiled,
+                            mapped.is_stack(),
+                            false,
+                            workspace.tiling_enabled,
+                        )
+                    } else {
+                        return;
+                    };
+
                     let grab = MenuGrab::new(
                         start_data,
                         seat,
@@ -2008,6 +2043,7 @@ impl Shell {
                                 &mapped,
                                 is_tiled,
                                 is_stacked,
+                            is_sticky,
                                 tiling_enabled,
                                 edge,
                                 &state.common.config.static_conf,
@@ -2034,7 +2070,6 @@ impl Shell {
                         serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
                         Focus::Keep,
                     );
-                }
             }
         }
     }
@@ -2238,6 +2273,89 @@ impl Shell {
                 if let Some(ResizeState::Resizing(data)) = *resize_state {
                     *resize_state = Some(ResizeState::WaitingForCommit(data));
                 }
+            }
+        }
+    }
+
+    pub fn toggle_sticky<'a>(
+        &mut self,
+        seats: impl Iterator<Item = &'a Seat<State>>,
+        seat: &Seat<State>,
+        mapped: &CosmicMapped,
+    ) {
+        // clean from focus-stacks
+        let seats = seats.collect::<Vec<_>>();
+        for workspace in self.workspaces.spaces_mut() {
+            for seat in seats.iter() {
+                let mut stack = workspace.focus_stack.get_mut(seat);
+                stack.remove(mapped);
+            }
+        }
+
+        if let Some(workspace) = self.space_for_mut(mapped) {
+            if workspace.is_fullscreen(mapped) {
+                // we are making it sticky, we don't need to move it to it's previous workspace
+                let _ = workspace.remove_fullscreen();
+            }
+            let previous_layer = if workspace.is_tiled(mapped) {
+                workspace.toggle_floating_window(seat, mapped);
+                ManagedLayer::Tiling
+            } else {
+                ManagedLayer::Floating
+            };
+            let geometry = workspace.element_geometry(mapped).unwrap();
+            workspace.unmap(mapped);
+
+            *mapped.previous_layer.lock().unwrap() = Some(previous_layer);
+            let output = workspace.output().clone();
+            let handle = workspace.handle;
+
+            for (window, _) in mapped.windows() {
+                self.toplevel_info_state
+                    .toplevel_leave_workspace(&window, &handle);
+            }
+
+            self.workspaces
+                .sets
+                .get_mut(&output)
+                .unwrap()
+                .sticky_layer
+                .map(mapped.clone(), geometry.loc);
+        } else if let Some(set) = self
+            .workspaces
+            .sets
+            .values_mut()
+            .find(|set| set.sticky_layer.mapped().any(|m| m == mapped))
+        {
+            let geometry = set.sticky_layer.element_geometry(mapped).unwrap();
+            set.sticky_layer.unmap(mapped);
+
+            let workspace = &mut set.workspaces[set.active];
+            for (window, _) in mapped.windows() {
+                self.toplevel_info_state
+                    .toplevel_enter_workspace(&window, &workspace.handle);
+            }
+
+            match mapped
+                .previous_layer
+                .lock()
+                .unwrap()
+                .take()
+                .unwrap_or(ManagedLayer::Floating)
+            {
+                ManagedLayer::Floating => {
+                    workspace.floating_layer.map(mapped.clone(), geometry.loc)
+                }
+                ManagedLayer::Tiling => {
+                    let focus_stack = workspace.focus_stack.get(seat);
+                    workspace.tiling_layer.map(
+                        mapped.clone(),
+                        Some(focus_stack.iter()),
+                        None,
+                        false,
+                    );
+                }
+                ManagedLayer::Sticky => unreachable!(),
             }
         }
     }
