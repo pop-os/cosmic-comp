@@ -1,5 +1,5 @@
 use crate::{
-    shell::{element::CosmicMapped, Shell, Workspace},
+    shell::{element::CosmicMapped, Shell},
     state::Common,
     utils::prelude::*,
     wayland::handlers::xdg_shell::PopupGrabData,
@@ -71,8 +71,6 @@ impl<'a> FocusStackMut<'a> {
     }
 }
 
-impl Workspace {}
-
 pub struct ActiveFocus(RefCell<Option<KeyboardFocusTarget>>);
 
 impl ActiveFocus {
@@ -113,7 +111,16 @@ impl Shell {
         };
 
         if let Some(mapped) = element {
-            if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
+            let workspace = state.common.shell.space_for_mut(&mapped);
+            let workspace = if workspace.is_none() {
+                state
+                    .common
+                    .shell
+                    .active_space_mut(&active_seat.active_output())
+            } else {
+                workspace.unwrap()
+            };
+
                 let mut focus_stack = workspace.focus_stack.get_mut(active_seat);
                 if Some(&mapped) != focus_stack.last() {
                     trace!(?mapped, "Focusing window.");
@@ -126,7 +133,6 @@ impl Shell {
                     {
                         if !popup_grab.has_ended() {
                             popup_grab.ungrab(PopupUngrabStrategy::All);
-                        }
                     }
                 }
             }
@@ -173,7 +179,15 @@ impl Shell {
             .collect::<Vec<_>>();
 
         for output in self.outputs().cloned().collect::<Vec<_>>().into_iter() {
-            // TODO: Add self.workspaces.active_workspaces()
+            let set = self.workspaces.sets.get_mut(&output).unwrap();
+            for focused in focused_windows.iter() {
+                raise_with_children(&mut set.sticky_layer, focused);
+            }
+            for window in set.sticky_layer.mapped() {
+                window.set_activated(focused_windows.contains(&window));
+                window.configure();
+            }
+
             let workspace = self.workspaces.active_mut(&output);
             for focused in focused_windows.iter() {
                 raise_with_children(&mut workspace.floating_layer, focused);
@@ -306,7 +320,7 @@ impl Common {
 }
 
 fn focus_target_is_valid(
-    state: &State,
+    state: &mut State,
     seat: &Seat<State>,
     output: &Output,
     target: KeyboardFocusTarget,
@@ -329,10 +343,27 @@ fn focus_target_is_valid(
 
     match target {
         KeyboardFocusTarget::Element(mapped) => {
+            let is_sticky = state
+                .common
+                .shell
+                .workspaces
+                .sets
+                .get(output)
+                .unwrap()
+                .sticky_layer
+                .mapped()
+                .any(|m| m == &mapped);
+
             let workspace = state.common.shell.active_space(&output);
             let focus_stack = workspace.focus_stack.get(&seat);
-            focus_stack.last().map(|m| m == &mapped).unwrap_or(false)
-                && workspace.get_fullscreen().is_none()
+            let is_in_focus_stack = focus_stack.last().map(|m| m == &mapped).unwrap_or(false);
+            let has_fullscreen = workspace.get_fullscreen().is_some();
+
+            if is_sticky && !is_in_focus_stack {
+                Shell::append_focus_stack(state, Some(&KeyboardFocusTarget::Element(mapped)), seat);
+            }
+
+            (is_sticky || is_in_focus_stack) && !has_fullscreen
         }
         KeyboardFocusTarget::LayerSurface(layer) => {
             layer_map_for_output(&output).layers().any(|l| l == &layer)
