@@ -10,8 +10,7 @@ use crate::{
             floating::ResizeGrabMarker,
             tiling::{SwapWindowGrab, TilingLayout},
         },
-        Direction, FocusResult, MoveResult, OverviewMode, ResizeDirection, ResizeMode, SessionLock,
-        Trigger, Workspace,
+        Direction, FocusResult, MoveResult, OverviewMode, ResizeDirection, ResizeMode, Trigger,
     },
     state::Common,
     utils::prelude::*,
@@ -52,7 +51,6 @@ use smithay::{
         shell::wlr_layer::Layer as WlrLayer,
         tablet_manager::{TabletDescriptor, TabletSeatTrait},
     },
-    xwayland::X11Surface,
 };
 #[cfg(not(feature = "debug"))]
 use tracing::info;
@@ -600,16 +598,8 @@ impl State {
 
                     let mut position = seat.get_pointer().unwrap().current_location().as_global();
 
-                    let overview = self.common.shell.overview_mode();
-                    let workspace = self.common.shell.workspaces.active_mut(&current_output);
-                    let under = State::surface_under(
-                        position,
-                        &current_output,
-                        &self.common.shell.override_redirect_windows,
-                        overview.0.clone(),
-                        workspace,
-                        self.common.shell.session_lock.as_ref(),
-                    )
+                    let under =
+                        State::surface_under(position, &current_output, &mut self.common.shell)
                     .map(|(target, pos)| (target, pos.as_logical()));
 
                     let ptr = seat.get_pointer().unwrap();
@@ -683,15 +673,7 @@ impl State {
 
                     let output_geometry = output.geometry();
 
-                    let workspace = self.common.shell.workspaces.active_mut(&output);
-                    let new_under = State::surface_under(
-                        position,
-                        &output,
-                        &self.common.shell.override_redirect_windows,
-                        overview.0,
-                        workspace,
-                        self.common.shell.session_lock.as_ref(),
-                    )
+                    let new_under = State::surface_under(position, &output, &mut self.common.shell)
                     .map(|(target, pos)| (target, pos.as_logical()));
 
                     position.x = position.x.clamp(
@@ -807,17 +789,8 @@ impl State {
                             geometry.size.as_logical(),
                         )
                         .as_global();
-                    let overview = self.common.shell.overview_mode();
-                    let workspace = self.common.shell.workspaces.active_mut(&output);
                     let serial = SERIAL_COUNTER.next_serial();
-                    let under = State::surface_under(
-                        position,
-                        &output,
-                        &self.common.shell.override_redirect_windows,
-                        overview.0,
-                        workspace,
-                        self.common.shell.session_lock.as_ref(),
-                    )
+                    let under = State::surface_under(position, &output, &mut self.common.shell)
                     .map(|(target, pos)| (target, pos.as_logical()));
 
                     for session in sessions_for_output(&self.common, &output) {
@@ -885,7 +858,6 @@ impl State {
 
                             let pos = seat.get_pointer().unwrap().current_location().as_global();
                             let relative_pos = pos.to_local(&output);
-                            let overview = self.common.shell.overview_mode();
                             let mut under = None;
 
                             if let Some(session_lock) = self.common.shell.session_lock.as_ref() {
@@ -915,7 +887,6 @@ impl State {
                                     under = Some(window.clone().into());
                                 }
                             } else {
-                                let workspace = self.common.shell.active_space_mut(&output);
                                 let done = {
                                     let layers = layer_map_for_output(&output);
                                     if let Some(layer) = layers
@@ -945,7 +916,7 @@ impl State {
                                 };
                                 if !done {
                                     if let Some((target, _)) =
-                                        workspace.element_under(pos, overview.0)
+                                        self.common.shell.element_under(pos, &output)
                                     {
                                         under = Some(target);
                                     } else {
@@ -1194,15 +1165,10 @@ impl State {
                             .position_transformed(geometry.size.as_logical())
                             .as_global();
 
-                    let overview = self.common.shell.overview_mode();
-                    let workspace = self.common.shell.workspaces.active_mut(&output);
                     let under = State::surface_under(
                         position,
                         &output,
-                        &self.common.shell.override_redirect_windows,
-                        overview.0.clone(),
-                        workspace,
-                        self.common.shell.session_lock.as_ref(),
+                        &mut self.common.shell,
                     )
                     .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -1234,15 +1200,10 @@ impl State {
                             .position_transformed(geometry.size.as_logical())
                             .as_global();
 
-                    let overview = self.common.shell.overview_mode();
-                    let workspace = self.common.shell.workspaces.active_mut(&output);
                     let under = State::surface_under(
                         position,
                         &output,
-                        &self.common.shell.override_redirect_windows,
-                        overview.0.clone(),
-                        workspace,
-                        self.common.shell.session_lock.as_ref(),
+                        &mut self.common.shell,
                     )
                     .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -1282,15 +1243,10 @@ impl State {
                         .as_global()
                         + geometry.loc.to_f64();
 
-                    let overview = self.common.shell.overview_mode();
-                    let workspace = self.common.shell.workspaces.active_mut(&output);
                     let under = State::surface_under(
                         position,
                         &output,
-                        &self.common.shell.override_redirect_windows,
-                        overview.0.clone(),
-                        workspace,
-                        self.common.shell.session_lock.as_ref(),
+                        &mut self.common.shell,
                     )
                     .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -1352,15 +1308,10 @@ impl State {
                         .as_global()
                         + geometry.loc.to_f64();
 
-                    let overview = self.common.shell.overview_mode();
-                    let workspace = self.common.shell.workspaces.active_mut(&output);
                     let under = State::surface_under(
                         position,
                         &output,
-                        &self.common.shell.override_redirect_windows,
-                        overview.0.clone(),
-                        workspace,
-                        self.common.shell.session_lock.as_ref(),
+                        &mut self.common.shell,
                     )
                     .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -2188,11 +2139,9 @@ impl State {
     pub fn surface_under(
         global_pos: Point<f64, Global>,
         output: &Output,
-        override_redirect_windows: &[X11Surface],
-        overview: OverviewMode,
-        workspace: &mut Workspace,
-        session_lock: Option<&SessionLock>,
+        shell: &mut Shell,
     ) -> Option<(PointerFocusTarget, Point<i32, Global>)> {
+        let session_lock = shell.session_lock.as_ref();
         let relative_pos = global_pos.to_local(output);
         let output_geo = output.geometry();
 
@@ -2205,7 +2154,7 @@ impl State {
             });
         }
 
-        if let Some(window) = workspace.get_fullscreen() {
+        if let Some(window) = shell.workspaces.active_mut(output).get_fullscreen() {
             let layers = layer_map_for_output(output);
             if let Some(layer) = layers.layer_under(WlrLayer::Overlay, relative_pos.as_logical()) {
                 let layer_loc = layers.layer_geometry(layer).unwrap().loc;
@@ -2219,7 +2168,7 @@ impl State {
                     return Some((layer.clone().into(), output_geo.loc + layer_loc.as_global()));
                 }
             }
-            if let Some(or) = override_redirect_windows.iter().find(|or| {
+            if let Some(or) = shell.override_redirect_windows.iter().find(|or| {
                 or.is_in_input_region(&(global_pos.as_logical() - or.geometry().loc.to_f64()))
             }) {
                 return Some((or.clone().into(), or.geometry().loc.as_global()));
@@ -2247,12 +2196,12 @@ impl State {
                     }
                 }
             }
-            if let Some(or) = override_redirect_windows.iter().find(|or| {
+            if let Some(or) = shell.override_redirect_windows.iter().find(|or| {
                 or.is_in_input_region(&(global_pos.as_logical() - or.geometry().loc.to_f64()))
             }) {
                 return Some((or.clone().into(), or.geometry().loc.as_global()));
             }
-            if let Some((target, loc)) = workspace.element_under(global_pos, overview) {
+            if let Some((target, loc)) = shell.element_under(global_pos, output) {
                 return Some((target, loc));
             }
             {
