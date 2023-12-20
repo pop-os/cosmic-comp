@@ -200,7 +200,54 @@ impl XdgShellHandler for State {
             .element_for_wl_surface(surface.wl_surface())
             .cloned()
         {
-            if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
+            if let Some(set) = self
+                .common
+                .shell
+                .workspaces
+                .sets
+                .values_mut()
+                .find(|set| set.sticky_layer.mapped().any(|m| m == &mapped))
+            {
+                let mapped = if mapped
+                    .stack_ref()
+                    .map(|stack| stack.len() > 1)
+                    .unwrap_or(false)
+                {
+                    let stack = mapped.stack_ref().unwrap();
+                    let surface = stack
+                        .surfaces()
+                        .find(|s| s.wl_surface().as_ref() == Some(surface.wl_surface()))
+                        .unwrap();
+                    stack.remove_window(&surface);
+                    CosmicMapped::from(CosmicWindow::new(
+                        surface,
+                        self.common.event_loop_handle.clone(),
+                        self.common.theme.clone(),
+                    ))
+                } else {
+                    set.sticky_layer.unmap(&mapped);
+                    mapped
+                };
+
+                let workspace_handle = self.common.shell.active_space(&output).handle.clone();
+                for (window, _) in mapped.windows() {
+                    self.common
+                        .shell
+                        .toplevel_info_state
+                        .toplevel_enter_output(&window, &output);
+                    self.common
+                        .shell
+                        .toplevel_info_state
+                        .toplevel_enter_workspace(&window, &workspace_handle);
+                }
+
+                let workspace = self.common.shell.active_space_mut(&output);
+                workspace.floating_layer.map(mapped.clone(), None);
+                workspace.fullscreen_request(
+                    &mapped.active_window(),
+                    Some((ManagedLayer::Sticky, workspace_handle)),
+                );
+            } else if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
                 if workspace.output != output {
                     let (mapped, layer) = if mapped
                         .stack_ref()
