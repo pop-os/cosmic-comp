@@ -12,7 +12,7 @@ use crate::{
             CosmicMappedRenderElement,
         },
         focus::target::{KeyboardFocusTarget, PointerFocusTarget},
-        CosmicMapped, CosmicSurface,
+        CosmicMapped, CosmicSurface, ManagedLayer,
     },
     utils::prelude::*,
 };
@@ -61,7 +61,7 @@ pub struct MoveGrabState {
     window_offset: Point<i32, Logical>,
     indicator_thickness: u8,
     start: Instant,
-    tiling: bool,
+    previous: ManagedLayer,
     stacking_indicator: Option<(StackHover, Point<i32, Logical>)>,
 }
 
@@ -82,7 +82,7 @@ impl MoveGrabState {
         #[cfg(feature = "debug")]
         puffin::profile_function!();
 
-        let scale = if self.tiling {
+        let scale = if self.previous == ManagedLayer::Tiling {
             0.6 + ((1.0
                 - (Instant::now().duration_since(self.start).as_millis() as f64
                     / RESCALE_ANIMATION_DURATION)
@@ -225,7 +225,7 @@ pub struct MoveGrab {
     seat: Seat<State>,
     cursor_output: Output,
     window_outputs: HashSet<Output>,
-    tiling: bool,
+    previous: ManagedLayer,
     release: ReleaseMode,
     // SAFETY: This is only used on drop which will always be on the main thread
     evlh: NotSend<LoopHandle<'static, State>>,
@@ -290,7 +290,7 @@ impl PointerGrab<State> for MoveGrab {
                 }
             }
 
-            if self.tiling {
+            if self.previous == ManagedLayer::Tiling {
                 let indicator_location = state
                     .common
                     .shell
@@ -458,7 +458,7 @@ impl MoveGrab {
         initial_cursor_location: Point<f64, Global>,
         initial_window_location: Point<i32, Global>,
         indicator_thickness: u8,
-        was_tiled: bool,
+        previous_layer: ManagedLayer,
         release: ReleaseMode,
         evlh: LoopHandle<'static, State>,
     ) -> MoveGrab {
@@ -475,7 +475,7 @@ impl MoveGrab {
             indicator_thickness,
             start: Instant::now(),
             stacking_indicator: None,
-            tiling: was_tiled,
+            previous: previous_layer,
         };
 
         *seat
@@ -495,14 +495,14 @@ impl MoveGrab {
             seat: seat.clone(),
             window_outputs: outputs,
             cursor_output: output,
-            tiling: was_tiled,
+            previous: previous_layer,
             release,
             evlh: NotSend(evlh),
         }
     }
 
     pub fn is_tiling_grab(&self) -> bool {
-        self.tiling
+        self.previous == ManagedLayer::Tiling
     }
 }
 
@@ -512,7 +512,7 @@ impl Drop for MoveGrab {
         let output = self.seat.active_output();
         let seat = self.seat.clone();
         let window_outputs = self.window_outputs.drain().collect::<HashSet<_>>();
-        let tiling = self.tiling;
+        let previous = self.previous;
         let window = self.window.clone();
 
         let _ = self.evlh.0.insert_idle(move |state| {
@@ -537,35 +537,54 @@ impl Drop for MoveGrab {
                             .common
                             .shell
                             .toplevel_info_state
-                            .toplevel_enter_workspace(&window, &workspace_handle);
-                        state
-                            .common
-                            .shell
-                            .toplevel_info_state
                             .toplevel_enter_output(&window, &output);
+                        if previous != ManagedLayer::Sticky {
+                            state
+                                .common
+                                .shell
+                                .toplevel_info_state
+                                .toplevel_enter_workspace(&window, &workspace_handle);
+                        }
                     }
 
-                    if tiling {
-                        let (window, location) = state
-                            .common
-                            .shell
-                            .active_space_mut(&output)
-                            .tiling_layer
-                            .drop_window(grab_state.window);
-                        Some((window, location.to_global(&output)))
-                    } else {
-                        grab_state.window.set_geometry(Rectangle::from_loc_and_size(
-                            window_location,
-                            grab_state.window.geometry().size.as_global(),
-                        ));
-                        let workspace = state.common.shell.active_space_mut(&output);
-                        workspace.floating_layer.map_internal(
-                            grab_state.window,
-                            Some(window_location.to_local(&workspace.output)),
-                            None,
-                        );
+                    match previous {
+                        ManagedLayer::Tiling => {
+                            let (window, location) = state
+                                .common
+                                .shell
+                                .active_space_mut(&output)
+                                .tiling_layer
+                                .drop_window(grab_state.window);
+                            Some((window, location.to_global(&output)))
+                        }
+                        ManagedLayer::Floating => {
+                            grab_state.window.set_geometry(Rectangle::from_loc_and_size(
+                                window_location,
+                                grab_state.window.geometry().size.as_global(),
+                            ));
+                            let workspace = state.common.shell.active_space_mut(&output);
+                            workspace.floating_layer.map_internal(
+                                grab_state.window,
+                                Some(window_location.to_local(&workspace.output)),
+                                None,
+                            );
 
-                        Some((window.clone(), window_location))
+                            Some((window.clone(), window_location))
+                        }
+                        ManagedLayer::Sticky => {
+                            grab_state.window.set_geometry(Rectangle::from_loc_and_size(
+                                window_location,
+                                grab_state.window.geometry().size.as_global(),
+                            ));
+                            let set = state.common.shell.workspaces.sets.get_mut(&output).unwrap();
+                            set.sticky_layer.map_internal(
+                                grab_state.window,
+                                Some(window_location.to_local(&output)),
+                                None,
+                            );
+
+                            Some((window.clone(), window_location))
+                        }
                     }
                 } else {
                     None

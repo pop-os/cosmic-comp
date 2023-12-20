@@ -4,7 +4,6 @@ use crate::{
         BackdropShader, GlMultiError, GlMultiFrame, GlMultiRenderer,
     },
     shell::{
-        grabs::MoveGrab,
         layout::{floating::FloatingLayout, tiling::TilingLayout},
         OverviewMode, ANIMATION_DURATION,
     },
@@ -21,7 +20,6 @@ use crate::{
     xwayland::XWaylandState,
 };
 
-use calloop::LoopHandle;
 use cosmic::theme::CosmicTheme;
 use id_tree::Tree;
 use indexmap::IndexSet;
@@ -37,7 +35,7 @@ use smithay::{
         ImportAll, ImportMem, Renderer,
     },
     desktop::{layer_map_for_output, space::SpaceElement},
-    input::{pointer::GrabStartData as PointerGrabStartData, Seat},
+    input::Seat,
     output::Output,
     reexports::{
         wayland_server::{protocol::wl_surface::WlSurface, Client, Resource},
@@ -151,6 +149,7 @@ pub struct ManagedState {
 pub enum ManagedLayer {
     Tiling,
     Floating,
+    Sticky,
 }
 
 #[derive(Debug, serde::Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -676,62 +675,6 @@ impl Workspace {
         } else {
             true
         }
-    }
-
-    pub fn move_request(
-        &mut self,
-        window: &CosmicSurface,
-        seat: &Seat<State>,
-        output: &Output,
-        start_data: PointerGrabStartData<State>,
-        indicator_thickness: u8,
-        release: ReleaseMode,
-        evlh: LoopHandle<'static, State>,
-    ) -> Option<MoveGrab> {
-        let pointer = seat.get_pointer().unwrap();
-        let pos = pointer.current_location().as_global();
-
-        if self
-            .fullscreen
-            .as_ref()
-            .is_some_and(|f| &f.surface == window)
-        {
-            let _ = self.remove_fullscreen(); // We are moving this window, we don't need to send it back to it's original workspace
-        }
-
-        let mapped = self.element_for_surface(&window)?.clone();
-        let mut initial_window_location = self
-            .element_geometry(&mapped)
-            .unwrap()
-            .loc
-            .to_global(&self.output);
-
-        if mapped.maximized_state.lock().unwrap().is_some() {
-            // If surface is maximized then unmaximize it
-            let new_size = self.unmaximize_request(window);
-            let ratio = pos.to_local(&self.output).x / output.geometry().size.w as f64;
-
-            initial_window_location = new_size
-                .map(|size| (pos.x - (size.w as f64 * ratio), pos.y).into())
-                .unwrap_or_else(|| pos)
-                .to_i32_round();
-        }
-
-        let was_floating = self.floating_layer.unmap(&mapped);
-        let was_tiled = self.tiling_layer.unmap_as_placeholder(&mapped);
-        assert!(was_floating != was_tiled.is_some());
-
-        Some(MoveGrab::new(
-            start_data,
-            mapped,
-            seat,
-            pos,
-            initial_window_location,
-            indicator_thickness,
-            was_tiled.is_some(),
-            release,
-            evlh,
-        ))
     }
 
     pub fn toggle_tiling(&mut self, seat: &Seat<State>) {

@@ -412,7 +412,14 @@ impl XwmHandler for State {
     fn move_request(&mut self, _xwm: XwmId, window: X11Surface, _button: u32) {
         if let Some(wl_surface) = window.wl_surface() {
             let seat = self.common.last_active_seat().clone();
-            Shell::move_request(self, &wl_surface, &seat, None, ReleaseMode::NoMouseButtons)
+            Shell::move_request(
+                self,
+                &wl_surface,
+                &seat,
+                None,
+                ReleaseMode::NoMouseButtons,
+                false,
+            )
         }
     }
 

@@ -233,7 +233,7 @@ pub fn window_items(
             let _ = handle.insert_idle(move |state| {
                 if let Some(surface) = move_clone.wl_surface() {
                     let seat = state.common.last_active_seat().clone();
-                    Shell::move_request(state, &surface, &seat, None, ReleaseMode::Click);
+                    Shell::move_request(state, &surface, &seat, None, ReleaseMode::Click, false);
                 }
             });
         })),

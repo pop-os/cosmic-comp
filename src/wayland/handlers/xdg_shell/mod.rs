@@ -147,6 +147,7 @@ impl XdgShellHandler for State {
             &seat,
             serial,
             ReleaseMode::NoMouseButtons,
+            false,
         )
     }
 
