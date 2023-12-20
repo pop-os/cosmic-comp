@@ -219,11 +219,11 @@ impl CompositorHandler for State {
         // We only want to resize once the client has acknoledged & commited the new size,
         // so we need to carefully track the state through different handlers.
         if let Some(element) = self.common.shell.element_for_wl_surface(surface).cloned() {
+            crate::shell::layout::floating::ResizeSurfaceGrab::apply_resize_to_location(
+                element.clone(),
+                &mut self.common.shell,
+            );
             if let Some(workspace) = self.common.shell.space_for_mut(&element) {
-                crate::shell::layout::floating::ResizeSurfaceGrab::apply_resize_to_location(
-                    element.clone(),
-                    workspace,
-                );
                 workspace.commit(surface);
             }
         }

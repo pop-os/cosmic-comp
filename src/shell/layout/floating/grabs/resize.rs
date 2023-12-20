@@ -290,17 +290,34 @@ impl ResizeSurfaceGrab {
         }
     }
 
-    pub fn apply_resize_to_location(window: CosmicMapped, space: &mut Workspace) {
-        if let Some(location) = space
-            .floating_layer
+    pub fn apply_resize_to_location(window: CosmicMapped, shell: &mut Shell) {
+        let mut resize_state = window.resize_state.lock().unwrap();
+
+        if resize_state.is_none() {
+            return;
+        }
+
+        let (output, floating_layer) = if let Some((output, set)) = shell
+            .workspaces
+            .sets
+            .iter_mut()
+            .find(|(_, set)| set.sticky_layer.mapped().any(|m| m == &window))
+        {
+            (output, &mut set.sticky_layer)
+        } else if let Some(workspace) = shell.space_for_mut(&window) {
+            (&workspace.output, &mut workspace.floating_layer)
+        } else {
+            return;
+        };
+
+        if let Some(location) = floating_layer
             .space
             .element_location(&window)
             .map(PointExt::as_local)
-            .map(|p| p.to_global(space.output()))
+            .map(|p| p.to_global(output))
         {
             let mut new_location = None;
 
-            let mut resize_state = window.resize_state.lock().unwrap();
             // If the window is being resized by top or left, its location must be adjusted
             // accordingly.
             match *resize_state {
@@ -311,7 +328,7 @@ impl ResizeSurfaceGrab {
                         initial_window_location,
                         initial_window_size,
                     } = resize_data;
-                    let initial_window_location = initial_window_location.to_global(space.output());
+                    let initial_window_location = initial_window_location.to_global(output);
 
                     if edges.intersects(ResizeEdge::TOP_LEFT) {
                         let size = window.geometry().size;
@@ -344,7 +361,7 @@ impl ResizeSurfaceGrab {
                             update_reactive_popups(
                                 &window,
                                 new_location + offset.as_global(),
-                                space.floating_layer.space.outputs(),
+                                floating_layer.space.outputs(),
                             );
                         }
                         CosmicSurface::X11(surface) => {
@@ -355,8 +372,7 @@ impl ResizeSurfaceGrab {
                         _ => unreachable!(),
                     }
                 }
-                space
-                    .floating_layer
+                floating_layer
                     .space
                     .map_element(window, new_location.as_logical(), false);
             }
