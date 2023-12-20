@@ -1741,6 +1741,21 @@ impl Shell {
         }
     }
 
+    pub fn element_under(
+        &mut self,
+        location: Point<f64, Global>,
+        output: &Output,
+    ) -> Option<(PointerFocusTarget, Point<i32, Global>)> {
+        let overview = self.overview_mode.clone();
+        self.workspaces.sets.get_mut(output).and_then(|set| {
+            set.sticky_layer
+                .space
+                .element_under(location.to_local(output).as_logical())
+                .map(|(mapped, p)| (mapped.clone().into(), p.as_local().to_global(output)))
+                .or_else(|| set.workspaces[set.active].element_under(location, overview))
+        })
+    }
+
     pub fn move_window(
         state: &mut State,
         seat: Option<&Seat<State>>,
