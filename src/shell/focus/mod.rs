@@ -121,18 +121,18 @@ impl Shell {
                 workspace.unwrap()
             };
 
-                let mut focus_stack = workspace.focus_stack.get_mut(active_seat);
-                if Some(&mapped) != focus_stack.last() {
-                    trace!(?mapped, "Focusing window.");
-                    focus_stack.append(&mapped);
-                    // also remove popup grabs, if we are switching focus
-                    if let Some(mut popup_grab) = active_seat
-                        .user_data()
-                        .get::<PopupGrabData>()
-                        .and_then(|x| x.take())
-                    {
-                        if !popup_grab.has_ended() {
-                            popup_grab.ungrab(PopupUngrabStrategy::All);
+            let mut focus_stack = workspace.focus_stack.get_mut(active_seat);
+            if Some(&mapped) != focus_stack.last() {
+                trace!(?mapped, "Focusing window.");
+                focus_stack.append(&mapped);
+                // also remove popup grabs, if we are switching focus
+                if let Some(mut popup_grab) = active_seat
+                    .user_data()
+                    .get::<PopupGrabData>()
+                    .and_then(|x| x.take())
+                {
+                    if !popup_grab.has_ended() {
+                        popup_grab.ungrab(PopupUngrabStrategy::All);
                     }
                 }
             }

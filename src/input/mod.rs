@@ -600,7 +600,7 @@ impl State {
 
                     let under =
                         State::surface_under(position, &current_output, &mut self.common.shell)
-                    .map(|(target, pos)| (target, pos.as_logical()));
+                            .map(|(target, pos)| (target, pos.as_logical()));
 
                     let ptr = seat.get_pointer().unwrap();
 
@@ -674,7 +674,7 @@ impl State {
                     let output_geometry = output.geometry();
 
                     let new_under = State::surface_under(position, &output, &mut self.common.shell)
-                    .map(|(target, pos)| (target, pos.as_logical()));
+                        .map(|(target, pos)| (target, pos.as_logical()));
 
                     position.x = position.x.clamp(
                         output_geometry.loc.x as f64,
@@ -791,7 +791,7 @@ impl State {
                         .as_global();
                     let serial = SERIAL_COUNTER.next_serial();
                     let under = State::surface_under(position, &output, &mut self.common.shell)
-                    .map(|(target, pos)| (target, pos.as_logical()));
+                        .map(|(target, pos)| (target, pos.as_logical()));
 
                     for session in sessions_for_output(&self.common, &output) {
                         if let Some((geometry, offset)) = seat.cursor_geometry(
