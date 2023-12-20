@@ -2134,6 +2134,10 @@ impl State {
                 let workspace = self.common.shell.active_space_mut(&output);
                 workspace.toggle_floating_window_focused(seat);
             }
+            Action::ToggleSticky => {
+                let seats = self.common.seats().cloned().collect::<Vec<_>>();
+                self.common.shell.toggle_sticky_current(seats.iter(), seat);
+            }
             Action::Spawn(command) => {
                 let (token, data) = self
                     .common
