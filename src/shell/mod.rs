@@ -71,7 +71,7 @@ use self::{
     element::{
         resize_indicator::{resize_indicator, ResizeIndicator},
         swap_indicator::{swap_indicator, SwapIndicator},
-        CosmicWindow,
+        CosmicWindow, MaximizedState,
     },
     focus::target::{KeyboardFocusTarget, PointerFocusTarget},
     grabs::{
@@ -2399,6 +2399,71 @@ impl Shell {
                 ptr.frame(state);
                 ptr.set_grab(state, grab, serial, Focus::Keep);
             }
+        }
+    }
+
+    pub fn maximize_toggle(&mut self, window: &CosmicMapped) {
+        if window.is_maximized(true) {
+            self.unmaximize_request(window);
+        } else {
+            self.maximize_request(window);
+        }
+    }
+
+    pub fn maximize_request(&mut self, mapped: &CosmicMapped) {
+        let (managed_layer, floating_layer) = if let Some(set) = self
+            .workspaces
+            .sets
+            .values_mut()
+            .find(|set| set.sticky_layer.mapped().any(|m| m == mapped))
+        {
+            (ManagedLayer::Sticky, &mut set.sticky_layer)
+        } else if let Some(workspace) = self.space_for_mut(&mapped) {
+            let layer = if workspace.is_floating(&mapped) {
+                ManagedLayer::Floating
+            } else {
+                ManagedLayer::Tiling
+            };
+            (layer, &mut workspace.floating_layer)
+        } else {
+            return;
+        };
+
+        let mut state = mapped.maximized_state.lock().unwrap();
+        if state.is_none() {
+            *state = Some(MaximizedState {
+                original_geometry: floating_layer.element_geometry(&mapped).unwrap(),
+                original_layer: managed_layer,
+            });
+            std::mem::drop(state);
+            floating_layer.map_maximized(mapped.clone());
+        }
+    }
+
+    pub fn unmaximize_request(&mut self, mapped: &CosmicMapped) -> Option<Size<i32, Logical>> {
+        if let Some(set) = self
+            .workspaces
+            .sets
+            .values_mut()
+            .find(|set| set.sticky_layer.mapped().any(|m| m == mapped))
+        {
+            let mut state = mapped.maximized_state.lock().unwrap();
+            if let Some(state) = state.take() {
+                assert_eq!(state.original_layer, ManagedLayer::Sticky);
+                mapped.set_maximized(false);
+                set.sticky_layer.map_internal(
+                    mapped.clone(),
+                    Some(state.original_geometry.loc),
+                    Some(state.original_geometry.size.as_logical()),
+                );
+                Some(state.original_geometry.size.as_logical())
+            } else {
+                None
+            }
+        } else if let Some(workspace) = self.space_for_mut(mapped) {
+            workspace.unmaximize_request(mapped)
+        } else {
+            None
         }
     }
 

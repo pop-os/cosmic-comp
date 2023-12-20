@@ -2039,9 +2039,9 @@ impl State {
                 let current_output = seat.active_output();
                 let workspace = self.common.shell.active_space_mut(&current_output);
                 let focus_stack = workspace.focus_stack.get(seat);
-                let focused_window = focus_stack.last();
-                if let Some(window) = focused_window.map(|f| f.active_window()) {
-                    workspace.maximize_toggle(&window);
+                let focused_window = focus_stack.last().cloned();
+                if let Some(window) = focused_window {
+                    self.common.shell.maximize_toggle(&window);
                 }
             }
             Action::Resizing(direction) => self.common.shell.set_resize_mode(
