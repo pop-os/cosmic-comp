@@ -266,7 +266,9 @@ impl XwmHandler for State {
         let outputs = if let Some(wl_surface) = window.wl_surface() {
             self.common
                 .shell
-                .visible_outputs_for_surface(&wl_surface)
+                .visible_output_for_surface(&wl_surface)
+                .into_iter()
+                .cloned()
                 .collect::<Vec<_>>()
         } else {
             self.common.shell.outputs().cloned().collect::<Vec<_>>()

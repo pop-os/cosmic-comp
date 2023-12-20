@@ -1179,26 +1179,23 @@ impl Shell {
             .refresh(&self.xdg_activation_state)
     }
 
-    pub fn visible_outputs_for_surface<'a>(
-        &'a self,
-        surface: &'a WlSurface,
-    ) -> impl Iterator<Item = Output> + 'a {
+    pub fn visible_output_for_surface(&self, surface: &WlSurface) -> Option<&Output> {
         if let Some(session_lock) = &self.session_lock {
-            let output = session_lock
+            return session_lock
                 .surfaces
                 .iter()
                 .find(|(_, v)| v.wl_surface() == surface)
-                .map(|(k, _)| k.clone());
-            return Box::new(output.into_iter()) as Box<dyn Iterator<Item = Output>>;
+                .map(|(k, _)| k);
         }
 
-        match self
-            .outputs()
+        self.outputs()
+            // layer map surface?
             .find(|o| {
                 let map = layer_map_for_output(o);
                 map.layer_for_surface(surface, WindowSurfaceType::ALL)
                     .is_some()
             })
+            // pending layer map surface?
             .or_else(|| {
                 self.pending_layers.iter().find_map(|(l, output, _)| {
                     let mut found = false;
@@ -1209,13 +1206,10 @@ impl Shell {
                     });
                     found.then_some(output)
                 })
-            }) {
-            Some(output) => {
-                Box::new(std::iter::once(output.clone())) as Box<dyn Iterator<Item = Output>>
-            }
-            None => Box::new(
-                self.outputs()
-                    .filter(|o| {
+            })
+            // override redirect window?
+            .or_else(|| {
+                self.outputs().find(|o| {
                         self.override_redirect_windows.iter().any(|or| {
                             if or.wl_surface().as_ref() == Some(surface) {
                                 or.geometry()
@@ -1227,15 +1221,24 @@ impl Shell {
                             }
                         })
                     })
-                    .cloned()
-                    .chain(self.outputs().map(|o| self.active_space(o)).flat_map(|w| {
-                        w.mapped()
-                            .find(|e| e.has_surface(surface, WindowSurfaceType::ALL))
-                            .map(|_| w.output().clone())
-                            .into_iter()
-                    })),
-            ),
-        }
+            })
+            // sticky window ?
+            .or_else(|| {
+                self.outputs().find(|o| {
+                    self.workspaces.sets[*o]
+                        .sticky_layer
+                        .mapped()
+                        .any(|e| e.has_surface(surface, WindowSurfaceType::ALL))
+                })
+            })
+            // normal window?
+            .or_else(|| {
+                self.outputs().find(|o| {
+                    self.active_space(o)
+                        .mapped()
+                        .any(|e| e.has_surface(surface, WindowSurfaceType::ALL))
+                })
+            })
     }
 
     pub fn workspace_for_surface(&self, surface: &WlSurface) -> Option<(WorkspaceHandle, Output)> {

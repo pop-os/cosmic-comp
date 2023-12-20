@@ -315,12 +315,12 @@ impl XdgShellHandler for State {
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
-        let outputs = self
+        let output = self
             .common
             .shell
-            .visible_outputs_for_surface(surface.wl_surface())
-            .collect::<Vec<_>>();
-        for output in outputs.iter() {
+            .visible_output_for_surface(surface.wl_surface())
+            .cloned();
+        if let Some(output) = output.as_ref() {
             self.common.shell.refresh_active_space(output);
         }
 
@@ -335,7 +335,7 @@ impl XdgShellHandler for State {
 
         // screencopy
         let mut scheduled_sessions = self.schedule_workspace_sessions(surface.wl_surface());
-        for output in outputs.into_iter() {
+        if let Some(output) = output.as_ref() {
             if let Some(sessions) = output.user_data().get::<PendingScreencopyBuffers>() {
                 scheduled_sessions
                     .get_or_insert_with(Vec::new)
@@ -349,7 +349,7 @@ impl XdgShellHandler for State {
                         .iter()
                         .filter(|(s, _)| match s.session_type() {
                             SessionType::Output(o) | SessionType::Workspace(o, _)
-                                if o == output =>
+                                if &o == output =>
                             {
                                 true
                             }
