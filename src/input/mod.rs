@@ -2069,9 +2069,7 @@ impl State {
                     .update_orientation(Some(orientation), &seat);
             }
             Action::ToggleStacking => {
-                let output = seat.active_output();
-                let workspace = self.common.shell.active_space_mut(&output);
-                if let Some(new_focus) = workspace.toggle_stacking_focused(seat) {
+                if let Some(new_focus) = self.common.shell.toggle_stacking_focused(seat) {
                     Common::set_focus(self, Some(&new_focus), seat, Some(serial));
                 }
             }

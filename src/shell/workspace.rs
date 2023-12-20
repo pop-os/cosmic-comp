@@ -699,33 +699,6 @@ impl Workspace {
         }
     }
 
-    pub fn toggle_stacking(&mut self, window: &CosmicMapped) -> Option<KeyboardFocusTarget> {
-        if self.tiling_layer.mapped().any(|(_, m, _)| m == window) {
-            self.tiling_layer.toggle_stacking(window)
-        } else if self.floating_layer.mapped().any(|w| w == window) {
-            self.floating_layer.toggle_stacking(window)
-        } else {
-            None
-        }
-    }
-
-    pub fn toggle_stacking_focused(&mut self, seat: &Seat<State>) -> Option<KeyboardFocusTarget> {
-        let maybe_window = self.focus_stack.get(seat).iter().next().cloned();
-        if let Some(window) = maybe_window {
-            if self.tiling_layer.mapped().any(|(_, m, _)| m == &window) {
-                self.tiling_layer
-                    .toggle_stacking_focused(seat, self.focus_stack.get_mut(seat))
-            } else if self.floating_layer.mapped().any(|w| w == &window) {
-                self.floating_layer
-                    .toggle_stacking_focused(seat, self.focus_stack.get_mut(seat))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-
     pub fn mapped(&self) -> impl Iterator<Item = &CosmicMapped> {
         self.floating_layer
             .mapped()

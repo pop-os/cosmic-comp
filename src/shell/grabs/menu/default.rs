@@ -14,18 +14,9 @@ use crate::{
 
 use super::{Item, ResizeEdge};
 
-fn unstack(state: &mut State, mapped: &CosmicMapped) {
+fn toggle_stacking(state: &mut State, mapped: &CosmicMapped) {
     let seat = state.common.last_active_seat().clone();
-    let Some(ws) = state.common.shell.space_for_mut(mapped) else { return };
-    if let Some(new_focus) = ws.toggle_stacking(mapped) {
-        Common::set_focus(state, Some(&new_focus), &seat, None);
-    }
-}
-
-fn stack(state: &mut State, mapped: &CosmicMapped) {
-    let seat = state.common.last_active_seat().clone();
-    let Some(ws) = state.common.shell.space_for_mut(&mapped) else { return };
-    if let Some(new_focus) = ws.toggle_stacking(&mapped) {
+    if let Some(new_focus) = state.common.shell.toggle_stacking(mapped) {
         Common::set_focus(state, Some(&new_focus), &seat, None);
     }
 }
@@ -182,7 +173,7 @@ pub fn window_items(
             Item::new(fl!("window-menu-unstack-all"), move |handle| {
                 let mapped = unstack_clone.clone();
                 let _ = handle.insert_idle(move |state| {
-                    unstack(state, &mapped);
+                    toggle_stacking(state, &mapped);
                 });
             })
             .shortcut(config.get_shortcut_for_action(&Action::ToggleStacking)),
@@ -282,7 +273,7 @@ pub fn window_items(
         (!is_stacked).then_some(
             Item::new(fl!("window-menu-stack"), move |handle| {
                 let mapped = stack_clone.clone();
-                let _ = handle.insert_idle(move |state| stack(state, &mapped));
+                let _ = handle.insert_idle(move |state| toggle_stacking(state, &mapped));
             })
             .shortcut(config.get_shortcut_for_action(&Action::ToggleStacking)),
         ),
