@@ -69,7 +69,7 @@ use super::{
         target::{KeyboardFocusTarget, PointerFocusTarget, WindowGroup},
         FocusDirection, FocusStack, FocusStackMut,
     },
-    grabs::{ReleaseMode, ResizeEdge, ResizeGrab},
+    grabs::ResizeEdge,
     layout::tiling::{Data, NodeDesc},
     CosmicMappedRenderElement, CosmicSurface, ResizeDirection, ResizeMode,
 };
@@ -449,34 +449,34 @@ impl Workspace {
     }
 
     pub fn unmaximize_request(&mut self, elem: &CosmicMapped) -> Option<Size<i32, Logical>> {
-            let mut state = elem.maximized_state.lock().unwrap();
-            if let Some(state) = state.take() {
-                match state.original_layer {
-                    ManagedLayer::Tiling => {
-                        // should still be mapped in tiling
-                        self.floating_layer.unmap(&elem);
-                        elem.output_enter(&self.output, elem.bbox());
-                        elem.set_maximized(false);
-                        elem.set_geometry(state.original_geometry.to_global(&self.output));
-                        elem.configure();
-                        self.tiling_layer.recalculate();
+        let mut state = elem.maximized_state.lock().unwrap();
+        if let Some(state) = state.take() {
+            match state.original_layer {
+                ManagedLayer::Tiling => {
+                    // should still be mapped in tiling
+                    self.floating_layer.unmap(&elem);
+                    elem.output_enter(&self.output, elem.bbox());
+                    elem.set_maximized(false);
+                    elem.set_geometry(state.original_geometry.to_global(&self.output));
+                    elem.configure();
+                    self.tiling_layer.recalculate();
                     self.tiling_layer
-                            .element_geometry(&elem)
+                        .element_geometry(&elem)
                         .map(|geo| geo.size.as_logical())
-                    }
-                    ManagedLayer::Floating => {
-                        elem.set_maximized(false);
-                        self.floating_layer.map_internal(
-                            elem.clone(),
-                            Some(state.original_geometry.loc),
-                            Some(state.original_geometry.size.as_logical()),
-                        );
-                    Some(state.original_geometry.size.as_logical())
-                    }
-                ManagedLayer::Sticky => unreachable!(),
                 }
+                ManagedLayer::Floating => {
+                    elem.set_maximized(false);
+                    self.floating_layer.map_internal(
+                        elem.clone(),
+                        Some(state.original_geometry.loc),
+                        Some(state.original_geometry.size.as_logical()),
+                    );
+                    Some(state.original_geometry.size.as_logical())
+                }
+                ManagedLayer::Sticky => unreachable!(),
+            }
         } else {
-        None
+            None
         }
     }
 
@@ -593,32 +593,6 @@ impl Workspace {
             .filter(|f| f.alive())
             .filter(|f| f.ended_at.is_none() && f.start_at.is_none())
             .map(|f| &f.surface)
-    }
-
-    pub fn resize_request(
-        &mut self,
-        mapped: &CosmicMapped,
-        seat: &Seat<State>,
-        start_data: PointerGrabStartData<State>,
-        edges: ResizeEdge,
-    ) -> Option<ResizeGrab> {
-        if mapped.is_fullscreen(true) || mapped.is_maximized(true) {
-            return None;
-        }
-
-        if self.floating_layer.mapped().any(|m| m == mapped) {
-            self.floating_layer
-                .resize_request(
-                    mapped,
-                    seat,
-                    start_data.clone(),
-                    edges,
-                    ReleaseMode::NoMouseButtons,
-                )
-                .map(Into::into)
-        } else {
-            None
-        }
     }
 
     pub fn resize(

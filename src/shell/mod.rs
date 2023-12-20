@@ -2479,16 +2479,38 @@ impl Shell {
             check_grab_preconditions(&seat, surface, serial, ReleaseMode::NoMouseButtons)
         {
             if let Some(mapped) = state.common.shell.element_for_wl_surface(surface).cloned() {
-                if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
-                    if let Some(grab) = workspace.resize_request(&mapped, &seat, start_data, edges)
-                    {
+                if mapped.is_fullscreen(true) || mapped.is_maximized(true) {
+                    return;
+                }
+
+                let floating_layer = if let Some(set) = state
+                    .common
+                    .shell
+                    .workspaces
+                    .sets
+                    .values_mut()
+                    .find(|set| set.sticky_layer.mapped().any(|m| m == &mapped))
+                {
+                    &mut set.sticky_layer
+                } else if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
+                    &mut workspace.floating_layer
+                } else {
+                    return;
+                };
+
+                if let Some(grab) = floating_layer.resize_request(
+                    &mapped,
+                    seat,
+                    start_data.clone(),
+                    edges,
+                    ReleaseMode::NoMouseButtons,
+                ) {
                         seat.get_pointer().unwrap().set_grab(
                             state,
                             grab,
                             serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
                             Focus::Clear,
                         );
-                    }
                 }
             }
         }
@@ -2500,8 +2522,6 @@ impl Shell {
         let Some(focused) = seat.get_keyboard().unwrap().current_focus() else {
             return;
         };
-
-        if let Some(workspace) = self.workspaces.get_mut(idx, &output) {
             let amount = (self
                 .resize_state
                 .take()
@@ -2509,6 +2529,17 @@ impl Shell {
                 .unwrap_or(10)
                 + 2)
             .min(20);
+
+        if self
+            .workspaces
+            .sets
+            .get_mut(&output)
+            .unwrap()
+            .sticky_layer
+            .resize(&focused, direction, edge, amount)
+        {
+            self.resize_state = Some((focused, direction, edge, amount, idx, output));
+        } else if let Some(workspace) = self.workspaces.get_mut(idx, &output) {
             if workspace.resize(&focused, direction, edge, amount) {
                 self.resize_state = Some((focused, direction, edge, amount, idx, output));
             }
@@ -2519,18 +2550,25 @@ impl Shell {
         if let Some((old_focused, old_direction, old_edge, _, idx, output)) =
             self.resize_state.take()
         {
-            let workspace = self.workspaces.get(idx, &output).unwrap();
             if old_direction == direction && old_edge == edge {
                 let Some(toplevel) = old_focused.toplevel() else {
                     return;
                 };
-                let Some(mapped) = workspace
+                let Some(mapped) = self.workspaces.sets.values()
+                    .find_map(|set| set.sticky_layer.mapped()
+                        .find(|m| m.has_surface(&toplevel, WindowSurfaceType::TOPLEVEL))
+                    ).cloned()
+                    .or_else(|| {
+                        let workspace = self.workspaces.get(idx, &output).unwrap();
+                        workspace
                     .mapped()
                     .find(|m| m.has_surface(&toplevel, WindowSurfaceType::TOPLEVEL))
                     .cloned()
+                    })
                 else {
-                    return;
+                    return
                 };
+
                 let mut resize_state = mapped.resize_state.lock().unwrap();
                 if let Some(ResizeState::Resizing(data)) = *resize_state {
                     *resize_state = Some(ResizeState::WaitingForCommit(data));
