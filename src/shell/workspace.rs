@@ -64,7 +64,6 @@ use super::{
     element::{
         resize_indicator::ResizeIndicator, stack::CosmicStackRenderElement,
         swap_indicator::SwapIndicator, window::CosmicWindowRenderElement, CosmicMapped,
-        MaximizedState,
     },
     focus::{
         target::{KeyboardFocusTarget, PointerFocusTarget, WindowGroup},
@@ -379,7 +378,7 @@ impl Workspace {
 
         if mapped.maximized_state.lock().unwrap().is_some() {
             // If surface is maximized then unmaximize it, so it is assigned to only one layer
-            let _ = self.unmaximize_request(&mapped.active_window());
+            let _ = self.unmaximize_request(mapped);
         }
 
         let was_floating = self.floating_layer.unmap(&mapped);
@@ -449,30 +448,7 @@ impl Workspace {
         self.floating_layer.refresh();
     }
 
-    pub fn maximize_request(&mut self, window: &CosmicSurface) {
-        if self.fullscreen.is_some() {
-            return;
-        }
-
-        if let Some(elem) = self.element_for_surface(window).cloned() {
-            let mut state = elem.maximized_state.lock().unwrap();
-            if state.is_none() {
-                *state = Some(MaximizedState {
-                    original_geometry: self.element_geometry(&elem).unwrap(),
-                    original_layer: if self.is_floating(&elem) {
-                        ManagedLayer::Floating
-                    } else {
-                        ManagedLayer::Tiling
-                    },
-                });
-                std::mem::drop(state);
-                self.floating_layer.map_maximized(elem);
-            }
-        }
-    }
-
-    pub fn unmaximize_request(&mut self, window: &CosmicSurface) -> Option<Size<i32, Logical>> {
-        if let Some(elem) = self.element_for_surface(window).cloned() {
+    pub fn unmaximize_request(&mut self, elem: &CosmicMapped) -> Option<Size<i32, Logical>> {
             let mut state = elem.maximized_state.lock().unwrap();
             if let Some(state) = state.take() {
                 match state.original_layer {
@@ -484,10 +460,9 @@ impl Workspace {
                         elem.set_geometry(state.original_geometry.to_global(&self.output));
                         elem.configure();
                         self.tiling_layer.recalculate();
-                        return self
-                            .tiling_layer
+                    self.tiling_layer
                             .element_geometry(&elem)
-                            .map(|geo| geo.size.as_logical());
+                        .map(|geo| geo.size.as_logical())
                     }
                     ManagedLayer::Floating => {
                         elem.set_maximized(false);
@@ -496,12 +471,13 @@ impl Workspace {
                             Some(state.original_geometry.loc),
                             Some(state.original_geometry.size.as_logical()),
                         );
-                        return Some(state.original_geometry.size.as_logical());
+                    Some(state.original_geometry.size.as_logical())
                     }
+                ManagedLayer::Sticky => unreachable!(),
                 }
-            }
-        }
+        } else {
         None
+        }
     }
 
     pub fn fullscreen_request(
@@ -611,14 +587,6 @@ impl Workspace {
         }
     }
 
-    pub fn maximize_toggle(&mut self, window: &CosmicSurface) {
-        if window.is_maximized(true) {
-            self.unmaximize_request(window);
-        } else {
-            self.maximize_request(window);
-        }
-    }
-
     pub fn get_fullscreen(&self) -> Option<&CosmicSurface> {
         self.fullscreen
             .as_ref()
@@ -710,7 +678,7 @@ impl Workspace {
     pub fn toggle_floating_window(&mut self, seat: &Seat<State>, window: &CosmicMapped) {
         if self.tiling_enabled {
             if window.is_maximized(false) {
-                self.unmaximize_request(&window.active_window());
+                self.unmaximize_request(window);
             }
             if self.tiling_layer.mapped().any(|(_, m, _)| m == window) {
                 self.tiling_layer.unmap(window);

@@ -274,13 +274,7 @@ impl Program for CosmicWindowInternal {
                         if let Some(mapped) =
                             state.common.shell.element_for_wl_surface(&surface).cloned()
                         {
-                            if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
-                                let (window, _) = mapped
-                                    .windows()
-                                    .find(|(w, _)| w.wl_surface().as_ref() == Some(&surface))
-                                    .unwrap();
-                                workspace.maximize_toggle(&window)
-                            }
+                            state.common.shell.maximize_toggle(&mapped)
                         }
                     });
                 }

@@ -30,16 +30,6 @@ fn stack(state: &mut State, mapped: &CosmicMapped) {
     }
 }
 
-fn maximize_toggle(state: &mut State, mapped: &CosmicMapped) {
-    if let Some(space) = state.common.shell.space_for_mut(mapped) {
-        if mapped.is_maximized(false) {
-            space.unmaximize_request(&mapped.active_window());
-        } else {
-            space.maximize_request(&mapped.active_window());
-        }
-    }
-}
-
 fn move_prev_workspace(state: &mut State, mapped: &CosmicMapped) {
     let seat = state.common.last_active_seat().clone();
     let (current_handle, output) = {
@@ -138,7 +128,7 @@ pub fn tab_items(
                         .collect::<Vec<_>>()
                         .into_iter()
                     {
-                        workspace.unmaximize_request(&mapped.active_window());
+                        workspace.unmaximize_request(&mapped);
                     }
                     let focus_stack = workspace.focus_stack.get(&seat);
                     workspace
@@ -202,7 +192,8 @@ pub fn window_items(
         Some(
             Item::new(fl!("window-menu-maximize"), move |handle| {
                 let mapped = maximize_clone.clone();
-                let _ = handle.insert_idle(move |state| maximize_toggle(state, &mapped));
+                let _ =
+                    handle.insert_idle(move |state| state.common.shell.maximize_toggle(&mapped));
             })
             .shortcut(config.get_shortcut_for_action(&Action::Maximize))
             .toggled(window.is_maximized(false)),

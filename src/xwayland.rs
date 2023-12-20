@@ -426,20 +426,14 @@ impl XwmHandler for State {
     fn maximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
         let surface = CosmicSurface::X11(window);
         if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
-            if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
-                let (window, _) = mapped.windows().find(|(w, _)| w == &surface).unwrap();
-                workspace.maximize_request(&window);
-            }
+            self.common.shell.maximize_request(&mapped);
         }
     }
 
     fn unmaximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
         let surface = CosmicSurface::X11(window);
         if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
-            if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
-                let (window, _) = mapped.windows().find(|(w, _)| w == &surface).unwrap();
-                workspace.unmaximize_request(&window);
-            }
+            self.common.shell.unmaximize_request(&mapped);
         }
     }
 

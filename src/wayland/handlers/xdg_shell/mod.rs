@@ -169,13 +169,7 @@ impl XdgShellHandler for State {
             .element_for_wl_surface(surface.wl_surface())
             .cloned()
         {
-            if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
-                let (window, _) = mapped
-                    .windows()
-                    .find(|(w, _)| w.wl_surface().as_ref() == Some(surface.wl_surface()))
-                    .unwrap();
-                workspace.maximize_request(&window)
-            }
+            self.common.shell.maximize_request(&mapped)
         }
     }
 
@@ -186,13 +180,7 @@ impl XdgShellHandler for State {
             .element_for_wl_surface(surface.wl_surface())
             .cloned()
         {
-            if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
-                let (window, _) = mapped
-                    .windows()
-                    .find(|(w, _)| w.wl_surface().as_ref() == Some(surface.wl_surface()))
-                    .unwrap();
-                workspace.unmaximize_request(&window);
-            }
+            self.common.shell.unmaximize_request(&mapped);
         }
     }
 
