@@ -544,11 +544,18 @@ where
     let output_size = output.geometry().size;
     let output_scale = output.current_scale().fractional_scale();
 
-    let workspace = state
+    let set = state
         .shell
         .workspaces
-        .space_for_handle(&current.0)
+        .sets
+        .get(output)
         .ok_or(OutputNoMode)?;
+    let workspace = set
+        .workspaces
+        .iter()
+        .find(|w| w.handle == current.0)
+        .ok_or(OutputNoMode)?;
+    let is_active_space = workspace.outputs().any(|o| o == &active_output);
 
     let has_fullscreen = workspace
         .fullscreen
@@ -570,7 +577,56 @@ where
     } else {
         Vec::new()
     };
+
     let active_hint = theme.active_hint as u8;
+
+    // sticky windows
+    if !has_fullscreen {
+        let alpha = match &overview.0 {
+            OverviewMode::Started(_, started) => {
+                (1.0 - (Instant::now().duration_since(*started).as_millis()
+                    / ANIMATION_DURATION.as_millis()) as f32)
+                    .max(0.0)
+                    * 0.4
+                    + 0.6
+            }
+            OverviewMode::Ended(_, ended) => {
+                ((Instant::now().duration_since(*ended).as_millis()
+                    / ANIMATION_DURATION.as_millis()) as f32)
+                    * 0.4
+                    + 0.6
+            }
+            OverviewMode::None => 1.0,
+        };
+
+        let current_focus = (!move_active && is_active_space)
+            .then_some(&last_active_seat)
+            .map(|seat| workspace.focus_stack.get(seat));
+
+        let (w_elements, p_elements) = set.sticky_layer.render(
+            renderer,
+            current_focus.as_ref().and_then(|stack| stack.last()),
+            resize_indicator.clone(),
+            active_hint,
+            alpha,
+            theme,
+        );
+
+        elements.extend(p_elements.into_iter().map(|p_element| {
+            CosmicElement::Workspace(RelocateRenderElement::from_element(
+                WorkspaceRenderElement::Window(p_element),
+                (0, 0),
+                Relocate::Relative,
+            ))
+        }));
+        window_elements.extend(w_elements.into_iter().map(|w_element| {
+            CosmicElement::Workspace(RelocateRenderElement::from_element(
+                WorkspaceRenderElement::Window(w_element),
+                (0, 0),
+                Relocate::Relative,
+            ))
+        }));
+    }
 
     let offset = match previous.as_ref() {
         Some((previous, previous_idx, start)) => {
@@ -659,8 +715,6 @@ where
         }
         None => (0, 0).into(),
     };
-
-    let is_active_space = workspace.outputs().any(|o| o == &active_output);
 
     let (w_elements, p_elements) = workspace
         .render::<R>(
