@@ -262,6 +262,7 @@ impl Program for CosmicWindowInternal {
                                 &seat,
                                 serial,
                                 ReleaseMode::NoMouseButtons,
+                                false,
                             );
                         });
                     }

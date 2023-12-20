@@ -1,10 +1,7 @@
-use super::{CosmicMapped, CosmicSurface, CosmicWindow};
+use super::CosmicSurface;
 use crate::{
     shell::{
-        focus::FocusDirection,
-        grabs::{MoveGrab, ReleaseMode},
-        layout::tiling::NodeDesc,
-        Direction, Shell, Trigger,
+        focus::FocusDirection, grabs::ReleaseMode, layout::tiling::NodeDesc, Direction, Shell,
     },
     state::State,
     utils::iced::{IcedElement, Program},
@@ -38,8 +35,8 @@ use smithay::{
         pointer::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
-            GrabStartData as PointerGrabStartData, MotionEvent, PointerTarget, RelativeMotionEvent,
+            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
+            PointerTarget, RelativeMotionEvent,
         },
         Seat,
     },
@@ -659,6 +656,7 @@ impl Program for CosmicStackInternal {
                                 &seat,
                                 serial,
                                 ReleaseMode::NoMouseButtons,
+                                false,
                             );
                         });
                     }
@@ -713,20 +711,20 @@ impl Program for CosmicStackInternal {
                                     return;
                                 };
 
-                                    let mut cursor = seat
-                                        .get_pointer()
-                                        .unwrap()
-                                        .current_location()
-                                        .to_i32_round();
-                                    cursor.y -= TAB_HEIGHT;
-                                    Shell::menu_request(
-                                        state,
-                                        &surface,
-                                        &seat,
-                                        serial,
-                                        cursor - position.as_logical(),
-                                        true,
-                                    );
+                                let mut cursor = seat
+                                    .get_pointer()
+                                    .unwrap()
+                                    .current_location()
+                                    .to_i32_round();
+                                cursor.y -= TAB_HEIGHT;
+                                Shell::menu_request(
+                                    state,
+                                    &surface,
+                                    &seat,
+                                    serial,
+                                    cursor - position.as_logical(),
+                                    true,
+                                );
                             }
                         });
                     }
@@ -1172,60 +1170,18 @@ impl PointerTarget<State> for CosmicStack {
                             .0
                             .with_program(|p| p.windows.lock().unwrap().get(dragged_out).cloned())
                         {
-                            if let Some(stack_mapped) =
-                                data.common.shell.element_for_surface(&surface)
-                            {
-                                if let Some(workspace) = data.common.shell.space_for(stack_mapped) {
-                                    // TODO: Unify this somehow with Shell::move_request/Workspace::move_request
-                                    let button = 0x110; // BTN_LEFT
-                                    let pos = event.location.as_global();
-                                    let start_data = PointerGrabStartData {
-                                        focus: None,
-                                        button,
-                                        location: pos.as_logical(),
-                                    };
-                                    let mapped = CosmicMapped::from(CosmicWindow::new(
-                                        surface,
-                                        self.0.loop_handle(),
-                                        data.common.theme.clone(),
-                                    ));
-                                    let elem_geo =
-                                        workspace.element_geometry(stack_mapped).unwrap();
-                                    let indicator_thickness =
-                                        data.common.theme.cosmic().active_hint as u8;
-                                    let was_tiled = workspace.is_tiled(stack_mapped);
-
-                                    self.remove_idx(dragged_out);
-                                    mapped.configure();
-
-                                    let grab = MoveGrab::new(
-                                        start_data,
-                                        mapped,
-                                        seat,
-                                        pos,
-                                        pos.to_i32_round() - Point::from((elem_geo.size.w / 2, 24)),
-                                        indicator_thickness,
-                                        was_tiled,
+                            let seat = seat.clone();
+                            if let Some(surface) = surface.wl_surface() {
+                                let _ = data.common.event_loop_handle.insert_idle(move |state| {
+                                    Shell::move_request(
+                                        state,
+                                        &surface,
+                                        &seat,
+                                        None,
                                         ReleaseMode::NoMouseButtons,
-                                        data.common.event_loop_handle.clone(),
-                                    );
-                                    if grab.is_tiling_grab() {
-                                        data.common.shell.set_overview_mode(
-                                            Some(Trigger::Pointer(button)),
-                                            data.common.event_loop_handle.clone(),
-                                        );
-                                    }
-
-                                    let seat = seat.clone();
-                                    data.common.event_loop_handle.insert_idle(move |state| {
-                                        seat.get_pointer().unwrap().set_grab(
-                                            state,
-                                            grab,
-                                            event.serial,
-                                            smithay::input::pointer::Focus::Clear,
-                                        );
-                                    });
-                                }
+                                        true,
+                                    )
+                                });
                             }
                         }
                     }

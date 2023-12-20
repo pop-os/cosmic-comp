@@ -26,7 +26,7 @@ use smithay::{
         },
         wayland_server::{protocol::wl_surface::WlSurface, Client, DisplayHandle},
     },
-    utils::{Logical, Point, Rectangle, Serial, SERIAL_COUNTER},
+    utils::{Logical, Point, Rectangle, Serial, Size, SERIAL_COUNTER},
     wayland::{
         compositor::with_states,
         seat::WaylandFocus,
@@ -73,10 +73,12 @@ use self::{
         swap_indicator::{swap_indicator, SwapIndicator},
         CosmicWindow,
     },
-    focus::target::KeyboardFocusTarget,
-    grabs::{tab_items, window_items, Item, MenuGrab, ReleaseMode, ResizeEdge, ResizeGrab},
+    focus::target::{KeyboardFocusTarget, PointerFocusTarget},
+    grabs::{
+        tab_items, window_items, Item, MenuGrab, MoveGrab, ReleaseMode, ResizeEdge, ResizeGrab,
+    },
     layout::{
-        floating::ResizeState,
+        floating::{FloatingLayout, ResizeState},
         tiling::{NodeDesc, ResizeForkGrab, TilingLayout},
     },
 };
@@ -2098,52 +2100,179 @@ impl Shell {
         seat: &Seat<State>,
         serial: impl Into<Option<Serial>>,
         release: ReleaseMode,
+        move_out_of_stack: bool,
     ) {
         let serial = serial.into();
-        if let Some(start_data) = check_grab_preconditions(&seat, surface, serial, release) {
-            if let Some(mapped) = state.common.shell.element_for_wl_surface(surface).cloned() {
-                if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
                     let output = seat.active_output();
-                    let (window, _) = mapped
+
+        if let Some(mut start_data) = check_grab_preconditions(&seat, surface, serial, release) {
+            if let Some(mut old_mapped) =
+                state.common.shell.element_for_wl_surface(surface).cloned()
+            {
+                let seats = state.common.seats().cloned().collect::<Vec<_>>();
+                for workspace in state.common.shell.workspaces.spaces_mut() {
+                    for seat in seats.iter() {
+                        let mut stack = workspace.focus_stack.get_mut(seat);
+                        stack.remove(&old_mapped);
+                    }
+                }
+
+                let (window, _) = old_mapped
                         .windows()
                         .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
                         .unwrap();
+
+                let mapped = if move_out_of_stack {
+                    let new_mapped: CosmicMapped = CosmicWindow::new(
+                        window.clone(),
+                        state.common.event_loop_handle.clone(),
+                        state.common.theme.clone(),
+                    )
+                    .into();
+                    start_data.focus = Some((new_mapped.clone().into(), Point::from((0, 0))));
+                    new_mapped
+                } else {
+                    old_mapped.clone()
+                };
+
                     let button = start_data.button;
                     let active_hint = state.common.theme.cosmic().active_hint as u8;
-                    if let Some(grab) = workspace.move_request(
-                        &window,
-                        &seat,
-                        &output,
-                        start_data,
-                        active_hint as u8,
-                        release,
-                        state.common.event_loop_handle.clone(),
-                    ) {
-                        let handle = workspace.handle;
+                let pointer = seat.get_pointer().unwrap();
+                let pos = pointer.current_location().as_global();
+
+                let (initial_window_location, layer, workspace_handle) =
+                    if let Some(workspace) = state.common.shell.space_for_mut(&old_mapped) {
+                        if workspace
+                            .fullscreen
+                            .as_ref()
+                            .is_some_and(|f| f.surface == window)
+                        {
+                            let _ = workspace.remove_fullscreen(); // We are moving this window, we don't need to send it back to it's original workspace
+                        }
+
+                        let mut initial_window_location = workspace
+                            .element_geometry(&old_mapped)
+                            .unwrap()
+                            .loc
+                            .to_global(&output);
+
+                        if mapped.maximized_state.lock().unwrap().is_some() {
+                            // If surface is maximized then unmaximize it
+                            let new_size = workspace.unmaximize_request(&mapped);
+                            let ratio = pos.to_local(&output).x / output.geometry().size.w as f64;
+
+                            initial_window_location = new_size
+                                .map(|size| (pos.x - (size.w as f64 * ratio), pos.y).into())
+                                .unwrap_or_else(|| pos)
+                                .to_i32_round();
+                        }
+
+                        let layer = if mapped == old_mapped {
+                            let was_floating = workspace.floating_layer.unmap(&mapped);
+                            let was_tiled = workspace.tiling_layer.unmap_as_placeholder(&mapped);
+                            assert!(was_floating != was_tiled.is_some());
+                            was_tiled.is_some()
+                        } else {
+                            workspace
+                                .tiling_layer
+                                .mapped()
+                                .any(|(_, m, _)| m == &old_mapped)
+                        }
+                        .then_some(ManagedLayer::Tiling)
+                        .unwrap_or(ManagedLayer::Floating);
+
+                        (initial_window_location, layer, workspace.handle)
+                    } else if let Some(sticky_layer) = state
+                        .common
+                        .shell
+                        .workspaces
+                        .sets
+                        .get_mut(&output)
+                        .filter(|set| set.sticky_layer.mapped().any(|m| m == &old_mapped))
+                        .map(|set| &mut set.sticky_layer)
+                    {
+                        let mut initial_window_location = sticky_layer
+                            .element_geometry(&old_mapped)
+                            .unwrap()
+                            .loc
+                            .to_global(&output);
+
+                        if let Some(state) = mapped.maximized_state.lock().unwrap().take() {
+                            // If surface is maximized then unmaximize it
+                            mapped.set_maximized(false);
+                            let new_size = state.original_geometry.size.as_logical();
+                            sticky_layer.map_internal(
+                                mapped.clone(),
+                                Some(state.original_geometry.loc),
+                                Some(new_size),
+                            );
+
+                            let ratio = pos.to_local(&output).x / output.geometry().size.w as f64;
+                            initial_window_location =
+                                Point::<f64, _>::from((pos.x - (new_size.w as f64 * ratio), pos.y))
+                                    .to_i32_round();
+                        }
+
+                        if mapped == old_mapped {
+                            sticky_layer.unmap(&mapped);
+                        }
+
+                        (
+                            initial_window_location,
+                            ManagedLayer::Sticky,
+                            state.common.shell.active_space(&output).handle,
+                        )
+                    } else {
+                        return;
+                    };
+
                         state
                             .common
                             .shell
                             .toplevel_info_state
-                            .toplevel_leave_workspace(&window, &handle);
+                    .toplevel_leave_workspace(&window, &workspace_handle);
                         state
                             .common
                             .shell
                             .toplevel_info_state
                             .toplevel_leave_output(&window, &output);
+
+                if move_out_of_stack {
+                    old_mapped.stack_ref_mut().unwrap().remove_window(&window);
+                    state
+                        .common
+                        .shell
+                        .workspaces
+                        .space_for_handle_mut(&workspace_handle)
+                        .unwrap()
+                        .refresh(&state.common.shell.xdg_activation_state);
+                }
+
+                let grab = MoveGrab::new(
+                    start_data,
+                    mapped,
+                    seat,
+                    pos,
+                    initial_window_location,
+                    active_hint as u8,
+                    layer,
+                    release,
+                    state.common.event_loop_handle.clone(),
+                );
+
                         if grab.is_tiling_grab() {
                             state.common.shell.set_overview_mode(
                                 Some(Trigger::Pointer(button)),
                                 state.common.event_loop_handle.clone(),
                             );
                         }
+
                         seat.get_pointer().unwrap().set_grab(
                             state,
                             grab,
                             serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
                             Focus::Clear,
                         );
-                    }
-                }
             }
         }
     }
