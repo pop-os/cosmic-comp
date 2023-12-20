@@ -1372,7 +1372,7 @@ impl Shell {
         self.workspaces
             .sets
             .values()
-            .any(|set| set.previously_active.is_some())
+            .any(|set| set.previously_active.is_some() || set.sticky_layer.animations_going())
             || !matches!(self.overview_mode, OverviewMode::None)
             || !matches!(self.resize_mode, ResizeMode::None)
             || self
@@ -1383,6 +1383,9 @@ impl Shell {
 
     pub fn update_animations(&mut self) -> HashMap<ClientId, Client> {
         let mut clients = HashMap::new();
+        for set in self.workspaces.sets.values_mut() {
+            set.sticky_layer.update_animation_state();
+        }
         for workspace in self.workspaces.spaces_mut() {
             clients.extend(workspace.update_animations());
         }
