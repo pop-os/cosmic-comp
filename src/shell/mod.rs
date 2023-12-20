@@ -154,12 +154,6 @@ impl ResizeMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum MaximizeMode {
-    Floating,
-    OnTop,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ActivationKey {
     Wayland(WlSurface),
@@ -181,7 +175,6 @@ pub struct Shell {
     pub workspaces: Workspaces,
 
     pub popups: PopupManager,
-    pub maximize_mode: MaximizeMode,
     pub pending_windows: Vec<(CosmicSurface, Seat<State>, Option<Output>)>,
     pub pending_layers: Vec<(LayerSurface, Output, Seat<State>)>,
     pub pending_activations: HashMap<ActivationKey, ActivationContext>,
@@ -1056,7 +1049,6 @@ impl Shell {
         Shell {
             popups: PopupManager::default(),
             workspaces: Workspaces::new(config, theme.clone()),
-            maximize_mode: MaximizeMode::Floating,
 
             pending_windows: Vec::new(),
             pending_layers: Vec::new(),
