@@ -30,11 +30,34 @@ impl Shell {
     pub fn unconstrain_popup(&self, surface: &PopupSurface) {
         if let Some(parent) = get_popup_toplevel(&surface) {
             if let Some(elem) = self.element_for_wl_surface(&parent) {
-                let workspace = self.space_for(elem).unwrap();
-                let mut element_geo = workspace
-                    .element_geometry(elem)
-                    .unwrap()
-                    .to_global(workspace.output());
+                let (mut element_geo, output, is_tiled) =
+                    if let Some(workspace) = self.space_for(elem) {
+                        (
+                            workspace
+                                .element_geometry(elem)
+                                .unwrap()
+                                .to_global(workspace.output()),
+                            workspace.output.clone(),
+                            workspace.is_tiled(elem),
+                        )
+                    } else if let Some((output, set)) = self
+                        .workspaces
+                        .sets
+                        .iter()
+                        .find(|(_, set)| set.sticky_layer.mapped().any(|m| m == elem))
+                    {
+                        (
+                            set.sticky_layer
+                                .element_geometry(elem)
+                                .unwrap()
+                                .to_global(output),
+                            output.clone(),
+                            false,
+                        )
+                    } else {
+                        return;
+                    };
+
                 let (window, offset) = elem
                     .windows()
                     .find(|(w, _)| w.wl_surface().as_ref() == Some(&parent))
@@ -42,13 +65,13 @@ impl Shell {
                 let window_geo_offset = window.geometry().loc;
                 let window_loc: Point<i32, Global> =
                     element_geo.loc + offset.as_global() + window_geo_offset.as_global();
-                if workspace.is_tiled(elem) {
+                if is_tiled {
                     element_geo.loc = (0, 0).into();
                     if !unconstrain_xdg_popup_tile(surface, element_geo.as_logical()) {
-                        unconstrain_xdg_popup(surface, window_loc, workspace.output().geometry());
+                        unconstrain_xdg_popup(surface, window_loc, output.geometry());
                     }
                 } else {
-                    unconstrain_xdg_popup(surface, window_loc, workspace.output().geometry());
+                    unconstrain_xdg_popup(surface, window_loc, output.geometry());
                 }
             } else if let Some((output, layer_surface)) = self.outputs().find_map(|o| {
                 let map = layer_map_for_output(o);
