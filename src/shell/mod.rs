@@ -227,7 +227,8 @@ pub struct WorkspaceSet {
     tiling_enabled: bool,
     output: Output,
     theme: cosmic::Theme,
-    pub(crate) workspaces: Vec<Workspace>,
+    pub sticky_layer: FloatingLayout,
+    pub workspaces: Vec<Workspace>,
 }
 
 fn create_workspace(
@@ -339,6 +340,7 @@ impl WorkspaceSet {
                 })
                 .collect(),
         };
+        let sticky_layer = FloatingLayout::new(theme.clone(), output);
 
         WorkspaceSet {
             previously_active: None,
@@ -347,6 +349,7 @@ impl WorkspaceSet {
             idx,
             tiling_enabled,
             theme,
+            sticky_layer,
             workspaces,
             output: output.clone(),
         }
@@ -380,6 +383,11 @@ impl WorkspaceSet {
         new_output: &Output,
         toplevel_info: &mut ToplevelInfoState<State, CosmicSurface>,
     ) {
+        self.sticky_layer.set_output(new_output);
+        for window in self.sticky_layer.windows() {
+            toplevel_info.toplevel_leave_output(&window, &self.output);
+            toplevel_info.toplevel_enter_output(&window, &new_output);
+        }
         for workspace in &mut self.workspaces {
             workspace.set_output(new_output, toplevel_info);
         }
@@ -394,6 +402,7 @@ impl WorkspaceSet {
         } else {
             self.workspaces[self.active].refresh(xdg_activation_state);
         }
+        self.sticky_layer.refresh();
     }
 
     fn add_empty_workspace(&mut self, state: &mut WorkspaceUpdateGuard<State>) {
@@ -519,7 +528,7 @@ impl WorkspaceSet {
 
 #[derive(Debug)]
 pub struct Workspaces {
-    sets: IndexMap<Output, WorkspaceSet>,
+    pub sets: IndexMap<Output, WorkspaceSet>,
     backup_set: Option<WorkspaceSet>,
     amount: WorkspaceAmount,
     mode: WorkspaceMode,
@@ -994,6 +1003,8 @@ impl Workspaces {
     pub fn set_theme(&mut self, theme: cosmic::Theme, xdg_activation_state: &XdgActivationState) {
         for (_, s) in &mut self.sets {
             s.theme = theme.clone();
+            s.sticky_layer.theme = theme.clone();
+            s.sticky_layer.refresh();
             for mut w in &mut s.workspaces {
                 w.tiling_layer.theme = theme.clone();
                 w.floating_layer.theme = theme.clone();
