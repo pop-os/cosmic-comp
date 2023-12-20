@@ -88,7 +88,7 @@ use smithay::{
 use time::UtcOffset;
 use tracing::error;
 
-use std::{cell::RefCell, ffi::OsString, time::Duration};
+use std::{cell::RefCell, collections::HashSet, ffi::OsString, time::Duration};
 use std::{collections::VecDeque, time::Instant};
 
 #[derive(RustEmbed)]
@@ -557,7 +557,11 @@ impl Common {
             }
         }
 
+        let mut visited_outputs = HashSet::new();
         for seat in self.seats.iter() {
+            if !visited_outputs.insert(seat.active_output()) {
+                continue;
+            }
             if &seat.active_output() == output {
                 let cursor_status = seat
                     .user_data()
@@ -608,6 +612,63 @@ impl Common {
                         }
                     }
                 }
+
+                self.shell
+                    .workspaces
+                    .sets
+                    .get(output)
+                    .unwrap()
+                    .sticky_layer
+                    .mapped()
+                    .for_each(|mapped| {
+                        let window = mapped.active_window();
+                        window.with_surfaces(|surface, states| {
+                            let primary_scanout_output = update_surface_primary_scanout_output(
+                                surface,
+                                output,
+                                states,
+                                render_element_states,
+                                |_current_output, _current_state, next_output, _next_state| {
+                                    next_output
+                                },
+                            );
+                            if let Some(output) = primary_scanout_output {
+                                with_fractional_scale(states, |fraction_scale| {
+                                    fraction_scale.set_preferred_scale(
+                                        output.current_scale().fractional_scale(),
+                                    );
+                                });
+                            }
+                        });
+                        window.send_frame(output, time, throttle, surface_primary_scanout_output);
+                        if let Some(feedback) = window
+                            .wl_surface()
+                            .and_then(|wl_surface| {
+                                source_node_for_surface(&wl_surface, &self.display_handle)
+                            })
+                            .and_then(|source| dmabuf_feedback(source))
+                        {
+                            window.send_dmabuf_feedback(
+                                output,
+                                &feedback,
+                                render_element_states,
+                                surface_primary_scanout_output,
+                            );
+                        }
+                    })
+            } else {
+                let output = seat.active_output();
+                self.shell
+                    .workspaces
+                    .sets
+                    .get(&output)
+                    .unwrap()
+                    .sticky_layer
+                    .mapped()
+                    .for_each(|mapped| {
+                        let window = mapped.active_window();
+                        window.send_frame(&output, time, throttle, |_, _| None);
+                    });
             }
         }
 
