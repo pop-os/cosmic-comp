@@ -795,6 +795,13 @@ impl Workspaces {
         self.refresh(workspace_state, toplevel_info_state, xdg_activation_state)
     }
 
+    pub fn recalculate(&mut self) {
+        for set in self.sets.values_mut() {
+            set.sticky_layer.refresh();
+            set.workspaces.iter_mut().for_each(|w| w.recalculate());
+        }
+    }
+
     pub fn refresh(
         &mut self,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
