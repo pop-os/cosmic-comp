@@ -74,9 +74,7 @@ impl WlrLayerShellHandler for State {
                 map.unmap_layer(&layer);
             }
 
-            for workspace in self.common.shell.workspaces.spaces_mut() {
-                workspace.recalculate();
-            }
+            self.common.shell.workspaces.recalculate();
 
             // collect screencopy sessions needing an update
             let mut scheduled_sessions = self.schedule_workspace_sessions(surface.wl_surface());
