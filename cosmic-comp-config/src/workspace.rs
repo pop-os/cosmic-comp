@@ -6,7 +6,7 @@ fn default_workspace_layout() -> WorkspaceLayout {
     WorkspaceLayout::Vertical
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkspaceConfig {
     pub workspace_mode: WorkspaceMode,
     pub workspace_amount: WorkspaceAmount,

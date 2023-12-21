@@ -175,10 +175,10 @@ impl Config {
         Config {
             static_conf: Self::load_static(xdg.as_ref(), workspace.workspace_layout),
             dynamic_conf: Self::load_dynamic(xdg.as_ref()),
-            xkb: get_config(&config, "xkb-config"),
-            input_default: get_config(&config, "input-default"),
-            input_touchpad: get_config(&config, "input-touchpad"),
-            input_devices: get_config(&config, "input-devices"),
+            xkb: get_config(&config, "xkb_config"),
+            input_default: get_config(&config, "input_default"),
+            input_touchpad: get_config(&config, "input_touchpad"),
+            input_devices: get_config(&config, "input_devices"),
             workspace,
             config,
         }
@@ -517,18 +517,18 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 }
                 state.common.config.xkb = value;
             }
-            "input-default" => {
-                let value = get_config::<InputConfig>(&config, "input-default");
+            "input_default" => {
+                let value = get_config::<InputConfig>(&config, "input_default");
                 state.common.config.input_default = value;
                 update_input(state);
             }
-            "input-touchpad" => {
-                let value = get_config::<InputConfig>(&config, "input-touchpad");
+            "input_touchpad" => {
+                let value = get_config::<InputConfig>(&config, "input_touchpad");
                 state.common.config.input_touchpad = value;
                 update_input(state);
             }
-            "input-devices" => {
-                let value = get_config::<HashMap<String, InputConfig>>(&config, "input-devices");
+            "input_devices" => {
+                let value = get_config::<HashMap<String, InputConfig>>(&config, "input_devices");
                 state.common.config.input_devices = value;
                 update_input(state);
             }

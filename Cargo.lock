@@ -610,6 +610,7 @@ dependencies = [
 name = "cosmic-comp-config"
 version = "0.1.0"
 dependencies = [
+ "cosmic-config",
  "input",
  "serde",
 ]
