@@ -2,7 +2,7 @@
 
 use crate::{
     backend::render::cursor::CursorState,
-    config::{xkb_config_to_wl, Action, Config, KeyPattern, KeyModifiers},
+    config::{xkb_config_to_wl, Action, Config, KeyModifiers, KeyPattern},
     shell::{
         focus::{target::PointerFocusTarget, FocusDirection},
         grabs::{ResizeEdge, SeatMenuGrabState, SeatMoveGrabState},
@@ -1027,38 +1027,31 @@ impl State {
                         }
                     }
 
-                    let horizontal_amount = event.amount(Axis::Horizontal).unwrap_or_else(|| {
-                        event.amount_v120(Axis::Horizontal).unwrap_or(0.0) * 3.0 / 120.
-                    });
-                    let vertical_amount = event.amount(Axis::Vertical).unwrap_or_else(|| {
-                        event.amount_v120(Axis::Vertical).unwrap_or(0.0) * 3.0 / 120.
-                    });
-                    let horizontal_amount_discrete = event.amount_v120(Axis::Horizontal);
-                    let vertical_amount_discrete = event.amount_v120(Axis::Vertical);
-
-                    {
-                        let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
+                    let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
+                    if let Some(horizontal_amount) = event.amount(Axis::Horizontal) {
                         if horizontal_amount != 0.0 {
                             frame =
                                 frame.value(Axis::Horizontal, scroll_factor * horizontal_amount);
-                            if let Some(discrete) = horizontal_amount_discrete {
+                            if let Some(discrete) = event.amount_v120(Axis::Horizontal) {
                                 frame = frame.v120(Axis::Horizontal, discrete as i32);
                             }
                         } else if event.source() == AxisSource::Finger {
                             frame = frame.stop(Axis::Horizontal);
                         }
+                    }
+                    if let Some(vertical_amount) = event.amount(Axis::Vertical) {
                         if vertical_amount != 0.0 {
                             frame = frame.value(Axis::Vertical, scroll_factor * vertical_amount);
-                            if let Some(discrete) = vertical_amount_discrete {
+                            if let Some(discrete) = event.amount_v120(Axis::Vertical) {
                                 frame = frame.v120(Axis::Vertical, discrete as i32);
                             }
                         } else if event.source() == AxisSource::Finger {
                             frame = frame.stop(Axis::Vertical);
                         }
-                        let ptr = seat.get_pointer().unwrap();
-                        ptr.axis(self, frame);
-                        ptr.frame(self);
                     }
+                    let ptr = seat.get_pointer().unwrap();
+                    ptr.axis(self, frame);
+                    ptr.frame(self);
                 }
             }
             InputEvent::GestureSwipeBegin { event, .. } => {
