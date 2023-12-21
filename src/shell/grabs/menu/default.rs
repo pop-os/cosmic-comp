@@ -189,7 +189,7 @@ pub fn window_items(
             .shortcut(config.get_shortcut_for_action(&Action::Maximize))
             .toggled(window.is_maximized(false)),
         ),
-        tiling_enabled.then_some(
+        (tiling_enabled && !is_sticky).then_some(
             Item::new(fl!("window-menu-tiled"), move |handle| {
                 let tile_clone = tile_clone.clone();
                 let _ = handle.insert_idle(move |state| {
