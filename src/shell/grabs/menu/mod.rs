@@ -338,7 +338,7 @@ impl Program for ContextMenu {
                 .map(|(idx, item)| match item {
                     Item::Separator => horizontal_rule(1)
                         .style(theme::Rule::LightDivider)
-                        .width(Length::Shrink)
+                        .width(mode)
                         .into(),
                     Item::Submenu { title, .. } => Row::with_children(vec![
                         horizontal_space(16).into(),
@@ -377,7 +377,20 @@ impl Program for ContextMenu {
                             } else {
                                 horizontal_space(16).into()
                             },
-                            text(title).width(mode).into(),
+                            text(title)
+                                .width(mode)
+                                .style(if *disabled {
+                                    theme::Text::Custom(|theme| {
+                                        let mut color = theme.cosmic().background.component.on;
+                                        color.alpha *= 0.5;
+                                        TextAppearance {
+                                            color: Some(color.into()),
+                                        }
+                                    })
+                                } else {
+                                    theme::Text::Default
+                                })
+                                .into(),
                         ];
                         if let Some(shortcut) = shortcut.as_ref() {
                             components.push(
