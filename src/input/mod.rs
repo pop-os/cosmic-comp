@@ -1947,16 +1947,9 @@ impl State {
                 }
             }
             Action::Focus(focus) => {
-                let current_output = seat.active_output();
-                let overview = self.common.shell.overview_mode().0;
-                let workspace = self.common.shell.active_space_mut(&current_output);
-                let result = workspace.next_focus(
+                let result = self.common.shell.next_focus(
                     focus,
                     seat,
-                    match overview {
-                        OverviewMode::Started(Trigger::KeyboardSwap(_, desc), _) => Some(desc),
-                        _ => None,
-                    },
                 );
 
                 match result {
