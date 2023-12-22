@@ -1988,10 +1988,7 @@ impl State {
                 }
             }
             Action::Move(direction) => {
-                let current_output = seat.active_output();
-                let workspace = self.common.shell.active_space_mut(&current_output);
-
-                match workspace.move_current_element(direction, seat) {
+                match self.common.shell.move_current_element(direction, seat) {
                     MoveResult::MoveFurther(_move_further) => self.handle_action(
                         Action::MoveToOutput(direction),
                         seat,
@@ -2005,6 +2002,8 @@ impl State {
                         Common::set_focus(self, Some(&shift), seat, None);
                     }
                     _ => {
+                        let current_output = seat.active_output();
+                        let workspace = self.common.shell.active_space(&current_output);
                         if let Some(focused_window) = workspace.focus_stack.get(seat).last() {
                             if workspace.is_tiled(focused_window) {
                                 self.common.shell.set_overview_mode(

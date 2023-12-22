@@ -753,20 +753,6 @@ impl Workspace {
             })
     }
 
-    pub fn move_current_element<'a>(
-        &mut self,
-        direction: Direction,
-        seat: &Seat<State>,
-    ) -> MoveResult {
-        if let Some(f) = self.fullscreen.as_ref() {
-            MoveResult::MoveFurther(KeyboardFocusTarget::Fullscreen(f.surface.clone()))
-        } else {
-            self.floating_layer
-                .move_current_element(direction, seat, self.tiling_layer.theme.clone())
-                .or_else(|| self.tiling_layer.move_current_node(direction, seat))
-        }
-    }
-
     pub fn render<'a, R>(
         &self,
         renderer: &mut R,
