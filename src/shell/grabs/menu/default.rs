@@ -169,6 +169,13 @@ pub fn window_items(
     let close_clone = window.clone();
 
     vec![
+        (!is_stacked).then_some(
+            Item::new(fl!("window-menu-stack"), move |handle| {
+                let mapped = stack_clone.clone();
+                let _ = handle.insert_idle(move |state| toggle_stacking(state, &mapped));
+            })
+            .shortcut(config.get_shortcut_for_action(&Action::ToggleStacking)),
+        ),
         is_stacked.then_some(
             Item::new(fl!("window-menu-unstack-all"), move |handle| {
                 let mapped = unstack_clone.clone();
@@ -178,7 +185,7 @@ pub fn window_items(
             })
             .shortcut(config.get_shortcut_for_action(&Action::ToggleStacking)),
         ),
-        is_stacked.then_some(Item::Separator),
+        Some(Item::Separator),
         //Some(Item::new(fl!("window-menu-minimize"), |handle| {})),
         Some(
             Item::new(fl!("window-menu-maximize"), move |handle| {
@@ -256,26 +263,21 @@ pub fn window_items(
                 .disabled(!possible_resizes.contains(ResizeEdge::BOTTOM)),
             ],
         )),
-        (!is_sticky).then_some(
+        Some(
             Item::new(fl!("window-menu-move-prev-workspace"), move |handle| {
                 let mapped = move_prev_clone.clone();
                 let _ = handle.insert_idle(move |state| move_prev_workspace(state, &mapped));
             })
-            .shortcut(config.get_shortcut_for_action(&Action::MoveToPreviousWorkspace)),
+            .shortcut(config.get_shortcut_for_action(&Action::MoveToPreviousWorkspace))
+            .disabled(is_sticky),
         ),
-        (!is_sticky).then_some(
+        Some(
             Item::new(fl!("window-menu-move-next-workspace"), move |handle| {
                 let mapped = move_next_clone.clone();
                 let _ = handle.insert_idle(move |state| move_next_workspace(state, &mapped));
             })
-            .shortcut(config.get_shortcut_for_action(&Action::MoveToNextWorkspace)),
-        ),
-        (!is_stacked).then_some(
-            Item::new(fl!("window-menu-stack"), move |handle| {
-                let mapped = stack_clone.clone();
-                let _ = handle.insert_idle(move |state| toggle_stacking(state, &mapped));
-            })
-            .shortcut(config.get_shortcut_for_action(&Action::ToggleStacking)),
+            .shortcut(config.get_shortcut_for_action(&Action::MoveToNextWorkspace))
+            .disabled(is_sticky),
         ),
         Some(Item::Separator),
         Some(
