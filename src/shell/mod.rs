@@ -1151,7 +1151,30 @@ impl Shell {
                         .as_mut()
                         .and_then(|state| state.xwm.as_mut())
                     {
-                        let _ = set.workspaces[idx].raise_x11_windows(xwm);
+                        {
+                            for window in set.workspaces[set.active]
+                                .tiling_layer
+                                .mapped()
+                                .map(|(_, w, _)| w)
+                                .chain(set.workspaces[set.active].floating_layer.space.elements())
+                            {
+                                if let CosmicSurface::X11(surf) = window.active_window() {
+                                    let _ = xwm.raise_window(&surf);
+                                }
+                            }
+                            for window in set.sticky_layer.space.elements() {
+                                if let CosmicSurface::X11(surf) = window.active_window() {
+                                    let _ = xwm.raise_window(&surf);
+                                }
+                            }
+                            if let Some(CosmicSurface::X11(ref surf)) = set.workspaces[set.active]
+                                .fullscreen
+                                .as_ref()
+                                .map(|f| &f.surface)
+                            {
+                                let _ = xwm.raise_window(surf);
+                            }
+                        }
                         for surface in &self.override_redirect_windows {
                             let _ = xwm.raise_window(surface);
                         }
