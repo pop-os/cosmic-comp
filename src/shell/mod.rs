@@ -12,7 +12,8 @@ use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State 
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     desktop::{
-        layer_map_for_output, space::SpaceElement, LayerSurface, PopupManager, WindowSurfaceType,
+        layer_map_for_output, space::SpaceElement, LayerSurface, PopupKind, PopupManager,
+        WindowSurfaceType,
     },
     input::{
         pointer::{Focus, GrabStartData as PointerGrabStartData, MotionEvent},
@@ -47,7 +48,7 @@ use crate::{
     state::client_should_see_privileged_protocols,
     utils::prelude::*,
     wayland::{
-        handlers::xdg_activation::ActivationContext,
+        handlers::{xdg_activation::ActivationContext, xdg_shell::popup::get_popup_toplevel},
         protocols::{
             toplevel_info::ToplevelInfoState,
             toplevel_management::{ManagementCapabilities, ToplevelManagementState},
@@ -73,7 +74,10 @@ use self::{
         swap_indicator::{swap_indicator, SwapIndicator},
         CosmicWindow, MaximizedState,
     },
-    focus::target::{KeyboardFocusTarget, PointerFocusTarget},
+    focus::{
+        target::{KeyboardFocusTarget, PointerFocusTarget},
+        FocusDirection,
+    },
     grabs::{
         tab_items, window_items, Item, MenuGrab, MoveGrab, ReleaseMode, ResizeEdge, ResizeGrab,
     },
@@ -2357,6 +2361,147 @@ impl Shell {
                     Focus::Clear,
                 );
             }
+        }
+    }
+
+    pub fn next_focus<'a>(&mut self, direction: FocusDirection, seat: &Seat<State>) -> FocusResult {
+        let overview = self.overview_mode().0;
+        let output = seat.active_output();
+        let workspace = self.active_space_mut(&output);
+
+        if workspace.fullscreen.is_some() {
+            return FocusResult::None;
+        }
+
+        let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
+            return FocusResult::None
+        };
+
+        let set = self.workspaces.sets.get_mut(&output).unwrap();
+        let sticky_layer = &mut set.sticky_layer;
+        let workspace = &mut set.workspaces[set.active];
+
+        let Some(focused) = (match target {
+            KeyboardFocusTarget::Popup(popup) => {
+                let Some(toplevel_surface) = (match popup {
+                    PopupKind::Xdg(xdg) => get_popup_toplevel(&xdg),
+                    PopupKind::InputMethod(_) => unreachable!(),
+                }) else {
+                    return FocusResult::None
+                };
+                sticky_layer.space.elements().chain(workspace.mapped()).find(|elem| elem.wl_surface().as_ref() == Some(&toplevel_surface))
+            },
+            KeyboardFocusTarget::Element(elem) => sticky_layer.space.elements().chain(workspace.mapped()).find(|e| *e == &elem),
+            _ => None,
+        }).cloned() else {
+            return FocusResult::None
+        };
+
+        if focused.handle_focus(direction, None) {
+            return FocusResult::Handled;
+        }
+
+        if workspace.is_tiled(&focused) {
+            let focus_stack = workspace.focus_stack.get(seat);
+            let swap_desc = match overview {
+                OverviewMode::Started(Trigger::KeyboardSwap(_, desc), _) => Some(desc),
+                _ => None,
+            };
+
+            workspace
+                .tiling_layer
+                .next_focus(direction, seat, focus_stack.iter(), swap_desc)
+        } else {
+            let floating_layer = &mut set.workspaces[set.active].floating_layer;
+
+            let geometry = sticky_layer
+                .space
+                .element_geometry(&focused)
+                .or_else(|| floating_layer.space.element_geometry(&focused))
+                .unwrap();
+
+            let next = match direction {
+                FocusDirection::Up => sticky_layer
+                    .space
+                    .elements()
+                    .chain(floating_layer.space.elements())
+                    .min_by_key(|other| {
+                        let res = geometry.loc.y
+                            - sticky_layer
+                                .space
+                                .element_geometry(other)
+                                .or_else(|| floating_layer.space.element_geometry(other))
+                                .unwrap()
+                                .loc
+                                .y;
+                        if res.is_positive() {
+                            res
+                        } else {
+                            i32::MAX
+                        }
+                    }),
+                FocusDirection::Down => sticky_layer
+                    .space
+                    .elements()
+                    .chain(floating_layer.space.elements())
+                    .max_by_key(|other| {
+                        let res = geometry.loc.y
+                            - sticky_layer
+                                .space
+                                .element_geometry(other)
+                                .or_else(|| floating_layer.space.element_geometry(other))
+                                .unwrap()
+                                .loc
+                                .y;
+                        if res.is_negative() {
+                            res
+                        } else {
+                            i32::MIN
+                        }
+                    }),
+                FocusDirection::Left => sticky_layer
+                    .space
+                    .elements()
+                    .chain(floating_layer.space.elements())
+                    .min_by_key(|other| {
+                        let res = geometry.loc.x
+                            - sticky_layer
+                                .space
+                                .element_geometry(other)
+                                .or_else(|| floating_layer.space.element_geometry(other))
+                                .unwrap()
+                                .loc
+                                .x;
+                        if res.is_positive() {
+                            res
+                        } else {
+                            i32::MAX
+                        }
+                    }),
+                FocusDirection::Right => sticky_layer
+                    .space
+                    .elements()
+                    .chain(floating_layer.space.elements())
+                    .max_by_key(|other| {
+                        let res = geometry.loc.x
+                            - sticky_layer
+                                .space
+                                .element_geometry(other)
+                                .or_else(|| floating_layer.space.element_geometry(other))
+                                .unwrap()
+                                .loc
+                                .x;
+                        if res.is_negative() {
+                            res
+                        } else {
+                            i32::MIN
+                        }
+                    }),
+                _ => return FocusResult::None,
+            };
+
+            next.map(|elem| FocusResult::Some(KeyboardFocusTarget::Element(elem.clone())))
+                .unwrap_or(FocusResult::None)
         }
     }
 
