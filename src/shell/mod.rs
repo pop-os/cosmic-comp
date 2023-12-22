@@ -2360,6 +2360,39 @@ impl Shell {
         }
     }
 
+    pub fn move_current_element<'a>(
+        &mut self,
+        direction: Direction,
+        seat: &Seat<State>,
+    ) -> MoveResult {
+        let output = seat.active_output();
+        let workspace = self.active_space(&output);
+        let focus_stack = workspace.focus_stack.get(seat);
+        let Some(last) = focus_stack.last().cloned() else {
+            return MoveResult::None
+        };
+        let fullscreen = workspace.fullscreen.as_ref().map(|f| f.surface.clone());
+
+        if let Some(surface) = fullscreen {
+            MoveResult::MoveFurther(KeyboardFocusTarget::Fullscreen(surface))
+        } else if let Some(set) = self
+            .workspaces
+            .sets
+            .values_mut()
+            .find(|set| set.sticky_layer.mapped().any(|m| m == &last))
+        {
+            set.sticky_layer
+                .move_current_element(direction, seat, self.theme.clone())
+        } else {
+            let theme = self.theme.clone();
+            let workspace = self.active_space_mut(&output);
+            workspace
+                .floating_layer
+                .move_current_element(direction, seat, theme)
+                .or_else(|| workspace.tiling_layer.move_current_node(direction, seat))
+        }
+    }
+
     pub fn menu_resize_request(
         state: &mut State,
         mapped: &CosmicMapped,
