@@ -1648,12 +1648,21 @@ impl Shell {
             workspace.fullscreen_request(&mapped.active_window(), None);
         }
 
-        if workspace.output == seat.active_output() && active_handle == workspace.handle {
-            // TODO: enforce focus stealing prevention by also checking the same rules as for the else case.
-            Shell::set_focus(state, Some(&KeyboardFocusTarget::from(mapped)), &seat, None);
-        } else if workspace_empty || workspace_handle.is_some() || should_be_fullscreen {
+        let should_change_focus =
+            workspace_empty || workspace_handle.is_some() || should_be_fullscreen;
+        let is_active_workspace =
+            workspace.output == seat.active_output() && active_handle == workspace.handle;
+
+        if should_change_focus {
+            if is_active_workspace {
+                Shell::set_focus(state, Some(&KeyboardFocusTarget::from(mapped)), &seat, None);
+            } else {
+                let handle = workspace.handle;
+                Shell::append_focus_stack(state, Some(&KeyboardFocusTarget::from(mapped)), &seat);
+                state.common.shell.set_urgent(&handle);
+            }
+        } else if !is_active_workspace {
             let handle = workspace.handle;
-            Shell::append_focus_stack(state, Some(&KeyboardFocusTarget::from(mapped)), &seat);
             state.common.shell.set_urgent(&handle);
         }
 
