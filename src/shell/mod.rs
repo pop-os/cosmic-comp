@@ -2622,20 +2622,22 @@ impl Shell {
     }
 
     pub fn maximize_request(&mut self, mapped: &CosmicMapped) {
-        let (managed_layer, floating_layer) = if let Some(set) = self
+        let (original_layer, floating_layer, original_geometry) = if let Some(set) = self
             .workspaces
             .sets
             .values_mut()
             .find(|set| set.sticky_layer.mapped().any(|m| m == mapped))
         {
-            (ManagedLayer::Sticky, &mut set.sticky_layer)
+            let geometry = set.sticky_layer.element_geometry(mapped).unwrap();
+            (ManagedLayer::Sticky, &mut set.sticky_layer, geometry)
         } else if let Some(workspace) = self.space_for_mut(&mapped) {
             let layer = if workspace.is_floating(&mapped) {
                 ManagedLayer::Floating
             } else {
                 ManagedLayer::Tiling
             };
-            (layer, &mut workspace.floating_layer)
+            let geometry = workspace.element_geometry(mapped).unwrap();
+            (layer, &mut workspace.floating_layer, geometry)
         } else {
             return;
         };
@@ -2643,8 +2645,8 @@ impl Shell {
         let mut state = mapped.maximized_state.lock().unwrap();
         if state.is_none() {
             *state = Some(MaximizedState {
-                original_geometry: floating_layer.element_geometry(&mapped).unwrap(),
-                original_layer: managed_layer,
+                original_geometry,
+                original_layer,
             });
             std::mem::drop(state);
             floating_layer.map_maximized(mapped.clone());
