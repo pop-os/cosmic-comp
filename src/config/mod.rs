@@ -426,6 +426,16 @@ impl Config {
         .map_or(1.0, |x| x.0)
     }
 
+    pub fn map_to_output(&self, device: &InputDevice) -> Option<&str> {
+        let (device_config, default_config) = self.get_device_config(device);
+        Some(
+            input_config::get_config(device_config, default_config, |x| {
+                x.map_to_output.as_deref()
+            })?
+            .0,
+        )
+    }
+
     fn get_device_config(&self, device: &InputDevice) -> (Option<&InputConfig>, &InputConfig) {
         let default_config = if device.config_tap_finger_count() > 0 {
             &self.input_touchpad
