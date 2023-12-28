@@ -78,6 +78,7 @@ use smithay::{
         session_lock::SessionLockManagerState,
         shell::{kde::decoration::KdeDecorationState, xdg::decoration::XdgDecorationState},
         shm::ShmState,
+        tablet_manager::TabletManagerState,
         text_input::TextInputManagerState,
         viewporter::ViewporterState,
         virtual_keyboard::VirtualKeyboardManagerState,
@@ -364,6 +365,7 @@ impl State {
         XWaylandKeyboardGrabState::new::<Self>(&dh);
         PointerConstraintsState::new::<Self>(&dh);
         PointerGesturesState::new::<Self>(&dh);
+        TabletManagerState::new::<Self>(&dh);
         SecurityContextState::new::<Self, _>(&dh, client_has_no_security_context);
         InputMethodManagerState::new::<Self, _>(&dh, client_should_see_privileged_protocols);
         TextInputManagerState::new::<Self>(&dh);

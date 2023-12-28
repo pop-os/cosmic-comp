@@ -27,7 +27,9 @@ use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisSource, Device, DeviceCapability, GestureBeginEvent,
         GestureEndEvent, GesturePinchUpdateEvent as _, GestureSwipeUpdateEvent as _, InputBackend,
-        InputEvent, KeyState, PointerAxisEvent, TouchEvent,
+        InputEvent, KeyState, PointerAxisEvent, ProximityState, TabletToolButtonEvent,
+        TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent, TabletToolTipState,
+        TouchEvent,
     },
     desktop::{layer_map_for_output, space::SpaceElement, WindowSurfaceType},
     input::{
@@ -41,18 +43,14 @@ use smithay::{
         Seat, SeatState,
     },
     output::Output,
-    reexports::{
-        input::event::touch::{
-            TouchDownEvent as LibinputTouchDownEvent, TouchMotionEvent as LibinputTouchMotionEvent,
-        },
-        wayland_server::DisplayHandle,
-    },
+    reexports::{input::Device as InputDevice, wayland_server::DisplayHandle},
     utils::{Point, Serial, SERIAL_COUNTER},
     wayland::{
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
         pointer_constraints::{with_pointer_constraint, PointerConstraint},
         seat::WaylandFocus,
         shell::wlr_layer::Layer as WlrLayer,
+        tablet_manager::{TabletDescriptor, TabletSeatTrait},
     },
     xwayland::X11Surface,
 };
@@ -143,11 +141,15 @@ impl Devices {
     fn add_device<D: Device>(&self, device: &D) -> Vec<DeviceCapability> {
         let id = device.id();
         let mut map = self.0.borrow_mut();
-        let caps = [DeviceCapability::Keyboard, DeviceCapability::Pointer]
-            .iter()
-            .cloned()
-            .filter(|c| device.has_capability(*c))
-            .collect::<Vec<_>>();
+        let caps = [
+            DeviceCapability::Keyboard,
+            DeviceCapability::Pointer,
+            DeviceCapability::TabletTool,
+        ]
+        .iter()
+        .cloned()
+        .filter(|c| device.has_capability(*c))
+        .collect::<Vec<_>>();
         let new_caps = caps
             .iter()
             .cloned()
@@ -221,9 +223,7 @@ impl State {
         event: InputEvent<B>,
         needs_key_repetition: bool,
     ) where
-        <B as InputBackend>::PointerAxisEvent: 'static,
-        <B as InputBackend>::TouchDownEvent: 'static,
-        <B as InputBackend>::TouchMotionEvent: 'static,
+        <B as InputBackend>::Device: 'static,
     {
         use smithay::backend::input::Event;
         match event {
@@ -233,7 +233,13 @@ impl State {
                 let devices = userdata.get::<Devices>().unwrap();
                 for cap in devices.add_device(&device) {
                     match cap {
-                        // TODO: Handle touch, tablet
+                        DeviceCapability::TabletTool => {
+                            seat.tablet_seat().add_tablet::<Self>(
+                                &self.common.display_handle,
+                                &TabletDescriptor::from(&device),
+                            );
+                        }
+                        // TODO: Handle touch
                         _ => {}
                     }
                 }
@@ -249,7 +255,11 @@ impl State {
                     if devices.has_device(&device) {
                         for cap in devices.remove_device(&device) {
                             match cap {
-                                // TODO: Handle touch, tablet
+                                DeviceCapability::TabletTool => {
+                                    seat.tablet_seat()
+                                        .remove_tablet(&TabletDescriptor::from(&device));
+                                }
+                                // TODO: Handle touch
                                 _ => {}
                             }
                         }
@@ -1001,13 +1011,12 @@ impl State {
                 }
             }
             InputEvent::PointerAxis { event, .. } => {
-                let scroll_factor = if let Some(event) =
-                    <dyn Any>::downcast_ref::<smithay::backend::libinput::PointerScrollAxis>(&event)
-                {
-                    self.common.config.scroll_factor(&event.device())
-                } else {
-                    1.0
-                };
+                let scroll_factor =
+                    if let Some(device) = <dyn Any>::downcast_ref::<InputDevice>(&event.device()) {
+                        self.common.config.scroll_factor(device)
+                    } else {
+                        1.0
+                    };
 
                 if let Some(seat) = self.common.seat_with_device(&event.device()) {
                     #[cfg(feature = "debug")]
@@ -1174,23 +1183,7 @@ impl State {
             }
             InputEvent::TouchDown { event, .. } => {
                 if let Some(seat) = self.common.seat_with_device(&event.device()).cloned() {
-                    // TODO Is it possible to determine mapping for external touchscreen?
-                    let map_to_output = if let Some(event) =
-                        <dyn Any>::downcast_ref::<LibinputTouchDownEvent>(&event)
-                    {
-                        self.common
-                            .config
-                            .map_to_output(&event.device())
-                            .and_then(|name| {
-                                self.common
-                                    .shell
-                                    .outputs()
-                                    .find(|output| output.name() == name)
-                            })
-                    } else {
-                        None
-                    };
-                    let Some(output) = map_to_output.or_else(|| self.common.shell.builtin_output()).cloned() else {
+                    let Some(output) = mapped_output_for_device(&self.common, &event.device()).cloned() else {
                         return;
                     };
 
@@ -1230,22 +1223,7 @@ impl State {
             }
             InputEvent::TouchMotion { event, .. } => {
                 if let Some(seat) = self.common.seat_with_device(&event.device()).cloned() {
-                    let map_to_output = if let Some(event) =
-                        <dyn Any>::downcast_ref::<LibinputTouchMotionEvent>(&event)
-                    {
-                        self.common
-                            .config
-                            .map_to_output(&event.device())
-                            .and_then(|name| {
-                                self.common
-                                    .shell
-                                    .outputs()
-                                    .find(|output| output.name() == name)
-                            })
-                    } else {
-                        None
-                    };
-                    let Some(output) = map_to_output.or_else(|| self.common.shell.builtin_output()).cloned() else {
+                    let Some(output) = mapped_output_for_device(&self.common, &event.device()).cloned() else {
                         return;
                     };
 
@@ -1292,7 +1270,163 @@ impl State {
                 }
             }
             InputEvent::TouchFrame { event: _, .. } => {}
-            _ => { /* TODO e.g. tablet events */ }
+            InputEvent::TabletToolAxis { event, .. } => {
+                if let Some(seat) = self.common.seat_with_device(&event.device()).cloned() {
+                    let Some(output) = mapped_output_for_device(&self.common, &event.device()).cloned() else {
+                        return;
+                    };
+                    let geometry = output.geometry();
+
+                    let position = event
+                        .position_transformed(geometry.size.as_logical())
+                        .as_global()
+                        + geometry.loc.to_f64();
+
+                    let overview = self.common.shell.overview_mode();
+                    let workspace = self.common.shell.workspaces.active_mut(&output);
+                    let under = State::surface_under(
+                        position,
+                        &output,
+                        &self.common.shell.override_redirect_windows,
+                        overview.0.clone(),
+                        workspace,
+                        self.common.shell.session_lock.as_ref(),
+                    )
+                    .map(|(target, pos)| (target, pos.as_logical()));
+
+                    let pointer = seat.get_pointer().unwrap();
+                    pointer.motion(
+                        self,
+                        under.clone(),
+                        &MotionEvent {
+                            location: position.as_logical(),
+                            serial: SERIAL_COUNTER.next_serial(),
+                            time: 0,
+                        },
+                    );
+
+                    let tablet_seat = seat.tablet_seat();
+
+                    let tablet = tablet_seat.get_tablet(&TabletDescriptor::from(&event.device()));
+                    let tool = tablet_seat.get_tool(&event.tool());
+
+                    if let (Some(tablet), Some(tool)) = (tablet, tool) {
+                        if event.pressure_has_changed() {
+                            tool.pressure(event.pressure());
+                        }
+                        if event.distance_has_changed() {
+                            tool.distance(event.distance());
+                        }
+                        if event.tilt_has_changed() {
+                            tool.tilt(event.tilt());
+                        }
+                        if event.slider_has_changed() {
+                            tool.slider_position(event.slider_position());
+                        }
+                        if event.rotation_has_changed() {
+                            tool.rotation(event.rotation());
+                        }
+                        if event.wheel_has_changed() {
+                            tool.wheel(event.wheel_delta(), event.wheel_delta_discrete());
+                        }
+
+                        tool.motion(
+                            position.as_logical(),
+                            under.and_then(|(f, loc)| f.wl_surface().map(|s| (s, loc))),
+                            &tablet,
+                            SERIAL_COUNTER.next_serial(),
+                            event.time_msec(),
+                        );
+                    }
+                }
+            }
+            InputEvent::TabletToolProximity { event, .. } => {
+                if let Some(seat) = self.common.seat_with_device(&event.device()).cloned() {
+                    let Some(output) = mapped_output_for_device(&self.common, &event.device()).cloned() else {
+                        return;
+                    };
+                    let geometry = output.geometry();
+
+                    let position = event
+                        .position_transformed(geometry.size.as_logical())
+                        .as_global()
+                        + geometry.loc.to_f64();
+
+                    let overview = self.common.shell.overview_mode();
+                    let workspace = self.common.shell.workspaces.active_mut(&output);
+                    let under = State::surface_under(
+                        position,
+                        &output,
+                        &self.common.shell.override_redirect_windows,
+                        overview.0.clone(),
+                        workspace,
+                        self.common.shell.session_lock.as_ref(),
+                    )
+                    .map(|(target, pos)| (target, pos.as_logical()));
+
+                    let pointer = seat.get_pointer().unwrap();
+                    pointer.motion(
+                        self,
+                        under.clone(),
+                        &MotionEvent {
+                            location: position.as_logical(),
+                            serial: SERIAL_COUNTER.next_serial(),
+                            time: 0,
+                        },
+                    );
+
+                    let tablet_seat = seat.tablet_seat();
+
+                    let tablet = tablet_seat.get_tablet(&TabletDescriptor::from(&event.device()));
+                    let tool = tablet_seat.get_tool(&event.tool());
+
+                    if let (Some(tablet), Some(tool)) = (tablet, tool) {
+                        match event.state() {
+                            ProximityState::In => {
+                                if let Some(under) =
+                                    under.and_then(|(f, loc)| f.wl_surface().map(|s| (s, loc)))
+                                {
+                                    tool.proximity_in(
+                                        position.as_logical(),
+                                        under,
+                                        &tablet,
+                                        SERIAL_COUNTER.next_serial(),
+                                        event.time_msec(),
+                                    )
+                                }
+                            }
+                            ProximityState::Out => tool.proximity_out(event.time_msec()),
+                        }
+                    }
+                }
+            }
+            InputEvent::TabletToolTip { event, .. } => {
+                if let Some(seat) = self.common.seat_with_device(&event.device()) {
+                    if let Some(tool) = seat.tablet_seat().get_tool(&event.tool()) {
+                        match event.tip_state() {
+                            TabletToolTipState::Down => {
+                                tool.tip_down(SERIAL_COUNTER.next_serial(), event.time_msec());
+                            }
+                            TabletToolTipState::Up => {
+                                tool.tip_up(event.time_msec());
+                            }
+                        }
+                    }
+                }
+            }
+            InputEvent::TabletToolButton { event, .. } => {
+                if let Some(seat) = self.common.seat_with_device(&event.device()) {
+                    if let Some(tool) = seat.tablet_seat().get_tool(&event.tool()) {
+                        tool.button(
+                            event.button(),
+                            event.button_state(),
+                            SERIAL_COUNTER.next_serial(),
+                            event.time_msec(),
+                        );
+                    }
+                }
+            }
+            InputEvent::Special(_) => {}
         }
     }
 
@@ -2188,4 +2322,21 @@ fn sessions_for_output(state: &Common, output: &Output) -> impl Iterator<Item = 
         )
         .collect::<Vec<_>>()
         .into_iter()
+}
+
+// TODO Is it possible to determine mapping for external touchscreen?
+// Support map_to_region like sway?
+fn mapped_output_for_device<'a, D: Device + 'static>(
+    state: &'a Common,
+    device: &D,
+) -> Option<&'a Output> {
+    let map_to_output = if let Some(device) = <dyn Any>::downcast_ref::<InputDevice>(device) {
+        state
+            .config
+            .map_to_output(device)
+            .and_then(|name| state.shell.outputs().find(|output| output.name() == name))
+    } else {
+        None
+    };
+    map_to_output.or_else(|| state.shell.builtin_output())
 }
