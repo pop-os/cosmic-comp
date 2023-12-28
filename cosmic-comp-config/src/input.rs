@@ -27,6 +27,8 @@ pub struct InputConfig {
     pub scroll_config: Option<ScrollConfig>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub tap_config: Option<TapConfig>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub map_to_output: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]

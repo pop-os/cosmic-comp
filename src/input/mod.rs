@@ -41,7 +41,12 @@ use smithay::{
         Seat, SeatState,
     },
     output::Output,
-    reexports::wayland_server::DisplayHandle,
+    reexports::{
+        input::event::touch::{
+            TouchDownEvent as LibinputTouchDownEvent, TouchMotionEvent as LibinputTouchMotionEvent,
+        },
+        wayland_server::DisplayHandle,
+    },
     utils::{Point, Serial, SERIAL_COUNTER},
     wayland::{
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
@@ -217,6 +222,8 @@ impl State {
         needs_key_repetition: bool,
     ) where
         <B as InputBackend>::PointerAxisEvent: 'static,
+        <B as InputBackend>::TouchDownEvent: 'static,
+        <B as InputBackend>::TouchMotionEvent: 'static,
     {
         use smithay::backend::input::Event;
         match event {
@@ -1174,9 +1181,23 @@ impl State {
             }
             InputEvent::TouchDown { event, .. } => {
                 if let Some(seat) = self.common.seat_with_device(&event.device()).cloned() {
-                    // TODO: Configuration option for mapping touch device to output
-                    // Is it possible to determine mapping for external touchscreen?
-                    let Some(output) = self.common.shell.builtin_output().cloned() else {
+                    // TODO Is it possible to determine mapping for external touchscreen?
+                    let map_to_output = if let Some(event) =
+                        <dyn Any>::downcast_ref::<LibinputTouchDownEvent>(&event)
+                    {
+                        self.common
+                            .config
+                            .map_to_output(&event.device())
+                            .and_then(|name| {
+                                self.common
+                                    .shell
+                                    .outputs()
+                                    .find(|output| output.name() == name)
+                            })
+                    } else {
+                        None
+                    };
+                    let Some(output) = map_to_output.or_else(|| self.common.shell.builtin_output()).cloned() else {
                         return;
                     };
 
@@ -1216,7 +1237,22 @@ impl State {
             }
             InputEvent::TouchMotion { event, .. } => {
                 if let Some(seat) = self.common.seat_with_device(&event.device()).cloned() {
-                    let Some(output) = self.common.shell.builtin_output().cloned() else {
+                    let map_to_output = if let Some(event) =
+                        <dyn Any>::downcast_ref::<LibinputTouchMotionEvent>(&event)
+                    {
+                        self.common
+                            .config
+                            .map_to_output(&event.device())
+                            .and_then(|name| {
+                                self.common
+                                    .shell
+                                    .outputs()
+                                    .find(|output| output.name() == name)
+                            })
+                    } else {
+                        None
+                    };
+                    let Some(output) = map_to_output.or_else(|| self.common.shell.builtin_output()).cloned() else {
                         return;
                     };
 
