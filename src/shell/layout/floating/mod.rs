@@ -462,7 +462,7 @@ impl FloatingLayout {
         release: ReleaseMode,
     ) -> Option<ResizeSurfaceGrab> {
         if seat.get_pointer().is_some() {
-            let location = self.space.element_location(&mapped).unwrap().as_local();
+            let location = self.space.element_location(&mapped)?.as_local();
             let size = mapped.geometry().size;
             mapped.moved_since_mapped.store(true, Ordering::SeqCst);
 
