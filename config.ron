@@ -1,7 +1,8 @@
 (
     key_bindings: {
         (modifiers: [Super, Shift], key: "Escape"): Terminate,
-        (modifiers: [Super], key: "Escape"): Debug,
+        (modifiers: [Super, Ctrl], key: "Escape"): Debug,
+        (modifiers: [Super], key: "Escape"): Spawn("cosmic-greeter"),
         (modifiers: [Super], key: "q"): Close,
 
         (modifiers: [Super], key: "1"): Workspace(1),
