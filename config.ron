@@ -72,12 +72,14 @@
         (modifiers: [Super], key: "b"): Spawn("xdg-open http://"),
         (modifiers: [Super], key: "f"): Spawn("xdg-open ~"),
         //TODO: ability to select default terminal
-        (modifiers: [Super], key: "t"): Spawn("gnome-terminal"),
+        (modifiers: [Super], key: "t"): Spawn("cosmic-term"),
 
         (modifiers: [Super], key: "a"): Spawn("cosmic-app-library"),
         (modifiers: [Super], key: "w"): Spawn("cosmic-workspaces"),
         (modifiers: [Super], key: "slash"): Spawn("cosmic-launcher"),
         (modifiers: [Super]): Spawn("cosmic-launcher"),
+
+        (modifiers: [], key: "Print"): Spawn("cosmic-screenshot"),
 
         (modifiers: [], key: "XF86AudioRaiseVolume"): Spawn("amixer sset Master 5%+"),
         (modifiers: [], key: "XF86AudioLowerVolume"): Spawn("amixer sset Master 5%-"),
