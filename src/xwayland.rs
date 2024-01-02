@@ -443,6 +443,18 @@ impl XwmHandler for State {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
                 workspace.fullscreen_request(&surface, None)
             }
+        } else {
+            let output = self.common.last_active_seat().active_output();
+            if let Some(o) = self
+                .common
+                .shell
+                .pending_windows
+                .iter_mut()
+                .find(|(s, _, _)| s == &surface)
+                .map(|(_, _, o)| o)
+            {
+                *o = Some(output);
+            }
         }
     }
 
