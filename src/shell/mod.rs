@@ -2420,77 +2420,57 @@ impl Shell {
                 .or_else(|| floating_layer.space.element_geometry(&focused))
                 .unwrap();
 
+            let elements = sticky_layer
+                .space
+                .elements()
+                .chain(floating_layer.space.elements())
+                .filter(|elem| *elem != &focused)
+                .map(|elem| {
+                    (
+                        elem,
+                        sticky_layer
+                            .space
+                            .element_geometry(elem)
+                            .or_else(|| floating_layer.space.element_geometry(elem))
+                            .unwrap(),
+                    )
+                });
+
             let next = match direction {
-                FocusDirection::Up => sticky_layer
-                    .space
-                    .elements()
-                    .chain(floating_layer.space.elements())
-                    .min_by_key(|other| {
-                        let res = geometry.loc.y
-                            - sticky_layer
-                                .space
-                                .element_geometry(other)
-                                .or_else(|| floating_layer.space.element_geometry(other))
-                                .unwrap()
-                                .loc
-                                .y;
+                FocusDirection::Up => elements
+                    .filter(|(_, other_geo)| other_geo.loc.y <= geometry.loc.y)
+                    .min_by_key(|(_, other_geo)| {
+                        let res = geometry.loc.y - other_geo.loc.y;
                         if res.is_positive() {
                             res
                         } else {
                             i32::MAX
                         }
                     }),
-                FocusDirection::Down => sticky_layer
-                    .space
-                    .elements()
-                    .chain(floating_layer.space.elements())
-                    .max_by_key(|other| {
-                        let res = geometry.loc.y
-                            - sticky_layer
-                                .space
-                                .element_geometry(other)
-                                .or_else(|| floating_layer.space.element_geometry(other))
-                                .unwrap()
-                                .loc
-                                .y;
+                FocusDirection::Down => elements
+                    .filter(|(_, other_geo)| other_geo.loc.y > geometry.loc.y)
+                    .max_by_key(|(_, other_geo)| {
+                        let res = geometry.loc.y - other_geo.loc.y;
                         if res.is_negative() {
                             res
                         } else {
                             i32::MIN
                         }
                     }),
-                FocusDirection::Left => sticky_layer
-                    .space
-                    .elements()
-                    .chain(floating_layer.space.elements())
-                    .min_by_key(|other| {
-                        let res = geometry.loc.x
-                            - sticky_layer
-                                .space
-                                .element_geometry(other)
-                                .or_else(|| floating_layer.space.element_geometry(other))
-                                .unwrap()
-                                .loc
-                                .x;
+                FocusDirection::Left => elements
+                    .filter(|(_, other_geo)| other_geo.loc.x <= geometry.loc.x)
+                    .min_by_key(|(_, other_geo)| {
+                        let res = geometry.loc.x - other_geo.loc.x;
                         if res.is_positive() {
                             res
                         } else {
                             i32::MAX
                         }
                     }),
-                FocusDirection::Right => sticky_layer
-                    .space
-                    .elements()
-                    .chain(floating_layer.space.elements())
-                    .max_by_key(|other| {
-                        let res = geometry.loc.x
-                            - sticky_layer
-                                .space
-                                .element_geometry(other)
-                                .or_else(|| floating_layer.space.element_geometry(other))
-                                .unwrap()
-                                .loc
-                                .x;
+                FocusDirection::Right => elements
+                    .filter(|(_, other_geo)| other_geo.loc.x > geometry.loc.x)
+                    .max_by_key(|(_, other_geo)| {
+                        let res = geometry.loc.x - other_geo.loc.x;
                         if res.is_negative() {
                             res
                         } else {
@@ -2498,7 +2478,8 @@ impl Shell {
                         }
                     }),
                 _ => return FocusResult::None,
-            };
+            }
+            .map(|(other, _)| other);
 
             next.map(|elem| FocusResult::Some(KeyboardFocusTarget::Element(elem.clone())))
                 .unwrap_or(FocusResult::None)
