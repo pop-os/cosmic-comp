@@ -2049,8 +2049,9 @@ impl State {
             }
             Action::ToggleTiling => {
                 let output = seat.active_output();
-                let workspace = self.common.shell.active_space_mut(&output);
-                workspace.toggle_tiling(seat);
+                let workspace = self.common.shell.workspaces.active_mut(&output);
+                let mut guard = self.common.shell.workspace_state.update();
+                workspace.toggle_tiling(seat, &mut guard);
             }
             Action::ToggleWindowFloating => {
                 let output = seat.active_output();
