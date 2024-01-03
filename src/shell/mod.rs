@@ -8,7 +8,9 @@ use std::{
 use wayland_backend::server::ClientId;
 
 use cosmic_comp_config::workspace::{WorkspaceAmount, WorkspaceMode};
-use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State as WState;
+use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::{
+    State as WState, TilingState,
+};
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     desktop::{
@@ -238,7 +240,16 @@ fn create_workspace(
     tiling: bool,
     theme: cosmic::Theme,
 ) -> Workspace {
-    let workspace_handle = state.create_workspace(&group_handle).unwrap();
+    let workspace_handle = state
+        .create_workspace(
+            &group_handle,
+            if tiling {
+                TilingState::TilingEnabled
+            } else {
+                TilingState::FloatingOnly
+            },
+        )
+        .unwrap();
     if active {
         state.add_workspace_state(&workspace_handle, WState::Active);
     }
@@ -256,7 +267,16 @@ fn move_workspace_to_group(
     toplevel_info_state: &mut ToplevelInfoState<State, CosmicSurface>,
 ) {
     let old_workspace_handle = workspace.handle;
-    workspace.handle = workspace_state.create_workspace(group).unwrap();
+    workspace.handle = workspace_state
+        .create_workspace(
+            group,
+            if workspace.tiling_enabled {
+                TilingState::TilingEnabled
+            } else {
+                TilingState::FloatingOnly
+            },
+        )
+        .unwrap();
     workspace_state.set_workspace_capabilities(
         &workspace.handle,
         [WorkspaceCapabilities::Activate].into_iter(),
@@ -513,15 +533,6 @@ impl WorkspaceSet {
         self.idx = idx;
         for (i, workspace) in self.workspaces.iter().enumerate() {
             workspace_set_idx(state, i as u8 + 1, idx, &workspace.handle);
-        }
-    }
-
-    fn update_tiling_status(&mut self, seat: &Seat<State>, tiling_enabled: bool) {
-        self.tiling_enabled = tiling_enabled;
-        for workspace in &mut self.workspaces {
-            if workspace.tiling_enabled != tiling_enabled {
-                workspace.toggle_tiling(seat);
-            }
         }
     }
 }
@@ -999,12 +1010,6 @@ impl Workspaces {
                 .values_mut()
                 .flat_map(|set| set.workspaces.iter_mut()),
         )
-    }
-
-    pub fn update_tiling_status(&mut self, seat: &Seat<State>, tiling: bool) {
-        for set in self.sets.values_mut() {
-            set.update_tiling_status(seat, tiling)
-        }
     }
 
     pub fn set_theme(&mut self, theme: cosmic::Theme, xdg_activation_state: &XdgActivationState) {

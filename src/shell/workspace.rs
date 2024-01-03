@@ -14,12 +14,13 @@ use crate::{
         protocols::{
             screencopy::{BufferParams, Session as ScreencopySession},
             toplevel_info::ToplevelInfoState,
-            workspace::WorkspaceHandle,
+            workspace::{WorkspaceHandle, WorkspaceUpdateGuard},
         },
     },
 };
 
 use cosmic::theme::CosmicTheme;
+use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::TilingState;
 use id_tree::Tree;
 use indexmap::IndexSet;
 use keyframe::{ease, functions::EaseInOutCubic};
@@ -612,7 +613,11 @@ impl Workspace {
         }
     }
 
-    pub fn toggle_tiling(&mut self, seat: &Seat<State>) {
+    pub fn toggle_tiling(
+        &mut self,
+        seat: &Seat<State>,
+        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+    ) {
         if self.tiling_enabled {
             for window in self
                 .tiling_layer
@@ -624,6 +629,7 @@ impl Workspace {
                 self.tiling_layer.unmap(&window);
                 self.floating_layer.map(window, None);
             }
+            workspace_state.set_workspace_tiling_state(&self.handle, TilingState::FloatingOnly);
             self.tiling_enabled = false;
         } else {
             let focus_stack = self.focus_stack.get(seat);
@@ -638,6 +644,7 @@ impl Workspace {
                 self.tiling_layer
                     .map(window, Some(focus_stack.iter()), None)
             }
+            workspace_state.set_workspace_tiling_state(&self.handle, TilingState::TilingEnabled);
             self.tiling_enabled = true;
         }
     }

@@ -9,6 +9,7 @@ use smithay::{
         Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
     },
 };
+use wayland_backend::protocol::WEnum;
 
 use cosmic_protocols::workspace::v1::server::{
     zcosmic_workspace_group_handle_v1::{self, ZcosmicWorkspaceGroupHandleV1},
@@ -74,7 +75,7 @@ pub struct WorkspaceGroupDataInner {
 }
 pub type WorkspaceGroupData = Mutex<WorkspaceGroupDataInner>;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Workspace {
     id: usize,
     instances: Vec<ZcosmicWorkspaceHandleV1>,
@@ -83,6 +84,7 @@ pub struct Workspace {
     capabilities: Vec<WorkspaceCapabilities>,
     coordinates: Vec<u32>,
     states: HashSet<zcosmic_workspace_handle_v1::State>,
+    tiling: zcosmic_workspace_handle_v1::TilingState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -96,6 +98,7 @@ pub struct WorkspaceDataInner {
     capabilities: Vec<WorkspaceCapabilities>,
     coordinates: Vec<u32>,
     states: HashSet<zcosmic_workspace_handle_v1::State>,
+    tiling: Option<zcosmic_workspace_handle_v1::TilingState>,
 }
 pub type WorkspaceData = Mutex<WorkspaceDataInner>;
 
@@ -124,6 +127,14 @@ pub enum Request {
     Activate(WorkspaceHandle),
     Deactivate(WorkspaceHandle),
     Remove(WorkspaceHandle),
+    Rename {
+        workspace: WorkspaceHandle,
+        name: String,
+    },
+    SetTilingState {
+        workspace: WorkspaceHandle,
+        state: WEnum<zcosmic_workspace_handle_v1::TilingState>,
+    },
     Create {
         in_group: WorkspaceGroupHandle,
         name: String,
@@ -339,6 +350,36 @@ where
                     state.requests.push(Request::Remove(workspace_handle));
                 }
             }
+            zcosmic_workspace_handle_v1::Request::Rename { name } => {
+                if let Some(workspace_handle) = state.workspace_state().get_workspace_handle(obj) {
+                    let mut state = client
+                        .get_data::<<D as WorkspaceHandler>::Client>()
+                        .unwrap()
+                        .workspace_state()
+                        .lock()
+                        .unwrap();
+                    state.requests.push(Request::Rename {
+                        workspace: workspace_handle,
+                        name,
+                    });
+                }
+            }
+            zcosmic_workspace_handle_v1::Request::SetTilingState {
+                state: tiling_state,
+            } => {
+                if let Some(workspace_handle) = state.workspace_state().get_workspace_handle(obj) {
+                    let mut state = client
+                        .get_data::<<D as WorkspaceHandler>::Client>()
+                        .unwrap()
+                        .workspace_state()
+                        .lock()
+                        .unwrap();
+                    state.requests.push(Request::SetTilingState {
+                        workspace: workspace_handle,
+                        state: tiling_state,
+                    });
+                }
+            }
             zcosmic_workspace_handle_v1::Request::Destroy => {
                 for group in &mut state.workspace_state_mut().groups {
                     for workspace in &mut group.workspaces {
@@ -468,6 +509,18 @@ where
         })
     }
 
+    pub fn workspace_tiling_state(
+        &self,
+        workspace: &WorkspaceHandle,
+    ) -> Option<zcosmic_workspace_handle_v1::TilingState> {
+        self.groups.iter().find_map(|g| {
+            g.workspaces
+                .iter()
+                .find(|w| w.id == workspace.id)
+                .map(|w| w.tiling)
+        })
+    }
+
     pub fn group_handle(
         &self,
         group: &ZcosmicWorkspaceGroupHandleV1,
@@ -569,12 +622,21 @@ where
         WorkspaceGroupHandle { id }
     }
 
-    pub fn create_workspace(&mut self, group: &WorkspaceGroupHandle) -> Option<WorkspaceHandle> {
+    pub fn create_workspace(
+        &mut self,
+        group: &WorkspaceGroupHandle,
+        tiling: zcosmic_workspace_handle_v1::TilingState,
+    ) -> Option<WorkspaceHandle> {
         if let Some(group) = self.0.groups.iter_mut().find(|g| g.id == group.id) {
             let id = next_workspace_id();
             let workspace = Workspace {
                 id,
-                ..Default::default()
+                tiling,
+                instances: Default::default(),
+                name: Default::default(),
+                capabilities: Default::default(),
+                coordinates: Default::default(),
+                states: Default::default(),
             };
             group.workspaces.push(workspace);
             Some(WorkspaceHandle { id })
@@ -756,6 +818,28 @@ where
             .find_map(|g| g.workspaces.iter_mut().find(|w| w.id == workspace.id))
         {
             workspace.states.remove(&state);
+        }
+    }
+
+    pub fn workspace_tiling_state(
+        &self,
+        workspace: &WorkspaceHandle,
+    ) -> Option<zcosmic_workspace_handle_v1::TilingState> {
+        self.0.workspace_tiling_state(workspace)
+    }
+
+    pub fn set_workspace_tiling_state(
+        &mut self,
+        workspace: &WorkspaceHandle,
+        state: zcosmic_workspace_handle_v1::TilingState,
+    ) {
+        if let Some(workspace) = self
+            .0
+            .groups
+            .iter_mut()
+            .find_map(|g| g.workspaces.iter_mut().find(|w| w.id == workspace.id))
+        {
+            workspace.tiling = state;
         }
     }
 }
@@ -962,6 +1046,17 @@ where
         instance.state(states);
         handle_state.states = workspace.states.clone();
         changed = true;
+    }
+    if instance.version() >= zcosmic_workspace_handle_v1::EVT_TILING_STATE_SINCE {
+        if handle_state
+            .tiling
+            .map(|state| state != workspace.tiling)
+            .unwrap_or(true)
+        {
+            instance.tiling_state(workspace.tiling);
+            handle_state.tiling = Some(workspace.tiling);
+            changed = true;
+        }
     }
 
     changed
