@@ -462,6 +462,7 @@ impl Workspace {
                         elem.clone(),
                         Some(state.original_geometry.loc),
                         Some(state.original_geometry.size.as_logical()),
+                        None,
                     );
                     Some(state.original_geometry.size.as_logical())
                 }

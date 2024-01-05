@@ -2324,6 +2324,7 @@ impl Shell {
                                 mapped.clone(),
                                 Some(state.original_geometry.loc),
                                 Some(new_size),
+                                None,
                             );
 
                             let ratio = pos.to_local(&output).x / output.geometry().size.w as f64;
@@ -2531,6 +2532,16 @@ impl Shell {
         };
         let fullscreen = workspace.fullscreen.as_ref().map(|f| f.surface.clone());
 
+        if last
+            .maximized_state
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|state| state.original_layer == ManagedLayer::Tiling)
+        {
+            self.unmaximize_request(&last);
+        }
+
         if let Some(surface) = fullscreen {
             MoveResult::MoveFurther(KeyboardFocusTarget::Fullscreen(surface))
         } else if let Some(set) = self
@@ -2539,14 +2550,18 @@ impl Shell {
             .values_mut()
             .find(|set| set.sticky_layer.mapped().any(|m| m == &last))
         {
-            set.sticky_layer
-                .move_current_element(direction, seat, self.theme.clone())
+            set.sticky_layer.move_current_element(
+                direction,
+                seat,
+                ManagedLayer::Sticky,
+                self.theme.clone(),
+            )
         } else {
             let theme = self.theme.clone();
             let workspace = self.active_space_mut(&output);
             workspace
                 .floating_layer
-                .move_current_element(direction, seat, theme)
+                .move_current_element(direction, seat, ManagedLayer::Floating, theme)
                 .or_else(|| workspace.tiling_layer.move_current_node(direction, seat))
         }
     }
@@ -2662,7 +2677,7 @@ impl Shell {
                 original_layer,
             });
             std::mem::drop(state);
-            floating_layer.map_maximized(mapped.clone());
+            floating_layer.map_maximized(mapped.clone(), original_geometry);
         }
     }
 
@@ -2681,6 +2696,7 @@ impl Shell {
                     mapped.clone(),
                     Some(state.original_geometry.loc),
                     Some(state.original_geometry.size.as_logical()),
+                    None,
                 );
                 Some(state.original_geometry.size.as_logical())
             } else {
