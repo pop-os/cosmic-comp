@@ -618,20 +618,16 @@ impl Workspace {
         seat: &Seat<State>,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
     ) {
-        if self.tiling_enabled {
-            for window in self
-                .tiling_layer
-                .mapped()
-                .map(|(_, m, _)| m.clone())
-                .collect::<Vec<_>>()
-                .into_iter()
-            {
-                self.tiling_layer.unmap(&window);
-                self.floating_layer.map(window, None);
-            }
-            workspace_state.set_workspace_tiling_state(&self.handle, TilingState::FloatingOnly);
-            self.tiling_enabled = false;
-        } else {
+        self.set_tiling(!self.tiling_enabled, seat, workspace_state)
+    }
+
+    pub fn set_tiling(
+        &mut self,
+        tiling: bool,
+        seat: &Seat<State>,
+        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+    ) {
+        if tiling {
             let focus_stack = self.focus_stack.get(seat);
             for window in self
                 .floating_layer
@@ -646,6 +642,19 @@ impl Workspace {
             }
             workspace_state.set_workspace_tiling_state(&self.handle, TilingState::TilingEnabled);
             self.tiling_enabled = true;
+        } else {
+            for window in self
+                .tiling_layer
+                .mapped()
+                .map(|(_, m, _)| m.clone())
+                .collect::<Vec<_>>()
+                .into_iter()
+            {
+                self.tiling_layer.unmap(&window);
+                self.floating_layer.map(window, None);
+            }
+            workspace_state.set_workspace_tiling_state(&self.handle, TilingState::FloatingOnly);
+            self.tiling_enabled = false;
         }
     }
 

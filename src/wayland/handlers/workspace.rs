@@ -8,6 +8,7 @@ use crate::{
         WorkspaceHandler, WorkspaceState,
     },
 };
+use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::TilingState;
 use smithay::reexports::wayland_server::DisplayHandle;
 
 impl WorkspaceClientHandler for ClientState {
@@ -38,6 +39,25 @@ impl WorkspaceHandler for State {
 
                     if let Some((output, idx)) = maybe {
                         let _ = self.common.shell.activate(&output, idx); // TODO: move cursor?
+                    }
+                }
+                Request::SetTilingState { workspace, state } => {
+                    let seat = self.common.last_active_seat().clone();
+                    if let Some(workspace) = self
+                        .common
+                        .shell
+                        .workspaces
+                        .space_for_handle_mut(&workspace)
+                    {
+                        let mut guard = self.common.shell.workspace_state.update();
+                        workspace.set_tiling(
+                            match state.into_result() {
+                                Ok(TilingState::FloatingOnly) => false,
+                                _ => true,
+                            },
+                            &seat,
+                            &mut guard,
+                        );
                     }
                 }
                 _ => {}
