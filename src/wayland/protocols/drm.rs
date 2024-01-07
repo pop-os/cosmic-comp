@@ -168,8 +168,13 @@ where
                     return;
                 }
 
-                let mut dma = Dmabuf::builder((width, height), format, DmabufFlags::empty());
-                dma.add_plane(name, 0, offset0 as u32, stride0 as u32, Modifier::Invalid);
+                let mut dma = Dmabuf::builder(
+                    (width, height),
+                    format,
+                    Modifier::Invalid,
+                    DmabufFlags::empty(),
+                );
+                dma.add_plane(name, 0, offset0 as u32, stride0 as u32);
                 match dma.build() {
                     Some(dmabuf) => {
                         match state.dmabuf_imported(&data.dmabuf_global, dmabuf.clone()) {

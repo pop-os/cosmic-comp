@@ -955,7 +955,7 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330c60081dcc4c72131f8eb70510f1ac07223e5d4163db481a04a0befcffa412"
 dependencies = [
- "libloading 0.8.1",
+ "libloading 0.7.4",
 ]
 
 [[package]]
@@ -985,13 +985,13 @@ dependencies = [
 
 [[package]]
 name = "drm"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e58eefd79f5173683872c0c82d0f05c2dc3c583d631259f60bb7a323756b7ff2"
+checksum = "a0f8a69e60d75ae7dab4ef26a59ca99f2a89d4c142089b537775ae0c198bdcde"
 dependencies = [
  "bitflags 2.4.1",
  "bytemuck",
- "drm-ffi 0.7.0",
+ "drm-ffi 0.7.1",
  "drm-fourcc",
  "rustix",
 ]
@@ -1008,11 +1008,11 @@ dependencies = [
 
 [[package]]
 name = "drm-ffi"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "220dd8c12ebf2b0cbaffa19e00de02f5f090d363fb900f16ea012c077eea1174"
+checksum = "41334f8405792483e32ad05fbb9c5680ff4e84491883d2947a4757dc54cb2ac6"
 dependencies = [
- "drm-sys 0.6.0",
+ "drm-sys 0.6.1",
  "rustix",
 ]
 
@@ -1030,9 +1030,9 @@ checksum = "3a4f1c0468062a56cd5705f1e3b5409eb286d5596a2028ec8e947595d7e715ae"
 
 [[package]]
 name = "drm-sys"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5115283ec60c99da8a9e5dc3c55f27680211e974c948cb6f3b51f0373190503b"
+checksum = "2d09ff881f92f118b11105ba5e34ff8f4adf27b30dae8f12e28c193af1c83176"
 dependencies = [
  "libc",
  "linux-raw-sys 0.6.1",
@@ -1564,7 +1564,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65dffaf38d96aa22cb748ccd9b1ffe624931e899f54c0225815ef7ac757a409f"
 dependencies = [
  "bitflags 1.3.2",
- "drm 0.11.0",
+ "drm 0.11.1",
  "drm-fourcc",
  "gbm-sys",
  "libc",
@@ -4010,7 +4010,7 @@ checksum = "4dccd0940a2dcdf68d092b8cbab7dc0ad8fa938bf95787e1b916b0e3d0e8e970"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/smithay//smithay?rev=1ebe4e8#1ebe4e8fdcc910aba85e5222da1c1102d4f50e41"
+source = "git+https://github.com/smithay//smithay?rev=f6a33e4#f6a33e4c45a3c7fd42d201130ada50b026ff06c7"
 dependencies = [
  "appendlist",
  "ash",
@@ -4020,8 +4020,8 @@ dependencies = [
  "cgmath",
  "cursor-icon",
  "downcast-rs",
- "drm 0.11.0",
- "drm-ffi 0.7.0",
+ "drm 0.11.1",
+ "drm-ffi 0.7.1",
  "drm-fourcc",
  "encoding_rs",
  "errno",
