@@ -1587,12 +1587,11 @@ impl Shell {
                     .map(mapped, None)
             }
             ManagedLayer::Floating => new_workspace.floating_layer.map(mapped, None),
-            ManagedLayer::Tiling => new_workspace.tiling_layer.map(
-                mapped,
-                Option::<std::iter::Empty<_>>::None,
-                None,
-                false,
-            ),
+            ManagedLayer::Tiling => {
+                new_workspace
+                    .tiling_layer
+                    .map(mapped, Option::<std::iter::Empty<_>>::None, None)
+            }
         };
     }
 
@@ -1714,6 +1713,26 @@ impl Shell {
             .toplevel_info_state
             .toplevel_enter_workspace(&window, &workspace.handle);
 
+        let workspace_output = workspace.output.clone();
+        let was_activated = workspace_handle.is_some()
+            && (workspace_output != seat.active_output() || active_handle != workspace.handle);
+        let workspace_handle = workspace.handle;
+        let is_dialog = layout::is_dialog(&window);
+        let floating_exception = layout::has_floating_exception(&window);
+
+        let maybe_focused = workspace.focus_stack.get(&seat).iter().next().cloned();
+        if let Some(focused) = maybe_focused {
+            if (focused.is_stack() && !is_dialog && !should_be_fullscreen)
+                && !(workspace.is_tiled(&focused) && floating_exception)
+            {
+                focused.stack_ref().unwrap().add_window(window, None);
+                if was_activated {
+                    state.common.shell.set_urgent(&workspace_handle);
+                }
+                return;
+            }
+        }
+
         let mapped = CosmicMapped::from(CosmicWindow::new(
             window.clone(),
             state.common.event_loop_handle.clone(),
@@ -1725,8 +1744,7 @@ impl Shell {
         }
 
         let workspace_empty = workspace.mapped().next().is_none();
-
-        if layout::should_be_floating(&window) || !workspace.tiling_enabled {
+        if is_dialog || floating_exception || !workspace.tiling_enabled {
             workspace.floating_layer.map(mapped.clone(), None);
         } else {
             for mapped in workspace
@@ -1741,16 +1759,12 @@ impl Shell {
             let focus_stack = workspace.focus_stack.get(&seat);
             workspace
                 .tiling_layer
-                .map(mapped.clone(), Some(focus_stack.iter()), None, true);
+                .map(mapped.clone(), Some(focus_stack.iter()), None);
         }
 
         if !parent_is_sticky && should_be_fullscreen {
             workspace.fullscreen_request(&mapped.active_window(), None);
         }
-
-        let was_activated = workspace_handle.is_some();
-        let workspace_handle = workspace.handle;
-        let workspace_output = workspace.output.clone();
 
         if parent_is_sticky {
             let seats = state.common.seats().cloned().collect::<Vec<_>>();
@@ -1923,7 +1937,6 @@ impl Shell {
                 mapped.clone(),
                 focus_stack.as_ref().map(|x| x.iter()),
                 direction,
-                true,
             );
         }
 
@@ -2891,12 +2904,9 @@ impl Shell {
                 }
                 ManagedLayer::Tiling => {
                     let focus_stack = workspace.focus_stack.get(seat);
-                    workspace.tiling_layer.map(
-                        mapped.clone(),
-                        Some(focus_stack.iter()),
-                        None,
-                        false,
-                    );
+                    workspace
+                        .tiling_layer
+                        .map(mapped.clone(), Some(focus_stack.iter()), None);
                 }
                 ManagedLayer::Sticky => unreachable!(),
             }
