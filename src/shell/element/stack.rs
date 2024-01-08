@@ -24,8 +24,9 @@ use smithay::{
         renderer::{
             element::{
                 memory::MemoryRenderBufferRenderElement, surface::WaylandSurfaceRenderElement,
-                AsRenderElements,
+                AsRenderElements, Element, Id as ElementId, Kind, RenderElement,
             },
+            utils::CommitCounter,
             ImportAll, ImportMem, Renderer,
         },
     },
@@ -42,7 +43,7 @@ use smithay::{
     },
     output::Output,
     render_elements,
-    utils::{IsAlive, Logical, Point, Rectangle, Serial, Size},
+    utils::{Buffer, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size, Transform},
     wayland::seat::WaylandFocus,
 };
 use std::{
@@ -516,8 +517,8 @@ impl CosmicStack {
     pub fn split_render_elements<R, C>(
         &self,
         renderer: &mut R,
-        location: smithay::utils::Point<i32, smithay::utils::Physical>,
-        scale: smithay::utils::Scale<f64>,
+        location: Point<i32, Physical>,
+        scale: Scale<f64>,
         alpha: f32,
     ) -> (Vec<C>, Vec<C>)
     where
@@ -525,15 +526,15 @@ impl CosmicStack {
         <R as Renderer>::TextureId: 'static,
         C: From<CosmicStackRenderElement<R>>,
     {
-        let stack_loc = location
-            + self
-                .0
-                .with_program(|p| {
-                    p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)]
-                        .geometry()
-                        .loc
-                })
-                .to_physical_precise_round(scale);
+        let offset = self
+            .0
+            .with_program(|p| {
+                p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)]
+                    .geometry()
+                    .loc
+            })
+            .to_physical_precise_round(scale);
+        let stack_loc = location + offset;
         let window_loc = location + Point::from((0, (TAB_HEIGHT as f64 * scale.y) as i32));
 
         let elements = AsRenderElements::<R>::render_elements::<CosmicStackRenderElement<R>>(
@@ -549,17 +550,24 @@ impl CosmicStack {
                     renderer, window_loc, scale, alpha,
                 );
             // preparing the other windows will fix their x11 stacking order.
-            // they won't actually be drawn, but discarded due to the overlap anyway,
-            // the performance impact is neglible.
+            // they won't actually be drawn due to the placeholder element.
             for window in windows
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| *i != active)
                 .map(|(_, w)| w)
             {
-                let (elements, _) =
-                    window.split_render_elements(renderer, window_loc, scale, alpha);
-                window_elements.extend(elements);
+                let location =
+                    window_loc + offset - window.geometry().loc.to_physical_precise_round(scale);
+                let (elements, _) = window
+                    .split_render_elements::<R, WaylandSurfaceRenderElement<R>>(
+                        renderer, location, scale, alpha,
+                    );
+                window_elements.extend(
+                    elements
+                        .into_iter()
+                        .map(|e| PlaceholderElement(e.id().clone()).into()),
+                );
             }
 
             (window_elements, popup_elements)
@@ -865,7 +873,7 @@ impl Program for CosmicStackInternal {
     fn foreground(
         &self,
         pixels: &mut tiny_skia::PixmapMut<'_>,
-        damage: &[Rectangle<i32, smithay::utils::Buffer>],
+        damage: &[Rectangle<i32, Buffer>],
         scale: f32,
     ) {
         if self.group_focused.load(Ordering::SeqCst) {
@@ -1465,8 +1473,69 @@ impl PointerTarget<State> for CosmicStack {
     }
 }
 
+pub struct PlaceholderElement(ElementId);
+
+impl Element for PlaceholderElement {
+    fn id(&self) -> &ElementId {
+        &self.0
+    }
+
+    fn current_commit(&self) -> CommitCounter {
+        0.into()
+    }
+
+    fn src(&self) -> Rectangle<f64, Buffer> {
+        Rectangle::from_loc_and_size((0., 0.), (0., 0.))
+    }
+
+    fn geometry(&self, _: Scale<f64>) -> Rectangle<i32, Physical> {
+        Rectangle::from_loc_and_size((0, 0), (0, 0))
+    }
+
+    fn location(&self, _: Scale<f64>) -> Point<i32, Physical> {
+        (0, 0).into()
+    }
+
+    fn transform(&self) -> Transform {
+        Transform::Normal
+    }
+
+    fn damage_since(
+        &self,
+        _: Scale<f64>,
+        _: Option<CommitCounter>,
+    ) -> Vec<Rectangle<i32, Physical>> {
+        vec![]
+    }
+
+    fn opaque_regions(&self, _scale: Scale<f64>) -> Vec<Rectangle<i32, Physical>> {
+        vec![]
+    }
+
+    fn alpha(&self) -> f32 {
+        1.0
+    }
+
+    fn kind(&self) -> Kind {
+        Kind::default()
+    }
+}
+
+impl<R: Renderer> RenderElement<R> for PlaceholderElement {
+    fn draw(
+        &self,
+        _: &mut <R as Renderer>::Frame<'_>,
+        _: Rectangle<f64, Buffer>,
+        _: Rectangle<i32, Physical>,
+        _: &[Rectangle<i32, Physical>],
+    ) -> Result<(), <R as Renderer>::Error> {
+        Ok(())
+    }
+}
+
 render_elements! {
     pub CosmicStackRenderElement<R> where R: ImportAll + ImportMem;
     Header = MemoryRenderBufferRenderElement<R>,
     Window = WaylandSurfaceRenderElement<R>,
+    Placeholder = PlaceholderElement,
 }
