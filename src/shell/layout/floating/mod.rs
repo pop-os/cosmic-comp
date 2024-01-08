@@ -27,11 +27,14 @@ use crate::{
     shell::{
         element::{
             resize_indicator::ResizeIndicator,
-            stack::{CosmicStackRenderElement, MoveResult as StackMoveResult},
+            stack::{CosmicStackRenderElement, MoveResult as StackMoveResult, TAB_HEIGHT},
             window::CosmicWindowRenderElement,
             CosmicMapped, CosmicMappedRenderElement, CosmicWindow,
         },
-        focus::{target::KeyboardFocusTarget, FocusStackMut},
+        focus::{
+            target::{KeyboardFocusTarget, PointerFocusTarget},
+            FocusStackMut,
+        },
         grabs::{ReleaseMode, ResizeEdge},
         CosmicSurface, Direction, MoveResult, ResizeDirection, ResizeMode,
     },
@@ -50,6 +53,7 @@ pub struct FloatingLayout {
     pub(crate) space: Space<CosmicMapped>,
     spawn_order: Vec<CosmicMapped>,
     tiling_animations: HashMap<CosmicMapped, (Instant, Rectangle<i32, Local>)>,
+    hovered_stack: Option<(CosmicMapped, Rectangle<i32, Local>)>,
     dirty: AtomicBool,
     pub theme: cosmic::Theme,
 }
@@ -449,8 +453,51 @@ impl FloatingLayout {
         was_unmaped
     }
 
+    pub fn drop_window(
+        &mut self,
+        window: CosmicMapped,
+        position: Point<i32, Local>,
+    ) -> (CosmicMapped, Point<i32, Local>) {
+        if let Some((mapped, geo)) = self.hovered_stack.take() {
+            let stack = mapped.stack_ref().unwrap();
+            for surface in window.windows().map(|s| s.0) {
+                stack.add_window(surface, None);
+            }
+            (mapped, geo.loc)
+        } else {
+            self.map_internal(window.clone(), Some(position), None);
+            (window, position)
+        }
+    }
+
     pub fn element_geometry(&self, elem: &CosmicMapped) -> Option<Rectangle<i32, Local>> {
         self.space.element_geometry(elem).map(RectExt::as_local)
+    }
+
+    pub fn element_under(
+        &mut self,
+        location: Point<f64, Local>,
+    ) -> Option<(PointerFocusTarget, Point<i32, Local>)> {
+        let res = self
+            .space
+            .element_under(location.as_logical())
+            .map(|(mapped, p)| (mapped.clone(), p.as_local()));
+        if let Some((mapped, _)) = res.as_ref() {
+            let geometry = self.space.element_geometry(mapped).unwrap();
+            let offset = location.y.round() as i32 - geometry.loc.y;
+            if mapped.is_stack() && offset.is_positive() && offset <= TAB_HEIGHT {
+                self.hovered_stack = Some((mapped.clone(), geometry.as_local()));
+            } else {
+                self.hovered_stack.take();
+            }
+        } else {
+            self.hovered_stack.take();
+        }
+        res.map(|(m, p)| (m.into(), p))
+    }
+
+    pub fn stacking_indicator(&self) -> Option<Rectangle<i32, Local>> {
+        self.hovered_stack.as_ref().map(|(_, geo)| geo.clone())
     }
 
     pub fn resize_request(
