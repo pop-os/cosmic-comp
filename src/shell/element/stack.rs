@@ -1152,12 +1152,43 @@ impl PointerTarget<State> for CosmicStack {
             }
         }) {
             event.location.y += TAB_HEIGHT as f64;
-            event.location -= self
+            let active_window_geo = self
                 .0
-                .with_program(|p| p.windows.lock().unwrap()[active].geometry().loc.to_f64());
+                .with_program(|p| p.windows.lock().unwrap()[active].geometry());
+            event.location -= active_window_geo.loc.to_f64();
             match (previous, next) {
                 (Focus::Header, Focus::Header) => {
-                    PointerTarget::motion(&self.0, seat, data, &event)
+                    PointerTarget::motion(&self.0, seat, data, &event);
+                    if event.location.y < 0.0
+                        || event.location.x < 64.0
+                        || event.location.x > (active_window_geo.size.w as f64 - 64.0)
+                    {
+                        if let Some(dragged_out) = self
+                            .0
+                            .with_program(|p| p.potential_drag.lock().unwrap().take())
+                        {
+                            if let Some(surface) = self.0.with_program(|p| {
+                                p.windows.lock().unwrap().get(dragged_out).cloned()
+                            }) {
+                                let seat = seat.clone();
+                                surface.try_force_undecorated(false);
+                                surface.send_configure();
+                                if let Some(surface) = surface.wl_surface() {
+                                    let _ =
+                                        data.common.event_loop_handle.insert_idle(move |state| {
+                                            Shell::move_request(
+                                                state,
+                                                &surface,
+                                                &seat,
+                                                None,
+                                                ReleaseMode::NoMouseButtons,
+                                                true,
+                                            )
+                                        });
+                                }
+                            }
+                        }
+                    }
                 }
                 (_, Focus::Header) => PointerTarget::enter(&self.0, seat, data, &event),
                 (Focus::Header, _) => {
@@ -1171,6 +1202,8 @@ impl PointerTarget<State> for CosmicStack {
                             .with_program(|p| p.windows.lock().unwrap().get(dragged_out).cloned())
                         {
                             let seat = seat.clone();
+                            surface.try_force_undecorated(false);
+                            surface.send_configure();
                             if let Some(surface) = surface.wl_surface() {
                                 let _ = data.common.event_loop_handle.insert_idle(move |state| {
                                     Shell::move_request(
