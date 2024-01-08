@@ -333,7 +333,7 @@ impl FloatingLayout {
                                 geometry.loc.x = offset;
                                 // do we need to resize?
                                 if geometry.loc.y as i32 + win_geo.size.h
-                                    <= output_geometry.loc.y + output_geometry.size.h - 16
+                                    > output_geometry.loc.y + output_geometry.size.h - 16
                                 {
                                     win_geo.size.h =
                                         (output_geometry.loc.y + output_geometry.size.h - 16)
