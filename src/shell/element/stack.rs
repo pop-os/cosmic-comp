@@ -918,7 +918,12 @@ impl SpaceElement for CosmicStack {
     }
     fn is_in_input_region(&self, point: &Point<f64, Logical>) -> bool {
         let mut point = *point;
-        if point.y < TAB_HEIGHT as f64 {
+        let offset = self.0.with_program(|p| {
+            p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)]
+                .geometry()
+                .loc
+        });
+        if (point.y.round() as i32 - offset.y) < TAB_HEIGHT {
             return true;
         }
         point.y -= TAB_HEIGHT as f64;
