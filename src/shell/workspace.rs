@@ -424,9 +424,7 @@ impl Workspace {
     ) -> Option<(PointerFocusTarget, Point<i32, Global>)> {
         let location = location.to_local(&self.output);
         self.floating_layer
-            .space
-            .element_under(location.as_logical())
-            .map(|(mapped, p)| (mapped.clone().into(), p.as_local()))
+            .element_under(location)
             .or_else(|| self.tiling_layer.element_under(location, overview))
             .map(|(m, p)| (m, p.to_global(&self.output)))
     }

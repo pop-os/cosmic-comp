@@ -293,33 +293,28 @@ impl PointerGrab<State> for MoveGrab {
                 }
             }
 
-            if self.previous == ManagedLayer::Tiling {
-                let indicator_location = state
-                    .common
-                    .shell
-                    .active_space(&current_output)
-                    .tiling_layer
-                    .stacking_indicator();
-
-                if indicator_location.is_some() != grab_state.stacking_indicator.is_some() {
-                    grab_state.stacking_indicator = indicator_location.map(|geo| {
-                        let element = stack_hover(
-                            state.common.event_loop_handle.clone(),
-                            geo.size.as_logical(),
-                            state.common.theme.clone(),
+            let indicator_location = state
+                .common
+                .shell
+                .stacking_indicator(&current_output, self.previous);
+            if indicator_location.is_some() != grab_state.stacking_indicator.is_some() {
+                grab_state.stacking_indicator = indicator_location.map(|geo| {
+                    let element = stack_hover(
+                        state.common.event_loop_handle.clone(),
+                        geo.size.as_logical(),
+                        state.common.theme.clone(),
+                    );
+                    for output in &self.window_outputs {
+                        element.output_enter(
+                            output,
+                            Rectangle::from_loc_and_size(
+                                (0, 0),
+                                output.geometry().size.as_logical(),
+                            ),
                         );
-                        for output in &self.window_outputs {
-                            element.output_enter(
-                                output,
-                                Rectangle::from_loc_and_size(
-                                    (0, 0),
-                                    output.geometry().size.as_logical(),
-                                ),
-                            );
-                        }
-                        (element, geo.loc.as_logical())
-                    });
-                }
+                    }
+                    (element, geo.loc.as_logical())
+                });
             }
         }
         drop(borrow);
@@ -566,13 +561,11 @@ impl Drop for MoveGrab {
                                 grab_state.window.geometry().size.as_global(),
                             ));
                             let workspace = state.common.shell.active_space_mut(&output);
-                            workspace.floating_layer.map_internal(
+                            let (window, location) = workspace.floating_layer.drop_window(
                                 grab_state.window,
-                                Some(window_location.to_local(&workspace.output)),
-                                None,
+                                window_location.to_local(&workspace.output),
                             );
-
-                            Some((window.clone(), window_location))
+                            Some((window, location.to_global(&output)))
                         }
                         ManagedLayer::Sticky => {
                             grab_state.window.set_geometry(Rectangle::from_loc_and_size(
@@ -580,13 +573,11 @@ impl Drop for MoveGrab {
                                 grab_state.window.geometry().size.as_global(),
                             ));
                             let set = state.common.shell.workspaces.sets.get_mut(&output).unwrap();
-                            set.sticky_layer.map_internal(
-                                grab_state.window,
-                                Some(window_location.to_local(&output)),
-                                None,
-                            );
+                            let (window, location) = set
+                                .sticky_layer
+                                .drop_window(grab_state.window, window_location.to_local(&output));
 
-                            Some((window.clone(), window_location))
+                            Some((window, location.to_global(&output)))
                         }
                     }
                 } else {

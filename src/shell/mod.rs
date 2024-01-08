@@ -1510,6 +1510,25 @@ impl Shell {
         (self.resize_mode.clone(), self.resize_indicator.clone())
     }
 
+    pub fn stacking_indicator(
+        &self,
+        output: &Output,
+        layer: ManagedLayer,
+    ) -> Option<Rectangle<i32, Local>> {
+        match layer {
+            ManagedLayer::Sticky => self
+                .workspaces
+                .sets
+                .get(output)
+                .and_then(|set| set.sticky_layer.stacking_indicator()),
+            ManagedLayer::Floating => self
+                .active_space(output)
+                .floating_layer
+                .stacking_indicator(),
+            ManagedLayer::Tiling => self.active_space(output).tiling_layer.stacking_indicator(),
+        }
+    }
+
     pub fn refresh(&mut self) {
         #[cfg(feature = "debug")]
         puffin::profile_function!();
