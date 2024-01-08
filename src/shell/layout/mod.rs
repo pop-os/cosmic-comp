@@ -98,7 +98,7 @@ lazy_static::lazy_static! {
     ]).unwrap();
 }
 
-pub fn should_be_floating(window: &CosmicSurface) -> bool {
+pub fn is_dialog(window: &CosmicSurface) -> bool {
     // Check "window type"
     match window {
         CosmicSurface::Wayland(window) => {
@@ -136,6 +136,10 @@ pub fn should_be_floating(window: &CosmicSurface) -> bool {
         return true;
     }
 
+    false
+}
+
+pub fn has_floating_exception(window: &CosmicSurface) -> bool {
     // else take a look at our exceptions
     let appid_matches = EXCEPTIONS_APPID.matches(&window.app_id());
     let title_matches = EXCEPTIONS_TITLE.matches(&window.title());

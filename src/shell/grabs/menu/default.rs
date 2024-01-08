@@ -124,7 +124,7 @@ pub fn tab_items(
                     let focus_stack = workspace.focus_stack.get(&seat);
                     workspace
                         .tiling_layer
-                        .map(mapped, Some(focus_stack.iter()), None, false);
+                        .map(mapped, Some(focus_stack.iter()), None);
                 } else {
                     workspace.floating_layer.map(mapped, None)
                 }
