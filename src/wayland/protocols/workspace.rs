@@ -420,7 +420,7 @@ where
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
         let global = dh.create_global::<D, ZcosmicWorkspaceManagerV1, _>(
-            1,
+            2,
             WorkspaceGlobalData {
                 filter: Box::new(client_filter),
             },
