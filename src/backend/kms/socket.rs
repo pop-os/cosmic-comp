@@ -50,7 +50,7 @@ impl State {
         // initialize globals
         let filter = move |client: &Client| {
             if let Some(normal_client) = client.get_data::<ClientState>() {
-                let dev_id = normal_client.drm_node.unwrap();
+                let dev_id = normal_client.advertised_drm_node.unwrap();
                 return dev_id == render_node;
             }
             if let Some(xwayland_client) = client.get_data::<XWaylandClientData>() {

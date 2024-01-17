@@ -180,7 +180,7 @@ impl ScreencopyHandler for State {
                     .and_then(|client| {
                         // Lets check the global drm-node the client got either through default-feedback or wl_drm
                         if let Some(normal_client) = client.get_data::<ClientState>() {
-                            return normal_client.drm_node.clone();
+                            return normal_client.advertised_drm_node.clone();
                         }
                         // last but not least all xwayland-surfaces should also share a single node
                         if let Some(xwayland_client) = client.get_data::<XWaylandClientData>() {
@@ -188,7 +188,7 @@ impl ScreencopyHandler for State {
                         }
                         None
                     })
-                    .unwrap_or(kms.primary.clone());
+                    .unwrap_or(kms.primary_node.clone());
                 _kms_renderer = Some(kms.api.single_renderer(&node).unwrap());
                 _kms_renderer.as_mut().unwrap().as_mut()
             }
@@ -456,7 +456,9 @@ fn formats_for_output(
     let mut _kms_renderer = None;
     let renderer = match backend {
         BackendData::Kms(ref mut kms) => {
-            let node = kms.target_node_for_output(&output).unwrap_or(kms.primary);
+            let node = kms
+                .target_node_for_output(&output)
+                .unwrap_or(kms.primary_node);
             _kms_renderer = Some(kms.api.single_renderer(&node).unwrap());
             _kms_renderer.as_mut().unwrap().as_mut()
         }
@@ -530,7 +532,7 @@ fn node_from_params(
             BackendData::Kms(kms) => Some(
                 output
                     .and_then(|output| kms.target_node_for_output(output))
-                    .unwrap_or(kms.primary),
+                    .unwrap_or(kms.primary_node),
             ),
             _ => None,
         },

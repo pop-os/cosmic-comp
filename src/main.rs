@@ -12,7 +12,10 @@ use anyhow::{Context, Result};
 use std::{env, ffi::OsString, process, sync::Arc};
 use tracing::{error, info, warn};
 
-use crate::wayland::handlers::compositor::client_compositor_state;
+use crate::{
+    state::BackendData, utils::prelude::SeatExt,
+    wayland::handlers::compositor::client_compositor_state,
+};
 
 pub mod backend;
 pub mod config;
@@ -145,15 +148,23 @@ fn init_wayland_display(
     event_loop
         .handle()
         .insert_source(source, |client_stream, _, state| {
+            let node = match &state.backend {
+                BackendData::Kms(kms_state) if kms_state.auto_assign => kms_state
+                    .target_node_for_output(&state.common.last_active_seat().active_output()),
+                _ => None,
+            };
+
             if let Err(err) = state.common.display_handle.insert_client(
                 client_stream,
                 Arc::new(if cfg!(debug_assertions) {
                     state.new_privileged_client_state()
+                } else if let Some(node) = node {
+                    state.new_client_state_with_node(node)
                 } else {
                     state.new_client_state()
                 }),
             ) {
-                warn!(?err, "Error adding wayland client");
+                warn!(?err, "Error adding wayland client")
             };
         })
         .with_context(|| "Failed to init the wayland socket source.")?;

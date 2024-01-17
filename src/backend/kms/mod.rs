@@ -39,6 +39,7 @@ use smithay::{
             glow::GlowRenderer,
             multigpu::{gbm::GbmGlesBackend, Error as MultiError, GpuManager},
             sync::SyncPoint,
+            utils::with_renderer_surface_state,
             Bind, ImportDma, Offscreen,
         },
         session::{libseat::LibSeatSession, Event as SessionEvent, Session},
@@ -62,7 +63,10 @@ use smithay::{
             linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1,
             presentation_time::server::wp_presentation_feedback,
         },
-        wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle, Resource},
+        wayland_server::{
+            protocol::{wl_buffer::WlBuffer, wl_surface::WlSurface},
+            Client, DisplayHandle, Resource, Weak,
+        },
     },
     utils::{DeviceFd, Size, Transform},
     wayland::{
@@ -97,13 +101,14 @@ pub struct KmsState {
     pub devices: HashMap<DrmNode, Device>,
     pub input_devices: HashMap<String, input::Device>,
     pub api: GpuManager<GbmGlesBackend<GlowRenderer>>,
-    pub primary: DrmNode,
+    pub primary_node: DrmNode,
     session: LibSeatSession,
+    pub auto_assign: bool,
     _tokens: Vec<RegistrationToken>,
 }
 
 pub struct Device {
-    render_node: DrmNode,
+    pub render_node: DrmNode,
     surfaces: HashMap<crtc::Handle, Surface>,
     pub drm: DrmDevice,
     gbm: GbmDevice<DrmDeviceFd>,
@@ -113,6 +118,7 @@ pub struct Device {
     pub non_desktop_connectors: Vec<(connector::Handle, crtc::Handle)>,
     pub leasing_global: Option<DrmLeaseState>,
     pub active_leases: Vec<DrmLease>,
+    pub active_buffers: HashSet<Weak<WlBuffer>>,
     event_token: Option<RegistrationToken>,
     socket: Option<Socket>,
 }
@@ -367,6 +373,11 @@ pub fn init_backend(
         .map_err(|err| err.error)
         .context("Failed to initialize session event source")?;
 
+    let auto_assign = matches!(
+        std::env::var("COSMIC_RENDER_AUTO_ASSIGN").map(|val| val.to_lowercase()),
+        Ok(val) if val == "y" || val == "yes" || val == "true"
+    );
+
     state.backend = BackendData::Kms(KmsState {
         api,
         _tokens: vec![
@@ -374,8 +385,9 @@ pub fn init_backend(
             session_event_source,
             udev_event_source,
         ],
-        primary,
+        primary_node: primary,
         session,
+        auto_assign,
         devices: HashMap::new(),
         input_devices: HashMap::new(),
     });
@@ -598,6 +610,7 @@ impl State {
                 })
                 .ok(),
             active_leases: Vec::new(),
+            active_buffers: HashSet::new(),
             event_token: Some(token),
             socket,
         };
@@ -621,9 +634,13 @@ impl State {
             let mut renderer = match backend.api.single_renderer(&render_node) {
                 Ok(renderer) => renderer,
                 Err(err) => {
-                    warn!(?err, "Failed to initialize output.");
                     backend.api.as_mut().remove_node(&render_node);
-                    return Ok(());
+                    return Err(err).with_context(|| {
+                        format!(
+                            "Failed to initialize renderer for device: {}, skipping",
+                            render_node
+                        )
+                    });
                 }
             };
             init_shaders(&mut renderer).expect("Failed to initialize renderer");
@@ -686,6 +703,11 @@ impl State {
                     };
                 }
             }
+
+            if !device.in_use(&backend.primary_node) {
+                backend.api.as_mut().remove_node(&render_node);
+            }
+
             backend.devices.insert(drm_node, device);
         }
 
@@ -735,6 +757,31 @@ impl State {
                         outputs_removed.push(surface.output.clone());
                     }
                 }
+                backend
+                    .api
+                    .as_mut()
+                    .add_node(device.render_node, device.gbm.clone())
+                    .with_context(|| {
+                        format!(
+                            "Failed to initialize renderer for device: {}, skipping",
+                            device.render_node
+                        )
+                    })?;
+
+                let mut renderer = match backend.api.single_renderer(&device.render_node) {
+                    Ok(renderer) => renderer,
+                    Err(err) => {
+                        backend.api.as_mut().remove_node(&device.render_node);
+                        return Err(err).with_context(|| {
+                            format!(
+                                "Failed to initialize renderer for device: {}, skipping",
+                                device.render_node
+                            )
+                        });
+                    }
+                };
+                init_shaders(&mut renderer).expect("Failed to initialize renderer");
+
                 for (crtc, conn) in changes.added {
                     let non_desktop =
                         match drm_helpers::get_property_val(&device.drm, conn, "non-desktop") {
@@ -778,13 +825,6 @@ impl State {
                             );
                         }
                     } else {
-                        let mut renderer = match backend.api.single_renderer(&device.render_node) {
-                            Ok(renderer) => renderer,
-                            Err(err) => {
-                                warn!(?err, "Failed to initialize output.");
-                                continue;
-                            }
-                        };
                         match device.setup_surface(crtc, conn, (w, 0), &mut renderer) {
                             Ok(output) => {
                                 w += output
@@ -825,6 +865,15 @@ impl State {
             self.common
                 .shell
                 .remove_output(&output, seats.iter().cloned());
+        }
+
+        {
+            let backend = self.backend.kms();
+            if let Some(device) = backend.devices.get_mut(&drm_node) {
+                if !device.in_use(&backend.primary_node) {
+                    backend.api.as_mut().remove_node(&device.render_node);
+                }
+            }
         }
 
         Ok(())
@@ -1012,49 +1061,58 @@ impl Device {
 
         Ok(output)
     }
+
+    pub fn in_use(&self, primary: &DrmNode) -> bool {
+        &self.render_node == primary || !self.surfaces.is_empty() || !self.active_buffers.is_empty()
+    }
 }
 
-pub fn source_node_for_surface(w: &WlSurface, dh: &DisplayHandle) -> Option<DrmNode> {
-    // Lets check the global drm-node the client got either through default-feedback or wl_drm
-    let client = dh.get_client(w.id()).ok()?;
-    if let Some(normal_client) = client.get_data::<ClientState>() {
-        return normal_client.drm_node.clone();
-    }
-    // last but not least all xwayland-surfaces should also share a single node
-    if let Some(xwayland_client) = client.get_data::<XWaylandClientData>() {
-        return xwayland_client.user_data().get::<DrmNode>().cloned();
-    }
-    None
+fn source_node_for_surface<'a>(
+    w: &WlSurface,
+    mut devices: impl Iterator<Item = &'a Device>,
+) -> Option<DrmNode> {
+    with_renderer_surface_state(w, |state| {
+        state.buffer().and_then(|buffer| {
+            devices.find_map(|dev| {
+                dev.active_buffers
+                    .contains(&buffer.downgrade())
+                    .then_some(dev.render_node)
+            })
+        })
+    })
 }
 
 fn render_node_for_output(
-    dh: &DisplayHandle,
     output: &Output,
+    primary_node: DrmNode,
     target_node: DrmNode,
     shell: &Shell,
+    non_target_devices: &Vec<(&DrmNode, &mut Device)>,
 ) -> DrmNode {
+    if target_node == primary_node {
+        return target_node;
+    }
+
     let workspace = shell.active_space(output);
     let nodes = workspace
         .get_fullscreen()
         .map(|w| vec![w.clone()])
         .unwrap_or_else(|| workspace.windows().collect::<Vec<_>>())
         .into_iter()
-        .flat_map(|w| w.wl_surface().and_then(|s| source_node_for_surface(&s, dh)))
+        .flat_map(|w| {
+            w.wl_surface().and_then(|s| {
+                source_node_for_surface(&s, non_target_devices.iter().map(|(_, dev)| &**dev))
+            })
+        })
         .collect::<Vec<_>>();
-    if nodes.contains(&target_node) || nodes.is_empty() {
+
+    if nodes.is_empty() {
+        // we don't want to force needlessly expensive imports,
+        // so we only choose the target node if it is save and use the main_device otherwise.
+        // (possibly fixable, once we have kernel API to test for migrations or dmabuf-v5)
         target_node
     } else {
-        nodes
-            .iter()
-            .fold(HashMap::new(), |mut count_map, node| {
-                let count = count_map.entry(node).or_insert(0);
-                *count += 1;
-                count_map
-            })
-            .into_iter()
-            .reduce(|a, b| if a.1 > b.1 { a } else { b })
-            .map(|(node, _)| *node)
-            .unwrap_or(target_node)
+        primary_node
     }
 }
 
@@ -1494,11 +1552,17 @@ impl KmsState {
         target: DrmNode,
         shell: &Shell,
     ) {
-        let render = render_node_for_output(dh, &output, target, &shell);
+        let render = render_node_for_output(
+            &output,
+            self.primary_node,
+            target,
+            &shell,
+            &self.devices.iter_mut().collect(),
+        );
         if let Err(err) = self.api.early_import(
             if let Some(client) = dh.get_client(surface.id()).ok() {
                 if let Some(normal_client) = client.get_data::<ClientState>() {
-                    normal_client.drm_node.clone()
+                    normal_client.advertised_drm_node.clone()
                 } else if let Some(xwayland_client) = client.get_data::<XWaylandClientData>() {
                     xwayland_client.user_data().get::<DrmNode>().cloned()
                 } else {
@@ -1514,19 +1578,42 @@ impl KmsState {
         }
     }
 
-    pub fn dmabuf_imported(&mut self, global: &DmabufGlobal, dmabuf: Dmabuf) -> Result<()> {
-        for device in self.devices.values() {
+    pub fn dmabuf_imported(
+        &mut self,
+        _client: Option<Client>,
+        global: &DmabufGlobal,
+        dmabuf: Dmabuf,
+    ) -> Result<DrmNode> {
+        for device in self.devices.values_mut() {
             if device
                 .socket
                 .as_ref()
                 .map(|s| &s.dmabuf_global == global)
                 .unwrap_or(false)
             {
+                if device.render_node != self.primary_node {
+                    if !device.in_use(&self.primary_node) {
+                        self.api
+                            .as_mut()
+                            .add_node(device.render_node, device.gbm.clone())
+                            .context("Failed to initialize device")?;
+
+                        let mut renderer = match self.api.single_renderer(&device.render_node) {
+                            Ok(renderer) => renderer,
+                            Err(err) => {
+                                self.api.as_mut().remove_node(&device.render_node);
+                                return Err(err).context("Failed to initialize renderer");
+                            }
+                        };
+                        init_shaders(&mut renderer).context("Failed to initialize shaders")?;
+                    }
+                }
+
                 return self
                     .api
                     .single_renderer(&device.render_node)?
                     .import_dmabuf(&dmabuf, None)
-                    .map(|_| ())
+                    .map(|_| device.render_node)
                     .map_err(Into::into);
             }
         }
@@ -1582,13 +1669,14 @@ impl KmsState {
                         if let Some(surface) = target_device.surfaces.get_mut(&crtc) {
                             let target_node = target_device.render_node;
                             let render_node = render_node_for_output(
-                                &state.common.display_handle,
                                 &surface.output,
+                                backend.primary_node,
                                 target_node,
                                 &state.common.shell,
+                                &other,
                             );
-                            let common = &mut state.common;
 
+                            let common = &mut state.common;
                             let result = if render_node != target_node {
                                 let render_device = &mut other
                                     .iter_mut()

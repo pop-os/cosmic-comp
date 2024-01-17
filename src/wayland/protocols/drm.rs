@@ -7,6 +7,7 @@
 // You can use all the types from my_protocol as if they went from `wayland_client::protocol`.
 pub use generated::wl_drm;
 
+#[allow(non_snake_case, non_upper_case_globals, non_camel_case_types)]
 mod generated {
     use smithay::reexports::wayland_server::{self, protocol::*};
 
@@ -43,13 +44,15 @@ pub enum ImportError {
     InvalidFormat,
 }
 
-pub trait DrmHandler {
-    fn dmabuf_imported(&mut self, global: &DmabufGlobal, dmabuf: Dmabuf)
-        -> Result<(), ImportError>;
+pub trait DrmHandler<R: 'static> {
+    fn dmabuf_imported(&mut self, global: &DmabufGlobal, dmabuf: Dmabuf) -> Result<R, ImportError>;
+    fn buffer_created(&mut self, buffer: WlBuffer, result: R) {
+        let _ = (buffer, result);
+    }
 }
 
-#[derive(Debug)]
-pub struct WlDrmState;
+#[derive(Debug, Default)]
+pub struct WlDrmState<R>(std::marker::PhantomData<R>);
 
 /// Data associated with a drm global.
 pub struct DrmGlobalData {
@@ -64,13 +67,14 @@ pub struct DrmInstanceData {
     dmabuf_global: DmabufGlobal,
 }
 
-impl<D> GlobalDispatch<wl_drm::WlDrm, DrmGlobalData, D> for WlDrmState
+impl<D, R> GlobalDispatch<wl_drm::WlDrm, DrmGlobalData, D> for WlDrmState<R>
 where
     D: GlobalDispatch<wl_drm::WlDrm, DrmGlobalData>
         + Dispatch<wl_drm::WlDrm, DrmInstanceData>
         + BufferHandler
         + DmabufHandler
         + 'static,
+    R: 'static,
 {
     fn bind(
         _state: &mut D,
@@ -102,14 +106,15 @@ where
     }
 }
 
-impl<D> Dispatch<wl_drm::WlDrm, DrmInstanceData, D> for WlDrmState
+impl<D, R> Dispatch<wl_drm::WlDrm, DrmInstanceData, D> for WlDrmState<R>
 where
     D: GlobalDispatch<wl_drm::WlDrm, DrmGlobalData>
         + Dispatch<wl_drm::WlDrm, DrmInstanceData>
         + Dispatch<WlBuffer, Dmabuf>
         + BufferHandler
-        + DrmHandler
+        + DrmHandler<R>
         + 'static,
+    R: 'static,
 {
     fn request(
         state: &mut D,
@@ -178,10 +183,11 @@ where
                 match dma.build() {
                     Some(dmabuf) => {
                         match state.dmabuf_imported(&data.dmabuf_global, dmabuf.clone()) {
-                            Ok(()) => {
+                            Ok(result) => {
                                 // import was successful
-                                data_init.init(id, dmabuf);
+                                let buffer = data_init.init(id, dmabuf);
                                 trace!("Created a new validated dma wl_buffer via wl_drm.");
+                                state.buffer_created(buffer, result);
                             }
 
                             Err(ImportError::InvalidFormat) => {
@@ -212,7 +218,7 @@ where
     }
 }
 
-impl WlDrmState {
+impl<R: 'static> WlDrmState<R> {
     pub fn create_global<D>(
         &mut self,
         display: &DisplayHandle,
@@ -267,13 +273,13 @@ impl WlDrmState {
 }
 
 macro_rules! delegate_wl_drm {
-    ($(@<$( $lt:tt $( : $clt:tt $(+ $dlt:tt )* )? ),+>)? $ty: ty) => {
+    ($(@<$( $lt:tt $( : $clt:tt $(+ $dlt:tt )* )? ),+>)? $ty: ty; $r: ty) => {
         smithay::reexports::wayland_server::delegate_global_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
             $crate::wayland::protocols::drm::wl_drm::WlDrm: $crate::wayland::protocols::drm::DrmGlobalData
-        ] => $crate::wayland::protocols::drm::WlDrmState);
+        ] => $crate::wayland::protocols::drm::WlDrmState<$r>);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
             $crate::wayland::protocols::drm::wl_drm::WlDrm: $crate::wayland::protocols::drm::DrmInstanceData
-        ] => $crate::wayland::protocols::drm::WlDrmState);
+        ] => $crate::wayland::protocols::drm::WlDrmState<$r>);
     };
 }
 pub(crate) use delegate_wl_drm;
