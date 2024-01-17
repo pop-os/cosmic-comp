@@ -474,7 +474,7 @@ impl State {
                                     if is_grabbed
                                         && handle.modified_sym() == Keysym::Escape
                                         && state == KeyState::Pressed
-                                        && !modifiers.alt 
+                                        && !modifiers.alt
                                         && !modifiers.ctrl
                                         && !modifiers.logo
                                         && !modifiers.shift
@@ -1165,12 +1165,8 @@ impl State {
                             .position_transformed(geometry.size.as_logical())
                             .as_global();
 
-                    let under = State::surface_under(
-                        position,
-                        &output,
-                        &mut self.common.shell,
-                    )
-                    .map(|(target, pos)| (target, pos.as_logical()));
+                    let under = State::surface_under(position, &output, &mut self.common.shell)
+                        .map(|(target, pos)| (target, pos.as_logical()));
 
                     if let Some((target, pos)) = under {
                         if let Some(wl_surface) = target.wl_surface() {
@@ -1200,12 +1196,8 @@ impl State {
                             .position_transformed(geometry.size.as_logical())
                             .as_global();
 
-                    let under = State::surface_under(
-                        position,
-                        &output,
-                        &mut self.common.shell,
-                    )
-                    .map(|(target, pos)| (target, pos.as_logical()));
+                    let under = State::surface_under(position, &output, &mut self.common.shell)
+                        .map(|(target, pos)| (target, pos.as_logical()));
 
                     if let Some((_target, pos)) = under {
                         let touch = seat.get_touch().unwrap();
@@ -1243,12 +1235,8 @@ impl State {
                         .as_global()
                         + geometry.loc.to_f64();
 
-                    let under = State::surface_under(
-                        position,
-                        &output,
-                        &mut self.common.shell,
-                    )
-                    .map(|(target, pos)| (target, pos.as_logical()));
+                    let under = State::surface_under(position, &output, &mut self.common.shell)
+                        .map(|(target, pos)| (target, pos.as_logical()));
 
                     let pointer = seat.get_pointer().unwrap();
                     pointer.motion(
@@ -1308,12 +1296,8 @@ impl State {
                         .as_global()
                         + geometry.loc.to_f64();
 
-                    let under = State::surface_under(
-                        position,
-                        &output,
-                        &mut self.common.shell,
-                    )
-                    .map(|(target, pos)| (target, pos.as_logical()));
+                    let under = State::surface_under(position, &output, &mut self.common.shell)
+                        .map(|(target, pos)| (target, pos.as_logical()));
 
                     let pointer = seat.get_pointer().unwrap();
                     pointer.motion(
@@ -1947,10 +1931,7 @@ impl State {
                 }
             }
             Action::Focus(focus) => {
-                let result = self.common.shell.next_focus(
-                    focus,
-                    seat,
-                );
+                let result = self.common.shell.next_focus(focus, seat);
 
                 match result {
                     FocusResult::None => {
