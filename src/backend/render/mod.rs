@@ -331,6 +331,15 @@ pub fn init_shaders<R: AsGlowRenderer>(renderer: &mut R) -> Result<(), GlesError
     let glow_renderer = renderer.glow_renderer_mut();
     let gles_renderer: &mut GlesRenderer = glow_renderer.borrow_mut();
 
+    {
+        let egl_context = gles_renderer.egl_context();
+        if egl_context.user_data().get::<IndicatorShader>().is_some()
+            && egl_context.user_data().get::<BackdropShader>().is_some()
+        {
+            return Ok(());
+        }
+    }
+
     let outline_shader = gles_renderer.compile_custom_pixel_shader(
         OUTLINE_SHADER,
         &[

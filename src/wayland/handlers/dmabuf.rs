@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::state::State;
+use crate::state::{BackendData, State};
 use smithay::{
     backend::allocator::dmabuf::Dmabuf,
     delegate_dmabuf,
+    reexports::wayland_server::Resource,
     wayland::dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
 };
 
@@ -18,10 +19,33 @@ impl DmabufHandler for State {
         dmabuf: Dmabuf,
         import_notifier: ImportNotifier,
     ) {
-        if self.backend.dmabuf_imported(global, dmabuf).is_err() {
-            import_notifier.failed();
-        } else {
-            let _ = import_notifier.successful::<State>();
+        match self
+            .backend
+            .dmabuf_imported(import_notifier.client(), global, dmabuf)
+        {
+            Err(err) => {
+                tracing::debug!(?err, "dmabuf import failed");
+                import_notifier.failed()
+            }
+            Ok(Some(node)) => {
+                // kms backend
+                let Ok(buffer) = import_notifier.successful::<State>() else {
+                    return
+                };
+
+                if let BackendData::Kms(kms_state) = &mut self.backend {
+                    if let Some(device) = kms_state
+                        .devices
+                        .values_mut()
+                        .find(|dev| dev.render_node == node)
+                    {
+                        device.active_buffers.insert(buffer.downgrade());
+                    }
+                }
+            }
+            Ok(None) => {
+                let _ = import_notifier.successful::<State>();
+            }
         }
     }
 }

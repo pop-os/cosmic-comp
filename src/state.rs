@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::{
-        kms::{source_node_for_surface, KmsState},
-        winit::WinitState,
-        x11::X11State,
-    },
+    backend::{kms::KmsState, winit::WinitState, x11::X11State},
     config::{Config, OutputConfig},
     input::Devices,
     shell::{grabs::SeatMoveGrabState, Shell},
@@ -54,8 +50,8 @@ use smithay::{
         wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration_manager::Mode,
         wayland_server::{
             backend::{ClientData, ClientId, DisconnectReason},
-            protocol::wl_shm,
-            Client, DisplayHandle,
+            protocol::{wl_shm, wl_surface::WlSurface},
+            Client, DisplayHandle, Resource,
         },
     },
     utils::{Clock, IsAlive, Monotonic},
@@ -84,6 +80,7 @@ use smithay::{
         virtual_keyboard::VirtualKeyboardManagerState,
         xwayland_keyboard_grab::XWaylandKeyboardGrabState,
     },
+    xwayland::XWaylandClientData,
 };
 use time::UtcOffset;
 use tracing::error;
@@ -111,7 +108,7 @@ macro_rules! fl {
 pub struct ClientState {
     pub compositor_client_state: CompositorClientState,
     pub workspace_client_state: WorkspaceClientState,
-    pub drm_node: Option<DrmNode>,
+    pub advertised_drm_node: Option<DrmNode>,
     pub privileged: bool,
     pub evls: LoopSignal,
     pub security_context: Option<SecurityContext>,
@@ -121,6 +118,19 @@ impl ClientData for ClientState {
     fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {
         self.evls.wakeup();
     }
+}
+
+pub fn advertised_node_for_surface(w: &WlSurface, dh: &DisplayHandle) -> Option<DrmNode> {
+    // Lets check the global drm-node the client got either through default-feedback or wl_drm
+    let client = dh.get_client(w.id()).ok()?;
+    if let Some(normal_client) = client.get_data::<ClientState>() {
+        return normal_client.advertised_drm_node.clone();
+    }
+    // last but not least all xwayland-surfaces should also share a single node
+    if let Some(xwayland_client) = client.get_data::<XWaylandClientData>() {
+        return xwayland_client.user_data().get::<DrmNode>().cloned();
+    }
+    None
 }
 
 #[derive(Debug)]
@@ -168,7 +178,7 @@ pub struct Common {
     pub seat_state: SeatState<State>,
     pub session_lock_manager_state: SessionLockManagerState,
     pub shm_state: ShmState,
-    pub wl_drm_state: WlDrmState,
+    pub wl_drm_state: WlDrmState<Option<DrmNode>>,
     pub viewporter_state: ViewporterState,
     pub kde_decoration_state: KdeDecorationState,
     pub xdg_decoration_state: XdgDecorationState,
@@ -278,11 +288,16 @@ impl BackendData {
 
     pub fn dmabuf_imported(
         &mut self,
+        client: Option<Client>,
         global: &DmabufGlobal,
         dmabuf: Dmabuf,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<Option<DrmNode>, anyhow::Error> {
         match self {
-            BackendData::Kms(ref mut state) => state.dmabuf_imported(global, dmabuf)?,
+            BackendData::Kms(ref mut state) => {
+                return state
+                    .dmabuf_imported(client, global, dmabuf)
+                    .map(|node| Some(node))
+            }
             BackendData::Winit(ref mut state) => {
                 state.backend.renderer().import_dmabuf(&dmabuf, None)?;
             }
@@ -290,8 +305,8 @@ impl BackendData {
                 state.renderer.import_dmabuf(&dmabuf, None)?;
             }
             _ => unreachable!("No backend set when importing dmabuf"),
-        }
-        Ok(())
+        };
+        Ok(None)
     }
 }
 
@@ -357,7 +372,7 @@ impl State {
             ShmState::new::<Self>(dh, vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888]);
         let seat_state = SeatState::<Self>::new();
         let viewporter_state = ViewporterState::new::<Self>(dh);
-        let wl_drm_state = WlDrmState;
+        let wl_drm_state = WlDrmState::<Option<DrmNode>>::default();
         let kde_decoration_state = KdeDecorationState::new::<Self>(&dh, Mode::Client);
         let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
         let session_lock_manager_state =
@@ -432,19 +447,8 @@ impl State {
         ClientState {
             compositor_client_state: CompositorClientState::default(),
             workspace_client_state: WorkspaceClientState::default(),
-            drm_node: match &self.backend {
-                BackendData::Kms(kms_state) => {
-                    match std::env::var("COSMIC_RENDER_AUTO_ASSIGN").map(|val| val.to_lowercase()) {
-                        Ok(val) if val == "y" || val == "yes" || val == "true" => Some(
-                            kms_state
-                                .target_node_for_output(
-                                    &self.common.last_active_seat().active_output(),
-                                )
-                                .unwrap_or(kms_state.primary),
-                        ),
-                        _ => Some(kms_state.primary),
-                    }
-                }
+            advertised_drm_node: match &self.backend {
+                BackendData::Kms(kms_state) => Some(kms_state.primary_node),
                 _ => None,
             },
             privileged: false,
@@ -457,7 +461,7 @@ impl State {
         ClientState {
             compositor_client_state: CompositorClientState::default(),
             workspace_client_state: WorkspaceClientState::default(),
-            drm_node: Some(drm_node),
+            advertised_drm_node: Some(drm_node),
             privileged: false,
             evls: self.common.event_loop_signal.clone(),
             security_context: None,
@@ -468,8 +472,8 @@ impl State {
         ClientState {
             compositor_client_state: CompositorClientState::default(),
             workspace_client_state: WorkspaceClientState::default(),
-            drm_node: match &self.backend {
-                BackendData::Kms(kms_state) => Some(kms_state.primary),
+            advertised_drm_node: match &self.backend {
+                BackendData::Kms(kms_state) => Some(kms_state.primary_node),
                 _ => None,
             },
             privileged: true,
@@ -537,7 +541,7 @@ impl Common {
                     surface_primary_scanout_output,
                 );
                 if let Some(feedback) =
-                    source_node_for_surface(lock_surface.wl_surface(), &self.display_handle)
+                    advertised_node_for_surface(lock_surface.wl_surface(), &self.display_handle)
                         .and_then(|source| dmabuf_feedback(source))
                 {
                     send_dmabuf_feedback_surface_tree(
@@ -599,7 +603,7 @@ impl Common {
                         if let Some(feedback) = window
                             .wl_surface()
                             .and_then(|wl_surface| {
-                                source_node_for_surface(&wl_surface, &self.display_handle)
+                                advertised_node_for_surface(&wl_surface, &self.display_handle)
                             })
                             .and_then(|source| dmabuf_feedback(source))
                         {
@@ -644,7 +648,7 @@ impl Common {
                         if let Some(feedback) = window
                             .wl_surface()
                             .and_then(|wl_surface| {
-                                source_node_for_surface(&wl_surface, &self.display_handle)
+                                advertised_node_for_surface(&wl_surface, &self.display_handle)
                             })
                             .and_then(|source| dmabuf_feedback(source))
                         {
@@ -693,7 +697,9 @@ impl Common {
             window.send_frame(output, time, throttle, surface_primary_scanout_output);
             if let Some(feedback) = window
                 .wl_surface()
-                .and_then(|wl_surface| source_node_for_surface(&wl_surface, &self.display_handle))
+                .and_then(|wl_surface| {
+                    advertised_node_for_surface(&wl_surface, &self.display_handle)
+                })
                 .and_then(|source| dmabuf_feedback(source))
             {
                 window.send_dmabuf_feedback(
@@ -741,8 +747,9 @@ impl Common {
                     throttle,
                     surface_primary_scanout_output,
                 );
-                if let Some(feedback) = source_node_for_surface(&wl_surface, &self.display_handle)
-                    .and_then(|source| dmabuf_feedback(source))
+                if let Some(feedback) =
+                    advertised_node_for_surface(&wl_surface, &self.display_handle)
+                        .and_then(|source| dmabuf_feedback(source))
                 {
                     send_dmabuf_feedback_surface_tree(
                         &wl_surface,
@@ -780,7 +787,7 @@ impl Common {
             });
             layer_surface.send_frame(output, time, throttle, surface_primary_scanout_output);
             if let Some(feedback) =
-                source_node_for_surface(layer_surface.wl_surface(), &self.display_handle)
+                advertised_node_for_surface(layer_surface.wl_surface(), &self.display_handle)
                     .and_then(|source| dmabuf_feedback(source))
             {
                 layer_surface.send_dmabuf_feedback(

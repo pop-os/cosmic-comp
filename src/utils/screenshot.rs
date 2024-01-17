@@ -16,9 +16,8 @@ use smithay::{
 use tracing::warn;
 
 use crate::{
-    backend::kms::source_node_for_surface,
     shell::element::CosmicSurface,
-    state::{BackendData, State},
+    state::{advertised_node_for_surface, BackendData, State},
 };
 
 pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
@@ -99,8 +98,8 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
     if let Some(wl_surface) = surface.wl_surface() {
         let res = match &mut state.backend {
             BackendData::Kms(kms) => {
-                let node = source_node_for_surface(&wl_surface, &state.common.display_handle)
-                    .unwrap_or(kms.primary);
+                let node = advertised_node_for_surface(&wl_surface, &state.common.display_handle)
+                    .unwrap_or(kms.primary_node);
                 kms.api
                     .single_renderer(&node)
                     .with_context(|| "Failed to get renderer for screenshot")

@@ -37,14 +37,14 @@ impl SecurityContextHandler for State {
                 let drm_node = client_data
                     .as_ref()
                     .and_then(|data| data.downcast_ref::<ClientState>())
-                    .and_then(|data| data.drm_node.clone())
+                    .and_then(|data| data.advertised_drm_node.clone())
                     .or_else(|| {
                         client_data
                             .as_ref()
                             .and_then(|data| data.downcast_ref::<XWaylandClientData>())
                             .and_then(|data| data.user_data().get::<DrmNode>().cloned())
                     })
-                    .or_else(|| new_state.drm_node.clone());
+                    .or_else(|| new_state.advertised_drm_node.clone());
 
                 if let Err(err) = state.common.display_handle.insert_client(
                     client_stream,
@@ -53,7 +53,7 @@ impl SecurityContextHandler for State {
                         privileged: privileged
                             && security_context.sandbox_engine.as_deref()
                                 == Some("com.system76.CosmicPanel"),
-                        drm_node,
+                        advertised_drm_node: drm_node,
                         ..new_state
                     }),
                 ) {
