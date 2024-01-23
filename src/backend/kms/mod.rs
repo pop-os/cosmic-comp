@@ -22,7 +22,6 @@ use smithay::{
         allocator::{
             dmabuf::{AnyError, Dmabuf, DmabufAllocator},
             gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
-            vulkan::{ImageUsageFlags, VulkanAllocator},
             Allocator, Format, Fourcc,
         },
         drm::{
@@ -44,7 +43,6 @@ use smithay::{
         },
         session::{libseat::LibSeatSession, Event as SessionEvent, Session},
         udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
-        vulkan::{version::Version, Instance, PhysicalDevice},
     },
     desktop::utils::OutputPresentationFeedback,
     input::Seat,
@@ -247,7 +245,7 @@ pub fn init_backend(
         let dh = state.common.display_handle.clone();
         match match event {
             UdevEvent::Added { device_id, path } => state
-                .device_added(device_id, path, &dh, true)
+                .device_added(device_id, path, &dh)
                 .with_context(|| format!("Failed to add drm device: {}", device_id)),
             UdevEvent::Changed { device_id } => state
                 .device_changed(device_id)
@@ -301,7 +299,7 @@ pub fn init_backend(
                             }
                         } else {
                             let dh = state.common.display_handle.clone();
-                            if let Err(err) = state.device_added(dev, path.into(), &dh, true) {
+                            if let Err(err) = state.device_added(dev, path.into(), &dh) {
                                 error!(?err, "Failed to add drm device {}.", path.display(),);
                             }
                         }
@@ -386,34 +384,16 @@ pub fn init_backend(
     state.launch_xwayland(Some(primary));
 
     for (dev, path) in udev_dispatcher.as_source_ref().device_list() {
-        if let Err(err) = state.device_added(dev, path.into(), dh, false) {
+        if let Err(err) = state.device_added(dev, path.into(), dh) {
             warn!("Failed to add device {}: {:?}", path.display(), err);
         }
     }
 
-    // HACK: amdgpu doesn't like us initializing vulkan too early..
-    //      so lets do that delayed until mesa fixes that.
-    let devices = state
-        .backend
-        .kms()
-        .devices
-        .iter()
-        .map(|(drm_node, device)| (*drm_node, device.render_node))
-        .collect::<Vec<_>>();
-    for (drm_node, render_node) in devices {
-        state.init_vulkan(drm_node, render_node);
-    }
     Ok(())
 }
 
 impl State {
-    fn device_added(
-        &mut self,
-        dev: dev_t,
-        path: PathBuf,
-        dh: &DisplayHandle,
-        try_vulkan: bool,
-    ) -> Result<()> {
+    fn device_added(&mut self, dev: dev_t, path: PathBuf, dh: &DisplayHandle) -> Result<()> {
         if !self.backend.kms().session.is_active() {
             return Ok(());
         }
@@ -719,51 +699,7 @@ impl State {
             &self.common.event_loop_handle,
         );
 
-        if try_vulkan {
-            self.init_vulkan(drm_node, render_node);
-        }
-
         Ok(())
-    }
-
-    fn init_vulkan(&mut self, drm_node: DrmNode, render_node: DrmNode) {
-        if let Ok(instance) = Instance::new(Version::VERSION_1_2, None) {
-            if let Some(physical_device) =
-                PhysicalDevice::enumerate(&instance)
-                    .ok()
-                    .and_then(|devices| {
-                        devices
-                            .filter(|phd| {
-                                phd.has_device_extension(unsafe {
-                                    CStr::from_bytes_with_nul_unchecked(
-                                        b"VK_EXT_physical_device_drm\0",
-                                    )
-                                })
-                            })
-                            .find(|phd| {
-                                phd.primary_node().unwrap() == Some(render_node)
-                                    || phd.render_node().unwrap() == Some(render_node)
-                            })
-                    })
-            {
-                match VulkanAllocator::new(
-                    &physical_device,
-                    ImageUsageFlags::COLOR_ATTACHMENT | ImageUsageFlags::SAMPLED,
-                ) {
-                    Ok(allocator) => {
-                        self.backend
-                            .kms()
-                            .devices
-                            .get_mut(&drm_node)
-                            .unwrap()
-                            .allocator = Box::new(DmabufAllocator(allocator));
-                    }
-                    Err(err) => {
-                        warn!(?err, "Failed to create vulkan allocator.");
-                    }
-                }
-            }
-        }
     }
 
     fn device_changed(&mut self, dev: dev_t) -> Result<()> {
