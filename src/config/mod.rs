@@ -515,8 +515,8 @@ fn update_input(state: &mut State) {
 fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut State) {
     for key in &keys {
         match key.as_str() {
-            "xkb-config" => {
-                let value = get_config::<XkbConfig>(&config, "xkb-config");
+            "xkb_config" => {
+                let value = get_config::<XkbConfig>(&config, "xkb_config");
                 for seat in state.common.seats().cloned().collect::<Vec<_>>().iter() {
                     if let Some(keyboard) = seat.get_keyboard() {
                         if let Err(err) = keyboard.set_xkb_config(state, xkb_config_to_wl(&value)) {
