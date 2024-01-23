@@ -201,12 +201,12 @@ pub fn add_seat(
     // So instead of doing the right thing (and initialize these capabilities as matching
     // devices appear), we have to surrender to reality and just always expose a keyboard and pointer.
     let conf = config.xkb_config();
-    if let Err(err) = seat.add_keyboard(xkb_config_to_wl(&conf), 200, 25) {
+    if let Err(err) = seat.add_keyboard(xkb_config_to_wl(&conf), 600, 25) {
         warn!(
             ?err,
             "Failed to load provided xkb config. Trying default...",
         );
-        seat.add_keyboard(XkbConfig::default(), 200, 25)
+        seat.add_keyboard(XkbConfig::default(), 600, 25)
             .expect("Failed to load xkb configuration files");
     }
     seat.add_pointer();
