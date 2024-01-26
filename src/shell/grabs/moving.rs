@@ -546,27 +546,6 @@ impl Drop for MoveGrab {
                     }
 
                     match previous {
-                        ManagedLayer::Tiling => {
-                            let (window, location) = state
-                                .common
-                                .shell
-                                .active_space_mut(&output)
-                                .tiling_layer
-                                .drop_window(grab_state.window);
-                            Some((window, location.to_global(&output)))
-                        }
-                        ManagedLayer::Floating => {
-                            grab_state.window.set_geometry(Rectangle::from_loc_and_size(
-                                window_location,
-                                grab_state.window.geometry().size.as_global(),
-                            ));
-                            let workspace = state.common.shell.active_space_mut(&output);
-                            let (window, location) = workspace.floating_layer.drop_window(
-                                grab_state.window,
-                                window_location.to_local(&workspace.output),
-                            );
-                            Some((window, location.to_global(&output)))
-                        }
                         ManagedLayer::Sticky => {
                             grab_state.window.set_geometry(Rectangle::from_loc_and_size(
                                 window_location,
@@ -577,6 +556,30 @@ impl Drop for MoveGrab {
                                 .sticky_layer
                                 .drop_window(grab_state.window, window_location.to_local(&output));
 
+                            Some((window, location.to_global(&output)))
+                        }
+                        ManagedLayer::Tiling if state
+                                .common
+                                .shell
+                                .active_space(&output).tiling_enabled => {
+                            let (window, location) = state
+                                .common
+                                .shell
+                                .active_space_mut(&output)
+                                .tiling_layer
+                                .drop_window(grab_state.window);
+                            Some((window, location.to_global(&output)))
+                        }
+                        _ => {
+                            grab_state.window.set_geometry(Rectangle::from_loc_and_size(
+                                window_location,
+                                grab_state.window.geometry().size.as_global(),
+                            ));
+                            let workspace = state.common.shell.active_space_mut(&output);
+                            let (window, location) = workspace.floating_layer.drop_window(
+                                grab_state.window,
+                                window_location.to_local(&workspace.output),
+                            );
                             Some((window, location.to_global(&output)))
                         }
                     }

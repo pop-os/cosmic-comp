@@ -1605,12 +1605,12 @@ impl Shell {
                     .sticky_layer
                     .map(mapped, None)
             }
-            ManagedLayer::Floating => new_workspace.floating_layer.map(mapped, None),
-            ManagedLayer::Tiling => {
+            ManagedLayer::Tiling if new_workspace.tiling_enabled => {
                 new_workspace
                     .tiling_layer
                     .map(mapped, Option::<std::iter::Empty<_>>::None, None)
             }
+            _ => new_workspace.floating_layer.map(mapped, None),
         };
     }
 
@@ -1949,7 +1949,7 @@ impl Shell {
             .space_for_handle_mut(to)
             .unwrap(); // checked above
         let focus_stack = seat.map(|seat| to_workspace.focus_stack.get(&seat));
-        if window_state.layer == ManagedLayer::Floating {
+        if window_state.layer == ManagedLayer::Floating || !to_workspace.tiling_enabled {
             to_workspace.floating_layer.map(mapped.clone(), None);
         } else {
             to_workspace.tiling_layer.map(
@@ -2934,16 +2934,16 @@ impl Shell {
                 .take()
                 .unwrap_or(ManagedLayer::Floating)
             {
-                ManagedLayer::Floating => {
-                    workspace.floating_layer.map(mapped.clone(), geometry.loc)
-                }
-                ManagedLayer::Tiling => {
+                ManagedLayer::Tiling if workspace.tiling_enabled => {
                     let focus_stack = workspace.focus_stack.get(seat);
                     workspace
                         .tiling_layer
                         .map(mapped.clone(), Some(focus_stack.iter()), None);
                 }
                 ManagedLayer::Sticky => unreachable!(),
+                _ => {
+                    workspace.floating_layer.map(mapped.clone(), geometry.loc)
+                }
             }
         }
     }
