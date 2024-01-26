@@ -444,7 +444,7 @@ impl Workspace {
         let mut state = elem.maximized_state.lock().unwrap();
         if let Some(state) = state.take() {
             match state.original_layer {
-                ManagedLayer::Tiling => {
+                ManagedLayer::Tiling if self.tiling_enabled => {
                     // should still be mapped in tiling
                     self.floating_layer.unmap(&elem);
                     elem.output_enter(&self.output, elem.bbox());
@@ -456,7 +456,8 @@ impl Workspace {
                         .element_geometry(&elem)
                         .map(|geo| geo.size.as_logical())
                 }
-                ManagedLayer::Floating => {
+                ManagedLayer::Sticky => unreachable!(),
+                _ => {
                     elem.set_maximized(false);
                     self.floating_layer.map_internal(
                         elem.clone(),
@@ -466,7 +467,6 @@ impl Workspace {
                     );
                     Some(state.original_geometry.size.as_logical())
                 }
-                ManagedLayer::Sticky => unreachable!(),
             }
         } else {
             None
