@@ -1584,40 +1584,56 @@ impl KmsState {
         global: &DmabufGlobal,
         dmabuf: Dmabuf,
     ) -> Result<DrmNode> {
-        for device in self.devices.values_mut() {
-            if device
-                .socket
-                .as_ref()
-                .map(|s| &s.dmabuf_global == global)
-                .unwrap_or(false)
-            {
-                if device.render_node != self.primary_node {
-                    if !device.in_use(&self.primary_node) {
-                        self.api
-                            .as_mut()
-                            .add_node(device.render_node, device.gbm.clone())
-                            .context("Failed to initialize device")?;
+        let (expected_node, other_nodes) =
+            self.devices.values_mut().partition::<Vec<_>, _>(|device| {
+                device
+                    .socket
+                    .as_ref()
+                    .map(|s| &s.dmabuf_global == global)
+                    .unwrap_or(false)
+            });
 
-                        let mut renderer = match self.api.single_renderer(&device.render_node) {
-                            Ok(renderer) => renderer,
-                            Err(err) => {
-                                self.api.as_mut().remove_node(&device.render_node);
-                                return Err(err).context("Failed to initialize renderer");
-                            }
-                        };
-                        init_shaders(&mut renderer).context("Failed to initialize shaders")?;
+        let mut last_err = anyhow::anyhow!("Dmabuf cannot be imported on any gpu");
+        for device in expected_node.into_iter().chain(other_nodes.into_iter()) {
+            if device.render_node != self.primary_node {
+                if !device.in_use(&self.primary_node) {
+                    self.api
+                        .as_mut()
+                        .add_node(device.render_node, device.gbm.clone())
+                        .context("Failed to initialize device")?;
+
+                    let mut renderer = match self.api.single_renderer(&device.render_node) {
+                        Ok(renderer) => renderer,
+                        Err(err) => {
+                            self.api.as_mut().remove_node(&device.render_node);
+                            return Err(err).context("Failed to initialize renderer");
+                        }
+                    };
+                    init_shaders(&mut renderer).context("Failed to initialize shaders")?;
+                }
+            }
+
+            let result = self
+                .api
+                .single_renderer(&device.render_node)?
+                .import_dmabuf(&dmabuf, None)
+                .map(|_| device.render_node)
+                .map_err(Into::into);
+
+            match result {
+                Ok(node) => return Ok(node),
+                Err(err) => {
+                    trace!(?err, "Failed to import dmabuf on {:?}", device.render_node);
+                    last_err = err;
+
+                    if !device.in_use(&self.primary_node) {
+                        self.api.as_mut().remove_node(&device.render_node);
                     }
                 }
-
-                return self
-                    .api
-                    .single_renderer(&device.render_node)?
-                    .import_dmabuf(&dmabuf, None)
-                    .map(|_| device.render_node)
-                    .map_err(Into::into);
-            }
+            };
         }
-        unreachable!()
+
+        Err(last_err)
     }
 
     pub fn schedule_render(
