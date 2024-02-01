@@ -35,7 +35,7 @@ use smithay::{
             buffer_dimensions,
             damage::{Error as RenderError, RenderOutputResult},
             element::Element,
-            gles::{GlesRenderbuffer, GlesTexture},
+            gles::GlesRenderbuffer,
             glow::GlowRenderer,
             multigpu::{gbm::GbmGlesBackend, Error as MultiError, GpuManager},
             sync::SyncPoint,
@@ -79,7 +79,6 @@ use tracing::{error, info, trace, warn};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
-    ffi::CStr,
     fmt,
     path::PathBuf,
     time::Duration,
@@ -278,7 +277,10 @@ pub fn init_backend(
                     error!(?err, "Failed to resume libinput context.");
                 }
                 for device in state.backend.kms().devices.values_mut() {
-                    device.drm.activate();
+                    if let Err(err) = device.drm.activate(true) {
+                        error!(?err, "Failed to resume drm device");
+                    }
+                    // TODO save state, do the disable part manually, etc
                     if let Some(lease_state) = device.leasing_global.as_mut() {
                         lease_state.resume::<State>();
                     }
@@ -421,7 +423,7 @@ impl State {
         let gbm = GbmDevice::new(fd)
             .with_context(|| format!("Failed to initialize GBM device for {}", path.display()))?;
         let (render_node, formats) = {
-            let egl_display = EGLDisplay::new(gbm.clone()).with_context(|| {
+            let egl_display = unsafe { EGLDisplay::new(gbm.clone()) }.with_context(|| {
                 format!("Failed to create EGLDisplay for device: {}", path.display())
             })?;
             let egl_device = EGLDevice::device_for_display(&egl_display).with_context(|| {
@@ -1175,7 +1177,7 @@ impl Surface {
         })?;
         self.fps.elements();
 
-        let res = compositor.render_frame::<_, _, GlesTexture>(
+        let res = compositor.render_frame(
             &mut renderer,
             &elements,
             CLEAR_COLOR, // TODO use a theme neutral color
@@ -1184,7 +1186,7 @@ impl Surface {
 
         match res {
             Ok(frame_result) => {
-                let feedback = if frame_result.damage.is_some() {
+                let feedback = if !frame_result.is_empty {
                     Some(state.take_presentation_feedback(&self.output, &frame_result.states))
                 } else {
                     None

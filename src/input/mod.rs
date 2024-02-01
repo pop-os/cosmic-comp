@@ -1362,6 +1362,7 @@ impl State {
                 }
             }
             InputEvent::Special(_) => {}
+            InputEvent::SwitchToggle { event: _ } => {}
         }
     }
 

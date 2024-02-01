@@ -349,7 +349,7 @@ pub fn init_backend(
         .find(|device| device.try_get_render_node().ok().flatten() == Some(drm_node))
         .with_context(|| format!("Failed to find EGLDevice for node {}", drm_node))?;
     // Initialize EGL
-    let egl = EGLDisplay::new(device).with_context(|| "Failed to create EGL display")?;
+    let egl = unsafe { EGLDisplay::new(device) }.with_context(|| "Failed to create EGL display")?;
     // Create the OpenGL context
     let context = EGLContext::new(&egl).with_context(|| "Failed to create EGL context")?;
     // Create a renderer
@@ -470,6 +470,7 @@ pub fn init_backend(
                 }
             }
             X11Event::Input(event) => state.process_x11_event(event),
+            X11Event::Focus(_) => {} // TODO: release all keys when losing focus and make sure to go through our keyboard filter code
         })
         .map_err(|_| anyhow::anyhow!("Failed to insert X11 Backend into event loop"))?;
 
