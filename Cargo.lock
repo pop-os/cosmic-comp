@@ -2174,16 +2174,16 @@ dependencies = [
 
 [[package]]
 name = "input"
-version = "0.8.3"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6e74cd82cedcd66db78742a8337bdc48f188c4d2c12742cbc5cd85113f0b059"
+checksum = "7911ce3db9c10c5ab4a35c49af778a5f9a827bd0f7371d9be56175d8dd2740d0"
 dependencies = [
- "bitflags 1.3.2",
+ "bitflags 2.4.2",
  "input-sys",
  "io-lifetimes 1.0.11",
  "libc",
  "log",
- "udev 0.7.0",
+ "udev",
 ]
 
 [[package]]
@@ -4023,7 +4023,7 @@ checksum = "e6ecd384b10a64542d77071bd64bd7b231f4ed5940fba55e98c3de13824cf3d7"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/smithay//smithay?rev=f1e7fc18a#f1e7fc18a7f060f8ff1e647ca407df62f85467cf"
+source = "git+https://github.com/smithay//smithay?rev=3b3e07952e#3b3e07952e471618fe8b590ba3223f4201cec10c"
 dependencies = [
  "appendlist",
  "ash",
@@ -4058,7 +4058,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tracing",
- "udev 0.8.0",
+ "udev",
  "wayland-backend",
  "wayland-egl",
  "wayland-protocols",
@@ -4596,17 +4596,6 @@ name = "typenum"
 version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42ff0bf0c66b8238c6f3b578df37d0b7848e55df8577b3f74f92a69acceeb825"
-
-[[package]]
-name = "udev"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ebdbbd670373442a12fe9ef7aeb53aec4147a5a27a00bbc3ab639f08f48191a"
-dependencies = [
- "libc",
- "libudev-sys",
- "pkg-config",
-]
 
 [[package]]
 name = "udev"
