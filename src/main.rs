@@ -9,7 +9,7 @@ use smithay::{
 };
 
 use anyhow::{Context, Result};
-use std::{ffi::OsString, sync::Arc};
+use std::{env, ffi::OsString, process, sync::Arc};
 use tracing::{error, info, warn};
 
 use crate::wayland::handlers::compositor::client_compositor_state;
@@ -56,6 +56,18 @@ fn main() -> Result<()> {
     // potentially tell the session we are setup now
     session::setup_socket(event_loop.handle(), &state)?;
 
+    let mut args = env::args().skip(1);
+    let mut child_opt = if let Some(exec) = args.next() {
+        // Run command in kiosk mode
+        let mut command = process::Command::new(&exec);
+        command.args(args);
+        command.envs(session::get_env(&state)?);
+        info!("Running {:?}", exec);
+        Some(command.spawn()?)
+    } else {
+        None
+    };
+
     if let Err(err) = theme::watch_theme(event_loop.handle()) {
         warn!(?err, "Failed to watch theme");
     }
@@ -83,7 +95,35 @@ fn main() -> Result<()> {
 
         // send out events
         let _ = state.common.display_handle.flush_clients();
+
+        // check if kiosk child is running
+        if let Some(ref mut child) = child_opt {
+            match child.try_wait() {
+                // Kiosk child exited with status
+                Ok(Some(exit_status)) => {
+                    info!("Command exited with status {:?}", exit_status);
+                    match exit_status.code() {
+                        // Exiting with the same status as the kiosk child
+                        Some(code) => process::exit(code),
+                        // The kiosk child exited with signal, exiting with error
+                        None => process::exit(1),
+                    }
+                }
+                // Command still running
+                Ok(None) => {}
+                // Kiosk child disappeared, exiting with error
+                Err(err) => {
+                    warn!(?err, "Failed to wait for command");
+                    process::exit(1);
+                }
+            }
+        }
     })?;
+
+    // kill kiosk child if loop exited
+    if let Some(mut child) = child_opt {
+        let _ = child.kill();
+    }
 
     // drop eventloop & state before logger
     std::mem::drop(event_loop);
