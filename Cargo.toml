@@ -1,94 +1,111 @@
 [package]
-name = "cosmic-comp"
-version = "0.1.0"
+authors = ["Victoria Brekenfeld"]
 edition = "2021"
 license = "GPL-3.0-only"
-authors = ["Victoria Brekenfeld"]
+name = "cosmic-comp"
+version = "0.1.0"
 
 [workspace]
 members = [
-    "cosmic-comp-config"
+  "cosmic-comp-config",
 ]
 
 [dependencies]
-anyhow = { version = "1.0.51", features = ["backtrace"] }
+anyhow = {version = "1.0.51", features = ["backtrace"]}
 bitflags = "2.4"
 bytemuck = "1.12"
-calloop = { version = "0.12.2", features = ["executor"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sendfd = "0.4.1"
-egui = { version = "0.23.0", optional = true }
-egui_plot = { version = "0.23.0", optional = true }
-renderdoc = { version = "0.11.0", optional = true }
-edid-rs = { version = "0.1" }
-png = "0.17.5"
-lazy_static = "1.4.0"
-log-panics = { version = "2", features = ["with-backtrace"] }
-thiserror = "1.0.26"
-regex = "1"
-xcursor = "0.3.3"
-xkbcommon = "0.7"
+calloop = {version = "0.12.2", features = ["executor"]}
+cosmic-comp-config = {path = "cosmic-comp-config"}
+cosmic-config = {git = "https://github.com/pop-os/libcosmic/", features = ["calloop", "macro"]}
+cosmic-protocols = {git = "https://github.com/pop-os/cosmic-protocols", branch = "main", default-features = false, features = ["server"]}
+edid-rs = {version = "0.1"}
+egui = {version = "0.23.0", optional = true}
+egui_plot = {version = "0.23.0", optional = true}
+glow = "0.12.0"
+i18n-embed = {version = "0.14", features = ["fluent-system", "desktop-requester"]}
+i18n-embed-fl = "0.7"
+iced_tiny_skia = {git = "https://github.com/pop-os/libcosmic/"}
 indexmap = "2.0"
-xdg = "^2.1"
+keyframe = "1.1.1"
+lazy_static = "1.4.0"
+libc = "0.2.149"
+libcosmic = {git = "https://github.com/pop-os/libcosmic/", default-features = false}
+libsystemd = {version = "0.7", optional = true}
+log-panics = {version = "2", features = ["with-backtrace"]}
+once_cell = "1.18.0"
+ordered-float = "4.0"
+png = "0.17.5"
+puffin = {version = "0.17.0", optional = true}
+puffin_egui = {version = "0.23.0", optional = true}
+regex = "1"
+renderdoc = {version = "0.11.0", optional = true}
 ron = "0.8"
-libsystemd = { version = "0.7", optional = true }
+rust-embed = {version = "8.0", features = ["debug-embed"]}
+sanitize-filename = "0.5.0"
+sendfd = "0.4.1"
+serde = {version = "1", features = ["derive"]}
+serde_json = "1"
+thiserror = "1.0.26"
+time = {version = "0.3.30", features = ["macros", "formatting", "local-offset"]}
+tiny-skia = "0.11"
+tracing = {version = "0.1.37", features = ["max_level_debug", "release_max_level_info"]}
+tracing-journald = "0.3.0"
+tracing-subscriber = {version = "0.3.16", features = ["env-filter", "tracing-log"]}
 wayland-backend = "0.3.2"
 wayland-scanner = "0.31.0"
-cosmic-comp-config = { path = "cosmic-comp-config" }
-cosmic-config = { git = "https://github.com/pop-os/libcosmic/", features = ["calloop", "macro"] }
-cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", branch = "main", default-features = false, features = ["server"] }
-libcosmic = { git = "https://github.com/pop-os/libcosmic/", default-features = false }
-iced_tiny_skia = { git = "https://github.com/pop-os/libcosmic/" }
-tiny-skia = "0.11"
-ordered-float = "4.0"
-glow = "0.12.0"
-tracing-subscriber = { version = "0.3.16", features = ["env-filter", "tracing-log"] }
-tracing-journald = "0.3.0"
-tracing = { version = "0.1.37", features = ["max_level_debug", "release_max_level_info"] }
-puffin = { version = "0.17.0", optional = true }
-puffin_egui = { version = "0.23.0", optional = true }
-keyframe = "1.1.1"
-once_cell = "1.18.0"
-i18n-embed = { version = "0.14", features = ["fluent-system", "desktop-requester"] }
-i18n-embed-fl = "0.7"
-rust-embed = { version = "8.0", features = ["debug-embed"] }
-libc = "0.2.149"
+xcursor = "0.3.3"
+xdg = "^2.1"
 xdg-user = "0.2.1"
-time = { version = "0.3.30", features = ["macros", "formatting", "local-offset"] }
-sanitize-filename = "0.5.0"
+xkbcommon = "0.7"
+zbus = "3.15.0"
 
 [dependencies.id_tree]
-git = "https://github.com/Drakulix/id-tree.git"
 branch = "feature/copy_clone"
+git = "https://github.com/Drakulix/id-tree.git"
 
 [dependencies.smithay]
-version = "0.3"
+default-features = false
+features = [
+  "backend_drm",
+  "backend_gbm",
+  "backend_egl",
+  "backend_libinput",
+  "backend_session_libseat",
+  "backend_udev",
+  "backend_winit",
+  "backend_vulkan",
+  "backend_x11",
+  "desktop",
+  "use_system_lib",
+  "renderer_glow",
+  "renderer_multi",
+  "wayland_frontend",
+  "xwayland",
+]
 git = "https://github.com/smithay/smithay.git"
 rev = "74ef59a3f"
-default-features = false
-features = ["backend_drm", "backend_gbm", "backend_egl", "backend_libinput", "backend_session_libseat", "backend_udev", "backend_winit", "backend_vulkan", "backend_x11", "desktop", "use_system_lib", "renderer_glow", "renderer_multi", "wayland_frontend", "xwayland"]
+version = "0.3"
 
 [dependencies.smithay-egui]
-git = "https://github.com/Smithay/smithay-egui.git"
-rev = "cdc652e0"
 features = ["svg"]
+git = "https://github.com/Smithay/smithay-egui.git"
 optional = true
+rev = "cdc652e0"
 
 [features]
+debug = ["egui", "egui_plot", "smithay-egui", "renderdoc", "puffin", "puffin_egui", "anyhow/backtrace"]
 default = ["systemd"]
 systemd = ["libsystemd"]
-debug = ["egui", "egui_plot", "smithay-egui", "renderdoc", "puffin", "puffin_egui", "anyhow/backtrace"]
 
 [profile.dev]
 lto = "thin"
 
 [profile.fastdebug]
-inherits = "release"
 debug = true
+inherits = "release"
 
 [profile.release]
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/smithay//smithay", rev = "3b3e07952e" }
+smithay = {git = "https://github.com/smithay//smithay", rev = "094fa3f7c3"}

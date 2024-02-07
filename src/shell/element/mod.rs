@@ -1421,12 +1421,10 @@ impl RenderElement<GlowRenderer> for CosmicMappedRenderElement<GlowRenderer> {
     }
 }
 
-impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>>
-    for CosmicMappedRenderElement<GlMultiRenderer<'a, 'b>>
-{
+impl<'a> RenderElement<GlMultiRenderer<'a>> for CosmicMappedRenderElement<GlMultiRenderer<'a>> {
     fn draw<'frame>(
         &self,
-        frame: &mut GlMultiFrame<'a, 'b, 'frame>,
+        frame: &mut GlMultiFrame<'a, 'frame>,
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
@@ -1464,10 +1462,7 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>>
         }
     }
 
-    fn underlying_storage(
-        &self,
-        renderer: &mut GlMultiRenderer<'a, 'b>,
-    ) -> Option<UnderlyingStorage> {
+    fn underlying_storage(&self, renderer: &mut GlMultiRenderer<'a>) -> Option<UnderlyingStorage> {
         match self {
             CosmicMappedRenderElement::Stack(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::Window(elem) => elem.underlying_storage(renderer),

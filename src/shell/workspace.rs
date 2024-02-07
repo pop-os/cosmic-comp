@@ -1116,12 +1116,10 @@ impl RenderElement<GlowRenderer> for WorkspaceRenderElement<GlowRenderer> {
     }
 }
 
-impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>>
-    for WorkspaceRenderElement<GlMultiRenderer<'a, 'b>>
-{
+impl<'a> RenderElement<GlMultiRenderer<'a>> for WorkspaceRenderElement<GlMultiRenderer<'a>> {
     fn draw<'frame>(
         &self,
-        frame: &mut GlMultiFrame<'a, 'b, 'frame>,
+        frame: &mut GlMultiFrame<'a, 'frame>,
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, smithay::utils::Physical>],
@@ -1140,7 +1138,7 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>>
 
     fn underlying_storage(
         &self,
-        renderer: &mut GlMultiRenderer<'a, 'b>,
+        renderer: &mut GlMultiRenderer<'a>,
     ) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.underlying_storage(renderer),
