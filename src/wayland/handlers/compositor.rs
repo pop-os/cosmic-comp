@@ -35,18 +35,11 @@ use super::screencopy::PendingScreencopyBuffers;
 impl State {
     fn early_import_surface(&mut self, surface: &WlSurface) {
         let mut import_nodes = std::collections::HashSet::new();
-        let dh = &self.common.display_handle;
         if let Some(output) = self.common.shell.visible_output_for_surface(&surface) {
             if let BackendData::Kms(ref mut kms_state) = &mut self.backend {
                 if let Some(target) = kms_state.target_node_for_output(&output) {
                     if import_nodes.insert(target) {
-                        kms_state.try_early_import(
-                            dh,
-                            surface,
-                            &output,
-                            target,
-                            &self.common.shell,
-                        );
+                        kms_state.try_early_import(surface, &output, target, &self.common.shell);
                     }
                 }
             }
@@ -184,6 +177,7 @@ impl CompositorHandler for State {
                     let toplevel = wl_window.toplevel();
                     if self.toplevel_ensure_initial_configure(&toplevel)
                         && with_renderer_surface_state(&surface, |state| state.buffer().is_some())
+                            .unwrap_or(false)
                     {
                         window.on_commit();
                         Shell::map_window(self, &window);

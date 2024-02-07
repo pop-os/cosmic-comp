@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-#[cfg(feature = "debug")]
-use crate::backend::render::element::AsGlowRenderer;
 use crate::{
     backend::render::{workspace_elements, CLEAR_COLOR},
     config::OutputConfig,
     shell::Shell,
-    state::{BackendData, ClientState, Common, Fps, SurfaceDmabufFeedback},
+    state::{BackendData, Common, Fps, SurfaceDmabufFeedback},
     utils::prelude::*,
     wayland::{
         handlers::screencopy::{render_session, UserdataExt},
@@ -20,9 +18,9 @@ use libc::dev_t;
 use smithay::{
     backend::{
         allocator::{
-            dmabuf::{AnyError, Dmabuf, DmabufAllocator},
+            dmabuf::Dmabuf,
             gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
-            Allocator, Format, Fourcc,
+            Format, Fourcc,
         },
         drm::{
             compositor::{BlitFrameResultError, DrmCompositor, FrameError, PrimaryPlaneElement},
@@ -65,7 +63,7 @@ use smithay::{
         },
         wayland_server::{
             protocol::{wl_buffer::WlBuffer, wl_surface::WlSurface},
-            Client, DisplayHandle, Resource, Weak,
+            Client, DisplayHandle, Weak,
         },
     },
     utils::{DeviceFd, Size, Transform},
@@ -76,7 +74,6 @@ use smithay::{
         seat::WaylandFocus,
         shm::{shm_format_to_fourcc, with_buffer_contents},
     },
-    xwayland::XWaylandClientData,
 };
 use tracing::{error, info, trace, warn};
 
@@ -92,7 +89,7 @@ mod drm_helpers;
 mod socket;
 use socket::*;
 
-use super::render::{init_shaders, CursorMode, GlMultiRenderer};
+use super::render::{element::AsGlowRenderer, init_shaders, CursorMode, GlMultiRenderer};
 // for now we assume we need at least 3ms
 const MIN_RENDER_TIME: Duration = Duration::from_millis(3);
 
@@ -100,7 +97,7 @@ const MIN_RENDER_TIME: Duration = Duration::from_millis(3);
 pub struct KmsState {
     pub devices: HashMap<DrmNode, Device>,
     pub input_devices: HashMap<String, input::Device>,
-    pub api: GpuManager<GbmGlesBackend<GlowRenderer>>,
+    pub api: GpuManager<GbmGlesBackend<GlowRenderer, DrmDeviceFd>>,
     pub primary_node: DrmNode,
     session: LibSeatSession,
     pub auto_assign: bool,
@@ -112,7 +109,6 @@ pub struct Device {
     surfaces: HashMap<crtc::Handle, Surface>,
     pub drm: DrmDevice,
     gbm: GbmDevice<DrmDeviceFd>,
-    allocator: Box<dyn Allocator<Buffer = Dmabuf, Error = AnyError>>,
     formats: HashSet<Format>,
     supports_atomic: bool,
     pub non_desktop_connectors: Vec<(connector::Handle, crtc::Handle)>,
@@ -130,7 +126,6 @@ impl fmt::Debug for Device {
             .field("surfaces", &self.surfaces)
             .field("drm", &self.drm)
             .field("gbm", &self.gbm)
-            .field("allocator", &"...")
             .field("formats", &self.formats)
             .field("supports_atomic", &self.supports_atomic)
             .field("non_desktop_connectors", &self.non_desktop_connectors)
@@ -211,7 +206,7 @@ pub fn init_backend(
         })
         .map_err(|err| err.error)
         .context("Failed to initialize libinput event source")?;
-    let api = GpuManager::new(GbmGlesBackend::<GlowRenderer>::default())
+    let api = GpuManager::new(GbmGlesBackend::<GlowRenderer, DrmDeviceFd>::default())
         .context("Failed to initialize renderers")?;
 
     // TODO get this info from system76-power, if available and setup a watcher
@@ -586,15 +581,10 @@ impl State {
             }
         };
 
-        let allocator = Box::new(DmabufAllocator(GbmAllocator::new(
-            gbm.clone(),
-            GbmBufferFlags::RENDERING,
-        )));
         let mut device = Device {
             render_node,
             surfaces: HashMap::new(),
             gbm: gbm.clone(),
-            allocator,
             drm,
             formats,
             supports_atomic,
@@ -972,7 +962,7 @@ impl Device {
         crtc: crtc::Handle,
         conn: connector::Handle,
         position: (i32, i32),
-        renderer: &mut GlMultiRenderer<'_, '_>,
+        renderer: &mut GlMultiRenderer<'_>,
     ) -> Result<Output> {
         let drm = &mut self.drm;
         let crtc_info = drm.get_crtc(crtc)?;
@@ -1067,19 +1057,13 @@ impl Device {
     }
 }
 
-fn source_node_for_surface<'a>(
-    w: &WlSurface,
-    mut devices: impl Iterator<Item = &'a Device>,
-) -> Option<DrmNode> {
+fn source_node_for_surface<'a>(w: &WlSurface) -> Option<DrmNode> {
     with_renderer_surface_state(w, |state| {
-        state.buffer().and_then(|buffer| {
-            devices.find_map(|dev| {
-                dev.active_buffers
-                    .contains(&buffer.downgrade())
-                    .then_some(dev.render_node)
-            })
-        })
+        state
+            .buffer()
+            .and_then(|buffer| get_dmabuf(buffer).ok().and_then(|dmabuf| dmabuf.node()))
     })
+    .flatten()
 }
 
 fn render_node_for_output(
@@ -1087,7 +1071,6 @@ fn render_node_for_output(
     primary_node: DrmNode,
     target_node: DrmNode,
     shell: &Shell,
-    non_target_devices: &Vec<(&DrmNode, &mut Device)>,
 ) -> DrmNode {
     if target_node == primary_node {
         return target_node;
@@ -1099,17 +1082,10 @@ fn render_node_for_output(
         .map(|w| vec![w.clone()])
         .unwrap_or_else(|| workspace.windows().collect::<Vec<_>>())
         .into_iter()
-        .flat_map(|w| {
-            w.wl_surface().and_then(|s| {
-                source_node_for_surface(&s, non_target_devices.iter().map(|(_, dev)| &**dev))
-            })
-        })
+        .flat_map(|w| w.wl_surface().and_then(|s| source_node_for_surface(&s)))
         .collect::<Vec<_>>();
 
-    if nodes.is_empty() {
-        // we don't want to force needlessly expensive imports,
-        // so we only choose the target node if it is save and use the main_device otherwise.
-        // (possibly fixable, once we have kernel API to test for migrations or dmabuf-v5)
+    if nodes.contains(&target_node) || nodes.is_empty() {
         target_node
     } else {
         primary_node
@@ -1149,7 +1125,10 @@ fn get_surface_dmabuf_feedback(
         .collect::<Vec<_>>();
 
     let target_node = surface.device_fd().dev_id().unwrap();
-    let mut builder = DmabufFeedbackBuilder::new(render_node.dev_id(), render_formats);
+    let builder = DmabufFeedbackBuilder::new(render_node.dev_id(), render_formats);
+    /*
+    // iris doesn't handle nvidia buffers very well (it hangs).
+    // so only do this in the future with v6 and clients telling us the gpu
     if target_node != render_node.dev_id() && !combined_formats.is_empty() {
         builder = builder.add_preference_tranche(
             target_node,
@@ -1157,16 +1136,22 @@ fn get_surface_dmabuf_feedback(
             combined_formats,
         );
     };
-    let render_feedback = builder.clone().build().unwrap();
+    */
 
-    let scanout_feedback = builder
-        .add_preference_tranche(
-            target_node,
-            Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
-            planes_formats,
-        )
-        .build()
-        .unwrap();
+    let render_feedback = builder.clone().build().unwrap();
+    // we would want to do this in other cases as well, but same thing as above applies
+    let scanout_feedback = if target_node == render_node.dev_id() {
+        builder
+            .add_preference_tranche(
+                target_node,
+                Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
+                planes_formats,
+            )
+            .build()
+            .unwrap()
+    } else {
+        builder.build().unwrap()
+    };
 
     SurfaceDmabufFeedback {
         render_feedback,
@@ -1177,11 +1162,8 @@ fn get_surface_dmabuf_feedback(
 impl Surface {
     pub fn render_output(
         &mut self,
-        api: &mut GpuManager<GbmGlesBackend<GlowRenderer>>,
-        render_node: Option<(
-            &DrmNode,
-            &mut dyn Allocator<Buffer = Dmabuf, Error = AnyError>,
-        )>,
+        api: &mut GpuManager<GbmGlesBackend<GlowRenderer, DrmDeviceFd>>,
+        render_node: Option<&DrmNode>,
         target_node: &DrmNode,
         state: &mut Common,
         screencopy: Option<&[(ScreencopySession, BufferParams)]>,
@@ -1195,9 +1177,9 @@ impl Surface {
 
         let compositor = self.surface.as_mut().unwrap();
         let (render_node, mut renderer) = match render_node {
-            Some((render_node, allocator)) => (
+            Some(render_node) => (
                 render_node,
-                api.renderer(&render_node, &target_node, allocator, compositor.format())
+                api.renderer(&render_node, &target_node, compositor.format())
                     .unwrap(),
             ),
             None => (target_node, api.single_renderer(&target_node).unwrap()),
@@ -1536,6 +1518,7 @@ impl KmsState {
         }
         Ok(())
     }
+
     pub fn target_node_for_output(&self, output: &Output) -> Option<DrmNode> {
         self.devices
             .values()
@@ -1546,34 +1529,13 @@ impl KmsState {
 
     pub fn try_early_import(
         &mut self,
-        dh: &DisplayHandle,
         surface: &WlSurface,
         output: &Output,
         target: DrmNode,
         shell: &Shell,
     ) {
-        let render = render_node_for_output(
-            &output,
-            self.primary_node,
-            target,
-            &shell,
-            &self.devices.iter_mut().collect(),
-        );
-        if let Err(err) = self.api.early_import(
-            if let Some(client) = dh.get_client(surface.id()).ok() {
-                if let Some(normal_client) = client.get_data::<ClientState>() {
-                    normal_client.advertised_drm_node.clone()
-                } else if let Some(xwayland_client) = client.get_data::<XWaylandClientData>() {
-                    xwayland_client.user_data().get::<DrmNode>().cloned()
-                } else {
-                    None
-                }
-            } else {
-                None
-            },
-            render,
-            surface,
-        ) {
+        let render = render_node_for_output(&output, self.primary_node, target, &shell);
+        if let Err(err) = self.api.early_import(render, surface) {
             trace!(?err, "Early import failed.");
         }
     }
@@ -1616,12 +1578,17 @@ impl KmsState {
             let result = self
                 .api
                 .single_renderer(&device.render_node)?
+                // using the MultiRenderer here would actually try multiple devices
+                .glow_renderer_mut()
                 .import_dmabuf(&dmabuf, None)
                 .map(|_| device.render_node)
                 .map_err(Into::into);
 
             match result {
-                Ok(node) => return Ok(node),
+                Ok(node) => {
+                    dmabuf.set_node(node); // so the MultiRenderer knows what node to use
+                    return Ok(node);
+                }
                 Err(err) => {
                     trace!(?err, "Failed to import dmabuf on {:?}", device.render_node);
                     last_err = err;
@@ -1683,16 +1650,15 @@ impl KmsState {
                         let target_device = &mut device[0].1;
 
                         if let Some(surface) = target_device.surfaces.get_mut(&crtc) {
+                            let common = &mut state.common;
                             let target_node = target_device.render_node;
                             let render_node = render_node_for_output(
                                 &surface.output,
                                 backend.primary_node,
                                 target_node,
-                                &state.common.shell,
-                                &other,
+                                &common.shell,
                             );
 
-                            let common = &mut state.common;
                             let result = if render_node != target_node {
                                 let render_device = &mut other
                                     .iter_mut()
@@ -1701,10 +1667,7 @@ impl KmsState {
                                     .1;
                                 surface.render_output(
                                     &mut backend.api,
-                                    Some((
-                                        &render_device.render_node,
-                                        render_device.allocator.as_mut(),
-                                    )),
+                                    Some(&render_device.render_node),
                                     &target_node,
                                     common,
                                     screencopy_sessions.as_deref(),

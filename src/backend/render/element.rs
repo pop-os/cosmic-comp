@@ -161,10 +161,10 @@ impl RenderElement<GlowRenderer> for CosmicElement<GlowRenderer> {
     }
 }
 
-impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>> for CosmicElement<GlMultiRenderer<'a, 'b>> {
+impl<'a> RenderElement<GlMultiRenderer<'a>> for CosmicElement<GlMultiRenderer<'a>> {
     fn draw<'frame>(
         &self,
-        frame: &mut GlMultiFrame<'a, 'b, 'frame>,
+        frame: &mut GlMultiFrame<'a, 'frame>,
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
@@ -185,10 +185,7 @@ impl<'a, 'b> RenderElement<GlMultiRenderer<'a, 'b>> for CosmicElement<GlMultiRen
         }
     }
 
-    fn underlying_storage(
-        &self,
-        renderer: &mut GlMultiRenderer<'a, 'b>,
-    ) -> Option<UnderlyingStorage> {
+    fn underlying_storage(&self, renderer: &mut GlMultiRenderer<'a>) -> Option<UnderlyingStorage> {
         match self {
             CosmicElement::Workspace(elem) => elem.underlying_storage(renderer),
             CosmicElement::Cursor(elem) => elem.underlying_storage(renderer),
@@ -273,7 +270,7 @@ impl AsGlowRenderer for GlowRenderer {
     }
 }
 
-impl<'a, 'b> AsGlowRenderer for GlMultiRenderer<'a, 'b> {
+impl<'a> AsGlowRenderer for GlMultiRenderer<'a> {
     fn glow_renderer(&self) -> &GlowRenderer {
         self.as_ref()
     }
@@ -299,7 +296,7 @@ impl<'frame> AsGlowFrame<'frame> for GlowFrame<'frame> {
     }
 }
 
-impl<'renderer, 'alloc, 'frame> AsGlowFrame<'frame> for GlMultiFrame<'renderer, 'alloc, 'frame> {
+impl<'renderer, 'frame> AsGlowFrame<'frame> for GlMultiFrame<'renderer, 'frame> {
     fn glow_frame(&self) -> &GlowFrame<'frame> {
         self.as_ref()
     }

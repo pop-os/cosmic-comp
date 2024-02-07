@@ -40,7 +40,7 @@ use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     backend::{
         allocator::dmabuf::Dmabuf,
-        drm::DrmNode,
+        drm::{DrmDeviceFd, DrmNode},
         renderer::{
             buffer_dimensions,
             damage::{Error as RenderError, OutputDamageTracker, RenderOutputResult},
@@ -75,11 +75,23 @@ use self::cursor::CursorRenderElement;
 pub mod element;
 use self::element::{AsGlowRenderer, CosmicElement};
 
-pub type GlMultiRenderer<'a, 'b> =
-    MultiRenderer<'a, 'a, 'b, GbmGlesBackend<GlowRenderer>, GbmGlesBackend<GlowRenderer>>;
-pub type GlMultiFrame<'a, 'b, 'frame> =
-    MultiFrame<'a, 'a, 'b, 'frame, GbmGlesBackend<GlowRenderer>, GbmGlesBackend<GlowRenderer>>;
-pub type GlMultiError = MultiError<GbmGlesBackend<GlowRenderer>, GbmGlesBackend<GlowRenderer>>;
+pub type GlMultiRenderer<'a> = MultiRenderer<
+    'a,
+    'a,
+    GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
+    GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
+>;
+pub type GlMultiFrame<'a, 'frame> = MultiFrame<
+    'a,
+    'a,
+    'frame,
+    GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
+    GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
+>;
+pub type GlMultiError = MultiError<
+    GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
+    GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
+>;
 
 pub static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
 pub static OUTLINE_SHADER: &str = include_str!("./shaders/rounded_outline.frag");
