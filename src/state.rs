@@ -150,7 +150,6 @@ pub struct Common {
 
     //pub output_conf: ConfigurationManager,
     pub shell: Shell,
-
     seats: Vec<Seat<State>>,
     last_active_seat: Option<Seat<State>>,
 
@@ -391,6 +390,10 @@ impl State {
         });
 
         let shell = Shell::new(&config, dh);
+
+        if let Err(err) = crate::dbus::init(&handle) {
+            tracing::warn!(?err, "Failed to initialize dbus handlers");
+        }
 
         State {
             common: Common {
