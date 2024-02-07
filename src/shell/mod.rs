@@ -530,6 +530,10 @@ impl Workspaces {
                 .partition(|w| w.preferrs_output(output));
             moved_workspaces.extend(preferrs);
             set.workspaces = doesnt;
+            if set.workspaces.is_empty() {
+                set.add_empty_workspace(workspace_state);
+            }
+            set.active = set.active.min(set.workspaces.len() - 1);
         }
         {
             let set = self.sets.get_mut(output).unwrap();
@@ -2821,9 +2825,7 @@ impl Shell {
                         .map(mapped.clone(), Some(focus_stack.iter()), None);
                 }
                 ManagedLayer::Sticky => unreachable!(),
-                _ => {
-                    workspace.floating_layer.map(mapped.clone(), geometry.loc)
-                }
+                _ => workspace.floating_layer.map(mapped.clone(), geometry.loc),
             }
         }
     }
