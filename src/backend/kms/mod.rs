@@ -716,7 +716,7 @@ impl State {
         Ok(())
     }
 
-    fn device_changed(&mut self, dev: dev_t) -> Result<()> {
+    pub(crate) fn device_changed(&mut self, dev: dev_t) -> Result<()> {
         if !self.backend.kms().session.is_active() {
             return Ok(());
         }

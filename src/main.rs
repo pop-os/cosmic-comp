@@ -19,6 +19,7 @@ use crate::{
 
 pub mod backend;
 pub mod config;
+pub mod dbus;
 #[cfg(feature = "debug")]
 pub mod debug;
 pub mod input;
