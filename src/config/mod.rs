@@ -32,7 +32,7 @@ pub use self::types::*;
 use cosmic_comp_config::{
     input::InputConfig,
     workspace::{WorkspaceConfig, WorkspaceLayout},
-    CosmicCompConfig, XkbConfig,
+    CosmicCompConfig, TileBehavior, XkbConfig,
 };
 
 #[derive(Debug)]
@@ -557,17 +557,17 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                         .update_autotile(new, &mut guard, seats);
                 }
             }
-            "tile_all_windows" => {
-                let new = get_config::<bool>(&config, "tile_all_windows");
-                if new != state.common.config.cosmic_conf.tile_all_windows {
-                    state.common.config.cosmic_conf.tile_all_windows = new;
+            "autotile_behavior" => {
+                let new = get_config::<TileBehavior>(&config, "autotile_behavior");
+                if new != state.common.config.cosmic_conf.autotile_behavior {
+                    state.common.config.cosmic_conf.autotile_behavior = new;
                     let seats: Vec<_> = state.common.seats().cloned().collect();
                     let mut guard = state.common.shell.workspace_state.update();
                     state
                         .common
                         .shell
                         .workspaces
-                        .update_tile_all(new, &mut guard, seats);
+                        .update_autotile_behavior(new, &mut guard, seats);
                 }
             }
             "active_hint" => {

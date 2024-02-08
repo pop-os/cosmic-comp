@@ -20,7 +20,7 @@ use crate::{
     },
 };
 use calloop::{timer::Timer, RegistrationToken};
-use cosmic_comp_config::workspace::WorkspaceLayout;
+use cosmic_comp_config::{workspace::WorkspaceLayout, TileBehavior};
 use cosmic_config::ConfigSet;
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
 use smithay::{
@@ -2056,7 +2056,10 @@ impl State {
                 }
             }
             Action::ToggleTiling => {
-                if self.common.config.cosmic_conf.tile_all_windows {
+                if matches!(
+                    self.common.config.cosmic_conf.autotile_behavior,
+                    TileBehavior::Global
+                ) {
                     let autotile = !self.common.config.cosmic_conf.autotile;
                     self.common.config.cosmic_conf.autotile = autotile;
                     let seats: Vec<_> = self.common.seats().cloned().collect();

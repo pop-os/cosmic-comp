@@ -7,7 +7,7 @@ use std::{
 };
 use wayland_backend::server::ClientId;
 
-use cosmic_comp_config::workspace::WorkspaceMode;
+use cosmic_comp_config::{workspace::WorkspaceMode, TileBehavior};
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::{
     State as WState, TilingState,
 };
@@ -481,7 +481,7 @@ pub struct Workspaces {
     backup_set: Option<WorkspaceSet>,
     mode: WorkspaceMode,
     autotile: bool,
-    tile_all_windows: bool,
+    autotile_behavior: TileBehavior,
     theme: cosmic::Theme,
 }
 
@@ -492,7 +492,7 @@ impl Workspaces {
             backup_set: None,
             mode: config.cosmic_conf.workspaces.workspace_mode,
             autotile: config.cosmic_conf.autotile,
-            tile_all_windows: config.cosmic_conf.tile_all_windows,
+            autotile_behavior: config.cosmic_conf.autotile_behavior,
             theme,
         }
     }
@@ -923,13 +923,13 @@ impl Workspaces {
         }
     }
 
-    pub fn update_tile_all(
+    pub fn update_autotile_behavior(
         &mut self,
-        tile_all: bool,
+        behavior: TileBehavior,
         guard: &mut WorkspaceUpdateGuard<'_, State>,
         seats: Vec<Seat<State>>,
     ) {
-        self.tile_all_windows = tile_all;
+        self.autotile_behavior = behavior;
         self.apply_tile_change(guard, seats);
     }
 
@@ -938,7 +938,7 @@ impl Workspaces {
         guard: &mut WorkspaceUpdateGuard<'_, State>,
         seats: Vec<Seat<State>>,
     ) {
-        if self.tile_all_windows {
+        if matches!(self.autotile_behavior, TileBehavior::Global) {
             // must apply change to all workspaces now
             for (_, set) in &mut self.sets {
                 set.tiling_enabled = self.autotile;
