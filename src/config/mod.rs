@@ -5,7 +5,7 @@ use crate::{
     state::{BackendData, State},
     wayland::protocols::output_configuration::OutputConfigurationState,
 };
-use cosmic_config::ConfigGet;
+use cosmic_config::{ConfigGet, CosmicConfigEntry};
 use serde::{Deserialize, Serialize};
 use smithay::input::Seat;
 pub use smithay::{
@@ -32,25 +32,20 @@ pub use self::types::*;
 use cosmic_comp_config::{
     input::InputConfig,
     workspace::{WorkspaceConfig, WorkspaceLayout},
-    XkbConfig,
+    CosmicCompConfig, XkbConfig,
 };
 
 #[derive(Debug)]
 pub struct Config {
     pub static_conf: StaticConfig,
     pub dynamic_conf: DynamicConfig,
-    pub config: cosmic_config::Config,
-    pub xkb: XkbConfig,
-    pub input_default: InputConfig,
-    pub input_touchpad: InputConfig,
-    pub input_devices: HashMap<String, InputConfig>,
-    pub workspace: WorkspaceConfig,
+    pub config_helper: cosmic_config::Config,
+    pub config: CosmicCompConfig,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct StaticConfig {
     pub key_bindings: HashMap<key_bindings::KeyPattern, key_bindings::Action>,
-    pub tiling_enabled: bool,
     pub data_control_enabled: bool,
 }
 
@@ -172,15 +167,18 @@ impl Config {
             .expect("Failed to add cosmic-config to the event loop");
         let xdg = xdg::BaseDirectories::new().ok();
         let workspace = get_config::<WorkspaceConfig>(&config, "workspaces");
+        let cosmic_comp_config =
+            CosmicCompConfig::get_entry(&config).unwrap_or_else(|(errs, c)| {
+                for err in errs {
+                    error!(?err, "");
+                }
+                c
+            });
         Config {
             static_conf: Self::load_static(xdg.as_ref(), workspace.workspace_layout),
             dynamic_conf: Self::load_dynamic(xdg.as_ref()),
-            xkb: get_config(&config, "xkb_config"),
-            input_default: get_config(&config, "input_default"),
-            input_touchpad: get_config(&config, "input_touchpad"),
-            input_devices: get_config(&config, "input_devices"),
-            workspace,
-            config,
+            config: cosmic_comp_config,
+            config_helper: config,
         }
     }
 
@@ -221,7 +219,6 @@ impl Config {
 
         StaticConfig {
             key_bindings: HashMap::new(),
-            tiling_enabled: false,
             data_control_enabled: false,
         }
     }
@@ -410,7 +407,7 @@ impl Config {
     }
 
     pub fn xkb_config(&self) -> XkbConfig {
-        self.xkb.clone()
+        self.config.xkb_config.clone()
     }
 
     pub fn read_device(&self, device: &mut InputDevice) {
@@ -438,11 +435,11 @@ impl Config {
 
     fn get_device_config(&self, device: &InputDevice) -> (Option<&InputConfig>, &InputConfig) {
         let default_config = if device.config_tap_finger_count() > 0 {
-            &self.input_touchpad
+            &self.config.input_touchpad
         } else {
-            &self.input_default
+            &self.config.input_default
         };
-        let device_config = self.input_devices.get(device.name());
+        let device_config = self.config.input_devices.get(device.name());
         (device_config, default_config)
     }
 }
@@ -525,27 +522,60 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                         }
                     }
                 }
-                state.common.config.xkb = value;
+                state.common.config.config.xkb_config = value;
             }
             "input_default" => {
                 let value = get_config::<InputConfig>(&config, "input_default");
-                state.common.config.input_default = value;
+                state.common.config.config.input_default = value;
                 update_input(state);
             }
             "input_touchpad" => {
                 let value = get_config::<InputConfig>(&config, "input_touchpad");
-                state.common.config.input_touchpad = value;
+                state.common.config.config.input_touchpad = value;
                 update_input(state);
             }
             "input_devices" => {
                 let value = get_config::<HashMap<String, InputConfig>>(&config, "input_devices");
-                state.common.config.input_devices = value;
+                state.common.config.config.input_devices = value;
                 update_input(state);
             }
             "workspaces" => {
-                state.common.config.workspace =
+                state.common.config.config.workspaces =
                     get_config::<WorkspaceConfig>(&config, "workspaces");
                 state.common.shell.update_config(&state.common.config);
+            }
+            "autotile" => {
+                let new = get_config::<bool>(&config, "autotile");
+                if new != state.common.config.config.autotile {
+                    state.common.config.config.autotile = new;
+                    let seats: Vec<_> = state.common.seats().cloned().collect();
+                    let mut guard = state.common.shell.workspace_state.update();
+                    state
+                        .common
+                        .shell
+                        .workspaces
+                        .update_autotile(new, &mut guard, seats);
+                }
+            }
+            "tile_all_windows" => {
+                let new = get_config::<bool>(&config, "tile_all_windows");
+                if new != state.common.config.config.tile_all_windows {
+                    state.common.config.config.tile_all_windows = new;
+                    let seats: Vec<_> = state.common.seats().cloned().collect();
+                    let mut guard = state.common.shell.workspace_state.update();
+                    state
+                        .common
+                        .shell
+                        .workspaces
+                        .update_tile_all(new, &mut guard, seats);
+                }
+            }
+            "active_hint" => {
+                let new = get_config::<bool>(&config, "active_hint");
+                if new != state.common.config.config.active_hint {
+                    state.common.config.config.active_hint = new;
+                    state.common.shell.update_config(&state.common.config);
+                }
             }
             _ => {}
         }
