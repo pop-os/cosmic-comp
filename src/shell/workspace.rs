@@ -77,6 +77,7 @@ pub struct Workspace {
     pub output: Output,
     pub tiling_layer: TilingLayout,
     pub floating_layer: FloatingLayout,
+    pub minimized_windows: Vec<MinimizedWindow>,
     pub tiling_enabled: bool,
     pub fullscreen: Option<FullscreenSurface>,
 
@@ -88,6 +89,15 @@ pub struct Workspace {
     pub pending_tokens: HashSet<XdgActivationToken>,
     pub(super) backdrop_id: Id,
     pub dirty: AtomicBool,
+}
+
+#[derive(Debug)]
+pub struct MinimizedWindow {
+    pub window: CosmicMapped,
+    pub previous_layer: ManagedLayer,
+    pub was_fullscreen: Option<FullscreenSurface>,
+    pub was_maximized: bool,
+    pub tiling_state: Option<(id_tree::NodeId, Rectangle<i32, Logical>)>,
 }
 
 #[derive(Debug, Clone)]
@@ -222,6 +232,7 @@ impl Workspace {
             tiling_layer,
             floating_layer,
             tiling_enabled,
+            minimized_windows: Vec::new(),
             fullscreen: None,
             handle,
             focus_stack: FocusStacks::default(),

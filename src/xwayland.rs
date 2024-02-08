@@ -426,6 +426,20 @@ impl XwmHandler for State {
         }
     }
 
+    fn minimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        let surface = CosmicSurface::X11(window);
+        if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
+            self.common.shell.minimize_request(&mapped);
+        }
+    }
+
+    fn unminimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        let surface = CosmicSurface::X11(window);
+        if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
+            self.common.shell.unminimize_request(&mapped);
+        }
+    }
+
     fn fullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
         if let Some(mapped) = self.common.shell.element_for_x11_surface(&window).cloned() {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
