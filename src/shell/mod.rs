@@ -992,6 +992,9 @@ impl Shell {
             vec![
                 ManagementCapabilities::Close,
                 ManagementCapabilities::Activate,
+                ManagementCapabilities::Maximize,
+                ManagementCapabilities::Minimize,
+                ManagementCapabilities::MoveToWorkspace,
             ],
             client_should_see_privileged_protocols,
         );

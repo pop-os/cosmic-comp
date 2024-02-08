@@ -94,6 +94,59 @@ impl ToplevelManagementHandler for State {
             return;
         }
     }
+
+    fn fullscreen(
+        &mut self,
+        _dh: &DisplayHandle,
+        window: &<Self as ToplevelInfoHandler>::Window,
+        output: Option<Output>,
+    ) {
+        if let Some(mapped) = self.common.shell.element_for_surface(window).cloned() {
+            if let Some(output) = output {
+                let workspace = self.common.shell.workspaces.active_mut(&output);
+                workspace.fullscreen_request(window, None);
+            } else if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
+                workspace.fullscreen_request(window, None);
+            }
+        }
+    }
+
+    fn unfullscreen(
+        &mut self,
+        _dh: &DisplayHandle,
+        window: &<Self as ToplevelInfoHandler>::Window,
+    ) {
+        if let Some(mapped) = self.common.shell.element_for_surface(window).cloned() {
+            if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
+                let previous = workspace.unfullscreen_request(window);
+                assert!(previous.is_none());
+            }
+        }
+    }
+
+    fn maximize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
+        if let Some(mapped) = self.common.shell.element_for_surface(window).cloned() {
+            self.common.shell.maximize_request(&mapped);
+        }
+    }
+
+    fn unmaximize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
+        if let Some(mapped) = self.common.shell.element_for_surface(window).cloned() {
+            self.common.shell.unmaximize_request(&mapped);
+        }
+    }
+
+    fn minimize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
+        if let Some(mapped) = self.common.shell.element_for_surface(window).cloned() {
+            self.common.shell.minimize_request(&mapped);
+        }
+    }
+
+    fn unminimize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
+        if let Some(mapped) = self.common.shell.element_for_surface(window).cloned() {
+            self.common.shell.unminimize_request(&mapped);
+        }
+    }
 }
 
 impl ManagementWindow for CosmicSurface {
