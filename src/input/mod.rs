@@ -1655,7 +1655,7 @@ impl State {
                 } else if propagate {
                     match (
                         direction,
-                        self.common.config.config.workspaces.workspace_layout,
+                        self.common.config.cosmic_conf.workspaces.workspace_layout,
                     ) {
                         (Direction::Left, WorkspaceLayout::Horizontal)
                         | (Direction::Up, WorkspaceLayout::Vertical) => self.handle_action(
@@ -1793,7 +1793,7 @@ impl State {
                 } else if propagate {
                     match (
                         direction,
-                        self.common.config.config.workspaces.workspace_layout,
+                        self.common.config.cosmic_conf.workspaces.workspace_layout,
                     ) {
                         (Direction::Left, WorkspaceLayout::Horizontal)
                         | (Direction::Up, WorkspaceLayout::Vertical) => self.handle_action(
@@ -2056,17 +2056,17 @@ impl State {
                 }
             }
             Action::ToggleTiling => {
-                if self.common.config.config.tile_all_windows {
-                    let autotile = !self.common.config.config.autotile;
-                    self.common.config.config.autotile = autotile;
+                if self.common.config.cosmic_conf.tile_all_windows {
+                    let autotile = !self.common.config.cosmic_conf.autotile;
+                    self.common.config.cosmic_conf.autotile = autotile;
                     let seats: Vec<_> = self.common.seats().cloned().collect();
                     let mut guard = self.common.shell.workspace_state.update();
                     self.common.shell.workspaces.update_autotile(
-                        self.common.config.config.autotile,
+                        self.common.config.cosmic_conf.autotile,
                         &mut guard,
                         seats,
                     );
-                    let config = self.common.config.config_helper.clone();
+                    let config = self.common.config.cosmic_helper.clone();
                     thread::spawn(move || {
                         if let Err(err) = config.set("autotile", autotile) {
                             error!(?err, "Failed to update autotile key");

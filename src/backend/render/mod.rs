@@ -578,7 +578,7 @@ where
         Vec::new()
     };
 
-    let active_hint = if state.config.config.active_hint {
+    let active_hint = if state.config.cosmic_conf.active_hint {
         theme.active_hint as u8
     } else {
         0
@@ -668,7 +668,7 @@ where
 
     let offset = match previous.as_ref() {
         Some((previous, previous_idx, start)) => {
-            let layout = state.config.config.workspaces.workspace_layout;
+            let layout = state.config.cosmic_conf.workspaces.workspace_layout;
 
             let workspace = state
                 .shell

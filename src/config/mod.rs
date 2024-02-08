@@ -39,8 +39,8 @@ use cosmic_comp_config::{
 pub struct Config {
     pub static_conf: StaticConfig,
     pub dynamic_conf: DynamicConfig,
-    pub config_helper: cosmic_config::Config,
-    pub config: CosmicCompConfig,
+    pub cosmic_helper: cosmic_config::Config,
+    pub cosmic_conf: CosmicCompConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -177,8 +177,8 @@ impl Config {
         Config {
             static_conf: Self::load_static(xdg.as_ref(), workspace.workspace_layout),
             dynamic_conf: Self::load_dynamic(xdg.as_ref()),
-            config: cosmic_comp_config,
-            config_helper: config,
+            cosmic_conf: cosmic_comp_config,
+            cosmic_helper: config,
         }
     }
 
@@ -407,7 +407,7 @@ impl Config {
     }
 
     pub fn xkb_config(&self) -> XkbConfig {
-        self.config.xkb_config.clone()
+        self.cosmic_conf.xkb_config.clone()
     }
 
     pub fn read_device(&self, device: &mut InputDevice) {
@@ -435,11 +435,11 @@ impl Config {
 
     fn get_device_config(&self, device: &InputDevice) -> (Option<&InputConfig>, &InputConfig) {
         let default_config = if device.config_tap_finger_count() > 0 {
-            &self.config.input_touchpad
+            &self.cosmic_conf.input_touchpad
         } else {
-            &self.config.input_default
+            &self.cosmic_conf.input_default
         };
-        let device_config = self.config.input_devices.get(device.name());
+        let device_config = self.cosmic_conf.input_devices.get(device.name());
         (device_config, default_config)
     }
 }
@@ -522,32 +522,32 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                         }
                     }
                 }
-                state.common.config.config.xkb_config = value;
+                state.common.config.cosmic_conf.xkb_config = value;
             }
             "input_default" => {
                 let value = get_config::<InputConfig>(&config, "input_default");
-                state.common.config.config.input_default = value;
+                state.common.config.cosmic_conf.input_default = value;
                 update_input(state);
             }
             "input_touchpad" => {
                 let value = get_config::<InputConfig>(&config, "input_touchpad");
-                state.common.config.config.input_touchpad = value;
+                state.common.config.cosmic_conf.input_touchpad = value;
                 update_input(state);
             }
             "input_devices" => {
                 let value = get_config::<HashMap<String, InputConfig>>(&config, "input_devices");
-                state.common.config.config.input_devices = value;
+                state.common.config.cosmic_conf.input_devices = value;
                 update_input(state);
             }
             "workspaces" => {
-                state.common.config.config.workspaces =
+                state.common.config.cosmic_conf.workspaces =
                     get_config::<WorkspaceConfig>(&config, "workspaces");
                 state.common.shell.update_config(&state.common.config);
             }
             "autotile" => {
                 let new = get_config::<bool>(&config, "autotile");
-                if new != state.common.config.config.autotile {
-                    state.common.config.config.autotile = new;
+                if new != state.common.config.cosmic_conf.autotile {
+                    state.common.config.cosmic_conf.autotile = new;
                     let seats: Vec<_> = state.common.seats().cloned().collect();
                     let mut guard = state.common.shell.workspace_state.update();
                     state
@@ -559,8 +559,8 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
             }
             "tile_all_windows" => {
                 let new = get_config::<bool>(&config, "tile_all_windows");
-                if new != state.common.config.config.tile_all_windows {
-                    state.common.config.config.tile_all_windows = new;
+                if new != state.common.config.cosmic_conf.tile_all_windows {
+                    state.common.config.cosmic_conf.tile_all_windows = new;
                     let seats: Vec<_> = state.common.seats().cloned().collect();
                     let mut guard = state.common.shell.workspace_state.update();
                     state
@@ -572,8 +572,8 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
             }
             "active_hint" => {
                 let new = get_config::<bool>(&config, "active_hint");
-                if new != state.common.config.config.active_hint {
-                    state.common.config.config.active_hint = new;
+                if new != state.common.config.cosmic_conf.active_hint {
+                    state.common.config.cosmic_conf.active_hint = new;
                     state.common.shell.update_config(&state.common.config);
                 }
             }

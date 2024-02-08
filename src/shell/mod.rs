@@ -490,9 +490,9 @@ impl Workspaces {
         Workspaces {
             sets: IndexMap::new(),
             backup_set: None,
-            mode: config.config.workspaces.workspace_mode,
-            autotile: config.config.autotile,
-            tile_all_windows: config.config.tile_all_windows,
+            mode: config.cosmic_conf.workspaces.workspace_mode,
+            autotile: config.cosmic_conf.autotile,
+            tile_all_windows: config.cosmic_conf.tile_all_windows,
             theme,
         }
     }
@@ -664,7 +664,7 @@ impl Workspaces {
         xdg_activation_state: &XdgActivationState,
     ) {
         let old_mode = self.mode;
-        self.mode = config.config.workspaces.workspace_mode;
+        self.mode = config.cosmic_conf.workspaces.workspace_mode;
 
         if self.sets.len() <= 1 {
             return;
@@ -709,7 +709,7 @@ impl Workspaces {
                                     output,
                                     &set.group,
                                     false,
-                                    config.config.autotile,
+                                    config.cosmic_conf.autotile,
                                     self.theme.clone(),
                                 ),
                             );
@@ -2186,7 +2186,7 @@ impl Shell {
                 };
 
                 let button = start_data.button;
-                let active_hint = if state.common.config.config.active_hint {
+                let active_hint = if state.common.config.cosmic_conf.active_hint {
                     state.common.theme.cosmic().active_hint as u8
                 } else {
                     0
