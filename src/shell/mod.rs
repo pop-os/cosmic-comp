@@ -230,6 +230,7 @@ pub struct WorkspaceSet {
     output: Output,
     theme: cosmic::Theme,
     pub sticky_layer: FloatingLayout,
+    pub minimized_windows: Vec<MinimizedWindow>,
     pub workspaces: Vec<Workspace>,
 }
 
@@ -351,6 +352,7 @@ impl WorkspaceSet {
             tiling_enabled,
             theme,
             sticky_layer,
+            minimized_windows: Vec::new(),
             workspaces,
             output: output.clone(),
         }
@@ -978,6 +980,7 @@ impl Shell {
             [
                 WmCapabilities::Fullscreen,
                 WmCapabilities::Maximize,
+                WmCapabilities::Minimize,
                 WmCapabilities::WindowMenu,
             ],
         );
@@ -2617,6 +2620,10 @@ impl Shell {
             self.maximize_request(window);
         }
     }
+
+    pub fn minimize_request(&mut self, mapped: &CosmicMapped) {}
+
+    pub fn unminimize_request(&mut self, mapped: &CosmicMapped) {}
 
     pub fn maximize_request(&mut self, mapped: &CosmicMapped) {
         let (original_layer, floating_layer, original_geometry) = if let Some(set) = self

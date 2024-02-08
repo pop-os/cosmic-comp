@@ -162,6 +162,17 @@ impl XdgShellHandler for State {
         Shell::resize_request(self, surface.wl_surface(), &seat, serial, edges.into())
     }
 
+    fn minimize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(mapped) = self
+            .common
+            .shell
+            .element_for_wl_surface(surface.wl_surface())
+            .cloned()
+        {
+            self.common.shell.minimize_request(&mapped)
+        }
+    }
+
     fn maximize_request(&mut self, surface: ToplevelSurface) {
         if let Some(mapped) = self
             .common
