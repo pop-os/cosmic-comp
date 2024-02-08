@@ -20,7 +20,8 @@ use crate::{
     },
 };
 use calloop::{timer::Timer, RegistrationToken};
-use cosmic_comp_config::workspace::WorkspaceLayout;
+use cosmic_comp_config::{workspace::WorkspaceLayout, TileBehavior};
+use cosmic_config::ConfigSet;
 use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
 use smithay::{
     backend::input::{
@@ -61,6 +62,7 @@ use std::{
     any::Any,
     cell::RefCell,
     collections::HashMap,
+    thread,
     time::{Duration, Instant},
 };
 
@@ -1651,7 +1653,10 @@ impl State {
                         _ => {}
                     }
                 } else if propagate {
-                    match (direction, self.common.config.workspace.workspace_layout) {
+                    match (
+                        direction,
+                        self.common.config.cosmic_conf.workspaces.workspace_layout,
+                    ) {
                         (Direction::Left, WorkspaceLayout::Horizontal)
                         | (Direction::Up, WorkspaceLayout::Vertical) => self.handle_action(
                             Action::PreviousWorkspace,
@@ -1786,7 +1791,10 @@ impl State {
                         }
                     }
                 } else if propagate {
-                    match (direction, self.common.config.workspace.workspace_layout) {
+                    match (
+                        direction,
+                        self.common.config.cosmic_conf.workspaces.workspace_layout,
+                    ) {
                         (Direction::Left, WorkspaceLayout::Horizontal)
                         | (Direction::Up, WorkspaceLayout::Vertical) => self.handle_action(
                             Action::MoveToPreviousWorkspace,
@@ -2048,10 +2056,31 @@ impl State {
                 }
             }
             Action::ToggleTiling => {
-                let output = seat.active_output();
-                let workspace = self.common.shell.workspaces.active_mut(&output);
-                let mut guard = self.common.shell.workspace_state.update();
-                workspace.toggle_tiling(seat, &mut guard);
+                if matches!(
+                    self.common.config.cosmic_conf.autotile_behavior,
+                    TileBehavior::Global
+                ) {
+                    let autotile = !self.common.config.cosmic_conf.autotile;
+                    self.common.config.cosmic_conf.autotile = autotile;
+                    let seats: Vec<_> = self.common.seats().cloned().collect();
+                    let mut guard = self.common.shell.workspace_state.update();
+                    self.common.shell.workspaces.update_autotile(
+                        self.common.config.cosmic_conf.autotile,
+                        &mut guard,
+                        seats,
+                    );
+                    let config = self.common.config.cosmic_helper.clone();
+                    thread::spawn(move || {
+                        if let Err(err) = config.set("autotile", autotile) {
+                            error!(?err, "Failed to update autotile key");
+                        }
+                    });
+                } else {
+                    let output = seat.active_output();
+                    let workspace = self.common.shell.workspaces.active_mut(&output);
+                    let mut guard = self.common.shell.workspace_state.update();
+                    workspace.toggle_tiling(seat, &mut guard);
+                }
             }
             Action::ToggleWindowFloating => {
                 let output = seat.active_output();

@@ -7,7 +7,7 @@ use std::{
 };
 use wayland_backend::server::ClientId;
 
-use cosmic_comp_config::workspace::WorkspaceMode;
+use cosmic_comp_config::{workspace::WorkspaceMode, TileBehavior};
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::{
     State as WState, TilingState,
 };
@@ -27,7 +27,10 @@ use smithay::{
             ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
             xdg::shell::server::xdg_toplevel::WmCapabilities,
         },
-        wayland_server::{protocol::wl_surface::WlSurface, Client, DisplayHandle},
+        wayland_server::{
+            protocol::{wl_seat::WlSeat, wl_surface::WlSurface},
+            Client, DisplayHandle,
+        },
     },
     utils::{Logical, Point, Rectangle, Serial, Size, SERIAL_COUNTER},
     wayland::{
@@ -477,7 +480,8 @@ pub struct Workspaces {
     pub sets: IndexMap<Output, WorkspaceSet>,
     backup_set: Option<WorkspaceSet>,
     mode: WorkspaceMode,
-    tiling_enabled: bool,
+    autotile: bool,
+    autotile_behavior: TileBehavior,
     theme: cosmic::Theme,
 }
 
@@ -486,8 +490,9 @@ impl Workspaces {
         Workspaces {
             sets: IndexMap::new(),
             backup_set: None,
-            mode: config.workspace.workspace_mode,
-            tiling_enabled: config.static_conf.tiling_enabled,
+            mode: config.cosmic_conf.workspaces.workspace_mode,
+            autotile: config.cosmic_conf.autotile,
+            autotile_behavior: config.cosmic_conf.autotile_behavior,
             theme,
         }
     }
@@ -515,7 +520,7 @@ impl Workspaces {
                     workspace_state,
                     &output,
                     self.sets.len(),
-                    self.tiling_enabled,
+                    self.autotile,
                     self.theme.clone(),
                 )
             });
@@ -659,7 +664,7 @@ impl Workspaces {
         xdg_activation_state: &XdgActivationState,
     ) {
         let old_mode = self.mode;
-        self.mode = config.workspace.workspace_mode;
+        self.mode = config.cosmic_conf.workspaces.workspace_mode;
 
         if self.sets.len() <= 1 {
             return;
@@ -704,7 +709,7 @@ impl Workspaces {
                                     output,
                                     &set.group,
                                     false,
-                                    config.static_conf.tiling_enabled,
+                                    config.cosmic_conf.autotile,
                                     self.theme.clone(),
                                 ),
                             );
@@ -916,6 +921,48 @@ impl Workspaces {
                 w.recalculate();
             }
         }
+    }
+
+    pub fn update_autotile_behavior(
+        &mut self,
+        behavior: TileBehavior,
+        guard: &mut WorkspaceUpdateGuard<'_, State>,
+        seats: Vec<Seat<State>>,
+    ) {
+        self.autotile_behavior = behavior;
+        self.apply_tile_change(guard, seats);
+    }
+
+    fn apply_tile_change(
+        &mut self,
+        guard: &mut WorkspaceUpdateGuard<'_, State>,
+        seats: Vec<Seat<State>>,
+    ) {
+        if matches!(self.autotile_behavior, TileBehavior::Global) {
+            // must apply change to all workspaces now
+            for (_, set) in &mut self.sets {
+                set.tiling_enabled = self.autotile;
+
+                for w in &mut set.workspaces {
+                    if w.tiling_enabled == self.autotile {
+                        continue;
+                    }
+                    for s in &seats {
+                        w.toggle_tiling(s, guard);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn update_autotile(
+        &mut self,
+        autotile: bool,
+        guard: &mut WorkspaceUpdateGuard<'_, State>,
+        seats: Vec<Seat<State>>,
+    ) {
+        self.autotile = autotile;
+        self.apply_tile_change(guard, seats);
     }
 }
 
@@ -2139,7 +2186,11 @@ impl Shell {
                 };
 
                 let button = start_data.button;
-                let active_hint = state.common.theme.cosmic().active_hint as u8;
+                let active_hint = if state.common.config.cosmic_conf.active_hint {
+                    state.common.theme.cosmic().active_hint as u8
+                } else {
+                    0
+                };
                 let pointer = seat.get_pointer().unwrap();
                 let pos = pointer.current_location().as_global();
 

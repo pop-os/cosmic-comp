@@ -578,7 +578,11 @@ where
         Vec::new()
     };
 
-    let active_hint = theme.active_hint as u8;
+    let active_hint = if state.config.cosmic_conf.active_hint {
+        theme.active_hint as u8
+    } else {
+        0
+    };
 
     // overlay redirect windows
     // they need to be over sticky windows, because they could be popups of sticky windows,
@@ -664,7 +668,7 @@ where
 
     let offset = match previous.as_ref() {
         Some((previous, previous_idx, start)) => {
-            let layout = state.config.workspace.workspace_layout;
+            let layout = state.config.cosmic_conf.workspaces.workspace_layout;
 
             let workspace = state
                 .shell
