@@ -27,10 +27,7 @@ use smithay::{
             ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
             xdg::shell::server::xdg_toplevel::WmCapabilities,
         },
-        wayland_server::{
-            protocol::{wl_seat::WlSeat, wl_surface::WlSurface},
-            Client, DisplayHandle,
-        },
+        wayland_server::{protocol::wl_surface::WlSurface, Client, DisplayHandle},
     },
     utils::{Logical, Point, Rectangle, Serial, Size, SERIAL_COUNTER},
     wayland::{
@@ -938,11 +935,11 @@ impl Workspaces {
         guard: &mut WorkspaceUpdateGuard<'_, State>,
         seats: Vec<Seat<State>>,
     ) {
-        if matches!(self.autotile_behavior, TileBehavior::Global) {
-            // must apply change to all workspaces now
-            for (_, set) in &mut self.sets {
-                set.tiling_enabled = self.autotile;
+        for (_, set) in &mut self.sets {
+            set.tiling_enabled = self.autotile;
 
+            if matches!(self.autotile_behavior, TileBehavior::Global) {
+                // must apply change to all workspaces now
                 for w in &mut set.workspaces {
                     if w.tiling_enabled == self.autotile {
                         continue;
