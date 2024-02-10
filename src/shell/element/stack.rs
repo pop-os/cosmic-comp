@@ -17,7 +17,7 @@ use crate::{
 use calloop::LoopHandle;
 use cosmic::{
     iced::{id::Id, widget as iced_widget},
-    iced_core::{Background, BorderRadius, Color, Length},
+    iced_core::{border::Radius, Background, Border, Color, Length},
     iced_runtime::Command,
     iced_widget::scrollable::AbsoluteOffset,
     theme, widget as cosmic_widget, Apply, Element as CosmicElement,
@@ -866,9 +866,12 @@ impl Program for CosmicStackInternal {
                     icon_color: Some(Color::from(theme.cosmic().background.on)),
                     text_color: Some(Color::from(theme.cosmic().background.on)),
                     background: Some(Background::Color(theme.cosmic().accent_color().into())),
-                    border_radius: BorderRadius::from([8.0, 8.0, 0.0, 0.0]),
-                    border_width: 0.0,
-                    border_color: Color::TRANSPARENT,
+                    border: Border {
+                        radius: Radius::from([8.0, 8.0, 0.0, 0.0]),
+                        width: 0.0,
+                        color: Color::TRANSPARENT,
+                    },
+                    shadow: Default::default(),
                 })
             } else {
                 theme::Container::custom(|theme| iced_widget::container::Appearance {
@@ -877,9 +880,12 @@ impl Program for CosmicStackInternal {
                     background: Some(Background::Color(tab::primary_container_color(
                         theme.cosmic(),
                     ))),
-                    border_radius: BorderRadius::from([8.0, 8.0, 0.0, 0.0]),
-                    border_width: 0.0,
-                    border_color: Color::TRANSPARENT,
+                    border: Border {
+                        radius: Radius::from([8.0, 8.0, 0.0, 0.0]),
+                        width: 0.0,
+                        color: Color::TRANSPARENT,
+                    },
+                    shadow: Default::default(),
                 })
             })
             .into()

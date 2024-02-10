@@ -9,7 +9,7 @@ use cosmic::{
         renderer::{self, Renderer as IcedRenderer},
         text::{LineHeight, Paragraph, Renderer as TextRenderer, Shaping},
         widget::{tree, Tree, Widget},
-        Background, Color, Degrees, Gradient, Length, Rectangle, Size, Text,
+        Background, Border, Color, Degrees, Gradient, Length, Rectangle, Size, Text,
     },
 };
 
@@ -86,7 +86,7 @@ impl TabText {
     }
 }
 
-impl<Message> Widget<Message, cosmic::Renderer> for TabText {
+impl<Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for TabText {
     fn tag(&self) -> tree::Tag {
         tree::Tag::of::<LocalState>()
     }
@@ -99,20 +99,15 @@ impl<Message> Widget<Message, cosmic::Renderer> for TabText {
         })
     }
 
-    fn width(&self) -> Length {
-        self.width
-    }
-    fn height(&self) -> Length {
-        self.height
+    fn size(&self) -> Size<Length> {
+        Size::new(self.width, self.height)
     }
 
     fn layout(&self, tree: &mut Tree, _renderer: &cosmic::Renderer, limits: &Limits) -> Node {
-        let limits = limits.width(self.width).height(self.height);
-
         let state = tree.state.downcast_mut::<LocalState>();
         let text_bounds = state.paragraph.min_bounds();
         state.overflowed = limits.max().width < text_bounds.width;
-        let actual_size = limits.resolve(text_bounds);
+        let actual_size = limits.resolve(self.width, self.height, text_bounds);
 
         Node::new(actual_size)
     }
@@ -163,9 +158,12 @@ impl<Message> Widget<Message, cosmic::Renderer> for TabText {
                         width: 24.0_f32.min(bounds.width),
                         ..bounds
                     },
-                    border_radius: 0.0.into(),
-                    border_width: 0.0,
-                    border_color: Color::TRANSPARENT,
+                    border: Border {
+                        radius: 0.0.into(),
+                        width: 0.0,
+                        color: Color::TRANSPARENT,
+                    },
+                    shadow: Default::default(),
                 },
                 Background::Gradient(Gradient::Linear(
                     gradient::Linear::new(Degrees(90.))

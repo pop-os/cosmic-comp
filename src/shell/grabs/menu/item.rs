@@ -4,28 +4,20 @@ use cosmic::{
         event, layout, mouse, overlay,
         renderer::{Quad, Style},
         widget::{tree, Id, OperationOutputWrapper, Tree, Widget},
-        Background, Clipboard, Color, Event, Layout, Length, Rectangle, Renderer as IcedRenderer,
-        Shell,
+        Background, Border, Clipboard, Color, Event, Layout, Length, Rectangle,
+        Renderer as IcedRenderer, Shell, Size,
     },
     widget::button::StyleSheet,
 };
 
-pub struct SubmenuItem<'a, Message, Renderer>
-where
-    Renderer: IcedRenderer,
-    Renderer::Theme: StyleSheet,
-{
-    elem: Element<'a, Message, Renderer>,
+pub struct SubmenuItem<'a, Message> {
+    elem: cosmic::Element<'a, Message>,
     idx: usize,
-    styling: <Renderer::Theme as StyleSheet>::Style,
+    styling: <cosmic::Theme as StyleSheet>::Style,
 }
 
-impl<'a, Message, Renderer> SubmenuItem<'a, Message, Renderer>
-where
-    Renderer: IcedRenderer,
-    Renderer::Theme: StyleSheet,
-{
-    pub fn new(elem: impl Into<Element<'a, Message, Renderer>>, idx: usize) -> Self {
+impl<'a, Message> SubmenuItem<'a, Message> {
+    pub fn new(elem: impl Into<cosmic::Element<'a, Message>>, idx: usize) -> Self {
         Self {
             elem: elem.into(),
             idx,
@@ -33,7 +25,7 @@ where
         }
     }
 
-    pub fn style(mut self, style: <Renderer::Theme as StyleSheet>::Style) -> Self {
+    pub fn style(mut self, style: <cosmic::Theme as StyleSheet>::Style) -> Self {
         self.styling = style;
         self
     }
@@ -48,28 +40,22 @@ struct State {
     cursor_over: bool,
 }
 
-impl<'a, Message, Renderer> Widget<Message, Renderer> for SubmenuItem<'a, Message, Renderer>
+impl<'a, Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for SubmenuItem<'a, Message>
 where
-    Renderer: IcedRenderer,
-    Renderer::Theme: StyleSheet,
     Message: CursorEvents,
 {
     fn id(&self) -> Option<Id> {
         None
     }
 
-    fn width(&self) -> Length {
-        self.elem.as_widget().width()
-    }
-
-    fn height(&self) -> Length {
-        self.elem.as_widget().height()
+    fn size(&self) -> Size<Length> {
+        self.elem.as_widget().size()
     }
 
     fn layout(
         &self,
         state: &mut Tree,
-        renderer: &Renderer,
+        renderer: &cosmic::Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
         let state = &mut state.children[0];
@@ -80,8 +66,8 @@ where
     fn draw(
         &self,
         state: &Tree,
-        renderer: &mut Renderer,
-        theme: &<Renderer as IcedRenderer>::Theme,
+        renderer: &mut cosmic::Renderer,
+        theme: &cosmic::Theme,
         style: &Style,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
@@ -89,17 +75,20 @@ where
     ) {
         let widget_state = state.state.downcast_ref::<State>();
         let styling = if widget_state.cursor_over {
-            theme.hovered(true, &self.styling)
+            theme.hovered(true, false, &self.styling)
         } else {
-            theme.active(true, &self.styling)
+            theme.active(true, false, &self.styling)
         };
 
         renderer.fill_quad(
             Quad {
                 bounds: layout.bounds(),
-                border_radius: styling.border_radius,
-                border_width: styling.border_width,
-                border_color: styling.border_color,
+                border: Border {
+                    radius: styling.border_radius,
+                    width: styling.border_width,
+                    color: styling.border_color,
+                },
+                shadow: Default::default(),
             },
             styling
                 .background
@@ -143,7 +132,7 @@ where
         &self,
         state: &mut Tree,
         layout: Layout<'_>,
-        renderer: &Renderer,
+        renderer: &cosmic::Renderer,
         operation: &mut dyn cosmic::widget::Operation<OperationOutputWrapper<Message>>,
     ) {
         let state = &mut state.children[0];
@@ -159,7 +148,7 @@ where
         event: Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
-        renderer: &Renderer,
+        renderer: &cosmic::Renderer,
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
@@ -203,7 +192,7 @@ where
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
-        renderer: &Renderer,
+        renderer: &cosmic::Renderer,
     ) -> mouse::Interaction {
         let state = &state.children[0];
         let layout = layout.children().next().unwrap();
@@ -216,22 +205,19 @@ where
         &'b mut self,
         state: &'b mut Tree,
         layout: Layout<'_>,
-        renderer: &Renderer,
-    ) -> Option<overlay::Element<'b, Message, Renderer>> {
+        renderer: &cosmic::Renderer,
+    ) -> Option<overlay::Element<'b, Message, cosmic::Theme, cosmic::Renderer>> {
         let state = &mut state.children[0];
         let layout = layout.children().next().unwrap();
         self.elem.as_widget_mut().overlay(state, layout, renderer)
     }
 }
 
-impl<'a, Message, Renderer> Into<Element<'a, Message, Renderer>>
-    for SubmenuItem<'a, Message, Renderer>
+impl<'a, Message> Into<cosmic::Element<'a, Message>> for SubmenuItem<'a, Message>
 where
-    Renderer: IcedRenderer + 'a,
-    Renderer::Theme: StyleSheet,
     Message: CursorEvents + 'a,
 {
-    fn into(self) -> Element<'a, Message, Renderer> {
+    fn into(self) -> cosmic::Element<'a, Message> {
         Element::new(self)
     }
 }

@@ -6,7 +6,7 @@ use crate::{
 use calloop::LoopHandle;
 use cosmic::{
     iced::widget::{container, horizontal_space, row},
-    iced_core::{Alignment, Background, Color, Length},
+    iced_core::{Alignment, Background, Border, Color, Length},
     theme,
     widget::{icon::from_name, text},
     Apply,
@@ -27,7 +27,7 @@ pub struct SwapIndicatorInternal;
 impl Program for SwapIndicatorInternal {
     type Message = ();
 
-    fn view(&self) -> crate::utils::iced::Element<'_, Self::Message> {
+    fn view(&self) -> cosmic::Element<'_, Self::Message> {
         row(vec![
             from_name("window-swap-symbolic")
                 .size(32)
@@ -50,9 +50,12 @@ impl Program for SwapIndicatorInternal {
             icon_color: Some(Color::from(theme.cosmic().accent.on)),
             text_color: Some(Color::from(theme.cosmic().accent.on)),
             background: Some(Background::Color(theme.cosmic().accent_color().into())),
-            border_radius: 18.0.into(),
-            border_width: 0.0,
-            border_color: Color::TRANSPARENT,
+            border: Border {
+                radius: 18.0.into(),
+                width: 0.0,
+                color: Color::TRANSPARENT,
+            },
+            shadow: Default::default(),
         }))
         .width(Length::Shrink)
         .height(Length::Shrink)

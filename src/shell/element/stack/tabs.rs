@@ -13,7 +13,8 @@ use cosmic::{
             tree::{self, Tree},
             Widget,
         },
-        Background, Clipboard, Color, Length, Point, Rectangle, Renderer, Shell, Size, Vector,
+        Background, Border, Clipboard, Color, Length, Point, Rectangle, Renderer, Shell, Size,
+        Vector,
     },
     iced_style::container::StyleSheet as ContainerStyleSheet,
     iced_widget::container::draw_background,
@@ -291,15 +292,12 @@ impl State {
     }
 }
 
-impl<'a, Message> Widget<Message, cosmic::Renderer> for Tabs<'a, Message>
+impl<'a, Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for Tabs<'a, Message>
 where
     Message: TabMessage,
 {
-    fn width(&self) -> Length {
-        self.width
-    }
-    fn height(&self) -> Length {
-        self.height
+    fn size(&self) -> Size<Length> {
+        Size::new(self.width, self.height)
     }
 
     fn id(&self) -> Option<Id> {
@@ -352,7 +350,7 @@ where
                 width: a.width + b.width,
                 height: a.height.max(b.height),
             });
-        let size = limits.resolve(min_size);
+        let size = limits.resolve(self.width, self.height, min_size);
 
         if min_size.width <= size.width {
             // we don't need to scroll
@@ -366,6 +364,8 @@ where
                     cosmic::iced_core::layout::flex::Axis::Horizontal,
                     renderer,
                     &limits,
+                    self.width,
+                    self.height,
                     0.into(),
                     0.,
                     cosmic::iced::Alignment::Center,
@@ -392,15 +392,14 @@ where
                         .height(Length::Shrink);
 
                         let mut node = tab.as_widget().layout(tab_tree, renderer, &child_limits);
-                        node.move_to(Point::new(offset, 0.));
+                        node = node.move_to(Point::new(offset, 0.));
                         offset += node.bounds().width;
                         node
                     })
                     .collect::<Vec<_>>();
                 nodes.push({
-                    let mut node = Node::new(Size::new(4., limits.max().height));
-                    node.move_to(Point::new(offset, 0.));
-                    node
+                    let node = Node::new(Size::new(4., limits.max().height));
+                    node.move_to(Point::new(offset, 0.))
                 });
                 nodes
             };
@@ -424,7 +423,7 @@ where
             // we scroll, so use the computed min size, but add scroll buttons.
             let mut offset = 30.;
             for node in &mut nodes {
-                node.move_to(Point::new(offset, 0.));
+                *node = node.clone().move_to(Point::new(offset, 0.));
                 offset += node.bounds().width;
             }
             let last_position = Point::new(size.width - 34., 0.);
@@ -437,7 +436,7 @@ where
                         Size::new(16., 16.),
                         vec![Node::new(Size::new(16., 16.))],
                     );
-                    node.move_to(Point::new(9., (size.height - 16.) / 2.));
+                    node = node.move_to(Point::new(9., (size.height - 16.) / 2.));
                     node
                 }]
                 .into_iter()
@@ -445,7 +444,7 @@ where
                 .chain(vec![
                     {
                         let mut node = Node::new(Size::new(4., size.height));
-                        node.move_to(last_position);
+                        node = node.move_to(last_position);
                         node
                     },
                     {
@@ -453,12 +452,13 @@ where
                             Size::new(16., 16.),
                             vec![Node::new(Size::new(16., 16.))],
                         );
-                        node.move_to(last_position + Vector::new(9., (size.height - 16.) / 2.));
+                        node =
+                            node.move_to(last_position + Vector::new(9., (size.height - 16.) / 2.));
                         node
                     },
                     {
                         let mut node = Node::new(Size::new(4., size.height));
-                        node.move_to(last_position + Vector::new(30., 0.));
+                        node = node.move_to(last_position + Vector::new(30., 0.));
                         node
                     },
                 ])
@@ -498,9 +498,12 @@ where
                 background: Some(Background::Color(super::tab::primary_container_color(
                     theme.cosmic(),
                 ))),
-                border_radius: 0.0.into(),
-                border_width: 0.0,
-                border_color: Color::TRANSPARENT,
+                border: Border {
+                    radius: 0.0.into(),
+                    width: 0.0,
+                    color: Color::TRANSPARENT,
+                },
+                shadow: Default::default(),
             }),
         );
         draw_background(renderer, &background_style, bounds);
@@ -990,7 +993,7 @@ where
         tree: &'b mut Tree,
         layout: Layout<'_>,
         renderer: &cosmic::Renderer,
-    ) -> Option<overlay::Element<'b, Message, cosmic::Renderer>> {
+    ) -> Option<overlay::Element<'b, Message, cosmic::Theme, cosmic::Renderer>> {
         overlay::from_children(&mut self.elements, tree, layout, renderer)
     }
 }

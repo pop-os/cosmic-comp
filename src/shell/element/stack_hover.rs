@@ -6,7 +6,7 @@ use crate::{
 use calloop::LoopHandle;
 use cosmic::{
     iced::widget::{container, row},
-    iced_core::{Background, Color, Length},
+    iced_core::{Background, Border, Color, Length},
     theme,
     widget::{icon::from_name, text},
     Apply,
@@ -28,7 +28,7 @@ pub struct StackHoverInternal;
 impl Program for StackHoverInternal {
     type Message = ();
 
-    fn view(&self) -> crate::utils::iced::Element<'_, Self::Message> {
+    fn view(&self) -> cosmic::Element<'_, Self::Message> {
         row(vec![
             from_name("window-stack-symbolic")
                 .size(24)
@@ -60,9 +60,12 @@ impl Program for StackHoverInternal {
             icon_color: Some(Color::from(theme.cosmic().accent.on)),
             text_color: Some(Color::from(theme.cosmic().accent.on)),
             background: Some(Background::Color(theme.cosmic().accent_color().into())),
-            border_radius: 24.0.into(),
-            border_width: 0.0,
-            border_color: Color::TRANSPARENT,
+            border: Border {
+                radius: 24.0.into(),
+                width: 0.0,
+                color: Color::TRANSPARENT,
+            },
+            shadow: Default::default(),
         }))
         .width(Length::Shrink)
         .height(Length::Fixed(48.))
