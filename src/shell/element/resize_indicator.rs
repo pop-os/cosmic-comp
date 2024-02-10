@@ -10,7 +10,7 @@ use crate::{
 use calloop::LoopHandle;
 use cosmic::{
     iced::widget::{column, container, horizontal_space, row, vertical_space},
-    iced_core::{Background, Color, Length},
+    iced_core::{Background, Border, Color, Length},
     theme,
     widget::{icon::from_name, text},
     Apply,
@@ -64,16 +64,19 @@ pub struct ResizeIndicatorInternal {
 impl Program for ResizeIndicatorInternal {
     type Message = ();
 
-    fn view(&self) -> crate::utils::iced::Element<'_, Self::Message> {
+    fn view(&self) -> cosmic::Element<'_, Self::Message> {
         let edges = self.edges.lock().unwrap();
         let icon_container_style = || {
             theme::Container::custom(|theme| container::Appearance {
                 icon_color: Some(Color::from(theme.cosmic().accent.on)),
                 text_color: Some(Color::from(theme.cosmic().accent.on)),
                 background: Some(Background::Color(theme.cosmic().accent_color().into())),
-                border_radius: 18.0.into(),
-                border_width: 0.0,
-                border_color: Color::TRANSPARENT,
+                border: Border {
+                    radius: 18.0.into(),
+                    width: 0.0,
+                    color: Color::TRANSPARENT,
+                },
+                shadow: Default::default(),
             })
         };
 

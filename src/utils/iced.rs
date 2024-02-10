@@ -16,7 +16,7 @@ use cosmic::{
         Command, Limits, Point as IcedPoint, Rectangle as IcedRectangle, Size as IcedSize,
     },
     iced_core::{clipboard::Null as NullClipboard, renderer::Style, Color, Font, Length, Pixels},
-    iced_renderer::{graphics::Renderer as IcedGraphicsRenderer, Renderer as IcedRenderer},
+    iced_renderer::graphics::Renderer as IcedGraphicsRenderer,
     iced_runtime::{
         command::Action,
         program::{Program as IcedProgram, State},
@@ -28,7 +28,6 @@ use iced_tiny_skia::{
     graphics::{damage, Viewport},
     Backend, Primitive,
 };
-pub type Element<'a, Message> = cosmic::iced::Element<'a, Message, IcedRenderer<Theme>>;
 
 use ordered_float::OrderedFloat;
 use smithay::{
@@ -104,7 +103,7 @@ pub trait Program {
         let _ = (message, loop_handle);
         Command::none()
     }
-    fn view(&self) -> Element<'_, Self::Message>;
+    fn view(&self) -> cosmic::Element<'_, Self::Message>;
 
     fn background_color(&self) -> Color {
         Color::TRANSPARENT
@@ -123,13 +122,14 @@ pub trait Program {
 struct ProgramWrapper<P: Program>(P, LoopHandle<'static, crate::state::State>);
 impl<P: Program> IcedProgram for ProgramWrapper<P> {
     type Message = <P as Program>::Message;
-    type Renderer = IcedRenderer<Theme>;
+    type Renderer = cosmic::Renderer;
+    type Theme = cosmic::Theme;
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         self.0.update(message, &self.1)
     }
 
-    fn view(&self) -> Element<'_, Self::Message> {
+    fn view(&self) -> cosmic::Element<'_, Self::Message> {
         self.0.view()
     }
 }
@@ -146,7 +146,7 @@ struct IcedElementInternal<P: Program + Send + 'static> {
 
     // iced
     theme: Theme,
-    renderer: IcedRenderer<Theme>,
+    renderer: cosmic::Renderer,
     state: State<ProgramWrapper<P>>,
     debug: Debug,
 
@@ -171,7 +171,7 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
         if !self.state.is_queue_empty() {
             tracing::warn!("Missing force_update call");
         }
-        let mut renderer = IcedRenderer::TinySkia(IcedGraphicsRenderer::new(
+        let mut renderer = cosmic::Renderer::TinySkia(IcedGraphicsRenderer::new(
             Backend::new(),
             Font::default(),
             Pixels(16.0),
@@ -236,7 +236,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         theme: cosmic::Theme,
     ) -> IcedElement<P> {
         let size = size.into();
-        let mut renderer = IcedRenderer::TinySkia(IcedGraphicsRenderer::new(
+        let mut renderer = cosmic::Renderer::TinySkia(IcedGraphicsRenderer::new(
             Backend::new(),
             Font::default(),
             Pixels(16.0),
@@ -772,7 +772,7 @@ where
                 .to_i32_round();
 
             if size.w > 0 && size.h > 0 {
-                let IcedRenderer::TinySkia(renderer) = &mut internal_ref.renderer;
+                let cosmic::Renderer::TinySkia(renderer) = &mut internal_ref.renderer;
                 let state_ref = &internal_ref.state;
                 let mut clip_mask = tiny_skia::Mask::new(size.w as u32, size.h as u32).unwrap();
                 let overlay = internal_ref.debug.overlay();

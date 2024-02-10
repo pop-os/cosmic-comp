@@ -9,7 +9,7 @@ use std::{
 use calloop::LoopHandle;
 use cosmic::{
     iced::Background,
-    iced_core::{alignment::Horizontal, Length, Pixels, Rectangle as IcedRectangle},
+    iced_core::{alignment::Horizontal, Border, Length, Pixels, Rectangle as IcedRectangle},
     iced_widget::{self, horizontal_rule, text::Appearance as TextAppearance, Column, Row},
     theme,
     widget::{button, horizontal_space, icon::from_name, text},
@@ -319,7 +319,7 @@ impl Program for ContextMenu {
         Command::none()
     }
 
-    fn view(&self) -> crate::utils::iced::Element<'_, Self::Message> {
+    fn view(&self) -> cosmic::Element<'_, Self::Message> {
         let width = self
             .row_width
             .lock()
@@ -331,99 +331,93 @@ impl Program for ContextMenu {
             _ => Length::Fill,
         };
 
-        Column::with_children(
-            self.items
-                .iter()
-                .enumerate()
-                .map(|(idx, item)| match item {
-                    Item::Separator => horizontal_rule(1)
-                        .style(theme::Rule::LightDivider)
-                        .width(mode)
-                        .into(),
-                    Item::Submenu { title, .. } => Row::with_children(vec![
-                        horizontal_space(16).into(),
-                        text(title).width(mode).into(),
-                        from_name("go-next-symbolic")
-                            .size(16)
-                            .prefer_svg(true)
-                            .icon()
-                            .into(),
-                    ])
-                    .spacing(8)
-                    .width(width)
-                    .padding([8, 24])
-                    .apply(|row| item::SubmenuItem::new(row, idx))
-                    .style(theme::Button::MenuItem)
+        Column::with_children(self.items.iter().enumerate().map(|(idx, item)| {
+            match item {
+                Item::Separator => horizontal_rule(1)
+                    .style(theme::Rule::LightDivider)
+                    .width(mode)
                     .into(),
-                    Item::Entry {
-                        title,
-                        shortcut,
-                        toggled,
-                        disabled,
-                        ..
-                    } => {
-                        let mut components = vec![
-                            if *toggled {
-                                from_name("object-select-symbolic")
-                                    .size(16)
-                                    .prefer_svg(true)
-                                    .icon()
-                                    .style(theme::Svg::custom(|theme| {
-                                        iced_widget::svg::Appearance {
-                                            color: Some(theme.cosmic().accent.base.into()),
-                                        }
-                                    }))
-                                    .into()
-                            } else {
-                                horizontal_space(16).into()
-                            },
-                            text(title)
-                                .width(mode)
-                                .style(if *disabled {
-                                    theme::Text::Custom(|theme| {
-                                        let mut color = theme.cosmic().background.component.on;
-                                        color.alpha *= 0.5;
-                                        TextAppearance {
-                                            color: Some(color.into()),
-                                        }
-                                    })
-                                } else {
-                                    theme::Text::Default
-                                })
-                                .into(),
-                        ];
-                        if let Some(shortcut) = shortcut.as_ref() {
-                            components.push(
-                                text(shortcut)
-                                    .line_height(Pixels(20.))
-                                    .size(14)
-                                    .horizontal_alignment(Horizontal::Right)
-                                    .width(Length::Shrink)
-                                    .style(theme::Text::Custom(|theme| {
-                                        let mut color = theme.cosmic().background.component.on;
-                                        color.alpha *= 0.75;
-                                        TextAppearance {
-                                            color: Some(color.into()),
-                                        }
-                                    }))
-                                    .into(),
-                            );
-                        }
-                        components.push(horizontal_space(16).into());
-
-                        Row::with_children(components)
-                            .spacing(8)
+                Item::Submenu { title, .. } => Row::with_children(vec![
+                    horizontal_space(16).into(),
+                    text(title).width(mode).into(),
+                    from_name("go-next-symbolic")
+                        .size(16)
+                        .prefer_svg(true)
+                        .icon()
+                        .into(),
+                ])
+                .spacing(8)
+                .width(width)
+                .padding([8, 24])
+                .apply(|row| item::SubmenuItem::new(row, idx))
+                .style(theme::Button::MenuItem)
+                .into(),
+                Item::Entry {
+                    title,
+                    shortcut,
+                    toggled,
+                    disabled,
+                    ..
+                } => {
+                    let mut components = vec![
+                        if *toggled {
+                            from_name("object-select-symbolic")
+                                .size(16)
+                                .prefer_svg(true)
+                                .icon()
+                                .style(theme::Svg::custom(|theme| iced_widget::svg::Appearance {
+                                    color: Some(theme.cosmic().accent.base.into()),
+                                }))
+                                .into()
+                        } else {
+                            horizontal_space(16).into()
+                        },
+                        text(title)
                             .width(mode)
-                            .apply(button)
-                            .width(width)
-                            .padding([8, 24])
-                            .on_press_maybe((!disabled).then_some(Message::ItemPressed(idx)))
-                            .style(theme::Button::MenuItem)
-                            .into()
+                            .style(if *disabled {
+                                theme::Text::Custom(|theme| {
+                                    let mut color = theme.cosmic().background.component.on;
+                                    color.alpha *= 0.5;
+                                    TextAppearance {
+                                        color: Some(color.into()),
+                                    }
+                                })
+                            } else {
+                                theme::Text::Default
+                            })
+                            .into(),
+                    ];
+                    if let Some(shortcut) = shortcut.as_ref() {
+                        components.push(
+                            text(shortcut)
+                                .line_height(Pixels(20.))
+                                .size(14)
+                                .horizontal_alignment(Horizontal::Right)
+                                .width(Length::Shrink)
+                                .style(theme::Text::Custom(|theme| {
+                                    let mut color = theme.cosmic().background.component.on;
+                                    color.alpha *= 0.75;
+                                    TextAppearance {
+                                        color: Some(color.into()),
+                                    }
+                                }))
+                                .into(),
+                        );
                     }
-                })
-                .collect(),
-        )
+                    components.push(horizontal_space(16).into());
+
+                    Row::with_children(components)
+                        .spacing(8)
+                        .width(mode)
+                        .apply(button)
+                        .width(width)
+                        .padding([8, 24])
+                        .on_press_maybe((!disabled).then_some(Message::ItemPressed(idx)))
+                        .style(theme::Button::MenuItem)
+                        .into()
+                }
+            }
+        }))
         .width(Length::Shrink)
         .apply(iced_widget::container)
         .padding(1)
@@ -434,9 +428,12 @@ impl Program for ContextMenu {
                 icon_color: Some(cosmic.accent.base.into()),
                 text_color: Some(component.on.into()),
                 background: Some(Background::Color(component.base.into())),
-                border_radius: 8.0.into(),
-                border_width: 1.0,
-                border_color: component.divider.into(),
+                border: Border {
+                    radius: 8.0.into(),
+                    width: 1.0,
+                    color: component.divider.into(),
+                },
+                shadow: Default::default(),
             }
         }))
         .width(Length::Shrink)

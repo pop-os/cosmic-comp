@@ -10,7 +10,7 @@ use cosmic::{
             tree::Tree,
             Id, Widget,
         },
-        Clipboard, Color, Length, Rectangle, Shell, Size,
+        Border, Clipboard, Color, Length, Rectangle, Shell, Size,
     },
     iced_widget::scrollable::AbsoluteOffset,
     theme,
@@ -104,9 +104,12 @@ impl From<TabBackgroundTheme> for theme::Container {
                     icon_color: Some(Color::from(theme.cosmic().accent_text_color())),
                     text_color: Some(Color::from(theme.cosmic().accent_text_color())),
                     background: Some(background_theme.background_color(theme).into()),
-                    border_radius: 0.0.into(),
-                    border_width: 0.0,
-                    border_color: Color::TRANSPARENT,
+                    border: Border {
+                        radius: 0.0.into(),
+                        width: 0.0,
+                        color: Color::TRANSPARENT,
+                    },
+                    shadow: Default::default(),
                 })
             }
             TabBackgroundTheme::ActiveDeactivated => {
@@ -114,9 +117,12 @@ impl From<TabBackgroundTheme> for theme::Container {
                     icon_color: None,
                     text_color: None,
                     background: Some(background_theme.background_color(theme).into()),
-                    border_radius: 0.0.into(),
-                    border_width: 0.0,
-                    border_color: Color::TRANSPARENT,
+                    border: Border {
+                        radius: 0.0.into(),
+                        width: 0.0,
+                        color: Color::TRANSPARENT,
+                    },
+                    shadow: Default::default(),
                 })
             }
             TabBackgroundTheme::Default => Self::Transparent,
@@ -203,7 +209,7 @@ impl<Message: TabMessage + 'static> Tab<Message> {
         self
     }
 
-    pub(super) fn internal(self, idx: usize) -> TabInternal<'static, Message> {
+    pub(super) fn internal<'a>(self, idx: usize) -> TabInternal<'a, Message> {
         let mut close_button = from_name("window-close-symbolic")
             .size(16)
             .prefer_svg(true)
@@ -270,7 +276,10 @@ pub(super) struct TabInternal<'a, Message: TabMessage> {
     right_click_message: Option<Message>,
 }
 
-impl<'a, Message: TabMessage> Widget<Message, cosmic::Renderer> for TabInternal<'a, Message> {
+impl<'a, Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for TabInternal<'a, Message>
+where
+    Message: TabMessage,
+{
     fn id(&self) -> Option<Id> {
         Some(self.id.clone())
     }
@@ -283,12 +292,8 @@ impl<'a, Message: TabMessage> Widget<Message, cosmic::Renderer> for TabInternal<
         tree.diff_children(&mut self.elements);
     }
 
-    fn width(&self) -> Length {
-        Length::Fill
-    }
-
-    fn height(&self) -> Length {
-        Length::Fill
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Fill, Length::Fill)
     }
 
     fn layout(&self, tree: &mut Tree, renderer: &cosmic::Renderer, limits: &Limits) -> Node {
@@ -305,7 +310,9 @@ impl<'a, Message: TabMessage> Widget<Message, cosmic::Renderer> for TabInternal<
             .min_height(min_size.height)
             .width(Length::Fill)
             .height(Length::Fill);
-        let size = limits.resolve(min_size).max(min_size);
+        let size = limits
+            .resolve(Length::Shrink, Length::Shrink, min_size)
+            .max(min_size);
 
         let limits = Limits::new(size, size)
             .min_width(size.width)
@@ -316,6 +323,8 @@ impl<'a, Message: TabMessage> Widget<Message, cosmic::Renderer> for TabInternal<
             cosmic::iced_core::layout::flex::Axis::Horizontal,
             renderer,
             &limits,
+            Length::Fill,
+            Length::Fill,
             0.into(),
             8.,
             cosmic::iced::Alignment::Center,
@@ -474,7 +483,7 @@ impl<'a, Message: TabMessage> Widget<Message, cosmic::Renderer> for TabInternal<
         tree: &'b mut Tree,
         layout: Layout<'_>,
         renderer: &cosmic::Renderer,
-    ) -> Option<overlay::Element<'b, Message, cosmic::Renderer>> {
+    ) -> Option<overlay::Element<'b, Message, cosmic::Theme, cosmic::Renderer>> {
         overlay::from_children(&mut self.elements, tree, layout, renderer)
     }
 }
