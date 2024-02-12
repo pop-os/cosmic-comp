@@ -6,8 +6,8 @@ use smithay::{
         allocator::Fourcc,
         renderer::{
             element::{
+                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
                 surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
-                texture::{TextureBuffer, TextureRenderElement},
                 Kind,
             },
             ImportAll, ImportMem, Renderer,
@@ -22,14 +22,7 @@ use smithay::{
     utils::{IsAlive, Logical, Monotonic, Point, Scale, Time, Transform},
     wayland::compositor::{get_role, with_states},
 };
-use std::{
-    any::{Any, TypeId},
-    cell::RefCell,
-    collections::HashMap,
-    io::Read,
-    sync::Mutex,
-    time::Duration,
-};
+use std::{cell::RefCell, collections::HashMap, io::Read, sync::Mutex, time::Duration};
 use tracing::warn;
 use xcursor::{
     parser::{parse_xcursor, Image},
@@ -137,8 +130,8 @@ fn load_icon(theme: &CursorTheme, shape: CursorShape) -> Result<Vec<Image>, Erro
 }
 
 render_elements! {
-    pub CursorRenderElement<R> where R: ImportAll;
-    Static=TextureRenderElement<<R as Renderer>::TextureId>,
+    pub CursorRenderElement<R> where R: ImportAll + ImportMem;
+    Static=MemoryRenderBufferRenderElement<R>,
     Surface=WaylandSurfaceRenderElement<R>,
 }
 
@@ -209,7 +202,7 @@ pub struct CursorState {
     current_cursor: RefCell<CursorShape>,
     pub cursors: HashMap<CursorShape, Cursor>,
     current_image: RefCell<Option<Image>>,
-    image_cache: RefCell<HashMap<(TypeId, usize), Vec<(Image, Box<dyn Any + 'static>)>>>,
+    image_cache: RefCell<Vec<(Image, MemoryRenderBuffer)>>,
 }
 
 impl CursorState {
@@ -255,7 +248,7 @@ impl Default for CursorState {
                 map
             },
             current_image: RefCell::new(None),
-            image_cache: RefCell::new(HashMap::new()),
+            image_cache: RefCell::new(Vec::new()),
         }
     }
 }
@@ -307,34 +300,25 @@ where
                 Into::<Duration>::into(time).as_millis() as u32,
             );
 
-        let mut cache = state.image_cache.borrow_mut();
-        let pointer_images = cache
-            .entry((TypeId::of::<TextureBuffer<R::TextureId>>(), renderer.id()))
-            .or_default();
+        let mut pointer_images = state.image_cache.borrow_mut();
 
-        let maybe_image = pointer_images
-            .iter()
-            .find_map(|(image, texture)| if image == &frame { Some(texture) } else { None })
-            .and_then(|texture| texture.downcast_ref::<TextureBuffer<R::TextureId>>());
+        let maybe_image =
+            pointer_images
+                .iter()
+                .find_map(|(image, texture)| if image == &frame { Some(texture) } else { None });
         let pointer_image = match maybe_image {
             Some(image) => image,
             None => {
-                let texture = TextureBuffer::from_memory(
-                    renderer,
+                let buffer = MemoryRenderBuffer::from_slice(
                     &frame.pixels_rgba,
-                    Fourcc::Abgr8888,
+                    Fourcc::Argb8888,
                     (frame.width as i32, frame.height as i32),
-                    false,
                     integer_scale as i32,
                     Transform::Normal,
                     None,
-                )
-                .expect("Failed to import cursor bitmap");
-                pointer_images.push((frame.clone(), Box::new(texture.clone())));
-                pointer_images
-                    .last()
-                    .and_then(|(_, i)| i.downcast_ref::<TextureBuffer<R::TextureId>>())
-                    .unwrap()
+                );
+                pointer_images.push((frame.clone(), buffer));
+                pointer_images.last().map(|(_, i)| i).unwrap()
             }
         };
 
@@ -342,14 +326,16 @@ where
         *state.current_image.borrow_mut() = Some(frame);
 
         return vec![CursorRenderElement::Static(
-            TextureRenderElement::from_texture_buffer(
+            MemoryRenderBufferRenderElement::from_buffer(
+                renderer,
                 (location - hotspot).to_physical(scale),
                 pointer_image,
                 None,
                 None,
                 None,
                 Kind::Cursor,
-            ),
+            )
+            .expect("Failed to import cursor bitmap"),
         )];
     } else {
         Vec::new()
