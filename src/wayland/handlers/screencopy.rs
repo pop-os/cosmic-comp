@@ -909,7 +909,7 @@ pub fn render_workspace_to_buffer(
 }
 
 smithay::render_elements! {
-    pub WindowCaptureElement<R> where R: ImportAll;
+    pub WindowCaptureElement<R> where R: ImportAll + ImportMem;
     WaylandElement=WaylandSurfaceRenderElement<R>,
     CursorElement=cursor::CursorRenderElement<R>,
 }
