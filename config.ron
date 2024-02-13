@@ -71,7 +71,7 @@
         (modifiers: [Super, Shift], key: "r"): Resizing(Inwards),
 
         (modifiers: [Super], key: "b"): Spawn("xdg-open http://"),
-        (modifiers: [Super], key: "f"): Spawn("xdg-open ~"),
+        (modifiers: [Super], key: "f"): Spawn("cosmic-files"),
         //TODO: ability to select default terminal
         (modifiers: [Super], key: "t"): Spawn("cosmic-term"),
 
