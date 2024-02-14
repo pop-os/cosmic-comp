@@ -905,7 +905,7 @@ pub struct Frame {
 }
 
 impl Frame {
-    fn render_time(&self) -> Duration {
+    fn _render_time(&self) -> Duration {
         self.duration_elements + self.duration_render
     }
 
@@ -1028,11 +1028,12 @@ impl Fps {
         self.frames.iter().map(|f| f.frame_time()).sum::<Duration>() / (self.frames.len() as u32)
     }
 
-    pub fn avg_rendertime(&self, window: usize) -> Duration {
+    pub fn avg_time_to_display(&self, window: usize) -> Duration {
         self.frames
             .iter()
+            .rev()
             .take(window)
-            .map(|f| f.render_time())
+            .map(|f| f.time_to_display())
             .sum::<Duration>()
             / window as u32
     }
