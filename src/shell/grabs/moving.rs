@@ -39,16 +39,9 @@ use smithay::{
         Seat,
     },
     output::Output,
-    reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{IsAlive, Logical, Point, Rectangle, Scale, SERIAL_COUNTER},
-    wayland::compositor::SurfaceData,
 };
-use std::{
-    cell::RefCell,
-    collections::HashSet,
-    sync::atomic::Ordering,
-    time::{Duration, Instant},
-};
+use std::{cell::RefCell, collections::HashSet, sync::atomic::Ordering, time::Instant};
 
 use super::ReleaseMode;
 
@@ -197,18 +190,6 @@ impl MoveGrabState {
             }))
             .map(I::from)
             .collect()
-    }
-
-    pub fn send_frames(
-        &self,
-        output: &Output,
-        time: impl Into<Duration>,
-        throttle: Option<Duration>,
-        primary_scan_out_output: impl FnMut(&WlSurface, &SurfaceData) -> Option<Output> + Copy,
-    ) {
-        self.window
-            .active_window()
-            .send_frame(output, time, throttle, primary_scan_out_output)
     }
 
     pub fn window(&self) -> CosmicSurface {
@@ -558,10 +539,9 @@ impl Drop for MoveGrab {
 
                             Some((window, location.to_global(&output)))
                         }
-                        ManagedLayer::Tiling if state
-                                .common
-                                .shell
-                                .active_space(&output).tiling_enabled => {
+                        ManagedLayer::Tiling
+                            if state.common.shell.active_space(&output).tiling_enabled =>
+                        {
                             let (window, location) = state
                                 .common
                                 .shell
