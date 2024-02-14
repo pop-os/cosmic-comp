@@ -91,7 +91,7 @@ use socket::*;
 
 use super::render::{element::AsGlowRenderer, init_shaders, CursorMode, GlMultiRenderer};
 // for now we assume we need at least 3ms
-const MIN_RENDER_TIME: Duration = Duration::from_millis(3);
+const MIN_DISPLAY_TIME: Duration = Duration::from_millis(3);
 
 #[derive(Debug)]
 pub struct KmsState {
@@ -526,7 +526,7 @@ impl State {
                                             || {
                                                 (
                                                     surface.output.clone(),
-                                                    surface.fps.avg_rendertime(5),
+                                                    surface.fps.avg_time_to_display(5),
                                                 )
                                             },
                                         )
@@ -544,7 +544,7 @@ impl State {
                             None
                         };
 
-                        if let Some((output, avg_rendertime)) = rescheduled {
+                        if let Some((output, avg_time)) = rescheduled {
                             let mut scheduled_sessions =
                                 state.workspace_session_for_output(&output);
                             let mut output_sessions = output.pending_buffers().peekable();
@@ -554,8 +554,7 @@ impl State {
                                     .extend(output_sessions);
                             }
 
-                            let estimated_rendertime =
-                                std::cmp::max(avg_rendertime, MIN_RENDER_TIME);
+                            let estimated_rendertime = std::cmp::max(avg_time, MIN_DISPLAY_TIME);
                             if let Err(err) = state.backend.kms().schedule_render(
                                 &state.common.event_loop_handle,
                                 &output,
@@ -1241,7 +1240,10 @@ impl Surface {
                     }
                 }
                 match compositor.queue_frame(feedback) {
-                    Ok(()) | Err(FrameError::EmptyFrame) => {}
+                    Ok(()) => {
+                        self.pending = true;
+                    }
+                    Err(FrameError::EmptyFrame) => {}
                     Err(err) => {
                         return Err(err).with_context(|| "Failed to submit result for display")
                     }
@@ -1629,7 +1631,7 @@ impl KmsState {
                 }
                 return Ok(());
             }
-            if !surface.scheduled {
+            if !surface.scheduled && !surface.pending {
                 let device = *device;
                 let crtc = *crtc;
                 if let Some(token) = surface.render_timer_token.take() {
@@ -1689,7 +1691,6 @@ impl KmsState {
                                 Ok(_) => {
                                     trace!(?crtc, "Frame pending");
                                     surface.dirty = false;
-                                    surface.pending = true;
                                     surface.scheduled = false;
                                     surface.render_timer_token = None;
                                     return TimeoutAction::Drop;
@@ -1723,7 +1724,9 @@ impl KmsState {
                         }
                     });
                 }
-                surface.dirty = true;
+                if surface.pending {
+                    surface.dirty = true;
+                }
             }
         }
         Ok(())
