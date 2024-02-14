@@ -596,13 +596,24 @@ impl Common {
 
                 if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {
                     if let Some(grab_state) = move_grab.borrow().as_ref() {
-                        grab_state.send_frames(
-                            output,
-                            time,
-                            throttle,
-                            surface_primary_scanout_output,
-                        );
                         let window = grab_state.window();
+                        window.with_surfaces(|surface, states| {
+                            let primary_scanout_output = update_surface_primary_scanout_output(
+                                surface,
+                                output,
+                                states,
+                                render_element_states,
+                                default_primary_scanout_output_compare,
+                            );
+                            if let Some(output) = primary_scanout_output {
+                                with_fractional_scale(states, |fraction_scale| {
+                                    fraction_scale.set_preferred_scale(
+                                        output.current_scale().fractional_scale(),
+                                    );
+                                });
+                            }
+                        });
+                        window.send_frame(output, time, throttle, surface_primary_scanout_output);
                         if let Some(feedback) = window
                             .wl_surface()
                             .and_then(|wl_surface| {
