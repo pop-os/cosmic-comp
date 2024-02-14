@@ -206,8 +206,11 @@ pub fn init_backend(
         })
         .map_err(|err| err.error)
         .context("Failed to initialize libinput event source")?;
-    let api = GpuManager::new(GbmGlesBackend::<GlowRenderer, DrmDeviceFd>::default())
+
+    let mut api = GpuManager::new(GbmGlesBackend::<GlowRenderer, DrmDeviceFd>::default())
         .context("Failed to initialize renderers")?;
+    api.as_mut()
+        .set_allocator_flags(GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT);
 
     // TODO get this info from system76-power, if available and setup a watcher
     let primary = if let Some(path) = std::env::var("COSMIC_RENDER_DEVICE")
