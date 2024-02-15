@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    shell::CosmicSurface,
-    state::{BackendData, ClientState},
-    utils::prelude::*,
+    shell::CosmicSurface, state::ClientState, utils::prelude::*,
     wayland::protocols::screencopy::SessionType,
 };
 use calloop::Interest;
@@ -33,19 +31,6 @@ use std::sync::Mutex;
 use super::screencopy::PendingScreencopyBuffers;
 
 impl State {
-    fn early_import_surface(&mut self, surface: &WlSurface) {
-        let mut import_nodes = std::collections::HashSet::new();
-        if let Some(output) = self.common.shell.visible_output_for_surface(&surface) {
-            if let BackendData::Kms(ref mut kms_state) = &mut self.backend {
-                if let Some(target) = kms_state.target_node_for_output(&output) {
-                    if import_nodes.insert(target) {
-                        kms_state.try_early_import(surface, &output, target, &self.common.shell);
-                    }
-                }
-            }
-        }
-    }
-
     fn toplevel_ensure_initial_configure(&mut self, toplevel: &ToplevelSurface) -> bool {
         // send the initial configure if relevant
         let initial_configure_sent = with_states(toplevel.wl_surface(), |states| {
@@ -224,10 +209,6 @@ impl CompositorHandler for State {
 
         //handle window screencopy sessions
         self.schedule_window_session(surface);
-
-        // We need to know every potential output for importing to the right gpu and scheduling a render,
-        // so call this only after every potential surface map operation has been done.
-        self.early_import_surface(surface);
 
         // and refresh smithays internal state
         self.common.shell.popups.commit(surface);
