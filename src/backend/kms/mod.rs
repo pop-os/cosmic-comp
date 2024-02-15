@@ -146,8 +146,6 @@ pub struct Surface {
     vrr: bool,
     scheduled: bool,
     pending: bool,
-    dirty: bool,
-    last_animation_state: bool,
     render_timer_token: Option<RegistrationToken>,
     fps: Fps,
     feedback: HashMap<DrmNode, SurfaceDmabufFeedback>,
@@ -516,20 +514,10 @@ impl State {
                                         }
 
                                         surface.pending = false;
-                                        let animations_going =
-                                            state.common.shell.animations_going();
-                                        let animation_diff = std::mem::replace(
-                                            &mut surface.last_animation_state,
-                                            animations_going,
-                                        ) != animations_going;
-                                        (surface.dirty || animations_going || animation_diff).then(
-                                            || {
-                                                (
-                                                    surface.output.clone(),
-                                                    surface.fps.avg_time_to_display(5),
-                                                )
-                                            },
-                                        )
+                                        Some((
+                                            surface.output.clone(),
+                                            surface.fps.avg_time_to_display(5),
+                                        ))
                                     }
                                     Some(Err(err)) => {
                                         warn!(?err, "Failed to submit frame.");
@@ -1043,8 +1031,6 @@ impl Device {
             refresh_rate,
             scheduled: false,
             pending: false,
-            dirty: false,
-            last_animation_state: false,
             render_timer_token: None,
             fps: Fps::new(renderer.as_mut()),
             feedback: HashMap::new(),
@@ -1396,7 +1382,6 @@ impl KmsState {
                     if surface.surface.take().is_some() {
                         // just drop it
                         surface.pending = false;
-                        surface.dirty = false;
                     }
                 }
                 false
@@ -1690,7 +1675,6 @@ impl KmsState {
                             match result {
                                 Ok(_) => {
                                     trace!(?crtc, "Frame pending");
-                                    surface.dirty = false;
                                     surface.scheduled = false;
                                     surface.render_timer_token = None;
                                     return TimeoutAction::Drop;
@@ -1723,9 +1707,6 @@ impl KmsState {
                             state.common.still_pending(session, params);
                         }
                     });
-                }
-                if surface.pending {
-                    surface.dirty = true;
                 }
             }
         }
