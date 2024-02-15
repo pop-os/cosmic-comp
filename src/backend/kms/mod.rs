@@ -1229,7 +1229,9 @@ impl Surface {
                     Ok(()) => {
                         self.pending = true;
                     }
-                    Err(FrameError::EmptyFrame) => {}
+                    Err(FrameError::EmptyFrame) => {
+                        tracing::debug!("Stopped rendering");
+                    }
                     Err(err) => {
                         return Err(err).with_context(|| "Failed to submit result for display")
                     }
@@ -1515,19 +1517,6 @@ impl KmsState {
             .find(|dev| dev.surfaces.values().any(|s| s.output == *output))
             .map(|dev| &dev.render_node)
             .copied()
-    }
-
-    pub fn try_early_import(
-        &mut self,
-        surface: &WlSurface,
-        output: &Output,
-        target: DrmNode,
-        shell: &Shell,
-    ) {
-        let render = render_node_for_output(&output, self.primary_node, target, &shell);
-        if let Err(err) = self.api.early_import(render, surface) {
-            trace!(?err, "Early import failed.");
-        }
     }
 
     pub fn dmabuf_imported(
