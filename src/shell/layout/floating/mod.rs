@@ -223,7 +223,7 @@ impl FloatingLayout {
         self.tiling_animations
             .insert(mapped.clone(), (Instant::now(), previous_geometry));
         if mapped.floating_tiled.lock().unwrap().take().is_some() {
-            if let Some(mut state) = mapped.maximized_state.lock().unwrap().as_mut() {
+            if let Some(state) = mapped.maximized_state.lock().unwrap().as_mut() {
                 if let Some(real_old_geo) = mapped.last_geometry.lock().unwrap().clone() {
                     state.original_geometry = real_old_geo;
                 }
@@ -699,7 +699,8 @@ impl FloatingLayout {
         seat: &Seat<State>,
         mut focus_stack: FocusStackMut,
     ) -> Option<KeyboardFocusTarget> {
-        let Some(KeyboardFocusTarget::Element(elem)) = seat.get_keyboard().unwrap().current_focus() else {
+        let Some(KeyboardFocusTarget::Element(elem)) = seat.get_keyboard().unwrap().current_focus()
+        else {
             return None;
         };
 
@@ -716,7 +717,7 @@ impl FloatingLayout {
         theme: cosmic::Theme,
     ) -> MoveResult {
         let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
-            return MoveResult::None
+            return MoveResult::None;
         };
 
         let Some(focused) = (match target {
@@ -725,14 +726,16 @@ impl FloatingLayout {
                     PopupKind::Xdg(xdg) => get_popup_toplevel(&xdg),
                     PopupKind::InputMethod(_) => unreachable!(),
                 }) else {
-                    return MoveResult::None
+                    return MoveResult::None;
                 };
-                self.space.elements().find(|elem| elem.wl_surface().as_ref() == Some(&toplevel_surface))
-            },
+                self.space
+                    .elements()
+                    .find(|elem| elem.wl_surface().as_ref() == Some(&toplevel_surface))
+            }
             KeyboardFocusTarget::Element(elem) => self.space.elements().find(|e| *e == &elem),
             _ => None,
         }) else {
-            return MoveResult::None
+            return MoveResult::None;
         };
 
         match focused.handle_move(direction) {

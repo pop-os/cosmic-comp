@@ -904,7 +904,7 @@ impl Workspaces {
             s.theme = theme.clone();
             s.sticky_layer.theme = theme.clone();
             s.sticky_layer.refresh();
-            for mut w in &mut s.workspaces {
+            for w in &mut s.workspaces {
                 w.tiling_layer.theme = theme.clone();
                 w.floating_layer.theme = theme.clone();
 
@@ -1502,7 +1502,9 @@ impl Shell {
         }
 
         {
-            let Some(workspace) = self.workspaces.space_for_handle_mut(&current_workspace) else { return };
+            let Some(workspace) = self.workspaces.space_for_handle_mut(&current_workspace) else {
+                return;
+            };
             let _ = workspace.unmap(&mapped);
         }
 
@@ -2339,7 +2341,7 @@ impl Shell {
         }
 
         let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
-            return FocusResult::None
+            return FocusResult::None;
         };
 
         let set = self.workspaces.sets.get_mut(&output).unwrap();
@@ -2352,14 +2354,23 @@ impl Shell {
                     PopupKind::Xdg(xdg) => get_popup_toplevel(&xdg),
                     PopupKind::InputMethod(_) => unreachable!(),
                 }) else {
-                    return FocusResult::None
+                    return FocusResult::None;
                 };
-                sticky_layer.space.elements().chain(workspace.mapped()).find(|elem| elem.wl_surface().as_ref() == Some(&toplevel_surface))
-            },
-            KeyboardFocusTarget::Element(elem) => sticky_layer.space.elements().chain(workspace.mapped()).find(|e| *e == &elem),
+                sticky_layer
+                    .space
+                    .elements()
+                    .chain(workspace.mapped())
+                    .find(|elem| elem.wl_surface().as_ref() == Some(&toplevel_surface))
+            }
+            KeyboardFocusTarget::Element(elem) => sticky_layer
+                .space
+                .elements()
+                .chain(workspace.mapped())
+                .find(|e| *e == &elem),
             _ => None,
-        }).cloned() else {
-            return FocusResult::None
+        })
+        .cloned() else {
+            return FocusResult::None;
         };
 
         if focused.handle_focus(direction, None) {
@@ -2460,7 +2471,7 @@ impl Shell {
         let workspace = self.active_space(&output);
         let focus_stack = workspace.focus_stack.get(seat);
         let Some(last) = focus_stack.last().cloned() else {
-            return MoveResult::None
+            return MoveResult::None;
         };
         let fullscreen = workspace.fullscreen.as_ref().map(|f| f.surface.clone());
 
@@ -2504,7 +2515,9 @@ impl Shell {
         seat: &Seat<State>,
         edge: ResizeEdge,
     ) {
-        let Some(surface) = mapped.active_window().wl_surface() else { return };
+        let Some(surface) = mapped.active_window().wl_surface() else {
+            return;
+        };
         if let Some(start_data) =
             check_grab_preconditions(&seat, &surface, None, ReleaseMode::Click)
         {
@@ -2536,14 +2549,25 @@ impl Shell {
                 };
 
                 let grab: ResizeGrab = if ws.is_floating(mapped) {
-                    let Some(grab) = ws.floating_layer.resize_request(mapped, seat, start_data, edge, ReleaseMode::Click) else {
-                        return
+                    let Some(grab) = ws.floating_layer.resize_request(
+                        mapped,
+                        seat,
+                        start_data,
+                        edge,
+                        ReleaseMode::Click,
+                    ) else {
+                        return;
                     };
                     grab.into()
                 } else {
-                    let Some(node_id) = mapped.tiling_node_id.lock().unwrap().clone() else { return };
+                    let Some(node_id) = mapped.tiling_node_id.lock().unwrap().clone() else {
+                        return;
+                    };
                     let Some((node, left_up_idx, orientation)) =
-                        ws.tiling_layer.menu_resize(node_id, edge) else { return };
+                        ws.tiling_layer.menu_resize(node_id, edge)
+                    else {
+                        return;
+                    };
                     ResizeForkGrab::new(
                         start_data,
                         new_loc.to_f64(),
@@ -2728,10 +2752,16 @@ impl Shell {
                 let Some(toplevel) = old_focused.toplevel() else {
                     return;
                 };
-                let Some(mapped) = self.workspaces.sets.values()
-                    .find_map(|set| set.sticky_layer.mapped()
-                        .find(|m| m.has_surface(&toplevel, WindowSurfaceType::TOPLEVEL))
-                    ).cloned()
+                let Some(mapped) = self
+                    .workspaces
+                    .sets
+                    .values()
+                    .find_map(|set| {
+                        set.sticky_layer
+                            .mapped()
+                            .find(|m| m.has_surface(&toplevel, WindowSurfaceType::TOPLEVEL))
+                    })
+                    .cloned()
                     .or_else(|| {
                         let workspace = self.workspaces.get(idx, &output).unwrap();
                         workspace
@@ -2740,7 +2770,7 @@ impl Shell {
                             .cloned()
                     })
                 else {
-                    return
+                    return;
                 };
 
                 let mut resize_state = mapped.resize_state.lock().unwrap();

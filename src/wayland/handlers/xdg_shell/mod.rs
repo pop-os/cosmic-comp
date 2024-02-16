@@ -277,7 +277,6 @@ impl XdgShellHandler for State {
                         (mapped, layer)
                     };
                     let handle = workspace.handle.clone();
-                    std::mem::drop(workspace);
 
                     let workspace_handle = self.common.shell.active_space(&output).handle.clone();
                     for (window, _) in mapped.windows() {
