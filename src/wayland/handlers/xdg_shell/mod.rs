@@ -9,7 +9,7 @@ use smithay::{
     delegate_xdg_shell,
     desktop::{
         find_popup_root_surface, PopupGrab, PopupKeyboardGrab, PopupKind, PopupPointerGrab,
-        PopupUngrabStrategy, Window,
+        PopupUngrabStrategy,
     },
     input::{pointer::Focus, Seat},
     output::Output,
@@ -43,7 +43,7 @@ impl XdgShellHandler for State {
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         let seat = self.common.last_active_seat().clone();
-        let window = CosmicSurface::Wayland(Window::new(surface));
+        let window = CosmicSurface::from(surface);
         self.common.shell.pending_windows.push((window, seat, None));
         // We will position the window after the first commit, when we know its size hints
     }

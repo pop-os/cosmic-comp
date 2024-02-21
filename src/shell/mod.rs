@@ -15,7 +15,7 @@ use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     desktop::{
         layer_map_for_output, space::SpaceElement, LayerSurface, PopupKind, PopupManager,
-        WindowSurfaceType,
+        WindowSurface, WindowSurfaceType,
     },
     input::{
         pointer::{Focus, GrabStartData as PointerGrabStartData, MotionEvent},
@@ -170,10 +170,11 @@ pub enum ActivationKey {
 
 impl From<&CosmicSurface> for ActivationKey {
     fn from(value: &CosmicSurface) -> Self {
-        match value {
-            CosmicSurface::Wayland(w) => ActivationKey::Wayland(w.toplevel().wl_surface().clone()),
-            CosmicSurface::X11(s) => ActivationKey::X11(s.window_id()),
-            _ => unreachable!(),
+        match value.0.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => {
+                ActivationKey::Wayland(toplevel.wl_surface().clone())
+            }
+            WindowSurface::X11(s) => ActivationKey::X11(s.window_id()),
         }
     }
 }
@@ -1091,19 +1092,19 @@ impl Shell {
                                 .map(|(_, w, _)| w)
                                 .chain(set.workspaces[set.active].floating_layer.space.elements())
                             {
-                                if let CosmicSurface::X11(surf) = window.active_window() {
-                                    let _ = xwm.raise_window(&surf);
+                                if let Some(surf) = window.active_window().x11_surface() {
+                                    let _ = xwm.raise_window(surf);
                                 }
                             }
                             for window in set.sticky_layer.space.elements() {
-                                if let CosmicSurface::X11(surf) = window.active_window() {
-                                    let _ = xwm.raise_window(&surf);
+                                if let Some(surf) = window.active_window().x11_surface() {
+                                    let _ = xwm.raise_window(surf);
                                 }
                             }
-                            if let Some(CosmicSurface::X11(ref surf)) = set.workspaces[set.active]
+                            if let Some(surf) = set.workspaces[set.active]
                                 .fullscreen
                                 .as_ref()
-                                .map(|f| &f.surface)
+                                .and_then(|f| f.surface.x11_surface())
                             {
                                 let _ = xwm.raise_window(surf);
                             }
@@ -1254,6 +1255,19 @@ impl Shell {
                     set.workspaces
                         .iter()
                         .find_map(|w| w.element_for_wl_surface(surface))
+                })
+        })
+    }
+
+    pub fn element_for_x11_surface(&self, surface: &X11Surface) -> Option<&CosmicMapped> {
+        self.workspaces.sets.values().find_map(|set| {
+            set.sticky_layer
+                .mapped()
+                .find(|w| w.windows().any(|(s, _)| s.x11_surface() == Some(surface)))
+                .or_else(|| {
+                    set.workspaces
+                        .iter()
+                        .find_map(|w| w.element_for_x11_surface(surface))
                 })
         })
     }
@@ -1554,25 +1568,24 @@ impl Shell {
             .unwrap();
         let (window, seat, output) = state.common.shell.pending_windows.remove(pos);
 
-        let parent_is_sticky = match window.clone() {
-            CosmicSurface::Wayland(toplevel) => {
-                if let Some(parent) = toplevel.toplevel().parent() {
-                    if let Some(elem) = state.common.shell.element_for_wl_surface(&parent) {
-                        state
-                            .common
-                            .shell
-                            .workspaces
-                            .sets
-                            .values()
-                            .any(|set| set.sticky_layer.mapped().any(|m| m == elem))
-                    } else {
-                        false
-                    }
+        let parent_is_sticky = if let Some(toplevel) = window.0.toplevel() {
+            if let Some(parent) = toplevel.parent() {
+                if let Some(elem) = state.common.shell.element_for_wl_surface(&parent) {
+                    state
+                        .common
+                        .shell
+                        .workspaces
+                        .sets
+                        .values()
+                        .any(|set| set.sticky_layer.mapped().any(|m| m == elem))
                 } else {
                     false
                 }
+            } else {
+                false
             }
-            _ => false,
+        } else {
+            false
         };
 
         let pending_activation = state
@@ -2013,11 +2026,11 @@ impl Shell {
                 .unwrap()
                 .loc
                 .to_global(&workspace.output);
-            for (toplevel, offset) in mapped.windows() {
-                if let CosmicSurface::Wayland(toplevel) = toplevel {
-                    let window_geo_offset = toplevel.geometry().loc.as_global();
+            for (window, offset) in mapped.windows() {
+                if let Some(toplevel) = window.0.toplevel() {
+                    let window_geo_offset = window.geometry().loc.as_global();
                     update_reactive_popups(
-                        &toplevel,
+                        toplevel,
                         element_loc + offset.as_global() + window_geo_offset,
                         self.outputs(),
                     );

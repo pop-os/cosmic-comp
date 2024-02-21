@@ -2,6 +2,7 @@
 
 use regex::RegexSet;
 use smithay::{
+    desktop::WindowSurface,
     wayland::{compositor::with_states, shell::xdg::XdgToplevelSurfaceData},
     xwayland::xwm::WmWindowType,
 };
@@ -100,9 +101,9 @@ lazy_static::lazy_static! {
 
 pub fn is_dialog(window: &CosmicSurface) -> bool {
     // Check "window type"
-    match window {
-        CosmicSurface::Wayland(window) => {
-            if with_states(window.toplevel().wl_surface(), |states| {
+    match window.0.underlying_surface() {
+        WindowSurface::Wayland(toplevel) => {
+            if with_states(toplevel.wl_surface(), |states| {
                 let attrs = states
                     .data_map
                     .get::<XdgToplevelSurfaceData>()
@@ -114,7 +115,7 @@ pub fn is_dialog(window: &CosmicSurface) -> bool {
                 return true;
             }
         }
-        CosmicSurface::X11(surface) => {
+        WindowSurface::X11(surface) => {
             if surface.is_override_redirect()
                 || surface.is_popup()
                 || !matches!(
@@ -125,7 +126,6 @@ pub fn is_dialog(window: &CosmicSurface) -> bool {
                 return true;
             }
         }
-        _ => {}
     };
 
     // Check if sizing suggest dialog

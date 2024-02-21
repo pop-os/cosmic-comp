@@ -3,7 +3,7 @@
 use crate::{shell::Shell, utils::prelude::*};
 use smithay::{
     desktop::{
-        layer_map_for_output, space::SpaceElement, LayerSurface, PopupKind, PopupManager, Window,
+        layer_map_for_output, space::SpaceElement, LayerSurface, PopupKind, PopupManager,
         WindowSurfaceType,
     },
     output::Output,
@@ -18,8 +18,8 @@ use smithay::{
         compositor::{get_role, with_states},
         seat::WaylandFocus,
         shell::xdg::{
-            PopupSurface, PositionerState, SurfaceCachedState, XdgPopupSurfaceRoleAttributes,
-            XDG_POPUP_ROLE,
+            PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface,
+            XdgPopupSurfaceRoleAttributes, XDG_POPUP_ROLE,
         },
     },
 };
@@ -85,12 +85,12 @@ impl Shell {
 }
 
 pub fn update_reactive_popups<'a>(
-    window: &Window,
+    toplevel: &ToplevelSurface,
     loc: Point<i32, Global>,
     outputs: impl Iterator<Item = &'a Output>,
 ) {
     let output_geo = outputs.map(|o| o.geometry()).collect::<Vec<_>>();
-    for (popup, _) in PopupManager::popups_for_surface(window.toplevel().wl_surface()) {
+    for (popup, _) in PopupManager::popups_for_surface(toplevel.wl_surface()) {
         match popup {
             PopupKind::Xdg(surface) => {
                 let positioner = with_states(&surface.wl_surface(), |states| {

@@ -1156,7 +1156,9 @@ impl State {
             }
             InputEvent::TouchDown { event, .. } => {
                 if let Some(seat) = self.common.seat_with_device(&event.device()).cloned() {
-                    let Some(output) = mapped_output_for_device(&self.common, &event.device()).cloned() else {
+                    let Some(output) =
+                        mapped_output_for_device(&self.common, &event.device()).cloned()
+                    else {
                         return;
                     };
 
@@ -1187,7 +1189,9 @@ impl State {
             }
             InputEvent::TouchMotion { event, .. } => {
                 if let Some(seat) = self.common.seat_with_device(&event.device()).cloned() {
-                    let Some(output) = mapped_output_for_device(&self.common, &event.device()).cloned() else {
+                    let Some(output) =
+                        mapped_output_for_device(&self.common, &event.device()).cloned()
+                    else {
                         return;
                     };
 
@@ -1227,7 +1231,9 @@ impl State {
             InputEvent::TouchFrame { event: _, .. } => {}
             InputEvent::TabletToolAxis { event, .. } => {
                 if let Some(seat) = self.common.seat_with_device(&event.device()).cloned() {
-                    let Some(output) = mapped_output_for_device(&self.common, &event.device()).cloned() else {
+                    let Some(output) =
+                        mapped_output_for_device(&self.common, &event.device()).cloned()
+                    else {
                         return;
                     };
                     let geometry = output.geometry();
@@ -1288,7 +1294,9 @@ impl State {
             }
             InputEvent::TabletToolProximity { event, .. } => {
                 if let Some(seat) = self.common.seat_with_device(&event.device()).cloned() {
-                    let Some(output) = mapped_output_for_device(&self.common, &event.device()).cloned() else {
+                    let Some(output) =
+                        mapped_output_for_device(&self.common, &event.device()).cloned()
+                    else {
                         return;
                     };
                     let geometry = output.geometry();

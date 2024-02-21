@@ -230,7 +230,7 @@ impl PointerGrab<State> for MoveGrab {
                     .as_logical()
                     .overlaps_or_touches(Rectangle::from_loc_and_size(
                         handle.current_location().to_i32_floor(),
-                        (0,0),
+                        (0, 0),
                     ))
             })
             .cloned()

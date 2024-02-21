@@ -30,7 +30,7 @@ impl DmabufHandler for State {
             Ok(Some(node)) => {
                 // kms backend
                 let Ok(buffer) = import_notifier.successful::<State>() else {
-                    return
+                    return;
                 };
 
                 if let BackendData::Kms(kms_state) = &mut self.backend {

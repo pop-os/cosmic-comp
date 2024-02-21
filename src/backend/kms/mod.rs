@@ -642,7 +642,7 @@ impl State {
 
                 if non_desktop {
                     let Ok(output_name) = drm_helpers::interface_name(&device.drm, conn) else {
-                        continue
+                        continue;
                     };
                     let drm_helpers::EdidInfo {
                         model,
@@ -779,7 +779,7 @@ impl State {
 
                     if non_desktop {
                         let Ok(output_name) = drm_helpers::interface_name(&device.drm, conn) else {
-                            continue
+                            continue;
                         };
                         let drm_helpers::EdidInfo {
                             model,

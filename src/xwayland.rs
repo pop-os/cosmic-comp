@@ -153,8 +153,7 @@ impl XwmHandler for State {
         }
 
         let startup_id = window.startup_id();
-        let surface = CosmicSurface::X11(window.clone());
-        if self.common.shell.element_for_surface(&surface).is_some() {
+        if self.common.shell.element_for_x11_surface(&window).is_some() {
             return;
         }
 
@@ -175,6 +174,7 @@ impl XwmHandler for State {
             );
         }
 
+        let surface = CosmicSurface::from(window);
         self.common
             .shell
             .pending_windows
@@ -187,13 +187,7 @@ impl XwmHandler for State {
             .shell
             .pending_windows
             .iter()
-            .find(|(window, _, _)| {
-                if let CosmicSurface::X11(window) = window {
-                    window == &surface
-                } else {
-                    false
-                }
-            })
+            .find(|(window, _, _)| window.x11_surface() == Some(&surface))
             .cloned()
         {
             if !self
@@ -202,10 +196,7 @@ impl XwmHandler for State {
                 .pending_activations
                 .contains_key(&crate::shell::ActivationKey::X11(surface.window_id()))
             {
-                if let Some(startup_id) = match &window {
-                    CosmicSurface::X11(x11) => x11.startup_id(),
-                    _ => None,
-                } {
+                if let Some(startup_id) = window.x11_surface().and_then(|x| x.startup_id()) {
                     if let Some(context) = self
                         .common
                         .shell
@@ -238,7 +229,6 @@ impl XwmHandler for State {
     }
 
     fn unmapped_window(&mut self, _xwm: XwmId, window: X11Surface) {
-        let surface = CosmicSurface::X11(window.clone());
         if window.is_override_redirect() {
             self.common
                 .shell
@@ -247,7 +237,7 @@ impl XwmHandler for State {
         } else if let Some((element, space)) = self
             .common
             .shell
-            .element_for_surface(&surface)
+            .element_for_x11_surface(&window)
             .cloned()
             .and_then(|element| {
                 self.common
@@ -257,7 +247,12 @@ impl XwmHandler for State {
             })
         {
             if element.is_stack() && element.stack_ref().unwrap().len() >= 2 {
-                element.stack_ref().unwrap().remove_window(&surface);
+                if let Some((surface, _)) = element
+                    .windows()
+                    .find(|(w, _)| w.x11_surface() == Some(&window))
+                {
+                    element.stack_ref().unwrap().remove_window(&surface);
+                }
             } else {
                 space.unmap(&element);
             }
@@ -322,11 +317,7 @@ impl XwmHandler for State {
     ) {
         // We only allow floating X11 windows to resize themselves. Nothing else
         let mut current_geo = window.geometry();
-        if let Some(mapped) = self
-            .common
-            .shell
-            .element_for_surface(&CosmicSurface::X11(window.clone()))
-        {
+        if let Some(mapped) = self.common.shell.element_for_x11_surface(&window) {
             let space = self.common.shell.space_for(mapped).unwrap();
             if space.is_floating(mapped) {
                 mapped.set_geometry(
@@ -424,24 +415,26 @@ impl XwmHandler for State {
     }
 
     fn maximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let surface = CosmicSurface::X11(window);
-        if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
+        if let Some(mapped) = self.common.shell.element_for_x11_surface(&window).cloned() {
             self.common.shell.maximize_request(&mapped);
         }
     }
 
     fn unmaximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let surface = CosmicSurface::X11(window);
-        if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
+        if let Some(mapped) = self.common.shell.element_for_x11_surface(&window).cloned() {
             self.common.shell.unmaximize_request(&mapped);
         }
     }
 
     fn fullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let surface = CosmicSurface::X11(window);
-        if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
+        if let Some(mapped) = self.common.shell.element_for_x11_surface(&window).cloned() {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
-                workspace.fullscreen_request(&surface, None)
+                if let Some((surface, _)) = mapped
+                    .windows()
+                    .find(|(w, _)| w.x11_surface() == Some(&window))
+                {
+                    workspace.fullscreen_request(&surface, None)
+                }
             }
         } else {
             let output = self.common.last_active_seat().active_output();
@@ -450,7 +443,7 @@ impl XwmHandler for State {
                 .shell
                 .pending_windows
                 .iter_mut()
-                .find(|(s, _, _)| s == &surface)
+                .find(|(s, _, _)| s.x11_surface() == Some(&window))
                 .map(|(_, _, o)| o)
             {
                 *o = Some(output);
@@ -459,10 +452,12 @@ impl XwmHandler for State {
     }
 
     fn unfullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let surface = CosmicSurface::X11(window);
-        if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
+        if let Some(mapped) = self.common.shell.element_for_x11_surface(&window).cloned() {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
-                let (window, _) = mapped.windows().find(|(w, _)| w == &surface).unwrap();
+                let (window, _) = mapped
+                    .windows()
+                    .find(|(w, _)| w.x11_surface() == Some(&window))
+                    .unwrap();
                 let previous = workspace.unfullscreen_request(&window);
                 assert!(previous.is_none());
             }
@@ -539,7 +534,7 @@ impl Common {
     fn is_x_focused(&self, xwm: XwmId) -> bool {
         if let Some(keyboard) = self.last_active_seat().get_keyboard() {
             if let Some(KeyboardFocusTarget::Element(mapped)) = keyboard.current_focus() {
-                if let CosmicSurface::X11(surface) = mapped.active_window() {
+                if let Some(surface) = mapped.active_window().x11_surface() {
                     return surface.xwm_id().unwrap() == xwm;
                 }
             }

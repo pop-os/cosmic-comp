@@ -61,14 +61,16 @@ impl XdgActivationHandler for State {
 
         // Tokens without validation aren't allowed to steal focus
         let Some((serial, seat)) = data.serial else {
-            data.user_data.insert_if_missing(|| ActivationContext::UrgentOnly);
+            data.user_data
+                .insert_if_missing(|| ActivationContext::UrgentOnly);
             debug!(?token, "created urgent-only token for missing seat/serial");
-            return true
+            return true;
         };
         let Some(seat) = Seat::from_resource(&seat) else {
-            data.user_data.insert_if_missing(|| ActivationContext::UrgentOnly);
+            data.user_data
+                .insert_if_missing(|| ActivationContext::UrgentOnly);
             debug!(?token, "created urgent-only token for unknown seat");
-            return true
+            return true;
         };
 
         // At this point we don't bother with urgent-only tokens.
