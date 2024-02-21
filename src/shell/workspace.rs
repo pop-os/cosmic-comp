@@ -44,6 +44,7 @@ use smithay::{
         seat::WaylandFocus,
         xdg_activation::{XdgActivationState, XdgActivationToken},
     },
+    xwayland::X11Surface,
 };
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -416,6 +417,13 @@ impl Workspace {
                 e.windows()
                     .any(|(w, _)| w.wl_surface().as_ref() == Some(surface))
             })
+    }
+
+    pub fn element_for_x11_surface(&self, surface: &X11Surface) -> Option<&CosmicMapped> {
+        self.floating_layer
+            .mapped()
+            .chain(self.tiling_layer.mapped().map(|(_, w, _)| w))
+            .find(|e| e.windows().any(|(w, _)| w.x11_surface() == Some(surface)))
     }
 
     pub fn element_under(

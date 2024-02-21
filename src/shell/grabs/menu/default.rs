@@ -24,7 +24,9 @@ fn toggle_stacking(state: &mut State, mapped: &CosmicMapped) {
 fn move_prev_workspace(state: &mut State, mapped: &CosmicMapped) {
     let seat = state.common.last_active_seat().clone();
     let (current_handle, output) = {
-        let Some(ws) = state.common.shell.space_for(mapped) else { return };
+        let Some(ws) = state.common.shell.space_for(mapped) else {
+            return;
+        };
         (ws.handle, ws.output.clone())
     };
     let maybe_handle = state
@@ -59,7 +61,9 @@ fn move_prev_workspace(state: &mut State, mapped: &CosmicMapped) {
 fn move_next_workspace(state: &mut State, mapped: &CosmicMapped) {
     let seat = state.common.last_active_seat().clone();
     let (current_handle, output) = {
-        let Some(ws) = state.common.shell.space_for(mapped) else { return };
+        let Some(ws) = state.common.shell.space_for(mapped) else {
+            return;
+        };
         (ws.handle, ws.output.clone())
     };
     let maybe_handle = state

@@ -20,7 +20,7 @@ use tracing::{debug, trace};
 
 use self::target::{KeyboardFocusTarget, WindowGroup};
 
-use super::{layout::floating::FloatingLayout, CosmicSurface};
+use super::layout::floating::FloatingLayout;
 
 pub mod target;
 
@@ -207,11 +207,11 @@ fn raise_with_children(floating_layer: &mut FloatingLayout, focused: &CosmicMapp
             .space
             .elements()
             .filter(|elem| {
-                let parent = match elem.active_window() {
-                    CosmicSurface::Wayland(w) => w.toplevel().parent(),
-                    _ => None,
-                };
-
+                let parent = elem
+                    .active_window()
+                    .0
+                    .toplevel()
+                    .and_then(|toplevel| toplevel.parent());
                 parent == focused.active_window().wl_surface()
             })
             .cloned()

@@ -20,10 +20,7 @@ use smithay::{
 };
 use wayland_backend::protocol::WEnum;
 
-use crate::{
-    shell::{CosmicMapped, CosmicSurface},
-    state::State,
-};
+use crate::{shell::CosmicMapped, state::State};
 
 pub struct PreferredDecorationMode(RefCell<Option<XdgMode>>);
 
@@ -60,53 +57,61 @@ impl PreferredDecorationMode {
 impl State {
     pub fn new_decoration(mapped: &CosmicMapped, surface: &WlSurface) -> KdeMode {
         if mapped.is_stack() {
-            if let Some((CosmicSurface::Wayland(window), _)) = mapped
+            if let Some((window, _)) = mapped
                 .windows()
                 .find(|(window, _)| window.wl_surface().as_ref() == Some(surface))
             {
-                window
-                    .toplevel()
-                    .with_pending_state(|state| state.decoration_mode = Some(XdgMode::ServerSide));
-                window.toplevel().send_configure();
+                if let Some(toplevel) = window.0.toplevel() {
+                    toplevel.with_pending_state(|state| {
+                        state.decoration_mode = Some(XdgMode::ServerSide)
+                    });
+                    toplevel.send_configure();
+                }
             }
             KdeMode::Server
         } else {
-            if let Some((CosmicSurface::Wayland(window), _)) = mapped
+            if let Some((window, _)) = mapped
                 .windows()
                 .find(|(window, _)| window.wl_surface().as_ref() == Some(surface))
             {
-                window
-                    .toplevel()
-                    .with_pending_state(|state| state.decoration_mode = Some(XdgMode::ClientSide));
-                window.toplevel().send_configure();
+                if let Some(toplevel) = window.0.toplevel() {
+                    toplevel.with_pending_state(|state| {
+                        state.decoration_mode = Some(XdgMode::ClientSide)
+                    });
+                    toplevel.send_configure();
+                }
             }
             KdeMode::Client
         }
     }
 
     pub fn request_mode(mapped: &CosmicMapped, surface: &WlSurface, mode: XdgMode) {
-        if let Some((CosmicSurface::Wayland(window), _)) = mapped
+        if let Some((window, _)) = mapped
             .windows()
             .find(|(window, _)| window.wl_surface().as_ref() == Some(surface))
         {
-            PreferredDecorationMode::update(&window, Some(mode));
-            window.toplevel().with_pending_state(|state| {
-                state.decoration_mode = Some(mode);
-            });
-            window.toplevel().send_configure();
+            if let Some(toplevel) = window.0.toplevel() {
+                PreferredDecorationMode::update(&window.0, Some(mode));
+                toplevel.with_pending_state(|state| {
+                    state.decoration_mode = Some(mode);
+                });
+                toplevel.send_configure();
+            }
         }
     }
 
     pub fn unset_mode(mapped: &CosmicMapped, surface: &WlSurface) {
-        if let Some((CosmicSurface::Wayland(window), _)) = mapped
+        if let Some((window, _)) = mapped
             .windows()
             .find(|(window, _)| window.wl_surface().as_ref() == Some(surface))
         {
-            PreferredDecorationMode::update(&window, None);
-            window.toplevel().with_pending_state(|state| {
-                state.decoration_mode = None;
-            });
-            window.toplevel().send_configure();
+            if let Some(toplevel) = window.0.toplevel() {
+                PreferredDecorationMode::update(&window.0, None);
+                toplevel.with_pending_state(|state| {
+                    state.decoration_mode = None;
+                });
+                toplevel.send_configure();
+            }
         }
     }
 }

@@ -843,10 +843,7 @@ impl SpaceElement for CosmicMapped {
 
 impl X11Relatable for CosmicMapped {
     fn is_window(&self, window: &X11Surface) -> bool {
-        match self.active_window() {
-            CosmicSurface::X11(surface) => &surface == window,
-            _ => false,
-        }
+        self.active_window().x11_surface() == Some(window)
     }
 }
 

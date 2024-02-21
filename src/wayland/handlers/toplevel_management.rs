@@ -68,7 +68,12 @@ impl ToplevelManagementHandler for State {
         workspace: ZcosmicWorkspaceHandleV1,
         _output: Output,
     ) {
-        let Some(to_handle) = self.common.shell.workspace_state.get_workspace_handle(&workspace) else {
+        let Some(to_handle) = self
+            .common
+            .shell
+            .workspace_state
+            .get_workspace_handle(&workspace)
+        else {
             return;
         };
 

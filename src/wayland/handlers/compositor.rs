@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{
-    shell::CosmicSurface, state::ClientState, utils::prelude::*,
-    wayland::protocols::screencopy::SessionType,
-};
+use crate::{state::ClientState, utils::prelude::*, wayland::protocols::screencopy::SessionType};
 use calloop::Interest;
 use smithay::{
     backend::renderer::utils::{on_commit_buffer_handler, with_renderer_surface_state},
@@ -157,21 +154,14 @@ impl CompositorHandler for State {
             .find(|(window, _, _)| window.wl_surface().as_ref() == Some(surface))
             .cloned()
         {
-            match window {
-                CosmicSurface::Wayland(ref wl_window) => {
-                    let toplevel = wl_window.toplevel();
-                    if self.toplevel_ensure_initial_configure(&toplevel)
-                        && with_renderer_surface_state(&surface, |state| state.buffer().is_some())
-                            .unwrap_or(false)
-                    {
-                        window.on_commit();
-                        Shell::map_window(self, &window);
-                    } else {
-                        return;
-                    }
+            if let Some(toplevel) = window.0.toplevel() {
+                if self.toplevel_ensure_initial_configure(&toplevel)
+                    && with_renderer_surface_state(&surface, |state| state.buffer().is_some())
+                        .unwrap_or(false)
+                {
+                    window.on_commit();
+                    Shell::map_window(self, &window);
                 }
-                CosmicSurface::X11(_) => {}
-                _ => unreachable!(),
             }
         }
 

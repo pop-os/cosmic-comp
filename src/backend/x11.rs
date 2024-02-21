@@ -302,7 +302,9 @@ fn try_vulkan_allocator(node: &DrmNode) -> Option<Allocator> {
 
     let Some(device) = devices
         .filter(|phd| {
-            phd.has_device_extension(smithay::reexports::ash::extensions::ext::PhysicalDeviceDrm::name())
+            phd.has_device_extension(
+                smithay::reexports::ash::extensions::ext::PhysicalDeviceDrm::name(),
+            )
         })
         .find(|phd| {
             phd.primary_node().unwrap() == Some(*node) || phd.render_node().unwrap() == Some(*node)

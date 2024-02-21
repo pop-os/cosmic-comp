@@ -462,7 +462,9 @@ impl TilingLayout {
 
     pub fn replace_window(&mut self, old: &CosmicMapped, new: &CosmicMapped) {
         let gaps = self.gaps();
-        let Some(old_id) = old.tiling_node_id.lock().unwrap().clone() else { return };
+        let Some(old_id) = old.tiling_node_id.lock().unwrap().clone() else {
+            return;
+        };
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
 
         if let Ok(node) = tree.get_mut(&old_id) {
@@ -501,7 +503,13 @@ impl TilingLayout {
         match desc.stack_window {
             Some(stack_surface) => {
                 let node = this_tree.get(&desc.node).ok()?;
-                let Data::Mapped { mapped: this_mapped, .. } = node.data() else { return None };
+                let Data::Mapped {
+                    mapped: this_mapped,
+                    ..
+                } = node.data()
+                else {
+                    return None;
+                };
                 let this_stack = this_mapped.stack_ref()?;
                 this_stack.remove_window(&stack_surface);
                 if !this_stack.alive() {
@@ -698,7 +706,9 @@ impl TilingLayout {
                 }
             }
             (None, None) => {
-                let Some(other_tree) = other_tree.as_mut() else { unreachable!() };
+                let Some(other_tree) = other_tree.as_mut() else {
+                    unreachable!()
+                };
                 let this_node = this_tree.get_mut(&this_desc.node).ok()?;
                 let other_node = other_tree.get_mut(&other_desc.node).ok()?;
 
@@ -842,7 +852,13 @@ impl TilingLayout {
                     return None;
                 }
                 let this_node = this_tree.get_mut(&this_desc.node).ok()?;
-                let Data::Mapped { mapped: this_mapped, .. } = this_node.data() else { return None };
+                let Data::Mapped {
+                    mapped: this_mapped,
+                    ..
+                } = this_node.data()
+                else {
+                    return None;
+                };
                 let this_mapped = this_mapped.clone();
                 let geometry = *this_node.data().geometry();
                 assert!(this_mapped.is_stack());
@@ -927,7 +943,13 @@ impl TilingLayout {
 
                 let other_tree = other_tree.as_mut().unwrap_or(&mut this_tree);
                 let other_node = other_tree.get_mut(&other_desc.node).ok()?;
-                let Data::Mapped { mapped: other_mapped, .. } = other_node.data() else { return None };
+                let Data::Mapped {
+                    mapped: other_mapped,
+                    ..
+                } = other_node.data()
+                else {
+                    return None;
+                };
                 let other_mapped = other_mapped.clone();
                 let geometry = *other_node.data().geometry();
                 assert!(other_mapped.is_stack());
@@ -1259,9 +1281,7 @@ impl TilingLayout {
         let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
             return MoveResult::None;
         };
-        let Some((node_id, data)) =
-            TilingLayout::currently_focused_node(&mut tree, target)
-        else {
+        let Some((node_id, data)) = TilingLayout::currently_focused_node(&mut tree, target) else {
             return MoveResult::None;
         };
 
@@ -1587,14 +1607,10 @@ impl TilingLayout {
         let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
             return FocusResult::None;
         };
-        let Some(focused) =
-            TilingLayout::currently_focused_node(tree, target).or_else(
-                || {
-                    TilingLayout::last_active_window(tree, focus_stack)
-                        .map(|(id, mapped)| (id, FocusedNodeData::Window(mapped)))
-                },
-            )
-        else {
+        let Some(focused) = TilingLayout::currently_focused_node(tree, target).or_else(|| {
+            TilingLayout::last_active_window(tree, focus_stack)
+                .map(|(id, mapped)| (id, FocusedNodeData::Window(mapped)))
+        }) else {
             return FocusResult::None;
         };
 
@@ -2252,21 +2268,23 @@ impl TilingLayout {
         let gaps = self.gaps();
 
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
-        let Some(root_id) = tree.root_node_id() else { return false };
-        let Some(mut node_id) =
-            (match TilingLayout::currently_focused_node(&tree, focused.clone()) {
-                Some((_id, FocusedNodeData::Window(mapped))) =>
-                // we need to make sure the id belongs to this tree..
-                {
-                    tree.traverse_pre_order_ids(root_id)
-                        .unwrap()
-                        .find(|id| tree.get(id).unwrap().data().is_mapped(Some(&mapped)))
-                }
-                Some((id, FocusedNodeData::Group(_, _))) => Some(id), // in this case the workspace handle was already matched, so the id is to be trusted
-                _ => None,
-            }) else {
-                return false
-            };
+        let Some(root_id) = tree.root_node_id() else {
+            return false;
+        };
+        let Some(mut node_id) = (match TilingLayout::currently_focused_node(&tree, focused.clone())
+        {
+            Some((_id, FocusedNodeData::Window(mapped))) =>
+            // we need to make sure the id belongs to this tree..
+            {
+                tree.traverse_pre_order_ids(root_id)
+                    .unwrap()
+                    .find(|id| tree.get(id).unwrap().data().is_mapped(Some(&mapped)))
+            }
+            Some((id, FocusedNodeData::Group(_, _))) => Some(id), // in this case the workspace handle was already matched, so the id is to be trusted
+            _ => None,
+        }) else {
+            return false;
+        };
 
         while let Some(group_id) = tree.get(&node_id).unwrap().parent().cloned() {
             let orientation = tree.get(&group_id).unwrap().data().orientation();
@@ -3138,8 +3156,8 @@ impl TilingLayout {
                                 .unwrap()
                                 .position(|node| {
                                     let Some(geo) = geometries.get(node) else {
-                                            return false;
-                                        };
+                                        return false;
+                                    };
                                     match orientation {
                                         Orientation::Vertical => location.x < geo.loc.x,
                                         Orientation::Horizontal => location.y < geo.loc.y,

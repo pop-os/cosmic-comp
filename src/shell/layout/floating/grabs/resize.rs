@@ -7,13 +7,12 @@ use crate::{
         element::CosmicMapped,
         focus::target::PointerFocusTarget,
         grabs::{ReleaseMode, ResizeEdge},
-        CosmicSurface,
     },
     utils::prelude::*,
 };
 use smithay::{
     backend::input::ButtonState,
-    desktop::space::SpaceElement,
+    desktop::{space::SpaceElement, WindowSurface},
     input::{
         pointer::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
@@ -118,9 +117,10 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
 
         self.window.set_resizing(true);
         self.window.set_geometry(Rectangle::from_loc_and_size(
-            match self.window.active_window() {
-                CosmicSurface::X11(s) => s.geometry().loc.as_global(),
-                _ => (0, 0).into(),
+            if let Some(s) = self.window.active_window().x11_surface() {
+                s.geometry().loc.as_global()
+            } else {
+                (0, 0).into()
             },
             self.last_window_size.as_global(),
         ));
@@ -356,20 +356,19 @@ impl ResizeSurfaceGrab {
 
             if let Some(new_location) = new_location {
                 for (window, offset) in window.windows() {
-                    match window {
-                        CosmicSurface::Wayland(window) => {
+                    match window.0.underlying_surface() {
+                        WindowSurface::Wayland(toplevel) => {
                             update_reactive_popups(
-                                &window,
+                                toplevel,
                                 new_location + offset.as_global(),
                                 floating_layer.space.outputs(),
                             );
                         }
-                        CosmicSurface::X11(surface) => {
+                        WindowSurface::X11(surface) => {
                             let mut geometry = surface.geometry();
                             geometry.loc += (location - new_location).as_logical();
                             let _ = surface.configure(geometry);
                         }
-                        _ => unreachable!(),
                     }
                 }
                 floating_layer
@@ -402,9 +401,10 @@ impl ResizeSurfaceGrab {
 
         self.window.set_resizing(false);
         self.window.set_geometry(Rectangle::from_loc_and_size(
-            match self.window.active_window() {
-                CosmicSurface::X11(s) => s.geometry().loc.as_global(),
-                _ => (0, 0).into(),
+            if let Some(x11_surface) = self.window.active_window().x11_surface() {
+                x11_surface.geometry().loc.as_global()
+            } else {
+                (0, 0).into()
             },
             self.last_window_size.as_global(),
         ));
