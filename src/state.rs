@@ -37,11 +37,14 @@ use smithay::{
             ImportDma,
         },
     },
-    desktop::utils::{
-        send_dmabuf_feedback_surface_tree, send_frames_surface_tree,
-        surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
-        take_presentation_feedback_surface_tree, update_surface_primary_scanout_output,
-        with_surfaces_surface_tree, OutputPresentationFeedback,
+    desktop::{
+        layer_map_for_output,
+        utils::{
+            send_dmabuf_feedback_surface_tree, send_frames_surface_tree,
+            surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
+            take_presentation_feedback_surface_tree, update_surface_primary_scanout_output,
+            with_surfaces_surface_tree, OutputPresentationFeedback,
+        },
     },
     input::{pointer::CursorImageStatus, Seat, SeatState},
     output::{Mode as OutputMode, Output, Scale},
@@ -260,6 +263,7 @@ impl BackendData {
             let location =
                 Some(final_config.position.into()).filter(|x| *x != output.current_location());
             output.change_current_state(mode, transform, scale.map(Scale::Fractional), location);
+            layer_map_for_output(output).arrange();
         }
 
         result
