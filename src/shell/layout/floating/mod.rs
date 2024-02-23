@@ -122,6 +122,7 @@ impl Animation {
     fn geometry(
         &self,
         output_geometry: Rectangle<i32, Logical>,
+        current_geometry: Rectangle<i32, Local>,
         tiled_state: Option<&TiledCorners>,
     ) -> Rectangle<i32, Local> {
         let target_rect = match self {
@@ -131,15 +132,13 @@ impl Animation {
             | Animation::Unminimize {
                 target_geometry, ..
             } => target_geometry.clone(),
-            Animation::Tiled {
-                previous_geometry, ..
-            } => {
+            Animation::Tiled { .. } => {
                 if let Some(target_rect) =
                     tiled_state.map(|state| state.relative_geometry(output_geometry))
                 {
                     target_rect
                 } else {
-                    previous_geometry.clone()
+                    current_geometry
                 }
             }
         };
@@ -951,13 +950,15 @@ impl FloatingLayout {
                 let output_geometry = layers.non_exclusive_zone();
                 std::mem::drop(layers);
 
+                let current_geometry = self
+                    .space
+                    .element_geometry(focused)
+                    .map(RectExt::as_local)
+                    .unwrap();
                 let start_rectangle = if let Some(anim) = self.animations.remove(focused) {
-                    anim.geometry(output_geometry, tiled_state.as_ref())
+                    anim.geometry(output_geometry, current_geometry, tiled_state.as_ref())
                 } else {
-                    self.space
-                        .element_geometry(focused)
-                        .map(RectExt::as_local)
-                        .unwrap()
+                    current_geometry
                 };
 
                 let new_state = match (direction, &*tiled_state) {
@@ -1185,6 +1186,10 @@ impl FloatingLayout {
                 let original_geo = anim.previous_geometry();
                 geometry = anim.geometry(
                     output_geometry,
+                    self.space
+                        .element_geometry(elem)
+                        .map(RectExt::as_local)
+                        .unwrap_or(geometry),
                     elem.floating_tiled.lock().unwrap().as_ref(),
                 );
 
