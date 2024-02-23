@@ -1160,17 +1160,17 @@ where
     Stack(self::stack::CosmicStackRenderElement<R>),
     Window(self::window::CosmicWindowRenderElement<R>),
     TiledStack(
-        RelocateRenderElement<
-            RescaleRenderElement<CropRenderElement<self::stack::CosmicStackRenderElement<R>>>,
+        CropRenderElement<
+            RelocateRenderElement<RescaleRenderElement<self::stack::CosmicStackRenderElement<R>>>,
         >,
     ),
     TiledWindow(
-        RelocateRenderElement<
-            RescaleRenderElement<CropRenderElement<self::window::CosmicWindowRenderElement<R>>>,
+        CropRenderElement<
+            RelocateRenderElement<RescaleRenderElement<self::window::CosmicWindowRenderElement<R>>>,
         >,
     ),
     TiledOverlay(
-        RelocateRenderElement<RescaleRenderElement<CropRenderElement<PixelShaderElement>>>,
+        CropRenderElement<RelocateRenderElement<RescaleRenderElement<PixelShaderElement>>>,
     ),
     MovingStack(
         RelocateRenderElement<RescaleRenderElement<self::stack::CosmicStackRenderElement<R>>>,
