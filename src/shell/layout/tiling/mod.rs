@@ -141,6 +141,7 @@ pub enum Data {
     Mapped {
         mapped: CosmicMapped,
         last_geometry: Rectangle<i32, Local>,
+        minimize_to: Option<Rectangle<i32, Local>>,
     },
     Placeholder {
         last_geometry: Rectangle<i32, Local>,
@@ -317,6 +318,14 @@ enum FocusedNodeData {
     Window(CosmicMapped),
 }
 
+#[derive(Debug)]
+pub struct MinimizedTilingState {
+    pub parent: id_tree::NodeId,
+    pub orientation: Orientation,
+    pub idx: usize,
+    pub sizes: Vec<i32>,
+}
+
 impl TilingLayout {
     pub fn new(theme: cosmic::Theme, output: &Output) -> TilingLayout {
         TilingLayout {
@@ -347,11 +356,7 @@ impl TilingLayout {
             .into_iter()
             .flatten()
         {
-            if let Data::Mapped {
-                mapped,
-                last_geometry: _,
-            } = node.data()
-            {
+            if let Data::Mapped { mapped, .. } = node.data() {
                 mapped.output_leave(&self.output);
                 mapped.output_enter(output, mapped.bbox());
             }
@@ -390,6 +395,75 @@ impl TilingLayout {
         self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
     }
 
+    pub fn remap_minimized<'a>(
+        &mut self,
+        window: CosmicMapped,
+        from: Rectangle<i32, Local>,
+        tiling_state: Option<MinimizedTilingState>,
+        focus_stack: Option<impl Iterator<Item = &'a CosmicMapped> + 'a>,
+    ) {
+        let gaps = self.gaps();
+        let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
+
+        if let Some(MinimizedTilingState {
+            parent,
+            orientation,
+            idx,
+            mut sizes,
+        }) = tiling_state
+        {
+            if let Ok(node) = tree.get_mut(&parent) {
+                if let Data::Group {
+                    orientation: current_orientation,
+                    sizes: current_sizes,
+                    ..
+                } = node.data_mut()
+                {
+                    if *current_orientation == orientation && sizes.len() == current_sizes.len() + 1
+                    {
+                        let previous_length: i32 = sizes.iter().copied().sum();
+                        let new_length: i32 = current_sizes.iter().copied().sum();
+                        if previous_length != new_length {
+                            // rescale sizes
+                            sizes.iter_mut().for_each(|len| {
+                                *len = (((*len as f64) / (previous_length as f64))
+                                    * (new_length as f64))
+                                    .round() as i32;
+                            });
+                            let sum: i32 = sizes.iter().sum();
+
+                            // fix rounding issues
+                            if sum != new_length {
+                                let diff = new_length - sum;
+                                *sizes.last_mut().unwrap() += diff;
+                            }
+                        }
+                    }
+
+                    *current_sizes = sizes;
+                    let new_node = Node::new(Data::Mapped {
+                        mapped: window.clone(),
+                        last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
+                        minimize_to: Some(from),
+                    });
+                    let new_id = tree
+                        .insert(new_node, InsertBehavior::UnderNode(&parent))
+                        .unwrap();
+                    tree.make_nth_sibling(&new_id, idx).unwrap();
+                    *window.tiling_node_id.lock().unwrap() = Some(new_id);
+                    window.set_minimized(false);
+
+                    let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+                    self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
+                    return;
+                }
+            }
+        }
+
+        // else add as new_window
+        self.map_internal(window, focus_stack, None);
+    }
+
     fn map_to_tree<'a>(
         mut tree: &mut Tree<Data>,
         window: impl Into<CosmicMapped>,
@@ -401,6 +475,7 @@ impl TilingLayout {
         let new_window = Node::new(Data::Mapped {
             mapped: window.clone(),
             last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
+            minimize_to: None,
         });
 
         let window_id = if let Some(direction) = direction {
@@ -934,6 +1009,7 @@ impl TilingLayout {
                     .replace_data(Data::Mapped {
                         mapped,
                         last_geometry: geometry,
+                        minimize_to: None,
                     });
             }
             (None, Some(other_surface)) => {
@@ -1021,6 +1097,7 @@ impl TilingLayout {
                     .replace_data(Data::Mapped {
                         mapped,
                         last_geometry: geometry,
+                        minimize_to: None,
                     });
             }
             (Some(this_surface), Some(other_surface)) => {
@@ -1173,6 +1250,53 @@ impl TilingLayout {
         Some(node_id)
     }
 
+    pub fn unmap_minimize(
+        &mut self,
+        window: &CosmicMapped,
+        to: Rectangle<i32, Local>,
+    ) -> Option<MinimizedTilingState> {
+        let node_id = window.tiling_node_id.lock().unwrap().clone()?;
+        let state = {
+            let tree = &self.queue.trees.back().unwrap().0;
+            tree.get(&node_id).unwrap().parent().and_then(|parent_id| {
+                let parent = tree.get(&parent_id).unwrap();
+                let idx = parent
+                    .children()
+                    .iter()
+                    .position(|id| id == &node_id)
+                    .unwrap();
+                if let Data::Group {
+                    orientation, sizes, ..
+                } = parent.data()
+                {
+                    Some(MinimizedTilingState {
+                        parent: parent_id.clone(),
+                        orientation: *orientation,
+                        idx,
+                        sizes: sizes.clone(),
+                    })
+                } else {
+                    None
+                }
+            })
+        };
+
+        if self.unmap_window_internal(window) {
+            let tree = &mut self
+                .queue
+                .trees
+                .get_mut(self.queue.trees.len() - 2)
+                .unwrap()
+                .0;
+            if let Data::Mapped { minimize_to, .. } = tree.get_mut(&node_id).unwrap().data_mut() {
+                *minimize_to = Some(to);
+            }
+            window.set_minimized(true);
+        }
+
+        state
+    }
+
     fn unmap_window_internal(&mut self, mapped: &CosmicMapped) -> bool {
         let tiling_node_id = mapped.tiling_node_id.lock().unwrap().as_ref().cloned();
         let gaps = self.gaps();
@@ -1297,6 +1421,7 @@ impl TilingLayout {
                     let new_node = Node::new(Data::Mapped {
                         mapped: mapped.clone(),
                         last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
+                        minimize_to: None,
                     });
                     let new_id = tree.insert(new_node, InsertBehavior::AsRoot).unwrap();
                     TilingLayout::new_group(&mut tree, &node_id, &new_id, orientation).unwrap();
@@ -2070,6 +2195,7 @@ impl TilingLayout {
                     *data = Data::Mapped {
                         mapped: mapped.clone(),
                         last_geometry: geo,
+                        minimize_to: None,
                     };
 
                     let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
@@ -2406,6 +2532,7 @@ impl TilingLayout {
                         Node::new(Data::Mapped {
                             mapped: window.clone(),
                             last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
+                            minimize_to: None,
                         }),
                         InsertBehavior::UnderNode(group_id),
                     )
@@ -2441,6 +2568,7 @@ impl TilingLayout {
                         Node::new(Data::Mapped {
                             mapped: window.clone(),
                             last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
+                            minimize_to: None,
                         }),
                         InsertBehavior::UnderNode(group_id),
                     )
@@ -2462,6 +2590,7 @@ impl TilingLayout {
                 *data = Data::Mapped {
                     mapped: window.clone(),
                     last_geometry: geo,
+                    minimize_to: None,
                 };
                 *window.tiling_node_id.lock().unwrap() = Some(node_id.clone());
                 window
@@ -2472,6 +2601,7 @@ impl TilingLayout {
                         Node::new(Data::Mapped {
                             mapped: window.clone(),
                             last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
+                            minimize_to: None,
                         }),
                         InsertBehavior::UnderNode(&window_id),
                     )
@@ -2916,6 +3046,7 @@ impl TilingLayout {
                     Data::Mapped {
                         mapped,
                         last_geometry,
+                        ..
                     },
                 )) => {
                     let test_point = (location.to_f64() - last_geometry.loc.to_f64()

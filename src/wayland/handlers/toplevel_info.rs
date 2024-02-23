@@ -31,19 +31,19 @@ impl Window for CosmicSurface {
     }
 
     fn is_activated(&self) -> bool {
-        CosmicSurface::is_activated(self, false)
+        !self.is_minimized() && CosmicSurface::is_activated(self, false)
     }
 
     fn is_maximized(&self) -> bool {
-        CosmicSurface::is_maximized(self, false)
+        !self.is_minimized() && CosmicSurface::is_maximized(self, false)
     }
 
     fn is_fullscreen(&self) -> bool {
-        CosmicSurface::is_fullscreen(self, false)
+        !self.is_minimized() && CosmicSurface::is_fullscreen(self, false)
     }
 
     fn is_minimized(&self) -> bool {
-        false // TODO
+        CosmicSurface::is_minimized(self)
     }
 
     fn user_data(&self) -> &UserDataMap {

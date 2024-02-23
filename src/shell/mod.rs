@@ -50,7 +50,10 @@ use crate::{
     state::client_should_see_privileged_protocols,
     utils::prelude::*,
     wayland::{
-        handlers::{xdg_activation::ActivationContext, xdg_shell::popup::get_popup_toplevel},
+        handlers::{
+            toplevel_management::ToplevelManagementExt, xdg_activation::ActivationContext,
+            xdg_shell::popup::get_popup_toplevel,
+        },
         protocols::{
             toplevel_info::ToplevelInfoState,
             toplevel_management::{ManagementCapabilities, ToplevelManagementState},
@@ -289,6 +292,12 @@ fn move_workspace_to_group(
             toplevel_info_state.toplevel_enter_workspace(&surface, &workspace.handle);
         }
     }
+    for window in workspace.minimized_windows.iter() {
+        for (surface, _) in window.window.windows() {
+            toplevel_info_state.toplevel_leave_workspace(&surface, &old_workspace_handle);
+            toplevel_info_state.toplevel_enter_workspace(&surface, &workspace.handle);
+        }
+    }
     workspace_state.remove_workspace(old_workspace_handle);
 }
 
@@ -311,6 +320,7 @@ fn merge_workspaces(
             toplevel_info_state.toplevel_enter_workspace(&toplevel, &into.handle);
         }
     }
+    // TODO: merge minimized windows
     into.tiling_layer.merge(workspace.tiling_layer);
     into.floating_layer.merge(workspace.floating_layer);
     workspace_state.remove_workspace(workspace.handle);
@@ -433,7 +443,7 @@ impl WorkspaceSet {
         if self
             .workspaces
             .last()
-            .map(|last| !last.pending_tokens.is_empty() || last.windows().next().is_some())
+            .map(|last| !last.is_empty())
             .unwrap_or(true)
         {
             self.add_empty_workspace(state);
@@ -443,10 +453,7 @@ impl WorkspaceSet {
         let len = self.workspaces.len();
         let mut keep = vec![true; len];
         for (i, workspace) in self.workspaces.iter().enumerate() {
-            let has_windows =
-                !workspace.pending_tokens.is_empty() || workspace.windows().next().is_some();
-
-            if !has_windows && i != self.active && i != len - 1 {
+            if workspace.is_empty() && i != self.active && i != len - 1 {
                 state.remove_workspace(workspace.handle);
                 keep[i] = false;
             }
@@ -609,6 +616,22 @@ impl Workspaces {
                     workspace.refresh(xdg_activation_state);
                     new_set.workspaces.push(workspace);
                 }
+
+                for window in set.sticky_layer.mapped() {
+                    for (surface, _) in window.windows() {
+                        toplevel_info_state.toplevel_leave_output(&surface, output);
+                        toplevel_info_state.toplevel_enter_output(&surface, &new_output);
+                    }
+                }
+                new_set.sticky_layer.merge(set.sticky_layer);
+                for window in set.minimized_windows.iter() {
+                    for (surface, _) in window.window.windows() {
+                        toplevel_info_state.toplevel_leave_output(&surface, output);
+                        toplevel_info_state.toplevel_enter_output(&surface, &new_output);
+                    }
+                }
+                new_set.minimized_windows.extend(set.minimized_windows);
+
                 if self.mode == WorkspaceMode::OutputBound {
                     workspace_state.remove_workspace_group(set.group);
                 } else {
@@ -776,10 +799,7 @@ impl Workspaces {
                 let mut active = self.sets[0].active;
                 let mut keep = vec![true; len];
                 for i in 0..len {
-                    let has_windows = self.sets.values().any(|s| {
-                        !s.workspaces[i].pending_tokens.is_empty()
-                            || s.workspaces[i].windows().next().is_some()
-                    });
+                    let has_windows = self.sets.values().any(|s| !s.workspaces[i].is_empty());
 
                     if !has_windows && i != active && i != len - 1 {
                         for workspace in self.sets.values().map(|s| &s.workspaces[i]) {
@@ -1231,6 +1251,9 @@ impl Shell {
                 .find(|w| {
                     w.mapped()
                         .any(|e| e.has_surface(surface, WindowSurfaceType::ALL))
+                        || w.minimized_windows
+                            .iter()
+                            .any(|m| m.window.has_surface(surface, WindowSurfaceType::ALL))
                 })
                 .map(|w| (w.handle.clone(), w.output().clone())),
         }
@@ -1238,8 +1261,10 @@ impl Shell {
 
     pub fn element_for_surface(&self, surface: &CosmicSurface) -> Option<&CosmicMapped> {
         self.workspaces.sets.values().find_map(|set| {
-            set.sticky_layer
-                .mapped()
+            set.minimized_windows
+                .iter()
+                .map(|w| &w.window)
+                .chain(set.sticky_layer.mapped())
                 .find(|w| w.windows().any(|(s, _)| &s == surface))
                 .or_else(|| {
                     set.workspaces
@@ -1251,8 +1276,10 @@ impl Shell {
 
     pub fn element_for_wl_surface(&self, surface: &WlSurface) -> Option<&CosmicMapped> {
         self.workspaces.sets.values().find_map(|set| {
-            set.sticky_layer
-                .mapped()
+            set.minimized_windows
+                .iter()
+                .map(|w| &w.window)
+                .chain(set.sticky_layer.mapped())
                 .find(|w| {
                     w.windows()
                         .any(|(s, _)| s.wl_surface().as_ref() == Some(surface))
@@ -1267,8 +1294,10 @@ impl Shell {
 
     pub fn element_for_x11_surface(&self, surface: &X11Surface) -> Option<&CosmicMapped> {
         self.workspaces.sets.values().find_map(|set| {
-            set.sticky_layer
-                .mapped()
+            set.minimized_windows
+                .iter()
+                .map(|w| &w.window)
+                .chain(set.sticky_layer.mapped())
                 .find(|w| w.windows().any(|(s, _)| s.x11_surface() == Some(surface)))
                 .or_else(|| {
                     set.workspaces
@@ -1279,15 +1308,23 @@ impl Shell {
     }
 
     pub fn space_for(&self, mapped: &CosmicMapped) -> Option<&Workspace> {
-        self.workspaces
-            .spaces()
-            .find(|workspace| workspace.mapped().any(|m| m == mapped))
+        self.workspaces.spaces().find(|workspace| {
+            workspace.mapped().any(|m| m == mapped)
+                || workspace
+                    .minimized_windows
+                    .iter()
+                    .any(|m| &m.window == mapped)
+        })
     }
 
     pub fn space_for_mut(&mut self, mapped: &CosmicMapped) -> Option<&mut Workspace> {
-        self.workspaces
-            .spaces_mut()
-            .find(|workspace| workspace.mapped().any(|m| m == mapped))
+        self.workspaces.spaces_mut().find(|workspace| {
+            workspace.mapped().any(|m| m == mapped)
+                || workspace
+                    .minimized_windows
+                    .iter()
+                    .any(|m| &m.window == mapped)
+        })
     }
 
     pub fn outputs(&self) -> impl DoubleEndedIterator<Item = &Output> {
@@ -1731,7 +1768,13 @@ impl Shell {
         }
 
         if !parent_is_sticky && should_be_fullscreen {
-            workspace.fullscreen_request(&mapped.active_window(), None);
+            let from = state
+                .common
+                .shell
+                .toplevel_management_state
+                .minimize_rectangle(&output, &mapped.active_window());
+
+            workspace.fullscreen_request(&mapped.active_window(), None, from, &seat);
         }
 
         if parent_is_sticky {
@@ -1753,11 +1796,7 @@ impl Shell {
                 None,
             );
         } else if workspace_empty || was_activated || should_be_fullscreen {
-            Shell::append_focus_stack(
-                state,
-                Some(&KeyboardFocusTarget::from(mapped.clone())),
-                &seat,
-            );
+            Shell::append_focus_stack(state, &mapped, &seat);
             state.common.shell.set_urgent(&workspace_handle);
         }
 
@@ -1891,6 +1930,7 @@ impl Shell {
             None
         };
 
+        let any_seat = seat.unwrap_or(state.common.last_active_seat()).clone();
         let mut to_workspace = state
             .common
             .shell
@@ -1938,7 +1978,13 @@ impl Shell {
                 }
             }
 
-            to_workspace.fullscreen_request(&mapped.active_window(), f.previously);
+            let from = state
+                .common
+                .shell
+                .toplevel_management_state
+                .minimize_rectangle(&to_output, &mapped.active_window());
+
+            to_workspace.fullscreen_request(&mapped.active_window(), f.previously, from, &any_seat);
             to_workspace
                 .fullscreen
                 .as_ref()
@@ -2027,19 +2073,19 @@ impl Shell {
 
     pub fn update_reactive_popups(&self, mapped: &CosmicMapped) {
         if let Some(workspace) = self.space_for(mapped) {
-            let element_loc = workspace
+            if let Some(element_loc) = workspace
                 .element_geometry(mapped)
-                .unwrap()
-                .loc
-                .to_global(&workspace.output);
-            for (window, offset) in mapped.windows() {
-                if let Some(toplevel) = window.0.toplevel() {
-                    let window_geo_offset = window.geometry().loc.as_global();
-                    update_reactive_popups(
-                        toplevel,
-                        element_loc + offset.as_global() + window_geo_offset,
-                        self.outputs(),
-                    );
+                .map(|geo| geo.loc.to_global(&workspace.output))
+            {
+                for (window, offset) in mapped.windows() {
+                    if let Some(toplevel) = window.0.toplevel() {
+                        let window_geo_offset = window.geometry().loc.as_global();
+                        update_reactive_popups(
+                            toplevel,
+                            element_loc + offset.as_global() + window_geo_offset,
+                            self.outputs(),
+                        );
+                    }
                 }
             }
         }
@@ -2089,10 +2135,12 @@ impl Shell {
                     } else if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
                         let output = seat.active_output();
 
-                        let global_position = (workspace.element_geometry(&mapped).unwrap().loc
-                            + relative_loc.as_local()
-                            + location.as_local())
-                        .to_global(&output);
+                        let Some(elem_geo) = workspace.element_geometry(&mapped) else {
+                            return;
+                        };
+                        let global_position =
+                            (elem_geo.loc + relative_loc.as_local() + location.as_local())
+                                .to_global(&output);
                         let is_tiled = workspace.is_tiled(&mapped);
                         let edge = if is_tiled {
                             mapped
@@ -2177,6 +2225,10 @@ impl Shell {
             if let Some(mut old_mapped) =
                 state.common.shell.element_for_wl_surface(surface).cloned()
             {
+                if old_mapped.is_minimized() {
+                    return;
+                }
+
                 let seats = state.common.seats().cloned().collect::<Vec<_>>();
                 for workspace in state.common.shell.workspaces.spaces_mut() {
                     for seat in seats.iter() {
@@ -2222,11 +2274,10 @@ impl Shell {
                             let _ = workspace.remove_fullscreen(); // We are moving this window, we don't need to send it back to it's original workspace
                         }
 
-                        let mut initial_window_location = workspace
-                            .element_geometry(&old_mapped)
-                            .unwrap()
-                            .loc
-                            .to_global(&output);
+                        let Some(elem_geo) = workspace.element_geometry(&old_mapped) else {
+                            return;
+                        };
+                        let mut initial_window_location = elem_geo.loc.to_global(&output);
 
                         if mapped.maximized_state.lock().unwrap().is_some() {
                             // If surface is maximized then unmaximize it
@@ -2616,19 +2667,91 @@ impl Shell {
         }
     }
 
-    pub fn maximize_toggle(&mut self, window: &CosmicMapped) {
+    pub fn maximize_toggle(&mut self, window: &CosmicMapped, seat: &Seat<State>) {
         if window.is_maximized(true) {
             self.unmaximize_request(window);
         } else {
-            self.maximize_request(window);
+            self.maximize_request(window, seat);
         }
     }
 
-    pub fn minimize_request(&mut self, mapped: &CosmicMapped) {}
+    pub fn minimize_request(&mut self, mapped: &CosmicMapped) {
+        if let Some(set) = self
+            .workspaces
+            .sets
+            .values_mut()
+            .find(|set| set.sticky_layer.mapped().any(|m| m == mapped))
+        {
+            let to = self
+                .toplevel_management_state
+                .minimize_rectangle(&set.output, &mapped.active_window());
+            let (window, position) = set.sticky_layer.unmap_minimize(mapped, to).unwrap();
+            set.minimized_windows.push(MinimizedWindow {
+                window,
+                previous_state: MinimizedState::Sticky { position },
+                output_geo: set.output.geometry(),
+                fullscreen: None,
+            });
+        } else if let Some(workspace) = self.workspaces.sets.values_mut().find_map(|set| {
+            set.workspaces
+                .iter_mut()
+                .find(|workspace| workspace.mapped().any(|m| m == mapped))
+        }) {
+            let to = self
+                .toplevel_management_state
+                .minimize_rectangle(workspace.output(), &mapped.active_window());
+            if let Some(minimized) = workspace.minimize(&mapped, to) {
+                workspace.minimized_windows.push(minimized);
+            }
+        }
+    }
 
-    pub fn unminimize_request(&mut self, mapped: &CosmicMapped) {}
+    pub fn unminimize_request(&mut self, mapped: &CosmicMapped, seat: &Seat<State>) {
+        if let Some((set, window)) = self.workspaces.sets.values_mut().find_map(|set| {
+            set.minimized_windows
+                .iter()
+                .position(|m| &m.window == mapped)
+                .map(|i| set.minimized_windows.swap_remove(i))
+                .map(|window| (set, window))
+        }) {
+            let from = self
+                .toplevel_management_state
+                .minimize_rectangle(&set.output, &mapped.active_window());
 
-    pub fn maximize_request(&mut self, mapped: &CosmicMapped) {
+            if let MinimizedState::Sticky { mut position } = window.previous_state {
+                let current_output_size = set.output.geometry().size.as_logical();
+                if current_output_size != window.output_geo.size.as_logical() {
+                    position = Point::from((
+                        (position.x as f64 / window.output_geo.size.w as f64
+                            * current_output_size.w as f64)
+                            .floor() as i32,
+                        (position.y as f64 / window.output_geo.size.h as f64
+                            * current_output_size.h as f64)
+                            .floor() as i32,
+                    ))
+                };
+                set.sticky_layer
+                    .remap_minimized(window.window, from, position);
+            } else {
+                unreachable!("None sticky window in WorkspaceSet minimized_windows");
+            }
+        } else if let Some((workspace, window)) = self.workspaces.spaces_mut().find_map(|w| {
+            w.minimized_windows
+                .iter()
+                .position(|m| &m.window == mapped)
+                .map(|i| w.minimized_windows.swap_remove(i))
+                .map(|window| (w, window))
+        }) {
+            let from = self
+                .toplevel_management_state
+                .minimize_rectangle(workspace.output(), &mapped.active_window());
+
+            workspace.unminimize(window, from, seat);
+        }
+    }
+
+    pub fn maximize_request(&mut self, mapped: &CosmicMapped, seat: &Seat<State>) {
+        self.unminimize_request(mapped, seat);
         let (original_layer, floating_layer, original_geometry) = if let Some(set) = self
             .workspaces
             .sets
@@ -2661,22 +2784,29 @@ impl Shell {
     }
 
     pub fn unmaximize_request(&mut self, mapped: &CosmicMapped) -> Option<Size<i32, Logical>> {
-        if let Some(set) = self
-            .workspaces
-            .sets
-            .values_mut()
-            .find(|set| set.sticky_layer.mapped().any(|m| m == mapped))
-        {
+        if let Some(set) = self.workspaces.sets.values_mut().find(|set| {
+            set.sticky_layer.mapped().any(|m| m == mapped)
+                || set.minimized_windows.iter().any(|m| &m.window == mapped)
+        }) {
             let mut state = mapped.maximized_state.lock().unwrap();
             if let Some(state) = state.take() {
                 assert_eq!(state.original_layer, ManagedLayer::Sticky);
-                mapped.set_maximized(false);
-                set.sticky_layer.map_internal(
-                    mapped.clone(),
-                    Some(state.original_geometry.loc),
-                    Some(state.original_geometry.size.as_logical()),
-                    None,
-                );
+
+                if let Some(minimized) = set
+                    .minimized_windows
+                    .iter_mut()
+                    .find(|m| &m.window == mapped)
+                {
+                    minimized.unmaximize(state.original_geometry);
+                } else {
+                    mapped.set_maximized(false);
+                    set.sticky_layer.map_internal(
+                        mapped.clone(),
+                        Some(state.original_geometry.loc),
+                        Some(state.original_geometry.size.as_logical()),
+                        None,
+                    );
+                }
                 Some(state.original_geometry.size.as_logical())
             } else {
                 None
@@ -2875,7 +3005,9 @@ impl Shell {
             } else {
                 ManagedLayer::Floating
             };
-            let geometry = workspace.element_geometry(mapped).unwrap();
+            let Some(geometry) = workspace.element_geometry(mapped) else {
+                return;
+            };
             workspace.unmap(mapped);
 
             *mapped.previous_layer.lock().unwrap() = Some(previous_layer);

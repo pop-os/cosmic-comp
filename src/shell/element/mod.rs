@@ -379,6 +379,16 @@ impl CosmicMapped {
         window.is_activated(pending)
     }
 
+    pub fn is_minimized(&self) -> bool {
+        self.active_window().is_minimized()
+    }
+
+    pub fn set_minimized(&self, minimized: bool) {
+        for (w, _) in self.windows() {
+            w.set_minimized(minimized);
+        }
+    }
+
     pub fn pending_size(&self) -> Option<Size<i32, Logical>> {
         match &self.element {
             CosmicMappedInternal::Stack(s) => s.pending_size(),

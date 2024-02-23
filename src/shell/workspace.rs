@@ -34,7 +34,7 @@ use smithay::{
         glow::{GlowFrame, GlowRenderer},
         ImportAll, ImportMem, Renderer,
     },
-    desktop::{layer_map_for_output, space::SpaceElement},
+    desktop::{layer_map_for_output, space::SpaceElement, WindowSurfaceType},
     input::Seat,
     output::Output,
     reexports::wayland_server::{protocol::wl_surface::WlSurface, Client, Resource},
@@ -66,7 +66,7 @@ use super::{
         FocusStack, FocusStackMut,
     },
     grabs::ResizeEdge,
-    layout::tiling::{Data, NodeDesc},
+    layout::tiling::{Data, MinimizedTilingState, NodeDesc},
     CosmicMappedRenderElement, CosmicSurface, ResizeDirection, ResizeMode,
 };
 
@@ -94,10 +94,46 @@ pub struct Workspace {
 #[derive(Debug)]
 pub struct MinimizedWindow {
     pub window: CosmicMapped,
-    pub previous_layer: ManagedLayer,
-    pub was_fullscreen: Option<FullscreenSurface>,
-    pub was_maximized: bool,
-    pub tiling_state: Option<(id_tree::NodeId, Rectangle<i32, Logical>)>,
+    pub previous_state: MinimizedState,
+    pub fullscreen: Option<FullscreenSurface>,
+    pub output_geo: Rectangle<i32, Global>,
+}
+
+#[derive(Debug)]
+pub enum MinimizedState {
+    Sticky {
+        position: Point<i32, Local>,
+    },
+    Floating {
+        position: Point<i32, Local>,
+    },
+    Tiling {
+        tiling_state: Option<MinimizedTilingState>,
+        was_maximized: bool,
+    },
+}
+
+impl MinimizedWindow {
+    pub(super) fn unmaximize(&mut self, original_geometry: Rectangle<i32, Local>) {
+        self.window.set_maximized(false);
+        self.window.configure();
+
+        match &mut self.previous_state {
+            MinimizedState::Sticky { position } | MinimizedState::Floating { position } => {
+                *position = original_geometry.loc;
+            }
+            MinimizedState::Tiling { was_maximized, .. } => {
+                *was_maximized = false;
+            }
+        }
+    }
+
+    fn unfullscreen(&mut self) -> Option<(ManagedLayer, WorkspaceHandle)> {
+        let fullscreen = self.fullscreen.take()?;
+        self.window.set_fullscreen(false);
+        self.window.set_geometry(fullscreen.original_geometry);
+        fullscreen.previously
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -338,6 +374,18 @@ impl Workspace {
                 .0
                 .on_commit();
         }
+        if let Some(mapped) = self.minimized_windows.iter().find_map(|m| {
+            m.window
+                .has_surface(surface, WindowSurfaceType::TOPLEVEL)
+                .then_some(&m.window)
+        }) {
+            mapped
+                .windows()
+                .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
+                .unwrap()
+                .0
+                .on_commit();
+        }
     }
 
     pub fn output(&self) -> &Output {
@@ -353,6 +401,12 @@ impl Workspace {
         self.floating_layer.set_output(output);
         for mapped in self.mapped() {
             for (surface, _) in mapped.windows() {
+                toplevel_info.toplevel_leave_output(&surface, &self.output);
+                toplevel_info.toplevel_enter_output(&surface, output);
+            }
+        }
+        for window in self.minimized_windows.iter() {
+            for (surface, _) in window.window.windows() {
                 toplevel_info.toplevel_leave_output(&surface, &self.output);
                 toplevel_info.toplevel_enter_output(&surface, output);
             }
@@ -375,7 +429,7 @@ impl Workspace {
     }
 
     pub fn unmap(&mut self, mapped: &CosmicMapped) -> Option<ManagedState> {
-        let was_fullscreen = self
+        let mut was_fullscreen = self
             .fullscreen
             .as_ref()
             .filter(|f| f.ended_at.is_none())
@@ -388,10 +442,26 @@ impl Workspace {
             let _ = self.unmaximize_request(mapped);
         }
 
-        let was_floating = self.floating_layer.unmap(&mapped);
-        let was_tiling = self.tiling_layer.unmap(&mapped);
+        let mut was_floating = self.floating_layer.unmap(&mapped);
+        let mut was_tiling = self.tiling_layer.unmap(&mapped);
         if was_floating || was_tiling {
             assert!(was_floating != was_tiling);
+        }
+        if let Some(pos) = self
+            .minimized_windows
+            .iter()
+            .position(|m| &m.window == mapped)
+        {
+            let state = self.minimized_windows.remove(pos);
+            match state.previous_state {
+                MinimizedState::Sticky { .. } | MinimizedState::Floating { .. } => {
+                    was_floating = true;
+                }
+                MinimizedState::Tiling { .. } => {
+                    was_tiling = true;
+                }
+            }
+            was_fullscreen = state.fullscreen;
         }
 
         self.focus_stack
@@ -417,6 +487,7 @@ impl Workspace {
         self.floating_layer
             .mapped()
             .chain(self.tiling_layer.mapped().map(|(w, _)| w))
+            .chain(self.minimized_windows.iter().map(|w| &w.window))
             .find(|e| e.windows().any(|(w, _)| &w == surface))
     }
 
@@ -424,6 +495,7 @@ impl Workspace {
         self.floating_layer
             .mapped()
             .chain(self.tiling_layer.mapped().map(|(w, _)| w))
+            .chain(self.minimized_windows.iter().map(|w| &w.window))
             .find(|e| {
                 e.windows()
                     .any(|(w, _)| w.wl_surface().as_ref() == Some(surface))
@@ -434,6 +506,7 @@ impl Workspace {
         self.floating_layer
             .mapped()
             .chain(self.tiling_layer.mapped().map(|(w, _)| w))
+            .chain(self.minimized_windows.iter().map(|w| &w.window))
             .find(|e| e.windows().any(|(w, _)| w.x11_surface() == Some(surface)))
     }
 
@@ -463,31 +536,184 @@ impl Workspace {
     pub fn unmaximize_request(&mut self, elem: &CosmicMapped) -> Option<Size<i32, Logical>> {
         let mut state = elem.maximized_state.lock().unwrap();
         if let Some(state) = state.take() {
-            match state.original_layer {
-                ManagedLayer::Tiling if self.tiling_enabled => {
-                    // should still be mapped in tiling
-                    self.floating_layer.unmap(&elem);
-                    elem.output_enter(&self.output, elem.bbox());
-                    elem.set_maximized(false);
-                    elem.set_geometry(state.original_geometry.to_global(&self.output));
-                    elem.configure();
-                    self.tiling_layer.recalculate();
-                    self.tiling_layer
-                        .element_geometry(&elem)
-                        .map(|geo| geo.size.as_logical())
-                }
-                ManagedLayer::Sticky => unreachable!(),
-                _ => {
-                    elem.set_maximized(false);
-                    self.floating_layer.map_internal(
-                        elem.clone(),
-                        Some(state.original_geometry.loc),
-                        Some(state.original_geometry.size.as_logical()),
-                        None,
-                    );
-                    Some(state.original_geometry.size.as_logical())
+            if let Some(minimized) = self
+                .minimized_windows
+                .iter_mut()
+                .find(|m| &m.window == elem)
+            {
+                minimized.unmaximize(state.original_geometry);
+                Some(state.original_geometry.size.as_logical())
+            } else {
+                match state.original_layer {
+                    ManagedLayer::Tiling if self.tiling_enabled => {
+                        // should still be mapped in tiling
+                        self.floating_layer.unmap(&elem);
+                        elem.output_enter(&self.output, elem.bbox());
+                        elem.set_maximized(false);
+                        elem.set_geometry(state.original_geometry.to_global(&self.output));
+                        elem.configure();
+                        self.tiling_layer.recalculate();
+                        self.tiling_layer
+                            .element_geometry(&elem)
+                            .map(|geo| geo.size.as_logical())
+                    }
+                    ManagedLayer::Sticky => unreachable!(),
+                    _ => {
+                        elem.set_maximized(false);
+                        self.floating_layer.map_internal(
+                            elem.clone(),
+                            Some(state.original_geometry.loc),
+                            Some(state.original_geometry.size.as_logical()),
+                            None,
+                        );
+                        Some(state.original_geometry.size.as_logical())
+                    }
                 }
             }
+        } else {
+            None
+        }
+    }
+
+    pub fn minimize(
+        &mut self,
+        elem: &CosmicMapped,
+        to: Rectangle<i32, Local>,
+    ) -> Option<MinimizedWindow> {
+        let fullscreen = if self
+            .get_fullscreen()
+            .is_some_and(|s| elem.windows().any(|(w, _)| *s == w))
+        {
+            let fullscreen_state = self.fullscreen.clone().unwrap();
+            {
+                let f = self.fullscreen.as_mut().unwrap();
+                f.ended_at = Some(
+                    Instant::now()
+                        - (FULLSCREEN_ANIMATION_DURATION
+                            - f.start_at
+                                .take()
+                                .map(|earlier| {
+                                    Instant::now()
+                                        .duration_since(earlier)
+                                        .min(FULLSCREEN_ANIMATION_DURATION)
+                                })
+                                .unwrap_or(FULLSCREEN_ANIMATION_DURATION)),
+                );
+            }
+            Some(fullscreen_state)
+        } else {
+            None
+        };
+
+        if self.is_tiled(elem) {
+            let was_maximized = self.floating_layer.unmap(&elem);
+            let tiling_state = self.tiling_layer.unmap_minimize(elem, to);
+            Some(MinimizedWindow {
+                window: elem.clone(),
+                previous_state: MinimizedState::Tiling {
+                    tiling_state,
+                    was_maximized,
+                },
+                output_geo: self.output.geometry(),
+                fullscreen,
+            })
+        } else {
+            self.floating_layer
+                .unmap_minimize(elem, to)
+                .map(|(window, position)| MinimizedWindow {
+                    window,
+                    previous_state: MinimizedState::Floating { position },
+                    output_geo: self.output.geometry(),
+                    fullscreen,
+                })
+        }
+    }
+
+    pub fn unminimize(
+        &mut self,
+        window: MinimizedWindow,
+        from: Rectangle<i32, Local>,
+        seat: &Seat<State>,
+    ) -> Option<(CosmicMapped, ManagedLayer, WorkspaceHandle)> {
+        match window.previous_state {
+            MinimizedState::Floating { mut position } => {
+                let current_output_size = self.output.geometry().size.as_logical();
+                if current_output_size != window.output_geo.size.as_logical() {
+                    position = Point::from((
+                        (position.x as f64 / window.output_geo.size.w as f64
+                            * current_output_size.w as f64)
+                            .floor() as i32,
+                        (position.y as f64 / window.output_geo.size.h as f64
+                            * current_output_size.h as f64)
+                            .floor() as i32,
+                    ))
+                };
+                self.floating_layer
+                    .remap_minimized(window.window, from, position);
+            }
+            MinimizedState::Sticky { .. } => unreachable!(),
+            MinimizedState::Tiling {
+                tiling_state,
+                was_maximized,
+            } => {
+                if self.tiling_enabled {
+                    let focus_stack = self.focus_stack.get(seat);
+                    self.tiling_layer.remap_minimized(
+                        window.window.clone(),
+                        from,
+                        tiling_state,
+                        Some(focus_stack.iter()),
+                    );
+                    if was_maximized {
+                        let previous_geometry =
+                            self.tiling_layer.element_geometry(&window.window).unwrap();
+                        self.floating_layer
+                            .map_maximized(window.window, previous_geometry);
+                    }
+                } else {
+                    if was_maximized {
+                        self.floating_layer.map_maximized(window.window, from);
+                    } else {
+                        self.floating_layer.map(window.window.clone(), None);
+                        // get the right animation
+                        let geometry = self
+                            .floating_layer
+                            .element_geometry(&window.window)
+                            .unwrap();
+                        self.floating_layer.remap_minimized(
+                            window.window.clone(),
+                            from,
+                            geometry.loc,
+                        );
+                    }
+                }
+            }
+        }
+
+        if let Some(mut fullscreen) = window.fullscreen {
+            let old_fullscreen = self.remove_fullscreen();
+            fullscreen.start_at = Some(Instant::now());
+            let geo = self.output.geometry();
+            if geo != window.output_geo {
+                fullscreen.animation_signal = if let Some(surface) = fullscreen.surface.wl_surface()
+                {
+                    let signal = Arc::new(AtomicBool::new(false));
+                    add_blocker(
+                        &surface,
+                        FullscreenBlocker {
+                            signal: signal.clone(),
+                        },
+                    );
+                    Some(signal)
+                } else {
+                    None
+                };
+                fullscreen.surface.set_geometry(geo);
+                fullscreen.surface.send_configure();
+            }
+
+            self.fullscreen = Some(fullscreen);
+            old_fullscreen
         } else {
             None
         }
@@ -497,6 +723,8 @@ impl Workspace {
         &mut self,
         window: &CosmicSurface,
         previously: Option<(ManagedLayer, WorkspaceHandle)>,
+        from: Rectangle<i32, Local>,
+        seat: &Seat<State>,
     ) {
         if self
             .fullscreen
@@ -505,6 +733,15 @@ impl Workspace {
             .is_some()
         {
             return;
+        }
+
+        if let Some(pos) = self
+            .minimized_windows
+            .iter()
+            .position(|m| m.window.windows().any(|(w, _)| &w == window))
+        {
+            let minimized = self.minimized_windows.remove(pos);
+            let _ = self.unminimize(minimized, from, seat);
         }
 
         window.set_fullscreen(true);
@@ -540,7 +777,13 @@ impl Workspace {
         &mut self,
         window: &CosmicSurface,
     ) -> Option<(ManagedLayer, WorkspaceHandle)> {
-        if let Some(f) = self
+        if let Some(minimized) = self
+            .minimized_windows
+            .iter_mut()
+            .find(|m| m.fullscreen.as_ref().is_some_and(|f| &f.surface == window))
+        {
+            minimized.unfullscreen()
+        } else if let Some(f) = self
             .fullscreen
             .as_mut()
             .filter(|f| &f.surface == window && f.ended_at.is_none())
@@ -711,24 +954,41 @@ impl Workspace {
         self.floating_layer.space.outputs()
     }
 
-    pub fn windows(&self) -> impl Iterator<Item = CosmicSurface> + '_ {
-        self.floating_layer
-            .windows()
-            .chain(self.tiling_layer.windows().map(|(w, _)| w))
+    pub fn is_empty(&self) -> bool {
+        self.floating_layer.mapped().next().is_none()
+            && self.tiling_layer.mapped().next().is_none()
+            && self.minimized_windows.is_empty()
+            && self.pending_tokens.is_empty()
     }
 
     pub fn is_fullscreen(&self, mapped: &CosmicMapped) -> bool {
         self.fullscreen
             .as_ref()
             .is_some_and(|f| f.surface == mapped.active_window())
+            || self
+                .minimized_windows
+                .iter()
+                .any(|m| &m.window == mapped && m.fullscreen.is_some())
     }
 
     pub fn is_floating(&self, mapped: &CosmicMapped) -> bool {
-        !self.is_fullscreen(mapped) && self.floating_layer.mapped().any(|m| m == mapped)
+        !self.is_fullscreen(mapped)
+            && (self.floating_layer.mapped().any(|m| m == mapped)
+                || self.minimized_windows.iter().any(|m| {
+                    &m.window == mapped
+                        && matches!(
+                            m.previous_state,
+                            MinimizedState::Floating { .. } | MinimizedState::Sticky { .. }
+                        )
+                }))
     }
 
     pub fn is_tiled(&self, mapped: &CosmicMapped) -> bool {
-        !self.is_fullscreen(mapped) && self.tiling_layer.mapped().any(|(m, _)| m == mapped)
+        !self.is_fullscreen(mapped)
+            && (self.tiling_layer.mapped().any(|(m, _)| m == mapped)
+                || self.minimized_windows.iter().any(|m| {
+                    &m.window == mapped && matches!(m.previous_state, MinimizedState::Tiling { .. })
+                }))
     }
 
     pub fn node_desc(&self, focus: KeyboardFocusTarget) -> Option<NodeDesc> {

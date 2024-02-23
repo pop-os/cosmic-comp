@@ -194,8 +194,10 @@ pub fn window_items(
         Some(
             Item::new(fl!("window-menu-maximize"), move |handle| {
                 let mapped = maximize_clone.clone();
-                let _ =
-                    handle.insert_idle(move |state| state.common.shell.maximize_toggle(&mapped));
+                let _ = handle.insert_idle(move |state| {
+                    let seat = state.common.last_active_seat().clone();
+                    state.common.shell.maximize_toggle(&mapped, &seat);
+                });
             })
             .shortcut(config.get_shortcut_for_action(&Action::Maximize))
             .toggled(window.is_maximized(false)),

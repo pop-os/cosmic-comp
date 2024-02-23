@@ -105,12 +105,24 @@ impl ToplevelManagementState {
     pub fn rectangle_for(
         &mut self,
         window: &impl ManagementWindow,
-        client: &ClientId,
-    ) -> Option<(WlSurface, Rectangle<i32, Logical>)> {
+    ) -> impl Iterator<Item = (WlSurface, Rectangle<i32, Logical>)> {
         if let Some(state) = window.user_data().get::<ToplevelState>() {
-            state.lock().unwrap().rectangles.get(client).cloned()
+            let mut state = state.lock().unwrap();
+            state
+                .rectangles
+                .retain(|(surface, _)| surface.upgrade().is_ok());
+            Some(
+                state
+                    .rectangles
+                    .iter()
+                    .map(|(surface, rect)| (surface.upgrade().unwrap(), *rect))
+                    .collect::<Vec<_>>()
+                    .into_iter(),
+            )
+            .into_iter()
+            .flatten()
         } else {
-            None
+            None.into_iter().flatten()
         }
     }
 
@@ -217,18 +229,15 @@ where
                     window_from_handle::<<D as ToplevelInfoHandler>::Window>(toplevel).unwrap();
                 if let Some(toplevel_state) = window.user_data().get::<ToplevelState>() {
                     let mut toplevel_state = toplevel_state.lock().unwrap();
-                    if let Some(client) = surface.client() {
-                        if width == 0 && height == 0 {
-                            toplevel_state.rectangles.remove(&client.id());
-                        } else {
-                            toplevel_state.rectangles.insert(
-                                client.id(),
-                                (
-                                    surface,
-                                    Rectangle::from_loc_and_size((x, y), (width, height)),
-                                ),
-                            );
-                        }
+                    if width == 0 && height == 0 {
+                        toplevel_state
+                            .rectangles
+                            .retain(|(s, _)| s.id() != surface.id());
+                    } else {
+                        toplevel_state.rectangles.push((
+                            surface.downgrade(),
+                            Rectangle::from_loc_and_size((x, y), (width, height)),
+                        ));
                     }
                 }
             }
@@ -256,7 +265,13 @@ where
         {
             for toplevel in state.toplevel_info_state_mut().toplevels.iter() {
                 if let Some(toplevel_state) = toplevel.user_data().get::<ToplevelState>() {
-                    toplevel_state.lock().unwrap().rectangles.remove(&client);
+                    toplevel_state.lock().unwrap().rectangles.retain(|(s, _)| {
+                        s.upgrade()
+                            .ok()
+                            .and_then(|s| s.client())
+                            .map(|c| c.id() != client)
+                            .unwrap_or(false)
+                    });
                 }
             }
         }
