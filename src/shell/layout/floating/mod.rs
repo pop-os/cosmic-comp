@@ -52,10 +52,114 @@ pub const ANIMATION_DURATION: Duration = Duration::from_millis(200);
 pub struct FloatingLayout {
     pub(crate) space: Space<CosmicMapped>,
     spawn_order: Vec<CosmicMapped>,
-    tiling_animations: HashMap<CosmicMapped, (Instant, Rectangle<i32, Local>)>,
+    animations: HashMap<CosmicMapped, Animation>,
     hovered_stack: Option<(CosmicMapped, Rectangle<i32, Local>)>,
     dirty: AtomicBool,
     pub theme: cosmic::Theme,
+}
+
+#[derive(Debug)]
+enum Animation {
+    Tiled {
+        start: Instant,
+        previous_geometry: Rectangle<i32, Local>,
+    },
+    Minimize {
+        start: Instant,
+        previous_geometry: Rectangle<i32, Local>,
+        target_geometry: Rectangle<i32, Local>,
+    },
+    Unminimize {
+        start: Instant,
+        previous_geometry: Rectangle<i32, Local>,
+        target_geometry: Rectangle<i32, Local>,
+    },
+}
+
+impl Animation {
+    fn start(&self) -> &Instant {
+        match self {
+            Animation::Tiled { start, .. } => start,
+            Animation::Minimize { start, .. } => start,
+            Animation::Unminimize { start, .. } => start,
+        }
+    }
+
+    fn alpha(&self) -> f32 {
+        match self {
+            Animation::Tiled { .. } => 1.0,
+            Animation::Minimize { start, .. } => {
+                1.0 - (Instant::now()
+                    .duration_since(*start)
+                    .min(ANIMATION_DURATION)
+                    .as_secs_f32()
+                    / ANIMATION_DURATION.as_secs_f32())
+            }
+            Animation::Unminimize { start, .. } => {
+                Instant::now()
+                    .duration_since(*start)
+                    .min(ANIMATION_DURATION)
+                    .as_secs_f32()
+                    / ANIMATION_DURATION.as_secs_f32()
+            }
+        }
+    }
+
+    fn previous_geometry(&self) -> &Rectangle<i32, Local> {
+        match self {
+            Animation::Tiled {
+                previous_geometry, ..
+            } => previous_geometry,
+            Animation::Minimize {
+                previous_geometry, ..
+            } => previous_geometry,
+            Animation::Unminimize {
+                previous_geometry, ..
+            } => previous_geometry,
+        }
+    }
+
+    fn geometry(
+        &self,
+        output_geometry: Rectangle<i32, Logical>,
+        tiled_state: Option<&TiledCorners>,
+    ) -> Rectangle<i32, Local> {
+        let target_rect = match self {
+            Animation::Minimize {
+                target_geometry, ..
+            }
+            | Animation::Unminimize {
+                target_geometry, ..
+            } => target_geometry.clone(),
+            Animation::Tiled {
+                previous_geometry, ..
+            } => {
+                if let Some(target_rect) =
+                    tiled_state.map(|state| state.relative_geometry(output_geometry))
+                {
+                    target_rect
+                } else {
+                    previous_geometry.clone()
+                }
+            }
+        };
+        let previous_rect = self.previous_geometry().clone();
+        let start = *self.start();
+        let now = Instant::now();
+        let progress = now
+            .duration_since(start)
+            .min(ANIMATION_DURATION)
+            .as_secs_f64()
+            / ANIMATION_DURATION.as_secs_f64();
+
+        ease(
+            EaseInOutCubic,
+            EaseRectangle(previous_rect),
+            EaseRectangle(target_rect),
+            progress,
+        )
+        .unwrap()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -220,8 +324,13 @@ impl FloatingLayout {
 
         mapped.moved_since_mapped.store(true, Ordering::SeqCst);
 
-        self.tiling_animations
-            .insert(mapped.clone(), (Instant::now(), previous_geometry));
+        self.animations.insert(
+            mapped.clone(),
+            Animation::Tiled {
+                start: Instant::now(),
+                previous_geometry,
+            },
+        );
         if mapped.floating_tiled.lock().unwrap().take().is_some() {
             if let Some(state) = mapped.maximized_state.lock().unwrap().as_mut() {
                 if let Some(real_old_geo) = mapped.last_geometry.lock().unwrap().clone() {
@@ -433,11 +542,53 @@ impl FloatingLayout {
             .set_geometry(Rectangle::from_loc_and_size(position, win_geo.size).to_global(&output));
         mapped.configure();
 
-        if let Some(previous_geo) = prev.or(already_mapped) {
-            self.tiling_animations
-                .insert(mapped.clone(), (Instant::now(), previous_geo));
+        if let Some(previous_geometry) = prev.or(already_mapped) {
+            self.animations.insert(
+                mapped.clone(),
+                Animation::Tiled {
+                    start: Instant::now(),
+                    previous_geometry,
+                },
+            );
         }
         self.space.map_element(mapped, position.as_logical(), false);
+    }
+
+    pub fn remap_minimized(
+        &mut self,
+        mapped: CosmicMapped,
+        from: Rectangle<i32, Local>,
+        position: Point<i32, Local>,
+    ) {
+        let output = self.space.outputs().next().unwrap().clone();
+        let layers = layer_map_for_output(&output);
+        let geometry = layers.non_exclusive_zone().as_local();
+        mapped.set_bounds(geometry.size.as_logical());
+        let window_size = mapped.geometry().size;
+
+        if mapped.is_maximized(false) {
+            mapped.set_geometry(geometry.to_global(&output));
+            mapped.configure();
+        } else {
+            mapped.set_geometry(Rectangle::from_loc_and_size(
+                position.to_global(&output),
+                window_size.as_global(),
+            ));
+        }
+
+        mapped.set_minimized(false);
+        self.space
+            .map_element(mapped.clone(), position.as_logical(), true);
+        let target_geometry = self.space.element_geometry(&mapped).unwrap().as_local();
+
+        self.animations.insert(
+            mapped,
+            Animation::Unminimize {
+                start: Instant::now(),
+                previous_geometry: from,
+                target_geometry,
+            },
+        );
     }
 
     pub fn unmap(&mut self, window: &CosmicMapped) -> bool {
@@ -467,7 +618,7 @@ impl FloatingLayout {
             }
         }
 
-        let _ = self.tiling_animations.remove(window);
+        let _ = self.animations.remove(window);
 
         let was_unmaped = self.space.elements().any(|e| e == window);
         self.space.unmap_elem(&window);
@@ -478,6 +629,34 @@ impl FloatingLayout {
             window.moved_since_mapped.store(true, Ordering::SeqCst);
         }
         was_unmaped
+    }
+
+    pub fn unmap_minimize(
+        &mut self,
+        window: &CosmicMapped,
+        to: Rectangle<i32, Local>,
+    ) -> Option<(CosmicMapped, Point<i32, Local>)> {
+        let previous_geometry = self.space.element_geometry(window);
+        self.space.unmap_elem(&window);
+        if let Some(previous_geometry) = previous_geometry {
+            if let Some(pos) = self.spawn_order.iter().position(|w| w == window) {
+                self.spawn_order.truncate(pos);
+            }
+            window.moved_since_mapped.store(true, Ordering::SeqCst);
+            self.animations.insert(
+                window.clone(),
+                Animation::Minimize {
+                    start: Instant::now(),
+                    previous_geometry: previous_geometry.as_local(),
+                    target_geometry: to,
+                },
+            );
+
+            window.set_minimized(true);
+            Some((window.clone(), previous_geometry.loc.as_local()))
+        } else {
+            None
+        }
     }
 
     pub fn drop_window(
@@ -772,30 +951,8 @@ impl FloatingLayout {
                 let output_geometry = layers.non_exclusive_zone();
                 std::mem::drop(layers);
 
-                let start_rectangle = if let Some((previous_start, previous_rect)) =
-                    self.tiling_animations.remove(focused)
-                {
-                    if let Some(target_rect) = tiled_state
-                        .as_ref()
-                        .map(|state| state.relative_geometry(output_geometry))
-                    {
-                        ease(
-                            EaseInOutCubic,
-                            EaseRectangle(previous_rect),
-                            EaseRectangle(target_rect),
-                            Instant::now()
-                                .duration_since(previous_start)
-                                .max(ANIMATION_DURATION)
-                                .as_secs_f64()
-                                / ANIMATION_DURATION.as_secs_f64(),
-                        )
-                        .unwrap()
-                    } else {
-                        self.space
-                            .element_geometry(focused)
-                            .map(RectExt::as_local)
-                            .unwrap()
-                    }
+                let start_rectangle = if let Some(anim) = self.animations.remove(focused) {
+                    anim.geometry(output_geometry, tiled_state.as_ref())
                 } else {
                     self.space
                         .element_geometry(focused)
@@ -944,13 +1101,14 @@ impl FloatingLayout {
     }
 
     pub fn animations_going(&self) -> bool {
-        self.dirty.swap(false, Ordering::SeqCst) || !self.tiling_animations.is_empty()
+        self.dirty.swap(false, Ordering::SeqCst) || !self.animations.is_empty()
     }
 
     pub fn update_animation_state(&mut self) {
-        self.tiling_animations
-            .retain(|_, (start, _)| Instant::now().duration_since(*start) < ANIMATION_DURATION);
-        if self.tiling_animations.is_empty() {
+        let was_empty = self.animations.is_empty();
+        self.animations
+            .retain(|_, anim| Instant::now().duration_since(*anim.start()) < ANIMATION_DURATION);
+        if self.animations.is_empty() != was_empty {
             self.dirty.store(true, Ordering::SeqCst);
         }
     }
@@ -1000,12 +1158,18 @@ impl FloatingLayout {
         let mut window_elements = Vec::new();
         let mut popup_elements = Vec::new();
 
-        self.space.elements().rev().for_each(|elem| {
-            let mut geometry = self
-                .tiling_animations
+        for elem in self
+            .animations
+            .iter()
+            .filter(|(_, anim)| matches!(anim, Animation::Minimize { .. }))
+            .map(|(elem, _)| elem)
+            .chain(self.space.elements().rev())
+        {
+            let (mut geometry, alpha) = self
+                .animations
                 .get(elem)
-                .map(|(_, rect)| *rect)
-                .unwrap_or_else(|| self.space.element_geometry(elem).unwrap().as_local());
+                .map(|anim| (*anim.previous_geometry(), alpha * anim.alpha()))
+                .unwrap_or_else(|| (self.space.element_geometry(elem).unwrap().as_local(), alpha));
 
             let render_location = geometry.loc - elem.geometry().loc.as_local();
             let (mut w_elements, p_elements) = elem.split_render_elements(
@@ -1017,30 +1181,12 @@ impl FloatingLayout {
                 alpha,
             );
 
-            if let Some((start, original_geo)) = self.tiling_animations.get(elem) {
-                let target_rect = elem
-                    .floating_tiled
-                    .lock()
-                    .unwrap()
-                    .as_ref()
-                    .map(|state| state.relative_geometry(output_geometry))
-                    .or_else(|| {
-                        elem.is_maximized(true)
-                            .then_some(output_geometry.as_local())
-                    })
-                    .unwrap_or_else(|| self.space.element_geometry(elem).unwrap().as_local());
-
-                geometry = ease(
-                    EaseInOutCubic,
-                    EaseRectangle(original_geo.clone()),
-                    EaseRectangle(target_rect),
-                    Instant::now()
-                        .duration_since(*start)
-                        .min(ANIMATION_DURATION)
-                        .as_millis() as f32
-                        / ANIMATION_DURATION.as_millis() as f32,
-                )
-                .unwrap();
+            if let Some(anim) = self.animations.get(elem) {
+                let original_geo = anim.previous_geometry();
+                geometry = anim.geometry(
+                    output_geometry,
+                    elem.floating_tiled.lock().unwrap().as_ref(),
+                );
 
                 let buffer_size = elem.geometry().size;
                 let scale = Scale {
@@ -1142,7 +1288,7 @@ impl FloatingLayout {
 
             window_elements.extend(w_elements);
             popup_elements.extend(p_elements);
-        });
+        }
 
         (window_elements, popup_elements)
     }

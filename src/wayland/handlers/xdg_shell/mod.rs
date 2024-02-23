@@ -30,7 +30,10 @@ use smithay::{
 use std::cell::Cell;
 use tracing::warn;
 
-use super::{compositor::client_compositor_state, screencopy::PendingScreencopyBuffers};
+use super::{
+    compositor::client_compositor_state, screencopy::PendingScreencopyBuffers,
+    toplevel_management::ToplevelManagementExt,
+};
 
 pub mod popup;
 
@@ -180,7 +183,8 @@ impl XdgShellHandler for State {
             .element_for_wl_surface(surface.wl_surface())
             .cloned()
         {
-            self.common.shell.maximize_request(&mapped)
+            let seat = self.common.last_active_seat().clone();
+            self.common.shell.maximize_request(&mapped, &seat)
         }
     }
 
@@ -196,10 +200,8 @@ impl XdgShellHandler for State {
     }
 
     fn fullscreen_request(&mut self, surface: ToplevelSurface, output: Option<WlOutput>) {
-        let active_output = {
-            let seat = self.common.last_active_seat();
-            seat.active_output()
-        };
+        let seat = self.common.last_active_seat().clone();
+        let active_output = seat.active_output();
         let output = output
             .as_ref()
             .and_then(Output::from_resource)
@@ -211,6 +213,12 @@ impl XdgShellHandler for State {
             .element_for_wl_surface(surface.wl_surface())
             .cloned()
         {
+            let from = self
+                .common
+                .shell
+                .toplevel_management_state
+                .minimize_rectangle(&output, &mapped.active_window());
+
             if let Some(set) = self
                 .common
                 .shell
@@ -254,9 +262,12 @@ impl XdgShellHandler for State {
 
                 let workspace = self.common.shell.active_space_mut(&output);
                 workspace.floating_layer.map(mapped.clone(), None);
+
                 workspace.fullscreen_request(
                     &mapped.active_window(),
                     Some((ManagedLayer::Sticky, workspace_handle)),
+                    from,
+                    &seat,
                 );
             } else if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
                 if workspace.output != output {
@@ -303,13 +314,19 @@ impl XdgShellHandler for State {
 
                     let workspace = self.common.shell.active_space_mut(&output);
                     workspace.floating_layer.map(mapped.clone(), None);
-                    workspace.fullscreen_request(&mapped.active_window(), Some((layer, handle)));
+
+                    workspace.fullscreen_request(
+                        &mapped.active_window(),
+                        Some((layer, handle)),
+                        from,
+                        &seat,
+                    );
                 } else {
                     let (window, _) = mapped
                         .windows()
                         .find(|(w, _)| w.wl_surface().as_ref() == Some(surface.wl_surface()))
                         .unwrap();
-                    workspace.fullscreen_request(&window, None)
+                    workspace.fullscreen_request(&window, None, from, &seat)
                 }
             }
         } else {

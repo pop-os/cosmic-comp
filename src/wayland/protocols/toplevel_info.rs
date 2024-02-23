@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{collections::HashMap, sync::Mutex};
+use std::sync::Mutex;
 
 use smithay::{
     output::Output,
     reexports::wayland_server::{
         backend::{ClientId, GlobalId},
         protocol::wl_surface::WlSurface,
-        Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
+        Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, Weak,
     },
     utils::{user_data::UserDataMap, IsAlive, Logical, Rectangle},
 };
@@ -53,7 +53,7 @@ pub(super) struct ToplevelStateInner {
     instances: Vec<ZcosmicToplevelHandleV1>,
     outputs: Vec<Output>,
     workspaces: Vec<WorkspaceHandle>,
-    pub(super) rectangles: HashMap<ClientId, (WlSurface, Rectangle<i32, Logical>)>,
+    pub(super) rectangles: Vec<(Weak<WlSurface>, Rectangle<i32, Logical>)>,
 }
 pub(super) type ToplevelState = Mutex<ToplevelStateInner>;
 
@@ -255,7 +255,9 @@ where
                 .unwrap()
                 .lock()
                 .unwrap();
-            state.rectangles.retain(|_, (surface, _)| surface.alive());
+            state
+                .rectangles
+                .retain(|(surface, _)| surface.upgrade().is_ok());
             if window.alive() {
                 std::mem::drop(state);
                 for instance in &self.instances {

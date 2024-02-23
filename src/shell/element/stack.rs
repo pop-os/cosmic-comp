@@ -725,11 +725,10 @@ impl Program for CosmicStackInternal {
                                 } else if let Some(workspace) =
                                     state.common.shell.space_for_mut(&mapped)
                                 {
-                                    workspace
-                                        .element_geometry(&mapped)
-                                        .unwrap()
-                                        .loc
-                                        .to_global(&workspace.output)
+                                    let Some(elem_geo) = workspace.element_geometry(&mapped) else {
+                                        return;
+                                    };
+                                    elem_geo.loc.to_global(&workspace.output)
                                 } else {
                                     return;
                                 };
@@ -761,11 +760,10 @@ impl Program for CosmicStackInternal {
                                 state.common.shell.element_for_wl_surface(&surface).cloned()
                             {
                                 if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
-                                    let position = workspace
-                                        .element_geometry(&mapped)
-                                        .unwrap()
-                                        .loc
-                                        .to_global(&workspace.output);
+                                    let Some(elem_geo) = workspace.element_geometry(&mapped) else {
+                                        return;
+                                    };
+                                    let position = elem_geo.loc.to_global(&workspace.output);
                                     let mut cursor = seat
                                         .get_pointer()
                                         .unwrap()

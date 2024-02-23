@@ -145,14 +145,16 @@ impl XdgActivationHandler for State {
                             }
                         }
 
-                        let target = element.into();
                         if workspace == &current_workspace.handle && in_current_workspace {
+                            let target = element.into();
                             Shell::set_focus(self, Some(&target), &seat, None);
-                        } else if let Some((w, _)) = target
-                            .toplevel()
-                            .and_then(|t| self.common.shell.workspace_for_surface(&t))
+                        } else if let Some(w) = self
+                            .common
+                            .shell
+                            .space_for(&element)
+                            .map(|w| w.handle.clone())
                         {
-                            Shell::append_focus_stack(self, Some(&target), &seat);
+                            Shell::append_focus_stack(self, &element, &seat);
                             self.common.shell.set_urgent(&w);
                         }
                     }

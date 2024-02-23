@@ -6,7 +6,10 @@ use crate::{
     state::State,
     utils::prelude::*,
     wayland::{
-        handlers::{screencopy::PendingScreencopyBuffers, xdg_activation::ActivationContext},
+        handlers::{
+            screencopy::PendingScreencopyBuffers, toplevel_management::ToplevelManagementExt,
+            xdg_activation::ActivationContext,
+        },
         protocols::screencopy::SessionType,
     },
 };
@@ -416,7 +419,8 @@ impl XwmHandler for State {
 
     fn maximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
         if let Some(mapped) = self.common.shell.element_for_x11_surface(&window).cloned() {
-            self.common.shell.maximize_request(&mapped);
+            let seat = self.common.last_active_seat().clone();
+            self.common.shell.maximize_request(&mapped, &seat);
         }
     }
 
@@ -427,27 +431,42 @@ impl XwmHandler for State {
     }
 
     fn minimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let surface = CosmicSurface::X11(window);
-        if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
+        if let Some(mapped) = self.common.shell.element_for_x11_surface(&window).cloned() {
             self.common.shell.minimize_request(&mapped);
         }
     }
 
     fn unminimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let surface = CosmicSurface::X11(window);
-        if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
-            self.common.shell.unminimize_request(&mapped);
+        if let Some(mapped) = self.common.shell.element_for_x11_surface(&window).cloned() {
+            let seat = self.common.last_active_seat().clone();
+            self.common.shell.unminimize_request(&mapped, &seat);
         }
     }
 
     fn fullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        let seat = self.common.last_active_seat().clone();
         if let Some(mapped) = self.common.shell.element_for_x11_surface(&window).cloned() {
-            if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
+            if let Some((output, handle)) = self
+                .common
+                .shell
+                .space_for(&mapped)
+                .map(|workspace| (workspace.output.clone(), workspace.handle.clone()))
+            {
                 if let Some((surface, _)) = mapped
                     .windows()
                     .find(|(w, _)| w.x11_surface() == Some(&window))
                 {
-                    workspace.fullscreen_request(&surface, None)
+                    let from = self
+                        .common
+                        .shell
+                        .toplevel_management_state
+                        .minimize_rectangle(&output, &surface);
+                    self.common
+                        .shell
+                        .workspaces
+                        .space_for_handle_mut(&handle)
+                        .unwrap()
+                        .fullscreen_request(&surface, None, from, &seat);
                 }
             }
         } else {

@@ -41,13 +41,13 @@ impl<'a> FocusStack<'a> {
     pub fn last(&self) -> Option<&CosmicMapped> {
         self.0
             .as_ref()
-            .and_then(|set| set.iter().rev().find(|w| w.alive()))
+            .and_then(|set| set.iter().rev().find(|w| w.alive() && !w.is_minimized()))
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &'_ CosmicMapped> {
         self.0
             .iter()
-            .flat_map(|set| set.iter().rev().filter(|w| w.alive()))
+            .flat_map(|set| set.iter().rev().filter(|w| w.alive() && !w.is_minimized()))
     }
 }
 
@@ -63,11 +63,14 @@ impl<'a> FocusStackMut<'a> {
     }
 
     pub fn last(&self) -> Option<&CosmicMapped> {
-        self.0.iter().rev().find(|w| w.alive())
+        self.0.iter().rev().find(|w| w.alive() && !w.is_minimized())
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &'_ CosmicMapped> {
-        self.0.iter().rev().filter(|w| w.alive())
+        self.0
+            .iter()
+            .rev()
+            .filter(|w| w.alive() && !w.is_minimized())
     }
 }
 
@@ -96,44 +99,34 @@ impl ActiveFocus {
 }
 
 impl Shell {
-    pub fn append_focus_stack(
-        state: &mut State,
-        target: Option<&KeyboardFocusTarget>,
-        active_seat: &Seat<State>,
-    ) {
+    pub fn append_focus_stack(state: &mut State, mapped: &CosmicMapped, active_seat: &Seat<State>) {
+        if mapped.is_minimized() {
+            return;
+        }
+
         // update FocusStack and notify layouts about new focus (if any window)
-        let element = match target {
-            Some(KeyboardFocusTarget::Element(mapped)) => Some(mapped.clone()),
-            Some(KeyboardFocusTarget::Fullscreen(window)) => {
-                state.common.shell.element_for_surface(window).cloned()
-            }
-            _ => None,
+        let workspace = state.common.shell.space_for_mut(&mapped);
+        let workspace = if workspace.is_none() {
+            state
+                .common
+                .shell
+                .active_space_mut(&active_seat.active_output())
+        } else {
+            workspace.unwrap()
         };
 
-        if let Some(mapped) = element {
-            let workspace = state.common.shell.space_for_mut(&mapped);
-            let workspace = if workspace.is_none() {
-                state
-                    .common
-                    .shell
-                    .active_space_mut(&active_seat.active_output())
-            } else {
-                workspace.unwrap()
-            };
-
-            let mut focus_stack = workspace.focus_stack.get_mut(active_seat);
-            if Some(&mapped) != focus_stack.last() {
-                trace!(?mapped, "Focusing window.");
-                focus_stack.append(&mapped);
-                // also remove popup grabs, if we are switching focus
-                if let Some(mut popup_grab) = active_seat
-                    .user_data()
-                    .get::<PopupGrabData>()
-                    .and_then(|x| x.take())
-                {
-                    if !popup_grab.has_ended() {
-                        popup_grab.ungrab(PopupUngrabStrategy::All);
-                    }
+        let mut focus_stack = workspace.focus_stack.get_mut(active_seat);
+        if Some(mapped) != focus_stack.last() {
+            trace!(?mapped, "Focusing window.");
+            focus_stack.append(&mapped);
+            // also remove popup grabs, if we are switching focus
+            if let Some(mut popup_grab) = active_seat
+                .user_data()
+                .get::<PopupGrabData>()
+                .and_then(|x| x.take())
+            {
+                if !popup_grab.has_ended() {
+                    popup_grab.ungrab(PopupUngrabStrategy::All);
                 }
             }
         }
@@ -145,7 +138,20 @@ impl Shell {
         active_seat: &Seat<State>,
         serial: Option<Serial>,
     ) {
-        Self::append_focus_stack(state, target, active_seat);
+        let element = match target {
+            Some(KeyboardFocusTarget::Element(mapped)) => Some(mapped.clone()),
+            Some(KeyboardFocusTarget::Fullscreen(window)) => {
+                state.common.shell.element_for_surface(window).cloned()
+            }
+            _ => None,
+        };
+
+        if let Some(mapped) = element {
+            if mapped.is_minimized() {
+                return;
+            }
+            Self::append_focus_stack(state, &mapped, active_seat);
+        }
 
         // update keyboard focus
         if let Some(keyboard) = active_seat.get_keyboard() {
@@ -360,7 +366,7 @@ fn focus_target_is_valid(
             let has_fullscreen = workspace.get_fullscreen().is_some();
 
             if is_sticky && !is_in_focus_stack {
-                Shell::append_focus_stack(state, Some(&KeyboardFocusTarget::Element(mapped)), seat);
+                Shell::append_focus_stack(state, &mapped, seat);
             }
 
             (is_sticky || is_in_focus_stack) && !has_fullscreen

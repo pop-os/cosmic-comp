@@ -1,4 +1,7 @@
-use std::time::Duration;
+use std::{
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
+};
 
 use smithay::{
     backend::renderer::{
@@ -69,6 +72,9 @@ impl From<X11Surface> for CosmicSurface {
         CosmicSurface(Window::new_x11_window(s))
     }
 }
+
+#[derive(Default)]
+struct Minimized(AtomicBool);
 
 pub const SSD_HEIGHT: i32 = 48;
 pub const RESIZE_BORDER: i32 = 10;
@@ -348,6 +354,45 @@ impl CosmicSurface {
             WindowSurface::X11(surface) => {
                 let _ = surface.set_maximized(maximized);
             }
+        }
+    }
+
+    pub fn is_minimized(&self) -> bool {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(_) => self
+                .0
+                .user_data()
+                .get_or_insert_threadsafe(Minimized::default)
+                .0
+                .load(Ordering::SeqCst),
+            WindowSurface::X11(surface) => surface.is_minimized(),
+        }
+    }
+
+    pub fn set_minimized(&self, minimized: bool) {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(_) => self
+                .0
+                .user_data()
+                .get_or_insert_threadsafe(Minimized::default)
+                .0
+                .store(minimized, Ordering::SeqCst),
+            WindowSurface::X11(surface) => {
+                let _ = surface.set_minimized(minimized);
+            }
+        }
+    }
+
+    pub fn set_suspended(&self, suspended: bool) {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(window) => window.with_pending_state(|state| {
+                if suspended {
+                    state.states.set(ToplevelState::Suspended);
+                } else {
+                    state.states.unset(ToplevelState::Suspended);
+                }
+            }),
+            _ => {}
         }
     }
 

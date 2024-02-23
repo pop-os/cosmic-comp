@@ -290,7 +290,8 @@ impl Program for CosmicWindowInternal {
                         if let Some(mapped) =
                             state.common.shell.element_for_wl_surface(&surface).cloned()
                         {
-                            state.common.shell.maximize_toggle(&mapped)
+                            let seat = state.common.last_active_seat().clone();
+                            state.common.shell.maximize_toggle(&mapped, &seat)
                         }
                     });
                 }
@@ -315,11 +316,10 @@ impl Program for CosmicWindowInternal {
                                 } else if let Some(workspace) =
                                     state.common.shell.space_for_mut(&mapped)
                                 {
-                                    workspace
-                                        .element_geometry(&mapped)
-                                        .unwrap()
-                                        .loc
-                                        .to_global(&workspace.output)
+                                    let Some(elem_geo) = workspace.element_geometry(&mapped) else {
+                                        return;
+                                    };
+                                    elem_geo.loc.to_global(&workspace.output)
                                 } else {
                                     return;
                                 };

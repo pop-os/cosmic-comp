@@ -32,11 +32,11 @@ impl Shell {
             if let Some(elem) = self.element_for_wl_surface(&parent) {
                 let (mut element_geo, output, is_tiled) =
                     if let Some(workspace) = self.space_for(elem) {
+                        let Some(elem_geo) = workspace.element_geometry(elem) else {
+                            return;
+                        };
                         (
-                            workspace
-                                .element_geometry(elem)
-                                .unwrap()
-                                .to_global(workspace.output()),
+                            elem_geo.to_global(workspace.output()),
                             workspace.output.clone(),
                             workspace.is_tiled(elem),
                         )
