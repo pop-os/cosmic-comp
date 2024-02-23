@@ -38,7 +38,10 @@ use keyframe::{
 use smithay::{
     backend::renderer::{
         element::{
-            utils::{CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement},
+            utils::{
+                constrain_render_elements, ConstrainAlign, ConstrainScaleBehavior,
+                RescaleRenderElement,
+            },
             AsRenderElements, Id, RenderElement,
         },
         glow::GlowRenderer,
@@ -141,7 +144,7 @@ pub enum Data {
     Mapped {
         mapped: CosmicMapped,
         last_geometry: Rectangle<i32, Local>,
-        minimize_to: Option<Rectangle<i32, Local>>,
+        minimize_rect: Option<Rectangle<i32, Local>>,
     },
     Placeholder {
         last_geometry: Rectangle<i32, Local>,
@@ -402,6 +405,7 @@ impl TilingLayout {
         tiling_state: Option<MinimizedTilingState>,
         focus_stack: Option<impl Iterator<Item = &'a CosmicMapped> + 'a>,
     ) {
+        window.set_minimized(false);
         let gaps = self.gaps();
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
 
@@ -444,14 +448,13 @@ impl TilingLayout {
                     let new_node = Node::new(Data::Mapped {
                         mapped: window.clone(),
                         last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
-                        minimize_to: Some(from),
+                        minimize_rect: Some(from),
                     });
                     let new_id = tree
                         .insert(new_node, InsertBehavior::UnderNode(&parent))
                         .unwrap();
                     tree.make_nth_sibling(&new_id, idx).unwrap();
                     *window.tiling_node_id.lock().unwrap() = Some(new_id);
-                    window.set_minimized(false);
 
                     let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
                     self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
@@ -475,7 +478,7 @@ impl TilingLayout {
         let new_window = Node::new(Data::Mapped {
             mapped: window.clone(),
             last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
-            minimize_to: None,
+            minimize_rect: None,
         });
 
         let window_id = if let Some(direction) = direction {
@@ -1009,7 +1012,7 @@ impl TilingLayout {
                     .replace_data(Data::Mapped {
                         mapped,
                         last_geometry: geometry,
-                        minimize_to: None,
+                        minimize_rect: None,
                     });
             }
             (None, Some(other_surface)) => {
@@ -1097,7 +1100,7 @@ impl TilingLayout {
                     .replace_data(Data::Mapped {
                         mapped,
                         last_geometry: geometry,
-                        minimize_to: None,
+                        minimize_rect: None,
                     });
             }
             (Some(this_surface), Some(other_surface)) => {
@@ -1288,7 +1291,11 @@ impl TilingLayout {
                 .get_mut(self.queue.trees.len() - 2)
                 .unwrap()
                 .0;
-            if let Data::Mapped { minimize_to, .. } = tree.get_mut(&node_id).unwrap().data_mut() {
+            if let Data::Mapped {
+                minimize_rect: minimize_to,
+                ..
+            } = tree.get_mut(&node_id).unwrap().data_mut()
+            {
                 *minimize_to = Some(to);
             }
             window.set_minimized(true);
@@ -1421,7 +1428,7 @@ impl TilingLayout {
                     let new_node = Node::new(Data::Mapped {
                         mapped: mapped.clone(),
                         last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
-                        minimize_to: None,
+                        minimize_rect: None,
                     });
                     let new_id = tree.insert(new_node, InsertBehavior::AsRoot).unwrap();
                     TilingLayout::new_group(&mut tree, &node_id, &new_id, orientation).unwrap();
@@ -2195,7 +2202,7 @@ impl TilingLayout {
                     *data = Data::Mapped {
                         mapped: mapped.clone(),
                         last_geometry: geo,
-                        minimize_to: None,
+                        minimize_rect: None,
                     };
 
                     let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
@@ -2257,7 +2264,23 @@ impl TilingLayout {
             {
                 let _ = self.queue.animation_start.take();
                 let _ = self.queue.trees.pop_front();
-                let _ = self.queue.trees.front_mut().unwrap().2.take();
+                let front = self.queue.trees.front_mut().unwrap();
+                if let Some(root_id) = front.0.root_node_id() {
+                    for node in front
+                        .0
+                        .traverse_pre_order_ids(root_id)
+                        .unwrap()
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                    {
+                        if let Data::Mapped { minimize_rect, .. } =
+                            front.0.get_mut(&node).unwrap().data_mut()
+                        {
+                            minimize_rect.take();
+                        }
+                    }
+                }
+                let _ = front.2.take();
             } else {
                 return clients;
             }
@@ -2532,7 +2555,7 @@ impl TilingLayout {
                         Node::new(Data::Mapped {
                             mapped: window.clone(),
                             last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
-                            minimize_to: None,
+                            minimize_rect: None,
                         }),
                         InsertBehavior::UnderNode(group_id),
                     )
@@ -2568,7 +2591,7 @@ impl TilingLayout {
                         Node::new(Data::Mapped {
                             mapped: window.clone(),
                             last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
-                            minimize_to: None,
+                            minimize_rect: None,
                         }),
                         InsertBehavior::UnderNode(group_id),
                     )
@@ -2590,7 +2613,7 @@ impl TilingLayout {
                 *data = Data::Mapped {
                     mapped: window.clone(),
                     last_geometry: geo,
-                    minimize_to: None,
+                    minimize_rect: None,
                 };
                 *window.tiling_node_id.lock().unwrap() = Some(node_id.clone());
                 window
@@ -2601,7 +2624,7 @@ impl TilingLayout {
                         Node::new(Data::Mapped {
                             mapped: window.clone(),
                             last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
-                            minimize_to: None,
+                            minimize_rect: None,
                         }),
                         InsertBehavior::UnderNode(&window_id),
                     )
@@ -3780,7 +3803,9 @@ impl TilingLayout {
                 geometries.clone(),
                 output_scale,
                 percentage,
+                indicator_thickness,
                 swap_desc.is_some(),
+                theme,
             );
             window_elements.extend(w_elements);
             popup_elements.extend(p_elements);
@@ -4543,7 +4568,9 @@ fn render_old_tree<R>(
     geometries: Option<HashMap<NodeId, Rectangle<i32, Local>>>,
     output_scale: f64,
     percentage: f32,
+    indicator_thickness: u8,
     is_swap_mode: bool,
+    theme: &cosmic::theme::CosmicTheme,
 ) -> (
     Vec<CosmicMappedRenderElement<R>>,
     Vec<CosmicMappedRenderElement<R>>,
@@ -4555,6 +4582,7 @@ where
     CosmicWindowRenderElement<R>: RenderElement<R>,
     CosmicStackRenderElement<R>: RenderElement<R>,
 {
+    let window_hint = crate::theme::active_window_hint(theme);
     let mut window_elements = Vec::new();
     let mut popup_elements = Vec::new();
 
@@ -4569,12 +4597,18 @@ where
                     Data::Mapped {
                         mapped,
                         last_geometry,
+                        minimize_rect,
                         ..
-                    } => (mapped, last_geometry, geometries.get(&node_id)),
+                    } => (
+                        mapped,
+                        last_geometry,
+                        geometries.get(&node_id).copied(),
+                        minimize_rect,
+                    ),
                     _ => unreachable!(),
                 },
             )
-            .filter(|(mapped, _, _)| {
+            .filter(|(mapped, _, _, _)| {
                 if let Some(root) = target_tree.root_node_id() {
                     is_swap_mode
                         || !target_tree
@@ -4585,9 +4619,20 @@ where
                     true
                 }
             })
-            .for_each(|(mapped, original_geo, scaled_geo)| {
+            .for_each(|(mapped, original_geo, mut scaled_geo, minimize_geo)| {
+                if let Some(minimize_geo) = minimize_geo {
+                    scaled_geo = Some(
+                        ease(
+                            EaseInOutCubic,
+                            EaseRectangle(*original_geo),
+                            EaseRectangle(*minimize_geo),
+                            percentage,
+                        )
+                        .unwrap(),
+                    );
+                }
                 let (scale, offset) = scaled_geo
-                    .map(|adapted_geo| scale_to_center(&original_geo, adapted_geo))
+                    .map(|adapted_geo| scale_to_center(&original_geo, &adapted_geo))
                     .unwrap_or_else(|| (1.0.into(), (0, 0).into()));
                 let geo = scaled_geo
                     .map(|adapted_geo| {
@@ -4601,7 +4646,6 @@ where
                     })
                     .unwrap_or(*original_geo);
 
-                let crop_rect = geo.clone();
                 let original_location = original_geo
                     .loc
                     .as_logical()
@@ -4611,6 +4655,7 @@ where
                         .loc
                         .to_physical_precise_round(output_scale);
 
+                let elem_geometry = mapped.geometry().to_physical_precise_round(output_scale);
                 let (w_elements, p_elements) = mapped
                     .split_render_elements::<R, CosmicMappedRenderElement<R>>(
                         renderer,
@@ -4619,57 +4664,48 @@ where
                         1.0 - percentage,
                     );
 
-                window_elements.extend(w_elements.into_iter().flat_map(|element| match element {
-                    CosmicMappedRenderElement::Stack(elem) => {
-                        Some(CosmicMappedRenderElement::TiledStack({
-                            let cropped = CropRenderElement::from_element(
-                                elem,
+                window_elements.extend(w_elements.into_iter().flat_map(|element| {
+                    match element {
+                        CosmicMappedRenderElement::Stack(elem) => constrain_render_elements(
+                            std::iter::once(elem),
+                            geo.loc.as_logical().to_physical_precise_round(output_scale)
+                                - elem_geometry.loc,
+                            geo.as_logical().to_physical_precise_round(output_scale),
+                            elem_geometry,
+                            ConstrainScaleBehavior::Stretch,
+                            ConstrainAlign::CENTER,
                                 output_scale,
-                                crop_rect
-                                    .as_logical()
-                                    .to_physical_precise_round(output_scale),
-                            )?;
-                            let rescaled = RescaleRenderElement::from_element(
-                                cropped,
-                                original_location,
-                                scale,
-                            );
-                            let relocated = RelocateRenderElement::from_element(
-                                rescaled,
-                                (geo.loc - original_geo.loc)
-                                    .as_logical()
-                                    .to_physical_precise_round(output_scale),
-                                Relocate::Relative,
-                            );
-                            relocated
-                        }))
-                    }
-                    CosmicMappedRenderElement::Window(elem) => {
-                        Some(CosmicMappedRenderElement::TiledWindow({
-                            let cropped = CropRenderElement::from_element(
-                                elem,
+                        )
+                        .next()
+                        .map(CosmicMappedRenderElement::TiledStack),
+                        CosmicMappedRenderElement::Window(elem) => constrain_render_elements(
+                            std::iter::once(elem),
+                            geo.loc.as_logical().to_physical_precise_round(output_scale)
+                                - elem_geometry.loc,
+                            geo.as_logical().to_physical_precise_round(output_scale),
+                            elem_geometry,
+                            ConstrainScaleBehavior::Stretch,
+                            ConstrainAlign::CENTER,
                                 output_scale,
-                                crop_rect
-                                    .as_logical()
-                                    .to_physical_precise_round(output_scale),
-                            )?;
-                            let rescaled = RescaleRenderElement::from_element(
-                                cropped,
-                                original_location,
-                                scale,
-                            );
-                            let relocated = RelocateRenderElement::from_element(
-                                rescaled,
-                                (geo.loc - original_geo.loc)
-                                    .as_logical()
-                                    .to_physical_precise_round(output_scale),
-                                Relocate::Relative,
-                            );
-                            relocated
-                        }))
-                    }
+                        )
+                        .next()
+                        .map(CosmicMappedRenderElement::TiledWindow),
                     x => Some(x),
+                    }
                 }));
+                if minimize_geo.is_some() && indicator_thickness > 0 {
+                    window_elements.push(CosmicMappedRenderElement::FocusIndicator(
+                        IndicatorShader::focus_element(
+                            renderer,
+                            Key::Window(Usage::FocusIndicator, mapped.clone().into()),
+                            geo,
+                            indicator_thickness,
+                            output_scale,
+                            1.0 - percentage,
+                            [window_hint.red, window_hint.green, window_hint.blue],
+                        ),
+                    ));
+                }
                 popup_elements.extend(p_elements);
             });
     }
@@ -4880,26 +4916,36 @@ where
                     None
                 }
                 .unzip();
-            let old_geo = old_original_geo.map(|original_geo| {
+            let mut old_geo = old_original_geo.map(|original_geo| {
                 let (scale, offset) = old_scaled_geo
                     .unwrap()
                     .map(|adapted_geo| scale_to_center(original_geo, adapted_geo))
                     .unwrap_or_else(|| (1.0.into(), (0, 0).into()));
-                old_scaled_geo
-                    .unwrap()
-                    .map(|adapted_geo| {
-                        Rectangle::from_loc_and_size(
-                            adapted_geo.loc + offset,
-                            (
-                                (original_geo.size.w as f64 * scale).round() as i32,
-                                (original_geo.size.h as f64 * scale).round() as i32,
-                            ),
-                        )
-                    })
-                    .unwrap_or(*original_geo)
+                (
+                    old_scaled_geo
+                        .unwrap()
+                        .map(|adapted_geo| {
+                            Rectangle::from_loc_and_size(
+                                adapted_geo.loc + offset,
+                                (
+                                    (original_geo.size.w as f64 * scale).round() as i32,
+                                    (original_geo.size.h as f64 * scale).round() as i32,
+                                ),
+                            )
+                        })
+                        .unwrap_or(*original_geo),
+                    1.0,
+                )
             });
 
-            let mut crop_rect = original_geo;
+            if let Data::Mapped {
+                minimize_rect: Some(minimize_rect),
+                ..
+            } = &data
+            {
+                old_geo = Some((*minimize_rect, percentage));
+            }
+
             let (scale, offset) = scaled_geo
                 .map(|adapted_geo| scale_to_center(original_geo, adapted_geo))
                 .unwrap_or_else(|| (1.0.into(), (0, 0).into()));
@@ -4915,7 +4961,7 @@ where
                 })
                 .unwrap_or(*original_geo);
 
-            let (geo, alpha, animating) = if let Some(old_geo) = old_geo.filter(|_| {
+            let (geo, alpha, animating) = if let Some((old_geo, alpha)) = old_geo.filter(|_| {
                 swap_desc
                     .as_ref()
                     .map(|desc| desc.node != node_id && desc.stack_window.is_none())
@@ -4929,15 +4975,12 @@ where
                         percentage,
                     )
                     .unwrap(),
-                    1.0,
+                    alpha,
                     old_geo != new_geo,
                 )
             } else {
                 (new_geo, percentage, false)
             };
-            if matches!(overview.0, OverviewMode::None) {
-                crop_rect = &geo;
-            }
 
             if swap_desc.as_ref().map(|desc| &desc.node) == Some(&node_id)
                 || focused.as_ref() == Some(&node_id)
@@ -4986,7 +5029,7 @@ where
                                 indicator_thickness
                             },
                             output_scale,
-                            1.0,
+                            alpha,
                             [window_hint.red, window_hint.green, window_hint.blue],
                         ));
                     }
@@ -5067,13 +5110,13 @@ where
             }
 
             if let Data::Mapped { mapped, .. } = data {
-                let original_location = (original_geo.loc.as_logical() - mapped.geometry().loc)
-                    .to_physical_precise_round(output_scale);
-
+                let elem_geometry = mapped.geometry().to_physical_precise_round(output_scale);
                 let (mut w_elements, p_elements) = mapped
                     .split_render_elements::<R, CosmicMappedRenderElement<R>>(
                         renderer,
-                        original_location,
+                        //original_location,
+                        geo.loc.as_logical().to_physical_precise_round(output_scale)
+                            - elem_geometry.loc,
                         Scale::from(output_scale),
                         alpha,
                     );
@@ -5113,87 +5156,42 @@ where
                 }
 
                 let w_elements = w_elements.into_iter().flat_map(|element| match element {
-                    CosmicMappedRenderElement::Stack(elem) => {
-                        Some(CosmicMappedRenderElement::TiledStack({
-                            let cropped = CropRenderElement::from_element(
-                                elem,
+                    CosmicMappedRenderElement::Stack(elem) => constrain_render_elements(
+                        std::iter::once(elem),
+                        geo.loc.as_logical().to_physical_precise_round(output_scale)
+                            - elem_geometry.loc,
+                        geo.as_logical().to_physical_precise_round(output_scale),
+                        elem_geometry,
+                        ConstrainScaleBehavior::Stretch,
+                        ConstrainAlign::CENTER,
                                 output_scale,
-                                crop_rect
-                                    .as_logical()
-                                    .to_physical_precise_round(output_scale),
-                            )?;
-                            let rescaled = RescaleRenderElement::from_element(
-                                cropped,
-                                original_geo
-                                    .loc
-                                    .as_logical()
-                                    .to_physical_precise_round(output_scale),
-                                scale,
-                            );
-                            let relocated = RelocateRenderElement::from_element(
-                                rescaled,
-                                (geo.loc - original_geo.loc)
-                                    .as_logical()
-                                    .to_physical_precise_round(output_scale),
-                                Relocate::Relative,
-                            );
-                            relocated
-                        }))
-                    }
-                    CosmicMappedRenderElement::Window(elem) => {
-                        Some(CosmicMappedRenderElement::TiledWindow({
-                            let cropped = CropRenderElement::from_element(
-                                elem,
+                    )
+                    .next()
+                    .map(CosmicMappedRenderElement::TiledStack),
+                    CosmicMappedRenderElement::Window(elem) => constrain_render_elements(
+                        std::iter::once(elem),
+                        geo.loc.as_logical().to_physical_precise_round(output_scale)
+                            - elem_geometry.loc,
+                        geo.as_logical().to_physical_precise_round(output_scale),
+                        elem_geometry,
+                        ConstrainScaleBehavior::Stretch,
+                        ConstrainAlign::CENTER,
                                 output_scale,
-                                crop_rect
-                                    .as_logical()
-                                    .to_physical_precise_round(output_scale),
-                            )?;
-                            let rescaled = RescaleRenderElement::from_element(
-                                cropped,
-                                original_geo
-                                    .loc
-                                    .as_logical()
-                                    .to_physical_precise_round(output_scale),
-                                scale,
-                            );
-                            let relocated = RelocateRenderElement::from_element(
-                                rescaled,
-                                (geo.loc - original_geo.loc)
-                                    .as_logical()
-                                    .to_physical_precise_round(output_scale),
-                                Relocate::Relative,
-                            );
-                            relocated
-                        }))
-                    }
-                    CosmicMappedRenderElement::Overlay(elem) => {
-                        Some(CosmicMappedRenderElement::TiledOverlay({
-                            let cropped = CropRenderElement::from_element(
-                                elem,
+                    )
+                    .next()
+                    .map(CosmicMappedRenderElement::TiledWindow),
+                    CosmicMappedRenderElement::Overlay(elem) => constrain_render_elements(
+                        std::iter::once(elem),
+                        geo.loc.as_logical().to_physical_precise_round(output_scale)
+                            - elem_geometry.loc,
+                        geo.as_logical().to_physical_precise_round(output_scale),
+                        elem_geometry,
+                        ConstrainScaleBehavior::Stretch,
+                        ConstrainAlign::CENTER,
                                 output_scale,
-                                crop_rect
-                                    .as_logical()
-                                    .to_physical_precise_round(output_scale),
-                            )?;
-                            let rescaled = RescaleRenderElement::from_element(
-                                cropped,
-                                original_geo
-                                    .loc
-                                    .as_logical()
-                                    .to_physical_precise_round(output_scale),
-                                scale,
-                            );
-                            let relocated = RelocateRenderElement::from_element(
-                                rescaled,
-                                (geo.loc - original_geo.loc)
-                                    .as_logical()
-                                    .to_physical_precise_round(output_scale),
-                                Relocate::Relative,
-                            );
-                            relocated
-                        }))
-                    }
+                    )
+                    .next()
+                    .map(CosmicMappedRenderElement::TiledOverlay),
                     x => Some(x),
                 });
                 if swap_desc
