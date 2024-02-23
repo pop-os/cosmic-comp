@@ -323,7 +323,8 @@ enum FocusedNodeData {
 
 #[derive(Debug)]
 pub struct MinimizedTilingState {
-    pub parent: id_tree::NodeId,
+    pub parent: Option<id_tree::NodeId>,
+    pub sibling: Option<id_tree::NodeId>,
     pub orientation: Orientation,
     pub idx: usize,
     pub sizes: Vec<i32>,
@@ -411,18 +412,21 @@ impl TilingLayout {
 
         if let Some(MinimizedTilingState {
             parent,
+            sibling,
             orientation,
             idx,
             mut sizes,
         }) = tiling_state
         {
-            if let Ok(node) = tree.get_mut(&parent) {
+            if let Some(node) = parent.as_ref().and_then(|parent| tree.get_mut(parent).ok()) {
                 if let Data::Group {
                     orientation: current_orientation,
                     sizes: current_sizes,
                     ..
                 } = node.data_mut()
                 {
+                    let parent_id = parent.unwrap();
+
                     if *current_orientation == orientation && sizes.len() == current_sizes.len() + 1
                     {
                         let previous_length: i32 = sizes.iter().copied().sum();
@@ -451,7 +455,7 @@ impl TilingLayout {
                         minimize_rect: Some(from),
                     });
                     let new_id = tree
-                        .insert(new_node, InsertBehavior::UnderNode(&parent))
+                        .insert(new_node, InsertBehavior::UnderNode(&parent_id))
                         .unwrap();
                     tree.make_nth_sibling(&new_id, idx).unwrap();
                     *window.tiling_node_id.lock().unwrap() = Some(new_id);
@@ -460,6 +464,43 @@ impl TilingLayout {
                     self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
                     return;
                 }
+            }
+
+            if sibling
+                .as_ref()
+                .is_some_and(|sibling| tree.get(&sibling).is_ok())
+            {
+                let sibling_id = sibling.unwrap();
+                let new_node = Node::new(Data::Mapped {
+                    mapped: window.clone(),
+                    last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
+                    minimize_rect: Some(from),
+                });
+
+                let new_id = tree.insert(new_node, InsertBehavior::AsRoot).unwrap();
+                let group_id =
+                    TilingLayout::new_group(&mut tree, &sibling_id, &new_id, orientation).unwrap();
+                tree.make_nth_sibling(&new_id, idx).unwrap();
+                if let Data::Group {
+                    sizes: default_sizes,
+                    last_geometry,
+                    ..
+                } = tree.get_mut(&group_id).unwrap().data_mut()
+                {
+                    match orientation {
+                        Orientation::Horizontal => {
+                            last_geometry.size.h = sizes.iter().copied().sum()
+                        }
+                        Orientation::Vertical => last_geometry.size.w = sizes.iter().copied().sum(),
+                    };
+                    *default_sizes = sizes;
+                }
+
+                *window.tiling_node_id.lock().unwrap() = Some(new_id);
+
+                let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+                self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
+                return;
             }
         }
 
@@ -1272,12 +1313,24 @@ impl TilingLayout {
                     orientation, sizes, ..
                 } = parent.data()
                 {
-                    Some(MinimizedTilingState {
-                        parent: parent_id.clone(),
-                        orientation: *orientation,
-                        idx,
-                        sizes: sizes.clone(),
-                    })
+                    if sizes.len() == 2 {
+                        // this group will be flattened
+                        Some(MinimizedTilingState {
+                            parent: None,
+                            sibling: parent.children().iter().cloned().find(|id| id != &node_id),
+                            orientation: *orientation,
+                            idx,
+                            sizes: sizes.clone(),
+                        })
+                    } else {
+                        Some(MinimizedTilingState {
+                            parent: Some(parent_id.clone()),
+                            sibling: None,
+                            orientation: *orientation,
+                            idx,
+                            sizes: sizes.clone(),
+                        })
+                    }
                 } else {
                     None
                 }
@@ -4674,7 +4727,7 @@ where
                             elem_geometry,
                             ConstrainScaleBehavior::Stretch,
                             ConstrainAlign::CENTER,
-                                output_scale,
+                            output_scale,
                         )
                         .next()
                         .map(CosmicMappedRenderElement::TiledStack),
@@ -4686,11 +4739,11 @@ where
                             elem_geometry,
                             ConstrainScaleBehavior::Stretch,
                             ConstrainAlign::CENTER,
-                                output_scale,
+                            output_scale,
                         )
                         .next()
                         .map(CosmicMappedRenderElement::TiledWindow),
-                    x => Some(x),
+                        x => Some(x),
                     }
                 }));
                 if minimize_geo.is_some() && indicator_thickness > 0 {
@@ -5164,7 +5217,7 @@ where
                         elem_geometry,
                         ConstrainScaleBehavior::Stretch,
                         ConstrainAlign::CENTER,
-                                output_scale,
+                        output_scale,
                     )
                     .next()
                     .map(CosmicMappedRenderElement::TiledStack),
@@ -5176,7 +5229,7 @@ where
                         elem_geometry,
                         ConstrainScaleBehavior::Stretch,
                         ConstrainAlign::CENTER,
-                                output_scale,
+                        output_scale,
                     )
                     .next()
                     .map(CosmicMappedRenderElement::TiledWindow),
@@ -5188,7 +5241,7 @@ where
                         elem_geometry,
                         ConstrainScaleBehavior::Stretch,
                         ConstrainAlign::CENTER,
-                                output_scale,
+                        output_scale,
                     )
                     .next()
                     .map(CosmicMappedRenderElement::TiledOverlay),
