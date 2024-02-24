@@ -2192,7 +2192,7 @@ impl State {
         if let Some(session_lock) = session_lock {
             return session_lock.surfaces.get(output).map(|surface| {
                 (
-                    PointerFocusTarget::LockSurface(surface.clone()),
+                    PointerFocusTarget::WlSurface(surface.wl_surface().clone()),
                     output_geo.loc,
                 )
             });

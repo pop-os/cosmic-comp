@@ -52,7 +52,7 @@ use crate::{
     wayland::{
         handlers::{
             toplevel_management::ToplevelManagementExt, xdg_activation::ActivationContext,
-            xdg_shell::popup::get_popup_toplevel,
+            xdg_shell::popup::get_surface_toplevel,
         },
         protocols::{
             toplevel_info::ToplevelInfoState,
@@ -2419,11 +2419,9 @@ impl Shell {
         let workspace = &mut set.workspaces[set.active];
 
         let Some(focused) = (match target {
-            KeyboardFocusTarget::Popup(popup) => {
-                let Some(toplevel_surface) = (match popup {
-                    PopupKind::Xdg(xdg) => get_popup_toplevel(&xdg),
-                    PopupKind::InputMethod(_) => unreachable!(),
-                }) else {
+            // TODO update to handle toplevel
+            KeyboardFocusTarget::WlSurface(surface) => {
+                let Some(toplevel_surface) = get_surface_toplevel(&surface) else {
                     return FocusResult::None;
                 };
                 sticky_layer

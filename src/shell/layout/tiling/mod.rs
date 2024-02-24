@@ -25,7 +25,7 @@ use crate::{
     theme::group_color,
     utils::{prelude::*, tween::EaseRectangle},
     wayland::{
-        handlers::xdg_shell::popup::get_popup_toplevel,
+        handlers::xdg_shell::popup::get_surface_toplevel,
         protocols::{toplevel_info::ToplevelInfoState, workspace::WorkspaceHandle},
     },
 };
@@ -2787,26 +2787,25 @@ impl TilingLayout {
         mut target: KeyboardFocusTarget,
     ) -> Option<(NodeId, FocusedNodeData)> {
         // if the focus is currently on a popup, treat it's toplevel as the target
-        if let KeyboardFocusTarget::Popup(popup) = target {
-            let toplevel_surface = match popup {
-                PopupKind::Xdg(xdg) => get_popup_toplevel(&xdg),
-                PopupKind::InputMethod(_) => unreachable!(),
-            }?;
-            let root_id = tree.root_node_id()?;
-            let node =
-                tree.traverse_pre_order(root_id)
-                    .unwrap()
-                    .find(|node| match node.data() {
-                        Data::Mapped { mapped, .. } => mapped
-                            .windows()
-                            .any(|(w, _)| w.wl_surface().as_ref() == Some(&toplevel_surface)),
-                        _ => false,
-                    })?;
+        if let KeyboardFocusTarget::WlSurface(surface) = &target {
+            // What if it's a popup with no toplevel?
+            if let Some(toplevel_surface) = get_surface_toplevel(surface) {
+                let root_id = tree.root_node_id()?;
+                let node =
+                    tree.traverse_pre_order(root_id)
+                        .unwrap()
+                        .find(|node| match node.data() {
+                            Data::Mapped { mapped, .. } => mapped
+                                .windows()
+                                .any(|(w, _)| w.wl_surface().as_ref() == Some(&toplevel_surface)),
+                            _ => false,
+                        })?;
 
-            target = KeyboardFocusTarget::Element(match node.data() {
-                Data::Mapped { mapped, .. } => mapped.clone(),
-                _ => unreachable!(),
-            });
+                target = KeyboardFocusTarget::Element(match node.data() {
+                    Data::Mapped { mapped, .. } => mapped.clone(),
+                    _ => unreachable!(),
+                });
+            }
         }
 
         match target {

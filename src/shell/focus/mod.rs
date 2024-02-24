@@ -11,8 +11,10 @@ use smithay::{
     output::Output,
     utils::{IsAlive, Serial, SERIAL_COUNTER},
     wayland::{
+        compositor::with_states,
         seat::WaylandFocus,
         shell::wlr_layer::{KeyboardInteractivity, Layer},
+        shell::xdg::XdgPopupSurfaceData,
     },
 };
 use std::cell::RefCell;
@@ -260,27 +262,33 @@ impl Common {
                         trace!("Wrong Window, focus fixup");
                     }
                 } else {
-                    if let KeyboardFocusTarget::Popup(_) = target {
+                    if let KeyboardFocusTarget::WlSurface(surface) = target {
                         if let Some(popup_grab) = seat
                             .user_data()
                             .get::<PopupGrabData>()
                             .and_then(|x| x.take())
                         {
-                            if !popup_grab.has_ended() {
-                                if let Some(new) = popup_grab.current_grab() {
-                                    trace!("restore focus to previous popup grab");
-                                    if let Some(keyboard) = seat.get_keyboard() {
-                                        keyboard.set_focus(
-                                            state,
-                                            Some(new.clone()),
-                                            SERIAL_COUNTER.next_serial(),
-                                        );
+                            if with_states(&surface, |states| {
+                                states.data_map.get::<XdgPopupSurfaceData>().is_some()
+                            }) {
+                                if !popup_grab.has_ended() {
+                                    if let Some(new) = popup_grab.current_grab() {
+                                        trace!("restore focus to previous popup grab");
+                                        if let Some(keyboard) = seat.get_keyboard() {
+                                            keyboard.set_focus(
+                                                state,
+                                                Some(new.clone()),
+                                                SERIAL_COUNTER.next_serial(),
+                                            );
+                                        }
+                                        ActiveFocus::set(&seat, Some(new));
+                                        seat.user_data()
+                                            .get_or_insert::<PopupGrabData, _>(
+                                                PopupGrabData::default,
+                                            )
+                                            .set(Some(popup_grab));
+                                        continue;
                                     }
-                                    ActiveFocus::set(&seat, Some(new));
-                                    seat.user_data()
-                                        .get_or_insert::<PopupGrabData, _>(PopupGrabData::default)
-                                        .set(Some(popup_grab));
-                                    continue;
                                 }
                             }
                         }
@@ -333,8 +341,15 @@ fn focus_target_is_valid(
     target: KeyboardFocusTarget,
 ) -> bool {
     // If a session lock is active, only lock surfaces can be focused
-    if state.common.shell.session_lock.is_some() {
-        return matches!(target, KeyboardFocusTarget::LockSurface(_));
+    if let Some(session_lock) = state.common.shell.session_lock.as_ref() {
+        return if let KeyboardFocusTarget::WlSurface(surface) = target {
+            session_lock
+                .surfaces
+                .values()
+                .any(|x| x.wl_surface() == &surface)
+        } else {
+            false
+        };
     }
 
     // If an exclusive layer shell surface exists (on any output), only exclusive
@@ -393,8 +408,8 @@ fn focus_target_is_valid(
                 .unwrap_or(false)
                 && workspace.get_fullscreen().is_some()
         }
-        KeyboardFocusTarget::Popup(_) => true,
-        KeyboardFocusTarget::LockSurface(_) => false,
+        // TODO restrict when it handles all wl surfaces
+        KeyboardFocusTarget::WlSurface(_) => true,
     }
 }
 

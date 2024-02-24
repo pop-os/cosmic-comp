@@ -40,7 +40,7 @@ use crate::{
     },
     state::State,
     utils::{prelude::*, tween::EaseRectangle},
-    wayland::handlers::xdg_shell::popup::get_popup_toplevel,
+    wayland::handlers::xdg_shell::popup::get_surface_toplevel,
 };
 
 mod grabs;
@@ -906,11 +906,9 @@ impl FloatingLayout {
         };
 
         let Some(focused) = (match target {
-            KeyboardFocusTarget::Popup(popup) => {
-                let Some(toplevel_surface) = (match popup {
-                    PopupKind::Xdg(xdg) => get_popup_toplevel(&xdg),
-                    PopupKind::InputMethod(_) => unreachable!(),
-                }) else {
+            KeyboardFocusTarget::WlSurface(surface) => {
+                // TODO support toplevel
+                let Some(toplevel_surface) = get_surface_toplevel(&surface) else {
                     return MoveResult::None;
                 };
                 self.space
