@@ -1,0 +1,29 @@
+appid := env_var('APPID')
+share-dir := env_var('SHARE_DIR')
+lib-dir := env_var('LIB_DIR')
+bin-dir := env_var('BIN_DIR')
+
+desktop-src := 'cosmic' + '.desktop'
+desktop-dst := share-dir / 'wayland-sessions' / desktop-src
+
+ccservice-src := 'cosmic-comp' + '.service'
+ccservice-dst := lib-dir / 'systemd' / 'user' / ccservice-src
+
+session-target-src := 'cosmic-session' + '.target'
+session-target-dst := lib-dir / 'systemd' / 'user' / session-pretarget-src
+
+session-pretarget-src := 'cosmic-session-pre' + '.target'
+session-pretarget-dst := lib-dir / 'systemd' / 'user' / session-pretarget-src
+
+cosmic-service-src := 'cosmic-service'
+cosmic-service-dst := bin-dir / cosmic-service-src
+
+install-bare-session:
+    install -Dm0644 {{desktop-src}} {{desktop-dst}}
+    install -Dm0644 {{ccservice-src}} {{ccservice-dst}}
+    install -Dm0644 {{session-pretarget-src}} {{session-pretarget-dst}}
+    install -Dm0644 {{session-target-src}} {{session-target-dst}}
+    install -Dm0755 {{cosmic-service-src}} {{cosmic-service-dst}}
+
+uninstall-bare-session:
+    rm {{desktop-dst}} {{ccservice-dst}} {{session-pretarget-dst}} {{session-target-dst}} {{cosmic-service-dst}}

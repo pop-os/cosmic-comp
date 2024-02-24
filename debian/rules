@@ -9,10 +9,10 @@ CLEAN ?= 1
 
 override_dh_auto_clean:
 ifeq ($(CLEAN),1)
-	ischroot && make clean || make distclean
+	ischroot && just clean || just clean-dist
 endif
 ifeq ($(VENDOR),1)
-	ischroot || make vendor
+	ischroot || just vendor
 endif
 
 override_dh_installinit:
