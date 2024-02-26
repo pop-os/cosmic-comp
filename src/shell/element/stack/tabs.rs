@@ -526,8 +526,8 @@ where
             &theme::Container::custom(|theme| widget::container::Appearance {
                 icon_color: None,
                 text_color: None,
-                background: Some(Background::Color(Color::from(
-                    theme.cosmic().palette.neutral_3,
+                background: Some(Background::Color(super::tab::primary_container_color(
+                    theme.cosmic(),
                 ))),
                 border_radius: 0.0.into(),
                 border_width: 0.0,

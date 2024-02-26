@@ -28,6 +28,30 @@ use cosmic::{
 
 use super::tab_text::tab_text;
 
+/// The background color of the stack tab header.
+pub(super) fn primary_container_color(theme: &cosmic::cosmic_theme::Theme) -> Color {
+    const PRIMARY_CONTAINER_DARK: Color = Color::from_rgba(0.149, 0.149, 0.149, 1.0);
+    const PRIMARY_CONTAINER_LIGHT: Color = Color::from_rgba(0.894, 0.894, 0.894, 1.0);
+
+    if theme.is_dark {
+        PRIMARY_CONTAINER_DARK
+    } else {
+        PRIMARY_CONTAINER_LIGHT
+    }
+}
+
+/// The background color for the selected stack tab.
+pub(super) fn selected_state_color(theme: &cosmic::cosmic_theme::Theme) -> Color {
+    const SELECTED_STATE_DARK: Color = Color::from_rgba(0.302, 0.302, 0.302, 0.3);
+    const SELECTED_STATE_LIGHT: Color = Color::from_rgba(0.596, 0.596, 0.596, 0.2);
+
+    if theme.is_dark {
+        SELECTED_STATE_DARK
+    } else {
+        SELECTED_STATE_LIGHT
+    }
+}
+
 pub(super) enum TabRuleTheme {
     ActiveActivated,
     ActiveDeactivated,
@@ -59,6 +83,7 @@ impl Into<theme::Rule> for TabRuleTheme {
     }
 }
 
+#[derive(Clone, Copy)]
 pub(super) enum TabBackgroundTheme {
     ActiveActivated,
     ActiveDeactivated,
@@ -66,34 +91,36 @@ pub(super) enum TabBackgroundTheme {
 }
 
 impl TabBackgroundTheme {
-    fn background_color(&self) -> Color {
+    /// Select the background color of stack tabs based on dark theme preference.
+    fn background_color(self, theme: &theme::Theme) -> Color {
         match self {
-            TabBackgroundTheme::ActiveActivated => Color::from_rgba(0.365, 0.365, 0.365, 1.0),
-            TabBackgroundTheme::ActiveDeactivated => Color::from_rgba(0.365, 0.365, 0.365, 1.0),
-            TabBackgroundTheme::Default => Color::from_rgba(0.26, 0.26, 0.26, 1.0),
+            TabBackgroundTheme::ActiveActivated | TabBackgroundTheme::ActiveDeactivated => {
+                selected_state_color(theme.cosmic())
+            }
+
+            TabBackgroundTheme::Default => primary_container_color(theme.cosmic()),
         }
     }
 }
 
 impl Into<theme::Container> for TabBackgroundTheme {
     fn into(self) -> theme::Container {
-        let background_color = cosmic::iced::Background::Color(self.background_color());
         match self {
             Self::ActiveActivated => {
                 theme::Container::custom(move |theme| widget::container::Appearance {
                     icon_color: Some(Color::from(theme.cosmic().accent_text_color())),
                     text_color: Some(Color::from(theme.cosmic().accent_text_color())),
-                    background: Some(background_color),
+                    background: Some(self.background_color(theme).into()),
                     border_radius: 0.0.into(),
                     border_width: 0.0,
                     border_color: Color::TRANSPARENT,
                 })
             }
             Self::ActiveDeactivated => {
-                theme::Container::custom(move |_theme| widget::container::Appearance {
+                theme::Container::custom(move |theme| widget::container::Appearance {
                     icon_color: None,
                     text_color: None,
-                    background: Some(background_color),
+                    background: Some(self.background_color(theme).into()),
                     border_radius: 0.0.into(),
                     border_width: 0.0,
                     border_color: Color::TRANSPARENT,
@@ -224,7 +251,10 @@ impl<Message: TabMessage> Tab<Message> {
                     .horizontal_alignment(alignment::Horizontal::Left)
                     .vertical_alignment(alignment::Vertical::Center)
                     .apply(tab_text)
-                    .background(self.background_theme.background_color())
+                    .background(
+                        self.background_theme
+                            .background_color(&cosmic::theme::active()),
+                    )
                     .height(Length::Fill)
                     .width(Length::Fill),
             ),

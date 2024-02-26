@@ -861,7 +861,9 @@ impl Program for CosmicStackInternal {
                 theme::Container::custom(|theme| iced_widget::container::Appearance {
                     icon_color: Some(Color::from(theme.cosmic().background.on)),
                     text_color: Some(Color::from(theme.cosmic().background.on)),
-                    background: Some(Background::Color(theme.cosmic().palette.neutral_3.into())),
+                    background: Some(Background::Color(tab::primary_container_color(
+                        theme.cosmic(),
+                    ))),
                     border_radius: BorderRadius::from([8.0, 8.0, 0.0, 0.0]),
                     border_width: 0.0,
                     border_color: Color::TRANSPARENT,
