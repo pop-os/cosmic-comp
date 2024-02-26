@@ -131,7 +131,7 @@ where
             ..bounds
         };
 
-        let mut transparent_background = self.background.clone();
+        let mut transparent_background = self.background;
         transparent_background.a = 0.0;
         renderer.fill_quad(
             renderer::Quad {
