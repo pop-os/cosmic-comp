@@ -379,7 +379,7 @@ impl TilingLayout {
     ) {
         window.output_enter(&self.output, window.bbox());
         window.set_bounds(self.output.geometry().size.as_logical());
-        self.map_internal(window, focus_stack, direction);
+        self.map_internal(window, focus_stack, direction, None);
     }
 
     pub fn map_internal<'a>(
@@ -387,6 +387,7 @@ impl TilingLayout {
         window: impl Into<CosmicMapped>,
         focus_stack: Option<impl Iterator<Item = &'a CosmicMapped> + 'a>,
         direction: Option<Direction>,
+        minimize_rect: Option<Rectangle<i32, Local>>,
     ) {
         let gaps = self.gaps();
 
@@ -394,7 +395,14 @@ impl TilingLayout {
         let last_active = focus_stack
             .and_then(|focus_stack| TilingLayout::last_active_window(&mut tree, focus_stack))
             .map(|(node_id, _)| node_id);
-        TilingLayout::map_to_tree(&mut tree, window, &self.output, last_active, direction);
+        TilingLayout::map_to_tree(
+            &mut tree,
+            window,
+            &self.output,
+            last_active,
+            direction,
+            minimize_rect,
+        );
         let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
         self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
     }
@@ -505,7 +513,7 @@ impl TilingLayout {
         }
 
         // else add as new_window
-        self.map_internal(window, focus_stack, None);
+        self.map_internal(window, focus_stack, None, Some(from));
     }
 
     fn map_to_tree<'a>(
@@ -514,12 +522,13 @@ impl TilingLayout {
         output: &Output,
         node: Option<NodeId>,
         direction: Option<Direction>,
+        minimize_rect: Option<Rectangle<i32, Local>>,
     ) {
         let window = window.into();
         let new_window = Node::new(Data::Mapped {
             mapped: window.clone(),
             last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
-            minimize_rect: None,
+            minimize_rect,
         });
 
         let window_id = if let Some(direction) = direction {
@@ -2152,6 +2161,7 @@ impl TilingLayout {
                     &self.output,
                     Some(current_node),
                     None,
+                    None,
                 );
 
                 let node = window.tiling_node_id.lock().unwrap().clone().unwrap();
@@ -2710,7 +2720,14 @@ impl TilingLayout {
                 }
             }
             _ => {
-                TilingLayout::map_to_tree(&mut tree, window.clone(), &self.output, None, None);
+                TilingLayout::map_to_tree(
+                    &mut tree,
+                    window.clone(),
+                    &self.output,
+                    None,
+                    None,
+                    None,
+                );
                 window
             }
         };
