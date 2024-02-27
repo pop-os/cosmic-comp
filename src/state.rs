@@ -88,7 +88,7 @@ use smithay::{
 use time::UtcOffset;
 use tracing::error;
 
-use std::{cell::RefCell, collections::HashSet, ffi::OsString, time::Duration};
+use std::{cell::RefCell, ffi::OsString, time::Duration};
 use std::{collections::VecDeque, time::Instant};
 
 #[derive(RustEmbed)]
@@ -568,12 +568,11 @@ impl Common {
             }
         }
 
-        let mut visited_outputs = HashSet::new();
-        for seat in self.seats.iter() {
-            if !visited_outputs.insert(seat.active_output()) {
-                continue;
-            }
-            if &seat.active_output() == output {
+        for seat in self
+            .seats
+            .iter()
+            .filter(|seat| &seat.active_output() == output)
+        {
                 let cursor_status = seat
                     .user_data()
                     .get::<RefCell<CursorImageStatus>>()
@@ -589,13 +588,9 @@ impl Common {
                     .unwrap_or(CursorImageStatus::default_named());
 
                 if let CursorImageStatus::Surface(wl_surface) = cursor_status {
-                    send_frames_surface_tree(
-                        &wl_surface,
-                        output,
-                        time,
-                        Some(Duration::ZERO),
-                        |_, _| None,
-                    )
+                send_frames_surface_tree(&wl_surface, output, time, Some(Duration::ZERO), |_, _| {
+                    None
+                })
                 }
 
                 if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {
@@ -611,9 +606,8 @@ impl Common {
                             );
                             if let Some(output) = primary_scanout_output {
                                 with_fractional_scale(states, |fraction_scale| {
-                                    fraction_scale.set_preferred_scale(
-                                        output.current_scale().fractional_scale(),
-                                    );
+                                fraction_scale
+                                    .set_preferred_scale(output.current_scale().fractional_scale());
                                 });
                             }
                         });
@@ -631,6 +625,7 @@ impl Common {
                                 render_element_states,
                                 surface_primary_scanout_output,
                             );
+                    }
                         }
                     }
                 }
@@ -650,15 +645,12 @@ impl Common {
                                 output,
                                 states,
                                 render_element_states,
-                                |_current_output, _current_state, next_output, _next_state| {
-                                    next_output
-                                },
+                        |_current_output, _current_state, next_output, _next_state| next_output,
                             );
                             if let Some(output) = primary_scanout_output {
                                 with_fractional_scale(states, |fraction_scale| {
-                                    fraction_scale.set_preferred_scale(
-                                        output.current_scale().fractional_scale(),
-                                    );
+                            fraction_scale
+                                .set_preferred_scale(output.current_scale().fractional_scale());
                                 });
                             }
                         });
@@ -677,22 +669,7 @@ impl Common {
                                 surface_primary_scanout_output,
                             );
                         }
-                    })
-            } else {
-                let output = seat.active_output();
-                self.shell
-                    .workspaces
-                    .sets
-                    .get(&output)
-                    .unwrap()
-                    .sticky_layer
-                    .mapped()
-                    .for_each(|mapped| {
-                        let window = mapped.active_window();
-                        window.send_frame(&output, time, throttle, |_, _| None);
-                    });
-            }
-        }
+            });
 
         let active = self.shell.active_space(output);
         active.mapped().for_each(|mapped| {
@@ -732,12 +709,12 @@ impl Common {
         for space in self
             .shell
             .workspaces
-            .spaces()
+            .spaces_for_output(output)
             .filter(|w| w.handle != active.handle)
         {
             space.mapped().for_each(|mapped| {
                 let window = mapped.active_window();
-                window.send_frame(space.output(), time, throttle, |_, _| None);
+                window.send_frame(output, time, throttle, |_, _| None);
             });
         }
 
