@@ -573,102 +573,102 @@ impl Common {
             .iter()
             .filter(|seat| &seat.active_output() == output)
         {
-                let cursor_status = seat
-                    .user_data()
-                    .get::<RefCell<CursorImageStatus>>()
-                    .map(|cell| {
-                        let mut cursor_status = cell.borrow_mut();
-                        if let CursorImageStatus::Surface(ref surface) = *cursor_status {
-                            if !surface.alive() {
-                                *cursor_status = CursorImageStatus::default_named();
-                            }
+            let cursor_status = seat
+                .user_data()
+                .get::<RefCell<CursorImageStatus>>()
+                .map(|cell| {
+                    let mut cursor_status = cell.borrow_mut();
+                    if let CursorImageStatus::Surface(ref surface) = *cursor_status {
+                        if !surface.alive() {
+                            *cursor_status = CursorImageStatus::default_named();
                         }
-                        cursor_status.clone()
-                    })
-                    .unwrap_or(CursorImageStatus::default_named());
+                    }
+                    cursor_status.clone()
+                })
+                .unwrap_or(CursorImageStatus::default_named());
 
-                if let CursorImageStatus::Surface(wl_surface) = cursor_status {
+            if let CursorImageStatus::Surface(wl_surface) = cursor_status {
                 send_frames_surface_tree(&wl_surface, output, time, Some(Duration::ZERO), |_, _| {
                     None
                 })
-                }
+            }
 
-                if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {
-                    if let Some(grab_state) = move_grab.borrow().as_ref() {
-                        let window = grab_state.window();
-                        window.with_surfaces(|surface, states| {
-                            let primary_scanout_output = update_surface_primary_scanout_output(
-                                surface,
-                                output,
-                                states,
-                                render_element_states,
-                                default_primary_scanout_output_compare,
-                            );
-                            if let Some(output) = primary_scanout_output {
-                                with_fractional_scale(states, |fraction_scale| {
+            if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {
+                if let Some(grab_state) = move_grab.borrow().as_ref() {
+                    let window = grab_state.window();
+                    window.with_surfaces(|surface, states| {
+                        let primary_scanout_output = update_surface_primary_scanout_output(
+                            surface,
+                            output,
+                            states,
+                            render_element_states,
+                            default_primary_scanout_output_compare,
+                        );
+                        if let Some(output) = primary_scanout_output {
+                            with_fractional_scale(states, |fraction_scale| {
                                 fraction_scale
                                     .set_preferred_scale(output.current_scale().fractional_scale());
-                                });
-                            }
-                        });
-                        window.send_frame(output, time, throttle, surface_primary_scanout_output);
-                        if let Some(feedback) = window
-                            .wl_surface()
-                            .and_then(|wl_surface| {
-                                advertised_node_for_surface(&wl_surface, &self.display_handle)
-                            })
-                            .and_then(|source| dmabuf_feedback(source))
-                        {
-                            window.send_dmabuf_feedback(
-                                output,
-                                &feedback,
-                                render_element_states,
-                                surface_primary_scanout_output,
-                            );
-                    }
+                            });
                         }
+                    });
+                    window.send_frame(output, time, throttle, surface_primary_scanout_output);
+                    if let Some(feedback) = window
+                        .wl_surface()
+                        .and_then(|wl_surface| {
+                            advertised_node_for_surface(&wl_surface, &self.display_handle)
+                        })
+                        .and_then(|source| dmabuf_feedback(source))
+                    {
+                        window.send_dmabuf_feedback(
+                            output,
+                            &feedback,
+                            render_element_states,
+                            surface_primary_scanout_output,
+                        );
                     }
                 }
+            }
+        }
 
-                self.shell
-                    .workspaces
-                    .sets
-                    .get(output)
-                    .unwrap()
-                    .sticky_layer
-                    .mapped()
-                    .for_each(|mapped| {
-                        let window = mapped.active_window();
-                        window.with_surfaces(|surface, states| {
-                            let primary_scanout_output = update_surface_primary_scanout_output(
-                                surface,
-                                output,
-                                states,
-                                render_element_states,
+        self.shell
+            .workspaces
+            .sets
+            .get(output)
+            .unwrap()
+            .sticky_layer
+            .mapped()
+            .for_each(|mapped| {
+                let window = mapped.active_window();
+                window.with_surfaces(|surface, states| {
+                    let primary_scanout_output = update_surface_primary_scanout_output(
+                        surface,
+                        output,
+                        states,
+                        render_element_states,
                         |_current_output, _current_state, next_output, _next_state| next_output,
-                            );
-                            if let Some(output) = primary_scanout_output {
-                                with_fractional_scale(states, |fraction_scale| {
+                    );
+                    if let Some(output) = primary_scanout_output {
+                        with_fractional_scale(states, |fraction_scale| {
                             fraction_scale
                                 .set_preferred_scale(output.current_scale().fractional_scale());
-                                });
-                            }
                         });
-                        window.send_frame(output, time, throttle, surface_primary_scanout_output);
-                        if let Some(feedback) = window
-                            .wl_surface()
-                            .and_then(|wl_surface| {
-                                advertised_node_for_surface(&wl_surface, &self.display_handle)
-                            })
-                            .and_then(|source| dmabuf_feedback(source))
-                        {
-                            window.send_dmabuf_feedback(
-                                output,
-                                &feedback,
-                                render_element_states,
-                                surface_primary_scanout_output,
-                            );
-                        }
+                    }
+                });
+                window.send_frame(output, time, throttle, surface_primary_scanout_output);
+                if let Some(feedback) = window
+                    .wl_surface()
+                    .and_then(|wl_surface| {
+                        advertised_node_for_surface(&wl_surface, &self.display_handle)
+                    })
+                    .and_then(|source| dmabuf_feedback(source))
+                {
+                    window.send_dmabuf_feedback(
+                        output,
+                        &feedback,
+                        render_element_states,
+                        surface_primary_scanout_output,
+                    );
+                }
             });
 
         let active = self.shell.active_space(output);
@@ -705,6 +705,10 @@ impl Common {
                 );
             }
         });
+        active.minimized_windows.iter().for_each(|m| {
+            let window = m.window.active_window();
+            window.send_frame(output, time, throttle, |_, _| None);
+        });
 
         for space in self
             .shell
@@ -716,6 +720,10 @@ impl Common {
                 let window = mapped.active_window();
                 window.send_frame(output, time, throttle, |_, _| None);
             });
+            space.minimized_windows.iter().for_each(|m| {
+                let window = m.window.active_window();
+                window.send_frame(output, time, throttle, |_, _| None);
+            })
         }
 
         self.shell.override_redirect_windows.iter().for_each(|or| {
