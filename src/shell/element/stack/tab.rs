@@ -1,26 +1,18 @@
 use cosmic::{
     font::Font,
-    iced::{
-        widget::{self, container::draw_background, rule::FillMode},
-        Element,
-    },
+    iced::widget::{self, container::draw_background, rule::FillMode},
     iced_core::{
         alignment, event,
         layout::{Layout, Limits, Node},
         mouse, overlay, renderer,
         widget::{
             operation::{Operation, OperationOutputWrapper},
-            text::StyleSheet as TextStyleSheet,
             tree::Tree,
             Id, Widget,
         },
         Clipboard, Color, Length, Rectangle, Shell, Size,
     },
-    iced_style::{
-        button::StyleSheet as ButtonStyleSheet, container::StyleSheet as ContainerStyleSheet,
-        rule::StyleSheet as RuleStyleSheet,
-    },
-    iced_widget::{scrollable::AbsoluteOffset, text},
+    iced_widget::scrollable::AbsoluteOffset,
     theme,
     widget::{icon::from_name, Icon},
     Apply,
@@ -52,28 +44,29 @@ pub(super) fn selected_state_color(theme: &cosmic::cosmic_theme::Theme) -> Color
     }
 }
 
+#[derive(Clone, Copy)]
 pub(super) enum TabRuleTheme {
     ActiveActivated,
     ActiveDeactivated,
     Default,
 }
 
-impl Into<theme::Rule> for TabRuleTheme {
-    fn into(self) -> theme::Rule {
-        match self {
-            Self::ActiveActivated => theme::Rule::custom(|theme| widget::rule::Appearance {
+impl From<TabRuleTheme> for theme::Rule {
+    fn from(theme: TabRuleTheme) -> Self {
+        match theme {
+            TabRuleTheme::ActiveActivated => Self::custom(|theme| widget::rule::Appearance {
                 color: theme.cosmic().accent_color().into(),
                 width: 4,
                 radius: 0.0.into(),
                 fill_mode: FillMode::Full,
             }),
-            Self::ActiveDeactivated => theme::Rule::custom(|theme| widget::rule::Appearance {
+            TabRuleTheme::ActiveDeactivated => Self::custom(|theme| widget::rule::Appearance {
                 color: theme.cosmic().palette.neutral_5.into(),
                 width: 4,
                 radius: 0.0.into(),
                 fill_mode: FillMode::Full,
             }),
-            Self::Default => theme::Rule::custom(|theme| widget::rule::Appearance {
+            TabRuleTheme::Default => Self::custom(|theme| widget::rule::Appearance {
                 color: theme.cosmic().palette.neutral_5.into(),
                 width: 4,
                 radius: 8.0.into(),
@@ -103,30 +96,30 @@ impl TabBackgroundTheme {
     }
 }
 
-impl Into<theme::Container> for TabBackgroundTheme {
-    fn into(self) -> theme::Container {
-        match self {
-            Self::ActiveActivated => {
-                theme::Container::custom(move |theme| widget::container::Appearance {
+impl From<TabBackgroundTheme> for theme::Container {
+    fn from(background_theme: TabBackgroundTheme) -> Self {
+        match background_theme {
+            TabBackgroundTheme::ActiveActivated => {
+                Self::custom(move |theme| widget::container::Appearance {
                     icon_color: Some(Color::from(theme.cosmic().accent_text_color())),
                     text_color: Some(Color::from(theme.cosmic().accent_text_color())),
-                    background: Some(self.background_color(theme).into()),
+                    background: Some(background_theme.background_color(theme).into()),
                     border_radius: 0.0.into(),
                     border_width: 0.0,
                     border_color: Color::TRANSPARENT,
                 })
             }
-            Self::ActiveDeactivated => {
-                theme::Container::custom(move |theme| widget::container::Appearance {
+            TabBackgroundTheme::ActiveDeactivated => {
+                Self::custom(move |theme| widget::container::Appearance {
                     icon_color: None,
                     text_color: None,
-                    background: Some(self.background_color(theme).into()),
+                    background: Some(background_theme.background_color(theme).into()),
                     border_radius: 0.0.into(),
                     border_width: 0.0,
                     border_color: Color::TRANSPARENT,
                 })
             }
-            Self::Default => theme::Container::Transparent,
+            TabBackgroundTheme::Default => Self::Transparent,
         }
     }
 }
@@ -154,7 +147,7 @@ pub struct Tab<Message: TabMessage> {
     active: bool,
 }
 
-impl<Message: TabMessage> Tab<Message> {
+impl<Message: TabMessage + 'static> Tab<Message> {
     pub fn new(title: impl Into<String>, app_id: impl Into<String>, id: Id) -> Self {
         Tab {
             id,
@@ -210,20 +203,7 @@ impl<Message: TabMessage> Tab<Message> {
         self
     }
 
-    pub(super) fn internal<'a, Renderer>(self, idx: usize) -> TabInternal<'a, Message, Renderer>
-    where
-        Renderer: cosmic::iced_core::Renderer + 'a,
-        Renderer: cosmic::iced_core::text::Renderer<Font = Font>,
-        Renderer::Theme: ButtonStyleSheet<Style = theme::iced::Button>,
-        Renderer::Theme: ContainerStyleSheet,
-        Renderer::Theme: RuleStyleSheet<Style = theme::Rule>,
-        Renderer::Theme: TextStyleSheet,
-        Message: 'a,
-        widget::Button<'a, Message, Renderer>: Into<Element<'a, Message, Renderer>>,
-        widget::Container<'a, Message, Renderer>: Into<Element<'a, Message, Renderer>>,
-        widget::Text<'a, Renderer>: Into<Element<'a, Message, Renderer>>,
-        Icon: Into<Element<'a, Message, Renderer>>,
-    {
+    pub(super) fn internal(self, idx: usize) -> TabInternal<'static, Message> {
         let mut close_button = from_name("window-close-symbolic")
             .size(16)
             .prefer_svg(true)
@@ -238,19 +218,17 @@ impl<Message: TabMessage> Tab<Message> {
         let items = vec![
             widget::vertical_rule(4).style(self.rule_theme).into(),
             self.app_icon
+                .clone()
                 .apply(widget::container)
                 .height(Length::Fill)
                 .width(Length::Shrink)
                 .padding([2, 4])
                 .center_y()
                 .into(),
-            Element::<'a, Message, Renderer>::new(
-                text(self.title)
-                    .size(14)
+            cosmic::Element::<Message>::new(
+                tab_text(self.title)
                     .font(self.font)
-                    .horizontal_alignment(alignment::Horizontal::Left)
-                    .vertical_alignment(alignment::Vertical::Center)
-                    .apply(tab_text)
+                    .font_size(14.0)
                     .background(
                         self.background_theme
                             .background_color(&cosmic::theme::active()),
@@ -287,22 +265,17 @@ const MIN_TAB_WIDTH: i32 = 38;
 const TEXT_BREAKPOINT: i32 = 44;
 const CLOSE_BREAKPOINT: i32 = 125;
 
-pub(super) struct TabInternal<'a, Message: TabMessage, Renderer> {
+pub(super) struct TabInternal<'a, Message: TabMessage> {
     id: Id,
     idx: usize,
     active: bool,
     background: theme::Container,
-    elements: Vec<Element<'a, Message, Renderer>>,
+    elements: Vec<cosmic::Element<'a, Message>>,
     press_message: Option<Message>,
     right_click_message: Option<Message>,
 }
 
-impl<'a, Message, Renderer> Widget<Message, Renderer> for TabInternal<'a, Message, Renderer>
-where
-    Renderer: cosmic::iced_core::Renderer,
-    Renderer::Theme: ContainerStyleSheet<Style = theme::Container>,
-    Message: TabMessage,
-{
+impl<'a, Message: TabMessage> Widget<Message, cosmic::Renderer> for TabInternal<'a, Message> {
     fn id(&self) -> Option<Id> {
         Some(self.id.clone())
     }
@@ -312,7 +285,7 @@ where
     }
 
     fn diff(&mut self, tree: &mut Tree) {
-        tree.diff_children(&mut self.elements)
+        tree.diff_children(&mut self.elements);
     }
 
     fn width(&self) -> Length {
@@ -323,7 +296,7 @@ where
         Length::Fill
     }
 
-    fn layout(&self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) -> Node {
+    fn layout(&self, tree: &mut Tree, renderer: &cosmic::Renderer, limits: &Limits) -> Node {
         let min_size = Size {
             height: TAB_HEIGHT as f32,
             width: if self.active {
@@ -366,7 +339,7 @@ where
         &self,
         tree: &mut Tree,
         layout: Layout<'_>,
-        renderer: &Renderer,
+        renderer: &cosmic::Renderer,
         operation: &mut dyn Operation<OperationOutputWrapper<Message>>,
     ) {
         operation.container(None, layout.bounds(), &mut |operation| {
@@ -378,7 +351,7 @@ where
                     child
                         .as_widget()
                         .operate(state, layout, renderer, operation);
-                })
+                });
         });
     }
 
@@ -388,7 +361,7 @@ where
         event: event::Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
-        renderer: &Renderer,
+        renderer: &cosmic::Renderer,
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
@@ -449,7 +422,7 @@ where
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
-        renderer: &Renderer,
+        renderer: &cosmic::Renderer,
     ) -> mouse::Interaction {
         self.elements
             .iter()
@@ -467,13 +440,14 @@ where
     fn draw(
         &self,
         tree: &Tree,
-        renderer: &mut Renderer,
-        theme: &Renderer::Theme,
+        renderer: &mut cosmic::Renderer,
+        theme: &cosmic::Theme,
         renderer_style: &renderer::Style,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
+        use cosmic::widget::container::StyleSheet;
         let style = theme.appearance(&self.background);
 
         draw_background(renderer, &style, layout.bounds());
@@ -504,8 +478,8 @@ where
         &'b mut self,
         tree: &'b mut Tree,
         layout: Layout<'_>,
-        renderer: &Renderer,
-    ) -> Option<overlay::Element<'b, Message, Renderer>> {
+        renderer: &cosmic::Renderer,
+    ) -> Option<overlay::Element<'b, Message, cosmic::Renderer>> {
         overlay::from_children(&mut self.elements, tree, layout, renderer)
     }
 }
