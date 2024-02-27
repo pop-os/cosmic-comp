@@ -453,6 +453,7 @@ impl Workspace {
             .position(|m| &m.window == mapped)
         {
             let state = self.minimized_windows.remove(pos);
+            state.window.set_minimized(false);
             match state.previous_state {
                 MinimizedState::Sticky { .. } | MinimizedState::Floating { .. } => {
                     was_floating = true;
