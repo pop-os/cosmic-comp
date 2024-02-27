@@ -188,6 +188,7 @@ pub enum Action {
     Resizing(ResizeDirection),
     #[serde(skip)]
     _ResizingInternal(ResizeDirection, ResizeEdge, KeyState),
+    Minimize,
     Maximize,
     Spawn(String),
 }
