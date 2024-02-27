@@ -141,7 +141,7 @@ where
                 border_color: Color::TRANSPARENT,
             },
             Background::Gradient(Gradient::Linear(
-                gradient::Linear::new(Degrees(180.))
+                gradient::Linear::new(Degrees(90.))
                     .add_stop(0.0, transparent_background)
                     .add_stop(1.0, self.background),
             )),
