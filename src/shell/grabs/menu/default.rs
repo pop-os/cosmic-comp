@@ -157,6 +157,7 @@ pub fn window_items(
     possible_resizes: ResizeEdge,
     config: &StaticConfig,
 ) -> impl Iterator<Item = Item> {
+    let minimize_clone = window.clone();
     let maximize_clone = window.clone();
     let tile_clone = window.clone();
     let move_prev_clone = window.clone();
@@ -190,7 +191,15 @@ pub fn window_items(
             .shortcut(config.get_shortcut_for_action(&Action::ToggleStacking)),
         ),
         Some(Item::Separator),
-        //Some(Item::new(fl!("window-menu-minimize"), |handle| {})),
+        Some(
+            Item::new(fl!("window-menu-minimize"), move |handle| {
+                let mapped = minimize_clone.clone();
+                let _ = handle.insert_idle(move |state| {
+                    state.common.shell.minimize_request(&mapped);
+                });
+            })
+            .shortcut(config.get_shortcut_for_action(&Action::Minimize)),
+        ),
         Some(
             Item::new(fl!("window-menu-maximize"), move |handle| {
                 let mapped = maximize_clone.clone();
