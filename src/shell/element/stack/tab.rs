@@ -225,17 +225,12 @@ impl<Message: TabMessage + 'static> Tab<Message> {
                 .padding([2, 4])
                 .center_y()
                 .into(),
-            cosmic::Element::<Message>::new(
-                tab_text(self.title)
-                    .font(self.font)
-                    .font_size(14.0)
-                    .background(
-                        self.background_theme
-                            .background_color(&cosmic::theme::active()),
-                    )
-                    .height(Length::Fill)
-                    .width(Length::Fill),
-            ),
+            tab_text(self.title)
+                .font(self.font)
+                .font_size(14.0)
+                .height(Length::Fill)
+                .width(Length::Fill)
+                .into(),
             close_button
                 .apply(widget::container)
                 .height(Length::Fill)
