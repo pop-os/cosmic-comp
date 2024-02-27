@@ -117,6 +117,11 @@ impl XdgActivationHandler for State {
                     ActivationContext::Workspace(workspace) => {
                         let seat = self.common.last_active_seat().clone();
                         let current_output = seat.active_output();
+
+                        if element.is_minimized() {
+                            self.common.shell.unminimize_request(&element, &seat);
+                        }
+
                         let current_workspace = self.common.shell.active_space_mut(&current_output);
 
                         let in_current_workspace = current_workspace
@@ -145,7 +150,7 @@ impl XdgActivationHandler for State {
                             }
                         }
 
-                        if workspace == &current_workspace.handle && in_current_workspace {
+                        if workspace == &current_workspace.handle || in_current_workspace {
                             let target = element.into();
                             Shell::set_focus(self, Some(&target), &seat, None);
                         } else if let Some(w) = self
