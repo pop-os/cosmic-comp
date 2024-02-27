@@ -15,7 +15,7 @@ use cosmic::{
 
 /// Text in a stack tab with an overflow gradient.
 pub fn tab_text(text: String) -> TabText {
-    TabText::new(text, Color::TRANSPARENT)
+    TabText::new(text)
 }
 
 struct LocalState {
@@ -27,7 +27,6 @@ struct LocalState {
 /// Text in a stack tab with an overflow gradient.
 pub struct TabText {
     text: String,
-    background: Color,
     font: cosmic::font::Font,
     font_size: f32,
     height: Length,
@@ -35,20 +34,14 @@ pub struct TabText {
 }
 
 impl TabText {
-    pub fn new(text: String, background: Color) -> Self {
+    pub fn new(text: String) -> Self {
         TabText {
             width: Length::Shrink,
             height: Length::Shrink,
-            background,
             font: cosmic::font::DEFAULT,
             font_size: 14.0,
             text,
         }
-    }
-
-    pub fn background(mut self, background: Color) -> Self {
-        self.background = background;
-        self
     }
 
     pub fn font(mut self, font: cosmic::font::Font) -> Self {
@@ -138,7 +131,7 @@ impl<Message> Widget<Message, cosmic::Renderer> for TabText {
         &self,
         tree: &Tree,
         renderer: &mut cosmic::Renderer,
-        _theme: &cosmic::Theme,
+        theme: &cosmic::Theme,
         style: &renderer::Style,
         layout: Layout<'_>,
         _cursor: Cursor,
@@ -157,25 +150,27 @@ impl<Message> Widget<Message, cosmic::Renderer> for TabText {
         });
 
         if state.overflowed {
-            let gradient_bounds = Rectangle {
-                x: (bounds.x + bounds.width - 24.).max(bounds.x),
-                width: 24.0_f32.min(bounds.width),
-                ..bounds
+            let background = super::tab::primary_container_color(theme.cosmic());
+            let transparent = Color {
+                a: 0.0,
+                ..background
             };
 
-            let mut transparent_background = self.background;
-            transparent_background.a = 0.0;
             renderer.fill_quad(
                 renderer::Quad {
-                    bounds: gradient_bounds,
+                    bounds: Rectangle {
+                        x: (bounds.x + bounds.width - 24.).max(bounds.x),
+                        width: 24.0_f32.min(bounds.width),
+                        ..bounds
+                    },
                     border_radius: 0.0.into(),
                     border_width: 0.0,
                     border_color: Color::TRANSPARENT,
                 },
                 Background::Gradient(Gradient::Linear(
                     gradient::Linear::new(Degrees(90.))
-                        .add_stop(0.0, transparent_background)
-                        .add_stop(1.0, self.background),
+                        .add_stop(0.0, transparent)
+                        .add_stop(1.0, background),
                 )),
             );
         }
