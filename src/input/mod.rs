@@ -2025,6 +2025,15 @@ impl State {
                     }
                 }
             }
+            Action::Minimize => {
+                let current_output = seat.active_output();
+                let workspace = self.common.shell.active_space_mut(&current_output);
+                let focus_stack = workspace.focus_stack.get(seat);
+                let focused_window = focus_stack.last().cloned();
+                if let Some(window) = focused_window {
+                    self.common.shell.minimize_request(&window);
+                }
+            }
             Action::Maximize => {
                 let current_output = seat.active_output();
                 let workspace = self.common.shell.active_space_mut(&current_output);
