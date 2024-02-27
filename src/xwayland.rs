@@ -33,7 +33,7 @@ use smithay::{
         xdg_activation::XdgActivationToken,
     },
     xwayland::{
-        xwm::{Reorder, XwmId},
+        xwm::{Reorder, X11Relatable, XwmId},
         X11Surface, X11Wm, XWayland, XWaylandEvent, XwmHandler,
     },
 };
@@ -432,14 +432,22 @@ impl XwmHandler for State {
 
     fn minimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
         if let Some(mapped) = self.common.shell.element_for_x11_surface(&window).cloned() {
-            self.common.shell.minimize_request(&mapped);
+            if !mapped.is_stack() || mapped.active_window().is_window(&window) {
+                self.common.shell.minimize_request(&mapped);
+            }
         }
     }
 
     fn unminimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        if let Some(mapped) = self.common.shell.element_for_x11_surface(&window).cloned() {
+        if let Some(mut mapped) = self.common.shell.element_for_x11_surface(&window).cloned() {
             let seat = self.common.last_active_seat().clone();
             self.common.shell.unminimize_request(&mapped, &seat);
+            if mapped.is_stack() {
+                let maybe_surface = mapped.windows().find(|(w, _)| w.is_window(&window));
+                if let Some((surface, _)) = maybe_surface {
+                    mapped.stack_ref_mut().unwrap().set_active(&surface);
+                }
+            }
         }
     }
 
