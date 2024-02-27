@@ -172,7 +172,11 @@ impl XdgShellHandler for State {
             .element_for_wl_surface(surface.wl_surface())
             .cloned()
         {
-            self.common.shell.minimize_request(&mapped)
+            if !mapped.is_stack()
+                || mapped.active_window().wl_surface().as_ref() == Some(surface.wl_surface())
+            {
+                self.common.shell.minimize_request(&mapped)
+            }
         }
     }
 

@@ -186,14 +186,19 @@ impl ToplevelManagementHandler for State {
 
     fn minimize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
         if let Some(mapped) = self.common.shell.element_for_surface(window).cloned() {
-            self.common.shell.minimize_request(&mapped);
+            if !mapped.is_stack() || &mapped.active_window() == window {
+                self.common.shell.minimize_request(&mapped);
+            }
         }
     }
 
     fn unminimize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
-        if let Some(mapped) = self.common.shell.element_for_surface(window).cloned() {
+        if let Some(mut mapped) = self.common.shell.element_for_surface(window).cloned() {
             let seat = self.common.last_active_seat().clone();
             self.common.shell.unminimize_request(&mapped, &seat);
+            if mapped.is_stack() {
+                mapped.stack_ref_mut().unwrap().set_active(window);
+            }
         }
     }
 }
