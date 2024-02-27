@@ -1035,7 +1035,18 @@ impl SpaceElement for CosmicStack {
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |active| {
                     (active >= len).then_some(len - 1)
                 });
-            windows.iter().for_each(|w| SpaceElement::refresh(w));
+            let active = p.active.load(Ordering::SeqCst);
+
+            windows.iter().enumerate().for_each(|(i, w)| {
+                if i == active {
+                    w.set_suspended(false);
+                } else {
+                    w.set_suspended(true);
+                }
+                w.send_configure();
+
+                SpaceElement::refresh(w)
+            });
         });
     }
 }
