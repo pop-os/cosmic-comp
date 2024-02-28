@@ -1089,7 +1089,7 @@ impl Shell {
                             for window in set.workspaces[set.active]
                                 .tiling_layer
                                 .mapped()
-                                .map(|(_, w, _)| w)
+                                .map(|(w, _)| w)
                                 .chain(set.workspaces[set.active].floating_layer.space.elements())
                             {
                                 if let Some(surf) = window.active_window().x11_surface() {
@@ -2242,7 +2242,7 @@ impl Shell {
                             workspace
                                 .tiling_layer
                                 .mapped()
-                                .any(|(_, m, _)| m == &old_mapped)
+                                .any(|(m, _)| m == &old_mapped)
                         }
                         .then_some(ManagedLayer::Tiling)
                         .unwrap_or(ManagedLayer::Floating);
@@ -2803,7 +2803,7 @@ impl Shell {
         {
             set.sticky_layer.toggle_stacking(window)
         } else if let Some(workspace) = self.space_for_mut(window) {
-            if workspace.tiling_layer.mapped().any(|(_, m, _)| m == window) {
+            if workspace.tiling_layer.mapped().any(|(m, _)| m == window) {
                 workspace.tiling_layer.toggle_stacking(window)
             } else if workspace.floating_layer.mapped().any(|w| w == window) {
                 workspace.floating_layer.toggle_stacking(window)
@@ -2823,11 +2823,7 @@ impl Shell {
             if set.sticky_layer.mapped().any(|m| m == &window) {
                 set.sticky_layer
                     .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat))
-            } else if workspace
-                .tiling_layer
-                .mapped()
-                .any(|(_, m, _)| m == &window)
-            {
+            } else if workspace.tiling_layer.mapped().any(|(m, _)| m == &window) {
                 workspace
                     .tiling_layer
                     .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat))

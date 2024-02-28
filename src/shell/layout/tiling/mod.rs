@@ -1252,10 +1252,6 @@ impl TilingLayout {
         }
     }
 
-    pub fn output_for_element(&self, elem: &CosmicMapped) -> Option<&Output> {
-        self.mapped().find_map(|(o, m, _)| (m == elem).then_some(o))
-    }
-
     // TODO: Move would needs this to be accurate during animations
     pub fn element_geometry(&self, elem: &CosmicMapped) -> Option<Rectangle<i32, Local>> {
         if let Some(id) = elem.tiling_node_id.lock().unwrap().as_ref() {
@@ -2101,14 +2097,14 @@ impl TilingLayout {
 
         let dead_windows = self
             .mapped()
-            .map(|(_, w, _)| w.clone())
+            .map(|(w, _)| w.clone())
             .filter(|w| !w.alive())
             .collect::<Vec<_>>();
         for dead_window in dead_windows.iter() {
             self.unmap_window_internal(dead_window);
         }
 
-        for (_, mapped, _) in self.mapped() {
+        for (mapped, _) in self.mapped() {
             mapped.refresh();
         }
     }
@@ -3428,7 +3424,7 @@ impl TilingLayout {
         }
     }
 
-    pub fn mapped(&self) -> impl Iterator<Item = (&Output, &CosmicMapped, Rectangle<i32, Global>)> {
+    pub fn mapped(&self) -> impl Iterator<Item = (&CosmicMapped, Rectangle<i32, Local>)> {
         let tree = &self.queue.trees.back().unwrap().0;
         let iter = if let Some(root) = tree.root_node_id() {
             Some(
@@ -3444,10 +3440,7 @@ impl TilingLayout {
                             mapped,
                             last_geometry,
                             ..
-                        } => (&self.output, mapped, {
-                            let geo = last_geometry.clone();
-                            geo.to_global(&self.output)
-                        }),
+                        } => (mapped, last_geometry.clone()),
                         _ => unreachable!(),
                     })
                     .chain(
@@ -3463,10 +3456,7 @@ impl TilingLayout {
                                     mapped,
                                     last_geometry,
                                     ..
-                                } => (&self.output, mapped, {
-                                    let geo = last_geometry.clone();
-                                    geo.to_global(&self.output)
-                                }),
+                                } => (mapped, last_geometry.clone()),
                                 _ => unreachable!(),
                             }),
                     ),
@@ -3477,15 +3467,13 @@ impl TilingLayout {
         iter.into_iter().flatten()
     }
 
-    pub fn windows(
-        &self,
-    ) -> impl Iterator<Item = (Output, CosmicSurface, Rectangle<i32, Global>)> + '_ {
-        self.mapped().flat_map(|(output, mapped, geo)| {
+    pub fn windows(&self) -> impl Iterator<Item = (CosmicSurface, Rectangle<i32, Local>)> + '_ {
+        self.mapped().flat_map(|(mapped, geo)| {
             mapped.windows().map(move |(w, p)| {
-                (output.clone(), w, {
+                (w, {
                     let mut geo = geo.clone();
-                    geo.loc += p.as_global();
-                    geo.size -= p.to_size().as_global();
+                    geo.loc += p.as_local();
+                    geo.size -= p.to_size().as_local();
                     geo
                 })
             })
