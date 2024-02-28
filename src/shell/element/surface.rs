@@ -71,6 +71,7 @@ impl From<X11Surface> for CosmicSurface {
 }
 
 pub const SSD_HEIGHT: i32 = 48;
+pub const RESIZE_BORDER: i32 = 10;
 
 impl CosmicSurface {
     pub fn title(&self) -> String {
