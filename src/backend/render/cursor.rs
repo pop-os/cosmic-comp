@@ -37,6 +37,14 @@ pub enum CursorShape {
     ColResize,
     RowResize,
     Grab,
+    EastResize,
+    WestResize,
+    NorthResize,
+    SouthResize,
+    NorthEastResize,
+    NorthWestResize,
+    SouthEastResize,
+    SouthWestResize,
 }
 
 impl ToString for CursorShape {
@@ -46,6 +54,14 @@ impl ToString for CursorShape {
             CursorShape::ColResize => "col-resize",
             CursorShape::RowResize => "row-resize",
             CursorShape::Grab => "grabbing",
+            CursorShape::EastResize => "e-resize",
+            CursorShape::WestResize => "w-resize",
+            CursorShape::NorthResize => "n-resize",
+            CursorShape::SouthResize => "s-resize",
+            CursorShape::NorthEastResize => "ne-resize",
+            CursorShape::NorthWestResize => "nw-resize",
+            CursorShape::SouthEastResize => "se-resize",
+            CursorShape::SouthWestResize => "sw-resize",
         }
         .to_string()
     }
@@ -244,6 +260,38 @@ impl Default for CursorState {
                 map.insert(
                     CursorShape::Grab,
                     Cursor::load(&theme, CursorShape::Grab, size),
+                );
+                map.insert(
+                    CursorShape::NorthResize,
+                    Cursor::load(&theme, CursorShape::NorthResize, size),
+                );
+                map.insert(
+                    CursorShape::SouthResize,
+                    Cursor::load(&theme, CursorShape::SouthResize, size),
+                );
+                map.insert(
+                    CursorShape::EastResize,
+                    Cursor::load(&theme, CursorShape::EastResize, size),
+                );
+                map.insert(
+                    CursorShape::WestResize,
+                    Cursor::load(&theme, CursorShape::WestResize, size),
+                );
+                map.insert(
+                    CursorShape::NorthEastResize,
+                    Cursor::load(&theme, CursorShape::NorthEastResize, size),
+                );
+                map.insert(
+                    CursorShape::SouthEastResize,
+                    Cursor::load(&theme, CursorShape::SouthEastResize, size),
+                );
+                map.insert(
+                    CursorShape::NorthWestResize,
+                    Cursor::load(&theme, CursorShape::NorthWestResize, size),
+                );
+                map.insert(
+                    CursorShape::SouthWestResize,
+                    Cursor::load(&theme, CursorShape::SouthWestResize, size),
                 );
                 map
             },
