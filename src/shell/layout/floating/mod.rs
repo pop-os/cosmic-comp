@@ -47,6 +47,7 @@ mod grabs;
 pub use self::grabs::*;
 
 pub const ANIMATION_DURATION: Duration = Duration::from_millis(200);
+pub const MINIMIZE_ANIMATION_DURATION: Duration = Duration::from_millis(300);
 
 #[derive(Debug, Default)]
 pub struct FloatingLayout {
@@ -91,16 +92,16 @@ impl Animation {
             Animation::Minimize { start, .. } => {
                 1.0 - (Instant::now()
                     .duration_since(*start)
-                    .min(ANIMATION_DURATION)
+                    .min(MINIMIZE_ANIMATION_DURATION)
                     .as_secs_f32()
-                    / ANIMATION_DURATION.as_secs_f32())
+                    / MINIMIZE_ANIMATION_DURATION.as_secs_f32())
             }
             Animation::Unminimize { start, .. } => {
                 Instant::now()
                     .duration_since(*start)
-                    .min(ANIMATION_DURATION)
+                    .min(MINIMIZE_ANIMATION_DURATION)
                     .as_secs_f32()
-                    / ANIMATION_DURATION.as_secs_f32()
+                    / MINIMIZE_ANIMATION_DURATION.as_secs_f32()
             }
         }
     }
@@ -125,31 +126,29 @@ impl Animation {
         current_geometry: Rectangle<i32, Local>,
         tiled_state: Option<&TiledCorners>,
     ) -> Rectangle<i32, Local> {
-        let target_rect = match self {
+        let (duration, target_rect) = match self {
             Animation::Minimize {
                 target_geometry, ..
             }
             | Animation::Unminimize {
                 target_geometry, ..
-            } => target_geometry.clone(),
+            } => (MINIMIZE_ANIMATION_DURATION, target_geometry.clone()),
             Animation::Tiled { .. } => {
-                if let Some(target_rect) =
+                let target_geometry = if let Some(target_rect) =
                     tiled_state.map(|state| state.relative_geometry(output_geometry))
                 {
                     target_rect
                 } else {
                     current_geometry
-                }
+                };
+                (ANIMATION_DURATION, target_geometry)
             }
         };
         let previous_rect = self.previous_geometry().clone();
         let start = *self.start();
         let now = Instant::now();
-        let progress = now
-            .duration_since(start)
-            .min(ANIMATION_DURATION)
-            .as_secs_f64()
-            / ANIMATION_DURATION.as_secs_f64();
+        let progress =
+            now.duration_since(start).min(duration).as_secs_f64() / duration.as_secs_f64();
 
         ease(
             EaseInOutCubic,
@@ -1107,8 +1106,13 @@ impl FloatingLayout {
 
     pub fn update_animation_state(&mut self) {
         let was_empty = self.animations.is_empty();
-        self.animations
-            .retain(|_, anim| Instant::now().duration_since(*anim.start()) < ANIMATION_DURATION);
+        self.animations.retain(|_, anim| {
+            let duration = match anim {
+                Animation::Tiled { .. } => ANIMATION_DURATION,
+                _ => MINIMIZE_ANIMATION_DURATION,
+            };
+            Instant::now().duration_since(*anim.start()) < duration
+        });
         if self.animations.is_empty() != was_empty {
             self.dirty.store(true, Ordering::SeqCst);
         }

@@ -68,6 +68,7 @@ pub use self::blocker::*;
 pub use self::grabs::*;
 
 pub const ANIMATION_DURATION: Duration = Duration::from_millis(200);
+pub const MINIMIZE_ANIMATION_DURATION: Duration = Duration::from_millis(300);
 pub const MOUSE_ANIMATION_DELAY: Duration = Duration::from_millis(150);
 pub const INITIAL_MOUSE_ANIMATION_DELAY: Duration = Duration::from_millis(500);
 
@@ -395,6 +396,12 @@ impl TilingLayout {
         let last_active = focus_stack
             .and_then(|focus_stack| TilingLayout::last_active_window(&mut tree, focus_stack))
             .map(|(node_id, _)| node_id);
+        let duration = if minimize_rect.is_some() {
+            MINIMIZE_ANIMATION_DURATION
+        } else {
+            ANIMATION_DURATION
+        };
+
         TilingLayout::map_to_tree(
             &mut tree,
             window,
@@ -404,7 +411,7 @@ impl TilingLayout {
             minimize_rect,
         );
         let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
-        self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
+        self.queue.push_tree(tree, duration, blocker);
     }
 
     pub fn remap_minimized<'a>(
@@ -469,7 +476,8 @@ impl TilingLayout {
                     *window.tiling_node_id.lock().unwrap() = Some(new_id);
 
                     let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
-                    self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
+                    self.queue
+                        .push_tree(tree, MINIMIZE_ANIMATION_DURATION, blocker);
                     return;
                 }
             }
@@ -507,7 +515,8 @@ impl TilingLayout {
                 *window.tiling_node_id.lock().unwrap() = Some(new_id);
 
                 let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
-                self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
+                self.queue
+                    .push_tree(tree, MINIMIZE_ANIMATION_DURATION, blocker);
                 return;
             }
         }
