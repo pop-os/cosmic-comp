@@ -405,14 +405,14 @@ impl Workspace {
     pub fn element_for_surface(&self, surface: &CosmicSurface) -> Option<&CosmicMapped> {
         self.floating_layer
             .mapped()
-            .chain(self.tiling_layer.mapped().map(|(_, w, _)| w))
+            .chain(self.tiling_layer.mapped().map(|(w, _)| w))
             .find(|e| e.windows().any(|(w, _)| &w == surface))
     }
 
     pub fn element_for_wl_surface(&self, surface: &WlSurface) -> Option<&CosmicMapped> {
         self.floating_layer
             .mapped()
-            .chain(self.tiling_layer.mapped().map(|(_, w, _)| w))
+            .chain(self.tiling_layer.mapped().map(|(w, _)| w))
             .find(|e| {
                 e.windows()
                     .any(|(w, _)| w.wl_surface().as_ref() == Some(surface))
@@ -422,7 +422,7 @@ impl Workspace {
     pub fn element_for_x11_surface(&self, surface: &X11Surface) -> Option<&CosmicMapped> {
         self.floating_layer
             .mapped()
-            .chain(self.tiling_layer.mapped().map(|(_, w, _)| w))
+            .chain(self.tiling_layer.mapped().map(|(w, _)| w))
             .find(|e| e.windows().any(|(w, _)| w.x11_surface() == Some(surface)))
     }
 
@@ -654,7 +654,7 @@ impl Workspace {
             for window in self
                 .tiling_layer
                 .mapped()
-                .map(|(_, m, _)| m.clone())
+                .map(|(m, _)| m.clone())
                 .collect::<Vec<_>>()
                 .into_iter()
             {
@@ -671,7 +671,7 @@ impl Workspace {
             if window.is_maximized(false) {
                 self.unmaximize_request(window);
             }
-            if self.tiling_layer.mapped().any(|(_, m, _)| m == window) {
+            if self.tiling_layer.mapped().any(|(m, _)| m == window) {
                 self.tiling_layer.unmap(window);
                 self.floating_layer.map(window.clone(), None);
             } else if self.floating_layer.mapped().any(|w| w == window) {
@@ -693,7 +693,7 @@ impl Workspace {
     pub fn mapped(&self) -> impl Iterator<Item = &CosmicMapped> {
         self.floating_layer
             .mapped()
-            .chain(self.tiling_layer.mapped().map(|(_, w, _)| w))
+            .chain(self.tiling_layer.mapped().map(|(w, _)| w))
     }
 
     pub fn outputs(&self) -> impl Iterator<Item = &Output> {
@@ -703,7 +703,7 @@ impl Workspace {
     pub fn windows(&self) -> impl Iterator<Item = CosmicSurface> + '_ {
         self.floating_layer
             .windows()
-            .chain(self.tiling_layer.windows().map(|(_, w, _)| w))
+            .chain(self.tiling_layer.windows().map(|(w, _)| w))
     }
 
     pub fn is_fullscreen(&self, mapped: &CosmicMapped) -> bool {
@@ -717,13 +717,13 @@ impl Workspace {
     }
 
     pub fn is_tiled(&self, mapped: &CosmicMapped) -> bool {
-        !self.is_fullscreen(mapped) && self.tiling_layer.mapped().any(|(_, m, _)| m == mapped)
+        !self.is_fullscreen(mapped) && self.tiling_layer.mapped().any(|(m, _)| m == mapped)
     }
 
     pub fn node_desc(&self, focus: KeyboardFocusTarget) -> Option<NodeDesc> {
         match focus {
             KeyboardFocusTarget::Element(mapped) => {
-                self.tiling_layer.mapped().find_map(|(_, m, _)| {
+                self.tiling_layer.mapped().find_map(|(m, _)| {
                     if m == &mapped {
                         mapped
                             .tiling_node_id
