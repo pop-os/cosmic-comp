@@ -2852,7 +2852,7 @@ impl TilingLayout {
 
     pub fn element_under(
         &mut self,
-        location: Point<f64, Local>,
+        location_f64: Point<f64, Local>,
         overview: OverviewMode,
     ) -> Option<(PointerFocusTarget, Point<i32, Local>)> {
         let gaps = self.gaps();
@@ -2860,7 +2860,7 @@ impl TilingLayout {
         let placeholder_id = &self.placeholder_id;
         let tree = &self.queue.trees.back().unwrap().0;
         let root = tree.root_node_id()?;
-        let location = location.to_i32_round();
+        let location = location_f64.to_i32_round();
 
         {
             let output_geo =
@@ -2876,6 +2876,15 @@ impl TilingLayout {
         }
 
         if matches!(overview, OverviewMode::None) {
+            for (mapped, geo) in self.mapped() {
+                if !mapped.bbox().contains((location - geo.loc).as_logical()) {
+                    continue;
+                }
+                if mapped.is_in_input_region(&(location_f64 - geo.loc.to_f64()).as_logical()) {
+                    return Some((mapped.clone().into(), geo.loc));
+                }
+            }
+
             let mut result = None;
             let mut lookup = Some(root.clone());
             while let Some(node) = lookup {
