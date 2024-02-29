@@ -4707,7 +4707,7 @@ where
                 if let Some(minimize_geo) = minimize_geo {
                     scaled_geo = Some(
                         ease(
-                            EaseInOutCubic,
+                            Linear,
                             EaseRectangle(*original_geo),
                             EaseRectangle(*minimize_geo),
                             percentage,
@@ -4715,6 +4715,7 @@ where
                         .unwrap(),
                     );
                 }
+
                 let (scale, offset) = scaled_geo
                     .map(|adapted_geo| scale_to_center(&original_geo, &adapted_geo))
                     .unwrap_or_else(|| (1.0.into(), (0, 0).into()));
@@ -4730,20 +4731,13 @@ where
                     })
                     .unwrap_or(*original_geo);
 
-                let original_location = original_geo
-                    .loc
-                    .as_logical()
-                    .to_physical_precise_round(output_scale)
-                    - mapped
-                        .geometry()
-                        .loc
-                        .to_physical_precise_round(output_scale);
 
                 let elem_geometry = mapped.geometry().to_physical_precise_round(output_scale);
                 let (w_elements, p_elements) = mapped
                     .split_render_elements::<R, CosmicMappedRenderElement<R>>(
                         renderer,
-                        original_location,
+                        geo.loc.as_logical().to_physical_precise_round(output_scale)
+                            - elem_geometry.loc,
                         Scale::from(output_scale),
                         1.0 - percentage,
                     );
