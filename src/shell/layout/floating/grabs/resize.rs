@@ -371,9 +371,11 @@ impl ResizeSurfaceGrab {
                         }
                     }
                 }
-                floating_layer
-                    .space
-                    .map_element(window, new_location.as_logical(), false);
+                floating_layer.space.map_element(
+                    window,
+                    new_location.to_local(&output).as_logical(),
+                    false,
+                );
             }
         }
     }
