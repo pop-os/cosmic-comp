@@ -47,7 +47,7 @@ mod grabs;
 pub use self::grabs::*;
 
 pub const ANIMATION_DURATION: Duration = Duration::from_millis(200);
-pub const MINIMIZE_ANIMATION_DURATION: Duration = Duration::from_millis(300);
+pub const MINIMIZE_ANIMATION_DURATION: Duration = Duration::from_millis(400);
 
 #[derive(Debug, Default)]
 pub struct FloatingLayout {
