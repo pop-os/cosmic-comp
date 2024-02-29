@@ -1,11 +1,17 @@
-use super::CosmicSurface;
+use super::{surface::RESIZE_BORDER, CosmicSurface};
 use crate::{
+    backend::render::cursor::{CursorShape, CursorState},
     shell::{
-        focus::FocusDirection, grabs::ReleaseMode, layout::tiling::NodeDesc, Direction, Shell,
+        focus::FocusDirection,
+        grabs::{ReleaseMode, ResizeEdge},
+        layout::tiling::NodeDesc,
+        Direction, Shell,
     },
     state::State,
-    utils::iced::{IcedElement, Program},
-    utils::prelude::*,
+    utils::{
+        iced::{IcedElement, Program},
+        prelude::*,
+    },
     wayland::handlers::screencopy::ScreencopySessions,
 };
 use calloop::LoopHandle;
@@ -34,7 +40,7 @@ use smithay::{
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{
-            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
+            AxisFrame, ButtonEvent, CursorImageStatus, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
             GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
             PointerTarget, RelativeMotionEvent,
@@ -47,6 +53,7 @@ use smithay::{
     wayland::seat::WaylandFocus,
 };
 use std::{
+    cell::RefCell,
     fmt,
     hash::Hash,
     sync::{
@@ -118,6 +125,14 @@ pub enum Focus {
     None,
     Header,
     Window,
+    ResizeTop,
+    ResizeLeft,
+    ResizeRight,
+    ResizeBottom,
+    ResizeTopRight,
+    ResizeTopLeft,
+    ResizeBottomRight,
+    ResizeBottomLeft,
 }
 
 pub enum MoveResult {
@@ -922,20 +937,33 @@ impl SpaceElement for CosmicStack {
         self.0.with_program(|p| {
             let mut bbox =
                 SpaceElement::bbox(&p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)]);
+            bbox.loc -= Point::from((RESIZE_BORDER, RESIZE_BORDER));
+            bbox.size += Size::from((RESIZE_BORDER * 2, RESIZE_BORDER * 2));
             bbox.size.h += TAB_HEIGHT;
             bbox
         })
     }
     fn is_in_input_region(&self, point: &Point<f64, Logical>) -> bool {
         let mut point = *point;
-        let offset = self.0.with_program(|p| {
-            p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)]
-                .geometry()
-                .loc
+        let geo = self.0.with_program(|p| {
+            p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry()
         });
-        if (point.y.round() as i32 - offset.y) < TAB_HEIGHT {
+
+        let point_i32 = point.to_i32_round::<i32>();
+        if (point_i32.x - geo.loc.x >= -RESIZE_BORDER && point_i32.x - geo.loc.x < 0)
+            || (point_i32.y - geo.loc.y >= -RESIZE_BORDER && point_i32.y - geo.loc.y < 0)
+            || (point_i32.x - geo.loc.x >= geo.size.w
+                && point_i32.x - geo.loc.x < geo.size.w + RESIZE_BORDER)
+            || (point_i32.y - geo.loc.y >= geo.size.h
+                && point_i32.y - geo.loc.y < geo.size.h + TAB_HEIGHT + RESIZE_BORDER)
+        {
             return true;
         }
+
+        if (point_i32.y - geo.loc.y) < TAB_HEIGHT {
+            return true;
+        }
+
         point.y -= TAB_HEIGHT as f64;
         self.0.with_program(|p| {
             SpaceElement::is_in_input_region(
@@ -1091,7 +1119,6 @@ impl KeyboardTarget<State> for CosmicStack {
 impl PointerTarget<State> for CosmicStack {
     fn enter(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
         let mut event = event.clone();
-        event.location.y -= TAB_HEIGHT as f64;
         if self.0.with_program(|p| {
             let active_window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
             if let Some(sessions) = active_window.user_data().get::<ScreencopySessions>() {
@@ -1100,24 +1127,65 @@ impl PointerTarget<State> for CosmicStack {
                 }
             }
 
-            if (event.location.y - active_window.geometry().loc.y as f64) < 0. {
-                let previous = p.swap_focus(Focus::Header);
-                if previous == Focus::Window {
-                    PointerTarget::leave(active_window, seat, data, event.serial, event.time);
-                }
-                true
+            let geo = active_window.geometry();
+            let loc = event.location.to_i32_round::<i32>();
+            let (old_focus, shape) = if loc.y - geo.loc.y < 0 && loc.x - geo.loc.x < 0 {
+                (
+                    p.swap_focus(Focus::ResizeTopLeft),
+                    CursorShape::NorthWestResize,
+                )
+            } else if loc.y - geo.loc.y < 0 && loc.x - geo.loc.x >= geo.size.w {
+                (
+                    p.swap_focus(Focus::ResizeTopRight),
+                    CursorShape::NorthEastResize,
+                )
+            } else if loc.y - geo.loc.y < 0 {
+                (p.swap_focus(Focus::ResizeTop), CursorShape::NorthResize)
+            } else if loc.y - geo.loc.y >= TAB_HEIGHT + geo.size.h && loc.x - geo.loc.x < 0 {
+                (
+                    p.swap_focus(Focus::ResizeBottomLeft),
+                    CursorShape::SouthWestResize,
+                )
+            } else if loc.y - geo.loc.y >= TAB_HEIGHT + geo.size.h
+                && loc.x - geo.loc.x >= geo.size.w
+            {
+                (
+                    p.swap_focus(Focus::ResizeBottomRight),
+                    CursorShape::SouthEastResize,
+                )
+            } else if loc.y - geo.loc.y >= TAB_HEIGHT + geo.size.h {
+                (p.swap_focus(Focus::ResizeBottom), CursorShape::SouthResize)
+            } else if loc.x - geo.loc.x < 0 {
+                (p.swap_focus(Focus::ResizeLeft), CursorShape::WestResize)
+            } else if loc.x - geo.loc.x >= geo.size.w {
+                (p.swap_focus(Focus::ResizeRight), CursorShape::EastResize)
+            } else if loc.y - geo.loc.y < TAB_HEIGHT {
+                (p.swap_focus(Focus::Header), CursorShape::Default)
             } else {
                 p.swap_focus(Focus::Window);
 
+                event.location.y -= TAB_HEIGHT as f64;
                 *p.last_location.lock().unwrap() = Some((event.location, event.serial, event.time));
                 let active = p.active.load(Ordering::SeqCst);
                 p.previous_pointer.store(active, Ordering::SeqCst);
 
                 PointerTarget::enter(active_window, seat, data, &event);
-                false
+                return false;
+            };
+
+            if old_focus == Focus::Window {
+                PointerTarget::leave(active_window, seat, data, event.serial, event.time);
             }
+
+            let cursor_state = seat.user_data().get::<CursorState>().unwrap();
+            cursor_state.set_shape(shape);
+            let cursor_status = seat
+                .user_data()
+                .get::<RefCell<CursorImageStatus>>()
+                .unwrap();
+            *cursor_status.borrow_mut() = CursorImageStatus::default_named();
+            shape == CursorShape::Default
         }) {
-            event.location.y += TAB_HEIGHT as f64;
             event.location -= self.0.with_program(|p| {
                 p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)]
                     .geometry()
@@ -1130,11 +1198,10 @@ impl PointerTarget<State> for CosmicStack {
 
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
         let mut event = event.clone();
-        event.location.y -= TAB_HEIGHT as f64;
         let active =
             self.pointer_leave_if_previous(seat, data, event.serial, event.time, event.location);
 
-        if let Some((previous, next)) = self.0.with_program(|p| {
+        let (previous, next) = self.0.with_program(|p| {
             let active_window = &p.windows.lock().unwrap()[active];
             if let Some(sessions) = active_window.user_data().get::<ScreencopySessions>() {
                 for session in &*sessions.0.borrow() {
@@ -1147,13 +1214,30 @@ impl PointerTarget<State> for CosmicStack {
                 }
             }
 
-            if (event.location.y - active_window.geometry().loc.y as f64) < 0. {
-                let previous = p.swap_focus(Focus::Header);
-                if previous == Focus::Window {
-                    PointerTarget::leave(active_window, seat, data, event.serial, event.time);
-                }
-                Some((previous, Focus::Header))
+            let geo = active_window.geometry();
+            let loc = event.location.to_i32_round::<i32>();
+            let (next, shape) = if loc.y - geo.loc.y < 0 && loc.x - geo.loc.x < 0 {
+                (Focus::ResizeTopLeft, CursorShape::NorthWestResize)
+            } else if loc.y - geo.loc.y < 0 && loc.x - geo.loc.x >= geo.size.w {
+                (Focus::ResizeTopRight, CursorShape::NorthEastResize)
+            } else if loc.y - geo.loc.y < 0 {
+                (Focus::ResizeTop, CursorShape::NorthResize)
+            } else if loc.y - geo.loc.y >= TAB_HEIGHT + geo.size.h && loc.x - geo.loc.x < 0 {
+                (Focus::ResizeBottomLeft, CursorShape::SouthWestResize)
+            } else if loc.y - geo.loc.y >= TAB_HEIGHT + geo.size.h
+                && loc.x - geo.loc.x >= geo.size.w
+            {
+                (Focus::ResizeBottomRight, CursorShape::SouthEastResize)
+            } else if loc.y - geo.loc.y >= TAB_HEIGHT + geo.size.h {
+                (Focus::ResizeBottom, CursorShape::SouthResize)
+            } else if loc.x - geo.loc.x < 0 {
+                (Focus::ResizeLeft, CursorShape::WestResize)
+            } else if loc.x - geo.loc.x >= geo.size.w {
+                (Focus::ResizeRight, CursorShape::EastResize)
+            } else if (loc.y - geo.loc.y) < TAB_HEIGHT {
+                (Focus::Header, CursorShape::Default)
             } else {
+                event.location.y -= TAB_HEIGHT as f64;
                 *p.last_location.lock().unwrap() = Some((event.location, event.serial, event.time));
 
                 let previous = p.swap_focus(Focus::Window);
@@ -1163,51 +1247,37 @@ impl PointerTarget<State> for CosmicStack {
                     PointerTarget::motion(active_window, seat, data, &event);
                 }
 
-                Some((previous, Focus::Window))
+                return (previous, Focus::Window);
+            };
+
+            let previous = p.swap_focus(next);
+            if previous == Focus::Window {
+                PointerTarget::leave(active_window, seat, data, event.serial, event.time);
             }
-        }) {
-            event.location.y += TAB_HEIGHT as f64;
-            let active_window_geo = self
-                .0
-                .with_program(|p| p.windows.lock().unwrap()[active].geometry());
-            event.location -= active_window_geo.loc.to_f64();
-            match (previous, next) {
-                (Focus::Header, Focus::Header) => {
-                    PointerTarget::motion(&self.0, seat, data, &event);
-                    if event.location.y < 0.0
-                        || event.location.x < 64.0
-                        || event.location.x > (active_window_geo.size.w as f64 - 64.0)
-                    {
-                        if let Some(dragged_out) = self
-                            .0
-                            .with_program(|p| p.potential_drag.lock().unwrap().take())
-                        {
-                            if let Some(surface) = self.0.with_program(|p| {
-                                p.windows.lock().unwrap().get(dragged_out).cloned()
-                            }) {
-                                let seat = seat.clone();
-                                surface.try_force_undecorated(false);
-                                surface.send_configure();
-                                if let Some(surface) = surface.wl_surface() {
-                                    let _ =
-                                        data.common.event_loop_handle.insert_idle(move |state| {
-                                            Shell::move_request(
-                                                state,
-                                                &surface,
-                                                &seat,
-                                                None,
-                                                ReleaseMode::NoMouseButtons,
-                                                true,
-                                            )
-                                        });
-                                }
-                            }
-                        }
-                    }
-                }
-                (_, Focus::Header) => PointerTarget::enter(&self.0, seat, data, &event),
-                (Focus::Header, _) => {
-                    PointerTarget::leave(&self.0, seat, data, event.serial, event.time);
+
+            let cursor_state = seat.user_data().get::<CursorState>().unwrap();
+            cursor_state.set_shape(shape);
+            let cursor_status = seat
+                .user_data()
+                .get::<RefCell<CursorImageStatus>>()
+                .unwrap();
+            *cursor_status.borrow_mut() = CursorImageStatus::default_named();
+
+            (previous, next)
+        });
+
+        let active_window_geo = self
+            .0
+            .with_program(|p| p.windows.lock().unwrap()[active].geometry());
+        event.location -= active_window_geo.loc.to_f64();
+
+        match (previous, next) {
+            (Focus::Header, Focus::Header) => {
+                PointerTarget::motion(&self.0, seat, data, &event);
+                if event.location.y < 0.0
+                    || event.location.x < 64.0
+                    || event.location.x > (active_window_geo.size.w as f64 - 64.0)
+                {
                     if let Some(dragged_out) = self
                         .0
                         .with_program(|p| p.potential_drag.lock().unwrap().take())
@@ -1234,8 +1304,37 @@ impl PointerTarget<State> for CosmicStack {
                         }
                     }
                 }
-                _ => {}
             }
+            (_, Focus::Header) => PointerTarget::enter(&self.0, seat, data, &event),
+            (Focus::Header, _) => {
+                PointerTarget::leave(&self.0, seat, data, event.serial, event.time);
+                if let Some(dragged_out) = self
+                    .0
+                    .with_program(|p| p.potential_drag.lock().unwrap().take())
+                {
+                    if let Some(surface) = self
+                        .0
+                        .with_program(|p| p.windows.lock().unwrap().get(dragged_out).cloned())
+                    {
+                        let seat = seat.clone();
+                        surface.try_force_undecorated(false);
+                        surface.send_configure();
+                        if let Some(surface) = surface.wl_surface() {
+                            let _ = data.common.event_loop_handle.insert_idle(move |state| {
+                                Shell::move_request(
+                                    state,
+                                    &surface,
+                                    &seat,
+                                    None,
+                                    ReleaseMode::NoMouseButtons,
+                                    true,
+                                )
+                            });
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
@@ -1284,7 +1383,36 @@ impl PointerTarget<State> for CosmicStack {
                     self.0.force_redraw();
                 }
             }
-            _ => {}
+            Focus::None => {}
+            x => {
+                let serial = event.serial;
+                let seat = seat.clone();
+                let Some(surface) = self.0.with_program(|p| {
+                    let window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
+                    window.wl_surface()
+                }) else {
+                    return;
+                };
+                self.0.loop_handle().insert_idle(move |state| {
+                    Shell::resize_request(
+                        state,
+                        &surface,
+                        &seat,
+                        serial,
+                        match x {
+                            Focus::ResizeTop => ResizeEdge::TOP,
+                            Focus::ResizeTopLeft => ResizeEdge::TOP_LEFT,
+                            Focus::ResizeTopRight => ResizeEdge::TOP_RIGHT,
+                            Focus::ResizeBottom => ResizeEdge::BOTTOM,
+                            Focus::ResizeBottomLeft => ResizeEdge::BOTTOM_LEFT,
+                            Focus::ResizeBottomRight => ResizeEdge::BOTTOM_RIGHT,
+                            Focus::ResizeLeft => ResizeEdge::LEFT,
+                            Focus::ResizeRight => ResizeEdge::RIGHT,
+                            Focus::Header | Focus::Window | Focus::None => unreachable!(),
+                        },
+                    )
+                });
+            }
         }
     }
 
@@ -1349,6 +1477,8 @@ impl PointerTarget<State> for CosmicStack {
                 }
             }
 
+            let cursor_state = seat.user_data().get::<CursorState>().unwrap();
+            cursor_state.set_shape(CursorShape::Default);
             p.swap_focus(Focus::None)
         });
 
