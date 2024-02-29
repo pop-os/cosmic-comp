@@ -1280,7 +1280,7 @@ impl TilingLayout {
     }
 
     pub fn unmap(&mut self, window: &CosmicMapped) -> bool {
-        if self.unmap_window_internal(window) {
+        if self.unmap_window_internal(window, false) {
             window.output_leave(&self.output);
             window.set_tiled(false);
             *window.tiling_node_id.lock().unwrap() = None;
@@ -1355,7 +1355,7 @@ impl TilingLayout {
             })
         };
 
-        if self.unmap_window_internal(window) {
+        if self.unmap_window_internal(window, true) {
             let tree = &mut self
                 .queue
                 .trees
@@ -1375,7 +1375,7 @@ impl TilingLayout {
         state
     }
 
-    fn unmap_window_internal(&mut self, mapped: &CosmicMapped) -> bool {
+    fn unmap_window_internal(&mut self, mapped: &CosmicMapped, minimizing: bool) -> bool {
         let tiling_node_id = mapped.tiling_node_id.lock().unwrap().as_ref().cloned();
         let gaps = self.gaps();
 
@@ -1394,8 +1394,13 @@ impl TilingLayout {
 
                 TilingLayout::unmap_internal(&mut tree, &node_id);
 
+                let duration = if minimizing {
+                    MINIMIZE_ANIMATION_DURATION
+                } else {
+                    ANIMATION_DURATION
+                };
                 let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
-                self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
+                self.queue.push_tree(tree, duration, blocker);
 
                 return true;
             }
@@ -2306,7 +2311,7 @@ impl TilingLayout {
             .filter(|w| !w.alive())
             .collect::<Vec<_>>();
         for dead_window in dead_windows.iter() {
-            self.unmap_window_internal(dead_window);
+            self.unmap_window_internal(dead_window, false);
         }
 
         for (mapped, _) in self.mapped() {
