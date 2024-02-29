@@ -4731,6 +4731,11 @@ where
                     })
                     .unwrap_or(*original_geo);
 
+                let alpha = if minimize_geo.is_some() {
+                    1.0 - ((percentage - 0.5).max(0.0) * 2.0)
+                } else {
+                    1.0 - percentage
+                };
 
                 let elem_geometry = mapped.geometry().to_physical_precise_round(output_scale);
                 let (w_elements, p_elements) = mapped
@@ -4739,7 +4744,7 @@ where
                         geo.loc.as_logical().to_physical_precise_round(output_scale)
                             - elem_geometry.loc,
                         Scale::from(output_scale),
-                        1.0 - percentage,
+                        alpha,
                     );
 
                 window_elements.extend(w_elements.into_iter().flat_map(|element| {
@@ -5021,7 +5026,7 @@ where
                 ..
             } = &data
             {
-                old_geo = Some((*minimize_rect, percentage));
+                old_geo = Some((*minimize_rect, (percentage * 2.0).min(1.0)));
             }
 
             let (scale, offset) = scaled_geo

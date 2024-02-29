@@ -90,18 +90,20 @@ impl Animation {
         match self {
             Animation::Tiled { .. } => 1.0,
             Animation::Minimize { start, .. } => {
-                1.0 - (Instant::now()
+                let percentage = Instant::now()
                     .duration_since(*start)
                     .min(MINIMIZE_ANIMATION_DURATION)
                     .as_secs_f32()
-                    / MINIMIZE_ANIMATION_DURATION.as_secs_f32())
+                    / MINIMIZE_ANIMATION_DURATION.as_secs_f32();
+                1.0 - ((percentage - 0.5).max(0.0) * 2.0)
             }
             Animation::Unminimize { start, .. } => {
-                Instant::now()
+                let percentage = Instant::now()
                     .duration_since(*start)
                     .min(MINIMIZE_ANIMATION_DURATION)
                     .as_secs_f32()
-                    / MINIMIZE_ANIMATION_DURATION.as_secs_f32()
+                    / MINIMIZE_ANIMATION_DURATION.as_secs_f32();
+                (percentage * 2.0).min(1.0)
             }
         }
     }
