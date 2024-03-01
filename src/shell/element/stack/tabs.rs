@@ -114,92 +114,79 @@ where
     Message: TabMessage + 'static,
 {
     pub fn new(
-        tabs: impl IntoIterator<Item = Tab<Message>>,
+        tabs: impl ExactSizeIterator<Item = Tab<Message>>,
         active: usize,
         activated: bool,
         group_focused: bool,
     ) -> Self {
-        let mut tabs = tabs
-            .into_iter()
-            .enumerate()
-            .map(|(i, tab)| {
-                let rule = if activated {
-                    TabRuleTheme::ActiveActivated
-                } else {
-                    TabRuleTheme::ActiveDeactivated
-                };
+        let tabs = tabs.into_iter().enumerate().map(|(i, tab)| {
+            let rule = if activated {
+                TabRuleTheme::ActiveActivated
+            } else {
+                TabRuleTheme::ActiveDeactivated
+            };
 
-                let tab = if i == active {
-                    tab.rule_style(rule)
-                        .background_style(if activated {
-                            TabBackgroundTheme::ActiveActivated
-                        } else {
-                            TabBackgroundTheme::ActiveDeactivated
-                        })
-                        .font(cosmic::font::FONT_SEMIBOLD)
-                        .active()
-                } else if i.checked_sub(1) == Some(active) {
-                    tab.rule_style(rule).non_active()
-                } else {
-                    tab.non_active()
-                };
-
-                Element::new(tab.internal(i))
-            })
-            .collect::<Vec<_>>();
-
-        tabs.push(
-            widget::vertical_rule(4)
-                .style(if tabs.len() - 1 == active {
-                    if activated {
-                        TabRuleTheme::ActiveActivated
+            let tab = if i == active {
+                tab.rule_style(rule)
+                    .background_style(if activated {
+                        TabBackgroundTheme::ActiveActivated
                     } else {
-                        TabRuleTheme::ActiveDeactivated
-                    }
-                } else {
-                    TabRuleTheme::Default
-                })
-                .into(),
-        );
+                        TabBackgroundTheme::ActiveDeactivated
+                    })
+                    .font(cosmic::font::FONT_SEMIBOLD)
+                    .active()
+            } else if i.checked_sub(1) == Some(active) {
+                tab.rule_style(rule).non_active()
+            } else {
+                tab.non_active()
+            };
+
+            Element::new(tab.internal(i))
+        });
+
+        let tabs_rule = widget::vertical_rule(4).style(if tabs.len() - 1 == active {
+            if activated {
+                TabRuleTheme::ActiveActivated
+            } else {
+                TabRuleTheme::ActiveDeactivated
+            }
+        } else {
+            TabRuleTheme::Default
+        });
+
+        let rule_style = if group_focused {
+            TabRuleTheme::ActiveActivated
+        } else {
+            TabRuleTheme::Default
+        };
+
+        let prev_button = from_name("go-previous-symbolic")
+            .size(16)
+            .prefer_svg(true)
+            .icon()
+            .apply(widget::button)
+            .style(theme::iced::Button::Text)
+            .on_press(Message::scroll_back());
+
+        let next_button = from_name("go-next-symbolic")
+            .size(16)
+            .prefer_svg(true)
+            .icon()
+            .apply(widget::button)
+            .style(theme::iced::Button::Text)
+            .on_press(Message::scroll_further());
+
+        let mut elements = Vec::with_capacity(tabs.len() + 5);
+
+        elements.push(widget::vertical_rule(4).style(rule_style).into());
+        elements.push(prev_button.into());
+        elements.extend(tabs);
+        elements.push(tabs_rule.into());
+        elements.push(next_button.into());
+        elements.push(widget::vertical_rule(4).style(rule_style).into());
 
         Tabs {
-            elements: vec![
-                widget::vertical_rule(4)
-                    .style(if group_focused {
-                        TabRuleTheme::ActiveActivated
-                    } else {
-                        TabRuleTheme::Default
-                    })
-                    .into(),
-                from_name("go-previous-symbolic")
-                    .size(16)
-                    .prefer_svg(true)
-                    .icon()
-                    .apply(widget::button)
-                    .style(theme::iced::Button::Text)
-                    .on_press(Message::scroll_back())
-                    .into(),
-            ]
-            .into_iter()
-            .chain(tabs)
-            .chain(vec![
-                from_name("go-next-symbolic")
-                    .size(16)
-                    .prefer_svg(true)
-                    .icon()
-                    .apply(widget::button)
-                    .style(theme::iced::Button::Text)
-                    .on_press(Message::scroll_further())
-                    .into(),
-                widget::vertical_rule(4)
-                    .style(if group_focused {
-                        TabRuleTheme::ActiveActivated
-                    } else {
-                        TabRuleTheme::Default
-                    })
-                    .into(),
-            ])
-            .collect(),
+            elements,
             id: None,
             width: Length::Fill,
             height: Length::Shrink,
@@ -332,7 +319,7 @@ where
     }
 
     fn children(&self) -> Vec<Tree> {
-        self.elements.iter().map(|elem| Tree::new(elem)).collect()
+        self.elements.iter().map(Tree::new).collect()
     }
 
     fn diff(&mut self, tree: &mut Tree) {
