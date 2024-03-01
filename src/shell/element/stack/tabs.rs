@@ -340,7 +340,7 @@ where
 
         let mut nodes = self.elements[2..self.elements.len() - 2]
             .iter()
-            .zip(tree.children.iter_mut())
+            .zip(tree.children.iter_mut().skip(2))
             .map(|(tab, tab_tree)| tab.as_widget().layout(tab_tree, renderer, &child_limits))
             .collect::<Vec<_>>();
 
