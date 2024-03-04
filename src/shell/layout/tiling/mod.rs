@@ -4707,7 +4707,7 @@ where
                 if let Some(minimize_geo) = minimize_geo {
                     scaled_geo = Some(
                         ease(
-                            Linear,
+                            EaseInOutCubic,
                             EaseRectangle(*original_geo),
                             EaseRectangle(*minimize_geo),
                             percentage,
@@ -4784,7 +4784,7 @@ where
                             geo,
                             indicator_thickness,
                             output_scale,
-                            1.0 - percentage,
+                            alpha,
                             [window_hint.red, window_hint.green, window_hint.blue],
                         ),
                     ));
@@ -5021,13 +5021,16 @@ where
                 )
             });
 
-            if let Data::Mapped {
+            let was_minimized = if let Data::Mapped {
                 minimize_rect: Some(minimize_rect),
                 ..
             } = &data
             {
                 old_geo = Some((*minimize_rect, (percentage * 2.0).min(1.0)));
-            }
+                true
+            } else {
+                false
+            };
 
             let (scale, offset) = scaled_geo
                 .map(|adapted_geo| scale_to_center(original_geo, adapted_geo))
@@ -5051,13 +5054,23 @@ where
                     .unwrap_or(true)
             }) {
                 (
-                    ease(
-                        Linear,
-                        EaseRectangle(old_geo),
-                        EaseRectangle(new_geo),
-                        percentage,
-                    )
-                    .unwrap(),
+                    if was_minimized {
+                        ease(
+                            EaseInOutCubic,
+                            EaseRectangle(old_geo),
+                            EaseRectangle(new_geo),
+                            percentage,
+                        )
+                        .unwrap()
+                    } else {
+                        ease(
+                            Linear,
+                            EaseRectangle(old_geo),
+                            EaseRectangle(new_geo),
+                            percentage,
+                        )
+                        .unwrap()
+                    },
                     alpha,
                     old_geo != new_geo,
                 )
