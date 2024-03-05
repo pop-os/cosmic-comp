@@ -254,6 +254,7 @@ impl CosmicWindow {
 #[derive(Debug, Clone, Copy)]
 pub enum Message {
     DragStart,
+    Minimize,
     Maximize,
     Close,
     Menu,
@@ -282,6 +283,17 @@ impl Program for CosmicWindowInternal {
                             );
                         });
                     }
+                }
+            }
+            Message::Minimize => {
+                if let Some(surface) = self.window.wl_surface() {
+                    loop_handle.insert_idle(move |state| {
+                        if let Some(mapped) =
+                            state.common.shell.element_for_wl_surface(&surface).cloned()
+                        {
+                            state.common.shell.minimize_request(&mapped)
+                        }
+                    });
                 }
             }
             Message::Maximize => {
@@ -412,6 +424,7 @@ impl Program for CosmicWindowInternal {
         cosmic::widget::header_bar()
             .title(self.last_title.lock().unwrap().clone())
             .on_drag(Message::DragStart)
+            .on_minimize(Message::Minimize)
             .on_maximize(Message::Maximize)
             .on_close(Message::Close)
             .apply(mouse_area)
