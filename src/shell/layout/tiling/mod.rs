@@ -3117,8 +3117,14 @@ impl TilingLayout {
                 if !mapped.bbox().contains((location - geo.loc).as_logical()) {
                     continue;
                 }
-                if mapped.is_in_input_region(&(location_f64 - geo.loc.to_f64()).as_logical()) {
-                    return Some((mapped.clone().into(), geo.loc));
+                if mapped.is_in_input_region(
+                    &((location_f64 - geo.loc.to_f64()).as_logical()
+                        + mapped.geometry().loc.to_f64()),
+                ) {
+                    return Some((
+                        mapped.clone().into(),
+                        geo.loc - mapped.geometry().loc.as_local(),
+                    ));
                 }
             }
 
