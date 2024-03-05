@@ -212,6 +212,7 @@ fn raise_with_children(floating_layer: &mut FloatingLayout, focused: &CosmicMapp
         for element in floating_layer
             .space
             .elements()
+            .filter(|elem| elem != &focused)
             .filter(|elem| {
                 let parent = elem
                     .active_window()
