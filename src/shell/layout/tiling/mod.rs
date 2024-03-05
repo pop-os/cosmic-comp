@@ -5257,6 +5257,12 @@ where
                     )
                 }
 
+                let behavior = if animating {
+                    ConstrainScaleBehavior::Stretch
+                } else {
+                    ConstrainScaleBehavior::CutOff
+                };
+
                 let w_elements = w_elements.into_iter().flat_map(|element| match element {
                     CosmicMappedRenderElement::Stack(elem) => constrain_render_elements(
                         std::iter::once(elem),
@@ -5264,8 +5270,8 @@ where
                             - elem_geometry.loc,
                         geo.as_logical().to_physical_precise_round(output_scale),
                         elem_geometry,
-                        ConstrainScaleBehavior::Stretch,
-                        ConstrainAlign::CENTER,
+                        behavior,
+                        ConstrainAlign::TOP_LEFT,
                         output_scale,
                     )
                     .next()
@@ -5276,8 +5282,8 @@ where
                             - elem_geometry.loc,
                         geo.as_logical().to_physical_precise_round(output_scale),
                         elem_geometry,
-                        ConstrainScaleBehavior::Stretch,
-                        ConstrainAlign::CENTER,
+                        behavior,
+                        ConstrainAlign::TOP_LEFT,
                         output_scale,
                     )
                     .next()
@@ -5288,8 +5294,8 @@ where
                             - elem_geometry.loc,
                         geo.as_logical().to_physical_precise_round(output_scale),
                         elem_geometry,
-                        ConstrainScaleBehavior::Stretch,
-                        ConstrainAlign::CENTER,
+                        behavior,
+                        ConstrainAlign::TOP_LEFT,
                         output_scale,
                     )
                     .next()
