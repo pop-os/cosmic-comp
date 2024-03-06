@@ -1291,7 +1291,7 @@ impl TilingLayout {
     }
 
     pub fn unmap_as_placeholder(&mut self, window: &CosmicMapped) -> Option<NodeId> {
-        let node_id = window.tiling_node_id.lock().unwrap().clone()?;
+        let node_id = window.tiling_node_id.lock().unwrap().take()?;
 
         let data = self
             .queue
