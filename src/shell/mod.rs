@@ -2928,6 +2928,7 @@ impl Shell {
 
                 let mut resize_state = mapped.resize_state.lock().unwrap();
                 if let Some(ResizeState::Resizing(data)) = *resize_state {
+                    mapped.set_resizing(false);
                     *resize_state = Some(ResizeState::WaitingForCommit(data));
                 }
             }
