@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
+    input::Devices,
     shell::focus::target::{KeyboardFocusTarget, PointerFocusTarget},
     state::State,
 };
 use smithay::{
     delegate_seat,
-    input::{pointer::CursorImageStatus, SeatHandler, SeatState},
+    input::{keyboard::LedState, pointer::CursorImageStatus, SeatHandler, SeatState},
     reexports::wayland_server::Resource,
     wayland::{
         seat::WaylandFocus, selection::data_device::set_data_device_focus,
@@ -48,6 +49,12 @@ impl SeatHandler for State {
             set_data_device_focus(dh, seat, Some(client.clone()));
             set_primary_focus(dh, seat, Some(client))
         }
+    }
+
+    fn led_state_changed(&mut self, seat: &smithay::input::Seat<Self>, led_state: LedState) {
+        let userdata = seat.user_data();
+        let devices = userdata.get::<Devices>().unwrap();
+        devices.update_led_state(led_state);
     }
 }
 

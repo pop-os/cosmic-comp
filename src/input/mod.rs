@@ -33,7 +33,7 @@ use smithay::{
     },
     desktop::{layer_map_for_output, space::SpaceElement, WindowSurfaceType},
     input::{
-        keyboard::{FilterResult, KeysymHandle, XkbConfig},
+        keyboard::{FilterResult, KeysymHandle, LedState, XkbConfig},
         pointer::{
             AxisFrame, ButtonEvent, CursorImageStatus, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
@@ -76,7 +76,11 @@ pub struct SupressedKeys(RefCell<Vec<(Keycode, Option<RegistrationToken>)>>);
 #[derive(Default, Debug)]
 pub struct ModifiersShortcutQueue(RefCell<Option<KeyPattern>>);
 #[derive(Default)]
-pub struct Devices(RefCell<HashMap<String, Vec<DeviceCapability>>>);
+pub struct Devices {
+    capabilities: RefCell<HashMap<String, Vec<DeviceCapability>>>,
+    // Used for updating keyboard leds on kms backend
+    keyboards: RefCell<Vec<InputDevice>>,
+}
 
 impl Default for SeatId {
     fn default() -> SeatId {
@@ -138,9 +142,9 @@ impl ModifiersShortcutQueue {
 }
 
 impl Devices {
-    fn add_device<D: Device>(&self, device: &D) -> Vec<DeviceCapability> {
+    fn add_device<D: Device + 'static>(&self, device: &D) -> Vec<DeviceCapability> {
         let id = device.id();
-        let mut map = self.0.borrow_mut();
+        let mut map = self.capabilities.borrow_mut();
         let caps = [
             DeviceCapability::Keyboard,
             DeviceCapability::Pointer,
@@ -156,21 +160,40 @@ impl Devices {
             .filter(|c| map.values().flatten().all(|has| *c != *has))
             .collect::<Vec<_>>();
         map.insert(id, caps);
+
+        if device.has_capability(DeviceCapability::Keyboard) {
+            if let Some(device) = <dyn Any>::downcast_ref::<InputDevice>(device) {
+                self.keyboards.borrow_mut().push(device.clone());
+            }
+        }
+
         new_caps
     }
 
     pub fn has_device<D: Device>(&self, device: &D) -> bool {
-        self.0.borrow().contains_key(&device.id())
+        self.capabilities.borrow().contains_key(&device.id())
     }
 
     fn remove_device<D: Device>(&self, device: &D) -> Vec<DeviceCapability> {
         let id = device.id();
-        let mut map = self.0.borrow_mut();
+
+        let mut keyboards = self.keyboards.borrow_mut();
+        if let Some(idx) = keyboards.iter().position(|x| x.id() == id) {
+            keyboards.remove(idx);
+        }
+
+        let mut map = self.capabilities.borrow_mut();
         map.remove(&id)
             .unwrap_or(Vec::new())
             .into_iter()
             .filter(|c| map.values().flatten().all(|has| *c != *has))
             .collect()
+    }
+
+    pub fn update_led_state(&self, led_state: LedState) {
+        for keyboard in self.keyboards.borrow_mut().iter_mut() {
+            keyboard.led_update(led_state.into());
+        }
     }
 }
 
