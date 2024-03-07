@@ -2619,23 +2619,23 @@ impl Shell {
                 return;
             };
 
-                let new_loc = if edge.contains(ResizeEdge::LEFT) {
+            let new_loc = if edge.contains(ResizeEdge::LEFT) {
                 Point::<i32, Global>::from((geometry.loc.x, geometry.loc.y + (geometry.size.h / 2)))
-                } else if edge.contains(ResizeEdge::RIGHT) {
-                    Point::<i32, Global>::from((
-                        geometry.loc.x + geometry.size.w,
-                        geometry.loc.y + (geometry.size.h / 2),
-                    ))
-                } else if edge.contains(ResizeEdge::TOP) {
+            } else if edge.contains(ResizeEdge::RIGHT) {
+                Point::<i32, Global>::from((
+                    geometry.loc.x + geometry.size.w,
+                    geometry.loc.y + (geometry.size.h / 2),
+                ))
+            } else if edge.contains(ResizeEdge::TOP) {
                 Point::<i32, Global>::from((geometry.loc.x + (geometry.size.w / 2), geometry.loc.y))
-                } else if edge.contains(ResizeEdge::BOTTOM) {
-                    Point::<i32, Global>::from((
-                        geometry.loc.x + (geometry.size.w / 2),
-                        geometry.loc.y + geometry.size.h,
-                    ))
-                } else {
-                    return;
-                };
+            } else if edge.contains(ResizeEdge::BOTTOM) {
+                Point::<i32, Global>::from((
+                    geometry.loc.x + (geometry.size.w / 2),
+                    geometry.loc.y + geometry.size.h,
+                ))
+            } else {
+                return;
+            };
 
             let focus = Some((mapped.clone().into(), (new_loc - geometry.loc).as_logical()));
 
@@ -2643,49 +2643,49 @@ impl Shell {
             start_data.focus = focus.clone();
 
             let grab: ResizeGrab = if let Some(grab) = floating_layer.resize_request(
-                        mapped,
-                        seat,
+                mapped,
+                seat,
                 start_data.clone(),
-                        edge,
-                        ReleaseMode::Click,
+                edge,
+                ReleaseMode::Click,
             ) {
-                    grab.into()
+                grab.into()
             } else if let Some(ws) = state.common.shell.space_for_mut(&mapped) {
-                    let Some(node_id) = mapped.tiling_node_id.lock().unwrap().clone() else {
-                        return;
-                    };
-                    let Some((node, left_up_idx, orientation)) =
+                let Some(node_id) = mapped.tiling_node_id.lock().unwrap().clone() else {
+                    return;
+                };
+                let Some((node, left_up_idx, orientation)) =
                     ws.tiling_layer.resize_request(node_id, edge)
-                    else {
-                        return;
-                    };
-                    ResizeForkGrab::new(
-                        start_data,
-                        new_loc.to_f64(),
-                        node,
-                        left_up_idx,
-                        orientation,
-                        ws.output.downgrade(),
-                        ReleaseMode::Click,
-                    )
-                    .into()
+                else {
+                    return;
+                };
+                ResizeForkGrab::new(
+                    start_data,
+                    new_loc.to_f64(),
+                    node,
+                    left_up_idx,
+                    orientation,
+                    ws.output.downgrade(),
+                    ReleaseMode::Click,
+                )
+                .into()
             } else {
                 return;
-                };
+            };
 
-                let ptr = seat.get_pointer().unwrap();
-                let serial = SERIAL_COUNTER.next_serial();
-                ptr.motion(
-                    state,
+            let ptr = seat.get_pointer().unwrap();
+            let serial = SERIAL_COUNTER.next_serial();
+            ptr.motion(
+                state,
                 focus,
-                    &MotionEvent {
-                        location: new_loc.as_logical().to_f64(),
-                        serial,
-                        time: 0,
-                    },
-                );
-                ptr.frame(state);
-                ptr.set_grab(state, grab, serial, Focus::Keep);
+                &MotionEvent {
+                    location: new_loc.as_logical().to_f64(),
+                    serial,
+                    time: 0,
+                },
+            );
+            ptr.frame(state);
+            ptr.set_grab(state, grab, serial, Focus::Keep);
         }
     }
 
@@ -2871,20 +2871,43 @@ impl Shell {
                     return;
                 };
 
-                if let Some(grab) = floating_layer.resize_request(
+                let grab: ResizeGrab = if let Some(grab) = floating_layer.resize_request(
                     &mapped,
                     seat,
                     start_data.clone(),
                     edges,
                     ReleaseMode::NoMouseButtons,
                 ) {
-                    seat.get_pointer().unwrap().set_grab(
-                        state,
-                        grab,
-                        serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
-                        Focus::Clear,
-                    );
-                }
+                    grab.into()
+                } else if let Some(ws) = state.common.shell.space_for_mut(&mapped) {
+                    let Some(node_id) = mapped.tiling_node_id.lock().unwrap().clone() else {
+                        return;
+                    };
+                    let Some((node, left_up_idx, orientation)) =
+                        ws.tiling_layer.resize_request(node_id, edges)
+                    else {
+                        return;
+                    };
+                    ResizeForkGrab::new(
+                        start_data,
+                        seat.get_pointer().unwrap().current_location().as_global(),
+                        node,
+                        left_up_idx,
+                        orientation,
+                        ws.output.downgrade(),
+                        ReleaseMode::NoMouseButtons,
+                    )
+                    .into()
+                } else {
+                    return;
+                };
+
+                seat.get_pointer().unwrap().set_grab(
+                    state,
+                    grab,
+                    serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
+                    Focus::Clear,
+                );
             }
         }
     }

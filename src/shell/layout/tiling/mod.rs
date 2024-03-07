@@ -2443,7 +2443,7 @@ impl TilingLayout {
         edges
     }
 
-    pub fn menu_resize(
+    pub fn resize_request(
         &self,
         mut node_id: NodeId,
         edge: ResizeEdge,
