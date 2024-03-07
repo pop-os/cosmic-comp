@@ -933,8 +933,10 @@ impl State {
                                                 .is_some()
                                         {
                                             under = Some(layer.clone().into());
+                                            true
+                                        } else {
+                                            false
                                         }
-                                        true
                                     } else {
                                         false
                                     }
