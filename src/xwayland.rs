@@ -321,8 +321,21 @@ impl XwmHandler for State {
         // We only allow floating X11 windows to resize themselves. Nothing else
         let mut current_geo = window.geometry();
         if let Some(mapped) = self.common.shell.element_for_x11_surface(&window) {
-            let space = self.common.shell.space_for(mapped).unwrap();
-            if space.is_floating(mapped) {
+            let is_floating = self
+                .common
+                .shell
+                .workspaces
+                .sets
+                .values()
+                .any(|set| set.sticky_layer.mapped().any(|m| m == mapped))
+                || self
+                    .common
+                    .shell
+                    .space_for(&mapped)
+                    .filter(|space| space.is_floating(mapped))
+                    .is_some();
+
+            if is_floating {
                 mapped.set_geometry(
                     Rectangle::from_loc_and_size(
                         current_geo.loc,
