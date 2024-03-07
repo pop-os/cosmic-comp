@@ -307,6 +307,7 @@ impl FloatingLayout {
         &mut self,
         mapped: CosmicMapped,
         previous_geometry: Rectangle<i32, Local>,
+        animate: bool,
     ) {
         let output = self.space.outputs().next().unwrap().clone();
         let layers = layer_map_for_output(&output);
@@ -324,13 +325,15 @@ impl FloatingLayout {
 
         mapped.moved_since_mapped.store(true, Ordering::SeqCst);
 
-        self.animations.insert(
-            mapped.clone(),
-            Animation::Tiled {
-                start: Instant::now(),
-                previous_geometry,
-            },
-        );
+        if animate {
+            self.animations.insert(
+                mapped.clone(),
+                Animation::Tiled {
+                    start: Instant::now(),
+                    previous_geometry,
+                },
+            );
+        }
         if mapped.floating_tiled.lock().unwrap().take().is_some() {
             if let Some(state) = mapped.maximized_state.lock().unwrap().as_mut() {
                 if let Some(real_old_geo) = mapped.last_geometry.lock().unwrap().clone() {
@@ -1010,7 +1013,7 @@ impl FloatingLayout {
                         });
                         std::mem::drop(maximized_state);
 
-                        self.map_maximized(focused.clone(), start_rectangle);
+                        self.map_maximized(focused.clone(), start_rectangle, true);
                         return MoveResult::Done;
                     }
 

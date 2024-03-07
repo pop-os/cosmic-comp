@@ -2779,7 +2779,7 @@ impl Shell {
                 original_layer,
             });
             std::mem::drop(state);
-            floating_layer.map_maximized(mapped.clone(), original_geometry);
+            floating_layer.map_maximized(mapped.clone(), original_geometry, true);
         }
     }
 

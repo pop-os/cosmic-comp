@@ -60,6 +60,7 @@ use super::{
     element::{
         resize_indicator::ResizeIndicator, stack::CosmicStackRenderElement,
         swap_indicator::SwapIndicator, window::CosmicWindowRenderElement, CosmicMapped,
+        MaximizedState,
     },
     focus::{
         target::{KeyboardFocusTarget, PointerFocusTarget, WindowGroup},
@@ -669,11 +670,11 @@ impl Workspace {
                         let previous_geometry =
                             self.tiling_layer.element_geometry(&window.window).unwrap();
                         self.floating_layer
-                            .map_maximized(window.window, previous_geometry);
+                            .map_maximized(window.window, previous_geometry, true);
                     }
                 } else {
                     if was_maximized {
-                        self.floating_layer.map_maximized(window.window, from);
+                        self.floating_layer.map_maximized(window.window, from, true);
                     } else {
                         self.floating_layer.map(window.window.clone(), None);
                         // get the right animation
@@ -890,15 +891,21 @@ impl Workspace {
         seat: &Seat<State>,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
     ) {
+        let mut maximized_windows = Vec::new();
         if tiling {
+            let floating_windows = self.floating_layer.mapped().cloned().collect::<Vec<_>>();
+
+            for window in floating_windows.iter().filter(|w| w.is_maximized(false)) {
+                let original_geometry = {
+                    let state = window.maximized_state.lock().unwrap();
+                    state.as_ref().unwrap().original_geometry.clone()
+                };
+                self.unmaximize_request(&window);
+                maximized_windows.push((window.clone(), ManagedLayer::Tiling, original_geometry));
+            }
+
             let focus_stack = self.focus_stack.get(seat);
-            for window in self
-                .floating_layer
-                .mapped()
-                .cloned()
-                .collect::<Vec<_>>()
-                .into_iter()
-            {
+            for window in floating_windows.into_iter() {
                 self.floating_layer.unmap(&window);
                 self.tiling_layer
                     .map(window, Some(focus_stack.iter()), None)
@@ -913,11 +920,34 @@ impl Workspace {
                 .collect::<Vec<_>>()
                 .into_iter()
             {
+                if window.is_maximized(false) {
+                    let original_geometry = {
+                        let state = window.maximized_state.lock().unwrap();
+                        state.as_ref().unwrap().original_geometry.clone()
+                    };
+                    self.unmaximize_request(&window);
+                    maximized_windows.push((
+                        window.clone(),
+                        ManagedLayer::Floating,
+                        original_geometry,
+                    ));
+                }
                 self.tiling_layer.unmap(&window);
                 self.floating_layer.map(window, None);
             }
             workspace_state.set_workspace_tiling_state(&self.handle, TilingState::FloatingOnly);
             self.tiling_enabled = false;
+        }
+        for (window, original_layer, original_geometry) in maximized_windows {
+            let mut state = window.maximized_state.lock().unwrap();
+            *state = Some(MaximizedState {
+                original_geometry,
+                original_layer,
+            });
+            std::mem::drop(state);
+
+            self.floating_layer
+                .map_maximized(window, original_geometry, false);
         }
     }
 
