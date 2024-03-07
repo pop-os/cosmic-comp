@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
+    shell::WorkspaceDelta,
     state::ClientState,
     utils::prelude::*,
     wayland::protocols::workspace::{
@@ -38,7 +39,11 @@ impl WorkspaceHandler for State {
                     });
 
                     if let Some((output, idx)) = maybe {
-                        let _ = self.common.shell.activate(&output, idx); // TODO: move cursor?
+                        let _ = self.common.shell.activate(
+                            &output,
+                            idx,
+                            WorkspaceDelta::new_shortcut(),
+                        ); // TODO: move cursor?
                     }
                 }
                 Request::SetTilingState { workspace, state } => {

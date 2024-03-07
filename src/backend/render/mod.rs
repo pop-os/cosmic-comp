@@ -16,7 +16,7 @@ use crate::{
         grabs::{SeatMenuGrabState, SeatMoveGrabState},
         layout::tiling::ANIMATION_DURATION,
         CosmicMapped, CosmicMappedRenderElement, OverviewMode, SessionLock, Trigger,
-        WorkspaceRenderElement,
+        WorkspaceDelta, WorkspaceRenderElement,
     },
     state::{Common, Fps},
     utils::prelude::*,
@@ -69,6 +69,8 @@ use smithay::{
     },
 };
 use tracing::warn;
+
+pub mod animations;
 
 pub mod cursor;
 use self::cursor::CursorRenderElement;
@@ -468,7 +470,7 @@ pub fn workspace_elements<R>(
     renderer: &mut R,
     state: &mut Common,
     output: &Output,
-    previous: Option<(WorkspaceHandle, usize, Instant)>,
+    previous: Option<(WorkspaceHandle, usize, WorkspaceDelta)>,
     current: (WorkspaceHandle, usize),
     cursor_mode: CursorMode,
     _fps: &mut Option<&mut Fps>,
@@ -684,10 +686,18 @@ where
             let has_fullscreen = workspace.fullscreen.is_some();
             let is_active_space = workspace.outputs().any(|o| o == &active_output);
 
-            let percentage = {
-                let percentage = Instant::now().duration_since(*start).as_millis() as f32
-                    / ANIMATION_DURATION.as_millis() as f32;
-                ease(EaseInOutCubic, 0.0, 1.0, percentage)
+            let percentage = match start {
+                WorkspaceDelta::Shortcut(st) => ease(
+                    EaseInOutCubic,
+                    0.0,
+                    1.0,
+                    Instant::now().duration_since(*st).as_millis() as f32
+                        / ANIMATION_DURATION.as_millis() as f32,
+                ),
+                WorkspaceDelta::Gesture(prog) => *prog as f32,
+                WorkspaceDelta::GestureEnd(st, spring) => {
+                    (spring.value_at(Instant::now().duration_since(*st)) as f32).clamp(0.0, 1.0)
+                }
             };
             let offset = Point::<i32, Logical>::from(match (layout, *previous_idx < current.1) {
                 (WorkspaceLayout::Vertical, true) => {
@@ -1012,7 +1022,7 @@ pub fn render_workspace<R, Target, OffTarget, Source>(
     age: usize,
     state: &mut Common,
     output: &Output,
-    previous: Option<(WorkspaceHandle, usize, Instant)>,
+    previous: Option<(WorkspaceHandle, usize, WorkspaceDelta)>,
     current: (WorkspaceHandle, usize),
     mut cursor_mode: CursorMode,
     screencopy: Option<(Source, &[(ScreencopySession, BufferParams)])>,

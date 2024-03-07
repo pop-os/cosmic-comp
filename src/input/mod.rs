@@ -3,6 +3,7 @@
 use crate::{
     backend::render::cursor::CursorState,
     config::{xkb_config_to_wl, Action, Config, KeyModifiers, KeyPattern},
+    input::gestures::{GestureState, SwipeAction},
     shell::{
         focus::{target::PointerFocusTarget, FocusDirection},
         grabs::{ResizeEdge, SeatMenuGrabState, SeatMoveGrabState},
@@ -10,7 +11,8 @@ use crate::{
             floating::ResizeGrabMarker,
             tiling::{SwapWindowGrab, TilingLayout},
         },
-        Direction, FocusResult, MoveResult, OverviewMode, ResizeDirection, ResizeMode, Trigger,
+        Direction, FocusResult, InvalidWorkspaceIndex, MoveResult, OverviewMode, ResizeDirection,
+        ResizeMode, Trigger, WorkspaceDelta,
     },
     state::Common,
     utils::prelude::*,
@@ -67,6 +69,8 @@ use std::{
 };
 
 crate::utils::id_gen!(next_seat_id, SEAT_ID, SEAT_IDS);
+
+pub mod gestures;
 
 #[repr(transparent)]
 pub struct SeatId(pub usize);
@@ -1071,42 +1075,127 @@ impl State {
             }
             InputEvent::GestureSwipeBegin { event, .. } => {
                 if let Some(seat) = self.common.seat_with_device(&event.device()) {
-                    let serial = SERIAL_COUNTER.next_serial();
-                    let pointer = seat.get_pointer().unwrap();
-                    pointer.gesture_swipe_begin(
-                        self,
-                        &GestureSwipeBeginEvent {
-                            serial,
-                            time: event.time_msec(),
-                            fingers: event.fingers(),
-                        },
-                    );
+                    if event.fingers() >= 3 {
+                        self.common.gesture_state = Some(GestureState::new(event.fingers()));
+                    } else {
+                        let serial = SERIAL_COUNTER.next_serial();
+                        let pointer = seat.get_pointer().unwrap();
+                        pointer.gesture_swipe_begin(
+                            self,
+                            &GestureSwipeBeginEvent {
+                                serial,
+                                time: event.time_msec(),
+                                fingers: event.fingers(),
+                            },
+                        );
+                    }
                 }
             }
             InputEvent::GestureSwipeUpdate { event, .. } => {
-                if let Some(seat) = self.common.seat_with_device(&event.device()) {
-                    let pointer = seat.get_pointer().unwrap();
-                    pointer.gesture_swipe_update(
-                        self,
-                        &GestureSwipeUpdateEvent {
-                            time: event.time_msec(),
-                            delta: event.delta(),
-                        },
-                    );
+                if let Some(seat) = self.common.seat_with_device(&event.device()).cloned() {
+                    let mut activate_action: Option<SwipeAction> = None;
+                    if let Some(ref mut gesture_state) = self.common.gesture_state {
+                        let first_update = gesture_state.update(
+                            event.delta(),
+                            Duration::from_millis(event.time_msec() as u64),
+                        );
+                        // Decide on action if first update
+                        if first_update {
+                            activate_action = match gesture_state.fingers {
+                                3 => None, // TODO: 3 finger gestures
+                                4 => {
+                                    if self.common.config.cosmic_conf.workspaces.workspace_layout
+                                        == WorkspaceLayout::Horizontal
+                                    {
+                                        match gesture_state.direction {
+                                            Some(Direction::Left) => {
+                                                Some(SwipeAction::NextWorkspace)
+                                            }
+                                            Some(Direction::Right) => {
+                                                Some(SwipeAction::PrevWorkspace)
+                                            }
+                                            _ => None, // TODO: Other actions
+                                        }
+                                    } else {
+                                        match gesture_state.direction {
+                                            Some(Direction::Up) => Some(SwipeAction::NextWorkspace),
+                                            Some(Direction::Down) => {
+                                                Some(SwipeAction::PrevWorkspace)
+                                            }
+                                            _ => None, // TODO: Other actions
+                                        }
+                                    }
+                                }
+                                _ => None,
+                            };
+
+                            gesture_state.action = activate_action;
+                        }
+
+                        match gesture_state.action {
+                            Some(SwipeAction::NextWorkspace) | Some(SwipeAction::PrevWorkspace) => {
+                                self.common.shell.update_workspace_delta(
+                                    &seat.active_output(),
+                                    gesture_state.delta,
+                                )
+                            }
+                            _ => {}
+                        }
+                    } else {
+                        let pointer = seat.get_pointer().unwrap();
+                        pointer.gesture_swipe_update(
+                            self,
+                            &GestureSwipeUpdateEvent {
+                                time: event.time_msec(),
+                                delta: event.delta(),
+                            },
+                        );
+                    }
+                    match activate_action {
+                        Some(SwipeAction::NextWorkspace) => {
+                            let _ = self.to_next_workspace(&seat, true);
+                        }
+                        Some(SwipeAction::PrevWorkspace) => {
+                            let _ = self.to_previous_workspace(&seat, true);
+                        }
+                        _ => {}
+                    }
                 }
             }
             InputEvent::GestureSwipeEnd { event, .. } => {
-                if let Some(seat) = self.common.seat_with_device(&event.device()) {
-                    let serial = SERIAL_COUNTER.next_serial();
-                    let pointer = seat.get_pointer().unwrap();
-                    pointer.gesture_swipe_end(
-                        self,
-                        &GestureSwipeEndEvent {
-                            serial,
-                            time: event.time_msec(),
-                            cancelled: event.cancelled(),
-                        },
-                    );
+                if let Some(seat) = self.common.seat_with_device(&event.device()).cloned() {
+                    if let Some(ref gesture_state) = self.common.gesture_state {
+                        match gesture_state.action {
+                            Some(SwipeAction::NextWorkspace) | Some(SwipeAction::PrevWorkspace) => {
+                                let velocity = gesture_state.velocity();
+                                let norm_velocity =
+                                    if self.common.config.cosmic_conf.workspaces.workspace_layout
+                                        == WorkspaceLayout::Horizontal
+                                    {
+                                        velocity / seat.active_output().geometry().size.w as f64
+                                    } else {
+                                        velocity / seat.active_output().geometry().size.h as f64
+                                    };
+                                let _ = self
+                                    .common
+                                    .shell
+                                    .end_workspace_swipe(&seat.active_output(), norm_velocity);
+                            }
+                            _ => {}
+                        }
+                        self.common.gesture_state = None;
+                    } else {
+                        let serial = SERIAL_COUNTER.next_serial();
+                        let pointer = seat.get_pointer().unwrap();
+                        pointer.gesture_swipe_end(
+                            self,
+                            &GestureSwipeEndEvent {
+                                serial,
+                                time: event.time_msec(),
+                                cancelled: event.cancelled(),
+                            },
+                        );
+                    }
                 }
             }
             InputEvent::GesturePinchBegin { event, .. } => {
@@ -1471,10 +1560,11 @@ impl State {
                     0 => 9,
                     x => x - 1,
                 };
-                let _ = self
-                    .common
-                    .shell
-                    .activate(&current_output, workspace as usize);
+                let _ = self.common.shell.activate(
+                    &current_output,
+                    workspace as usize,
+                    WorkspaceDelta::new_shortcut(),
+                );
             }
             Action::LastWorkspace => {
                 let current_output = seat.active_output();
@@ -1484,24 +1574,14 @@ impl State {
                     .workspaces
                     .len(&current_output)
                     .saturating_sub(1);
-                let _ = self.common.shell.activate(&current_output, workspace);
+                let _ = self.common.shell.activate(
+                    &current_output,
+                    workspace,
+                    WorkspaceDelta::new_shortcut(),
+                );
             }
             Action::NextWorkspace => {
-                let current_output = seat.active_output();
-                let workspace = self
-                    .common
-                    .shell
-                    .workspaces
-                    .active_num(&current_output)
-                    .1
-                    .saturating_add(1);
-                if self
-                    .common
-                    .shell
-                    .activate(&current_output, workspace)
-                    .is_err()
-                    && propagate
-                {
+                if self.to_next_workspace(seat, false).is_err() && propagate {
                     if let Some(inferred) = pattern.inferred_direction() {
                         self.handle_action(
                             Action::SwitchOutput(inferred),
@@ -1516,21 +1596,7 @@ impl State {
                 }
             }
             Action::PreviousWorkspace => {
-                let current_output = seat.active_output();
-                let workspace = self
-                    .common
-                    .shell
-                    .workspaces
-                    .active_num(&current_output)
-                    .1
-                    .saturating_sub(1);
-                if self
-                    .common
-                    .shell
-                    .activate(&current_output, workspace)
-                    .is_err()
-                    && propagate
-                {
+                if self.to_previous_workspace(seat, false).is_err() && propagate {
                     if let Some(inferred) = pattern.inferred_direction() {
                         self.handle_action(
                             Action::SwitchOutput(inferred),
@@ -1663,7 +1729,11 @@ impl State {
 
                 if let Some(next_output) = next_output {
                     let idx = self.common.shell.workspaces.active_num(&next_output).1;
-                    match self.common.shell.activate(&next_output, idx) {
+                    match self.common.shell.activate(
+                        &next_output,
+                        idx,
+                        WorkspaceDelta::new_shortcut(),
+                    ) {
                         Ok(Some(new_pos)) => {
                             seat.set_active_output(&next_output);
                             if let Some(ptr) = seat.get_pointer() {
@@ -1726,7 +1796,11 @@ impl State {
                     .cloned();
                 if let Some(next_output) = next_output {
                     let idx = self.common.shell.workspaces.active_num(&next_output).1;
-                    match self.common.shell.activate(&next_output, idx) {
+                    match self.common.shell.activate(
+                        &next_output,
+                        idx,
+                        WorkspaceDelta::new_shortcut(),
+                    ) {
                         Ok(Some(new_pos)) => {
                             seat.set_active_output(&next_output);
                             if let Some(ptr) = seat.get_pointer() {
@@ -1762,7 +1836,11 @@ impl State {
                     .cloned();
                 if let Some(prev_output) = prev_output {
                     let idx = self.common.shell.workspaces.active_num(&prev_output).1;
-                    match self.common.shell.activate(&prev_output, idx) {
+                    match self.common.shell.activate(
+                        &prev_output,
+                        idx,
+                        WorkspaceDelta::new_shortcut(),
+                    ) {
                         Ok(Some(new_pos)) => {
                             seat.set_active_output(&prev_output);
                             if let Some(ptr) = seat.get_pointer() {
@@ -2270,6 +2348,56 @@ impl State {
             }
             None
         }
+    }
+
+    pub fn to_next_workspace(
+        &mut self,
+        seat: &Seat<State>,
+        gesture: bool,
+    ) -> Result<Option<Point<i32, Global>>, InvalidWorkspaceIndex> {
+        let current_output = seat.active_output();
+        let workspace = self
+            .common
+            .shell
+            .workspaces
+            .active_num(&current_output)
+            .1
+            .saturating_add(1);
+
+        self.common.shell.activate(
+            &current_output,
+            workspace,
+            if gesture {
+                WorkspaceDelta::new_gesture()
+            } else {
+                WorkspaceDelta::new_shortcut()
+            },
+        )
+    }
+
+    pub fn to_previous_workspace(
+        &mut self,
+        seat: &Seat<State>,
+        gesture: bool,
+    ) -> Result<Option<Point<i32, Global>>, InvalidWorkspaceIndex> {
+        let current_output = seat.active_output();
+        let workspace = self
+            .common
+            .shell
+            .workspaces
+            .active_num(&current_output)
+            .1
+            .saturating_sub(1);
+
+        self.common.shell.activate(
+            &current_output,
+            workspace,
+            if gesture {
+                WorkspaceDelta::new_gesture()
+            } else {
+                WorkspaceDelta::new_shortcut()
+            },
+        )
     }
 }
 

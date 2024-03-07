@@ -46,6 +46,7 @@ use smithay::{
 };
 
 use crate::{
+    backend::render::animations::spring::{Spring, SpringParams},
     config::{Config, KeyModifiers, KeyPattern},
     state::client_should_see_privileged_protocols,
     utils::prelude::*,
@@ -93,6 +94,9 @@ use self::{
 };
 
 const ANIMATION_DURATION: Duration = Duration::from_millis(200);
+const GESTURE_MAX_LENGTH: f64 = 150.0;
+const GESTURE_POSITION_THRESHOLD: f64 = 0.5;
+const GESTURE_VELOCITY_THRESHOLD: f64 = 0.02;
 
 #[derive(Debug, Clone)]
 pub enum Trigger {
@@ -223,9 +227,41 @@ pub struct SessionLock {
     pub surfaces: HashMap<Output, LockSurface>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum WorkspaceDelta {
+    Shortcut(Instant),
+    Gesture(f64),
+    GestureEnd(Instant, Spring),
+    // InvalidGesture(f64), TODO
+    // InvalidGestureEnd(Instant, Spring), TODO
+}
+
+impl WorkspaceDelta {
+    pub fn new_gesture() -> Self {
+        WorkspaceDelta::Gesture(0.0)
+    }
+
+    pub fn new_gesture_end(delta: f64, velocity: f64) -> Self {
+        let params: SpringParams = SpringParams::new(1.0, 1000.0, 0.0001);
+        WorkspaceDelta::GestureEnd(
+            Instant::now(),
+            Spring {
+                from: delta,
+                to: 1.0,
+                initial_velocity: velocity,
+                params,
+            },
+        )
+    }
+
+    pub fn new_shortcut() -> Self {
+        WorkspaceDelta::Shortcut(Instant::now())
+    }
+}
+
 #[derive(Debug)]
 pub struct WorkspaceSet {
-    previously_active: Option<(usize, Instant)>,
+    previously_active: Option<(usize, WorkspaceDelta)>,
     active: usize,
     pub group: WorkspaceGroupHandle,
     idx: usize,
@@ -371,6 +407,7 @@ impl WorkspaceSet {
     fn activate(
         &mut self,
         idx: usize,
+        workspace_delta: WorkspaceDelta,
         state: &mut WorkspaceUpdateGuard<'_, State>,
     ) -> Result<bool, InvalidWorkspaceIndex> {
         if idx >= self.workspaces.len() {
@@ -383,12 +420,33 @@ impl WorkspaceSet {
             state.remove_workspace_state(&self.workspaces[old_active].handle, WState::Urgent);
             state.remove_workspace_state(&self.workspaces[idx].handle, WState::Urgent);
             state.add_workspace_state(&self.workspaces[idx].handle, WState::Active);
-
-            self.previously_active = Some((old_active, Instant::now()));
+            self.previously_active = Some((old_active, workspace_delta));
             self.active = idx;
             Ok(true)
         } else {
+            if let Some((p_idx, _)) = self.previously_active {
+                self.previously_active = Some((p_idx, workspace_delta));
+                return Ok(true);
+            }
             Ok(false)
+        }
+    }
+
+    fn activate_previous(
+        &mut self,
+        workspace_delta: WorkspaceDelta,
+        state: &mut WorkspaceUpdateGuard<'_, State>,
+    ) -> Result<bool, InvalidWorkspaceIndex> {
+        if let Some((idx, _)) = self.previously_active {
+            return self.activate(idx, workspace_delta, state);
+        }
+        Err(InvalidWorkspaceIndex)
+    }
+
+    fn update_workspace_delta(&mut self, delta: f64) {
+        let easing = delta.clamp(0.0, GESTURE_MAX_LENGTH).abs() / GESTURE_MAX_LENGTH;
+        if let Some((idx, _)) = self.previously_active {
+            self.previously_active = Some((idx, WorkspaceDelta::Gesture(easing)));
         }
     }
 
@@ -410,8 +468,21 @@ impl WorkspaceSet {
 
     fn refresh<'a>(&mut self, xdg_activation_state: &XdgActivationState) {
         if let Some((_, start)) = self.previously_active {
-            if Instant::now().duration_since(start).as_millis() >= ANIMATION_DURATION.as_millis() {
-                self.previously_active = None;
+            match start {
+                WorkspaceDelta::Shortcut(st) => {
+                    if Instant::now().duration_since(st).as_millis() as f32
+                        >= ANIMATION_DURATION.as_millis() as f32
+                    {
+                        self.previously_active = None;
+                    }
+                }
+                WorkspaceDelta::GestureEnd(st, spring) => {
+                    if Instant::now().duration_since(st).as_millis() > spring.duration().as_millis()
+                    {
+                        self.previously_active = None;
+                    }
+                }
+                _ => {}
             }
         } else {
             self.workspaces[self.active].refresh(xdg_activation_state);
@@ -855,7 +926,7 @@ impl Workspaces {
             .and_then(|set| set.workspaces.get_mut(num))
     }
 
-    pub fn active(&self, output: &Output) -> (Option<(&Workspace, Instant)>, &Workspace) {
+    pub fn active(&self, output: &Output) -> (Option<(&Workspace, WorkspaceDelta)>, &Workspace) {
         let set = self.sets.get(output).or(self.backup_set.as_ref()).unwrap();
         (
             set.previously_active
@@ -1095,6 +1166,7 @@ impl Shell {
         &mut self,
         output: &Output,
         idx: usize,
+        workspace_delta: WorkspaceDelta,
     ) -> Result<Option<Point<i32, Global>>, InvalidWorkspaceIndex> {
         match &mut self.workspaces.mode {
             WorkspaceMode::OutputBound => {
@@ -1105,7 +1177,7 @@ impl Shell {
                     ) {
                         set.workspaces[set.active].tiling_layer.cleanup_drag();
                     }
-                    set.activate(idx, &mut self.workspace_state.update())?;
+                    set.activate(idx, workspace_delta, &mut self.workspace_state.update())?;
                     if let Some(xwm) = self
                         .xwayland_state
                         .as_mut()
@@ -1151,7 +1223,143 @@ impl Shell {
             }
             WorkspaceMode::Global => {
                 for set in self.workspaces.sets.values_mut() {
-                    set.activate(idx, &mut self.workspace_state.update())?;
+                    set.activate(idx, workspace_delta, &mut self.workspace_state.update())?;
+                }
+                Ok(None)
+            }
+        }
+    }
+
+    pub fn update_workspace_delta(&mut self, output: &Output, delta: f64) {
+        match &mut self.workspaces.mode {
+            WorkspaceMode::OutputBound => {
+                if let Some(set) = self.workspaces.sets.get_mut(output) {
+                    set.update_workspace_delta(delta);
+                }
+            }
+            WorkspaceMode::Global => {
+                for set in self.workspaces.sets.values_mut() {
+                    set.update_workspace_delta(delta);
+                }
+            }
+        }
+    }
+
+    pub fn end_workspace_swipe(
+        &mut self,
+        output: &Output,
+        velocity: f64,
+    ) -> Result<Option<Point<i32, Global>>, InvalidWorkspaceIndex> {
+        match &mut self.workspaces.mode {
+            WorkspaceMode::OutputBound => {
+                if let Some(set) = self.workspaces.sets.get_mut(output) {
+                    if matches!(
+                        self.overview_mode,
+                        OverviewMode::Started(Trigger::Pointer(_), _)
+                    ) {
+                        set.workspaces[set.active].tiling_layer.cleanup_drag();
+                    }
+                    if let Some((_, workspace_delta)) = set.previously_active {
+                        match workspace_delta {
+                            WorkspaceDelta::Gesture(delta) => {
+                                if (velocity > 0.0 && velocity.abs() >= GESTURE_VELOCITY_THRESHOLD)
+                                    || (velocity.abs() < GESTURE_VELOCITY_THRESHOLD
+                                        && delta.abs() > GESTURE_POSITION_THRESHOLD)
+                                {
+                                    set.activate(
+                                        set.active,
+                                        WorkspaceDelta::new_gesture_end(
+                                            delta.abs(),
+                                            velocity.abs(),
+                                        ),
+                                        &mut self.workspace_state.update(),
+                                    )?;
+                                } else {
+                                    set.activate_previous(
+                                        WorkspaceDelta::new_gesture_end(
+                                            1.0 - delta.abs(),
+                                            velocity.abs(),
+                                        ),
+                                        &mut self.workspace_state.update(),
+                                    )?;
+                                }
+                            }
+                            _ => {} // Do nothing
+                        }
+                    }
+                    if let Some(xwm) = self
+                        .xwayland_state
+                        .as_mut()
+                        .and_then(|state| state.xwm.as_mut())
+                    {
+                        {
+                            for window in set.workspaces[set.active]
+                                .tiling_layer
+                                .mapped()
+                                .map(|(w, _)| w)
+                                .chain(set.workspaces[set.active].floating_layer.space.elements())
+                            {
+                                if let Some(surf) = window.active_window().x11_surface() {
+                                    let _ = xwm.raise_window(surf);
+                                }
+                            }
+                            for window in set.sticky_layer.space.elements() {
+                                if let Some(surf) = window.active_window().x11_surface() {
+                                    let _ = xwm.raise_window(surf);
+                                }
+                            }
+                            if let Some(surf) = set.workspaces[set.active]
+                                .fullscreen
+                                .as_ref()
+                                .and_then(|f| f.surface.x11_surface())
+                            {
+                                let _ = xwm.raise_window(surf);
+                            }
+                        }
+                        for surface in &self.override_redirect_windows {
+                            let _ = xwm.raise_window(surface);
+                        }
+                    }
+
+                    let output_geo = output.geometry();
+                    Ok(Some(
+                        output_geo.loc
+                            + Point::from((output_geo.size.w / 2, output_geo.size.h / 2)),
+                    ))
+                } else {
+                    Ok(None)
+                }
+            }
+            WorkspaceMode::Global => {
+                for set in self.workspaces.sets.values_mut() {
+                    if let Some((_, workspace_delta)) = set.previously_active {
+                        match workspace_delta {
+                            WorkspaceDelta::Gesture(delta) => {
+                                if (velocity > 0.0 && velocity.abs() >= GESTURE_VELOCITY_THRESHOLD)
+                                    || (velocity.abs() < GESTURE_VELOCITY_THRESHOLD
+                                        && delta.abs() > GESTURE_POSITION_THRESHOLD)
+                                {
+                                    set.activate(
+                                        set.active,
+                                        WorkspaceDelta::new_gesture_end(
+                                            delta.abs(),
+                                            velocity.abs(),
+                                        ),
+                                        &mut self.workspace_state.update(),
+                                    )?;
+                                } else {
+                                    set.activate_previous(
+                                        WorkspaceDelta::new_gesture_end(
+                                            1.0 - delta.abs(),
+                                            velocity.abs(),
+                                        ),
+                                        &mut self.workspace_state.update(),
+                                    )?;
+                                }
+                            }
+                            _ => {} // Do nothing
+                        }
+                    }
                 }
                 Ok(None)
             }
@@ -1923,7 +2131,13 @@ impl Shell {
                 .shell
                 .workspaces
                 .idx_for_handle(&to_output, to)
-                .and_then(|to_idx| state.common.shell.activate(&to_output, to_idx).unwrap())
+                .and_then(|to_idx| {
+                    state
+                        .common
+                        .shell
+                        .activate(&to_output, to_idx, WorkspaceDelta::new_shortcut())
+                        .unwrap()
+                })
         } else {
             None
         };
