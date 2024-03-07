@@ -2588,27 +2588,46 @@ impl Shell {
         let Some(surface) = mapped.active_window().wl_surface() else {
             return;
         };
-        if let Some(start_data) =
+        if mapped.is_fullscreen(true) || mapped.is_maximized(true) {
+            return;
+        }
+
+        if let Some(mut start_data) =
             check_grab_preconditions(&seat, &surface, None, ReleaseMode::Click)
         {
-            if let Some(ws) = state.common.shell.space_for_mut(mapped) {
-                let geometry = ws.element_geometry(mapped).unwrap().to_global(ws.output());
+            let (floating_layer, geometry) = if let Some(set) = state
+                .common
+                .shell
+                .workspaces
+                .sets
+                .values_mut()
+                .find(|set| set.sticky_layer.mapped().any(|m| m == mapped))
+            {
+                let geometry = set
+                    .sticky_layer
+                    .element_geometry(mapped)
+                    .unwrap()
+                    .to_global(&set.output);
+                (&mut set.sticky_layer, geometry)
+            } else if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
+                let geometry = workspace
+                    .element_geometry(&mapped)
+                    .unwrap()
+                    .to_global(workspace.output());
+                (&mut workspace.floating_layer, geometry)
+            } else {
+                return;
+            };
 
                 let new_loc = if edge.contains(ResizeEdge::LEFT) {
-                    Point::<i32, Global>::from((
-                        geometry.loc.x,
-                        geometry.loc.y + (geometry.size.h / 2),
-                    ))
+                Point::<i32, Global>::from((geometry.loc.x, geometry.loc.y + (geometry.size.h / 2)))
                 } else if edge.contains(ResizeEdge::RIGHT) {
                     Point::<i32, Global>::from((
                         geometry.loc.x + geometry.size.w,
                         geometry.loc.y + (geometry.size.h / 2),
                     ))
                 } else if edge.contains(ResizeEdge::TOP) {
-                    Point::<i32, Global>::from((
-                        geometry.loc.x + (geometry.size.w / 2),
-                        geometry.loc.y,
-                    ))
+                Point::<i32, Global>::from((geometry.loc.x + (geometry.size.w / 2), geometry.loc.y))
                 } else if edge.contains(ResizeEdge::BOTTOM) {
                     Point::<i32, Global>::from((
                         geometry.loc.x + (geometry.size.w / 2),
@@ -2618,23 +2637,25 @@ impl Shell {
                     return;
                 };
 
-                let grab: ResizeGrab = if ws.is_floating(mapped) {
-                    let Some(grab) = ws.floating_layer.resize_request(
+            let focus = Some((mapped.clone().into(), (new_loc - geometry.loc).as_logical()));
+
+            start_data.location = new_loc.as_logical().to_f64();
+            start_data.focus = focus.clone();
+
+            let grab: ResizeGrab = if let Some(grab) = floating_layer.resize_request(
                         mapped,
                         seat,
-                        start_data,
+                start_data.clone(),
                         edge,
                         ReleaseMode::Click,
-                    ) else {
-                        return;
-                    };
+            ) {
                     grab.into()
-                } else {
+            } else if let Some(ws) = state.common.shell.space_for_mut(&mapped) {
                     let Some(node_id) = mapped.tiling_node_id.lock().unwrap().clone() else {
                         return;
                     };
                     let Some((node, left_up_idx, orientation)) =
-                        ws.tiling_layer.menu_resize(node_id, edge)
+                    ws.tiling_layer.resize_request(node_id, edge)
                     else {
                         return;
                     };
@@ -2648,13 +2669,15 @@ impl Shell {
                         ReleaseMode::Click,
                     )
                     .into()
+            } else {
+                return;
                 };
 
                 let ptr = seat.get_pointer().unwrap();
                 let serial = SERIAL_COUNTER.next_serial();
                 ptr.motion(
                     state,
-                    Some((mapped.clone().into(), (new_loc - geometry.loc).as_logical())),
+                focus,
                     &MotionEvent {
                         location: new_loc.as_logical().to_f64(),
                         serial,
@@ -2663,7 +2686,6 @@ impl Shell {
                 );
                 ptr.frame(state);
                 ptr.set_grab(state, grab, serial, Focus::Keep);
-            }
         }
     }
 
