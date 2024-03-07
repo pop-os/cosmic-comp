@@ -605,6 +605,14 @@ impl CosmicStack {
     pub(crate) fn force_redraw(&self) {
         self.0.force_redraw();
     }
+
+    pub fn is_in_popup_input_region(&self, point: &Point<f64, Logical>) -> bool {
+        self.0.with_program(|p| {
+            let active = p.active.load(Ordering::SeqCst);
+            let windows = p.windows.lock().unwrap();
+            windows[active].is_in_popup_input_region(point)
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

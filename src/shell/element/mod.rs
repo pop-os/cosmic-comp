@@ -816,6 +816,16 @@ impl CosmicMapped {
             CosmicMappedInternal::_GenericCatcher(_) => {}
         }
     }
+
+    pub fn is_in_popup_input_region(&self, point: &Point<f64, Logical>) -> bool {
+        match &self.element {
+            CosmicMappedInternal::Window(w) => w.is_in_popup_input_region(point),
+            CosmicMappedInternal::Stack(s) => s.is_in_popup_input_region(point),
+            CosmicMappedInternal::_GenericCatcher(_) => {
+                unreachable!()
+            }
+        }
+    }
 }
 
 impl IsAlive for CosmicMapped {

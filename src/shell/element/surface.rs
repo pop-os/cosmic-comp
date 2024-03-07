@@ -14,7 +14,8 @@ use smithay::{
         ImportAll, Renderer,
     },
     desktop::{
-        space::SpaceElement, utils::OutputPresentationFeedback, PopupManager, Window, WindowSurface,
+        space::SpaceElement, utils::OutputPresentationFeedback, PopupManager, Window,
+        WindowSurface, WindowSurfaceType,
     },
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
@@ -37,7 +38,7 @@ use smithay::{
         },
         wayland_server::protocol::wl_surface::WlSurface,
     },
-    utils::{user_data::UserDataMap, IsAlive, Logical, Rectangle, Serial, Size},
+    utils::{user_data::UserDataMap, IsAlive, Logical, Point, Rectangle, Serial, Size},
     wayland::{
         compositor::{with_states, SurfaceData},
         seat::WaylandFocus,
@@ -596,6 +597,15 @@ impl CosmicSurface {
 
     pub fn x11_surface(&self) -> Option<&X11Surface> {
         self.0.x11_surface()
+    }
+
+    pub fn is_in_popup_input_region(&self, point: &Point<f64, Logical>) -> bool {
+        self.0
+            .surface_under(
+                *point,
+                WindowSurfaceType::POPUP | WindowSurfaceType::SUBSURFACE,
+            )
+            .is_some()
     }
 }
 

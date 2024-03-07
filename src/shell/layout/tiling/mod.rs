@@ -3113,11 +3113,9 @@ impl TilingLayout {
         }
 
         if matches!(overview, OverviewMode::None) {
+            // first check popups
             for (mapped, geo) in self.mapped() {
-                if !mapped.bbox().contains((location - geo.loc).as_logical()) {
-                    continue;
-                }
-                if mapped.is_in_input_region(
+                if mapped.is_in_popup_input_region(
                     &((location_f64 - geo.loc.to_f64()).as_logical()
                         + mapped.geometry().loc.to_f64()),
                 ) {
