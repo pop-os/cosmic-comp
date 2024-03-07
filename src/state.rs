@@ -3,7 +3,7 @@
 use crate::{
     backend::{kms::KmsState, winit::WinitState, x11::X11State},
     config::{Config, OutputConfig},
-    input::Devices,
+    input::{gestures::GestureState, Devices},
     shell::{grabs::SeatMoveGrabState, Shell},
     utils::prelude::*,
     wayland::protocols::{
@@ -159,6 +159,7 @@ pub struct Common {
     pub clock: Clock<Monotonic>,
     pub should_stop: bool,
     pub local_offset: time::UtcOffset,
+    pub gesture_state: Option<GestureState>,
 
     pub theme: cosmic::Theme,
 
@@ -423,6 +424,7 @@ impl State {
 
                 clock,
                 should_stop: false,
+                gesture_state: None,
 
                 theme: cosmic::theme::system_preference(),
 

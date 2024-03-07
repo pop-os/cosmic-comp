@@ -10,7 +10,7 @@ use smithay::{
 };
 
 use crate::{
-    shell::{CosmicSurface, Shell},
+    shell::{CosmicSurface, Shell, WorkspaceDelta},
     utils::prelude::*,
     wayland::protocols::{
         toplevel_info::ToplevelInfoHandler,
@@ -60,7 +60,11 @@ impl ToplevelManagementHandler for State {
                     .unwrap()
                     .clone();
 
-                let _ = self.common.shell.activate(&output, idx as usize); // TODO: Move pointer?
+                let _ = self.common.shell.activate(
+                    &output,
+                    idx as usize,
+                    WorkspaceDelta::new_shortcut(),
+                ); // TODO: Move pointer?
                 mapped.focus_window(window);
                 Common::set_focus(self, Some(&mapped.clone().into()), &seat, None);
                 return;
