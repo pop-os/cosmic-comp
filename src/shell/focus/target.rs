@@ -8,7 +8,7 @@ use crate::{
 use id_tree::NodeId;
 use smithay::{
     backend::input::KeyState,
-    desktop::{LayerSurface, PopupKind},
+    desktop::{LayerSurface, PopupKind, WindowSurface, WindowSurfaceType},
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{
@@ -20,7 +20,7 @@ use smithay::{
         Seat,
     },
     reexports::wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface, Resource},
-    utils::{IsAlive, Serial},
+    utils::{IsAlive, Logical, Point, Serial},
     wayland::{seat::WaylandFocus, session_lock::LockSurface},
     xwayland::X11Surface,
 };
@@ -30,7 +30,6 @@ use smithay::{
 pub enum PointerFocusTarget {
     WlSurface(WlSurface),
     Element(CosmicMapped),
-    Fullscreen(CosmicSurface),
     X11(X11Surface),
     ResizeFork(ResizeForkTarget),
 }
@@ -68,6 +67,21 @@ impl TryFrom<PointerFocusTarget> for KeyboardFocusTarget {
     }
 }
 
+impl PointerFocusTarget {
+    pub fn under_surface<P: Into<Point<f64, Logical>>>(
+        surface: &CosmicSurface,
+        point: P,
+    ) -> Option<(Self, Point<i32, Logical>)> {
+        match surface.0.underlying_surface() {
+            WindowSurface::Wayland(_toplevel) => surface
+                .0
+                .surface_under(point, WindowSurfaceType::ALL)
+                .map(|(wl_surface, point)| (Self::WlSurface(wl_surface), point)),
+            WindowSurface::X11(surface) => Some((Self::X11(surface.clone()), Point::default())),
+        }
+    }
+}
+
 impl KeyboardFocusTarget {
     pub fn toplevel(&self) -> Option<WlSurface> {
         match self {
@@ -97,7 +111,6 @@ impl IsAlive for PointerFocusTarget {
             // XXX? does this change anything
             PointerFocusTarget::WlSurface(s) => s.alive(),
             PointerFocusTarget::Element(e) => e.alive(),
-            PointerFocusTarget::Fullscreen(f) => f.alive(),
             PointerFocusTarget::X11(s) => s.alive(),
             PointerFocusTarget::ResizeFork(f) => f.alive(),
         }
@@ -119,7 +132,6 @@ impl PointerTarget<State> for PointerFocusTarget {
         match self {
             PointerFocusTarget::WlSurface(s) => PointerTarget::enter(s, seat, data, event),
             PointerFocusTarget::Element(w) => PointerTarget::enter(w, seat, data, event),
-            PointerFocusTarget::Fullscreen(w) => PointerTarget::enter(w, seat, data, event),
             PointerFocusTarget::X11(s) => PointerTarget::enter(s, seat, data, event),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::enter(f, seat, data, event),
         }
@@ -127,7 +139,6 @@ impl PointerTarget<State> for PointerFocusTarget {
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
         match self {
             PointerFocusTarget::Element(w) => PointerTarget::motion(w, seat, data, event),
-            PointerFocusTarget::Fullscreen(w) => PointerTarget::motion(w, seat, data, event),
             PointerFocusTarget::WlSurface(s) => PointerTarget::motion(s, seat, data, event),
             PointerFocusTarget::X11(s) => PointerTarget::motion(s, seat, data, event),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::motion(f, seat, data, event),
@@ -139,9 +150,6 @@ impl PointerTarget<State> for PointerFocusTarget {
                 PointerTarget::relative_motion(s, seat, data, event)
             }
             PointerFocusTarget::Element(w) => PointerTarget::relative_motion(w, seat, data, event),
-            PointerFocusTarget::Fullscreen(w) => {
-                PointerTarget::relative_motion(w, seat, data, event)
-            }
             PointerFocusTarget::X11(s) => PointerTarget::relative_motion(s, seat, data, event),
             PointerFocusTarget::ResizeFork(f) => {
                 PointerTarget::relative_motion(f, seat, data, event)
@@ -152,7 +160,6 @@ impl PointerTarget<State> for PointerFocusTarget {
         match self {
             PointerFocusTarget::WlSurface(s) => PointerTarget::button(s, seat, data, event),
             PointerFocusTarget::Element(w) => PointerTarget::button(w, seat, data, event),
-            PointerFocusTarget::Fullscreen(w) => PointerTarget::button(w, seat, data, event),
             PointerFocusTarget::X11(s) => PointerTarget::button(s, seat, data, event),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::button(f, seat, data, event),
         }
@@ -161,7 +168,6 @@ impl PointerTarget<State> for PointerFocusTarget {
         match self {
             PointerFocusTarget::WlSurface(s) => PointerTarget::axis(s, seat, data, frame),
             PointerFocusTarget::Element(w) => PointerTarget::axis(w, seat, data, frame),
-            PointerFocusTarget::Fullscreen(w) => PointerTarget::axis(w, seat, data, frame),
             PointerFocusTarget::X11(s) => PointerTarget::axis(s, seat, data, frame),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::axis(f, seat, data, frame),
         }
@@ -170,7 +176,6 @@ impl PointerTarget<State> for PointerFocusTarget {
         match self {
             PointerFocusTarget::WlSurface(s) => PointerTarget::frame(s, seat, data),
             PointerFocusTarget::Element(w) => PointerTarget::frame(w, seat, data),
-            PointerFocusTarget::Fullscreen(w) => PointerTarget::frame(w, seat, data),
             PointerFocusTarget::X11(s) => PointerTarget::frame(s, seat, data),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::frame(f, seat, data),
         }
@@ -179,7 +184,6 @@ impl PointerTarget<State> for PointerFocusTarget {
         match self {
             PointerFocusTarget::WlSurface(s) => PointerTarget::leave(s, seat, data, serial, time),
             PointerFocusTarget::Element(w) => PointerTarget::leave(w, seat, data, serial, time),
-            PointerFocusTarget::Fullscreen(w) => PointerTarget::leave(w, seat, data, serial, time),
             PointerFocusTarget::X11(s) => PointerTarget::leave(s, seat, data, serial, time),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::leave(f, seat, data, serial, time),
         }
@@ -195,9 +199,6 @@ impl PointerTarget<State> for PointerFocusTarget {
                 PointerTarget::gesture_swipe_begin(s, seat, data, event)
             }
             PointerFocusTarget::Element(w) => {
-                PointerTarget::gesture_swipe_begin(w, seat, data, event)
-            }
-            PointerFocusTarget::Fullscreen(w) => {
                 PointerTarget::gesture_swipe_begin(w, seat, data, event)
             }
             PointerFocusTarget::X11(s) => PointerTarget::gesture_swipe_begin(s, seat, data, event),
@@ -219,9 +220,6 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::Element(w) => {
                 PointerTarget::gesture_swipe_update(w, seat, data, event)
             }
-            PointerFocusTarget::Fullscreen(w) => {
-                PointerTarget::gesture_swipe_update(w, seat, data, event)
-            }
             PointerFocusTarget::X11(s) => PointerTarget::gesture_swipe_update(s, seat, data, event),
             PointerFocusTarget::ResizeFork(f) => {
                 PointerTarget::gesture_swipe_update(f, seat, data, event)
@@ -239,9 +237,6 @@ impl PointerTarget<State> for PointerFocusTarget {
                 PointerTarget::gesture_swipe_end(s, seat, data, event)
             }
             PointerFocusTarget::Element(w) => {
-                PointerTarget::gesture_swipe_end(w, seat, data, event)
-            }
-            PointerFocusTarget::Fullscreen(w) => {
                 PointerTarget::gesture_swipe_end(w, seat, data, event)
             }
             PointerFocusTarget::X11(s) => PointerTarget::gesture_swipe_end(s, seat, data, event),
@@ -263,9 +258,6 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::Element(w) => {
                 PointerTarget::gesture_pinch_begin(w, seat, data, event)
             }
-            PointerFocusTarget::Fullscreen(w) => {
-                PointerTarget::gesture_pinch_begin(w, seat, data, event)
-            }
             PointerFocusTarget::X11(s) => PointerTarget::gesture_pinch_begin(s, seat, data, event),
             PointerFocusTarget::ResizeFork(f) => {
                 PointerTarget::gesture_pinch_begin(f, seat, data, event)
@@ -283,9 +275,6 @@ impl PointerTarget<State> for PointerFocusTarget {
                 PointerTarget::gesture_pinch_update(s, seat, data, event)
             }
             PointerFocusTarget::Element(w) => {
-                PointerTarget::gesture_pinch_update(w, seat, data, event)
-            }
-            PointerFocusTarget::Fullscreen(w) => {
                 PointerTarget::gesture_pinch_update(w, seat, data, event)
             }
             PointerFocusTarget::X11(s) => PointerTarget::gesture_pinch_update(s, seat, data, event),
@@ -307,9 +296,6 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::Element(w) => {
                 PointerTarget::gesture_pinch_end(w, seat, data, event)
             }
-            PointerFocusTarget::Fullscreen(w) => {
-                PointerTarget::gesture_pinch_end(w, seat, data, event)
-            }
             PointerFocusTarget::X11(s) => PointerTarget::gesture_pinch_end(s, seat, data, event),
             PointerFocusTarget::ResizeFork(f) => {
                 PointerTarget::gesture_pinch_end(f, seat, data, event)
@@ -329,9 +315,6 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::Element(w) => {
                 PointerTarget::gesture_hold_begin(w, seat, data, event)
             }
-            PointerFocusTarget::Fullscreen(w) => {
-                PointerTarget::gesture_hold_begin(w, seat, data, event)
-            }
             PointerFocusTarget::X11(s) => PointerTarget::gesture_hold_begin(s, seat, data, event),
             PointerFocusTarget::ResizeFork(f) => {
                 PointerTarget::gesture_hold_begin(f, seat, data, event)
@@ -344,9 +327,6 @@ impl PointerTarget<State> for PointerFocusTarget {
                 PointerTarget::gesture_hold_end(s, seat, data, event)
             }
             PointerFocusTarget::Element(w) => PointerTarget::gesture_hold_end(w, seat, data, event),
-            PointerFocusTarget::Fullscreen(w) => {
-                PointerTarget::gesture_hold_end(w, seat, data, event)
-            }
             PointerFocusTarget::X11(s) => PointerTarget::gesture_hold_end(s, seat, data, event),
             PointerFocusTarget::ResizeFork(f) => {
                 PointerTarget::gesture_hold_end(f, seat, data, event)
@@ -436,7 +416,6 @@ impl WaylandFocus for PointerFocusTarget {
         Some(match self {
             PointerFocusTarget::WlSurface(s) => s.clone(),
             PointerFocusTarget::Element(w) => WaylandFocus::wl_surface(w)?,
-            PointerFocusTarget::Fullscreen(w) => WaylandFocus::wl_surface(w)?,
             PointerFocusTarget::X11(s) => {
                 return s.wl_surface();
             }
@@ -449,7 +428,6 @@ impl WaylandFocus for PointerFocusTarget {
         match self {
             PointerFocusTarget::WlSurface(s) => s.id().same_client_as(object_id),
             PointerFocusTarget::Element(w) => WaylandFocus::same_client_as(w, object_id),
-            PointerFocusTarget::Fullscreen(w) => WaylandFocus::same_client_as(w, object_id),
             PointerFocusTarget::X11(s) => WaylandFocus::same_client_as(s, object_id),
             PointerFocusTarget::ResizeFork(_) => false,
         }
@@ -459,12 +437,6 @@ impl WaylandFocus for PointerFocusTarget {
 impl From<CosmicMapped> for PointerFocusTarget {
     fn from(w: CosmicMapped) -> Self {
         PointerFocusTarget::Element(w)
-    }
-}
-
-impl From<CosmicSurface> for PointerFocusTarget {
-    fn from(s: CosmicSurface) -> Self {
-        PointerFocusTarget::Fullscreen(s)
     }
 }
 

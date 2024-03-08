@@ -907,7 +907,11 @@ impl State {
                                         }
                                     }
                                 } else {
-                                    under = Some(window.clone().into());
+                                    under = PointerFocusTarget::under_surface(
+                                        window,
+                                        relative_pos.as_logical(),
+                                    )
+                                    .map(|(target, _)| target)
                                 }
                             } else {
                                 let done = {
@@ -2212,7 +2216,8 @@ impl State {
             }) {
                 return Some((or.clone().into(), or.geometry().loc.as_global()));
             }
-            Some((window.clone().into(), output_geo.loc))
+            PointerFocusTarget::under_surface(window, relative_pos.as_logical())
+                .map(|(target, surface_loc)| (target, output_geo.loc + surface_loc.as_global()))
         } else {
             {
                 let layers = layer_map_for_output(output);
