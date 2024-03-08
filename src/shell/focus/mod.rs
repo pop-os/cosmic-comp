@@ -142,8 +142,8 @@ impl Shell {
     ) {
         let element = match target {
             Some(KeyboardFocusTarget::Element(mapped)) => Some(mapped.clone()),
-            Some(KeyboardFocusTarget::Fullscreen(window)) => {
-                state.common.shell.element_for_surface(window).cloned()
+            Some(KeyboardFocusTarget::WlSurface(surface)) => {
+                state.common.shell.element_for_wl_surface(surface).cloned()
             }
             _ => None,
         };
@@ -403,6 +403,7 @@ fn focus_target_is_valid(
             .1
             .tiling_layer
             .has_node(&node),
+        /*
         KeyboardFocusTarget::Fullscreen(window) => {
             let workspace = state.common.shell.active_space(&output);
             let focus_stack = workspace.focus_stack.get(&seat);
@@ -413,6 +414,7 @@ fn focus_target_is_valid(
                 .unwrap_or(false)
                 && workspace.get_fullscreen().is_some()
         }
+        */
         // TODO restrict when it handles all wl surfaces
         KeyboardFocusTarget::WlSurface(_) => true,
     }
@@ -440,7 +442,7 @@ fn update_focus_target(
             .cloned()
             .map(KeyboardFocusTarget::from)
     } else if let Some(surface) = state.common.shell.active_space(&output).get_fullscreen() {
-        Some(KeyboardFocusTarget::Fullscreen(surface.clone()))
+        KeyboardFocusTarget::try_from(surface.clone()).ok()
     } else {
         state
             .common

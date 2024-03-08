@@ -1988,7 +1988,7 @@ impl Shell {
             to_workspace
                 .fullscreen
                 .as_ref()
-                .map(|f| KeyboardFocusTarget::from(f.surface.clone()))
+                .and_then(|f| KeyboardFocusTarget::try_from(f.surface.clone()).ok())
                 .unwrap_or_else(|| KeyboardFocusTarget::from(mapped.clone()))
         } else {
             KeyboardFocusTarget::from(mapped.clone())
@@ -2553,8 +2553,8 @@ impl Shell {
             self.unmaximize_request(&last);
         }
 
-        if let Some(surface) = fullscreen {
-            MoveResult::MoveFurther(KeyboardFocusTarget::Fullscreen(surface))
+        if let Some(wl_surface) = fullscreen.and_then(|f| f.wl_surface()) {
+            MoveResult::MoveFurther(KeyboardFocusTarget::WlSurface(wl_surface))
         } else if let Some(set) = self
             .workspaces
             .sets

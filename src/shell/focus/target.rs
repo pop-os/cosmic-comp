@@ -40,7 +40,6 @@ pub enum KeyboardFocusTarget {
     // Unlike pointer target, should not be a subsurface
     WlSurface(WlSurface),
     Element(CosmicMapped),
-    Fullscreen(CosmicSurface),
     Group(WindowGroup),
 }
 
@@ -50,7 +49,7 @@ impl From<KeyboardFocusTarget> for PointerFocusTarget {
         match target {
             KeyboardFocusTarget::WlSurface(surface) => PointerFocusTarget::WlSurface(surface),
             KeyboardFocusTarget::Element(elem) => PointerFocusTarget::Element(elem),
-            KeyboardFocusTarget::Fullscreen(elem) => PointerFocusTarget::Fullscreen(elem),
+            // KeyboardFocusTarget::Fullscreen(elem) => PointerFocusTarget::Fullscreen(elem),
             _ => unreachable!("A window grab cannot start a popup grab"),
         }
     }
@@ -63,7 +62,7 @@ impl TryFrom<PointerFocusTarget> for KeyboardFocusTarget {
         match target {
             PointerFocusTarget::WlSurface(surface) => Ok(KeyboardFocusTarget::WlSurface(surface)),
             PointerFocusTarget::Element(mapped) => Ok(KeyboardFocusTarget::Element(mapped)),
-            PointerFocusTarget::Fullscreen(surf) => Ok(KeyboardFocusTarget::Fullscreen(surf)),
+            // PointerFocusTarget::Fullscreen(surf) => Ok(KeyboardFocusTarget::Fullscreen(surf)),
             _ => Err(()),
         }
     }
@@ -110,7 +109,6 @@ impl IsAlive for KeyboardFocusTarget {
         match self {
             KeyboardFocusTarget::WlSurface(s) => s.alive(),
             KeyboardFocusTarget::Element(e) => e.alive(),
-            KeyboardFocusTarget::Fullscreen(f) => f.alive(),
             KeyboardFocusTarget::Group(g) => g.alive.upgrade().is_some(),
         }
     }
@@ -368,9 +366,6 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
         match self {
             KeyboardFocusTarget::WlSurface(s) => KeyboardTarget::enter(s, seat, data, keys, serial),
             KeyboardFocusTarget::Element(w) => KeyboardTarget::enter(w, seat, data, keys, serial),
-            KeyboardFocusTarget::Fullscreen(w) => {
-                KeyboardTarget::enter(w, seat, data, keys, serial)
-            }
             KeyboardFocusTarget::Group(_) => {}
         }
     }
@@ -378,7 +373,6 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
         match self {
             KeyboardFocusTarget::WlSurface(s) => KeyboardTarget::leave(s, seat, data, serial),
             KeyboardFocusTarget::Element(w) => KeyboardTarget::leave(w, seat, data, serial),
-            KeyboardFocusTarget::Fullscreen(w) => KeyboardTarget::leave(w, seat, data, serial),
             KeyboardFocusTarget::Group(_) => {}
         }
     }
@@ -398,9 +392,6 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
             KeyboardFocusTarget::Element(w) => {
                 KeyboardTarget::key(w, seat, data, key, state, serial, time)
             }
-            KeyboardFocusTarget::Fullscreen(w) => {
-                KeyboardTarget::key(w, seat, data, key, state, serial, time)
-            }
             KeyboardFocusTarget::Group(_) => {}
         }
     }
@@ -418,9 +409,6 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
             KeyboardFocusTarget::Element(w) => {
                 KeyboardTarget::modifiers(w, seat, data, modifiers, serial)
             }
-            KeyboardFocusTarget::Fullscreen(w) => {
-                KeyboardTarget::modifiers(w, seat, data, modifiers, serial)
-            }
             KeyboardFocusTarget::Group(_) => {}
         }
     }
@@ -431,7 +419,6 @@ impl WaylandFocus for KeyboardFocusTarget {
         match self {
             KeyboardFocusTarget::WlSurface(s) => Some(s.clone()),
             KeyboardFocusTarget::Element(w) => WaylandFocus::wl_surface(w),
-            KeyboardFocusTarget::Fullscreen(w) => WaylandFocus::wl_surface(w),
             KeyboardFocusTarget::Group(_) => None,
         }
     }
@@ -439,7 +426,6 @@ impl WaylandFocus for KeyboardFocusTarget {
         match self {
             KeyboardFocusTarget::WlSurface(s) => s.id().same_client_as(object_id),
             KeyboardFocusTarget::Element(w) => WaylandFocus::same_client_as(w, object_id),
-            KeyboardFocusTarget::Fullscreen(w) => WaylandFocus::same_client_as(w, object_id),
             KeyboardFocusTarget::Group(_) => false,
         }
     }
@@ -518,9 +504,11 @@ impl From<CosmicMapped> for KeyboardFocusTarget {
     }
 }
 
-impl From<CosmicSurface> for KeyboardFocusTarget {
-    fn from(s: CosmicSurface) -> Self {
-        KeyboardFocusTarget::Fullscreen(s)
+impl TryFrom<CosmicSurface> for KeyboardFocusTarget {
+    type Error = ();
+
+    fn try_from(s: CosmicSurface) -> Result<Self, ()> {
+        Ok(KeyboardFocusTarget::WlSurface(s.wl_surface().ok_or(())?))
     }
 }
 
