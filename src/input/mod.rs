@@ -898,15 +898,14 @@ impl State {
                                     layers.layer_under(WlrLayer::Overlay, relative_pos.as_logical())
                                 {
                                     let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                                    if layer.can_receive_keyboard_focus()
-                                        && layer
-                                            .surface_under(
-                                                relative_pos.as_logical() - layer_loc.to_f64(),
-                                                WindowSurfaceType::ALL,
-                                            )
-                                            .is_some()
-                                    {
-                                        under = Some(layer.clone().into());
+                                    if layer.can_receive_keyboard_focus() {
+                                        if let Some((wl_surface, _)) = layer.surface_under(
+                                            relative_pos.as_logical() - layer_loc.to_f64(),
+                                            WindowSurfaceType::ALL,
+                                        ) {
+                                            // XXX subsurface point?
+                                            under = Some(wl_surface.into());
+                                        }
                                     }
                                 } else {
                                     under = Some(window.clone().into());
@@ -924,16 +923,17 @@ impl State {
                                         })
                                     {
                                         let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                                        if layer.can_receive_keyboard_focus()
-                                            && layer
-                                                .surface_under(
-                                                    relative_pos.as_logical() - layer_loc.to_f64(),
-                                                    WindowSurfaceType::ALL,
-                                                )
-                                                .is_some()
-                                        {
-                                            under = Some(layer.clone().into());
-                                            true
+                                        if layer.can_receive_keyboard_focus() {
+                                            if let Some((wl_surface, _)) = layer.surface_under(
+                                                relative_pos.as_logical() - layer_loc.to_f64(),
+                                                WindowSurfaceType::ALL,
+                                            ) {
+                                                // XXX subsurface point?
+                                                under = Some(wl_surface.into());
+                                                true
+                                            } else {
+                                                false
+                                            }
                                         } else {
                                             false
                                         }
@@ -962,16 +962,14 @@ impl State {
                                         {
                                             let layer_loc =
                                                 layers.layer_geometry(layer).unwrap().loc;
-                                            if layer.can_receive_keyboard_focus()
-                                                && layer
-                                                    .surface_under(
-                                                        relative_pos.as_logical()
-                                                            - layer_loc.to_f64(),
-                                                        WindowSurfaceType::ALL,
-                                                    )
-                                                    .is_some()
-                                            {
-                                                under = Some(layer.clone().into());
+                                            if layer.can_receive_keyboard_focus() {
+                                                if let Some((wl_surface, _)) = layer.surface_under(
+                                                    relative_pos.as_logical() - layer_loc.to_f64(),
+                                                    WindowSurfaceType::ALL,
+                                                ) {
+                                                    // XXX subsurface point?
+                                                    under = Some(wl_surface.into());
+                                                }
                                             }
                                         };
                                     }
@@ -2202,14 +2200,12 @@ impl State {
             let layers = layer_map_for_output(output);
             if let Some(layer) = layers.layer_under(WlrLayer::Overlay, relative_pos.as_logical()) {
                 let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                if layer
-                    .surface_under(
-                        relative_pos.as_logical() - layer_loc.to_f64(),
-                        WindowSurfaceType::ALL,
-                    )
-                    .is_some()
-                {
-                    return Some((layer.clone().into(), output_geo.loc + layer_loc.as_global()));
+                if let Some((wl_surface, _)) = layer.surface_under(
+                    relative_pos.as_logical() - layer_loc.to_f64(),
+                    WindowSurfaceType::ALL,
+                ) {
+                    // XXX subsurface point?
+                    return Some((wl_surface.into(), output_geo.loc + layer_loc.as_global()));
                 }
             }
             if let Some(or) = shell.override_redirect_windows.iter().find(|or| {
@@ -2226,15 +2222,13 @@ impl State {
                     .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos.as_logical()))
                 {
                     let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                    if layer
-                        .surface_under(
-                            relative_pos.as_logical() - layer_loc.to_f64(),
-                            WindowSurfaceType::ALL,
-                        )
-                        .is_some()
-                    {
+                    if let Some((wl_surface, _)) = layer.surface_under(
+                        relative_pos.as_logical() - layer_loc.to_f64(),
+                        WindowSurfaceType::ALL,
+                    ) {
                         return Some((
-                            layer.clone().into(),
+                            wl_surface.into(),
+                            // XXX subsurface point?
                             output_geo.loc + layer_loc.as_global(),
                         ));
                     }
@@ -2255,15 +2249,13 @@ impl State {
                     .or_else(|| layers.layer_under(WlrLayer::Background, relative_pos.as_logical()))
                 {
                     let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                    if layer
-                        .surface_under(
-                            relative_pos.as_logical() - layer_loc.to_f64(),
-                            WindowSurfaceType::ALL,
-                        )
-                        .is_some()
-                    {
+                    if let Some((wl_surface, _)) = layer.surface_under(
+                        relative_pos.as_logical() - layer_loc.to_f64(),
+                        WindowSurfaceType::ALL,
+                    ) {
                         return Some((
-                            layer.clone().into(),
+                            wl_surface.into(),
+                            // XXX subsurface point?
                             output_geo.loc + layer_loc.as_global(),
                         ));
                     }

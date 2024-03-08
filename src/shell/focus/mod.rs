@@ -355,12 +355,15 @@ fn focus_target_is_valid(
     // If an exclusive layer shell surface exists (on any output), only exclusive
     // shell surfaces can have focus, on the highest layer with exclusive surfaces.
     if let Some(layer) = exclusive_layer_surface_layer(state) {
+        // XXX TODO get layer surface for WlSurface, or parent of a subsurface
+        /*
         return if let KeyboardFocusTarget::LayerSurface(layer_surface) = target {
             let data = layer_surface.cached_state();
             (data.keyboard_interactivity, data.layer) == (KeyboardInteractivity::Exclusive, layer)
         } else {
             false
         };
+        */
     }
 
     match target {
@@ -387,9 +390,11 @@ fn focus_target_is_valid(
 
             (is_sticky || is_in_focus_stack) && !has_fullscreen
         }
+        /*
         KeyboardFocusTarget::LayerSurface(layer) => {
             layer_map_for_output(&output).layers().any(|l| l == &layer)
         }
+        */
         KeyboardFocusTarget::Group(WindowGroup { node, .. }) => state
             .common
             .shell
