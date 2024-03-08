@@ -32,7 +32,7 @@ pub enum PointerFocusTarget {
     Element(CosmicMapped),
     Fullscreen(CosmicSurface),
     LayerSurface(LayerSurface),
-    OverrideRedirect(X11Surface),
+    X11(X11Surface),
     ResizeFork(ResizeForkTarget),
 }
 
@@ -102,7 +102,7 @@ impl IsAlive for PointerFocusTarget {
             PointerFocusTarget::Element(e) => e.alive(),
             PointerFocusTarget::Fullscreen(f) => f.alive(),
             PointerFocusTarget::LayerSurface(l) => l.alive(),
-            PointerFocusTarget::OverrideRedirect(s) => s.alive(),
+            PointerFocusTarget::X11(s) => s.alive(),
             PointerFocusTarget::ResizeFork(f) => f.alive(),
         }
     }
@@ -127,7 +127,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::Element(w) => PointerTarget::enter(w, seat, data, event),
             PointerFocusTarget::Fullscreen(w) => PointerTarget::enter(w, seat, data, event),
             PointerFocusTarget::LayerSurface(l) => PointerTarget::enter(l, seat, data, event),
-            PointerFocusTarget::OverrideRedirect(s) => PointerTarget::enter(s, seat, data, event),
+            PointerFocusTarget::X11(s) => PointerTarget::enter(s, seat, data, event),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::enter(f, seat, data, event),
         }
     }
@@ -137,7 +137,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::Fullscreen(w) => PointerTarget::motion(w, seat, data, event),
             PointerFocusTarget::LayerSurface(l) => PointerTarget::motion(l, seat, data, event),
             PointerFocusTarget::WlSurface(s) => PointerTarget::motion(s, seat, data, event),
-            PointerFocusTarget::OverrideRedirect(s) => PointerTarget::motion(s, seat, data, event),
+            PointerFocusTarget::X11(s) => PointerTarget::motion(s, seat, data, event),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::motion(f, seat, data, event),
         }
     }
@@ -153,7 +153,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::LayerSurface(l) => {
                 PointerTarget::relative_motion(l, seat, data, event)
             }
-            PointerFocusTarget::OverrideRedirect(s) => {
+            PointerFocusTarget::X11(s) => {
                 PointerTarget::relative_motion(s, seat, data, event)
             }
             PointerFocusTarget::ResizeFork(f) => {
@@ -167,7 +167,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::Element(w) => PointerTarget::button(w, seat, data, event),
             PointerFocusTarget::Fullscreen(w) => PointerTarget::button(w, seat, data, event),
             PointerFocusTarget::LayerSurface(l) => PointerTarget::button(l, seat, data, event),
-            PointerFocusTarget::OverrideRedirect(s) => PointerTarget::button(s, seat, data, event),
+            PointerFocusTarget::X11(s) => PointerTarget::button(s, seat, data, event),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::button(f, seat, data, event),
         }
     }
@@ -177,7 +177,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::Element(w) => PointerTarget::axis(w, seat, data, frame),
             PointerFocusTarget::Fullscreen(w) => PointerTarget::axis(w, seat, data, frame),
             PointerFocusTarget::LayerSurface(l) => PointerTarget::axis(l, seat, data, frame),
-            PointerFocusTarget::OverrideRedirect(s) => PointerTarget::axis(s, seat, data, frame),
+            PointerFocusTarget::X11(s) => PointerTarget::axis(s, seat, data, frame),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::axis(f, seat, data, frame),
         }
     }
@@ -187,7 +187,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::Element(w) => PointerTarget::frame(w, seat, data),
             PointerFocusTarget::Fullscreen(w) => PointerTarget::frame(w, seat, data),
             PointerFocusTarget::LayerSurface(l) => PointerTarget::frame(l, seat, data),
-            PointerFocusTarget::OverrideRedirect(s) => PointerTarget::frame(s, seat, data),
+            PointerFocusTarget::X11(s) => PointerTarget::frame(s, seat, data),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::frame(f, seat, data),
         }
     }
@@ -199,7 +199,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::LayerSurface(l) => {
                 PointerTarget::leave(l, seat, data, serial, time)
             }
-            PointerFocusTarget::OverrideRedirect(s) => {
+            PointerFocusTarget::X11(s) => {
                 PointerTarget::leave(s, seat, data, serial, time)
             }
             PointerFocusTarget::ResizeFork(f) => PointerTarget::leave(f, seat, data, serial, time),
@@ -224,7 +224,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::LayerSurface(l) => {
                 PointerTarget::gesture_swipe_begin(l, seat, data, event)
             }
-            PointerFocusTarget::OverrideRedirect(s) => {
+            PointerFocusTarget::X11(s) => {
                 PointerTarget::gesture_swipe_begin(s, seat, data, event)
             }
             PointerFocusTarget::ResizeFork(f) => {
@@ -251,7 +251,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::LayerSurface(l) => {
                 PointerTarget::gesture_swipe_update(l, seat, data, event)
             }
-            PointerFocusTarget::OverrideRedirect(s) => {
+            PointerFocusTarget::X11(s) => {
                 PointerTarget::gesture_swipe_update(s, seat, data, event)
             }
             PointerFocusTarget::ResizeFork(f) => {
@@ -278,7 +278,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::LayerSurface(l) => {
                 PointerTarget::gesture_swipe_end(l, seat, data, event)
             }
-            PointerFocusTarget::OverrideRedirect(s) => {
+            PointerFocusTarget::X11(s) => {
                 PointerTarget::gesture_swipe_end(s, seat, data, event)
             }
             PointerFocusTarget::ResizeFork(f) => {
@@ -305,7 +305,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::LayerSurface(l) => {
                 PointerTarget::gesture_pinch_begin(l, seat, data, event)
             }
-            PointerFocusTarget::OverrideRedirect(s) => {
+            PointerFocusTarget::X11(s) => {
                 PointerTarget::gesture_pinch_begin(s, seat, data, event)
             }
             PointerFocusTarget::ResizeFork(f) => {
@@ -332,7 +332,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::LayerSurface(l) => {
                 PointerTarget::gesture_pinch_update(l, seat, data, event)
             }
-            PointerFocusTarget::OverrideRedirect(s) => {
+            PointerFocusTarget::X11(s) => {
                 PointerTarget::gesture_pinch_update(s, seat, data, event)
             }
             PointerFocusTarget::ResizeFork(f) => {
@@ -359,7 +359,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::LayerSurface(l) => {
                 PointerTarget::gesture_pinch_end(l, seat, data, event)
             }
-            PointerFocusTarget::OverrideRedirect(s) => {
+            PointerFocusTarget::X11(s) => {
                 PointerTarget::gesture_pinch_end(s, seat, data, event)
             }
             PointerFocusTarget::ResizeFork(f) => {
@@ -386,7 +386,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::LayerSurface(l) => {
                 PointerTarget::gesture_hold_begin(l, seat, data, event)
             }
-            PointerFocusTarget::OverrideRedirect(s) => {
+            PointerFocusTarget::X11(s) => {
                 PointerTarget::gesture_hold_begin(s, seat, data, event)
             }
             PointerFocusTarget::ResizeFork(f) => {
@@ -406,7 +406,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::LayerSurface(l) => {
                 PointerTarget::gesture_hold_end(l, seat, data, event)
             }
-            PointerFocusTarget::OverrideRedirect(s) => {
+            PointerFocusTarget::X11(s) => {
                 PointerTarget::gesture_hold_end(s, seat, data, event)
             }
             PointerFocusTarget::ResizeFork(f) => {
@@ -523,7 +523,7 @@ impl WaylandFocus for PointerFocusTarget {
             PointerFocusTarget::Element(w) => WaylandFocus::wl_surface(w)?,
             PointerFocusTarget::Fullscreen(w) => WaylandFocus::wl_surface(w)?,
             PointerFocusTarget::LayerSurface(l) => l.wl_surface().clone(),
-            PointerFocusTarget::OverrideRedirect(s) => {
+            PointerFocusTarget::X11(s) => {
                 return s.wl_surface();
             }
             PointerFocusTarget::ResizeFork(_) => {
@@ -537,7 +537,7 @@ impl WaylandFocus for PointerFocusTarget {
             PointerFocusTarget::Element(w) => WaylandFocus::same_client_as(w, object_id),
             PointerFocusTarget::Fullscreen(w) => WaylandFocus::same_client_as(w, object_id),
             PointerFocusTarget::LayerSurface(l) => l.wl_surface().id().same_client_as(object_id),
-            PointerFocusTarget::OverrideRedirect(s) => WaylandFocus::same_client_as(s, object_id),
+            PointerFocusTarget::X11(s) => WaylandFocus::same_client_as(s, object_id),
             PointerFocusTarget::ResizeFork(_) => false,
         }
     }
@@ -569,7 +569,7 @@ impl From<PopupKind> for PointerFocusTarget {
 
 impl From<X11Surface> for PointerFocusTarget {
     fn from(s: X11Surface) -> Self {
-        PointerFocusTarget::OverrideRedirect(s)
+        PointerFocusTarget::X11(s)
     }
 }
 
