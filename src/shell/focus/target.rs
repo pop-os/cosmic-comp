@@ -61,6 +61,13 @@ impl TryFrom<PointerFocusTarget> for KeyboardFocusTarget {
         match target {
             PointerFocusTarget::WlSurface(surface) => Ok(KeyboardFocusTarget::WlSurface(surface)),
             PointerFocusTarget::Element(mapped) => Ok(KeyboardFocusTarget::Element(mapped)),
+            PointerFocusTarget::X11(surface) => {
+                if let Some(wl_surface) = surface.wl_surface() {
+                    Ok(KeyboardFocusTarget::WlSurface(wl_surface))
+                } else {
+                    Err(())
+                }
+            }
             // PointerFocusTarget::Fullscreen(surf) => Ok(KeyboardFocusTarget::Fullscreen(surf)),
             _ => Err(()),
         }
