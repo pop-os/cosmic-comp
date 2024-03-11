@@ -1255,7 +1255,10 @@ impl Workspace {
                     Into::<CosmicMappedRenderElement<R>>::into(BackdropShader::element(
                         renderer,
                         self.backdrop_id.clone(),
-                        zone,
+                        Rectangle::from_loc_and_size(
+                            (0, 0),
+                            self.output.geometry().size.as_local(),
+                        ),
                         0.,
                         alpha * 0.85,
                         [0.0, 0.0, 0.0],
