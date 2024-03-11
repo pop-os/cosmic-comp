@@ -96,6 +96,8 @@ pub type GlMultiError = MultiError<
 pub static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
 pub static OUTLINE_SHADER: &str = include_str!("./shaders/rounded_outline.frag");
 pub static RECTANGLE_SHADER: &str = include_str!("./shaders/rounded_rectangle.frag");
+pub static GROUP_COLOR: [f32; 3] = [0.788, 0.788, 0.788];
+pub static ACTIVE_GROUP_COLOR: [f32; 3] = [0.58, 0.922, 0.922];
 
 pub struct IndicatorShader(pub GlesPixelProgram);
 

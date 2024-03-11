@@ -7,7 +7,7 @@ use cosmic::cosmic_theme::{palette, Theme, ThemeMode};
 
 use crate::state::State;
 
-pub(crate) fn group_color(theme: &Theme) -> [f32; 3] {
+pub(crate) fn _group_color(theme: &Theme) -> [f32; 3] {
     let neutral_8 = theme.palette.neutral_8;
     [neutral_8.red, neutral_8.green, neutral_8.blue]
 }

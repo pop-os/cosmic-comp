@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::render::{element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, Usage},
+    backend::render::{
+        element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, Usage, ACTIVE_GROUP_COLOR,
+        GROUP_COLOR,
+    },
     shell::{
         element::{
             resize_indicator::ResizeIndicator,
@@ -22,7 +25,6 @@ use crate::{
         CosmicSurface, Direction, FocusResult, MoveResult, OutputNotMapped, OverviewMode,
         ResizeDirection, ResizeMode, Trigger,
     },
-    theme::group_color,
     utils::{prelude::*, tween::EaseRectangle},
     wayland::{
         handlers::xdg_shell::popup::get_popup_toplevel,
@@ -4017,7 +4019,7 @@ fn geometries_for_groupview<'a, R>(
     mouse_tiling: Option<Option<&TargetZone>>,
     swap_desc: Option<NodeDesc>,
     swap_tree: Option<&Tree<Data>>,
-    theme: &cosmic::theme::CosmicTheme,
+    _theme: &cosmic::theme::CosmicTheme,
 ) -> (
     HashMap<NodeId, Rectangle<i32, Local>>,
     Vec<CosmicMappedRenderElement<R>>,
@@ -4175,7 +4177,7 @@ where
                 )
             };
 
-            let group_color = group_color(theme);
+            let group_color = GROUP_COLOR;
 
             match data {
                 Data::Group {
@@ -4547,7 +4549,7 @@ where
                             geo.size -= (gap * 2, gap * 2).into();
                         }
 
-                        let accent = theme.accent.base;
+                        let accent = ACTIVE_GROUP_COLOR;
 
                         if focused
                             .as_ref()
@@ -4563,7 +4565,7 @@ where
                                 Some(Some(TargetZone::WindowStack(stack_id, _)))
                                     if *stack_id == node_id =>
                                 {
-                                    [accent.red, accent.green, accent.blue]
+                                    accent
                                 }
                                 _ => group_color,
                             };
@@ -4580,9 +4582,7 @@ where
                                         * if focused
                                             .as_ref()
                                             .map(|focused_id| focused_id == &node_id)
-                                            .unwrap_or(
-                                                color == [accent.red, accent.green, accent.blue],
-                                            )
+                                            .unwrap_or(color == accent)
                                         {
                                             0.4
                                         } else {
@@ -4881,7 +4881,7 @@ where
     let swap_tree = swap_tree.flatten().filter(|_| is_active_output);
     let swap_desc = swap_desc.filter(|_| is_active_output);
     let window_hint = crate::theme::active_window_hint(theme);
-    let group_color = group_color(theme);
+    let group_color = GROUP_COLOR;
     // render placeholder, if we are swapping to an empty workspace
     if target_tree.root_node_id().is_none() && swap_desc.is_some() {
         window_elements.push(
