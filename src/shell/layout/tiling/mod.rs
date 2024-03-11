@@ -5257,10 +5257,12 @@ where
                     )
                 }
 
-                let behavior = if animating {
-                    ConstrainScaleBehavior::Stretch
+                let (behavior, align) = if is_overview {
+                    (ConstrainScaleBehavior::Fit, ConstrainAlign::CENTER)
+                } else if animating {
+                    (ConstrainScaleBehavior::Stretch, ConstrainAlign::TOP_LEFT)
                 } else {
-                    ConstrainScaleBehavior::CutOff
+                    (ConstrainScaleBehavior::CutOff, ConstrainAlign::TOP_LEFT)
                 };
 
                 let w_elements = w_elements.into_iter().flat_map(|element| match element {
@@ -5271,7 +5273,7 @@ where
                         geo.as_logical().to_physical_precise_round(output_scale),
                         elem_geometry,
                         behavior,
-                        ConstrainAlign::TOP_LEFT,
+                        align,
                         output_scale,
                     )
                     .next()
@@ -5283,7 +5285,7 @@ where
                         geo.as_logical().to_physical_precise_round(output_scale),
                         elem_geometry,
                         behavior,
-                        ConstrainAlign::TOP_LEFT,
+                        align,
                         output_scale,
                     )
                     .next()
@@ -5295,7 +5297,7 @@ where
                         geo.as_logical().to_physical_precise_round(output_scale),
                         elem_geometry,
                         behavior,
-                        ConstrainAlign::TOP_LEFT,
+                        align,
                         output_scale,
                     )
                     .next()
