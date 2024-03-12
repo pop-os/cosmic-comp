@@ -9,11 +9,10 @@ use crate::{
         iced::{IcedElement, Program},
         prelude::*,
     },
-    wayland::handlers::screencopy::ScreencopySessions,
+    wayland::handlers::screencopy::SessionHolder,
 };
 use calloop::LoopHandle;
 use cosmic::{iced::Command, widget::mouse_area, Apply};
-use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
 use smithay::{
     backend::{
         input::KeyState,
@@ -39,7 +38,7 @@ use smithay::{
     output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     render_elements,
-    utils::{Buffer as BufferCoords, IsAlive, Logical, Point, Rectangle, Serial, Size},
+    utils::{Buffer as BufferCoords, IsAlive, Logical, Point, Rectangle, Serial, Size, Transform},
     wayland::seat::WaylandFocus,
 };
 use std::{
@@ -50,6 +49,7 @@ use std::{
         atomic::{AtomicBool, AtomicU8, Ordering},
         Arc, Mutex,
     },
+    time::Duration,
 };
 use wayland_backend::server::ObjectId;
 
@@ -576,12 +576,6 @@ impl PointerTarget<State> for CosmicWindow {
     fn enter(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
         let mut event = event.clone();
         if self.0.with_program(|p| {
-            if let Some(sessions) = p.window.user_data().get::<ScreencopySessions>() {
-                for session in &*sessions.0.borrow() {
-                    session.cursor_enter(seat, InputType::Pointer)
-                }
-            }
-
             if p.has_ssd(false) {
                 let geo = p.window.geometry();
                 let loc = event.location.to_i32_round::<i32>();
@@ -624,6 +618,27 @@ impl PointerTarget<State> for CosmicWindow {
                     let mut event = event.clone();
                     event.location.y -= SSD_HEIGHT as f64;
                     PointerTarget::enter(&p.window, seat, data, &event);
+
+                    for session in p.window.cursor_sessions() {
+                        session.set_cursor_pos(Some(
+                            event
+                                .location
+                                .to_buffer(
+                                    1.0,
+                                    Transform::Normal,
+                                    &p.window.geometry().size.to_f64(),
+                                )
+                                .to_i32_round(),
+                        ));
+                        if let Some((_, hotspot)) = seat.cursor_geometry(
+                            (0.0, 0.0),
+                            Duration::from_millis(event.time as u64).into(),
+                        ) {
+                            session.set_cursor_hotspot(hotspot);
+                        } else {
+                            session.set_cursor_hotspot((0, 0));
+                        }
+                    }
                     return false;
                 };
 
@@ -640,6 +655,22 @@ impl PointerTarget<State> for CosmicWindow {
             } else {
                 p.swap_focus(Focus::Window);
                 PointerTarget::enter(&p.window, seat, data, &event);
+                for session in p.window.cursor_sessions() {
+                    session.set_cursor_pos(Some(
+                        event
+                            .location
+                            .to_buffer(1.0, Transform::Normal, &p.window.geometry().size.to_f64())
+                            .to_i32_round(),
+                    ));
+                    if let Some((_, hotspot)) = seat.cursor_geometry(
+                        (0.0, 0.0),
+                        Duration::from_millis(event.time as u64).into(),
+                    ) {
+                        session.set_cursor_hotspot(hotspot);
+                    } else {
+                        session.set_cursor_hotspot((0, 0));
+                    }
+                }
                 false
             }
         }) {
@@ -651,17 +682,6 @@ impl PointerTarget<State> for CosmicWindow {
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
         let mut event = event.clone();
         if let Some((previous, next)) = self.0.with_program(|p| {
-            if let Some(sessions) = p.window.user_data().get::<ScreencopySessions>() {
-                for session in &*sessions.0.borrow() {
-                    let buffer_loc = (event.location.x, event.location.y); // we always screencast windows at 1x1 scale
-                    if let Some((geo, hotspot)) =
-                        seat.cursor_geometry(buffer_loc, data.common.clock.now())
-                    {
-                        session.cursor_info(seat, InputType::Pointer, geo, hotspot);
-                    }
-                }
-            }
-
             if p.has_ssd(false) {
                 let geo = p.window.geometry();
                 let loc = event.location.to_i32_round::<i32>();
@@ -693,6 +713,27 @@ impl PointerTarget<State> for CosmicWindow {
                         PointerTarget::motion(&p.window, seat, data, &event);
                     }
 
+                    for session in p.window.cursor_sessions() {
+                        session.set_cursor_pos(Some(
+                            event
+                                .location
+                                .to_buffer(
+                                    1.0,
+                                    Transform::Normal,
+                                    &p.window.geometry().size.to_f64(),
+                                )
+                                .to_i32_round(),
+                        ));
+                        if let Some((_, hotspot)) = seat.cursor_geometry(
+                            (0.0, 0.0),
+                            Duration::from_millis(event.time as u64).into(),
+                        ) {
+                            session.set_cursor_hotspot(hotspot);
+                        } else {
+                            session.set_cursor_hotspot((0, 0));
+                        }
+                    }
+
                     return Some((previous, Focus::Window));
                 };
 
@@ -713,6 +754,24 @@ impl PointerTarget<State> for CosmicWindow {
             } else {
                 p.swap_focus(Focus::Window);
                 PointerTarget::motion(&p.window, seat, data, &event);
+
+                for session in p.window.cursor_sessions() {
+                    session.set_cursor_pos(Some(
+                        event
+                            .location
+                            .to_buffer(1.0, Transform::Normal, &p.window.geometry().size.to_f64())
+                            .to_i32_round(),
+                    ));
+                    if let Some((_, hotspot)) = seat.cursor_geometry(
+                        (0.0, 0.0),
+                        Duration::from_millis(event.time as u64).into(),
+                    ) {
+                        session.set_cursor_hotspot(hotspot);
+                    } else {
+                        session.set_cursor_hotspot((0, 0));
+                    }
+                }
+
                 None
             }
         }) {
@@ -801,10 +860,8 @@ impl PointerTarget<State> for CosmicWindow {
 
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
         let previous = self.0.with_program(|p| {
-            if let Some(sessions) = p.window.user_data().get::<ScreencopySessions>() {
-                for session in &*sessions.0.borrow() {
-                    session.cursor_leave(seat, InputType::Pointer)
-                }
+            for session in p.window.cursor_sessions() {
+                session.set_cursor_pos(None);
             }
 
             let cursor_state = seat.user_data().get::<CursorState>().unwrap();

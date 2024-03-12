@@ -1,282 +1,91 @@
-// SPDX-License-Identifier: GPL-3.0-only
-
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
 
-use cosmic_protocols::screencopy::v1::server::{
-    zcosmic_screencopy_manager_v1::{self, CursorMode as WlCursorMode, ZcosmicScreencopyManagerV1},
-    zcosmic_screencopy_session_v1::{
-        self, BufferType, FailureReason, InputType, ZcosmicScreencopySessionV1,
-    },
+pub use cosmic_protocols::screencopy::v2::server::zcosmic_screencopy_frame_v2::FailureReason;
+use cosmic_protocols::screencopy::v2::server::{
+    zcosmic_screencopy_cursor_session_v2::{self, ZcosmicScreencopyCursorSessionV2},
+    zcosmic_screencopy_frame_v2::{self, ZcosmicScreencopyFrameV2},
+    zcosmic_screencopy_manager_v2::{self, ZcosmicScreencopyManagerV2},
+    zcosmic_screencopy_session_v2::{self, ZcosmicScreencopySessionV2},
 };
 use smithay::{
     backend::{
-        allocator::Fourcc as DrmFourcc,
-        drm::{DrmNode, NodeType},
+        allocator::{Buffer, Fourcc, Modifier},
+        drm::DrmNode,
+        renderer::{buffer_type, BufferType},
     },
-    input::{Seat, SeatHandler},
-    output::Output,
+    utils::{user_data::UserDataMap, Buffer as BufferCoords, IsAlive, Size, Transform},
+    wayland::{dmabuf::get_dmabuf, shm::with_buffer_contents},
+};
+use smithay::{reexports::wayland_server::protocol::wl_buffer::WlBuffer, utils::Point};
+use smithay::{
     reexports::wayland_server::{
-        protocol::{wl_buffer::WlBuffer, wl_output, wl_seat::WlSeat, wl_shm::Format as ShmFormat},
-        Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
+        protocol::wl_shm, Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
     },
-    utils::{user_data::UserDataMap, Buffer, IsAlive, Physical, Point, Rectangle, Size, Transform},
+    utils::Rectangle,
 };
-use tracing::warn;
-use wayland_backend::{
-    protocol::WEnum,
-    server::{GlobalId, ObjectId},
-};
+use tracing::debug;
+use wayland_backend::server::GlobalId;
 
-use crate::{shell::CosmicSurface, state::State};
+use super::image_source::ImageSourceData;
 
-use super::{
-    toplevel_info::{window_from_handle, ToplevelInfoHandler},
-    workspace::{WorkspaceHandle, WorkspaceHandler},
-};
-
-/// Screencopy global state
 #[derive(Debug)]
 pub struct ScreencopyState {
     global: GlobalId,
-}
-
-pub struct ScreencopyGlobalData {
-    cursor_modes: Vec<WlCursorMode>,
-    filter: Box<dyn for<'a> Fn(&'a Client) -> bool + Send + Sync>,
+    known_sessions: Vec<Session>,
+    known_cursor_sessions: Vec<CursorSession>,
 }
 
 impl ScreencopyState {
-    /// Create a new screencopy global
-    pub fn new<D, I, F>(
-        display: &DisplayHandle,
-        cursor_modes: I,
-        client_filter: F,
-    ) -> ScreencopyState
+    pub fn new<D, F>(display: &DisplayHandle, client_filter: F) -> ScreencopyState
     where
-        D: GlobalDispatch<ZcosmicScreencopyManagerV1, ScreencopyGlobalData>
-            + Dispatch<ZcosmicScreencopyManagerV1, Vec<WlCursorMode>>
-            + Dispatch<ZcosmicScreencopySessionV1, SessionData>
+        D: GlobalDispatch<ZcosmicScreencopyManagerV2, ScreencopyGlobalData>
+            + Dispatch<ZcosmicScreencopyManagerV2, ScreencopyData>
+            + Dispatch<ZcosmicScreencopySessionV2, SessionData>
+            + Dispatch<ZcosmicScreencopySessionV2, CursorSessionData>
+            + Dispatch<ZcosmicScreencopyCursorSessionV2, CursorSessionData>
+            + Dispatch<ZcosmicScreencopyFrameV2, FrameData>
             + ScreencopyHandler
-            + WorkspaceHandler
             + 'static,
-        I: IntoIterator<Item = WlCursorMode>,
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
         ScreencopyState {
-            global: display.create_global::<D, ZcosmicScreencopyManagerV1, _>(
+            global: display.create_global::<D, ZcosmicScreencopyManagerV2, _>(
                 1,
                 ScreencopyGlobalData {
-                    cursor_modes: Vec::from_iter(cursor_modes),
                     filter: Box::new(client_filter),
                 },
             ),
+            known_sessions: Vec::new(),
+            known_cursor_sessions: Vec::new(),
         }
     }
 
-    /// Returns the screencopy global id
-    pub fn global(&self) -> GlobalId {
-        self.global.clone()
+    pub fn global_id(&self) -> &GlobalId {
+        &self.global
     }
 }
 
-#[derive(Debug)]
-pub enum BufferInfo {
-    Shm {
-        format: ShmFormat,
-        size: Size<i32, Buffer>,
-        stride: u32,
-    },
-    Dmabuf {
-        node: DrmNode,
-        format: DrmFourcc,
-        size: Size<i32, Buffer>,
-    },
+#[derive(Debug, Clone)]
+pub struct BufferConstraints {
+    pub size: Size<i32, BufferCoords>,
+    pub shm: Vec<wl_shm::Format>,
+    pub dma: Option<DmabufConstraints>,
 }
 
-#[derive(Debug)]
-pub struct SessionDataInnerInner {
-    gone: bool,
-    pending_buffer: Option<BufferParams>,
-    _type: SessionType,
-    aux: AuxData,
+#[derive(Debug, Clone)]
+pub struct DmabufConstraints {
+    pub node: DrmNode,
+    pub formats: Vec<(Fourcc, Vec<Modifier>)>,
 }
-
-impl SessionDataInnerInner {
-    pub fn is_cursor(&self) -> bool {
-        match self.aux {
-            AuxData::Cursor { .. } => true,
-            _ => false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum SessionType {
-    Output(Output),
-    Workspace(Output, WorkspaceHandle),
-    Window(CosmicSurface),
-    Cursor(Seat<State>),
-    #[doc(hidden)]
-    Unknown,
-}
-
-#[derive(Debug)]
-enum AuxData {
-    Normal { cursor: CursorMode },
-    Cursor { seat: WlSeat },
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum CursorMode {
-    Captured(Vec<CursorSession>),
-    Embedded,
-    None,
-}
-
-impl AuxData {
-    pub fn seat(&self) -> &WlSeat {
-        match self {
-            AuxData::Cursor { seat } => seat,
-            _ => unreachable!("Unwrapped seat from aux data"),
-        }
-    }
-
-    pub fn cursor(&self) -> &CursorMode {
-        match self {
-            AuxData::Normal { cursor } => &cursor,
-            _ => unreachable!("Unwrapped cursor from aux data"),
-        }
-    }
-}
-
-impl CursorMode {
-    pub fn sessions<'a>(&'a self) -> impl Iterator<Item = &'a CursorSession> {
-        match self {
-            CursorMode::Captured(sessions) => Some(sessions.iter()).into_iter().flatten(),
-            _ => None.into_iter().flatten(),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct SessionDataInner {
-    inner: Mutex<SessionDataInnerInner>,
-    user_data: UserDataMap,
-}
-
-pub type SessionData = Arc<SessionDataInner>;
 
 #[derive(Debug, Clone)]
 pub struct Session {
-    obj: SessionResource,
-    data: SessionData,
-}
-
-#[derive(Debug, Clone)]
-enum SessionResource {
-    Alive(ZcosmicScreencopySessionV1),
-    Destroyed(ObjectId),
-}
-
-impl SessionResource {
-    fn client(&self) -> Option<Client> {
-        match self {
-            SessionResource::Alive(obj) => obj.client(),
-            _ => None,
-        }
-    }
-
-    fn buffer_info(
-        &self,
-        _type: BufferType,
-        node: Option<String>,
-        format: u32,
-        width: u32,
-        height: u32,
-        stride: u32,
-    ) {
-        if let SessionResource::Alive(obj) = self {
-            obj.buffer_info(_type, node, format, width, height, stride)
-        }
-    }
-
-    fn init_done(&self) {
-        if let SessionResource::Alive(obj) = self {
-            obj.init_done()
-        }
-    }
-
-    fn transform(&self, transform: wl_output::Transform) {
-        if let SessionResource::Alive(obj) = self {
-            obj.transform(transform)
-        }
-    }
-
-    fn damage(&self, x: u32, y: u32, w: u32, h: u32) {
-        if let SessionResource::Alive(obj) = self {
-            obj.damage(x, y, w, h)
-        }
-    }
-
-    fn commit_time(&self, time_sec_hi: u32, time_sec_lo: u32, time_nsec: u32) {
-        if let SessionResource::Alive(obj) = self {
-            obj.commit_time(time_sec_hi, time_sec_lo, time_nsec)
-        }
-    }
-
-    fn ready(&self) {
-        if let SessionResource::Alive(obj) = self {
-            obj.ready()
-        }
-    }
-
-    fn failed(&self, reason: FailureReason) {
-        if let SessionResource::Alive(obj) = self {
-            obj.failed(reason)
-        }
-    }
-
-    fn cursor_enter(&self, wl_seat: &WlSeat, input_type: InputType) {
-        if let SessionResource::Alive(obj) = self {
-            obj.cursor_enter(wl_seat, input_type)
-        }
-    }
-
-    fn cursor_info(
-        &self,
-        wl_seat: &WlSeat,
-        input_type: InputType,
-        x: i32,
-        y: i32,
-        w: i32,
-        h: i32,
-        dx: i32,
-        dy: i32,
-    ) {
-        if let SessionResource::Alive(obj) = self {
-            obj.cursor_info(wl_seat, input_type, x, y, w, h, dx, dy)
-        }
-    }
-
-    fn cursor_leave(&self, wl_seat: &WlSeat, input_type: InputType) {
-        if let SessionResource::Alive(obj) = self {
-            obj.cursor_leave(wl_seat, input_type)
-        }
-    }
-}
-
-impl PartialEq for SessionResource {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (SessionResource::Alive(obj1), SessionResource::Alive(obj2)) => obj1 == obj2,
-            (SessionResource::Alive(obj), SessionResource::Destroyed(id))
-            | (SessionResource::Destroyed(id), SessionResource::Alive(obj)) => obj.id() == *id,
-            (SessionResource::Destroyed(id1), SessionResource::Destroyed(id2)) => id1 == id2,
-        }
-    }
+    obj: ZcosmicScreencopySessionV2,
+    inner: Arc<Mutex<SessionInner>>,
+    user_data: Arc<UserDataMap>,
 }
 
 impl PartialEq for Session {
@@ -285,146 +94,107 @@ impl PartialEq for Session {
     }
 }
 
-// TODO: Handle Alive
+#[derive(Debug)]
+struct SessionInner {
+    stopped: bool,
+    constraints: Option<BufferConstraints>,
+    draw_cursors: bool,
+    source: ImageSourceData,
+    active_frames: Vec<Frame>,
+}
 
-// TODO: Better errors
-
-impl Session {
-    pub fn cursor_enter<D: SeatHandler + 'static>(&self, seat: &Seat<D>, input_type: InputType) {
-        if !self.alive() {
-            return;
+impl SessionInner {
+    fn new(source: ImageSourceData, draw_cursors: bool) -> SessionInner {
+        SessionInner {
+            stopped: false,
+            constraints: None,
+            draw_cursors,
+            source,
+            active_frames: Vec::new(),
         }
-        if let Some(client) = self.obj.client() {
-            for wl_seat in seat.client_seats(&client) {
-                self.obj.cursor_enter(&wl_seat, input_type)
-            }
-        }
-    }
-
-    pub fn cursor_info<D: SeatHandler + 'static>(
-        &self,
-        seat: &Seat<D>,
-        input_type: InputType,
-        geometry: Rectangle<i32, Buffer>,
-        offset: Point<i32, Buffer>,
-    ) {
-        if !self.alive() {
-            return;
-        }
-        if let Some(client) = self.obj.client() {
-            for wl_seat in seat.client_seats(&client) {
-                self.obj.cursor_info(
-                    &wl_seat,
-                    input_type,
-                    geometry.loc.x,
-                    geometry.loc.y,
-                    geometry.size.w,
-                    geometry.size.h,
-                    offset.x,
-                    offset.y,
-                );
-                let data = self.data.inner.lock().unwrap();
-                for cursor_session in data.aux.cursor().sessions() {
-                    cursor_session.obj.cursor_info(
-                        &wl_seat,
-                        input_type,
-                        geometry.loc.x,
-                        geometry.loc.y,
-                        geometry.size.w,
-                        geometry.size.h,
-                        offset.x,
-                        offset.y,
-                    );
-                }
-            }
-        }
-    }
-
-    pub fn cursor_leave<D: SeatHandler + 'static>(&self, seat: &Seat<D>, input_type: InputType) {
-        if !self.alive() {
-            return;
-        }
-        if let Some(client) = self.obj.client() {
-            for wl_seat in seat.client_seats(&client) {
-                self.obj.cursor_leave(&wl_seat, input_type)
-            }
-        }
-    }
-
-    pub fn cursor_sessions(&self) -> impl Iterator<Item = CursorSession> {
-        if !self.alive() {
-            return Vec::new().into_iter();
-        }
-        self.data
-            .inner
-            .lock()
-            .unwrap()
-            .aux
-            .cursor()
-            .sessions()
-            .cloned()
-            .collect::<Vec<_>>()
-            .into_iter()
-    }
-
-    pub fn commit_buffer(
-        &self,
-        transform: Transform,
-        damage: Vec<Rectangle<i32, Physical>>,
-        time: Option<Duration>,
-    ) {
-        if !self.alive() {
-            return;
-        }
-        self.obj.transform(transform.into());
-        for rect in damage {
-            self.obj.damage(
-                rect.loc.x as u32,
-                rect.loc.y as u32,
-                rect.size.w as u32,
-                rect.size.h as u32,
-            );
-        }
-        if let Some(time) = time {
-            let tv_sec_hi = (time.as_secs() >> 32) as u32;
-            let tv_sec_lo = (time.as_secs() & 0xFFFFFFFF) as u32;
-            self.obj
-                .commit_time(tv_sec_hi, tv_sec_lo, time.subsec_nanos());
-        }
-        self.obj.ready()
-    }
-
-    pub fn failed(&self, reason: FailureReason) {
-        if !self.alive() {
-            return;
-        }
-        self.obj.failed(reason);
-        self.data.inner.lock().unwrap().gone = true;
-    }
-
-    pub fn user_data(&self) -> &UserDataMap {
-        &self.data.user_data
-    }
-
-    pub fn session_type(&self) -> SessionType {
-        self.data.inner.lock().unwrap()._type.clone()
-    }
-
-    pub fn cursor_mode(&self) -> CursorMode {
-        self.data.inner.lock().unwrap().aux.cursor().clone()
     }
 }
 
 impl IsAlive for Session {
     fn alive(&self) -> bool {
-        !self.data.inner.lock().unwrap().gone
+        self.obj.is_alive()
+    }
+}
+
+impl Session {
+    pub fn update_constraints(&self, constraints: BufferConstraints) {
+        let mut inner = self.inner.lock().unwrap();
+
+        if !self.obj.is_alive() || inner.stopped {
+            return;
+        }
+
+        self.obj
+            .buffer_size(constraints.size.w as u32, constraints.size.h as u32);
+        for fmt in &constraints.shm {
+            self.obj.shm_format(*fmt as u32);
+        }
+        if let Some(dma) = constraints.dma.as_ref() {
+            let node = Vec::from(dma.node.dev_id().to_ne_bytes());
+            self.obj.dmabuf_device(node);
+            for (fmt, modifiers) in &dma.formats {
+                let mut modifiers = modifiers.clone();
+                let modifiers: Vec<u8> = {
+                    let ptr = modifiers.as_mut_ptr() as *mut u8;
+                    let len = modifiers.len() * 4;
+                    let cap = modifiers.capacity() * 4;
+                    std::mem::forget(modifiers);
+                    unsafe { Vec::from_raw_parts(ptr, len, cap) }
+                };
+                self.obj.dmabuf_format(*fmt as u32, modifiers);
+            }
+        }
+        self.obj.done();
+
+        inner.constraints = Some(constraints);
+    }
+
+    pub fn current_constraints(&self) -> Option<BufferConstraints> {
+        self.inner.lock().unwrap().constraints.clone()
+    }
+
+    pub fn source(&self) -> ImageSourceData {
+        self.inner.lock().unwrap().source.clone()
+    }
+
+    pub fn draw_cursor(&self) -> bool {
+        self.inner.lock().unwrap().draw_cursors
+    }
+
+    pub fn user_data(&self) -> &UserDataMap {
+        &*self.user_data
+    }
+
+    pub fn stop(self) {
+        let mut inner = self.inner.lock().unwrap();
+
+        if !self.obj.is_alive() || inner.stopped {
+            return;
+        }
+
+        for frame in inner.active_frames.drain(..) {
+            let mut inner = frame.inner.lock().unwrap();
+            if inner.failed.replace(FailureReason::Stopped).is_none() && inner.capture_requested {
+                frame.obj.failed(FailureReason::Stopped);
+            }
+        }
+
+        self.obj.stopped();
+        inner.constraints.take();
+        inner.stopped = true;
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct CursorSession {
-    obj: SessionResource,
-    data: SessionData,
+    obj: ZcosmicScreencopyCursorSessionV2,
+    inner: Arc<Mutex<CursorSessionInner>>,
+    user_data: Arc<UserDataMap>,
 }
 
 impl PartialEq for CursorSession {
@@ -433,100 +203,300 @@ impl PartialEq for CursorSession {
     }
 }
 
-impl CursorSession {
-    pub fn seat(&self) -> WlSeat {
-        self.data.inner.lock().unwrap().aux.seat().clone()
-    }
+#[derive(Debug)]
+struct CursorSessionInner {
+    session: Option<ZcosmicScreencopySessionV2>,
+    stopped: bool,
+    constraints: Option<BufferConstraints>,
+    source: ImageSourceData,
+    position: Option<Point<i32, BufferCoords>>,
+    hotspot: Point<i32, BufferCoords>,
+    active_frames: Vec<Frame>,
+}
 
-    pub fn buffer_waiting(&self) -> Option<BufferParams> {
-        self.data.inner.lock().unwrap().pending_buffer.take()
-    }
-
-    pub fn commit_buffer<'a>(
-        &self,
-        transform: Transform,
-        damage: impl Iterator<Item = &'a Rectangle<i32, Buffer>> + 'a,
-    ) {
-        self.obj.transform(transform.into());
-        for rect in damage {
-            self.obj.damage(
-                rect.loc.x as u32,
-                rect.loc.y as u32,
-                rect.size.w as u32,
-                rect.size.h as u32,
-            );
+impl CursorSessionInner {
+    fn new(source: ImageSourceData) -> CursorSessionInner {
+        CursorSessionInner {
+            session: None,
+            stopped: false,
+            constraints: None,
+            source,
+            position: None,
+            hotspot: Point::from((0, 0)),
+            active_frames: Vec::new(),
         }
-    }
-
-    pub fn failed(&self, reason: FailureReason) {
-        self.obj.failed(reason);
-        self.data.inner.lock().unwrap().gone = true;
-    }
-
-    pub fn user_data(&self) -> &UserDataMap {
-        &self.data.user_data
     }
 }
 
 impl IsAlive for CursorSession {
     fn alive(&self) -> bool {
-        !self.data.inner.lock().unwrap().gone
+        self.obj.is_alive()
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct BufferParams {
-    pub buffer: WlBuffer,
-    pub node: Option<DrmNode>,
-    pub age: u32,
+impl CursorSession {
+    pub fn update_constraints(&self, constrains: BufferConstraints) {
+        let mut inner = self.inner.lock().unwrap();
+
+        if !self.obj.is_alive() || inner.stopped {
+            return;
+        }
+
+        if let Some(session_obj) = inner.session.as_ref() {
+            session_obj.buffer_size(constrains.size.w as u32, constrains.size.h as u32);
+            for fmt in &constrains.shm {
+                session_obj.shm_format(*fmt as u32);
+            }
+            if let Some(dma) = constrains.dma.as_ref() {
+                let node = Vec::from(dma.node.dev_id().to_ne_bytes());
+                session_obj.dmabuf_device(node);
+                for (fmt, modifiers) in &dma.formats {
+                    let mut modifiers = modifiers.clone();
+                    let modifiers: Vec<u8> = {
+                        let ptr = modifiers.as_mut_ptr() as *mut u8;
+                        let len = modifiers.len() * 4;
+                        let cap = modifiers.capacity() * 4;
+                        std::mem::forget(modifiers);
+                        unsafe { Vec::from_raw_parts(ptr, len, cap) }
+                    };
+                    session_obj.dmabuf_format(*fmt as u32, modifiers);
+                }
+            }
+            session_obj.done();
+        }
+
+        inner.constraints = Some(constrains);
+    }
+
+    pub fn current_constraints(&self) -> Option<BufferConstraints> {
+        self.inner.lock().unwrap().constraints.clone()
+    }
+
+    pub fn source(&self) -> ImageSourceData {
+        self.inner.lock().unwrap().source.clone()
+    }
+
+    pub fn has_cursor(&self) -> bool {
+        self.inner.lock().unwrap().position.is_some()
+    }
+
+    pub fn set_cursor_pos(&self, position: Option<Point<i32, BufferCoords>>) {
+        if !self.obj.is_alive() {
+            return;
+        }
+
+        let mut inner = self.inner.lock().unwrap();
+
+        if inner.position == position {
+            return;
+        }
+
+        if inner.position.is_none() {
+            self.obj.enter();
+            self.obj.hotspot(inner.hotspot.x, inner.hotspot.y)
+        }
+
+        if let Some(new_pos) = position {
+            self.obj.position(new_pos.x, new_pos.y);
+        } else {
+            self.obj.leave()
+        }
+
+        inner.position = position;
+    }
+
+    pub fn set_cursor_hotspot(&self, hotspot: impl Into<Point<i32, BufferCoords>>) {
+        if !self.obj.is_alive() {
+            return;
+        }
+
+        let hotspot = hotspot.into();
+
+        let mut inner = self.inner.lock().unwrap();
+
+        if inner.hotspot == hotspot {
+            return;
+        }
+
+        inner.hotspot = hotspot;
+        if inner.position.is_some() {
+            self.obj.hotspot(hotspot.x, hotspot.y);
+        }
+    }
+
+    pub fn user_data(&self) -> &UserDataMap {
+        &*self.user_data
+    }
+
+    pub fn stop(self) {
+        let mut inner = self.inner.lock().unwrap();
+
+        if !self.obj.is_alive() || inner.stopped {
+            return;
+        }
+
+        if let Some(session_obj) = inner.session.as_ref() {
+            session_obj.stopped();
+        }
+        inner.constraints.take();
+
+        for frame in inner.active_frames.drain(..) {
+            let mut inner = frame.inner.lock().unwrap();
+            if inner.failed.replace(FailureReason::Stopped).is_none() && inner.capture_requested {
+                frame.obj.failed(FailureReason::Stopped);
+            }
+        }
+
+        inner.stopped = true;
+    }
+}
+
+#[derive(Debug)]
+pub struct Frame {
+    obj: ZcosmicScreencopyFrameV2,
+    inner: Arc<Mutex<FrameInner>>,
+}
+
+impl PartialEq for Frame {
+    fn eq(&self, other: &Self) -> bool {
+        self.obj == other.obj
+    }
+}
+
+impl Frame {
+    pub fn buffer(&self) -> WlBuffer {
+        self.inner.lock().unwrap().buffer.clone().unwrap()
+    }
+
+    pub fn damage(&self) -> Vec<Rectangle<i32, BufferCoords>> {
+        self.inner.lock().unwrap().damage.clone()
+    }
+
+    pub fn has_failed(&self) -> bool {
+        self.inner.lock().unwrap().failed.is_some()
+    }
+
+    pub fn success(
+        self,
+        transform: impl Into<Transform>,
+        damage: impl Into<Option<Vec<Rectangle<i32, BufferCoords>>>>,
+        presented: impl Into<Duration>,
+    ) {
+        {
+            let inner = self.inner.lock().unwrap();
+            if !inner.capture_requested || inner.failed.is_some() {
+                return;
+            }
+        }
+
+        self.obj.transform(transform.into().into());
+        for damage in damage.into().into_iter().flatten() {
+            self.obj
+                .damage(damage.loc.x, damage.loc.y, damage.size.w, damage.size.h);
+        }
+
+        let time = presented.into();
+        let tv_sec_hi = (time.as_secs() >> 32) as u32;
+        let tv_sec_lo = (time.as_secs() & 0xFFFFFFFF) as u32;
+        let tv_nsec = time.subsec_nanos();
+        self.obj.presentation_time(tv_sec_hi, tv_sec_lo, tv_nsec);
+
+        self.obj.ready()
+    }
+
+    pub fn fail(self, reason: FailureReason) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.failed = Some(reason);
+        if inner.capture_requested {
+            self.obj.failed(reason);
+        }
+    }
+}
+
+#[derive(Debug)]
+struct FrameInner {
+    constraints: Option<BufferConstraints>,
+    buffer: Option<WlBuffer>,
+    damage: Vec<Rectangle<i32, BufferCoords>>,
+    obj: ZcosmicScreencopySessionV2,
+    capture_requested: bool,
+    failed: Option<FailureReason>,
+}
+
+impl FrameInner {
+    fn new(
+        obj: ZcosmicScreencopySessionV2,
+        constraints: impl Into<Option<BufferConstraints>>,
+    ) -> Self {
+        FrameInner {
+            constraints: constraints.into(),
+            buffer: None,
+            damage: Vec::new(),
+            obj,
+            capture_requested: false,
+            failed: None,
+        }
+    }
 }
 
 pub trait ScreencopyHandler {
-    fn capture_output(&mut self, output: Output, session: Session) -> Vec<BufferInfo>;
+    fn screencopy_state(&mut self) -> &mut ScreencopyState;
 
-    fn capture_workspace(
-        &mut self,
-        workspace: WorkspaceHandle,
-        output: Output,
-        session: Session,
-    ) -> Vec<BufferInfo>;
+    fn capture_source(&mut self, source: &ImageSourceData) -> Option<BufferConstraints>;
+    fn capture_cursor_source(&mut self, source: &ImageSourceData) -> Option<BufferConstraints>;
 
-    fn capture_toplevel(&mut self, toplevel: CosmicSurface, session: Session) -> Vec<BufferInfo>;
+    fn new_session(&mut self, session: Session);
+    fn new_cursor_session(&mut self, session: CursorSession);
 
-    fn capture_cursor(&mut self, session: CursorSession) -> Vec<BufferInfo>;
+    fn frame(&mut self, session: Session, frame: Frame);
+    fn cursor_frame(&mut self, session: CursorSession, frame: Frame);
 
-    fn buffer_attached(&mut self, session: Session, buffer: BufferParams, on_damage: bool);
-
-    fn cursor_session_destroyed(&mut self, session: CursorSession) {
+    fn frame_aborted(&mut self, frame: Frame);
+    fn session_destroyed(&mut self, session: Session) {
         let _ = session;
     }
-
-    fn session_destroyed(&mut self, session: Session) {
+    fn cursor_session_destroyed(&mut self, session: CursorSession) {
         let _ = session;
     }
 }
 
-impl<D> GlobalDispatch<ZcosmicScreencopyManagerV1, ScreencopyGlobalData, D> for ScreencopyState
+pub struct ScreencopyGlobalData {
+    filter: Box<dyn for<'a> Fn(&'a Client) -> bool + Send + Sync>,
+}
+
+pub struct ScreencopyData;
+
+pub struct SessionData {
+    inner: Arc<Mutex<SessionInner>>,
+}
+
+pub struct CursorSessionData {
+    inner: Arc<Mutex<CursorSessionInner>>,
+}
+pub struct FrameData {
+    inner: Arc<Mutex<FrameInner>>,
+}
+
+impl<D> GlobalDispatch<ZcosmicScreencopyManagerV2, ScreencopyGlobalData, D> for ScreencopyState
 where
-    D: GlobalDispatch<ZcosmicScreencopyManagerV1, ScreencopyGlobalData>
-        + Dispatch<ZcosmicScreencopyManagerV1, Vec<WlCursorMode>>
-        + Dispatch<ZcosmicScreencopySessionV1, SessionData>
+    D: GlobalDispatch<ZcosmicScreencopyManagerV2, ScreencopyGlobalData>
+        + Dispatch<ZcosmicScreencopyManagerV2, ScreencopyData>
+        + Dispatch<ZcosmicScreencopySessionV2, SessionData>
+        + Dispatch<ZcosmicScreencopySessionV2, CursorSessionData>
+        + Dispatch<ZcosmicScreencopyCursorSessionV2, CursorSessionData>
+        + Dispatch<ZcosmicScreencopyFrameV2, FrameData>
         + ScreencopyHandler
-        + WorkspaceHandler
         + 'static,
 {
     fn bind(
         _state: &mut D,
         _handle: &DisplayHandle,
         _client: &Client,
-        resource: New<ZcosmicScreencopyManagerV1>,
-        global_data: &ScreencopyGlobalData,
+        resource: New<ZcosmicScreencopyManagerV2>,
+        _global_data: &ScreencopyGlobalData,
         data_init: &mut DataInit<'_, D>,
     ) {
-        let global = data_init.init(resource, global_data.cursor_modes.clone());
-        for mode in &global_data.cursor_modes {
-            global.supported_cursor_mode(*mode);
-        }
+        data_init.init(resource, ScreencopyData);
     }
 
     fn can_view(client: Client, global_data: &ScreencopyGlobalData) -> bool {
@@ -534,347 +504,176 @@ where
     }
 }
 
-fn check_cursor(
-    cursor: WEnum<WlCursorMode>,
-    supported: &[WlCursorMode],
-    resource: &ZcosmicScreencopyManagerV1,
-) -> Option<WlCursorMode> {
-    match cursor.into_result() {
-        Ok(mode) => {
-            if !supported.contains(&mode) {
-                warn!(?mode, "Client did send unsupported cursor mode");
-                resource.post_error(
-                    zcosmic_screencopy_manager_v1::Error::InvalidCursorMode,
-                    "Unsupported cursor mode",
-                );
-                return None;
-            }
-            Some(mode)
-        }
-        Err(err) => {
-            warn!(?err, "Client did send unknown cursor mode");
-            resource.post_error(
-                zcosmic_screencopy_manager_v1::Error::InvalidCursorMode,
-                "Unknown cursor mode, wrong protocol version?",
-            );
-            None
-        }
-    }
-}
-
-fn init_session<D>(
-    data_init: &mut DataInit<'_, D>,
-    session: New<ZcosmicScreencopySessionV1>,
-    cursor: WlCursorMode,
-    _type: SessionType,
-) -> Option<Session>
+impl<D> Dispatch<ZcosmicScreencopyManagerV2, ScreencopyData, D> for ScreencopyState
 where
-    D: GlobalDispatch<ZcosmicScreencopyManagerV1, ScreencopyGlobalData>
-        + Dispatch<ZcosmicScreencopyManagerV1, Vec<WlCursorMode>>
-        + Dispatch<ZcosmicScreencopySessionV1, SessionData>
+    D: Dispatch<ZcosmicScreencopyManagerV2, ScreencopyData>
+        + Dispatch<ZcosmicScreencopySessionV2, SessionData>
+        + Dispatch<ZcosmicScreencopySessionV2, CursorSessionData>
+        + Dispatch<ZcosmicScreencopyCursorSessionV2, CursorSessionData>
+        + Dispatch<ZcosmicScreencopyFrameV2, FrameData>
         + ScreencopyHandler
-        + WorkspaceHandler
-        + 'static,
-{
-    let data = Arc::new(SessionDataInner {
-        inner: Mutex::new(SessionDataInnerInner {
-            gone: false,
-            pending_buffer: None,
-            aux: AuxData::Normal {
-                cursor: match cursor {
-                    WlCursorMode::Capture => CursorMode::Captured(Vec::new()),
-                    WlCursorMode::Embedded => CursorMode::Embedded,
-                    _ => CursorMode::None,
-                },
-            },
-            _type,
-        }),
-        user_data: UserDataMap::new(),
-    });
-    let session = data_init.init(session, data.clone());
-
-    let session = Session {
-        obj: SessionResource::Alive(session),
-        data,
-    };
-
-    Some(session)
-}
-
-impl<D> Dispatch<ZcosmicScreencopyManagerV1, Vec<WlCursorMode>, D> for ScreencopyState
-where
-    D: GlobalDispatch<ZcosmicScreencopyManagerV1, ScreencopyGlobalData>
-        + Dispatch<ZcosmicScreencopyManagerV1, Vec<WlCursorMode>>
-        + Dispatch<ZcosmicScreencopySessionV1, SessionData>
-        + ToplevelInfoHandler<Window = CosmicSurface>
-        + ScreencopyHandler
-        + WorkspaceHandler
         + 'static,
 {
     fn request(
         state: &mut D,
         _client: &Client,
-        resource: &ZcosmicScreencopyManagerV1,
-        request: <ZcosmicScreencopyManagerV1 as smithay::reexports::wayland_server::Resource>::Request,
-        data: &Vec<WlCursorMode>,
+        _resource: &ZcosmicScreencopyManagerV2,
+        request: <ZcosmicScreencopyManagerV2 as Resource>::Request,
+        _data: &ScreencopyData,
         _dhandle: &DisplayHandle,
         data_init: &mut DataInit<'_, D>,
     ) {
         match request {
-            zcosmic_screencopy_manager_v1::Request::CaptureOutput {
+            zcosmic_screencopy_manager_v2::Request::CreateSession {
                 session,
-                output,
-                cursor,
+                source,
+                options,
             } => {
-                let Some(cursor) = check_cursor(cursor, &data, resource) else {
-                    return;
-                };
-
-                match Output::from_resource(&output) {
-                    Some(output) => {
-                        let session = match init_session(
-                            data_init,
-                            session,
-                            cursor,
-                            SessionType::Output(output.clone()),
-                        ) {
-                            Some(result) => result,
-                            None => {
-                                return;
-                            }
-                        };
-                        let formats = state.capture_output(output, session.clone());
-                        if !session.data.inner.lock().unwrap().gone {
-                            send_formats(&session.obj, formats);
-                        }
-                    }
-                    None => {
-                        let session =
-                            match init_session(data_init, session, cursor, SessionType::Unknown) {
-                                Some(result) => result,
-                                None => {
-                                    return;
-                                }
-                            };
-                        session.failed(FailureReason::InvalidOutput);
-                        return;
-                    }
-                }
-            }
-            zcosmic_screencopy_manager_v1::Request::CaptureToplevel {
-                session,
-                toplevel,
-                cursor,
-            } => {
-                let Some(cursor) = check_cursor(cursor, &data, resource) else {
-                    return;
-                };
-
-                match window_from_handle::<<D as ToplevelInfoHandler>::Window>(toplevel) {
-                    Some(window) => {
-                        let session = match init_session(
-                            data_init,
-                            session,
-                            cursor,
-                            SessionType::Window(window.clone()),
-                        ) {
-                            Some(result) => result,
-                            None => {
-                                return;
-                            }
-                        };
-
-                        let formats = state.capture_toplevel(window, session.clone());
-                        if !session.data.inner.lock().unwrap().gone {
-                            send_formats(&session.obj, formats);
-                        }
-                    }
-                    None => {
-                        let session =
-                            match init_session(data_init, session, cursor, SessionType::Unknown) {
-                                Some(result) => result,
-                                None => {
-                                    return;
-                                }
-                            };
-                        session.obj.failed(FailureReason::InvalidToplevel);
-                        return;
-                    }
-                }
-            }
-            zcosmic_screencopy_manager_v1::Request::CaptureWorkspace {
-                session,
-                workspace,
-                output,
-                cursor,
-            } => {
-                let Some(cursor) = check_cursor(cursor, &data, resource) else {
-                    return;
-                };
-
-                match Output::from_resource(&output) {
-                    Some(output) => match state.workspace_state().workspace_handle(&workspace) {
-                        Some(handle) => {
-                            let session = match init_session(
-                                data_init,
+                if let Some(src) = source.data::<ImageSourceData>() {
+                    if *src != ImageSourceData::Destroyed {
+                        if let Some(buffer_constraints) = state.capture_source(src) {
+                            let session_data = Arc::new(Mutex::new(SessionInner::new(
+                                src.clone(),
+                                Into::<u32>::into(options) == 1,
+                            )));
+                            let obj = data_init.init(
                                 session,
-                                cursor,
-                                SessionType::Workspace(output.clone(), handle.clone()),
-                            ) {
-                                Some(result) => result,
-                                None => {
-                                    return;
-                                }
+                                SessionData {
+                                    inner: session_data.clone(),
+                                },
+                            );
+
+                            let session = Session {
+                                obj,
+                                inner: session_data,
+                                user_data: Arc::new(UserDataMap::new()),
                             };
-                            let formats = state.capture_workspace(handle, output, session.clone());
-                            if !session.data.inner.lock().unwrap().gone {
-                                send_formats(&session.obj, formats);
-                            }
-                        }
-                        None => {
-                            let session = match init_session(
-                                data_init,
-                                session,
-                                cursor,
-                                SessionType::Unknown,
-                            ) {
-                                Some(result) => result,
-                                None => {
-                                    return;
-                                }
-                            };
-                            session.failed(FailureReason::InvalidWorkspace);
+                            session.update_constraints(buffer_constraints);
+                            state
+                                .screencopy_state()
+                                .known_sessions
+                                .push(session.clone());
+                            state.new_session(session);
                             return;
                         }
-                    },
-                    None => {
-                        let session =
-                            match init_session(data_init, session, cursor, SessionType::Unknown) {
-                                Some(result) => result,
-                                None => {
-                                    return;
-                                }
-                            };
-                        session.failed(FailureReason::InvalidOutput);
-                        return;
                     }
                 }
+
+                let session_data = Arc::new(Mutex::new(SessionInner::new(
+                    ImageSourceData::Destroyed,
+                    false,
+                )));
+                let obj = data_init.init(
+                    session,
+                    SessionData {
+                        inner: session_data.clone(),
+                    },
+                );
+                let session = Session {
+                    obj,
+                    inner: session_data,
+                    user_data: Arc::new(UserDataMap::new()),
+                };
+                session.stop();
+            }
+            zcosmic_screencopy_manager_v2::Request::CreatePointerCursorSession {
+                session,
+                source,
+                pointer: _,
+                options: _,
+            } => {
+                // TODO: use pointer, but we need new smithay api for that.
+
+                if let Some(src) = source.data::<ImageSourceData>() {
+                    if *src != ImageSourceData::Destroyed {
+                        if let Some(buffer_constraints) = state.capture_cursor_source(src) {
+                            let session_data =
+                                Arc::new(Mutex::new(CursorSessionInner::new(src.clone())));
+                            let obj = data_init.init(
+                                session,
+                                CursorSessionData {
+                                    inner: session_data.clone(),
+                                },
+                            );
+
+                            let session = CursorSession {
+                                obj,
+                                inner: session_data,
+                                user_data: Arc::new(UserDataMap::new()),
+                            };
+                            session.update_constraints(buffer_constraints);
+                            state
+                                .screencopy_state()
+                                .known_cursor_sessions
+                                .push(session.clone());
+                            state.new_cursor_session(session);
+                            return;
+                        }
+                    }
+                }
+
+                let session_data = Arc::new(Mutex::new(CursorSessionInner::new(
+                    ImageSourceData::Destroyed,
+                )));
+                let obj = data_init.init(
+                    session,
+                    CursorSessionData {
+                        inner: session_data.clone(),
+                    },
+                );
+                let session = CursorSession {
+                    obj,
+                    inner: session_data,
+                    user_data: Arc::new(UserDataMap::new()),
+                };
+                session.stop();
             }
             _ => {}
         }
     }
+
+    fn destroyed(
+        _state: &mut D,
+        _client: wayland_backend::server::ClientId,
+        _resource: &ZcosmicScreencopyManagerV2,
+        _data: &ScreencopyData,
+    ) {
+    }
 }
 
-impl<D> Dispatch<ZcosmicScreencopySessionV1, SessionData, D> for ScreencopyState
+impl<D> Dispatch<ZcosmicScreencopySessionV2, SessionData, D> for ScreencopyState
 where
-    D: GlobalDispatch<ZcosmicScreencopyManagerV1, ScreencopyGlobalData>
-        + Dispatch<ZcosmicScreencopyManagerV1, Vec<WlCursorMode>>
-        + Dispatch<ZcosmicScreencopySessionV1, SessionData>
+    D: Dispatch<ZcosmicScreencopySessionV2, SessionData>
+        + Dispatch<ZcosmicScreencopyFrameV2, FrameData>
         + ScreencopyHandler
-        + WorkspaceHandler
         + 'static,
 {
     fn request(
-        state: &mut D,
+        _state: &mut D,
         _client: &Client,
-        resource: &ZcosmicScreencopySessionV1,
-        request: <ZcosmicScreencopySessionV1 as Resource>::Request,
+        resource: &ZcosmicScreencopySessionV2,
+        request: <ZcosmicScreencopySessionV2 as Resource>::Request,
         data: &SessionData,
         _dhandle: &DisplayHandle,
         data_init: &mut DataInit<'_, D>,
     ) {
         match request {
-            zcosmic_screencopy_session_v1::Request::CaptureCursor {
-                session,
-                seat: wl_seat,
-            } => match Seat::from_resource(&wl_seat) {
-                Some(seat) => {
-                    {
-                        let resource_data = data.inner.lock().unwrap();
-                        if resource_data.is_cursor() || resource_data.gone {
-                            resource.failed(FailureReason::Unspec);
-                            return;
-                        }
-                    }
-
-                    let data = Arc::new(SessionDataInner {
-                        inner: Mutex::new(SessionDataInnerInner {
-                            gone: false,
-                            pending_buffer: None,
-                            aux: AuxData::Cursor { seat: wl_seat },
-                            _type: SessionType::Cursor(seat),
-                        }),
-                        user_data: UserDataMap::new(),
-                    });
-                    let session = data_init.init(session, data.clone());
-
-                    let cursor_session = CursorSession {
-                        obj: SessionResource::Alive(session),
-                        data,
-                    };
-                    let formats = state.capture_cursor(cursor_session.clone());
-                    if !cursor_session.data.inner.lock().unwrap().gone {
-                        send_formats(&cursor_session.obj, formats);
-                    }
-                }
-                None => {
-                    let session = match init_session(
-                        data_init,
-                        session,
-                        WlCursorMode::Capture,
-                        SessionType::Unknown,
-                    ) {
-                        Some(result) => result,
-                        None => {
-                            return;
-                        }
-                    };
-                    session.failed(FailureReason::InvalidSeat);
-                    return;
-                }
-            },
-            zcosmic_screencopy_session_v1::Request::AttachBuffer { buffer, node, age } => {
-                if data.inner.lock().unwrap().gone {
-                    resource.failed(FailureReason::Unspec);
-                    return;
-                }
-                let params = BufferParams {
-                    buffer,
-                    node: node.and_then(|p| DrmNode::from_path(p).ok()),
-                    age,
-                };
-                data.inner.lock().unwrap().pending_buffer = Some(params);
-            }
-            zcosmic_screencopy_session_v1::Request::Commit { options } => {
-                let buffer = {
-                    let mut resource_data = data.inner.lock().unwrap();
-                    if resource_data.is_cursor() || resource_data.gone {
-                        resource.failed(FailureReason::Unspec);
-                        return;
-                    }
-                    resource_data.pending_buffer.take()
-                };
-
-                if let Some(buffer) = buffer {
-                    let session = Session {
-                        obj: SessionResource::Alive(resource.clone()),
-                        data: data.clone(),
-                    };
-                    state.buffer_attached(
-                        session,
-                        buffer,
-                        options
-                            .into_result()
-                            .ok()
-                            .map(|v| v.contains(zcosmic_screencopy_session_v1::Options::OnDamage))
-                            .unwrap_or(false),
-                    );
-                } else {
-                    resource.failed(FailureReason::InvalidBuffer);
-                }
-            }
-            zcosmic_screencopy_session_v1::Request::Destroy => {
-                data.inner.lock().unwrap().gone = true;
+            zcosmic_screencopy_session_v2::Request::CreateFrame { frame } => {
+                let inner = Arc::new(Mutex::new(FrameInner::new(
+                    resource.clone(),
+                    data.inner.lock().unwrap().constraints.clone(),
+                )));
+                let obj = data_init.init(
+                    frame,
+                    FrameData {
+                        inner: inner.clone(),
+                    },
+                );
+                data.inner
+                    .lock()
+                    .unwrap()
+                    .active_frames
+                    .push(Frame { obj, inner });
             }
             _ => {}
         }
@@ -883,71 +682,419 @@ where
     fn destroyed(
         state: &mut D,
         _client: wayland_backend::server::ClientId,
-        resource: &ZcosmicScreencopySessionV1,
-        data: &SessionData,
+        resource: &ZcosmicScreencopySessionV2,
+        _data: &SessionData,
     ) {
-        if data.inner.lock().unwrap().is_cursor() {
-            let session = CursorSession {
-                obj: SessionResource::Destroyed(resource.id()),
-                data: data.clone(),
-            };
-            state.cursor_session_destroyed(session)
-        } else {
-            let session = Session {
-                obj: SessionResource::Destroyed(resource.id()),
-                data: data.clone(),
-            };
-            state.session_destroyed(session)
+        let scpy = state.screencopy_state();
+        if let Some(pos) = scpy
+            .known_sessions
+            .iter()
+            .position(|session| session.obj == *resource)
+        {
+            let session = scpy.known_sessions.remove(pos);
+            state.session_destroyed(session);
         }
     }
 }
 
-fn send_formats(session: &SessionResource, formats: Vec<BufferInfo>) {
-    for format in formats {
-        match format {
-            BufferInfo::Dmabuf { node, format, size } => {
-                if let Some(node_path) = node
-                    .dev_path_with_type(NodeType::Render)
-                    .or_else(|| node.dev_path())
-                {
-                    session.buffer_info(
-                        zcosmic_screencopy_session_v1::BufferType::Dmabuf,
-                        Some(node_path.as_os_str().to_string_lossy().into_owned()),
-                        format as u32,
-                        size.w as u32,
-                        size.h as u32,
-                        0,
+impl<D> Dispatch<ZcosmicScreencopyCursorSessionV2, CursorSessionData, D> for ScreencopyState
+where
+    D: Dispatch<ZcosmicScreencopyCursorSessionV2, CursorSessionData>
+        + Dispatch<ZcosmicScreencopySessionV2, CursorSessionData>
+        + Dispatch<ZcosmicScreencopyFrameV2, FrameData>
+        + ScreencopyHandler
+        + 'static,
+{
+    fn request(
+        _state: &mut D,
+        _client: &Client,
+        resource: &ZcosmicScreencopyCursorSessionV2,
+        request: <ZcosmicScreencopyCursorSessionV2 as Resource>::Request,
+        data: &CursorSessionData,
+        _dhandle: &DisplayHandle,
+        data_init: &mut DataInit<'_, D>,
+    ) {
+        match request {
+            zcosmic_screencopy_cursor_session_v2::Request::GetScreencopySession { session } => {
+                let new_data = CursorSessionData {
+                    inner: data.inner.clone(),
+                };
+                let session = data_init.init(session, new_data);
+
+                let mut inner = data.inner.lock().unwrap();
+                if inner.session.is_some() {
+                    resource.post_error(
+                        zcosmic_screencopy_cursor_session_v2::Error::DuplicateSession,
+                        "Duplicate session",
                     );
+                    return;
                 }
+
+                if inner.stopped {
+                    session.stopped();
+                } else if let Some(constraints) = inner.constraints.as_ref() {
+                    session.buffer_size(constraints.size.w as u32, constraints.size.h as u32);
+                    for fmt in &constraints.shm {
+                        session.shm_format(*fmt as u32);
+                    }
+                    if let Some(dma) = constraints.dma.as_ref() {
+                        let node = Vec::from(dma.node.dev_id().to_ne_bytes());
+                        session.dmabuf_device(node);
+                        for (fmt, modifiers) in &dma.formats {
+                            let mut modifiers = modifiers.clone();
+                            let modifiers: Vec<u8> = {
+                                let ptr = modifiers.as_mut_ptr() as *mut u8;
+                                let len = modifiers.len() * 4;
+                                let cap = modifiers.capacity() * 4;
+                                std::mem::forget(modifiers);
+                                unsafe { Vec::from_raw_parts(ptr, len, cap) }
+                            };
+                            session.dmabuf_format(*fmt as u32, modifiers);
+                        }
+                    }
+                    session.done();
+                }
+                inner.session = Some(session);
             }
-            BufferInfo::Shm {
-                format,
-                size,
-                stride,
-            } => session.buffer_info(
-                zcosmic_screencopy_session_v1::BufferType::WlShm,
-                None,
-                format as u32,
-                size.w as u32,
-                size.h as u32,
-                stride,
-            ),
+            _ => {}
         }
     }
 
-    session.init_done();
+    fn destroyed(
+        state: &mut D,
+        _client: wayland_backend::server::ClientId,
+        resource: &ZcosmicScreencopyCursorSessionV2,
+        _data: &CursorSessionData,
+    ) {
+        let scpy = state.screencopy_state();
+        if let Some(pos) = scpy
+            .known_cursor_sessions
+            .iter()
+            .position(|session| session.obj == *resource)
+        {
+            let session = scpy.known_cursor_sessions.remove(pos);
+            state.cursor_session_destroyed(session);
+        }
+    }
+}
+
+impl<D> Dispatch<ZcosmicScreencopySessionV2, CursorSessionData, D> for ScreencopyState
+where
+    D: Dispatch<ZcosmicScreencopySessionV2, SessionData>
+        + Dispatch<ZcosmicScreencopyFrameV2, FrameData>
+        + ScreencopyHandler
+        + 'static,
+{
+    fn request(
+        _state: &mut D,
+        _client: &Client,
+        resource: &ZcosmicScreencopySessionV2,
+        request: <ZcosmicScreencopySessionV2 as Resource>::Request,
+        data: &CursorSessionData,
+        _dhandle: &DisplayHandle,
+        data_init: &mut DataInit<'_, D>,
+    ) {
+        match request {
+            zcosmic_screencopy_session_v2::Request::CreateFrame { frame } => {
+                let inner = Arc::new(Mutex::new(FrameInner::new(
+                    resource.clone(),
+                    data.inner.lock().unwrap().constraints.clone(),
+                )));
+                let obj = data_init.init(
+                    frame,
+                    FrameData {
+                        inner: inner.clone(),
+                    },
+                );
+                data.inner
+                    .lock()
+                    .unwrap()
+                    .active_frames
+                    .push(Frame { obj, inner });
+            }
+            _ => {}
+        }
+    }
+
+    fn destroyed(
+        _state: &mut D,
+        _client: wayland_backend::server::ClientId,
+        _resource: &ZcosmicScreencopySessionV2,
+        _data: &CursorSessionData,
+    ) {
+    }
+}
+
+impl<D> Dispatch<ZcosmicScreencopyFrameV2, FrameData, D> for ScreencopyState
+where
+    D: Dispatch<ZcosmicScreencopyFrameV2, FrameData> + ScreencopyHandler + 'static,
+{
+    fn request(
+        state: &mut D,
+        _client: &Client,
+        resource: &ZcosmicScreencopyFrameV2,
+        request: <ZcosmicScreencopyFrameV2 as Resource>::Request,
+        data: &FrameData,
+        _dhandle: &DisplayHandle,
+        _data_init: &mut DataInit<'_, D>,
+    ) {
+        match request {
+            zcosmic_screencopy_frame_v2::Request::AttachBuffer { buffer } => {
+                let mut inner = data.inner.lock().unwrap();
+
+                if inner.capture_requested {
+                    resource.post_error(
+                        zcosmic_screencopy_frame_v2::Error::AlreadyCaptured,
+                        "Frame was captured previously",
+                    );
+                }
+
+                inner.buffer = Some(buffer);
+            }
+            zcosmic_screencopy_frame_v2::Request::DamageBuffer {
+                x,
+                y,
+                width,
+                height,
+            } => {
+                let mut inner = data.inner.lock().unwrap();
+
+                if inner.capture_requested {
+                    resource.post_error(
+                        zcosmic_screencopy_frame_v2::Error::AlreadyCaptured,
+                        "Frame was captured previously",
+                    );
+                }
+
+                if x < 0 || y < 0 || width <= 0 || height <= 0 {
+                    resource.post_error(
+                        zcosmic_screencopy_frame_v2::Error::InvalidBufferDamage,
+                        "Coordinates negative or size equal to zero",
+                    );
+                    return;
+                }
+
+                inner
+                    .damage
+                    .push(Rectangle::from_loc_and_size((x, y), (width, height)));
+            }
+            zcosmic_screencopy_frame_v2::Request::Capture => {
+                let mut inner = data.inner.lock().unwrap();
+
+                if inner.capture_requested {
+                    resource.post_error(
+                        zcosmic_screencopy_frame_v2::Error::AlreadyCaptured,
+                        "Frame was captured previously",
+                    );
+                }
+
+                if inner.buffer.is_none() {
+                    resource.post_error(
+                        zcosmic_screencopy_frame_v2::Error::NoBuffer,
+                        "Attempting to capture frame without a buffer",
+                    );
+                }
+
+                inner.capture_requested = true;
+
+                if let Some(reason) = inner.failed {
+                    resource.failed(reason);
+                    return;
+                }
+
+                if let Some(constraints) = inner.constraints.as_ref() {
+                    let buffer = inner.buffer.as_ref().unwrap();
+                    match buffer_type(buffer) {
+                        Some(BufferType::Dma) => {
+                            let Some(dma_constraints) = constraints.dma.as_ref() else {
+                                debug!("dma buffer not specified for screencopy");
+                                inner.failed = Some(FailureReason::BufferConstraints);
+                                resource.failed(FailureReason::BufferConstraints);
+                                return;
+                            };
+
+                            let dmabuf = match get_dmabuf(buffer) {
+                                Ok(buf) => buf,
+                                Err(err) => {
+                                    debug!(?err, "Error accessing dma buffer for screencopy");
+                                    inner.failed = Some(FailureReason::Unknown);
+                                    resource.failed(FailureReason::Unknown);
+                                    return;
+                                }
+                            };
+
+                            let buffer_size = dmabuf.size();
+                            if buffer_size.w < constraints.size.w
+                                || buffer_size.h < constraints.size.h
+                            {
+                                debug!(?buffer_size, ?constraints.size, "buffer too small for screencopy");
+                                inner.failed = Some(FailureReason::BufferConstraints);
+                                resource.failed(FailureReason::BufferConstraints);
+                                return;
+                            }
+
+                            let format = dmabuf.format();
+                            if dma_constraints
+                                .formats
+                                .iter()
+                                .find(|(fourcc, _)| *fourcc == format.code)
+                                .filter(|(_, modifiers)| modifiers.contains(&format.modifier))
+                                .is_none()
+                            {
+                                debug!(
+                                    ?format,
+                                    ?dma_constraints,
+                                    "unsupported buffer format for screencopy"
+                                );
+                                inner.failed = Some(FailureReason::BufferConstraints);
+                                resource.failed(FailureReason::BufferConstraints);
+                                return;
+                            }
+                        }
+                        Some(BufferType::Shm) => {
+                            let buffer_data = match with_buffer_contents(buffer, |_, _, data| data)
+                            {
+                                Ok(data) => data,
+                                Err(err) => {
+                                    debug!(?err, "Error accessing shm buffer for screencopy");
+                                    inner.failed = Some(FailureReason::Unknown);
+                                    resource.failed(FailureReason::Unknown);
+                                    return;
+                                }
+                            };
+
+                            if buffer_data.width < constraints.size.w
+                                || buffer_data.height < constraints.size.h
+                            {
+                                debug!(?buffer_data, ?constraints.size, "buffer too small for screencopy");
+                                inner.failed = Some(FailureReason::BufferConstraints);
+                                resource.failed(FailureReason::BufferConstraints);
+                                return;
+                            }
+
+                            if !constraints.shm.contains(&buffer_data.format) {
+                                debug!(?buffer_data.format, ?constraints.shm, "unsupported buffer format for screencopy");
+                                inner.failed = Some(FailureReason::BufferConstraints);
+                                resource.failed(FailureReason::BufferConstraints);
+                                return;
+                            }
+                        }
+                        x => {
+                            debug!(?x, "Attempt to screencopy with unsupported buffer type");
+                            inner.failed = Some(FailureReason::BufferConstraints);
+                            resource.failed(FailureReason::BufferConstraints);
+                            return;
+                        }
+                    }
+                } else {
+                    inner.failed = Some(FailureReason::Unknown);
+                    resource.failed(FailureReason::Unknown);
+                    return;
+                }
+
+                let frame = Frame {
+                    obj: resource.clone(),
+                    inner: data.inner.clone(),
+                };
+
+                let scpy = state.screencopy_state();
+                if let Some(session) = scpy
+                    .known_sessions
+                    .iter()
+                    .find(|session| session.obj == inner.obj)
+                    .map(|s| Session {
+                        obj: s.obj.clone(),
+                        inner: s.inner.clone(),
+                        user_data: s.user_data.clone(),
+                    })
+                {
+                    if session.inner.lock().unwrap().stopped {
+                        resource.failed(FailureReason::Stopped);
+                        return;
+                    }
+
+                    std::mem::drop(inner);
+                    state.frame(session, frame);
+                } else if let Some(session) = scpy
+                    .known_cursor_sessions
+                    .iter()
+                    .find(|session| {
+                        session.inner.lock().unwrap().session.as_ref() == Some(&inner.obj)
+                    })
+                    .map(|s| CursorSession {
+                        obj: s.obj.clone(),
+                        inner: s.inner.clone(),
+                        user_data: s.user_data.clone(),
+                    })
+                {
+                    if session.inner.lock().unwrap().stopped {
+                        resource.failed(FailureReason::Stopped);
+                        return;
+                    }
+
+                    std::mem::drop(inner);
+                    state.cursor_frame(session, frame);
+                } else {
+                    inner.failed = Some(FailureReason::Unknown);
+                    resource.failed(FailureReason::Unknown);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn destroyed(
+        state: &mut D,
+        _client: wayland_backend::server::ClientId,
+        resource: &ZcosmicScreencopyFrameV2,
+        data: &FrameData,
+    ) {
+        {
+            let scpy = state.screencopy_state();
+            for session in &mut scpy.known_sessions {
+                session
+                    .inner
+                    .lock()
+                    .unwrap()
+                    .active_frames
+                    .retain(|frame| frame.obj != *resource);
+            }
+            for cursor_session in &mut scpy.known_cursor_sessions {
+                cursor_session
+                    .inner
+                    .lock()
+                    .unwrap()
+                    .active_frames
+                    .retain(|frame| frame.obj != *resource);
+            }
+        }
+        let frame = Frame {
+            obj: resource.clone(),
+            inner: data.inner.clone(),
+        };
+        state.frame_aborted(frame);
+    }
 }
 
 macro_rules! delegate_screencopy {
     ($(@<$( $lt:tt $( : $clt:tt $(+ $dlt:tt )* )? ),+>)? $ty: ty) => {
         smithay::reexports::wayland_server::delegate_global_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_manager_v1::ZcosmicScreencopyManagerV1: $crate::wayland::protocols::screencopy::ScreencopyGlobalData
+            cosmic_protocols::screencopy::v2::server::zcosmic_screencopy_manager_v2::ZcosmicScreencopyManagerV2: $crate::wayland::protocols::screencopy::ScreencopyGlobalData
         ] => $crate::wayland::protocols::screencopy::ScreencopyState);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_manager_v1::ZcosmicScreencopyManagerV1: std::vec::Vec<cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_manager_v1::CursorMode>
+            cosmic_protocols::screencopy::v2::server::zcosmic_screencopy_manager_v2::ZcosmicScreencopyManagerV2: $crate::wayland::protocols::screencopy::ScreencopyData
         ] => $crate::wayland::protocols::screencopy::ScreencopyState);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::ZcosmicScreencopySessionV1: $crate::wayland::protocols::screencopy::SessionData
+            cosmic_protocols::screencopy::v2::server::zcosmic_screencopy_session_v2::ZcosmicScreencopySessionV2: $crate::wayland::protocols::screencopy::SessionData
+        ] => $crate::wayland::protocols::screencopy::ScreencopyState);
+        smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
+            cosmic_protocols::screencopy::v2::server::zcosmic_screencopy_cursor_session_v2::ZcosmicScreencopyCursorSessionV2: $crate::wayland::protocols::screencopy::CursorSessionData
+        ] => $crate::wayland::protocols::screencopy::ScreencopyState);
+        smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
+            cosmic_protocols::screencopy::v2::server::zcosmic_screencopy_session_v2::ZcosmicScreencopySessionV2: $crate::wayland::protocols::screencopy::CursorSessionData
+        ] => $crate::wayland::protocols::screencopy::ScreencopyState);
+        smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
+            cosmic_protocols::screencopy::v2::server::zcosmic_screencopy_frame_v2::ZcosmicScreencopyFrameV2: $crate::wayland::protocols::screencopy::FrameData
         ] => $crate::wayland::protocols::screencopy::ScreencopyState);
     };
 }

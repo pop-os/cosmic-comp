@@ -7,14 +7,12 @@ use crate::{
     shell::{grabs::SeatMoveGrabState, Shell},
     utils::prelude::*,
     wayland::protocols::{
-        drm::WlDrmState,
-        output_configuration::OutputConfigurationState,
-        screencopy::{BufferParams, ScreencopyState, Session as ScreencopySession},
+        drm::WlDrmState, image_source::ImageSourceState,
+        output_configuration::OutputConfigurationState, screencopy::ScreencopyState,
         workspace::WorkspaceClientState,
     },
 };
 use anyhow::Context;
-use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_manager_v1::CursorMode;
 use i18n_embed::{
     fluent::{fluent_language_loader, FluentLanguageLoader},
     DesktopLanguageRequester,
@@ -177,6 +175,7 @@ pub struct Common {
     pub presentation_state: PresentationState,
     pub primary_selection_state: PrimarySelectionState,
     pub data_control_state: Option<DataControlState>,
+    pub image_source_state: ImageSourceState,
     pub screencopy_state: ScreencopyState,
     pub seat_state: SeatState<State>,
     pub session_lock_manager_state: SessionLockManagerState,
@@ -270,19 +269,14 @@ impl BackendData {
         result
     }
 
-    pub fn schedule_render(
-        &mut self,
-        loop_handle: &LoopHandle<'_, State>,
-        output: &Output,
-        screencopy: Option<Vec<(ScreencopySession, BufferParams)>>,
-    ) {
+    pub fn schedule_render(&mut self, loop_handle: &LoopHandle<'_, State>, output: &Output) {
         match self {
-            BackendData::Winit(ref mut state) => state.pending_screencopy(screencopy), // We cannot do this on the winit backend.
+            BackendData::Winit(_) => {} // We cannot do this on the winit backend.
             // Winit has a very strict render-loop and skipping frames breaks atleast the wayland winit-backend.
             // Swapping with damage (which should be empty on these frames) is likely good enough anyway.
-            BackendData::X11(ref mut state) => state.schedule_render(output, screencopy),
+            BackendData::X11(ref mut state) => state.schedule_render(output),
             BackendData::Kms(ref mut state) => {
-                if let Err(err) = state.schedule_render(loop_handle, output, None, screencopy) {
+                if let Err(err) = state.schedule_render(loop_handle, output, None) {
                     error!(?err, "Failed to schedule event, are we shutting down?");
                 }
             }
@@ -375,11 +369,10 @@ impl State {
             OutputConfigurationState::new(dh, client_should_see_privileged_protocols);
         let presentation_state = PresentationState::new::<Self>(dh, clock.id() as u32);
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
-        let screencopy_state = ScreencopyState::new::<Self, _, _>(
-            dh,
-            vec![CursorMode::Embedded, CursorMode::Hidden],
-            client_should_see_privileged_protocols,
-        );
+        let image_source_state =
+            ImageSourceState::new::<Self, _>(dh, client_should_see_privileged_protocols);
+        let screencopy_state =
+            ScreencopyState::new::<Self, _>(dh, client_should_see_privileged_protocols);
         let shm_state =
             ShmState::new::<Self>(dh, vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888]);
         let seat_state = SeatState::<Self>::new();
@@ -441,6 +434,7 @@ impl State {
                 data_device_state,
                 dmabuf_state,
                 fractional_scale_state,
+                image_source_state,
                 screencopy_state,
                 shm_state,
                 seat_state,
@@ -890,7 +884,6 @@ struct PendingFrame {
     start: Instant,
     duration_elements: Option<Duration>,
     duration_render: Option<Duration>,
-    duration_screencopy: Option<Duration>,
     duration_displayed: Option<Duration>,
 }
 
@@ -899,7 +892,6 @@ pub struct Frame {
     pub start: Instant,
     pub duration_elements: Duration,
     pub duration_render: Duration,
-    pub duration_screencopy: Option<Duration>,
     pub duration_displayed: Duration,
 }
 
@@ -909,16 +901,11 @@ impl Frame {
     }
 
     fn frame_time(&self) -> Duration {
-        self.duration_elements
-            + self.duration_render
-            + self.duration_screencopy.clone().unwrap_or(Duration::ZERO)
+        self.duration_elements + self.duration_render
     }
 
     fn time_to_display(&self) -> Duration {
-        self.duration_elements
-            + self.duration_render
-            + self.duration_screencopy.clone().unwrap_or(Duration::ZERO)
-            + self.duration_displayed
+        self.duration_elements + self.duration_render + self.duration_displayed
     }
 }
 
@@ -928,7 +915,6 @@ impl From<PendingFrame> for Frame {
             start: pending.start,
             duration_elements: pending.duration_elements.unwrap_or(Duration::ZERO),
             duration_render: pending.duration_render.unwrap_or(Duration::ZERO),
-            duration_screencopy: pending.duration_screencopy,
             duration_displayed: pending.duration_displayed.unwrap_or(Duration::ZERO),
         }
     }
@@ -942,7 +928,6 @@ impl Fps {
             start: Instant::now(),
             duration_elements: None,
             duration_render: None,
-            duration_screencopy: None,
             duration_displayed: None,
         });
     }
@@ -962,23 +947,12 @@ impl Fps {
         }
     }
 
-    pub fn screencopy(&mut self) {
-        if let Some(frame) = self.pending_frame.as_mut() {
-            frame.duration_screencopy = Some(
-                Instant::now().duration_since(frame.start)
-                    - frame.duration_elements.clone().unwrap_or(Duration::ZERO)
-                    - frame.duration_render.clone().unwrap_or(Duration::ZERO),
-            );
-        }
-    }
-
     pub fn displayed(&mut self) {
         if let Some(mut frame) = self.pending_frame.take() {
             frame.duration_displayed = Some(
                 Instant::now().duration_since(frame.start)
                     - frame.duration_elements.clone().unwrap_or(Duration::ZERO)
-                    - frame.duration_render.clone().unwrap_or(Duration::ZERO)
-                    - frame.duration_screencopy.clone().unwrap_or(Duration::ZERO),
+                    - frame.duration_render.clone().unwrap_or(Duration::ZERO),
             );
 
             self.frames.push_back(frame.into());

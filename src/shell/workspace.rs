@@ -10,9 +10,8 @@ use crate::{
     state::State,
     utils::{prelude::*, tween::EaseRectangle},
     wayland::{
-        handlers::screencopy::DropableSession,
+        handlers::screencopy::ScreencopySessions,
         protocols::{
-            screencopy::{BufferParams, Session as ScreencopySession},
             toplevel_info::ToplevelInfoState,
             workspace::{WorkspaceHandle, WorkspaceUpdateGuard},
         },
@@ -83,8 +82,7 @@ pub struct Workspace {
 
     pub handle: WorkspaceHandle,
     pub focus_stack: FocusStacks,
-    pub pending_buffers: Vec<(ScreencopySession, BufferParams)>,
-    pub screencopy_sessions: Vec<DropableSession>,
+    pub screencopy: ScreencopySessions,
     pub output_stack: VecDeque<String>,
     pub pending_tokens: HashSet<XdgActivationToken>,
     pub(super) backdrop_id: Id,
@@ -272,8 +270,7 @@ impl Workspace {
             fullscreen: None,
             handle,
             focus_stack: FocusStacks::default(),
-            pending_buffers: Vec::new(),
-            screencopy_sessions: Vec::new(),
+            screencopy: ScreencopySessions::default(),
             output_stack: {
                 let mut queue = VecDeque::new();
                 queue.push_back(output_name);

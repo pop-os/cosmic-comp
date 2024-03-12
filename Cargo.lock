@@ -914,7 +914,7 @@ dependencies = [
 [[package]]
 name = "cosmic-protocols"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-protocols?branch=main#e65fa5e2bb47e51656221657049bd3f88ae9dae5"
+source = "git+https://github.com/pop-os/cosmic-protocols?branch=main#1cc4a1393d0f8be4d444666e260fdb811b400f49"
 dependencies = [
  "bitflags 2.4.2",
  "wayland-backend",

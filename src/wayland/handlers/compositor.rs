@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{
-    shell::grabs::SeatMoveGrabState, state::ClientState, utils::prelude::*,
-    wayland::protocols::screencopy::SessionType,
-};
+use crate::{shell::grabs::SeatMoveGrabState, state::ClientState, utils::prelude::*};
 use calloop::Interest;
 use smithay::{
     backend::renderer::utils::{on_commit_buffer_handler, with_renderer_surface_state},
@@ -28,8 +25,6 @@ use smithay::{
     xwayland::{X11Wm, XWaylandClientData},
 };
 use std::sync::Mutex;
-
-use super::screencopy::PendingScreencopyBuffers;
 
 impl State {
     fn toplevel_ensure_initial_configure(&mut self, toplevel: &ToplevelSurface) -> bool {
@@ -251,13 +246,10 @@ impl CompositorHandler for State {
                     workspace.commit(surface);
                 }
             }
-
-            //handle window screencopy sessions
-            self.schedule_window_session(surface);
-
-            // and refresh smithays internal state
-            self.common.shell.popups.commit(surface);
         }
+
+        // and refresh smithays internal state
+        self.common.shell.popups.commit(surface);
 
         // re-arrange layer-surfaces (commits may change size and positioning)
         let layer_output = self
@@ -277,34 +269,10 @@ impl CompositorHandler for State {
             }
         }
 
-        let mut scheduled_sessions = self.schedule_workspace_sessions(surface);
-
         // schedule a new render
         if let Some(output) = self.common.shell.visible_output_for_surface(surface) {
-            if let Some(sessions) = output.user_data().get::<PendingScreencopyBuffers>() {
-                scheduled_sessions
-                    .get_or_insert_with(Vec::new)
-                    .extend(sessions.borrow_mut().drain(..));
-            }
-
-            self.backend.schedule_render(
-                &self.common.event_loop_handle,
-                &output,
-                scheduled_sessions.as_ref().map(|sessions| {
-                    sessions
-                        .iter()
-                        .filter(|(s, _)| match s.session_type() {
-                            SessionType::Output(o) | SessionType::Workspace(o, _)
-                                if &o == output =>
-                            {
-                                true
-                            }
-                            _ => false,
-                        })
-                        .cloned()
-                        .collect::<Vec<_>>()
-                }),
-            );
+            self.backend
+                .schedule_render(&self.common.event_loop_handle, &output);
         }
     }
 }

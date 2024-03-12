@@ -3,7 +3,6 @@
 use crate::{
     shell::{element::CosmicWindow, grabs::ReleaseMode, CosmicMapped, CosmicSurface, ManagedLayer},
     utils::prelude::*,
-    wayland::protocols::screencopy::SessionType,
 };
 use smithay::{
     delegate_xdg_shell,
@@ -30,10 +29,7 @@ use smithay::{
 use std::cell::Cell;
 use tracing::warn;
 
-use super::{
-    compositor::client_compositor_state, screencopy::PendingScreencopyBuffers,
-    toplevel_management::ToplevelManagementExt,
-};
+use super::{compositor::client_compositor_state, toplevel_management::ToplevelManagementExt};
 
 pub mod popup;
 
@@ -403,32 +399,9 @@ impl XdgShellHandler for State {
             }
         }
 
-        // screencopy
-        let mut scheduled_sessions = self.schedule_workspace_sessions(surface.wl_surface());
         if let Some(output) = output.as_ref() {
-            if let Some(sessions) = output.user_data().get::<PendingScreencopyBuffers>() {
-                scheduled_sessions
-                    .get_or_insert_with(Vec::new)
-                    .extend(sessions.borrow_mut().drain(..));
-            }
-            self.backend.schedule_render(
-                &self.common.event_loop_handle,
-                &output,
-                scheduled_sessions.as_ref().map(|sessions| {
-                    sessions
-                        .iter()
-                        .filter(|(s, _)| match s.session_type() {
-                            SessionType::Output(o) | SessionType::Workspace(o, _)
-                                if &o == output =>
-                            {
-                                true
-                            }
-                            _ => false,
-                        })
-                        .cloned()
-                        .collect::<Vec<_>>()
-                }),
-            );
+            self.backend
+                .schedule_render(&self.common.event_loop_handle, &output);
         }
     }
 

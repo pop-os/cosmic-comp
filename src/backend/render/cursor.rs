@@ -19,7 +19,9 @@ use smithay::{
     },
     reexports::wayland_server::protocol::wl_surface,
     render_elements,
-    utils::{IsAlive, Logical, Monotonic, Point, Scale, Time, Transform},
+    utils::{
+        Buffer as BufferCoords, IsAlive, Logical, Monotonic, Point, Scale, Size, Time, Transform,
+    },
     wayland::compositor::{get_role, with_states},
 };
 use std::{cell::RefCell, collections::HashMap, io::Read, sync::Mutex, time::Duration};
@@ -156,12 +158,12 @@ pub fn draw_surface_cursor<R>(
     surface: &wl_surface::WlSurface,
     location: impl Into<Point<i32, Logical>>,
     scale: impl Into<Scale<f64>>,
-) -> Vec<CursorRenderElement<R>>
+) -> Vec<(CursorRenderElement<R>, Point<i32, BufferCoords>)>
 where
     R: Renderer + ImportAll,
     <R as Renderer>::TextureId: 'static,
 {
-    let mut position = location.into();
+    let position = location.into();
     let scale = scale.into();
     let h = with_states(&surface, |states| {
         states
@@ -171,8 +173,12 @@ where
             .lock()
             .unwrap()
             .hotspot
+            .to_buffer(
+                1,
+                Transform::Normal,
+                &Size::from((1, 1)), /* Size doesn't matter for Transform::Normal */
+            )
     });
-    position -= h;
 
     render_elements_from_surface_tree(
         renderer,
@@ -182,6 +188,9 @@ where
         1.0,
         Kind::Cursor,
     )
+    .into_iter()
+    .map(|elem| (elem, h))
+    .collect()
 }
 
 #[profiling::function]
@@ -190,7 +199,7 @@ pub fn draw_dnd_icon<R>(
     surface: &wl_surface::WlSurface,
     location: impl Into<Point<i32, Logical>>,
     scale: impl Into<Scale<f64>>,
-) -> Vec<CursorRenderElement<R>>
+) -> Vec<WaylandSurfaceRenderElement<R>>
 where
     R: Renderer + ImportAll,
     <R as Renderer>::TextureId: 'static,
@@ -307,7 +316,7 @@ pub fn draw_cursor<R>(
     scale: Scale<f64>,
     time: Time<Monotonic>,
     draw_default: bool,
-) -> Vec<CursorRenderElement<R>>
+) -> Vec<(CursorRenderElement<R>, Point<i32, BufferCoords>)>
 where
     R: Renderer + ImportMem + ImportAll,
     <R as Renderer>::TextureId: Clone + 'static,
@@ -367,20 +376,23 @@ where
             }
         };
 
-        let hotspot = Point::<i32, Logical>::from((frame.xhot as i32, frame.yhot as i32)).to_f64();
+        let hotspot = Point::<i32, BufferCoords>::from((frame.xhot as i32, frame.yhot as i32));
         *state.current_image.borrow_mut() = Some(frame);
 
-        return vec![CursorRenderElement::Static(
-            MemoryRenderBufferRenderElement::from_buffer(
-                renderer,
-                (location - hotspot).to_physical(scale),
-                pointer_image,
-                None,
-                None,
-                None,
-                Kind::Cursor,
-            )
-            .expect("Failed to import cursor bitmap"),
+        return vec![(
+            CursorRenderElement::Static(
+                MemoryRenderBufferRenderElement::from_buffer(
+                    renderer,
+                    location.to_physical(scale),
+                    pointer_image,
+                    None,
+                    None,
+                    None,
+                    Kind::Cursor,
+                )
+                .expect("Failed to import cursor bitmap"),
+            ),
+            hotspot,
         )];
     } else {
         Vec::new()

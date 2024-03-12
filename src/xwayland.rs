@@ -5,12 +5,8 @@ use crate::{
     shell::{focus::target::KeyboardFocusTarget, grabs::ReleaseMode, CosmicSurface, Shell},
     state::State,
     utils::prelude::*,
-    wayland::{
-        handlers::{
-            screencopy::PendingScreencopyBuffers, toplevel_management::ToplevelManagementExt,
-            xdg_activation::ActivationContext,
-        },
-        protocols::screencopy::SessionType,
+    wayland::handlers::{
+        toplevel_management::ToplevelManagementExt, xdg_activation::ActivationContext,
     },
 };
 use smithay::{
@@ -354,36 +350,9 @@ impl XwmHandler for State {
             self.common.shell.refresh_active_space(output);
         }
 
-        // screencopy
-        let mut scheduled_sessions = window
-            .wl_surface()
-            .map(|wl_surface| self.schedule_workspace_sessions(&wl_surface))
-            .unwrap_or_default();
-
         for output in outputs.into_iter() {
-            if let Some(sessions) = output.user_data().get::<PendingScreencopyBuffers>() {
-                scheduled_sessions
-                    .get_or_insert_with(Vec::new)
-                    .extend(sessions.borrow_mut().drain(..));
-            }
-            self.backend.schedule_render(
-                &self.common.event_loop_handle,
-                &output,
-                scheduled_sessions.as_ref().map(|sessions| {
-                    sessions
-                        .iter()
-                        .filter(|(s, _)| match s.session_type() {
-                            SessionType::Output(o) | SessionType::Workspace(o, _)
-                                if o == output =>
-                            {
-                                true
-                            }
-                            _ => false,
-                        })
-                        .cloned()
-                        .collect::<Vec<_>>()
-                }),
-            );
+            self.backend
+                .schedule_render(&self.common.event_loop_handle, &output);
         }
     }
 
