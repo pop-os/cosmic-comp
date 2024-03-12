@@ -1,19 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::render::{workspace_elements, CLEAR_COLOR},
+    backend::render::{
+        element::{CosmicElement, DamageElement},
+        workspace_elements, CLEAR_COLOR,
+    },
     config::OutputConfig,
     shell::Shell,
     state::{BackendData, Common, Fps, SurfaceDmabufFeedback},
     utils::prelude::*,
     wayland::{
-        handlers::screencopy::{render_session, UserdataExt},
-        protocols::screencopy::{BufferParams, Session as ScreencopySession},
+        handlers::screencopy::{submit_buffer, FrameHolder, SessionData},
+        protocols::screencopy::{
+            FailureReason, Frame as ScreencopyFrame, Session as ScreencopySession,
+        },
     },
 };
 
 use anyhow::{Context, Result};
-use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::FailureReason;
 use libc::dev_t;
 use smithay::{
     backend::{
@@ -31,8 +35,8 @@ use smithay::{
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
             buffer_dimensions,
-            damage::{Error as RenderError, RenderOutputResult},
-            element::Element,
+            damage::Error as RenderError,
+            element::{Element, RenderElementStates},
             gles::GlesRenderbuffer,
             glow::GlowRenderer,
             multigpu::{gbm::GbmGlesBackend, Error as MultiError, GpuManager},
@@ -66,7 +70,7 @@ use smithay::{
             Client, DisplayHandle, Weak,
         },
     },
-    utils::{DeviceFd, Size, Transform},
+    utils::{Buffer as BufferCoords, DeviceFd, Physical, Rectangle, Size, Transform},
     wayland::{
         dmabuf::{get_dmabuf, DmabufFeedbackBuilder, DmabufGlobal},
         drm_lease::{DrmLease, DrmLeaseState},
@@ -82,6 +86,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     path::PathBuf,
+    sync::mpsc::Receiver,
     time::Duration,
 };
 
@@ -92,6 +97,14 @@ use socket::*;
 use super::render::{element::AsGlowRenderer, init_shaders, CursorMode, GlMultiRenderer};
 // for now we assume we need at least 3ms
 const MIN_DISPLAY_TIME: Duration = Duration::from_millis(3);
+
+/*
+TODO Screencopy:
+- Fixup blit, include additional damage
+- Send accurate presentation time
+- Handle early exit no damage case
+- input...
+*/
 
 #[derive(Debug)]
 pub struct KmsState {
@@ -154,7 +167,10 @@ pub struct Surface {
 pub type GbmDrmCompositor = DrmCompositor<
     GbmAllocator<DrmDeviceFd>,
     GbmDevice<DrmDeviceFd>,
-    Option<OutputPresentationFeedback>,
+    Option<(
+        OutputPresentationFeedback,
+        Receiver<(ScreencopyFrame, Vec<Rectangle<i32, BufferCoords>>)>,
+    )>,
     DrmDeviceFd,
 >;
 
@@ -191,7 +207,6 @@ pub fn init_backend(
                 if let Err(err) = state.backend.kms().schedule_render(
                     &state.common.event_loop_handle,
                     output,
-                    None,
                     None,
                 ) {
                     error!(
@@ -328,16 +343,10 @@ pub fn init_backend(
                         surface.pending = false;
                     }
                     for output in state.common.shell.outputs() {
-                        let sessions = output.pending_buffers().collect::<Vec<_>>();
                         if let Err(err) = state.backend.kms().schedule_render(
                             &state.common.event_loop_handle,
                             output,
                             None,
-                            if !sessions.is_empty() {
-                                Some(sessions)
-                            } else {
-                                None
-                            },
                         ) {
                             error!(
                                 ?err,
@@ -472,7 +481,7 @@ impl State {
 
                                 match surface.surface.as_mut().map(|x| x.frame_submitted()) {
                                     Some(Ok(feedback)) => {
-                                        if let Some(mut feedback) = feedback.flatten() {
+                                        if let Some((mut feedback, frames)) = feedback.flatten() {
                                             let submit_time =
                                                 match metadata.take().map(|data| data.time) {
                                                     Some(DrmEventTime::Monotonic(tp)) => Some(tp),
@@ -511,6 +520,14 @@ impl State {
                                                 seq as u64,
                                                 flags,
                                             );
+
+                                            while let Ok((frame, damage)) = frames.recv() {
+                                                frame.success(
+                                                    surface.output.current_transform(),
+                                                    damage,
+                                                    clock,
+                                                );
+                                            }
                                         }
 
                                         surface.pending = false;
@@ -533,21 +550,11 @@ impl State {
                         };
 
                         if let Some((output, avg_time)) = rescheduled {
-                            let mut scheduled_sessions =
-                                state.workspace_session_for_output(&output);
-                            let mut output_sessions = output.pending_buffers().peekable();
-                            if output_sessions.peek().is_some() {
-                                scheduled_sessions
-                                    .get_or_insert_with(Vec::new)
-                                    .extend(output_sessions);
-                            }
-
                             let _estimated_rendertime = std::cmp::max(avg_time, MIN_DISPLAY_TIME);
                             if let Err(err) = state.backend.kms().schedule_render(
                                 &state.common.event_loop_handle,
                                 &output,
                                 None, //Some(estimated_rendertime),
-                                scheduled_sessions,
                             ) {
                                 warn!(?err, "Failed to schedule render.");
                             }
@@ -1160,7 +1167,6 @@ impl Surface {
         render_node: Option<&DrmNode>,
         target_node: &DrmNode,
         state: &mut Common,
-        screencopy: Option<&[(ScreencopySession, BufferParams)]>,
     ) -> Result<()> {
         if self.surface.is_none() {
             return Ok(());
@@ -1192,7 +1198,7 @@ impl Surface {
             .map(|((w, start), idx)| (w.handle, idx, start));
         let workspace = (workspace.handle, idx);
 
-        let elements = workspace_elements(
+        let mut elements = workspace_elements(
             Some(&render_node),
             &mut renderer,
             state,
@@ -1208,6 +1214,65 @@ impl Surface {
         })?;
         self.fps.elements();
 
+        let frames: Vec<(
+            ScreencopySession,
+            ScreencopyFrame,
+            Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), OutputNoMode>,
+        )> = self
+            .output
+            .take_pending_frames()
+            .into_iter()
+            .map(|(session, frame)| {
+                let additional_damage = frame.damage();
+                let session_data = session.user_data().get::<SessionData>().unwrap();
+                let mut damage_tracking = session_data.borrow_mut();
+
+                let old_len = if !additional_damage.is_empty() {
+                    let area = self
+                        .output
+                        .current_mode()
+                        .unwrap()
+                        /* TODO: Mode is Buffer..., why is this Physical in the first place */
+                        .size
+                        .to_logical(1)
+                        .to_buffer(1, Transform::Normal)
+                        .to_f64();
+
+                    let old_len = elements.len();
+                    elements.extend(
+                        additional_damage
+                            .into_iter()
+                            .map(|rect| {
+                                rect.to_f64()
+                                    .to_logical(
+                                        self.output.current_scale().fractional_scale(),
+                                        self.output.current_transform(),
+                                        &area,
+                                    )
+                                    .to_i32_round()
+                            })
+                            .map(DamageElement::new)
+                            .map(Into::into),
+                    );
+
+                    Some(old_len)
+                } else {
+                    None
+                };
+
+                let buffer = frame.buffer();
+                let age = damage_tracking.age_for_buffer(&buffer);
+                let res = damage_tracking.dt.damage_output(age, &elements);
+
+                if let Some(old_len) = old_len {
+                    elements.truncate(old_len);
+                }
+
+                std::mem::drop(damage_tracking);
+                (session, frame, res)
+            })
+            .collect();
+
         let res = compositor.render_frame(
             &mut renderer,
             &elements,
@@ -1217,8 +1282,13 @@ impl Surface {
 
         match res {
             Ok(frame_result) => {
+                let (tx, rx) = std::sync::mpsc::channel();
+
                 let feedback = if !frame_result.is_empty {
-                    Some(state.take_presentation_feedback(&self.output, &frame_result.states))
+                    Some((
+                        state.take_presentation_feedback(&self.output, &frame_result.states),
+                        rx,
+                    ))
                 } else {
                     None
                 };
@@ -1228,93 +1298,152 @@ impl Surface {
                         elem.sync.wait();
                     }
                 }
+
                 match compositor.queue_frame(feedback) {
-                    Ok(()) => {
-                        self.pending = true;
-                    }
-                    Err(FrameError::EmptyFrame) => {
-                        tracing::debug!("Stopped rendering");
-                    }
-                    Err(err) => {
-                        return Err(err).with_context(|| "Failed to submit result for display")
-                    }
-                };
+                    x @ Ok(()) | x @ Err(FrameError::EmptyFrame) => {
+                        for (session, frame, res) in frames {
+                            let damage = match res {
+                                Ok((damage, _)) => damage,
+                                Err(err) => {
+                                    tracing::warn!(?err, "Failed to screencopy");
+                                    session
+                                        .user_data()
+                                        .get::<SessionData>()
+                                        .unwrap()
+                                        .borrow_mut()
+                                        .reset();
+                                    frame.fail(FailureReason::Unknown);
+                                    continue;
+                                }
+                            };
 
-                if let Some(screencopy) = screencopy {
-                    for (session, params) in screencopy {
-                        match render_session(
-                            Some(*render_node),
-                            &mut renderer,
-                            &session,
-                            params,
-                            self.output.current_transform(),
-                            |_node, buffer, renderer, dt, age| {
-                                let res = dt.damage_output(age, &elements)?;
+                            let mut sync = SyncPoint::default();
 
-                                let mut sync = SyncPoint::default();
-                                if let (Some(ref damage), _) = &res {
-                                    if let Ok(dmabuf) = get_dmabuf(buffer) {
-                                        renderer.bind(dmabuf).map_err(RenderError::Rendering)?;
-                                    } else {
-                                        let size = buffer_dimensions(buffer).ok_or(
-                                            RenderError::Rendering(MultiError::ImportFailed),
-                                        )?;
-                                        let format =
-                                            with_buffer_contents(buffer, |_, _, data| shm_format_to_fourcc(data.format))
-                                                .map_err(|_| OutputNoMode)? // eh, we have to do some error
-                                                .expect("We should be able to convert all hardcoded shm screencopy formats");
-                                        let render_buffer =
-                                            Offscreen::<GlesRenderbuffer>::create_buffer(
-                                                renderer, format, size,
-                                            )
-                                            .map_err(RenderError::Rendering)?;
-                                        renderer
-                                            .bind(render_buffer)
-                                            .map_err(RenderError::Rendering)?;
-                                    }
-
-                                    let (output_size, output_scale, output_transform) = (
-                                        self.output.current_mode().ok_or(OutputNoMode)?.size,
-                                        self.output.current_scale().fractional_scale(),
-                                        self.output.current_transform(),
-                                    );
-                                    sync = frame_result
-                                        .blit_frame_result(
-                                            output_size,
-                                            output_transform,
-                                            output_scale,
-                                            renderer,
-                                            damage.iter().copied(),
-                                            // TODO: Filter cursor element
-                                            elements.iter().map(|e| e.id().clone()),
+                            if let Some(ref damage) = damage {
+                                let buffer = frame.buffer();
+                                if let Ok(dmabuf) = get_dmabuf(&buffer) {
+                                    renderer
+                                        .bind(dmabuf)
+                                        .map_err(RenderError::<GlMultiRenderer>::Rendering)?;
+                                } else {
+                                    let size = buffer_dimensions(&buffer).ok_or(RenderError::<
+                                        GlMultiRenderer,
+                                    >::Rendering(
+                                        MultiError::ImportFailed,
+                                    ))?;
+                                    let format =
+                                        with_buffer_contents(&buffer, |_, _, data| shm_format_to_fourcc(data.format))
+                                            .map_err(|_| OutputNoMode)? // eh, we have to do some error
+                                            .expect("We should be able to convert all hardcoded shm screencopy formats");
+                                    let render_buffer =
+                                        Offscreen::<GlesRenderbuffer>::create_buffer(
+                                            &mut renderer,
+                                            format,
+                                            size,
                                         )
-                                        .map_err(|err| match err {
-                                            BlitFrameResultError::Rendering(err) => {
-                                                RenderError::Rendering(err)
-                                            }
-                                            BlitFrameResultError::Export(_) => {
-                                                RenderError::Rendering(MultiError::DeviceMissing)
-                                            }
-                                        })?;
+                                        .map_err(RenderError::<GlMultiRenderer>::Rendering)?;
+                                    renderer
+                                        .bind(render_buffer)
+                                        .map_err(RenderError::<GlMultiRenderer>::Rendering)?;
                                 }
 
-                                Ok(RenderOutputResult {
-                                    damage: res.0,
-                                    states: res.1,
-                                    sync,
-                                })
-                            },
-                        ) {
-                            Ok(true) => {} // success
-                            Ok(false) => state.still_pending(session.clone(), params.clone()),
-                            Err(err) => {
-                                warn!(?err, "Error rendering to screencopy session.");
-                                session.failed(FailureReason::Unspec);
+                                let (output_size, output_scale, output_transform) = (
+                                    self.output.current_mode().ok_or(OutputNoMode)?.size,
+                                    self.output.current_scale().fractional_scale(),
+                                    self.output.current_transform(),
+                                );
+
+                                let filter = (!session.draw_cursor())
+                                    .then(|| {
+                                        elements.iter().filter_map(|elem| {
+                                            if let CosmicElement::Cursor(_) = elem {
+                                                Some(elem.id().clone())
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                    })
+                                    .into_iter()
+                                    .flatten();
+
+                                match frame_result
+                                    .blit_frame_result(
+                                        output_size,
+                                        output_transform,
+                                        output_scale,
+                                        &mut renderer,
+                                        damage.iter().copied(),
+                                        filter,
+                                    )
+                                    .map_err(|err| match err {
+                                        BlitFrameResultError::Rendering(err) => {
+                                            RenderError::<GlMultiRenderer>::Rendering(err)
+                                        }
+                                        BlitFrameResultError::Export(_) => {
+                                            RenderError::<GlMultiRenderer>::Rendering(
+                                                MultiError::DeviceMissing,
+                                            )
+                                        }
+                                    }) {
+                                    Ok(new_sync) => {
+                                        sync = new_sync;
+                                    }
+                                    Err(err) => {
+                                        tracing::warn!(?err, "Failed to screencopy");
+                                        session
+                                            .user_data()
+                                            .get::<SessionData>()
+                                            .unwrap()
+                                            .borrow_mut()
+                                            .reset();
+                                        frame.fail(FailureReason::Unknown);
+                                        continue;
+                                    }
+                                };
+                            }
+
+                            let transform = self.output.current_transform();
+
+                            match submit_buffer(frame, &mut renderer, transform, damage, sync) {
+                                Ok(Some((frame, damage))) => {
+                                    if frame_result.is_empty {
+                                        frame.success(transform, damage, state.clock.now());
+                                    } else {
+                                        let _ = tx.send((frame, damage));
+                                    }
+                                }
+                                Ok(None) => {}
+                                Err(err) => {
+                                    session
+                                        .user_data()
+                                        .get::<SessionData>()
+                                        .unwrap()
+                                        .borrow_mut()
+                                        .reset();
+                                    tracing::warn!(?err, "Failed to screencopy");
+                                }
                             }
                         }
+
+                        if x.is_ok() {
+                            self.pending = true;
+                        } else {
+                            tracing::debug!("Stopped rendering");
+                        }
                     }
-                    self.fps.screencopy();
-                }
+                    Err(err) => {
+                        for (session, frame, _) in frames {
+                            session
+                                .user_data()
+                                .get::<SessionData>()
+                                .unwrap()
+                                .borrow_mut()
+                                .reset();
+                            frame.fail(FailureReason::Unknown);
+                        }
+                        return Err(err).with_context(|| "Failed to submit result for display");
+                    }
+                };
 
                 state.send_frames(&self.output, &frame_result.states, |source_node| {
                     Some(
@@ -1494,17 +1623,7 @@ impl KmsState {
         };
 
         if recreated {
-            let sessions = output.pending_buffers().collect::<Vec<_>>();
-            if let Err(err) = self.schedule_render(
-                loop_handle,
-                output,
-                None,
-                if !sessions.is_empty() {
-                    Some(sessions)
-                } else {
-                    None
-                },
-            ) {
+            if let Err(err) = self.schedule_render(loop_handle, output, None) {
                 error!(
                     ?err,
                     "Error scheduling event loop for output {}.",
@@ -1592,7 +1711,6 @@ impl KmsState {
         loop_handle: &LoopHandle<'_, State>,
         output: &Output,
         estimated_rendertime: Option<Duration>,
-        mut screencopy_sessions: Option<Vec<(ScreencopySession, BufferParams)>>,
     ) -> Result<(), InsertError<Timer>> {
         if let Some((device, crtc, surface)) = self
             .devices
@@ -1601,13 +1719,6 @@ impl KmsState {
             .find(|(_, _, s)| s.output == *output)
         {
             if surface.surface.is_none() {
-                if let Some(sessions) = screencopy_sessions {
-                    loop_handle.insert_idle(move |state| {
-                        for (session, params) in sessions.into_iter() {
-                            state.common.still_pending(session, params);
-                        }
-                    });
-                }
                 return Ok(());
             }
             if !surface.scheduled && !surface.pending {
@@ -1655,16 +1766,9 @@ impl KmsState {
                                     Some(&render_device.render_node),
                                     &target_node,
                                     common,
-                                    screencopy_sessions.as_deref(),
                                 )
                             } else {
-                                surface.render_output(
-                                    &mut backend.api,
-                                    None,
-                                    &target_node,
-                                    common,
-                                    screencopy_sessions.as_deref(),
-                                )
+                                surface.render_output(&mut backend.api, None, &target_node, common)
                             };
 
                             profiling::finish_frame!();
@@ -1687,24 +1791,11 @@ impl KmsState {
                             };
                         }
 
-                        if let Some(sessions) = screencopy_sessions.as_mut() {
-                            for (session, params) in sessions.drain(..) {
-                                state.common.still_pending(session, params);
-                            }
-                        }
                         TimeoutAction::Drop
                     },
                 )?);
                 trace!(?surface.render_timer_token, ?crtc, "Frame scheduled");
                 surface.scheduled = true;
-            } else {
-                if let Some(sessions) = screencopy_sessions {
-                    loop_handle.insert_idle(|state| {
-                        for (session, params) in sessions.into_iter() {
-                            state.common.still_pending(session, params);
-                        }
-                    });
-                }
             }
         }
         Ok(())

@@ -9,6 +9,7 @@ pub mod dmabuf;
 pub mod drm;
 pub mod drm_lease;
 pub mod fractional_scale;
+pub mod image_source;
 pub mod input_method;
 pub mod keyboard_shortcuts_inhibit;
 pub mod layer_shell;
