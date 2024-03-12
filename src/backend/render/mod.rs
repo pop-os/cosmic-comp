@@ -11,6 +11,7 @@ use std::{
 #[cfg(feature = "debug")]
 use crate::debug::{fps_ui, profiler_ui};
 use crate::{
+    backend::render::element::DamageElement,
     shell::{
         focus::target::WindowGroup,
         grabs::{SeatMenuGrabState, SeatMoveGrabState},
@@ -23,19 +24,13 @@ use crate::{
     wayland::{
         handlers::{
             data_device::get_dnd_icon,
-            screencopy::{render_session, WORKSPACE_OVERVIEW_NAMESPACE},
+            screencopy::{render_session, FrameHolder, SessionData, WORKSPACE_OVERVIEW_NAMESPACE},
         },
-        protocols::{
-            screencopy::{
-                BufferParams, CursorMode as ScreencopyCursorMode, Session as ScreencopySession,
-            },
-            workspace::WorkspaceHandle,
-        },
+        protocols::workspace::WorkspaceHandle,
     },
 };
 
 use cosmic_comp_config::workspace::WorkspaceLayout;
-use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::FailureReason;
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     backend::{
@@ -61,7 +56,7 @@ use smithay::{
     },
     desktop::{layer_map_for_output, PopupManager},
     output::{Output, OutputNoMode},
-    utils::{IsAlive, Logical, Point, Rectangle, Scale},
+    utils::{IsAlive, Logical, Point, Rectangle, Scale, Transform},
     wayland::{
         dmabuf::get_dmabuf,
         shell::wlr_layer::Layer,
@@ -71,7 +66,6 @@ use smithay::{
 use tracing::warn;
 
 pub mod cursor;
-use self::cursor::CursorRenderElement;
 pub mod element;
 use self::element::{AsGlowRenderer, CosmicElement};
 
@@ -388,17 +382,16 @@ pub enum CursorMode {
     All,
 }
 
-pub fn cursor_elements<'frame, E, R>(
+pub fn cursor_elements<'frame, R>(
     renderer: &mut R,
     state: &Common,
     output: &Output,
     mode: CursorMode,
-) -> Vec<E>
+) -> Vec<CosmicElement<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
-    E: From<CursorRenderElement<R>> + From<CosmicMappedRenderElement<R>>,
 {
     #[cfg(feature = "debug")]
     puffin::profile_function!();
@@ -424,7 +417,13 @@ where
                     mode != CursorMode::NotDefault,
                 )
                 .into_iter()
-                .map(E::from),
+                .map(|(elem, hotspot)| {
+                    CosmicElement::Cursor(RelocateRenderElement::from_element(
+                        elem,
+                        Point::from((-hotspot.x, -hotspot.y)),
+                        Relocate::Relative,
+                    ))
+                }),
             );
         }
 
@@ -432,7 +431,7 @@ where
             elements.extend(
                 cursor::draw_dnd_icon(renderer, &wl_surface, location.to_i32_round(), scale)
                     .into_iter()
-                    .map(E::from),
+                    .map(CosmicElement::Dnd),
             );
         }
 
@@ -443,7 +442,7 @@ where
             .unwrap()
             .borrow()
             .as_ref()
-            .map(|state| state.render::<E, R>(renderer, seat, output, theme))
+            .map(|state| state.render::<CosmicElement<R>, R>(renderer, seat, output, theme))
         {
             elements.extend(grab_elements);
         }
@@ -964,7 +963,7 @@ where
     }
 }
 
-pub fn render_output<R, Target, OffTarget, Source>(
+pub fn render_output<R, Target, OffTarget>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,
     target: Target,
@@ -973,7 +972,6 @@ pub fn render_output<R, Target, OffTarget, Source>(
     state: &mut Common,
     output: &Output,
     cursor_mode: CursorMode,
-    screencopy: Option<(Source, &[(ScreencopySession, BufferParams)])>,
     fps: Option<&mut Fps>,
 ) -> Result<RenderOutputResult, RenderError<R>>
 where
@@ -984,14 +982,14 @@ where
         + Bind<Dmabuf>
         + Bind<Target>
         + Offscreen<OffTarget>
-        + Blit<Source>
+        + Blit<Target>
         + AsGlowRenderer,
     <R as Renderer>::TextureId: Clone + 'static,
     <R as Renderer>::Error: From<GlesError>,
     CosmicElement<R>: RenderElement<R>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
-    Source: Clone,
+    Target: Clone,
 {
     let (previous_workspace, workspace) = state.shell.workspaces.active(output);
     let (previous_idx, idx) = state.shell.workspaces.active_num(output);
@@ -1003,37 +1001,127 @@ where
     let result = render_workspace(
         gpu,
         renderer,
-        target,
+        target.clone(),
         damage_tracker,
         age,
+        None,
         state,
         output,
         previous_workspace,
         workspace,
         cursor_mode,
-        screencopy,
         fps,
         false,
     );
 
-    result
+    match result {
+        Ok((res, mut elements)) => {
+            for (session, frame) in output.take_pending_frames() {
+                if let Some((frame, damage)) = render_session(
+                    renderer,
+                    &session.user_data().get::<SessionData>().unwrap(),
+                    frame,
+                    output.current_transform(),
+                    |buffer, renderer, dt, age, additional_damage| {
+                        let old_len = if !additional_damage.is_empty() {
+                            let area = output
+                                .current_mode()
+                                .ok_or(RenderError::OutputNoMode(OutputNoMode))
+                                .map(
+                                    |mode| {
+                                        mode.size
+                                            .to_logical(1)
+                                            .to_buffer(1, Transform::Normal)
+                                            .to_f64()
+                                    }, /* TODO: Mode is Buffer..., why is this Physical in the first place */
+                                )?;
+
+                            let old_len = elements.len();
+                            elements.extend(
+                                additional_damage
+                                    .into_iter()
+                                    .map(|rect| {
+                                        rect.to_f64()
+                                            .to_logical(
+                                                output.current_scale().fractional_scale(),
+                                                output.current_transform(),
+                                                &area,
+                                            )
+                                            .to_i32_round()
+                                    })
+                                    .map(DamageElement::new)
+                                    .map(Into::into),
+                            );
+
+                            Some(old_len)
+                        } else {
+                            None
+                        };
+
+                        let res = dt.damage_output(age, &elements)?;
+
+                        if let Some(old_len) = old_len {
+                            elements.truncate(old_len);
+                        }
+
+                        if let (Some(ref damage), _) = &res {
+                            if let Ok(dmabuf) = get_dmabuf(buffer) {
+                                renderer.bind(dmabuf).map_err(RenderError::Rendering)?;
+                            } else {
+                                let size = buffer_dimensions(buffer).unwrap();
+                                let format = with_buffer_contents(buffer, |_, _, data| {
+                                    shm_format_to_fourcc(data.format)
+                                })
+                                .map_err(|_| OutputNoMode)? // eh, we have to do some error
+                                .expect(
+                                    "We should be able to convert all hardcoded shm screencopy formats",
+                                );
+                                let render_buffer = renderer
+                                    .create_buffer(format, size)
+                                    .map_err(RenderError::Rendering)?;
+                                renderer
+                                    .bind(render_buffer)
+                                    .map_err(RenderError::Rendering)?;
+                            }
+                            for rect in damage {
+                                renderer
+                                    .blit_from(target.clone(), *rect, *rect, TextureFilter::Nearest)
+                                    .map_err(RenderError::Rendering)?;
+                            }
+                        }
+
+                        Ok(RenderOutputResult {
+                            damage: res.0,
+                            sync: SyncPoint::default(),
+                            states: res.1,
+                        })
+                    },
+                )? {
+                    frame.success(output.current_transform(), damage, state.clock.now());
+                }
+            }
+
+            Ok(res)
+        }
+        Err(err) => Err(err),
+    }
 }
 
-pub fn render_workspace<R, Target, OffTarget, Source>(
+pub fn render_workspace<R, Target, OffTarget>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,
     target: Target,
     damage_tracker: &mut OutputDamageTracker,
     age: usize,
+    additional_damage: Option<Vec<Rectangle<i32, Logical>>>,
     state: &mut Common,
     output: &Output,
     previous: Option<(WorkspaceHandle, usize, Instant)>,
     current: (WorkspaceHandle, usize),
-    mut cursor_mode: CursorMode,
-    screencopy: Option<(Source, &[(ScreencopySession, BufferParams)])>,
+    cursor_mode: CursorMode,
     mut fps: Option<&mut Fps>,
     exclude_workspace_overview: bool,
-) -> Result<RenderOutputResult, RenderError<R>>
+) -> Result<(RenderOutputResult, Vec<CosmicElement<R>>), RenderError<R>>
 where
     R: Renderer
         + ImportAll
@@ -1042,14 +1130,12 @@ where
         + Bind<Dmabuf>
         + Bind<Target>
         + Offscreen<OffTarget>
-        + Blit<Source>
         + AsGlowRenderer,
     <R as Renderer>::TextureId: Clone + 'static,
     <R as Renderer>::Error: From<GlesError>,
     CosmicElement<R>: RenderElement<R>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
-    Source: Clone,
 {
     #[cfg(feature = "debug")]
     puffin::profile_function!();
@@ -1065,22 +1151,7 @@ where
         }
     }
 
-    let screencopy_contains_embedded = screencopy.as_ref().map_or(false, |(_, sessions)| {
-        sessions
-            .iter()
-            .any(|(s, _)| s.cursor_mode() == ScreencopyCursorMode::Embedded)
-    });
-    // cursor handling without a cursor_plane in this case is horrible.
-    // because what if some session disagree and/or the backend wants to render with a different mode?
-    // It seems we would need to render to an offscreen buffer in those cases (and do multiple renders, which messes with damage tracking).
-    // So for now, we just pick the worst mode (embedded), if any requires it.
-    //
-    // Once we move to a cursor_plane, the default framebuffer will never contain a cursor and we can just composite the cursor for each session separately on top (or not).
-    if screencopy_contains_embedded {
-        cursor_mode = CursorMode::All;
-    };
-
-    let elements: Vec<CosmicElement<R>> = workspace_elements(
+    let mut elements: Vec<CosmicElement<R>> = workspace_elements(
         gpu,
         renderer,
         state,
@@ -1091,6 +1162,18 @@ where
         &mut fps,
         exclude_workspace_overview,
     )?;
+
+    if let Some(additional_damage) = additional_damage {
+        let output_geo = output.geometry().to_local(&output).as_logical();
+        elements.extend(
+            additional_damage
+                .into_iter()
+                .filter_map(|rect| rect.intersection(output_geo))
+                .map(DamageElement::new)
+                .map(Into::<CosmicElement<R>>::into),
+        );
+    }
+
     if let Some(fps) = fps.as_mut() {
         fps.elements();
     }
@@ -1107,62 +1190,6 @@ where
         fps.render();
     }
 
-    if let Some((source, buffers)) = screencopy {
-        if res.is_ok() {
-            for (session, params) in buffers {
-                match render_session(
-                    gpu.cloned(),
-                    renderer,
-                    &session,
-                    params,
-                    output.current_transform(),
-                    |_node, buffer, renderer, dt, age| {
-                        let res = dt.damage_output(age, &elements)?;
-
-                        if let (Some(ref damage), _) = &res {
-                            if let Ok(dmabuf) = get_dmabuf(buffer) {
-                                renderer.bind(dmabuf).map_err(RenderError::Rendering)?;
-                            } else {
-                                let size = buffer_dimensions(buffer).unwrap();
-                                let format =
-                                            with_buffer_contents(buffer, |_, _, data| shm_format_to_fourcc(data.format))
-                                                .map_err(|_| OutputNoMode)? // eh, we have to do some error
-                                                .expect("We should be able to convert all hardcoded shm screencopy formats");
-                                let render_buffer = renderer
-                                    .create_buffer(format, size)
-                                    .map_err(RenderError::Rendering)?;
-                                renderer
-                                    .bind(render_buffer)
-                                    .map_err(RenderError::Rendering)?;
-                            }
-                            for rect in damage {
-                                renderer
-                                    .blit_from(source.clone(), *rect, *rect, TextureFilter::Nearest)
-                                    .map_err(RenderError::Rendering)?;
-                            }
-                        }
-
-                        Ok(RenderOutputResult {
-                            damage: res.0,
-                            sync: SyncPoint::default(),
-                            states: res.1,
-                        })
-                    },
-                ) {
-                    Ok(true) => {} // success
-                    Ok(false) => state.still_pending(session.clone(), params.clone()),
-                    Err(err) => {
-                        warn!(?err, "Error rendering to screencopy session.");
-                        session.failed(FailureReason::Unspec);
-                    }
-                }
-            }
-        }
-        if let Some(fps) = fps.as_mut() {
-            fps.screencopy();
-        }
-    }
-
     #[cfg(feature = "debug")]
     if let Some(ref mut fps) = fps {
         if let Some(rd) = fps.rd.as_mut() {
@@ -1175,5 +1202,5 @@ where
         puffin::GlobalProfiler::lock().new_frame();
     }
 
-    res
+    res.map(|res| (res, elements))
 }

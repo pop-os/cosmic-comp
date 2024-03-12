@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 pub mod drm;
-//pub mod export_dmabuf;
+pub mod image_source;
 pub mod output_configuration;
 pub mod screencopy;
 pub mod toplevel_info;

@@ -15,14 +15,13 @@ use crate::{
     state::Common,
     utils::prelude::*,
     wayland::{
-        handlers::{screencopy::ScreencopySessions, xdg_activation::ActivationContext},
-        protocols::screencopy::Session,
+        handlers::{screencopy::SessionHolder, xdg_activation::ActivationContext},
+        protocols::screencopy::{BufferConstraints, CursorSession},
     },
 };
 use calloop::{timer::Timer, RegistrationToken};
 use cosmic_comp_config::{workspace::WorkspaceLayout, TileBehavior};
 use cosmic_config::ConfigSet;
-use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
 use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisSource, Device, DeviceCapability, GestureBeginEvent,
@@ -43,7 +42,10 @@ use smithay::{
         Seat, SeatState,
     },
     output::Output,
-    reexports::{input::Device as InputDevice, wayland_server::DisplayHandle},
+    reexports::{
+        input::Device as InputDevice,
+        wayland_server::{protocol::wl_shm::Format as ShmFormat, DisplayHandle},
+    },
     utils::{Point, Serial, SERIAL_COUNTER},
     wayland::{
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
@@ -772,18 +774,13 @@ impl State {
                     }
 
                     if output != current_output {
-                        for session in sessions_for_output(&self.common, &current_output) {
-                            session.cursor_leave(&seat, InputType::Pointer);
+                        for session in cursor_sessions_for_output(&self.common, &current_output) {
+                            session.set_cursor_pos(None);
                         }
-
-                        for session in sessions_for_output(&self.common, &output) {
-                            session.cursor_enter(&seat, InputType::Pointer);
-                        }
-
                         seat.set_active_output(&output);
                     }
 
-                    for session in sessions_for_output(&self.common, &output) {
+                    for session in cursor_sessions_for_output(&self.common, &output) {
                         if let Some((geometry, offset)) = seat.cursor_geometry(
                             position.as_logical().to_buffer(
                                 output.current_scale().fractional_scale(),
@@ -792,7 +789,19 @@ impl State {
                             ),
                             self.common.clock.now(),
                         ) {
-                            session.cursor_info(&seat, InputType::Pointer, geometry, offset);
+                            if session
+                                .current_constraints()
+                                .map(|constraint| constraint.size != geometry.size)
+                                .unwrap_or(true)
+                            {
+                                session.update_constraints(BufferConstraints {
+                                    size: geometry.size,
+                                    shm: vec![ShmFormat::Argb8888],
+                                    dma: None,
+                                });
+                            }
+                            session.set_cursor_hotspot(offset);
+                            session.set_cursor_pos(Some(geometry.loc));
                         }
                     }
                     #[cfg(feature = "debug")]
@@ -818,7 +827,7 @@ impl State {
                     let under = State::surface_under(position, &output, &mut self.common.shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
-                    for session in sessions_for_output(&self.common, &output) {
+                    for session in cursor_sessions_for_output(&self.common, &output) {
                         if let Some((geometry, offset)) = seat.cursor_geometry(
                             position.as_logical().to_buffer(
                                 output.current_scale().fractional_scale(),
@@ -827,7 +836,19 @@ impl State {
                             ),
                             self.common.clock.now(),
                         ) {
-                            session.cursor_info(&seat, InputType::Pointer, geometry, offset);
+                            if session
+                                .current_constraints()
+                                .map(|constraint| constraint.size != geometry.size)
+                                .unwrap_or(true)
+                            {
+                                session.update_constraints(BufferConstraints {
+                                    size: geometry.size,
+                                    shm: vec![ShmFormat::Argb8888],
+                                    dma: None,
+                                });
+                            }
+                            session.set_cursor_hotspot(offset);
+                            session.set_cursor_pos(Some(geometry.loc));
                         }
                     }
                     let ptr = seat.get_pointer().unwrap();
@@ -2274,51 +2295,22 @@ impl State {
     }
 }
 
-fn sessions_for_output(state: &Common, output: &Output) -> impl Iterator<Item = Session> {
+fn cursor_sessions_for_output(
+    state: &Common,
+    output: &Output,
+) -> impl Iterator<Item = CursorSession> {
     let workspace = state.shell.active_space(&output);
     let maybe_fullscreen = workspace.get_fullscreen();
     workspace
-        .screencopy_sessions
-        .iter()
-        .map(|s| (&**s).clone())
+        .cursor_sessions()
+        .into_iter()
         .chain(
             maybe_fullscreen
-                .as_ref()
-                .and_then(|w| {
-                    if let Some(sessions) = w.user_data().get::<ScreencopySessions>() {
-                        Some(
-                            sessions
-                                .0
-                                .borrow()
-                                .iter()
-                                .map(|s| (&**s).clone())
-                                .collect::<Vec<_>>(),
-                        )
-                    } else {
-                        None
-                    }
-                })
+                .map(|w| w.cursor_sessions())
                 .into_iter()
                 .flatten(),
         )
-        .chain(
-            output
-                .user_data()
-                .get::<ScreencopySessions>()
-                .map(|sessions| {
-                    sessions
-                        .0
-                        .borrow()
-                        .iter()
-                        .map(|s| (&**s).clone())
-                        .collect::<Vec<_>>()
-                })
-                .into_iter()
-                .into_iter()
-                .flatten(),
-        )
-        .collect::<Vec<_>>()
-        .into_iter()
+        .chain(output.cursor_sessions().into_iter())
 }
 
 // TODO Is it possible to determine mapping for external touchscreen?
