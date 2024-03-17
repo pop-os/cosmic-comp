@@ -207,13 +207,23 @@ impl Config {
             debug!("Trying config location: {}", path.display());
             if path.exists() {
                 info!("Using config at {}", path.display());
-                let mut config: StaticConfig =
-                    ron::de::from_reader(OpenOptions::new().read(true).open(path).unwrap())
-                        .expect("Malformed config file");
-
-                key_bindings::add_default_bindings(&mut config.key_bindings, workspace_layout);
-
-                return config;
+                let Ok(file) = OpenOptions::new().read(true).open(path) else {
+                    error!("Failed to open config file.");
+                    continue;
+                };
+                match ron::de::from_reader::<_, StaticConfig>(file) {
+                    Ok(mut config) => {
+                        key_bindings::add_default_bindings(
+                            &mut config.key_bindings,
+                            workspace_layout,
+                        );
+                        return config;
+                    }
+                    Err(err) => {
+                        error!("Malformed config file (skipping): {}", err);
+                        continue;
+                    }
+                }
             }
         }
 
