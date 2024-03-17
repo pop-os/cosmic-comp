@@ -227,10 +227,19 @@ impl Config {
             }
         }
 
-        StaticConfig {
-            key_bindings: HashMap::new(),
-            data_control_enabled: false,
-        }
+        info!("No config found, consider installing a config file. Using default mapping.");
+
+        let mut config = ron::from_str(include_str!("../../config.ron")).unwrap_or_else(|err| {
+            debug!("Failed to load internal default config: {}", err);
+            StaticConfig {
+                // Small usefull keybindings by default
+                key_bindings: HashMap::new(),
+                data_control_enabled: false,
+            }
+        });
+
+        key_bindings::add_default_bindings(&mut config.key_bindings, workspace_layout);
+        config
     }
 
     fn load_dynamic(xdg: Option<&xdg::BaseDirectories>) -> DynamicConfig {
