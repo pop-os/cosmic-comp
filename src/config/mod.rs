@@ -207,20 +207,39 @@ impl Config {
             debug!("Trying config location: {}", path.display());
             if path.exists() {
                 info!("Using config at {}", path.display());
-                let mut config: StaticConfig =
-                    ron::de::from_reader(OpenOptions::new().read(true).open(path).unwrap())
-                        .expect("Malformed config file");
-
-                key_bindings::add_default_bindings(&mut config.key_bindings, workspace_layout);
-
-                return config;
+                let Ok(file) = OpenOptions::new().read(true).open(path) else {
+                    error!("Failed to open config file.");
+                    continue;
+                };
+                match ron::de::from_reader::<_, StaticConfig>(file) {
+                    Ok(mut config) => {
+                        key_bindings::add_default_bindings(
+                            &mut config.key_bindings,
+                            workspace_layout,
+                        );
+                        return config;
+                    }
+                    Err(err) => {
+                        error!("Malformed config file (skipping): {}", err);
+                        continue;
+                    }
+                }
             }
         }
 
-        StaticConfig {
-            key_bindings: HashMap::new(),
-            data_control_enabled: false,
-        }
+        info!("No config found, consider installing a config file. Using default mapping.");
+
+        let mut config = ron::from_str(include_str!("../../config.ron")).unwrap_or_else(|err| {
+            debug!("Failed to load internal default config: {}", err);
+            StaticConfig {
+                // Small useful keybindings by default
+                key_bindings: HashMap::new(),
+                data_control_enabled: false,
+            }
+        });
+
+        key_bindings::add_default_bindings(&mut config.key_bindings, workspace_layout);
+        config
     }
 
     fn load_dynamic(xdg: Option<&xdg::BaseDirectories>) -> DynamicConfig {
