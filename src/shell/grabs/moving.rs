@@ -12,7 +12,8 @@ use crate::{
             CosmicMappedRenderElement,
         },
         focus::target::{KeyboardFocusTarget, PointerFocusTarget},
-        CosmicMapped, CosmicSurface, ManagedLayer,
+        layout::floating::TiledCorners,
+        CosmicMapped, CosmicSurface, Direction, ManagedLayer,
     },
     utils::prelude::*,
 };
@@ -27,7 +28,7 @@ use smithay::{
             ImportAll, ImportMem, Renderer,
         },
     },
-    desktop::space::SpaceElement,
+    desktop::{layer_map_for_output, space::SpaceElement},
     input::{
         pointer::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
@@ -55,6 +56,7 @@ pub struct MoveGrabState {
     indicator_thickness: u8,
     start: Instant,
     previous: ManagedLayer,
+    snapping_zone: Option<SnappingZone>,
     stacking_indicator: Option<(StackHover, Point<i32, Logical>)>,
 }
 
@@ -141,6 +143,30 @@ impl MoveGrabState {
             None
         };
 
+        let non_exclusive_geometry = {
+            let layers = layer_map_for_output(&output);
+            layers.non_exclusive_zone()
+        };
+
+        let snapping_indicator = match &self.snapping_zone {
+            Some(t) => vec![IndicatorShader::element(
+                renderer,
+                Key::Window(Usage::SnappingIndicator, self.window.clone()),
+                t.overlay_geometry(non_exclusive_geometry),
+                4,
+                8,
+                0.5,
+                output_scale.x,
+                [
+                    active_window_hint.red,
+                    active_window_hint.green,
+                    active_window_hint.blue,
+                ],
+            )
+            .into()],
+            None => vec![],
+        };
+
         let (window_elements, popup_elements) = self
             .window
             .split_render_elements::<R, CosmicMappedRenderElement<R>>(
@@ -188,6 +214,7 @@ impl MoveGrabState {
                 }
                 x => x,
             }))
+            .chain(snapping_indicator)
             .map(I::from)
             .collect()
     }
@@ -199,6 +226,58 @@ impl MoveGrabState {
 
 struct NotSend<T>(pub T);
 unsafe impl<T> Send for NotSend<T> {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SnappingZone {
+    TopMaxim,
+    TopSnap,
+    Left,
+    Right,
+    Bottom,
+}
+
+const SNAPPING_RANGE: i32 = 12;
+
+impl SnappingZone {
+    pub fn contains(
+        &self,
+        point: Point<i32, Logical>,
+        non_exclusive_geometry: Rectangle<i32, Logical>,
+        output_geometry: Rectangle<i32, Logical>,
+    ) -> bool {
+        if !output_geometry.contains(point) {
+            return false;
+        }
+        match self {
+            SnappingZone::TopMaxim => point.y < non_exclusive_geometry.loc.y + SNAPPING_RANGE,
+            SnappingZone::TopSnap => {
+                point.y < non_exclusive_geometry.loc.y + SNAPPING_RANGE * 2
+                    && point.y >= non_exclusive_geometry.loc.y + SNAPPING_RANGE
+            }
+            SnappingZone::Bottom => {
+                point.y
+                    > non_exclusive_geometry.loc.y + non_exclusive_geometry.size.h - SNAPPING_RANGE
+            }
+            SnappingZone::Left => point.x < non_exclusive_geometry.loc.x + SNAPPING_RANGE,
+            SnappingZone::Right => {
+                point.x
+                    > non_exclusive_geometry.loc.x + non_exclusive_geometry.size.w - SNAPPING_RANGE
+            }
+        }
+    }
+    pub fn overlay_geometry(
+        &self,
+        non_exclusive_geometry: Rectangle<i32, Logical>,
+    ) -> Rectangle<i32, Local> {
+        match self {
+            SnappingZone::TopMaxim => non_exclusive_geometry.as_local(),
+            SnappingZone::TopSnap => TiledCorners::Top.relative_geometry(non_exclusive_geometry),
+            SnappingZone::Left => TiledCorners::Left.relative_geometry(non_exclusive_geometry),
+            SnappingZone::Right => TiledCorners::Right.relative_geometry(non_exclusive_geometry),
+            SnappingZone::Bottom => TiledCorners::Bottom.relative_geometry(non_exclusive_geometry),
+        }
+    }
+}
 
 pub struct MoveGrab {
     window: CosmicMapped,
@@ -296,6 +375,31 @@ impl PointerGrab<State> for MoveGrab {
                     }
                     (element, geo.loc.as_logical())
                 });
+            }
+
+            // Check for overlapping with zones
+            if grab_state.previous == ManagedLayer::Floating {
+                let non_exclusive_geometry = {
+                    let layers = layer_map_for_output(&current_output);
+                    layers.non_exclusive_zone()
+                };
+                let total_geometry = current_output.geometry().as_logical();
+                grab_state.snapping_zone = vec![
+                    SnappingZone::TopMaxim,
+                    SnappingZone::TopSnap,
+                    SnappingZone::Left,
+                    SnappingZone::Right,
+                    SnappingZone::Bottom,
+                ]
+                .iter()
+                .find(|&x| {
+                    x.contains(
+                        handle.current_location().to_i32_floor(),
+                        non_exclusive_geometry,
+                        total_geometry,
+                    )
+                })
+                .cloned();
             }
         }
         drop(borrow);
@@ -454,6 +558,7 @@ impl MoveGrab {
             indicator_thickness,
             start: Instant::now(),
             stacking_indicator: None,
+            snapping_zone: None,
             previous: previous_layer,
         };
 
@@ -555,11 +660,35 @@ impl Drop for MoveGrab {
                                 window_location,
                                 grab_state.window.geometry().size.as_global(),
                             ));
+                            let theme = state.common.shell.theme.clone();
                             let workspace = state.common.shell.active_space_mut(&output);
                             let (window, location) = workspace.floating_layer.drop_window(
                                 grab_state.window,
                                 window_location.to_local(&workspace.output),
                             );
+
+                            if previous == ManagedLayer::Floating {
+                                if let Some(sz) = grab_state.snapping_zone {
+                                    if sz == SnappingZone::TopMaxim {
+                                        state.common.shell.maximize_toggle(&window, &seat);
+                                    } else {
+                                        let direction = match sz {
+                                            SnappingZone::TopSnap => Direction::Up,
+                                            SnappingZone::Bottom => Direction::Down,
+                                            SnappingZone::Left => Direction::Left,
+                                            SnappingZone::Right => Direction::Right,
+                                            _ => Direction::Up,
+                                        };
+                                        workspace.floating_layer.move_element(
+                                            direction,
+                                            &seat,
+                                            ManagedLayer::Floating,
+                                            theme,
+                                            &window,
+                                        );
+                                    }
+                                }
+                            }
                             Some((window, location.to_global(&output)))
                         }
                     }

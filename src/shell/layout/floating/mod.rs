@@ -894,41 +894,20 @@ impl FloatingLayout {
         res
     }
 
-    pub fn move_current_element<'a>(
+    pub fn move_element<'a>(
         &mut self,
         direction: Direction,
         seat: &Seat<State>,
         layer: ManagedLayer,
         theme: cosmic::Theme,
+        element: &CosmicMapped,
     ) -> MoveResult {
-        let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
-            return MoveResult::None;
-        };
-
-        let Some(focused) = (match target {
-            KeyboardFocusTarget::Popup(popup) => {
-                let Some(toplevel_surface) = (match popup {
-                    PopupKind::Xdg(xdg) => get_popup_toplevel(&xdg),
-                    PopupKind::InputMethod(_) => unreachable!(),
-                }) else {
-                    return MoveResult::None;
-                };
-                self.space
-                    .elements()
-                    .find(|elem| elem.wl_surface().as_ref() == Some(&toplevel_surface))
-            }
-            KeyboardFocusTarget::Element(elem) => self.space.elements().find(|e| *e == &elem),
-            _ => None,
-        }) else {
-            return MoveResult::None;
-        };
-
-        match focused.handle_move(direction) {
+        match element.handle_move(direction) {
             StackMoveResult::Handled => MoveResult::Done,
             StackMoveResult::MoveOut(surface, loop_handle) => {
                 let mapped: CosmicMapped = CosmicWindow::new(surface, loop_handle, theme).into();
                 let output = seat.active_output();
-                let pos = self.space.element_geometry(focused).unwrap().loc
+                let pos = self.space.element_geometry(element).unwrap().loc
                     + match direction {
                         Direction::Up => Point::from((5, -10)),
                         Direction::Down => Point::from((5, 10)),
@@ -950,7 +929,7 @@ impl FloatingLayout {
                 MoveResult::ShiftFocus(KeyboardFocusTarget::Element(mapped))
             }
             StackMoveResult::Default => {
-                let mut tiled_state = focused.floating_tiled.lock().unwrap();
+                let mut tiled_state = element.floating_tiled.lock().unwrap();
 
                 let output = self.space.outputs().next().unwrap().clone();
                 let layers = layer_map_for_output(&output);
@@ -959,10 +938,10 @@ impl FloatingLayout {
 
                 let current_geometry = self
                     .space
-                    .element_geometry(focused)
+                    .element_geometry(element)
                     .map(RectExt::as_local)
                     .unwrap();
-                let start_rectangle = if let Some(anim) = self.animations.remove(focused) {
+                let start_rectangle = if let Some(anim) = self.animations.remove(element) {
                     anim.geometry(output_geometry, current_geometry, tiled_state.as_ref())
                 } else {
                     current_geometry
@@ -995,7 +974,7 @@ impl FloatingLayout {
                         | Some(TiledCorners::BottomRight),
                     ) => {
                         return MoveResult::MoveFurther(KeyboardFocusTarget::Element(
-                            focused.clone(),
+                            element.clone(),
                         ));
                     }
 
@@ -1006,14 +985,14 @@ impl FloatingLayout {
                     | (Direction::Right, Some(TiledCorners::Left)) => {
                         std::mem::drop(tiled_state);
 
-                        let mut maximized_state = focused.maximized_state.lock().unwrap();
+                        let mut maximized_state = element.maximized_state.lock().unwrap();
                         *maximized_state = Some(MaximizedState {
                             original_geometry: start_rectangle,
                             original_layer: layer,
                         });
                         std::mem::drop(maximized_state);
 
-                        self.map_maximized(focused.clone(), start_rectangle, true);
+                        self.map_maximized(element.clone(), start_rectangle, true);
                         return MoveResult::Done;
                     }
 
@@ -1044,28 +1023,28 @@ impl FloatingLayout {
 
                 let new_geo = new_state.relative_geometry(output_geometry);
                 let (new_pos, new_size) = (new_geo.loc, new_geo.size);
-                focused.set_tiled(true); // TODO: More fine grained?
-                focused.set_maximized(false);
+                element.set_tiled(true); // TODO: More fine grained?
+                element.set_maximized(false);
 
                 if tiled_state.is_none() {
-                    let last_geometry = focused
+                    let last_geometry = element
                         .maximized_state
                         .lock()
                         .unwrap()
                         .take()
                         .map(|state| state.original_geometry)
-                        .or_else(|| self.space.element_geometry(focused).map(RectExt::as_local));
+                        .or_else(|| self.space.element_geometry(element).map(RectExt::as_local));
 
-                    *focused.last_geometry.lock().unwrap() = last_geometry;
+                    *element.last_geometry.lock().unwrap() = last_geometry;
                 }
 
                 *tiled_state = Some(new_state);
                 std::mem::drop(tiled_state);
 
-                focused.moved_since_mapped.store(true, Ordering::SeqCst);
-                let focused = focused.clone();
+                element.moved_since_mapped.store(true, Ordering::SeqCst);
+                let element = element.clone();
                 self.map_internal(
-                    focused,
+                    element,
                     Some(new_pos),
                     Some(new_size.as_logical()),
                     Some(start_rectangle),
@@ -1074,6 +1053,38 @@ impl FloatingLayout {
                 MoveResult::Done
             }
         }
+    }
+
+    pub fn move_current_element<'a>(
+        &mut self,
+        direction: Direction,
+        seat: &Seat<State>,
+        layer: ManagedLayer,
+        theme: cosmic::Theme,
+    ) -> MoveResult {
+        let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
+            return MoveResult::None;
+        };
+
+        let Some(focused) = (match target {
+            KeyboardFocusTarget::Popup(popup) => {
+                let Some(toplevel_surface) = (match popup {
+                    PopupKind::Xdg(xdg) => get_popup_toplevel(&xdg),
+                    PopupKind::InputMethod(_) => unreachable!(),
+                }) else {
+                    return MoveResult::None;
+                };
+                self.space
+                    .elements()
+                    .find(|elem| elem.wl_surface().as_ref() == Some(&toplevel_surface))
+            }
+            KeyboardFocusTarget::Element(elem) => self.space.elements().find(|x| *x == &elem),
+            _ => None,
+        }) else {
+            return MoveResult::None;
+        };
+
+        self.move_element(direction, seat, layer, theme, &focused.clone())
     }
 
     pub fn mapped(&self) -> impl Iterator<Item = &CosmicMapped> {

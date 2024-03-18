@@ -108,6 +108,7 @@ pub enum Usage {
     MoveGrabIndicator,
     FocusIndicator,
     PotentialGroupIndicator,
+    SnappingIndicator,
 }
 
 #[derive(Clone)]
