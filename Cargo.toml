@@ -109,3 +109,14 @@ lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
 smithay = {git = "https://github.com/smithay//smithay", rev = "c17297b"}
+
+[patch.crates-io]
+wayland-egl = { git = "https://github.com/drakulix/wayland-rs", branch = "ext-screencopy" }
+wayland-protocols = { git = "https://github.com/drakulix/wayland-rs", branch = "ext-screencopy" }
+wayland-protocols-wlr = { git = "https://github.com/drakulix/wayland-rs", branch = "ext-screencopy" }
+wayland-protocols-misc = { git = "https://github.com/drakulix/wayland-rs", branch = "ext-screencopy" }
+wayland-server = { git = "https://github.com/drakulix/wayland-rs", branch = "ext-screencopy" }
+wayland-client = { git = "https://github.com/drakulix/wayland-rs", branch = "ext-screencopy" }
+wayland-sys = { git = "https://github.com/drakulix/wayland-rs", branch = "ext-screencopy" }
+wayland-backend = { git = "https://github.com/drakulix/wayland-rs", branch = "ext-screencopy" }
+wayland-scanner = { git = "https://github.com/drakulix/wayland-rs", branch = "ext-screencopy" }

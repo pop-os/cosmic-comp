@@ -977,7 +977,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e16e44ab292b1dddfdaf7be62cfd8877df52f2f3fde5858d95bab606be259f20"
 dependencies = [
  "bitflags 2.4.2",
- "libloading 0.7.4",
+ "libloading 0.8.1",
  "winapi",
 ]
 
@@ -1148,7 +1148,7 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330c60081dcc4c72131f8eb70510f1ac07223e5d4163db481a04a0befcffa412"
 dependencies = [
- "libloading 0.7.4",
+ "libloading 0.8.1",
 ]
 
 [[package]]
@@ -3862,9 +3862,9 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
-version = "0.30.0"
+version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eff6510e86862b57b210fd8cbe8ed3f0d7d600b9c2863cd4549a2e033c66e956"
+checksum = "1004a344b30a54e2ee58d66a71b32d2db2feb0a31f9a2d302bf0536f15de2a33"
 dependencies = [
  "memchr",
 ]
@@ -5388,13 +5388,12 @@ dependencies = [
 
 [[package]]
 name = "wayland-backend"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19152ddd73f45f024ed4534d9ca2594e0ef252c1847695255dae47f34df9fbe4"
+version = "0.3.3"
+source = "git+https://github.com/drakulix/wayland-rs?branch=ext-screencopy#4f7eaa5498a4d59d937c6b2efd21553fb4aa0a9a"
 dependencies = [
  "cc",
  "downcast-rs",
- "nix 0.26.4",
+ "rustix 0.38.30",
  "scoped-tls",
  "smallvec",
  "wayland-sys",
@@ -5402,12 +5401,11 @@ dependencies = [
 
 [[package]]
 name = "wayland-client"
-version = "0.31.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ca7d52347346f5473bf2f56705f360e8440873052e575e55890c4fa57843ed3"
+version = "0.31.2"
+source = "git+https://github.com/drakulix/wayland-rs?branch=ext-screencopy#4f7eaa5498a4d59d937c6b2efd21553fb4aa0a9a"
 dependencies = [
  "bitflags 2.4.2",
- "nix 0.26.4",
+ "rustix 0.38.30",
  "wayland-backend",
  "wayland-scanner",
 ]
@@ -5437,8 +5435,7 @@ dependencies = [
 [[package]]
 name = "wayland-egl"
 version = "0.32.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "355f652e5a24ae02d2ad536c8fc2d3dcc6c2bd635027cd6103a193e7d75eeda2"
+source = "git+https://github.com/drakulix/wayland-rs?branch=ext-screencopy#4f7eaa5498a4d59d937c6b2efd21553fb4aa0a9a"
 dependencies = [
  "wayland-backend",
  "wayland-sys",
@@ -5447,8 +5444,7 @@ dependencies = [
 [[package]]
 name = "wayland-protocols"
 version = "0.31.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f81f365b8b4a97f422ac0e8737c438024b5951734506b0e1d775c73030561f4"
+source = "git+https://github.com/drakulix/wayland-rs?branch=ext-screencopy#4f7eaa5498a4d59d937c6b2efd21553fb4aa0a9a"
 dependencies = [
  "bitflags 2.4.2",
  "wayland-backend",
@@ -5460,8 +5456,7 @@ dependencies = [
 [[package]]
 name = "wayland-protocols-misc"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfa5933740b200188c9b4c38601b8212e8c154d7de0d2cb171944e137a77de1e"
+source = "git+https://github.com/drakulix/wayland-rs?branch=ext-screencopy#4f7eaa5498a4d59d937c6b2efd21553fb4aa0a9a"
 dependencies = [
  "bitflags 2.4.2",
  "wayland-backend",
@@ -5486,8 +5481,7 @@ dependencies = [
 [[package]]
 name = "wayland-protocols-wlr"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad1f61b76b6c2d8742e10f9ba5c3737f6530b4c243132c2a2ccc8aa96fe25cd6"
+source = "git+https://github.com/drakulix/wayland-rs?branch=ext-screencopy#4f7eaa5498a4d59d937c6b2efd21553fb4aa0a9a"
 dependencies = [
  "bitflags 2.4.2",
  "wayland-backend",
@@ -5499,9 +5493,8 @@ dependencies = [
 
 [[package]]
 name = "wayland-scanner"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb8e28403665c9f9513202b7e1ed71ec56fde5c107816843fb14057910b2c09c"
+version = "0.31.1"
+source = "git+https://github.com/drakulix/wayland-rs?branch=ext-screencopy#4f7eaa5498a4d59d937c6b2efd21553fb4aa0a9a"
 dependencies = [
  "proc-macro2",
  "quick-xml",
@@ -5510,14 +5503,13 @@ dependencies = [
 
 [[package]]
 name = "wayland-server"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f3f0c52a445936ca1184c98f1a69cf4ad9c9130788884531ef04428468cb1ce"
+version = "0.31.1"
+source = "git+https://github.com/drakulix/wayland-rs?branch=ext-screencopy#4f7eaa5498a4d59d937c6b2efd21553fb4aa0a9a"
 dependencies = [
  "bitflags 2.4.2",
  "downcast-rs",
  "io-lifetimes 2.0.3",
- "nix 0.26.4",
+ "rustix 0.38.30",
  "wayland-backend",
  "wayland-scanner",
 ]
@@ -5525,8 +5517,7 @@ dependencies = [
 [[package]]
 name = "wayland-sys"
 version = "0.31.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15a0c8eaff5216d07f226cb7a549159267f3467b289d9a2e52fd3ef5aae2b7af"
+source = "git+https://github.com/drakulix/wayland-rs?branch=ext-screencopy#4f7eaa5498a4d59d937c6b2efd21553fb4aa0a9a"
 dependencies = [
  "dlib",
  "libc",
@@ -5633,7 +5624,7 @@ dependencies = [
  "js-sys",
  "khronos-egl",
  "libc",
- "libloading 0.7.4",
+ "libloading 0.8.1",
  "log",
  "metal",
  "naga",
