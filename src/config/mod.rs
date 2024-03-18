@@ -232,7 +232,7 @@ impl Config {
         let mut config = ron::from_str(include_str!("../../config.ron")).unwrap_or_else(|err| {
             debug!("Failed to load internal default config: {}", err);
             StaticConfig {
-                // Small usefull keybindings by default
+                // Small useful keybindings by default
                 key_bindings: HashMap::new(),
                 data_control_enabled: false,
             }
