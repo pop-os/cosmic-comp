@@ -22,7 +22,7 @@ use smithay::{
             ImportAll, ImportMem, Renderer,
         },
     },
-    desktop::{space::SpaceElement, PopupManager, WindowSurfaceType},
+    desktop::{space::SpaceElement, PopupManager, WindowSurface, WindowSurfaceType},
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{
@@ -641,12 +641,13 @@ impl CosmicMapped {
                                         ui.label("App ID: ");
                                         ui.label(window.app_id());
                                     });
-                                    ui.label(match window {
-                                        CosmicSurface::Wayland(_) => "Protocol: Wayland",
-                                        CosmicSurface::X11(_) => "Protocol: X11",
-                                        _ => unreachable!(),
+                                    ui.label(match window.0.underlying_surface() {
+                                        WindowSurface::Wayland(_) => "Protocol: Wayland",
+                                        WindowSurface::X11(_) => "Protocol: X11",
                                     });
-                                    if let CosmicSurface::X11(ref surf) = window {
+                                    if let WindowSurface::X11(ref surf) =
+                                        window.0.underlying_surface()
+                                    {
                                         let geo = surf.geometry();
                                         ui.label(format!(
                                             "X11 Geo: {}x{}x{}x{}",

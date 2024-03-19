@@ -3,10 +3,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    shell::{
-        focus::target::{KeyboardFocusTarget, PointerFocusTarget},
-        CosmicSurface,
-    },
+    shell::focus::target::{KeyboardFocusTarget, PointerFocusTarget},
     state::{Common, Fps},
 };
 use egui::{load::SizedTexture, Color32, Vec2};
@@ -19,6 +16,7 @@ use smithay::{
             glow::GlowRenderer,
         },
     },
+    desktop::WindowSurface,
     input::keyboard::xkb,
     reexports::wayland_server::Resource,
     utils::{Logical, Rectangle},
@@ -307,19 +305,17 @@ fn format_pointer_focus(focus: Option<PointerFocusTarget>) -> String {
         Some(Element(x)) => match x {
             x if x.is_stack() => format!(
                 "Stacked Window {} ({})",
-                match x.active_window() {
-                    CosmicSurface::Wayland(w) => w.toplevel().wl_surface().id().protocol_id(),
-                    CosmicSurface::X11(x) => x.window_id(),
-                    _ => unreachable!(),
+                match x.active_window().0.underlying_surface() {
+                    WindowSurface::Wayland(t) => t.wl_surface().id().protocol_id(),
+                    WindowSurface::X11(x) => x.window_id(),
                 },
                 x.active_window().title()
             ),
             x if x.is_window() => format!(
                 "Window {} ({})",
-                match x.active_window() {
-                    CosmicSurface::Wayland(w) => w.toplevel().wl_surface().id().protocol_id(),
-                    CosmicSurface::X11(x) => x.window_id(),
-                    _ => unreachable!(),
+                match x.active_window().0.underlying_surface() {
+                    WindowSurface::Wayland(t) => t.wl_surface().id().protocol_id(),
+                    WindowSurface::X11(x) => x.window_id(),
                 },
                 x.active_window().title()
             ),
@@ -327,10 +323,9 @@ fn format_pointer_focus(focus: Option<PointerFocusTarget>) -> String {
         },
         Some(Fullscreen(x)) => format!(
             "Fullscreen {} ({})",
-            match &x {
-                CosmicSurface::Wayland(w) => w.toplevel().wl_surface().id().protocol_id(),
-                CosmicSurface::X11(x) => x.window_id(),
-                _ => unreachable!(),
+            match x.0.underlying_surface() {
+                WindowSurface::Wayland(t) => t.wl_surface().id().protocol_id(),
+                WindowSurface::X11(x) => x.window_id(),
             },
             x.title()
         ),
@@ -350,19 +345,17 @@ fn format_keyboard_focus(focus: Option<KeyboardFocusTarget>) -> String {
         Some(Element(x)) => match x {
             x if x.is_stack() => format!(
                 "Stacked Window {} ({})",
-                match x.active_window() {
-                    CosmicSurface::Wayland(w) => w.toplevel().wl_surface().id().protocol_id(),
-                    CosmicSurface::X11(x) => x.window_id(),
-                    _ => unreachable!(),
+                match x.active_window().0.underlying_surface() {
+                    WindowSurface::Wayland(t) => t.wl_surface().id().protocol_id(),
+                    WindowSurface::X11(x) => x.window_id(),
                 },
                 x.active_window().title()
             ),
             x if x.is_window() => format!(
                 "Window {} ({})",
-                match x.active_window() {
-                    CosmicSurface::Wayland(w) => w.toplevel().wl_surface().id().protocol_id(),
-                    CosmicSurface::X11(x) => x.window_id(),
-                    _ => unreachable!(),
+                match x.active_window().0.underlying_surface() {
+                    WindowSurface::Wayland(t) => t.wl_surface().id().protocol_id(),
+                    WindowSurface::X11(x) => x.window_id(),
                 },
                 x.active_window().title()
             ),
@@ -370,10 +363,9 @@ fn format_keyboard_focus(focus: Option<KeyboardFocusTarget>) -> String {
         },
         Some(Fullscreen(x)) => format!(
             "Fullscreen {} ({})",
-            match &x {
-                CosmicSurface::Wayland(w) => w.toplevel().wl_surface().id().protocol_id(),
-                CosmicSurface::X11(x) => x.window_id(),
-                _ => unreachable!(),
+            match x.0.underlying_surface() {
+                WindowSurface::Wayland(t) => t.wl_surface().id().protocol_id(),
+                WindowSurface::X11(x) => x.window_id(),
             },
             x.title()
         ),
