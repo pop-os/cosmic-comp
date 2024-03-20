@@ -39,7 +39,7 @@ impl SessionLockHandler for State {
 
         for output in self.common.shell.outputs() {
             self.backend
-                .schedule_render(&self.common.event_loop_handle, &output, None);
+                .schedule_render(&self.common.event_loop_handle, &output);
         }
     }
 
@@ -48,7 +48,7 @@ impl SessionLockHandler for State {
 
         for output in self.common.shell.outputs() {
             self.backend
-                .schedule_render(&self.common.event_loop_handle, &output, None);
+                .schedule_render(&self.common.event_loop_handle, &output);
         }
     }
 

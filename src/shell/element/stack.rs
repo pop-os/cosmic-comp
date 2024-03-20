@@ -12,7 +12,7 @@ use crate::{
         iced::{IcedElement, Program},
         prelude::*,
     },
-    wayland::handlers::screencopy::ScreencopySessions,
+    wayland::handlers::screencopy::SessionHolder,
 };
 use calloop::LoopHandle;
 use cosmic::{
@@ -22,7 +22,6 @@ use cosmic::{
     iced_widget::scrollable::AbsoluteOffset,
     theme, widget as cosmic_widget, Apply, Element as CosmicElement,
 };
-use cosmic_protocols::screencopy::v1::server::zcosmic_screencopy_session_v1::InputType;
 use once_cell::sync::Lazy;
 use smithay::{
     backend::{
@@ -60,6 +59,7 @@ use std::{
         atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
         Arc, Mutex,
     },
+    time::Duration,
 };
 
 mod tab;
@@ -492,17 +492,28 @@ impl CosmicStack {
             if previous != active {
                 let windows = p.windows.lock().unwrap();
                 if let Some(previous) = windows.get(previous) {
-                    if let Some(sessions) = previous.user_data().get::<ScreencopySessions>() {
-                        for session in &*sessions.0.borrow() {
-                            session.cursor_leave(seat, InputType::Pointer)
-                        }
+                    for session in previous.cursor_sessions() {
+                        session.set_cursor_pos(None);
                     }
                     PointerTarget::leave(previous, seat, data, serial, time);
                 }
 
-                if let Some(sessions) = windows[active].user_data().get::<ScreencopySessions>() {
-                    for session in &*sessions.0.borrow() {
-                        session.cursor_enter(seat, InputType::Pointer)
+                for session in windows[active].cursor_sessions() {
+                    session.set_cursor_pos(Some(
+                        location
+                            .to_buffer(
+                                1.0,
+                                Transform::Normal,
+                                &windows[active].geometry().size.to_f64(),
+                            )
+                            .to_i32_round(),
+                    ));
+                    if let Some((_, hotspot)) =
+                        seat.cursor_geometry((0.0, 0.0), Duration::from_millis(time as u64).into())
+                    {
+                        session.set_cursor_hotspot(hotspot);
+                    } else {
+                        session.set_cursor_hotspot((0, 0));
                     }
                 }
                 PointerTarget::enter(
@@ -1130,12 +1141,6 @@ impl PointerTarget<State> for CosmicStack {
         let mut event = event.clone();
         if self.0.with_program(|p| {
             let active_window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
-            if let Some(sessions) = active_window.user_data().get::<ScreencopySessions>() {
-                for session in &*sessions.0.borrow() {
-                    session.cursor_enter(seat, InputType::Pointer)
-                }
-            }
-
             let geo = active_window.geometry();
             let loc = event.location.to_i32_round::<i32>();
             let (old_focus, shape) = if loc.y - geo.loc.y < 0 && loc.x - geo.loc.x < 0 {
@@ -1179,11 +1184,33 @@ impl PointerTarget<State> for CosmicStack {
                 p.previous_pointer.store(active, Ordering::SeqCst);
 
                 PointerTarget::enter(active_window, seat, data, &event);
+
+                for session in active_window.cursor_sessions() {
+                    session.set_cursor_pos(Some(
+                        event
+                            .location
+                            .to_buffer(1.0, Transform::Normal, &geo.size.to_f64())
+                            .to_i32_round(),
+                    ));
+                    if let Some((_, hotspot)) = seat.cursor_geometry(
+                        (0.0, 0.0),
+                        Duration::from_millis(event.time as u64).into(),
+                    ) {
+                        session.set_cursor_hotspot(hotspot);
+                    } else {
+                        session.set_cursor_hotspot((0, 0));
+                    }
+                }
+
                 return false;
             };
 
             if old_focus == Focus::Window {
                 PointerTarget::leave(active_window, seat, data, event.serial, event.time);
+
+                for session in active_window.cursor_sessions() {
+                    session.set_cursor_pos(None);
+                }
             }
 
             let cursor_state = seat.user_data().get::<CursorState>().unwrap();
@@ -1212,17 +1239,6 @@ impl PointerTarget<State> for CosmicStack {
 
         let (previous, next) = self.0.with_program(|p| {
             let active_window = &p.windows.lock().unwrap()[active];
-            if let Some(sessions) = active_window.user_data().get::<ScreencopySessions>() {
-                for session in &*sessions.0.borrow() {
-                    let buffer_loc = (event.location.x, event.location.y); // we always screencast windows at 1x1 scale
-                    if let Some((geo, hotspot)) =
-                        seat.cursor_geometry(buffer_loc, data.common.clock.now())
-                    {
-                        session.cursor_info(seat, InputType::Pointer, geo, hotspot);
-                    }
-                }
-            }
-
             let geo = active_window.geometry();
             let loc = event.location.to_i32_round::<i32>();
             let (next, shape) = if loc.y - geo.loc.y < 0 && loc.x - geo.loc.x < 0 {
@@ -1256,12 +1272,33 @@ impl PointerTarget<State> for CosmicStack {
                     PointerTarget::motion(active_window, seat, data, &event);
                 }
 
+                for session in active_window.cursor_sessions() {
+                    session.set_cursor_pos(Some(
+                        event
+                            .location
+                            .to_buffer(1.0, Transform::Normal, &geo.size.to_f64())
+                            .to_i32_round(),
+                    ));
+                    if let Some((_, hotspot)) = seat.cursor_geometry(
+                        (0.0, 0.0),
+                        Duration::from_millis(event.time as u64).into(),
+                    ) {
+                        session.set_cursor_hotspot(hotspot);
+                    } else {
+                        session.set_cursor_hotspot((0, 0));
+                    }
+                }
+
                 return (previous, Focus::Window);
             };
 
             let previous = p.swap_focus(next);
             if previous == Focus::Window {
                 PointerTarget::leave(active_window, seat, data, event.serial, event.time);
+
+                for session in active_window.cursor_sessions() {
+                    session.set_cursor_pos(None);
+                }
             }
 
             let cursor_state = seat.user_data().get::<CursorState>().unwrap();
@@ -1477,13 +1514,10 @@ impl PointerTarget<State> for CosmicStack {
         }
 
         let previous = self.0.with_program(|p| {
-            if let Some(sessions) = p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)]
-                .user_data()
-                .get::<ScreencopySessions>()
+            for session in
+                p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].cursor_sessions()
             {
-                for session in &*sessions.0.borrow() {
-                    session.cursor_leave(seat, InputType::Pointer)
-                }
+                session.set_cursor_pos(None);
             }
 
             let cursor_state = seat.user_data().get::<CursorState>().unwrap();

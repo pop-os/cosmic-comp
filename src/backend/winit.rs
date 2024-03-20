@@ -6,7 +6,6 @@ use crate::{
     input::Devices,
     state::{BackendData, Common},
     utils::prelude::*,
-    wayland::protocols::screencopy::{BufferParams, Session as ScreencopySession},
 };
 use anyhow::{anyhow, Context, Result};
 use smithay::{
@@ -45,7 +44,6 @@ pub struct WinitState {
     pub backend: WinitGraphicsBackend<GlowRenderer>,
     output: Output,
     damage_tracker: OutputDamageTracker,
-    screencopy: Vec<(ScreencopySession, BufferParams)>,
     #[cfg(feature = "debug")]
     fps: Fps,
 }
@@ -58,7 +56,7 @@ impl WinitState {
         let age = self.backend.buffer_age().unwrap_or(0);
 
         let surface = self.backend.egl_surface();
-        match render::render_output::<_, _, GlesRenderbuffer, _>(
+        match render::render_output::<_, _, GlesRenderbuffer>(
             None,
             self.backend.renderer(),
             surface.clone(),
@@ -67,11 +65,6 @@ impl WinitState {
             state,
             &self.output,
             CursorMode::NotDefault,
-            if !self.screencopy.is_empty() {
-                Some((surface, &self.screencopy))
-            } else {
-                None
-            },
             #[cfg(not(feature = "debug"))]
             None,
             #[cfg(feature = "debug")]
@@ -84,7 +77,6 @@ impl WinitState {
                 self.backend
                     .submit(damage.as_deref())
                     .with_context(|| "Failed to submit buffer for display")?;
-                self.screencopy.clear();
                 #[cfg(feature = "debug")]
                 self.fps.displayed();
                 state.send_frames(&self.output, &states, |_| None);
@@ -103,9 +95,6 @@ impl WinitState {
                 }
             }
             Err(err) => {
-                for (session, params) in self.screencopy.drain(..) {
-                    state.still_pending(session, params)
-                }
                 anyhow::bail!("Rendering failed: {}", err);
             }
         };
@@ -133,12 +122,6 @@ impl WinitState {
             Err(anyhow::anyhow!("Cannot set window size"))
         } else {
             Ok(())
-        }
-    }
-
-    pub fn pending_screencopy(&mut self, new: Option<Vec<(ScreencopySession, BufferParams)>>) {
-        if let Some(sessions) = new {
-            self.screencopy.extend(sessions);
         }
     }
 }
@@ -231,7 +214,6 @@ pub fn init_backend(
         backend,
         output: output.clone(),
         damage_tracker: OutputDamageTracker::from_output(&output),
-        screencopy: Vec::new(),
         #[cfg(feature = "debug")]
         fps,
     });

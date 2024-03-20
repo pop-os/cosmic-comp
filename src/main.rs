@@ -13,12 +13,8 @@ use std::{env, ffi::OsString, process, sync::Arc};
 use tracing::{error, info, warn};
 
 use crate::{
-    state::BackendData,
-    utils::prelude::SeatExt,
-    wayland::{
-        handlers::{compositor::client_compositor_state, screencopy::PendingScreencopyBuffers},
-        protocols::screencopy::SessionType,
-    },
+    state::BackendData, utils::prelude::SeatExt,
+    wayland::handlers::compositor::client_compositor_state,
 };
 
 pub mod backend;
@@ -110,30 +106,9 @@ fn main() -> Result<()> {
                 .collect::<Vec<_>>()
                 .into_iter()
             {
-                let mut scheduled_sessions = state.workspace_session_for_output(&output);
-                if let Some(sessions) = output.user_data().get::<PendingScreencopyBuffers>() {
-                    scheduled_sessions
-                        .get_or_insert_with(Vec::new)
-                        .extend(sessions.borrow_mut().drain(..));
-                }
-                state.backend.schedule_render(
-                    &state.common.event_loop_handle,
-                    &output,
-                    scheduled_sessions.as_ref().map(|sessions| {
-                        sessions
-                            .iter()
-                            .filter(|(s, _)| match s.session_type() {
-                                SessionType::Output(o) | SessionType::Workspace(o, _)
-                                    if o == output =>
-                                {
-                                    true
-                                }
-                                _ => false,
-                            })
-                            .cloned()
-                            .collect::<Vec<_>>()
-                    }),
-                );
+                state
+                    .backend
+                    .schedule_render(&state.common.event_loop_handle, &output);
             }
         }
 

@@ -14,8 +14,6 @@ use smithay::{
     },
 };
 
-use super::screencopy::PendingScreencopyBuffers;
-
 impl WlrLayerShellHandler for State {
     fn shell_state(&mut self) -> &mut WlrLayerShellState {
         &mut self.common.shell.layer_shell_state
@@ -76,19 +74,8 @@ impl WlrLayerShellHandler for State {
 
             self.common.shell.workspaces.recalculate();
 
-            // collect screencopy sessions needing an update
-            let mut scheduled_sessions = self.schedule_workspace_sessions(surface.wl_surface());
-            if let Some(sessions) = output.user_data().get::<PendingScreencopyBuffers>() {
-                scheduled_sessions
-                    .get_or_insert_with(Vec::new)
-                    .extend(sessions.borrow_mut().drain(..));
-            }
-
-            self.backend.schedule_render(
-                &self.common.event_loop_handle,
-                &output,
-                scheduled_sessions,
-            );
+            self.backend
+                .schedule_render(&self.common.event_loop_handle, &output);
         }
     }
 }
