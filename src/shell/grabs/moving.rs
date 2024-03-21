@@ -4,7 +4,7 @@ use crate::{
     backend::render::{
         cursor::{CursorShape, CursorState},
         element::AsGlowRenderer,
-        IndicatorShader, Key, Usage,
+        BackdropShader, IndicatorShader, Key, Usage,
     },
     shell::{
         element::{
@@ -147,21 +147,36 @@ impl MoveGrabState {
         };
 
         let snapping_indicator = match &self.snapping_zone {
-            Some(t) => vec![IndicatorShader::element(
-                renderer,
-                Key::Window(Usage::SnappingIndicator, self.window.clone()),
-                t.overlay_geometry(non_exclusive_geometry),
-                4,
-                8,
-                0.5,
-                output_scale.x,
-                [
-                    active_window_hint.red,
-                    active_window_hint.green,
-                    active_window_hint.blue,
-                ],
-            )
-            .into()],
+            Some(t) => {
+                let base_color = theme.palette.neutral_9;
+                let overlay_geometry = t.overlay_geometry(non_exclusive_geometry);
+                vec![
+                    CosmicMappedRenderElement::from(IndicatorShader::element(
+                        renderer,
+                        Key::Window(Usage::SnappingIndicator, self.window.clone()),
+                        overlay_geometry,
+                        3,
+                        theme.radius_s()[0] as u8, // TODO: Fix once shaders support 4 corner radii customization
+                        1.0,
+                        output_scale.x,
+                        [
+                            active_window_hint.red,
+                            active_window_hint.green,
+                            active_window_hint.blue,
+                        ],
+                    ))
+                    .into(),
+                    CosmicMappedRenderElement::from(BackdropShader::element(
+                        renderer,
+                        Key::Window(Usage::SnappingIndicator, self.window.clone()),
+                        t.overlay_geometry(non_exclusive_geometry),
+                        theme.radius_s()[0], // TODO: Fix once shaders support 4 corner radii customization
+                        0.4,
+                        [base_color.red, base_color.green, base_color.blue],
+                    ))
+                    .into(),
+                ]
+            }
             None => vec![],
         };
 
@@ -227,40 +242,48 @@ unsafe impl<T> Send for NotSend<T> {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SnappingZone {
-    TopMaxim,
-    TopSnap,
+    Maximize,
+    Top,
+    TopLeft,
     Left,
-    Right,
+    BottomLeft,
     Bottom,
+    BottomRight,
+    Right,
+    TopRight,
 }
 
-const SNAPPING_RANGE: i32 = 12;
+const SNAP_RANGE: i32 = 32;
+const SNAP_RANGE_TOP: i32 = 24;
 
 impl SnappingZone {
     pub fn contains(
         &self,
-        point: Point<i32, Logical>,
-        non_exclusive_geometry: Rectangle<i32, Logical>,
-        output_geometry: Rectangle<i32, Logical>,
+        point: Point<i32, Local>,
+        output_geometry: Rectangle<i32, Local>,
     ) -> bool {
         if !output_geometry.contains(point) {
             return false;
         }
+        let top_zone_32 = point.y < output_geometry.loc.y + SNAP_RANGE;
+        let top_zone_56 = point.y < output_geometry.loc.y + SNAP_RANGE + SNAP_RANGE_TOP;
+        let left_zone = point.x < output_geometry.loc.x + SNAP_RANGE;
+        let right_zone = point.x > output_geometry.loc.x + output_geometry.size.w - SNAP_RANGE;
+        let bottom_zone = point.y > output_geometry.loc.y + output_geometry.size.h - SNAP_RANGE;
+        let left_6th = point.x < output_geometry.loc.x + (output_geometry.size.w / 6);
+        let right_6th = point.x > output_geometry.loc.x + (output_geometry.size.w * 5 / 6);
+        let top_4th = point.y < output_geometry.loc.y + (output_geometry.size.h / 4);
+        let bottom_4th = point.y > output_geometry.loc.y + (output_geometry.size.h * 3 / 4);
         match self {
-            SnappingZone::TopMaxim => point.y < non_exclusive_geometry.loc.y + SNAPPING_RANGE,
-            SnappingZone::TopSnap => {
-                point.y < non_exclusive_geometry.loc.y + SNAPPING_RANGE * 2
-                    && point.y >= non_exclusive_geometry.loc.y + SNAPPING_RANGE
-            }
-            SnappingZone::Bottom => {
-                point.y
-                    > non_exclusive_geometry.loc.y + non_exclusive_geometry.size.h - SNAPPING_RANGE
-            }
-            SnappingZone::Left => point.x < non_exclusive_geometry.loc.x + SNAPPING_RANGE,
-            SnappingZone::Right => {
-                point.x
-                    > non_exclusive_geometry.loc.x + non_exclusive_geometry.size.w - SNAPPING_RANGE
-            }
+            SnappingZone::Maximize => top_zone_32 && !left_6th && !right_6th,
+            SnappingZone::Top => top_zone_56 && !top_zone_32 && !left_6th && !right_6th,
+            SnappingZone::TopLeft => (top_zone_56 && left_6th) || (left_zone && top_4th),
+            SnappingZone::Left => left_zone && !top_4th && !bottom_4th,
+            SnappingZone::BottomLeft => (bottom_zone && left_6th) || (left_zone && bottom_4th),
+            SnappingZone::Bottom => bottom_zone && !left_6th && !right_6th,
+            SnappingZone::BottomRight => (bottom_zone && right_6th) || (right_zone && bottom_4th),
+            SnappingZone::Right => right_zone && !top_4th && !bottom_4th,
+            SnappingZone::TopRight => (top_zone_56 && right_6th) || (right_zone && top_4th),
         }
     }
     pub fn overlay_geometry(
@@ -268,11 +291,23 @@ impl SnappingZone {
         non_exclusive_geometry: Rectangle<i32, Logical>,
     ) -> Rectangle<i32, Local> {
         match self {
-            SnappingZone::TopMaxim => non_exclusive_geometry.as_local(),
-            SnappingZone::TopSnap => TiledCorners::Top.relative_geometry(non_exclusive_geometry),
+            SnappingZone::Maximize => non_exclusive_geometry.as_local(),
+            SnappingZone::Top => TiledCorners::Top.relative_geometry(non_exclusive_geometry),
+            SnappingZone::TopLeft => {
+                TiledCorners::TopLeft.relative_geometry(non_exclusive_geometry)
+            }
             SnappingZone::Left => TiledCorners::Left.relative_geometry(non_exclusive_geometry),
-            SnappingZone::Right => TiledCorners::Right.relative_geometry(non_exclusive_geometry),
+            SnappingZone::BottomLeft => {
+                TiledCorners::BottomLeft.relative_geometry(non_exclusive_geometry)
+            }
             SnappingZone::Bottom => TiledCorners::Bottom.relative_geometry(non_exclusive_geometry),
+            SnappingZone::BottomRight => {
+                TiledCorners::BottomRight.relative_geometry(non_exclusive_geometry)
+            }
+            SnappingZone::Right => TiledCorners::Right.relative_geometry(non_exclusive_geometry),
+            SnappingZone::TopRight => {
+                TiledCorners::TopRight.relative_geometry(non_exclusive_geometry)
+            }
         }
     }
 }
@@ -377,24 +412,27 @@ impl PointerGrab<State> for MoveGrab {
 
             // Check for overlapping with zones
             if grab_state.previous == ManagedLayer::Floating {
-                let non_exclusive_geometry = {
-                    let layers = layer_map_for_output(&current_output);
-                    layers.non_exclusive_zone()
-                };
-                let total_geometry = current_output.geometry().as_logical();
+                let output_geometry = current_output.geometry().to_local(&current_output);
                 grab_state.snapping_zone = vec![
-                    SnappingZone::TopMaxim,
-                    SnappingZone::TopSnap,
+                    SnappingZone::Maximize,
+                    SnappingZone::Top,
+                    SnappingZone::TopLeft,
                     SnappingZone::Left,
-                    SnappingZone::Right,
+                    SnappingZone::BottomLeft,
                     SnappingZone::Bottom,
+                    SnappingZone::BottomRight,
+                    SnappingZone::Right,
+                    SnappingZone::TopRight,
                 ]
                 .iter()
                 .find(|&x| {
                     x.contains(
-                        handle.current_location().to_i32_floor(),
-                        non_exclusive_geometry,
-                        total_geometry,
+                        handle
+                            .current_location()
+                            .as_global()
+                            .to_local(&current_output)
+                            .to_i32_floor(),
+                        output_geometry,
                     )
                 })
                 .cloned();
@@ -667,23 +705,37 @@ impl Drop for MoveGrab {
 
                             if previous == ManagedLayer::Floating {
                                 if let Some(sz) = grab_state.snapping_zone {
-                                    if sz == SnappingZone::TopMaxim {
+                                    if sz == SnappingZone::Maximize {
                                         state.common.shell.maximize_toggle(&window, &seat);
                                     } else {
-                                        let direction = match sz {
-                                            SnappingZone::TopSnap => Direction::Up,
-                                            SnappingZone::Bottom => Direction::Down,
-                                            SnappingZone::Left => Direction::Left,
-                                            SnappingZone::Right => Direction::Right,
-                                            _ => Direction::Up,
+                                        let directions = match sz {
+                                            SnappingZone::Maximize => vec![],
+                                            SnappingZone::Top => vec![Direction::Up],
+                                            SnappingZone::TopLeft => {
+                                                vec![Direction::Up, Direction::Left]
+                                            }
+                                            SnappingZone::Left => vec![Direction::Left],
+                                            SnappingZone::BottomLeft => {
+                                                vec![Direction::Down, Direction::Left]
+                                            }
+                                            SnappingZone::Bottom => vec![Direction::Down],
+                                            SnappingZone::BottomRight => {
+                                                vec![Direction::Down, Direction::Right]
+                                            }
+                                            SnappingZone::Right => vec![Direction::Right],
+                                            SnappingZone::TopRight => {
+                                                vec![Direction::Up, Direction::Right]
+                                            }
                                         };
-                                        workspace.floating_layer.move_element(
-                                            direction,
-                                            &seat,
-                                            ManagedLayer::Floating,
-                                            theme,
-                                            &window,
-                                        );
+                                        for direction in directions {
+                                            workspace.floating_layer.move_element(
+                                                direction,
+                                                &seat,
+                                                ManagedLayer::Floating,
+                                                &theme,
+                                                &window,
+                                            );
+                                        }
                                     }
                                 }
                             }
