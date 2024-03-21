@@ -29,7 +29,7 @@ use smithay::{
         },
         wayland_server::{protocol::wl_surface::WlSurface, Client, DisplayHandle},
     },
-    utils::{Logical, Point, Rectangle, Serial, Size, SERIAL_COUNTER},
+    utils::{IsAlive, Logical, Point, Rectangle, Serial, Size, SERIAL_COUNTER},
     wayland::{
         compositor::with_states,
         seat::WaylandFocus,
@@ -262,7 +262,7 @@ impl WorkspaceDelta {
 #[derive(Debug)]
 pub struct WorkspaceSet {
     previously_active: Option<(usize, WorkspaceDelta)>,
-    active: usize,
+    pub active: usize,
     pub group: WorkspaceGroupHandle,
     idx: usize,
     tiling_enabled: bool,
@@ -1682,6 +1682,9 @@ impl Shell {
             .iter()
             .for_each(|or| or.refresh());
 
+        self.pending_layers.retain(|(s, _, _)| s.alive());
+        self.pending_windows.retain(|(s, _, _)| s.alive());
+
         self.toplevel_info_state
             .refresh(Some(&self.workspace_state));
     }
@@ -1991,6 +1994,62 @@ impl Shell {
 
         if wants_focus {
             Shell::set_focus(state, Some(&layer_surface.into()), &seat, None)
+        }
+    }
+
+    pub fn unmap_surface<S>(&mut self, surface: &S, seat: &Seat<State>)
+    where
+        CosmicSurface: PartialEq<S>,
+    {
+        for set in self.workspaces.sets.values_mut() {
+            let sticky_res = set.sticky_layer.mapped().find_map(|m| {
+                m.windows()
+                    .position(|(s, _)| &s == surface)
+                    .map(|idx| (idx, m.clone()))
+            });
+            let surface = if let Some((idx, mut mapped)) = sticky_res {
+                if mapped.is_stack() {
+                    mapped.stack_ref_mut().unwrap().remove_idx(idx)
+                } else {
+                    set.sticky_layer.unmap(&mapped);
+                    Some(mapped.active_window())
+                }
+            } else if let Some(idx) = set
+                .minimized_windows
+                .iter()
+                .map(|w| &w.window)
+                .position(|w| w.windows().any(|(s, _)| &s == surface))
+            {
+                if set.minimized_windows.get(idx).unwrap().window.is_stack() {
+                    let window = &mut set.minimized_windows.get_mut(idx).unwrap().window;
+                    let stack = window.stack_ref_mut().unwrap();
+                    let idx = stack.surfaces().position(|s| &s == surface);
+                    idx.and_then(|idx| stack.remove_idx(idx))
+                } else {
+                    Some(set.minimized_windows.remove(idx).window.active_window())
+                }
+            } else if let Some((workspace, mut elem)) = set.workspaces.iter_mut().find_map(|w| {
+                w.element_for_surface(&surface)
+                    .cloned()
+                    .map(|elem| (w, elem))
+            }) {
+                if elem.is_stack() {
+                    let stack = elem.stack_ref_mut().unwrap();
+                    let idx = stack.surfaces().position(|s| &s == surface);
+                    idx.and_then(|idx| stack.remove_idx(idx))
+                } else {
+                    workspace.unmap(&elem);
+                    Some(elem.active_window())
+                }
+            } else {
+                None
+            };
+
+            if let Some(surface) = surface {
+                self.toplevel_info_state.remove_toplevel(&surface);
+                self.pending_windows.push((surface, seat.clone(), None));
+                return;
+            }
         }
     }
 

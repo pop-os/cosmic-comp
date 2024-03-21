@@ -19,7 +19,7 @@ use cosmic_protocols::toplevel_info::v1::server::{
     zcosmic_toplevel_info_v1::{self, ZcosmicToplevelInfoV1},
 };
 
-pub trait Window: IsAlive + Clone + Send {
+pub trait Window: IsAlive + Clone + PartialEq + Send {
     fn title(&self) -> String;
     fn app_id(&self) -> String;
     fn is_activated(&self) -> bool;
@@ -245,6 +245,24 @@ where
         if let Some(state) = toplevel.user_data().get::<ToplevelState>() {
             state.lock().unwrap().workspaces.retain(|w| w != workspace);
         }
+    }
+
+    pub fn remove_toplevel(&mut self, toplevel: &W) {
+        if let Some(state) = toplevel.user_data().get::<ToplevelState>() {
+            let mut state_inner = state.lock().unwrap();
+            for handle in &state_inner.instances {
+                // don't send events to stopped instances
+                if self
+                    .instances
+                    .iter()
+                    .any(|i| i.id().same_client_as(&handle.id()))
+                {
+                    handle.closed();
+                }
+            }
+            *state_inner = Default::default();
+        }
+        self.toplevels.retain(|w| w != toplevel);
     }
 
     pub fn refresh(&mut self, workspace_state: Option<&WorkspaceState<D>>) {

@@ -235,18 +235,18 @@ impl CosmicStack {
         self.0.force_redraw()
     }
 
-    pub fn remove_idx(&self, idx: usize) {
-        self.0.with_program(|p| {
+    pub fn remove_idx(&self, idx: usize) -> Option<CosmicSurface> {
+        let window = self.0.with_program(|p| {
             let mut windows = p.windows.lock().unwrap();
             if windows.len() == 1 {
                 p.override_alive.store(false, Ordering::SeqCst);
                 let window = windows.get(0).unwrap();
                 window.try_force_undecorated(false);
                 window.set_tiled(false);
-                return;
+                return Some(window.clone());
             }
             if windows.len() <= idx {
-                return;
+                return None;
             }
             if idx == p.active.load(Ordering::SeqCst) {
                 p.reenter.store(true, Ordering::SeqCst);
@@ -256,8 +256,11 @@ impl CosmicStack {
             window.set_tiled(false);
 
             p.active.fetch_min(windows.len() - 1, Ordering::SeqCst);
+
+            Some(window)
         });
-        self.0.force_redraw()
+        self.0.force_redraw();
+        window
     }
 
     pub fn len(&self) -> usize {
