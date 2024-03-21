@@ -946,6 +946,8 @@ impl State {
                                     }
                                 };
                                 if !done {
+                                    // Don't check override redirect windows, because we don't set keyboard focus to them explicitly.
+                                    // These cases are handled by the XwaylandKeyboardGrab.
                                     if let Some((target, _)) =
                                         self.common.shell.element_under(pos, &output)
                                     {
@@ -2290,9 +2292,11 @@ impl State {
                 }
             }
             if let Some(or) = shell.override_redirect_windows.iter().find(|or| {
-                or.is_in_input_region(&(global_pos.as_logical() - or.geometry().loc.to_f64()))
+                or.is_in_input_region(
+                    &(global_pos.as_logical() - X11Surface::geometry(*or).loc.to_f64()),
+                )
             }) {
-                return Some((or.clone().into(), or.geometry().loc.as_global()));
+                return Some((or.clone().into(), X11Surface::geometry(or).loc.as_global()));
             }
             Some((window.clone().into(), output_geo.loc))
         } else {
@@ -2320,7 +2324,7 @@ impl State {
             if let Some(or) = shell.override_redirect_windows.iter().find(|or| {
                 or.is_in_input_region(&(global_pos.as_logical() - or.geometry().loc.to_f64()))
             }) {
-                return Some((or.clone().into(), or.geometry().loc.as_global()));
+                return Some((or.clone().into(), X11Surface::geometry(or).loc.as_global()));
             }
             if let Some((target, loc)) = shell.element_under(global_pos, output) {
                 return Some((target, loc));
