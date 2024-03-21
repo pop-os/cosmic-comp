@@ -289,7 +289,7 @@ impl Program for CosmicWindowInternal {
                 if let Some(surface) = self.window.wl_surface() {
                     loop_handle.insert_idle(move |state| {
                         if let Some(mapped) =
-                            state.common.shell.element_for_wl_surface(&surface).cloned()
+                            state.common.shell.element_for_surface(&surface).cloned()
                         {
                             state.common.shell.minimize_request(&mapped)
                         }
@@ -300,7 +300,7 @@ impl Program for CosmicWindowInternal {
                 if let Some(surface) = self.window.wl_surface() {
                     loop_handle.insert_idle(move |state| {
                         if let Some(mapped) =
-                            state.common.shell.element_for_wl_surface(&surface).cloned()
+                            state.common.shell.element_for_surface(&surface).cloned()
                         {
                             let seat = state.common.last_active_seat().clone();
                             state.common.shell.maximize_toggle(&mapped, &seat)
@@ -314,7 +314,7 @@ impl Program for CosmicWindowInternal {
                     if let Some(surface) = self.window.wl_surface() {
                         loop_handle.insert_idle(move |state| {
                             if let Some(mapped) =
-                                state.common.shell.element_for_wl_surface(&surface).cloned()
+                                state.common.shell.element_for_surface(&surface).cloned()
                             {
                                 let position = if let Some((output, set)) =
                                     state.common.shell.workspaces.sets.iter().find(|(_, set)| {

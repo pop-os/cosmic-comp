@@ -965,7 +965,7 @@ pub fn render_window_to_buffer(
         for seat in common.seats() {
             if let Some(location) = {
                 // we need to find the mapped element in that case
-                if let Some(mapped) = common.shell.element_for_surface(&window) {
+                if let Some(mapped) = common.shell.element_for_surface(window) {
                     mapped.cursor_position(seat).and_then(|mut p| {
                         p -= mapped.active_window_offset().to_f64();
                         if p.x < 0. || p.y < 0. {
@@ -1174,7 +1174,7 @@ impl State {
     pub fn schedule_window_session(&mut self, surface: &WlSurface) {
         if let Some(element) = surface
             .wl_surface()
-            .and_then(|surface| self.common.shell.element_for_wl_surface(&surface).cloned())
+            .and_then(|surface| self.common.shell.element_for_surface(&surface).cloned())
         {
             let active = element.active_window();
             if active.wl_surface().as_ref() == Some(surface) {

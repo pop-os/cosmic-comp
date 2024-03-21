@@ -105,7 +105,7 @@ impl XdgActivationHandler for State {
         surface: WlSurface,
     ) {
         if let Some(context) = token_data.user_data.get::<ActivationContext>() {
-            if let Some(element) = self.common.shell.element_for_wl_surface(&surface).cloned() {
+            if let Some(element) = self.common.shell.element_for_surface(&surface).cloned() {
                 match context {
                     ActivationContext::UrgentOnly => {
                         if let Some((workspace, _output)) =

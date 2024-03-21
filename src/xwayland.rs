@@ -156,7 +156,7 @@ impl XwmHandler for State {
         }
 
         let startup_id = window.startup_id();
-        if self.common.shell.element_for_x11_surface(&window).is_some() {
+        if self.common.shell.element_for_surface(&window).is_some() {
             return;
         }
 
@@ -320,7 +320,7 @@ impl XwmHandler for State {
     ) {
         // We only allow floating X11 windows to resize themselves. Nothing else
         let mut current_geo = window.geometry();
-        if let Some(mapped) = self.common.shell.element_for_x11_surface(&window) {
+        if let Some(mapped) = self.common.shell.element_for_surface(&window) {
             let is_floating = self
                 .common
                 .shell
@@ -431,20 +431,20 @@ impl XwmHandler for State {
     }
 
     fn maximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        if let Some(mapped) = self.common.shell.element_for_x11_surface(&window).cloned() {
+        if let Some(mapped) = self.common.shell.element_for_surface(&window).cloned() {
             let seat = self.common.last_active_seat().clone();
             self.common.shell.maximize_request(&mapped, &seat);
         }
     }
 
     fn unmaximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        if let Some(mapped) = self.common.shell.element_for_x11_surface(&window).cloned() {
+        if let Some(mapped) = self.common.shell.element_for_surface(&window).cloned() {
             self.common.shell.unmaximize_request(&mapped);
         }
     }
 
     fn minimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        if let Some(mapped) = self.common.shell.element_for_x11_surface(&window).cloned() {
+        if let Some(mapped) = self.common.shell.element_for_surface(&window).cloned() {
             if !mapped.is_stack() || mapped.active_window().is_window(&window) {
                 self.common.shell.minimize_request(&mapped);
             }
@@ -452,7 +452,7 @@ impl XwmHandler for State {
     }
 
     fn unminimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        if let Some(mut mapped) = self.common.shell.element_for_x11_surface(&window).cloned() {
+        if let Some(mut mapped) = self.common.shell.element_for_surface(&window).cloned() {
             let seat = self.common.last_active_seat().clone();
             self.common.shell.unminimize_request(&mapped, &seat);
             if mapped.is_stack() {
@@ -466,7 +466,7 @@ impl XwmHandler for State {
 
     fn fullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
         let seat = self.common.last_active_seat().clone();
-        if let Some(mapped) = self.common.shell.element_for_x11_surface(&window).cloned() {
+        if let Some(mapped) = self.common.shell.element_for_surface(&window).cloned() {
             if let Some((output, handle)) = self
                 .common
                 .shell
@@ -506,7 +506,7 @@ impl XwmHandler for State {
     }
 
     fn unfullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        if let Some(mapped) = self.common.shell.element_for_x11_surface(&window).cloned() {
+        if let Some(mapped) = self.common.shell.element_for_surface(&window).cloned() {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
                 let (window, _) = mapped
                     .windows()
