@@ -877,13 +877,11 @@ impl State {
                     let serial = SERIAL_COUNTER.next_serial();
                     let button = event.button_code();
                     if event.state() == ButtonState::Pressed {
-                        // change the keyboard focus unless the pointer or keyboard is grabbed
+                        // change the keyboard focus unless the pointer is grabbed
                         // We test for any matching surface type here but always use the root
                         // (in case of a window the toplevel) surface for the focus.
                         // see: https://gitlab.freedesktop.org/wayland/wayland/-/issues/294
-                        if !seat.get_pointer().unwrap().is_grabbed()
-                            && !seat.get_keyboard().map(|k| k.is_grabbed()).unwrap_or(false)
-                        {
+                        if !seat.get_pointer().unwrap().is_grabbed() {
                             let output = seat.active_output();
 
                             let pos = seat.get_pointer().unwrap().current_location().as_global();
