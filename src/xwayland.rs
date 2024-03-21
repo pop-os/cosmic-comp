@@ -136,6 +136,104 @@ impl State {
     }
 }
 
+impl Common {
+    fn is_x_focused(&self, xwm: XwmId) -> bool {
+        if let Some(keyboard) = self.last_active_seat().get_keyboard() {
+            if let Some(KeyboardFocusTarget::Element(mapped)) = keyboard.current_focus() {
+                if let Some(surface) = mapped.active_window().x11_surface() {
+                    return surface.xwm_id().unwrap() == xwm;
+                }
+            }
+        }
+
+        false
+    }
+
+    pub fn update_x11_stacking_order(&mut self) {
+        let active_output = self.last_active_seat().active_output();
+        if let Some(xwm) = self
+            .shell
+            .xwayland_state
+            .as_mut()
+            .and_then(|state| state.xwm.as_mut())
+        {
+            // front to back, given that is how the workspace enumerates
+            let order = self
+                .shell
+                .workspaces
+                .sets
+                .iter()
+                .filter(|(output, _)| *output == &active_output)
+                .chain(
+                    self.shell
+                        .workspaces
+                        .sets
+                        .iter()
+                        .filter(|(output, _)| *output != &active_output),
+                )
+                .flat_map(|(_, set)| {
+                    set.sticky_layer
+                        .mapped()
+                        .flat_map(|mapped| {
+                            let active = mapped.active_window();
+                            std::iter::once(active.clone()).chain(
+                                mapped
+                                    .is_stack()
+                                    .then(move || {
+                                        mapped
+                                            .windows()
+                                            .map(|(s, _)| s)
+                                            .filter(move |s| s != &active)
+                                    })
+                                    .into_iter()
+                                    .flatten(),
+                            )
+                        })
+                        .chain(
+                            set.workspaces
+                                .iter()
+                                .enumerate()
+                                .filter(|(i, _)| *i == set.active)
+                                .chain(
+                                    set.workspaces
+                                        .iter()
+                                        .enumerate()
+                                        .filter(|(i, _)| *i != set.active),
+                                )
+                                .flat_map(|(_, workspace)| {
+                                    workspace.get_fullscreen().cloned().into_iter().chain(
+                                        workspace.mapped().flat_map(|mapped| {
+                                            let active = mapped.active_window();
+                                            std::iter::once(active.clone()).chain(
+                                                mapped
+                                                    .is_stack()
+                                                    .then(move || {
+                                                        mapped
+                                                            .windows()
+                                                            .map(|(s, _)| s)
+                                                            .filter(move |s| s != &active)
+                                                    })
+                                                    .into_iter()
+                                                    .flatten(),
+                                            )
+                                        }),
+                                    )
+                                }),
+                        )
+                })
+                .collect::<Vec<_>>();
+
+            // we don't include the popup elements, which contain the OR windows, because we are not supposed to restack them.
+            // Which is also why we match upwards, to not disturb elements at the top.
+            //
+            // But this also means we need to match across all outputs and workspaces at once, to be sure nothing that shouldn't be on top of us is.
+            if let Err(err) = xwm.update_stacking_order_upwards(order.iter().rev()) {
+                warn!(wm_id = ?xwm.id(), ?err, "Failed to update Xwm stacking order.");
+            }
+        }
+    }
+}
+
 impl XwmHandler for State {
     fn xwm_state(&mut self, _xwm: XwmId) -> &mut X11Wm {
         self.common
@@ -581,19 +679,5 @@ impl XwmHandler for State {
                 }
             }
         }
-    }
-}
-
-impl Common {
-    fn is_x_focused(&self, xwm: XwmId) -> bool {
-        if let Some(keyboard) = self.last_active_seat().get_keyboard() {
-            if let Some(KeyboardFocusTarget::Element(mapped)) = keyboard.current_focus() {
-                if let Some(surface) = mapped.active_window().x11_surface() {
-                    return surface.xwm_id().unwrap() == xwm;
-                }
-            }
-        }
-
-        false
     }
 }

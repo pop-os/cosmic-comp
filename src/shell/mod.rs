@@ -1178,39 +1178,6 @@ impl Shell {
                         set.workspaces[set.active].tiling_layer.cleanup_drag();
                     }
                     set.activate(idx, workspace_delta, &mut self.workspace_state.update())?;
-                    if let Some(xwm) = self
-                        .xwayland_state
-                        .as_mut()
-                        .and_then(|state| state.xwm.as_mut())
-                    {
-                        {
-                            for window in set.workspaces[set.active]
-                                .tiling_layer
-                                .mapped()
-                                .map(|(w, _)| w)
-                                .chain(set.workspaces[set.active].floating_layer.space.elements())
-                            {
-                                if let Some(surf) = window.active_window().x11_surface() {
-                                    let _ = xwm.raise_window(surf);
-                                }
-                            }
-                            for window in set.sticky_layer.space.elements() {
-                                if let Some(surf) = window.active_window().x11_surface() {
-                                    let _ = xwm.raise_window(surf);
-                                }
-                            }
-                            if let Some(surf) = set.workspaces[set.active]
-                                .fullscreen
-                                .as_ref()
-                                .and_then(|f| f.surface.x11_surface())
-                            {
-                                let _ = xwm.raise_window(surf);
-                            }
-                        }
-                        for surface in &self.override_redirect_windows {
-                            let _ = xwm.raise_window(surface);
-                        }
-                    }
 
                     let output_geo = output.geometry();
                     Ok(Some(
