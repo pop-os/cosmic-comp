@@ -711,7 +711,7 @@ impl Program for CosmicStackInternal {
                     if let Some(surface) = self.windows.lock().unwrap()[active].wl_surface() {
                         loop_handle.insert_idle(move |state| {
                             if let Some(mapped) =
-                                state.common.shell.element_for_wl_surface(&surface).cloned()
+                                state.common.shell.element_for_surface(&surface).cloned()
                             {
                                 let position = if let Some((output, set)) =
                                     state.common.shell.workspaces.sets.iter().find(|(_, set)| {
@@ -757,7 +757,7 @@ impl Program for CosmicStackInternal {
                     if let Some(surface) = self.windows.lock().unwrap()[idx].wl_surface() {
                         loop_handle.insert_idle(move |state| {
                             if let Some(mapped) =
-                                state.common.shell.element_for_wl_surface(&surface).cloned()
+                                state.common.shell.element_for_surface(&surface).cloned()
                             {
                                 if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
                                     let Some(elem_geo) = workspace.element_geometry(&mapped) else {

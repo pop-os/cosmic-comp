@@ -73,6 +73,18 @@ impl From<X11Surface> for CosmicSurface {
     }
 }
 
+impl PartialEq<WlSurface> for CosmicSurface {
+    fn eq(&self, other: &WlSurface) -> bool {
+        self.wl_surface().map_or(false, |s| &s == other)
+    }
+}
+
+impl PartialEq<X11Surface> for CosmicSurface {
+    fn eq(&self, other: &X11Surface) -> bool {
+        self.x11_surface().map_or(false, |s| s == other)
+    }
+}
+
 #[derive(Default)]
 struct Minimized(AtomicBool);
 

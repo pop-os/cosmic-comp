@@ -44,7 +44,6 @@ use smithay::{
         seat::WaylandFocus,
         xdg_activation::{XdgActivationState, XdgActivationToken},
     },
-    xwayland::X11Surface,
 };
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -365,7 +364,7 @@ impl Workspace {
     }
 
     pub fn commit(&mut self, surface: &WlSurface) {
-        if let Some(mapped) = self.element_for_wl_surface(surface) {
+        if let Some(mapped) = self.element_for_surface(surface) {
             mapped
                 .windows()
                 .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
@@ -483,31 +482,15 @@ impl Workspace {
         }
     }
 
-    pub fn element_for_surface(&self, surface: &CosmicSurface) -> Option<&CosmicMapped> {
+    pub fn element_for_surface<S>(&self, surface: &S) -> Option<&CosmicMapped>
+    where
+        CosmicSurface: PartialEq<S>,
+    {
         self.floating_layer
             .mapped()
             .chain(self.tiling_layer.mapped().map(|(w, _)| w))
             .chain(self.minimized_windows.iter().map(|w| &w.window))
             .find(|e| e.windows().any(|(w, _)| &w == surface))
-    }
-
-    pub fn element_for_wl_surface(&self, surface: &WlSurface) -> Option<&CosmicMapped> {
-        self.floating_layer
-            .mapped()
-            .chain(self.tiling_layer.mapped().map(|(w, _)| w))
-            .chain(self.minimized_windows.iter().map(|w| &w.window))
-            .find(|e| {
-                e.windows()
-                    .any(|(w, _)| w.wl_surface().as_ref() == Some(surface))
-            })
-    }
-
-    pub fn element_for_x11_surface(&self, surface: &X11Surface) -> Option<&CosmicMapped> {
-        self.floating_layer
-            .mapped()
-            .chain(self.tiling_layer.mapped().map(|(w, _)| w))
-            .chain(self.minimized_windows.iter().map(|w| &w.window))
-            .find(|e| e.windows().any(|(w, _)| w.x11_surface() == Some(surface)))
     }
 
     pub fn element_under(

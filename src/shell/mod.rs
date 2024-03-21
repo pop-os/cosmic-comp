@@ -1467,7 +1467,10 @@ impl Shell {
         }
     }
 
-    pub fn element_for_surface(&self, surface: &CosmicSurface) -> Option<&CosmicMapped> {
+    pub fn element_for_surface<S>(&self, surface: &S) -> Option<&CosmicMapped>
+    where
+        CosmicSurface: PartialEq<S>,
+    {
         self.workspaces.sets.values().find_map(|set| {
             set.minimized_windows
                 .iter()
@@ -1478,39 +1481,6 @@ impl Shell {
                     set.workspaces
                         .iter()
                         .find_map(|w| w.element_for_surface(surface))
-                })
-        })
-    }
-
-    pub fn element_for_wl_surface(&self, surface: &WlSurface) -> Option<&CosmicMapped> {
-        self.workspaces.sets.values().find_map(|set| {
-            set.minimized_windows
-                .iter()
-                .map(|w| &w.window)
-                .chain(set.sticky_layer.mapped())
-                .find(|w| {
-                    w.windows()
-                        .any(|(s, _)| s.wl_surface().as_ref() == Some(surface))
-                })
-                .or_else(|| {
-                    set.workspaces
-                        .iter()
-                        .find_map(|w| w.element_for_wl_surface(surface))
-                })
-        })
-    }
-
-    pub fn element_for_x11_surface(&self, surface: &X11Surface) -> Option<&CosmicMapped> {
-        self.workspaces.sets.values().find_map(|set| {
-            set.minimized_windows
-                .iter()
-                .map(|w| &w.window)
-                .chain(set.sticky_layer.mapped())
-                .find(|w| w.windows().any(|(s, _)| s.x11_surface() == Some(surface)))
-                .or_else(|| {
-                    set.workspaces
-                        .iter()
-                        .find_map(|w| w.element_for_x11_surface(surface))
                 })
         })
     }
@@ -1819,7 +1789,7 @@ impl Shell {
 
         let parent_is_sticky = if let Some(toplevel) = window.0.toplevel() {
             if let Some(parent) = toplevel.parent() {
-                if let Some(elem) = state.common.shell.element_for_wl_surface(&parent) {
+                if let Some(elem) = state.common.shell.element_for_surface(&parent) {
                     state
                         .common
                         .shell
@@ -2315,7 +2285,7 @@ impl Shell {
         if let Some(start_data) =
             check_grab_preconditions(&seat, surface, serial, ReleaseMode::NoMouseButtons)
         {
-            if let Some(mapped) = state.common.shell.element_for_wl_surface(surface).cloned() {
+            if let Some(mapped) = state.common.shell.element_for_surface(surface).cloned() {
                 let (_, relative_loc) = mapped
                     .windows()
                     .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
@@ -2434,9 +2404,7 @@ impl Shell {
         let output = seat.active_output();
 
         if let Some(mut start_data) = check_grab_preconditions(&seat, surface, serial, release) {
-            if let Some(mut old_mapped) =
-                state.common.shell.element_for_wl_surface(surface).cloned()
-            {
+            if let Some(mut old_mapped) = state.common.shell.element_for_surface(surface).cloned() {
                 if old_mapped.is_minimized() {
                     return;
                 }
@@ -3063,7 +3031,7 @@ impl Shell {
         if let Some(start_data) =
             check_grab_preconditions(&seat, surface, serial, ReleaseMode::NoMouseButtons)
         {
-            if let Some(mapped) = state.common.shell.element_for_wl_surface(surface).cloned() {
+            if let Some(mapped) = state.common.shell.element_for_surface(surface).cloned() {
                 if mapped.is_fullscreen(true) || mapped.is_maximized(true) {
                     return;
                 }

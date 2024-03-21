@@ -76,7 +76,7 @@ impl XdgShellHandler for State {
         let kind = PopupKind::Xdg(surface);
         if let Some(root) = find_popup_root_surface(&kind)
             .ok()
-            .and_then(|root| self.common.shell.element_for_wl_surface(&root))
+            .and_then(|root| self.common.shell.element_for_surface(&root))
         {
             let target = root.clone().into();
             let ret = self
@@ -169,7 +169,7 @@ impl XdgShellHandler for State {
         if let Some(mapped) = self
             .common
             .shell
-            .element_for_wl_surface(surface.wl_surface())
+            .element_for_surface(surface.wl_surface())
             .cloned()
         {
             if !mapped.is_stack()
@@ -184,7 +184,7 @@ impl XdgShellHandler for State {
         if let Some(mapped) = self
             .common
             .shell
-            .element_for_wl_surface(surface.wl_surface())
+            .element_for_surface(surface.wl_surface())
             .cloned()
         {
             let seat = self.common.last_active_seat().clone();
@@ -196,7 +196,7 @@ impl XdgShellHandler for State {
         if let Some(mapped) = self
             .common
             .shell
-            .element_for_wl_surface(surface.wl_surface())
+            .element_for_surface(surface.wl_surface())
             .cloned()
         {
             self.common.shell.unmaximize_request(&mapped);
@@ -214,7 +214,7 @@ impl XdgShellHandler for State {
         if let Some(mapped) = self
             .common
             .shell
-            .element_for_wl_surface(surface.wl_surface())
+            .element_for_surface(surface.wl_surface())
             .cloned()
         {
             let from = self
@@ -351,7 +351,7 @@ impl XdgShellHandler for State {
         if let Some(mapped) = self
             .common
             .shell
-            .element_for_wl_surface(surface.wl_surface())
+            .element_for_surface(surface.wl_surface())
             .cloned()
         {
             if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
