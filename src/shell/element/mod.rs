@@ -22,7 +22,7 @@ use smithay::{
             ImportAll, ImportMem, Renderer,
         },
     },
-    desktop::{space::SpaceElement, PopupManager, WindowSurface, WindowSurfaceType},
+    desktop::{space::SpaceElement, PopupManager, WindowSurfaceType},
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{

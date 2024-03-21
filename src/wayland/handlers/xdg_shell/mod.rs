@@ -382,6 +382,9 @@ impl XdgShellHandler for State {
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
+        let seat = self.common.last_active_seat().clone();
+        self.common.shell.unmap_surface(surface.wl_surface(), &seat);
+
         let output = self
             .common
             .shell

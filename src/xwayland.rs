@@ -335,28 +335,9 @@ impl XwmHandler for State {
                 .shell
                 .override_redirect_windows
                 .retain(|or| or != &window);
-        } else if let Some((element, space)) = self
-            .common
-            .shell
-            .element_for_x11_surface(&window)
-            .cloned()
-            .and_then(|element| {
-                self.common
-                    .shell
-                    .space_for_mut(&element)
-                    .map(|space| (element, space))
-            })
-        {
-            if element.is_stack() && element.stack_ref().unwrap().len() >= 2 {
-                if let Some((surface, _)) = element
-                    .windows()
-                    .find(|(w, _)| w.x11_surface() == Some(&window))
-                {
-                    element.stack_ref().unwrap().remove_window(&surface);
-                }
-            } else {
-                space.unmap(&element);
-            }
+        } else {
+            let seat = self.common.last_active_seat().clone();
+            self.common.shell.unmap_surface(&window, &seat);
         }
 
         let outputs = if let Some(wl_surface) = window.wl_surface() {

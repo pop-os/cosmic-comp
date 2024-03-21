@@ -232,6 +232,10 @@ impl MoveGrabState {
             .collect()
     }
 
+    pub fn element(&self) -> CosmicMapped {
+        self.window.clone()
+    }
+
     pub fn window(&self) -> CosmicSurface {
         self.window.active_window()
     }

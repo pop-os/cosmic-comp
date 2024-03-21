@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{state::ClientState, utils::prelude::*, wayland::protocols::screencopy::SessionType};
+use crate::{
+    shell::grabs::SeatMoveGrabState, state::ClientState, utils::prelude::*,
+    wayland::protocols::screencopy::SessionType,
+};
 use calloop::Interest;
 use smithay::{
     backend::renderer::utils::{on_commit_buffer_handler, with_renderer_surface_state},
     delegate_compositor,
     desktop::{layer_map_for_output, LayerSurface, PopupKind, WindowSurfaceType},
     reexports::wayland_server::{protocol::wl_surface::WlSurface, Client, Resource},
+    utils::SERIAL_COUNTER,
     wayland::{
         compositor::{
             add_blocker, add_pre_commit_hook, with_states, BufferAssignment, CompositorClientState,
@@ -142,10 +146,10 @@ impl CompositorHandler for State {
 
     fn commit(&mut self, surface: &WlSurface) {
         X11Wm::commit_hook::<State>(surface);
-        // first load the buffer for various smithay helper functions
+        // first load the buffer for various smithay helper functions (which also initializes the RendererSurfaceState)
         on_commit_buffer_handler::<Self>(surface);
 
-        // then handle initial configure events and map windows if necessary
+        // handle initial configure events and map windows if necessary
         if let Some((window, _, _)) = self
             .common
             .shell
@@ -182,26 +186,78 @@ impl CompositorHandler for State {
             self.xdg_popup_ensure_initial_configure(&popup);
         }
 
-        // at last handle some special cases, like grabs and changing layer surfaces
+        if with_renderer_surface_state(surface, |state| state.buffer().is_none()).unwrap_or(false) {
+            // handle null-commits causing weird conflicts:
 
-        // If we would re-position the window inside the grab we would get a weird jittery animation.
-        // We only want to resize once the client has acknoledged & commited the new size,
-        // so we need to carefully track the state through different handlers.
-        if let Some(element) = self.common.shell.element_for_wl_surface(surface).cloned() {
-            crate::shell::layout::floating::ResizeSurfaceGrab::apply_resize_to_location(
-                element.clone(),
-                &mut self.common.shell,
-            );
-            if let Some(workspace) = self.common.shell.space_for_mut(&element) {
-                workspace.commit(surface);
+            // session-lock disallows null commits
+
+            // if it was a move-grab?
+            let seat = self.common.last_active_seat().clone();
+            let moved_window = seat
+                .user_data()
+                .get::<SeatMoveGrabState>()
+                .unwrap()
+                .borrow()
+                .as_ref()
+                .and_then(|state| {
+                    state
+                        .element()
+                        .windows()
+                        .any(|(s, _)| {
+                            s.wl_surface()
+                                .as_ref()
+                                .map(|s| s == surface)
+                                .unwrap_or(false)
+                        })
+                        .then(|| state.element())
+                });
+            if let Some(mut window) = moved_window {
+                if window.is_stack() {
+                    let stack = window.stack_ref_mut().unwrap();
+                    if let Some(i) = stack.surfaces().position(|s| {
+                        s.wl_surface()
+                            .as_ref()
+                            .map(|s| s == surface)
+                            .unwrap_or(false)
+                    }) {
+                        stack.remove_idx(i);
+                    }
+                } else {
+                    seat.get_pointer()
+                        .unwrap()
+                        .unset_grab(self, SERIAL_COUNTER.next_serial(), 0);
+                }
             }
+
+            // if it was a layer-shell surface?
+            // ignore, that will affect recompute normally
+
+            // if it was a sticky / floating / tiled window
+            // we could unmap, I guess?
+
+            // if it was an x11 surface => do nothing, we will get a separate UnmapNotify anyway
+        } else {
+            // handle some special cases, like grabs and changing layer surfaces
+
+            // If we would re-position the window inside the grab we would get a weird jittery animation.
+            // We only want to resize once the client has acknoledged & commited the new size,
+            // so we need to carefully track the state through different handlers.
+            if let Some(element) = self.common.shell.element_for_surface(surface).cloned() {
+                crate::shell::layout::floating::ResizeSurfaceGrab::apply_resize_to_location(
+                    element.clone(),
+                    &mut self.common.shell,
+                );
+                if let Some(workspace) = self.common.shell.space_for_mut(&element) {
+                    workspace.commit(surface);
+                }
+            }
+
+            //handle window screencopy sessions
+            self.schedule_window_session(surface);
+
+            // and refresh smithays internal state
+            self.common.shell.popups.commit(surface);
         }
-
-        //handle window screencopy sessions
-        self.schedule_window_session(surface);
-
-        // and refresh smithays internal state
-        self.common.shell.popups.commit(surface);
 
         // re-arrange layer-surfaces (commits may change size and positioning)
         let layer_output = self
