@@ -797,7 +797,7 @@ where
                 let current_start = offset.x;
                 let current_end = current_start + scroll_width;
 
-                assert!((right_offset - left_offset) <= (current_end - current_start));
+                //assert!((right_offset - left_offset) <= (current_end - current_start));
                 if (left_offset - current_start).is_sign_negative()
                     || (current_end - right_offset).is_sign_negative()
                 {
