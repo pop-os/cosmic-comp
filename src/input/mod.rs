@@ -54,6 +54,7 @@ use smithay::{
         shell::wlr_layer::Layer as WlrLayer,
         tablet_manager::{TabletDescriptor, TabletSeatTrait},
     },
+    xwayland::X11Surface,
 };
 #[cfg(not(feature = "debug"))]
 use tracing::info;
@@ -2322,7 +2323,9 @@ impl State {
                 }
             }
             if let Some(or) = shell.override_redirect_windows.iter().find(|or| {
-                or.is_in_input_region(&(global_pos.as_logical() - or.geometry().loc.to_f64()))
+                or.is_in_input_region(
+                    &(global_pos.as_logical() - X11Surface::geometry(*or).loc.to_f64()),
+                )
             }) {
                 return Some((or.clone().into(), X11Surface::geometry(or).loc.as_global()));
             }
