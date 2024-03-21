@@ -542,11 +542,11 @@ impl State {
                                     .extend(output_sessions);
                             }
 
-                            let estimated_rendertime = std::cmp::max(avg_time, MIN_DISPLAY_TIME);
+                            let _estimated_rendertime = std::cmp::max(avg_time, MIN_DISPLAY_TIME);
                             if let Err(err) = state.backend.kms().schedule_render(
                                 &state.common.event_loop_handle,
                                 &output,
-                                Some(estimated_rendertime),
+                                None, //Some(estimated_rendertime),
                                 scheduled_sessions,
                             ) {
                                 warn!(?err, "Failed to schedule render.");
