@@ -75,9 +75,6 @@ impl MoveGrabState {
         CosmicMappedRenderElement<R>: RenderElement<R>,
         I: From<CosmicMappedRenderElement<R>>,
     {
-        #[cfg(feature = "debug")]
-        puffin::profile_function!();
-
         let scale = if self.previous == ManagedLayer::Tiling {
             0.6 + ((1.0
                 - (Instant::now().duration_since(self.start).as_millis() as f64

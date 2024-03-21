@@ -9,7 +9,7 @@ use std::{
 };
 
 #[cfg(feature = "debug")]
-use crate::debug::{fps_ui, profiler_ui};
+use crate::debug::fps_ui;
 use crate::{
     shell::{
         focus::target::WindowGroup,
@@ -402,9 +402,6 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
     E: From<CursorRenderElement<R>> + From<CosmicMappedRenderElement<R>>,
 {
-    #[cfg(feature = "debug")]
-    puffin::profile_function!();
-
     let scale = output.current_scale().fractional_scale();
     let mut elements = Vec::new();
 
@@ -484,9 +481,6 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
-    #[cfg(feature = "debug")]
-    puffin::profile_function!();
-
     let mut elements = cursor_elements(renderer, state, output, cursor_mode);
 
     #[cfg(feature = "debug")]
@@ -509,20 +503,6 @@ where
             .map_err(<R as Renderer>::Error::from)
             .map_err(RenderError::Rendering)?;
             elements.push(fps_overlay.into());
-        }
-
-        if state.shell.outputs().next() == Some(output) {
-            if let Some(profiler_overlay) = profiler_ui(
-                state,
-                renderer.glow_renderer_mut(),
-                Rectangle::from_loc_and_size((0, 0), output_geo.size).as_logical(),
-                scale,
-            )
-            .map_err(<R as Renderer>::Error::from)
-            .map_err(RenderError::Rendering)?
-            {
-                elements.push(profiler_overlay.into());
-            }
         }
     }
 
@@ -1056,9 +1036,6 @@ where
     WorkspaceRenderElement<R>: RenderElement<R>,
     Source: Clone,
 {
-    #[cfg(feature = "debug")]
-    puffin::profile_function!();
-
     if let Some(ref mut fps) = fps {
         fps.start();
         #[cfg(feature = "debug")]
@@ -1176,8 +1153,6 @@ where
                 std::ptr::null(),
             );
         }
-
-        puffin::GlobalProfiler::lock().new_frame();
     }
 
     res

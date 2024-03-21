@@ -27,31 +27,6 @@ pub const RENDER_COLOR: Color32 = Color32::from_rgb(29, 114, 58);
 pub const SCREENCOPY_COLOR: Color32 = Color32::from_rgb(253, 178, 39);
 pub const DISPLAY_COLOR: Color32 = Color32::from_rgb(41, 184, 209);
 
-pub fn profiler_ui(
-    state: &mut Common,
-    renderer: &mut GlowRenderer,
-    area: Rectangle<i32, Logical>,
-    scale: f64,
-) -> Result<Option<TextureRenderElement<GlesTexture>>, GlesError> {
-    if !state.egui.active {
-        return Ok(None);
-    }
-
-    state
-        .egui
-        .state
-        .render(
-            |ctx| {
-                puffin_egui::profiler_window(ctx);
-            },
-            renderer,
-            area,
-            scale,
-            0.8,
-        )
-        .map(Some)
-}
-
 pub fn fps_ui(
     gpu: Option<&DrmNode>,
     state: &Common,

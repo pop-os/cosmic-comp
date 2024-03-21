@@ -612,9 +612,6 @@ where
         usize,
     ) -> Result<RenderOutputResult, DTError<R>>,
 {
-    #[cfg(feature = "debug")]
-    puffin::profile_function!();
-
     let mut dt = session.user_data().get::<SessionDT>().unwrap().borrow_mut();
 
     let res = render_fn(
@@ -926,9 +923,6 @@ pub fn render_window_to_buffer(
     params: BufferParams,
     window: &CosmicSurface,
 ) -> Result<bool, (FailureReason, anyhow::Error)> {
-    #[cfg(feature = "debug")]
-    puffin::profile_function!();
-
     let geometry = window.geometry();
     let buffer_size = buffer_dimensions(&params.buffer).unwrap();
     if buffer_size != geometry.size.to_buffer(1, Transform::Normal) {

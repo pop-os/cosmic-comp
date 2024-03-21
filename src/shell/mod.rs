@@ -1517,9 +1517,6 @@ impl Shell {
 
     #[profiling::function]
     pub fn refresh(&mut self) {
-        #[cfg(feature = "debug")]
-        puffin::profile_function!();
-
         self.popups.cleanup();
 
         self.xdg_activation_state.retain_tokens(|_, data| {

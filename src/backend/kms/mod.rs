@@ -1162,9 +1162,6 @@ impl Surface {
         state: &mut Common,
         screencopy: Option<&[(ScreencopySession, BufferParams)]>,
     ) -> Result<()> {
-        #[cfg(feature = "debug")]
-        puffin::profile_function!();
-
         if self.surface.is_none() {
             return Ok(());
         }

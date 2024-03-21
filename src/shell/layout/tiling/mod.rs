@@ -2305,9 +2305,6 @@ impl TilingLayout {
 
     #[profiling::function]
     pub fn refresh(&mut self) {
-        #[cfg(feature = "debug")]
-        puffin::profile_function!();
-
         let dead_windows = self
             .mapped()
             .map(|(w, _)| w.clone())
@@ -2941,9 +2938,6 @@ impl TilingLayout {
         tree: &mut Tree<Data>,
         gaps: (i32, i32),
     ) -> Option<TilingBlocker> {
-        #[cfg(feature = "debug")]
-        puffin::profile_function!();
-
         if let Some(root_id) = tree.root_node_id() {
             let mut configures = Vec::new();
 
@@ -3827,9 +3821,6 @@ impl TilingLayout {
         CosmicWindowRenderElement<R>: RenderElement<R>,
         CosmicStackRenderElement<R>: RenderElement<R>,
     {
-        #[cfg(feature = "debug")]
-        puffin::profile_function!();
-
         let output_scale = self.output.current_scale().fractional_scale();
 
         let (target_tree, duration, _) = if self.queue.animation_start.is_some() {

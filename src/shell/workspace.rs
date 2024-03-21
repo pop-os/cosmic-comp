@@ -288,9 +288,6 @@ impl Workspace {
 
     #[profiling::function]
     pub fn refresh(&mut self, xdg_activation_state: &XdgActivationState) {
-        #[cfg(feature = "debug")]
-        puffin::profile_function!();
-
         // TODO: `Option::take_if` once stabilitized
         if self.fullscreen.as_ref().is_some_and(|w| !w.alive()) {
             let _ = self.fullscreen.take();
@@ -1084,9 +1081,6 @@ impl Workspace {
         CosmicStackRenderElement<R>: RenderElement<R>,
         WorkspaceRenderElement<R>: RenderElement<R>,
     {
-        #[cfg(feature = "debug")]
-        puffin::profile_function!();
-
         let mut window_elements = Vec::new();
         let mut popup_elements = Vec::new();
 

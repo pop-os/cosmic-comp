@@ -1097,9 +1097,6 @@ impl FloatingLayout {
 
     #[profiling::function]
     pub fn refresh(&mut self) {
-        #[cfg(feature = "debug")]
-        puffin::profile_function!();
-
         self.space.refresh();
 
         if let Some(pos) = self.spawn_order.iter().position(|w| !w.alive()) {
@@ -1171,9 +1168,6 @@ impl FloatingLayout {
         CosmicWindowRenderElement<R>: RenderElement<R>,
         CosmicStackRenderElement<R>: RenderElement<R>,
     {
-        #[cfg(feature = "debug")]
-        puffin::profile_function!();
-
         let output = self.space.outputs().next().unwrap();
         let output_geometry = {
             let layers = layer_map_for_output(output);
