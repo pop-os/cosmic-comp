@@ -814,24 +814,6 @@ where
         }));
     }
 
-    if let Some(xwm) = state
-        .shell
-        .xwayland_state
-        .as_mut()
-        .and_then(|state| state.xwm.as_mut())
-    {
-        // we don't include the popup elements, which contain the OR windows, because we are not supposed to restack them
-        if let Err(err) =
-            xwm.update_stacking_order_upwards(window_elements.iter().rev().map(|e| e.id()))
-        {
-            warn!(
-                wm_id = ?xwm.id(),
-                ?err,
-                "Failed to update Xwm stacking order.",
-            );
-        }
-    }
-
     elements.extend(window_elements);
 
     Ok(elements)

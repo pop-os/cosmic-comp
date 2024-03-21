@@ -110,6 +110,7 @@ fn main() -> Result<()> {
         }
         state.common.shell.refresh();
         state::Common::refresh_focus(state);
+        state.common.update_x11_stacking_order();
 
         if state.common.shell.animations_going() {
             for output in state
