@@ -972,9 +972,7 @@ impl SpaceElement for CosmicStack {
     }
     fn set_activate(&self, activated: bool) {
         SpaceElement::set_activate(&self.0, activated);
-        self.0.force_redraw();
-        self.0.with_program(|p| {
-            p.activated.store(activated, Ordering::SeqCst);
+        let changed = self.0.with_program(|p| {
             if !p.group_focused.load(Ordering::SeqCst) {
                 p.windows
                     .lock()
@@ -982,7 +980,12 @@ impl SpaceElement for CosmicStack {
                     .iter()
                     .for_each(|w| SpaceElement::set_activate(w, activated))
             }
+            p.activated.swap(activated, Ordering::SeqCst) != activated
         });
+
+        if changed {
+            self.0.force_redraw();
+        }
     }
     fn output_enter(&self, output: &Output, overlap: Rectangle<i32, Logical>) {
         SpaceElement::output_enter(&self.0, output, overlap);
