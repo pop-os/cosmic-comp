@@ -100,6 +100,15 @@ profile-with-tracy = ["profiling/profile-with-tracy"]
 [profile.dev]
 lto = "thin"
 
+[profile.dev.package.tiny-skia]
+opt-level = 2
+
+[profile.dev.package.rustybuzz]
+opt-level = 2
+
+[profile.dev.package.ttf-parser]
+opt-level = 2
+
 [profile.fastdebug]
 debug = true
 inherits = "release"
