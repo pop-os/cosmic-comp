@@ -85,6 +85,7 @@
         (modifiers: [], key: "XF86AudioRaiseVolume"): Spawn("amixer sset Master 5%+"),
         (modifiers: [], key: "XF86AudioLowerVolume"): Spawn("amixer sset Master 5%-"),
         (modifiers: [], key: "XF86AudioMute"): Spawn("amixer sset Master toggle"),
+        (modifiers: [], key: "XF86AudioMicMute"): Spawn("amixer sset Capture toggle"),
         (modifiers: [], key: "XF86MonBrightnessUp"): Spawn("busctl --user call com.system76.CosmicSettingsDaemon /com/system76/CosmicSettingsDaemon com.system76.CosmicSettingsDaemon IncreaseDisplayBrightness"),
         (modifiers: [], key: "XF86MonBrightnessDown"): Spawn("busctl --user call com.system76.CosmicSettingsDaemon /com/system76/CosmicSettingsDaemon com.system76.CosmicSettingsDaemon DecreaseDisplayBrightness"),
     },
