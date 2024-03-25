@@ -2057,14 +2057,45 @@ impl Shell {
         &mut self,
         location: Point<f64, Global>,
         output: &Output,
+    ) -> Option<KeyboardFocusTarget> {
+        self.workspaces.sets.get_mut(output).and_then(|set| {
+            set.sticky_layer
+                .space
+                .element_under(location.to_local(output).as_logical())
+                .map(|(mapped, _)| mapped.clone().into())
+                .or_else(|| set.workspaces[set.active].element_under(location))
+        })
+    }
+    pub fn surface_under(
+        &mut self,
+        location: Point<f64, Global>,
+        output: &Output,
     ) -> Option<(PointerFocusTarget, Point<i32, Global>)> {
         let overview = self.overview_mode.clone();
         self.workspaces.sets.get_mut(output).and_then(|set| {
             set.sticky_layer
                 .space
                 .element_under(location.to_local(output).as_logical())
-                .map(|(mapped, p)| (mapped.clone().into(), p.as_local().to_global(output)))
-                .or_else(|| set.workspaces[set.active].element_under(location, overview))
+                .and_then(|(mapped, element_offset)| {
+                    let geometry = set
+                        .sticky_layer
+                        .space
+                        .element_geometry(mapped)
+                        .unwrap()
+                        .as_local();
+                    let point = location.to_local(output) - geometry.loc.to_f64();
+                    mapped
+                        .focus_under(point.as_logical())
+                        .map(|(surface, surface_offset)| {
+                            (
+                                surface,
+                                (element_offset + surface_offset)
+                                    .as_local()
+                                    .to_global(output),
+                            )
+                        })
+                })
+                .or_else(|| set.workspaces[set.active].surface_under(location, overview))
         })
     }
 
@@ -2455,7 +2486,7 @@ impl Shell {
                         state.common.theme.clone(),
                     )
                     .into();
-                    start_data.focus = Some((new_mapped.clone().into(), Point::from((0, 0))));
+                    start_data.focus = new_mapped.focus_under((0., 0.).into());
                     new_mapped
                 } else {
                     old_mapped.clone()
@@ -2843,8 +2874,10 @@ impl Shell {
                 return;
             };
 
-            let focus = Some((mapped.clone().into(), (new_loc - geometry.loc).as_logical()));
-
+            let element_offset = (new_loc - geometry.loc).as_logical();
+            let focus = mapped
+                .focus_under(element_offset.to_f64())
+                .map(|(target, surface_offset)| (target, (surface_offset + element_offset)));
             start_data.location = new_loc.as_logical().to_f64();
             start_data.focus = focus.clone();
 

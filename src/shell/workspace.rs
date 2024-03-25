@@ -490,15 +490,22 @@ impl Workspace {
             .find(|e| e.windows().any(|(w, _)| &w == surface))
     }
 
-    pub fn element_under(
+    pub fn element_under(&mut self, location: Point<f64, Global>) -> Option<KeyboardFocusTarget> {
+        let location = location.to_local(&self.output);
+        self.floating_layer
+            .element_under(location)
+            .or_else(|| self.tiling_layer.element_under(location))
+    }
+
+    pub fn surface_under(
         &mut self,
         location: Point<f64, Global>,
         overview: OverviewMode,
     ) -> Option<(PointerFocusTarget, Point<i32, Global>)> {
         let location = location.to_local(&self.output);
         self.floating_layer
-            .element_under(location)
-            .or_else(|| self.tiling_layer.element_under(location, overview))
+            .surface_under(location)
+            .or_else(|| self.tiling_layer.surface_under(location, overview))
             .map(|(m, p)| (m, p.to_global(&self.output)))
     }
 

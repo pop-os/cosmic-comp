@@ -686,7 +686,13 @@ impl FloatingLayout {
         self.space.element_geometry(elem).map(RectExt::as_local)
     }
 
-    pub fn element_under(
+    pub fn element_under(&mut self, location: Point<f64, Local>) -> Option<KeyboardFocusTarget> {
+        self.space
+            .element_under(location.as_logical())
+            .map(|(mapped, _)| mapped.clone().into())
+    }
+
+    pub fn surface_under(
         &mut self,
         location: Point<f64, Local>,
     ) -> Option<(PointerFocusTarget, Point<i32, Local>)> {
@@ -694,6 +700,7 @@ impl FloatingLayout {
             .space
             .element_under(location.as_logical())
             .map(|(mapped, p)| (mapped.clone(), p.as_local()));
+
         if let Some((mapped, _)) = res.as_ref() {
             let geometry = self.space.element_geometry(mapped).unwrap();
             let offset = location.y.round() as i32 - geometry.loc.y;
@@ -705,7 +712,16 @@ impl FloatingLayout {
         } else {
             self.hovered_stack.take();
         }
-        res.map(|(m, p)| (m.into(), p))
+
+        res.and_then(|(element, space_offset)| {
+            let geometry = self.space.element_geometry(&element).unwrap().as_local();
+            let point = location - geometry.loc.to_f64();
+            element
+                .focus_under(point.as_logical())
+                .map(|(surface, surface_offset)| {
+                    (surface, space_offset + surface_offset.as_local())
+                })
+        })
     }
 
     pub fn stacking_indicator(&self) -> Option<Rectangle<i32, Local>> {

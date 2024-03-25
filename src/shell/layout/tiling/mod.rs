@@ -3088,6 +3088,26 @@ impl TilingLayout {
     pub fn element_under(
         &mut self,
         location_f64: Point<f64, Local>,
+    ) -> Option<KeyboardFocusTarget> {
+        let location = location_f64.to_i32_round();
+
+        for (mapped, geo) in self.mapped() {
+            if !mapped.bbox().contains((location - geo.loc).as_logical()) {
+                continue;
+            }
+            if mapped.is_in_input_region(
+                &((location_f64 - geo.loc.to_f64()).as_logical() + mapped.geometry().loc.to_f64()),
+            ) {
+                return Some(mapped.clone().into());
+            }
+        }
+
+        None
+    }
+
+    pub fn surface_under(
+        &mut self,
+        location_f64: Point<f64, Local>,
         overview: OverviewMode,
     ) -> Option<(PointerFocusTarget, Point<i32, Local>)> {
         let gaps = self.gaps();
@@ -3115,13 +3135,12 @@ impl TilingLayout {
                 if !mapped.bbox().contains((location - geo.loc).as_logical()) {
                     continue;
                 }
-                if mapped.is_in_input_region(
-                    &((location_f64 - geo.loc.to_f64()).as_logical()
-                        + mapped.geometry().loc.to_f64()),
+                if let Some((target, surface_offset)) = mapped.focus_under(
+                    (location_f64 - geo.loc.to_f64()).as_logical() + mapped.geometry().loc.to_f64(),
                 ) {
                     return Some((
-                        mapped.clone().into(),
-                        geo.loc - mapped.geometry().loc.as_local(),
+                        target,
+                        geo.loc - mapped.geometry().loc.as_local() + surface_offset.as_local(),
                     ));
                 }
             }
@@ -3163,12 +3182,15 @@ impl TilingLayout {
                     let test_point = (location.to_f64() - last_geometry.loc.to_f64()
                         + mapped.geometry().loc.to_f64().as_local())
                     .as_logical();
-                    mapped.is_in_input_region(&test_point).then(|| {
-                        (
-                            mapped.clone().into(),
-                            last_geometry.loc - mapped.geometry().loc.as_local(),
-                        )
-                    })
+                    mapped
+                        .focus_under(test_point)
+                        .map(|(surface, surface_offset)| {
+                            (
+                                surface,
+                                last_geometry.loc - mapped.geometry().loc.as_local()
+                                    + surface_offset.as_local(),
+                            )
+                        })
                 }
                 Some((
                     id,

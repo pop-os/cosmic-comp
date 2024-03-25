@@ -25,12 +25,6 @@ use smithay::{
     desktop::{space::SpaceElement, PopupManager, WindowSurfaceType},
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
-        pointer::{
-            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
-            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
-            PointerTarget, RelativeMotionEvent,
-        },
         Seat,
     },
     output::Output,
@@ -72,7 +66,7 @@ use smithay::backend::renderer::{element::texture::TextureRenderElement, gles::G
 use tracing::debug;
 
 use super::{
-    focus::FocusDirection,
+    focus::{target::PointerFocusTarget, FocusDirection},
     layout::{
         floating::{ResizeState, TiledCorners},
         tiling::NodeDesc,
@@ -256,6 +250,20 @@ impl CosmicMapped {
                 false
             }
         })
+    }
+
+    /// Give the pointer target under a relative offset into this element.
+    ///
+    /// Returns Target + Offset relative to the target
+    pub fn focus_under(
+        &self,
+        relative_pos: Point<f64, Logical>,
+    ) -> Option<(PointerFocusTarget, Point<i32, Logical>)> {
+        match &self.element {
+            CosmicMappedInternal::Stack(stack) => stack.focus_under(relative_pos),
+            CosmicMappedInternal::Window(window) => window.focus_under(relative_pos),
+            _ => unreachable!(),
+        }
     }
 
     pub fn handle_move(&self, direction: Direction) -> MoveResult {
@@ -912,188 +920,6 @@ impl KeyboardTarget<State> for CosmicMapped {
             }
             CosmicMappedInternal::Window(w) => {
                 KeyboardTarget::modifiers(w, seat, data, modifiers, serial)
-            }
-            _ => {}
-        }
-    }
-}
-
-impl PointerTarget<State> for CosmicMapped {
-    fn enter(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
-        self.last_cursor_position
-            .lock()
-            .unwrap()
-            .insert(seat.id(), event.location);
-        match &self.element {
-            CosmicMappedInternal::Stack(s) => PointerTarget::enter(s, seat, data, event),
-            CosmicMappedInternal::Window(w) => PointerTarget::enter(w, seat, data, event),
-            _ => {}
-        }
-    }
-    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
-        self.last_cursor_position
-            .lock()
-            .unwrap()
-            .insert(seat.id(), event.location);
-        match &self.element {
-            CosmicMappedInternal::Stack(s) => PointerTarget::motion(s, seat, data, event),
-            CosmicMappedInternal::Window(w) => PointerTarget::motion(w, seat, data, event),
-            _ => {}
-        }
-    }
-    fn relative_motion(&self, seat: &Seat<State>, data: &mut State, event: &RelativeMotionEvent) {
-        match &self.element {
-            CosmicMappedInternal::Stack(s) => PointerTarget::relative_motion(s, seat, data, event),
-            CosmicMappedInternal::Window(w) => PointerTarget::relative_motion(w, seat, data, event),
-            _ => {}
-        }
-    }
-    fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
-        match &self.element {
-            CosmicMappedInternal::Stack(s) => PointerTarget::button(s, seat, data, event),
-            CosmicMappedInternal::Window(w) => PointerTarget::button(w, seat, data, event),
-            _ => {}
-        }
-    }
-    fn axis(&self, seat: &Seat<State>, data: &mut State, frame: AxisFrame) {
-        match &self.element {
-            CosmicMappedInternal::Stack(s) => PointerTarget::axis(s, seat, data, frame),
-            CosmicMappedInternal::Window(w) => PointerTarget::axis(w, seat, data, frame),
-            _ => {}
-        }
-    }
-    fn frame(&self, seat: &Seat<State>, data: &mut State) {
-        match &self.element {
-            CosmicMappedInternal::Stack(s) => PointerTarget::frame(s, seat, data),
-            CosmicMappedInternal::Window(w) => PointerTarget::frame(w, seat, data),
-            _ => {}
-        }
-    }
-    fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
-        self.last_cursor_position.lock().unwrap().remove(&seat.id());
-        match &self.element {
-            CosmicMappedInternal::Stack(s) => PointerTarget::leave(s, seat, data, serial, time),
-            CosmicMappedInternal::Window(w) => PointerTarget::leave(w, seat, data, serial, time),
-            _ => {}
-        }
-    }
-    fn gesture_swipe_begin(
-        &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &GestureSwipeBeginEvent,
-    ) {
-        match &self.element {
-            CosmicMappedInternal::Stack(s) => {
-                PointerTarget::gesture_swipe_begin(s, seat, data, event)
-            }
-            CosmicMappedInternal::Window(w) => {
-                PointerTarget::gesture_swipe_begin(w, seat, data, event)
-            }
-            _ => {}
-        }
-    }
-    fn gesture_swipe_update(
-        &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &GestureSwipeUpdateEvent,
-    ) {
-        match &self.element {
-            CosmicMappedInternal::Stack(s) => {
-                PointerTarget::gesture_swipe_update(s, seat, data, event)
-            }
-            CosmicMappedInternal::Window(w) => {
-                PointerTarget::gesture_swipe_update(w, seat, data, event)
-            }
-            _ => {}
-        }
-    }
-    fn gesture_swipe_end(
-        &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &GestureSwipeEndEvent,
-    ) {
-        match &self.element {
-            CosmicMappedInternal::Stack(s) => {
-                PointerTarget::gesture_swipe_end(s, seat, data, event)
-            }
-            CosmicMappedInternal::Window(w) => {
-                PointerTarget::gesture_swipe_end(w, seat, data, event)
-            }
-            _ => {}
-        }
-    }
-    fn gesture_pinch_begin(
-        &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &GesturePinchBeginEvent,
-    ) {
-        match &self.element {
-            CosmicMappedInternal::Stack(s) => {
-                PointerTarget::gesture_pinch_begin(s, seat, data, event)
-            }
-            CosmicMappedInternal::Window(w) => {
-                PointerTarget::gesture_pinch_begin(w, seat, data, event)
-            }
-            _ => {}
-        }
-    }
-    fn gesture_pinch_update(
-        &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &GesturePinchUpdateEvent,
-    ) {
-        match &self.element {
-            CosmicMappedInternal::Stack(s) => {
-                PointerTarget::gesture_pinch_update(s, seat, data, event)
-            }
-            CosmicMappedInternal::Window(w) => {
-                PointerTarget::gesture_pinch_update(w, seat, data, event)
-            }
-            _ => {}
-        }
-    }
-    fn gesture_pinch_end(
-        &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &GesturePinchEndEvent,
-    ) {
-        match &self.element {
-            CosmicMappedInternal::Stack(s) => {
-                PointerTarget::gesture_pinch_end(s, seat, data, event)
-            }
-            CosmicMappedInternal::Window(w) => {
-                PointerTarget::gesture_pinch_end(w, seat, data, event)
-            }
-            _ => {}
-        }
-    }
-    fn gesture_hold_begin(
-        &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &GestureHoldBeginEvent,
-    ) {
-        match &self.element {
-            CosmicMappedInternal::Stack(s) => {
-                PointerTarget::gesture_hold_begin(s, seat, data, event)
-            }
-            CosmicMappedInternal::Window(w) => {
-                PointerTarget::gesture_hold_begin(w, seat, data, event)
-            }
-            _ => {}
-        }
-    }
-    fn gesture_hold_end(&self, seat: &Seat<State>, data: &mut State, event: &GestureHoldEndEvent) {
-        match &self.element {
-            CosmicMappedInternal::Stack(s) => PointerTarget::gesture_hold_end(s, seat, data, event),
-            CosmicMappedInternal::Window(w) => {
-                PointerTarget::gesture_hold_end(w, seat, data, event)
             }
             _ => {}
         }
