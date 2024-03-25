@@ -760,18 +760,24 @@ impl Drop for MoveGrab {
 
             if let Some((mapped, position)) = position {
                 let serial = SERIAL_COUNTER.next_serial();
-                pointer.motion(
-                    state,
-                    Some((
-                        PointerFocusTarget::from(mapped.clone()),
-                        position.as_logical() - window.geometry().loc,
-                    )),
-                    &MotionEvent {
-                        location: pointer.current_location(),
-                        serial,
-                        time: 0,
-                    },
-                );
+                let current_location = pointer.current_location();
+
+                if let Some((target, offset)) =
+                    mapped.focus_under(current_location - position.as_logical().to_f64())
+                {
+                    pointer.motion(
+                        state,
+                        Some((
+                            target,
+                            position.as_logical() - window.geometry().loc + offset,
+                        )),
+                        &MotionEvent {
+                            location: pointer.current_location(),
+                            serial,
+                            time: 0,
+                        },
+                    );
+                }
                 Common::set_focus(
                     state,
                     Some(&KeyboardFocusTarget::from(mapped)),

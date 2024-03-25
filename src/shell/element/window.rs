@@ -1,6 +1,7 @@
 use crate::{
     backend::render::cursor::{CursorShape, CursorState},
     shell::{
+        focus::target::PointerFocusTarget,
         grabs::{ReleaseMode, ResizeEdge},
         Shell,
     },
@@ -24,7 +25,7 @@ use smithay::{
             ImportAll, ImportMem, Renderer,
         },
     },
-    desktop::space::SpaceElement,
+    desktop::{space::SpaceElement, WindowSurfaceType},
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{
@@ -97,7 +98,6 @@ impl fmt::Debug for CosmicWindowInternal {
 pub enum Focus {
     None,
     Header,
-    Window,
     ResizeTop,
     ResizeLeft,
     ResizeRight,
@@ -179,6 +179,54 @@ impl CosmicWindow {
 
     pub fn surface(&self) -> CosmicSurface {
         self.0.with_program(|p| p.window.clone())
+    }
+
+    pub fn focus_under(
+        &self,
+        mut relative_pos: Point<f64, Logical>,
+    ) -> Option<(PointerFocusTarget, Point<i32, Logical>)> {
+        self.0.with_program(|p| {
+            let mut offset = Point::from((0, 0));
+            let mut window_ui = None;
+            if p.has_ssd(false) {
+                let geo = p.window.geometry();
+
+                let point_i32 = relative_pos.to_i32_round::<i32>();
+                if (point_i32.x - geo.loc.x >= -RESIZE_BORDER && point_i32.x - geo.loc.x < 0)
+                    || (point_i32.y - geo.loc.y >= -RESIZE_BORDER && point_i32.y - geo.loc.y < 0)
+                    || (point_i32.x - geo.loc.x >= geo.size.w
+                        && point_i32.x - geo.loc.x < geo.size.w + RESIZE_BORDER)
+                    || (point_i32.y - geo.loc.y >= geo.size.h
+                        && point_i32.y - geo.loc.y < geo.size.h + SSD_HEIGHT + RESIZE_BORDER)
+                {
+                    window_ui = Some((
+                        PointerFocusTarget::WindowUI(self.clone()),
+                        Point::from((0, 0)),
+                    ));
+                }
+
+                if point_i32.y - geo.loc.y < SSD_HEIGHT {
+                    window_ui = Some((
+                        PointerFocusTarget::WindowUI(self.clone()),
+                        Point::from((0, 0)),
+                    ));
+                }
+
+                relative_pos.y -= SSD_HEIGHT as f64;
+                offset.y += SSD_HEIGHT;
+            }
+
+            p.window
+                .0
+                .surface_under(relative_pos, WindowSurfaceType::ALL)
+                .map(|(surface, surface_offset)| {
+                    (
+                        PointerFocusTarget::WlSurface(surface),
+                        offset + surface_offset,
+                    )
+                })
+                .or(window_ui)
+        })
     }
 
     pub fn contains_surface(&self, window: &CosmicSurface) -> bool {
@@ -452,30 +500,7 @@ impl SpaceElement for CosmicWindow {
         })
     }
     fn is_in_input_region(&self, point: &Point<f64, Logical>) -> bool {
-        let mut point = *point;
-        self.0.with_program(|p| {
-            if p.has_ssd(false) {
-                let geo = p.window.geometry();
-
-                let point_i32 = point.to_i32_round::<i32>();
-                if (point_i32.x - geo.loc.x >= -RESIZE_BORDER && point_i32.x - geo.loc.x < 0)
-                    || (point_i32.y - geo.loc.y >= -RESIZE_BORDER && point_i32.y - geo.loc.y < 0)
-                    || (point_i32.x - geo.loc.x >= geo.size.w
-                        && point_i32.x - geo.loc.x < geo.size.w + RESIZE_BORDER)
-                    || (point_i32.y - geo.loc.y >= geo.size.h
-                        && point_i32.y - geo.loc.y < geo.size.h + SSD_HEIGHT + RESIZE_BORDER)
-                {
-                    return true;
-                }
-
-                if point_i32.y - geo.loc.y < SSD_HEIGHT {
-                    return true;
-                }
-
-                point.y -= SSD_HEIGHT as f64;
-            }
-            SpaceElement::is_in_input_region(&p.window, &point)
-        })
+        self.focus_under(*point).is_some()
     }
     fn set_activate(&self, activated: bool) {
         if self
@@ -575,7 +600,7 @@ impl KeyboardTarget<State> for CosmicWindow {
 impl PointerTarget<State> for CosmicWindow {
     fn enter(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
         let mut event = event.clone();
-        if self.0.with_program(|p| {
+        self.0.with_program(|p| {
             if p.has_ssd(false) {
                 let geo = p.window.geometry();
                 let loc = event.location.to_i32_round::<i32>();
@@ -612,34 +637,7 @@ impl PointerTarget<State> for CosmicWindow {
                 } else if loc.y - geo.loc.y < SSD_HEIGHT {
                     (p.swap_focus(Focus::Header), CursorShape::Default)
                 } else {
-                    let focus = p.swap_focus(Focus::Window);
-                    assert_eq!(focus, Focus::None);
-
-                    let mut event = event.clone();
-                    event.location.y -= SSD_HEIGHT as f64;
-                    PointerTarget::enter(&p.window, seat, data, &event);
-
-                    for session in p.window.cursor_sessions() {
-                        session.set_cursor_pos(Some(
-                            event
-                                .location
-                                .to_buffer(
-                                    1.0,
-                                    Transform::Normal,
-                                    &p.window.geometry().size.to_f64(),
-                                )
-                                .to_i32_round(),
-                        ));
-                        if let Some((_, hotspot)) = seat.cursor_geometry(
-                            (0.0, 0.0),
-                            Duration::from_millis(event.time as u64).into(),
-                        ) {
-                            session.set_cursor_hotspot(hotspot);
-                        } else {
-                            session.set_cursor_hotspot((0, 0));
-                        }
-                    }
-                    return false;
+                    return;
                 };
 
                 assert_eq!(old_focus, Focus::None);
@@ -651,37 +649,16 @@ impl PointerTarget<State> for CosmicWindow {
                     .get::<RefCell<CursorImageStatus>>()
                     .unwrap();
                 *cursor_status.borrow_mut() = CursorImageStatus::default_named();
-                shape == CursorShape::Default
-            } else {
-                p.swap_focus(Focus::Window);
-                PointerTarget::enter(&p.window, seat, data, &event);
-                for session in p.window.cursor_sessions() {
-                    session.set_cursor_pos(Some(
-                        event
-                            .location
-                            .to_buffer(1.0, Transform::Normal, &p.window.geometry().size.to_f64())
-                            .to_i32_round(),
-                    ));
-                    if let Some((_, hotspot)) = seat.cursor_geometry(
-                        (0.0, 0.0),
-                        Duration::from_millis(event.time as u64).into(),
-                    ) {
-                        session.set_cursor_hotspot(hotspot);
-                    } else {
-                        session.set_cursor_hotspot((0, 0));
-                    }
-                }
-                false
             }
-        }) {
-            event.location -= self.0.with_program(|p| p.window.geometry().loc.to_f64());
-            PointerTarget::enter(&self.0, seat, data, &event)
-        }
+        });
+
+        event.location -= self.0.with_program(|p| p.window.geometry().loc.to_f64());
+        PointerTarget::enter(&self.0, seat, data, &event)
     }
 
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
         let mut event = event.clone();
-        if let Some((previous, next)) = self.0.with_program(|p| {
+        self.0.with_program(|p| {
             if p.has_ssd(false) {
                 let geo = p.window.geometry();
                 let loc = event.location.to_i32_round::<i32>();
@@ -704,43 +681,10 @@ impl PointerTarget<State> for CosmicWindow {
                 } else if loc.y < SSD_HEIGHT {
                     (Focus::Header, CursorShape::Default)
                 } else {
-                    event.location.y -= SSD_HEIGHT as f64;
-
-                    let previous = p.swap_focus(Focus::Window);
-                    if previous != Focus::Window {
-                        PointerTarget::enter(&p.window, seat, data, &event);
-                    } else {
-                        PointerTarget::motion(&p.window, seat, data, &event);
-                    }
-
-                    for session in p.window.cursor_sessions() {
-                        session.set_cursor_pos(Some(
-                            event
-                                .location
-                                .to_buffer(
-                                    1.0,
-                                    Transform::Normal,
-                                    &p.window.geometry().size.to_f64(),
-                                )
-                                .to_i32_round(),
-                        ));
-                        if let Some((_, hotspot)) = seat.cursor_geometry(
-                            (0.0, 0.0),
-                            Duration::from_millis(event.time as u64).into(),
-                        ) {
-                            session.set_cursor_hotspot(hotspot);
-                        } else {
-                            session.set_cursor_hotspot((0, 0));
-                        }
-                    }
-
-                    return Some((previous, Focus::Window));
+                    return;
                 };
 
-                let previous = p.swap_focus(next);
-                if previous == Focus::Window {
-                    PointerTarget::leave(&p.window, seat, data, event.serial, event.time);
-                }
+                let _previous = p.swap_focus(next);
 
                 let cursor_state = seat.user_data().get::<CursorState>().unwrap();
                 cursor_state.set_shape(shape);
@@ -749,52 +693,19 @@ impl PointerTarget<State> for CosmicWindow {
                     .get::<RefCell<CursorImageStatus>>()
                     .unwrap();
                 *cursor_status.borrow_mut() = CursorImageStatus::default_named();
-
-                Some((previous, next))
-            } else {
-                p.swap_focus(Focus::Window);
-                PointerTarget::motion(&p.window, seat, data, &event);
-
-                for session in p.window.cursor_sessions() {
-                    session.set_cursor_pos(Some(
-                        event
-                            .location
-                            .to_buffer(1.0, Transform::Normal, &p.window.geometry().size.to_f64())
-                            .to_i32_round(),
-                    ));
-                    if let Some((_, hotspot)) = seat.cursor_geometry(
-                        (0.0, 0.0),
-                        Duration::from_millis(event.time as u64).into(),
-                    ) {
-                        session.set_cursor_hotspot(hotspot);
-                    } else {
-                        session.set_cursor_hotspot((0, 0));
-                    }
-                }
-
-                None
             }
-        }) {
-            event.location -= self.0.with_program(|p| p.window.geometry().loc.to_f64());
-            match (previous, next) {
-                (Focus::Header, Focus::Header) => {
-                    PointerTarget::motion(&self.0, seat, data, &event)
-                }
-                (_, Focus::Header) => PointerTarget::enter(&self.0, seat, data, &event),
-                (Focus::Header, _) => {
-                    PointerTarget::leave(&self.0, seat, data, event.serial, event.time)
-                }
-                _ => {}
-            };
-        }
+        });
+
+        event.location -= self.0.with_program(|p| p.window.geometry().loc.to_f64());
+        PointerTarget::motion(&self.0, seat, data, &event)
     }
 
-    fn relative_motion(&self, seat: &Seat<State>, data: &mut State, event: &RelativeMotionEvent) {
-        self.0.with_program(|p| {
-            if !p.has_ssd(false) || p.current_focus() == Focus::Window {
-                PointerTarget::relative_motion(&p.window, seat, data, event)
-            }
-        })
+    fn relative_motion(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _event: &RelativeMotionEvent,
+    ) {
     }
 
     fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
@@ -805,9 +716,6 @@ impl PointerTarget<State> for CosmicWindow {
                 });
                 PointerTarget::button(&self.0, seat, data, event)
             }
-            Focus::Window => self
-                .0
-                .with_program(|p| PointerTarget::button(&p.window, seat, data, event)),
             Focus::None => {}
             x => {
                 let serial = event.serial;
@@ -830,7 +738,7 @@ impl PointerTarget<State> for CosmicWindow {
                             Focus::ResizeBottomRight => ResizeEdge::BOTTOM_RIGHT,
                             Focus::ResizeLeft => ResizeEdge::LEFT,
                             Focus::ResizeRight => ResizeEdge::RIGHT,
-                            Focus::Header | Focus::Window | Focus::None => unreachable!(),
+                            Focus::Header | Focus::None => unreachable!(),
                         },
                     )
                 });
@@ -841,9 +749,6 @@ impl PointerTarget<State> for CosmicWindow {
     fn axis(&self, seat: &Seat<State>, data: &mut State, frame: AxisFrame) {
         match self.0.with_program(|p| p.current_focus()) {
             Focus::Header => PointerTarget::axis(&self.0, seat, data, frame),
-            Focus::Window => self
-                .0
-                .with_program(|p| PointerTarget::axis(&p.window, seat, data, frame)),
             _ => {}
         }
     }
@@ -851,129 +756,81 @@ impl PointerTarget<State> for CosmicWindow {
     fn frame(&self, seat: &Seat<State>, data: &mut State) {
         match self.0.with_program(|p| p.current_focus()) {
             Focus::Header => PointerTarget::frame(&self.0, seat, data),
-            Focus::Window => self
-                .0
-                .with_program(|p| PointerTarget::frame(&p.window, seat, data)),
             _ => {}
         }
     }
 
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
-        let previous = self.0.with_program(|p| {
-            for session in p.window.cursor_sessions() {
-                session.set_cursor_pos(None);
-            }
-
+        self.0.with_program(|p| {
             let cursor_state = seat.user_data().get::<CursorState>().unwrap();
             cursor_state.set_shape(CursorShape::Default);
-            p.swap_focus(Focus::None)
+            let _previous = p.swap_focus(Focus::None);
         });
-        match previous {
-            Focus::Header => PointerTarget::leave(&self.0, seat, data, serial, time),
-            Focus::Window => self
-                .0
-                .with_program(|p| PointerTarget::leave(&p.window, seat, data, serial, time)),
-            _ => {}
-        }
+        PointerTarget::leave(&self.0, seat, data, serial, time)
     }
 
     fn gesture_swipe_begin(
         &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &GestureSwipeBeginEvent,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _event: &GestureSwipeBeginEvent,
     ) {
-        self.0.with_program(|p| {
-            if !p.has_ssd(false) || p.current_focus() == Focus::Window {
-                PointerTarget::gesture_swipe_begin(&p.window, seat, data, event)
-            }
-        })
     }
 
     fn gesture_swipe_update(
         &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &GestureSwipeUpdateEvent,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _event: &GestureSwipeUpdateEvent,
     ) {
-        self.0.with_program(|p| {
-            if !p.has_ssd(false) || p.current_focus() == Focus::Window {
-                PointerTarget::gesture_swipe_update(&p.window, seat, data, event)
-            }
-        })
     }
 
     fn gesture_swipe_end(
         &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &GestureSwipeEndEvent,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _event: &GestureSwipeEndEvent,
     ) {
-        self.0.with_program(|p| {
-            if !p.has_ssd(false) || p.current_focus() == Focus::Window {
-                PointerTarget::gesture_swipe_end(&p.window, seat, data, event)
-            }
-        })
     }
 
     fn gesture_pinch_begin(
         &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &GesturePinchBeginEvent,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _event: &GesturePinchBeginEvent,
     ) {
-        self.0.with_program(|p| {
-            if !p.has_ssd(false) || p.current_focus() == Focus::Window {
-                PointerTarget::gesture_pinch_begin(&p.window, seat, data, event)
-            }
-        })
     }
 
     fn gesture_pinch_update(
         &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &GesturePinchUpdateEvent,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _event: &GesturePinchUpdateEvent,
     ) {
-        self.0.with_program(|p| {
-            if !p.has_ssd(false) || p.current_focus() == Focus::Window {
-                PointerTarget::gesture_pinch_update(&p.window, seat, data, event)
-            }
-        })
     }
 
     fn gesture_pinch_end(
         &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &GesturePinchEndEvent,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _event: &GesturePinchEndEvent,
     ) {
-        self.0.with_program(|p| {
-            if !p.has_ssd(false) || p.current_focus() == Focus::Window {
-                PointerTarget::gesture_pinch_end(&p.window, seat, data, event)
-            }
-        })
     }
 
     fn gesture_hold_begin(
         &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &GestureHoldBeginEvent,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _event: &GestureHoldBeginEvent,
     ) {
-        self.0.with_program(|p| {
-            if !p.has_ssd(false) || p.current_focus() == Focus::Window {
-                PointerTarget::gesture_hold_begin(&p.window, seat, data, event)
-            }
-        })
     }
 
-    fn gesture_hold_end(&self, seat: &Seat<State>, data: &mut State, event: &GestureHoldEndEvent) {
-        self.0.with_program(|p| {
-            if !p.has_ssd(false) || p.current_focus() == Focus::Window {
-                PointerTarget::gesture_hold_end(&p.window, seat, data, event)
-            }
-        })
+    fn gesture_hold_end(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _event: &GestureHoldEndEvent,
+    ) {
     }
 }
 

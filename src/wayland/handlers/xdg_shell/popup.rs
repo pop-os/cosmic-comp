@@ -19,11 +19,10 @@ use smithay::{
         seat::WaylandFocus,
         shell::xdg::{
             PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface,
-            XdgPopupSurfaceRoleAttributes, XDG_POPUP_ROLE,
+            XdgPopupSurfaceData, XDG_POPUP_ROLE,
         },
     },
 };
-use std::sync::Mutex;
 use tracing::{trace, warn};
 
 impl Shell {
@@ -96,7 +95,7 @@ pub fn update_reactive_popups<'a>(
                 let positioner = with_states(&surface.wl_surface(), |states| {
                     let attributes = states
                         .data_map
-                        .get::<Mutex<XdgPopupSurfaceRoleAttributes>>()
+                        .get::<XdgPopupSurfaceData>()
                         .unwrap()
                         .lock()
                         .unwrap();
@@ -378,7 +377,7 @@ pub fn get_popup_toplevel(popup: &PopupSurface) -> Option<WlSurface> {
         parent = with_states(&parent, |states| {
             states
                 .data_map
-                .get::<Mutex<XdgPopupSurfaceRoleAttributes>>()
+                .get::<XdgPopupSurfaceData>()
                 .unwrap()
                 .lock()
                 .unwrap()
@@ -402,7 +401,7 @@ fn get_popup_toplevel_coords(popup: &PopupSurface) -> Point<i32, Logical> {
         offset += with_states(&parent, |states| {
             states
                 .data_map
-                .get::<Mutex<XdgPopupSurfaceRoleAttributes>>()
+                .get::<XdgPopupSurfaceData>()
                 .unwrap()
                 .lock()
                 .unwrap()
@@ -413,7 +412,7 @@ fn get_popup_toplevel_coords(popup: &PopupSurface) -> Point<i32, Logical> {
         parent = with_states(&parent, |states| {
             states
                 .data_map
-                .get::<Mutex<XdgPopupSurfaceRoleAttributes>>()
+                .get::<XdgPopupSurfaceData>()
                 .unwrap()
                 .lock()
                 .unwrap()
