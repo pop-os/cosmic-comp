@@ -1,4 +1,4 @@
-use std::sync::Weak;
+use std::{sync::Weak, time::Duration};
 
 use crate::{
     shell::{
@@ -7,12 +7,12 @@ use crate::{
         CosmicSurface,
     },
     utils::prelude::*,
-    wayland::handlers::xdg_shell::popup::get_popup_toplevel,
+    wayland::handlers::{screencopy::SessionHolder, xdg_shell::popup::get_popup_toplevel},
 };
 use id_tree::NodeId;
 use smithay::{
     backend::input::KeyState,
-    desktop::{LayerSurface, PopupKind, WindowSurface, WindowSurfaceType},
+    desktop::{space::SpaceElement, LayerSurface, PopupKind, WindowSurface, WindowSurfaceType},
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{
@@ -24,17 +24,37 @@ use smithay::{
         Seat,
     },
     reexports::wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface, Resource},
-    utils::{IsAlive, Logical, Point, Serial},
+    utils::{IsAlive, Logical, Point, Serial, Transform},
     wayland::{seat::WaylandFocus, session_lock::LockSurface},
 };
 
-// discuss: should contain WlSurface, IcedElement
 #[derive(Debug, Clone, PartialEq)]
 pub enum PointerFocusTarget {
-    WlSurface(WlSurface),
+    WlSurface {
+        surface: WlSurface,
+        toplevel: Option<PointerFocusToplevel>,
+    },
     StackUI(CosmicStack),
     WindowUI(CosmicWindow),
     ResizeFork(ResizeForkTarget),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PointerFocusToplevel {
+    Surface(CosmicSurface),
+    Popup(PopupKind),
+}
+
+impl From<CosmicSurface> for PointerFocusToplevel {
+    fn from(value: CosmicSurface) -> Self {
+        PointerFocusToplevel::Surface(value)
+    }
+}
+
+impl From<PopupKind> for PointerFocusToplevel {
+    fn from(value: PopupKind) -> Self {
+        PointerFocusToplevel::Popup(value)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -52,40 +72,33 @@ impl From<KeyboardFocusTarget> for PointerFocusTarget {
     fn from(target: KeyboardFocusTarget) -> Self {
         match target {
             KeyboardFocusTarget::Element(elem) => {
-                PointerFocusTarget::WlSurface(elem.active_window().wl_surface().unwrap())
+                let window = elem.active_window();
+                let surface = window.wl_surface().unwrap();
+                PointerFocusTarget::WlSurface {
+                    surface,
+                    toplevel: Some(window.into()),
+                }
             }
-            KeyboardFocusTarget::Fullscreen(elem) => {
-                PointerFocusTarget::WlSurface(elem.wl_surface().unwrap())
-            }
-            KeyboardFocusTarget::LayerSurface(layer) => {
-                PointerFocusTarget::WlSurface(layer.wl_surface().clone())
-            }
-            KeyboardFocusTarget::Popup(popup) => {
-                PointerFocusTarget::WlSurface(popup.wl_surface().clone())
-            }
-            KeyboardFocusTarget::LockSurface(lock) => {
-                PointerFocusTarget::WlSurface(lock.wl_surface().clone())
-            }
+            KeyboardFocusTarget::Fullscreen(elem) => PointerFocusTarget::WlSurface {
+                surface: elem.wl_surface().unwrap(),
+                toplevel: Some(elem.into()),
+            },
+            KeyboardFocusTarget::LayerSurface(layer) => PointerFocusTarget::WlSurface {
+                surface: layer.wl_surface().clone(),
+                toplevel: None,
+            },
+            KeyboardFocusTarget::Popup(popup) => PointerFocusTarget::WlSurface {
+                surface: popup.wl_surface().clone(),
+                toplevel: Some(popup.into()),
+            },
+            KeyboardFocusTarget::LockSurface(lock) => PointerFocusTarget::WlSurface {
+                surface: lock.wl_surface().clone(),
+                toplevel: None,
+            },
             _ => unreachable!("A group cannot start a popup grab"),
         }
     }
 }
-
-/*
-impl TryFrom<PointerFocusTarget> for KeyboardFocusTarget {
-    type Error = ();
-    fn try_from(target: PointerFocusTarget) -> Result<Self, Self::Error> {
-        match target {
-            PointerFocusTarget::Element(mapped) => Ok(KeyboardFocusTarget::Element(mapped)),
-            PointerFocusTarget::Fullscreen(surf) => Ok(KeyboardFocusTarget::Fullscreen(surf)),
-            PointerFocusTarget::LayerSurface(layer) => Ok(KeyboardFocusTarget::LayerSurface(layer)),
-            PointerFocusTarget::Popup(popup) => Ok(KeyboardFocusTarget::Popup(popup)),
-            PointerFocusTarget::LockSurface(lock) => Ok(KeyboardFocusTarget::LockSurface(lock)),
-            _ => Err(()),
-        }
-    }
-}
-*/
 
 impl PointerFocusTarget {
     pub fn under_surface<P: Into<Point<f64, Logical>>>(
@@ -96,10 +109,49 @@ impl PointerFocusTarget {
             WindowSurface::Wayland(_toplevel) => surface
                 .0
                 .surface_under(point, WindowSurfaceType::ALL)
-                .map(|(wl_surface, point)| (Self::WlSurface(wl_surface), point)),
-            WindowSurface::X11(surface) => {
-                Some((Self::WlSurface(surface.wl_surface()?), Point::default()))
-            }
+                .map(|(wl_surface, point)| {
+                    (
+                        Self::WlSurface {
+                            surface: wl_surface,
+                            toplevel: Some(surface.clone().into()),
+                        },
+                        point,
+                    )
+                }),
+            WindowSurface::X11(x11_surface) => Some((
+                Self::WlSurface {
+                    surface: x11_surface.wl_surface()?,
+                    toplevel: Some(surface.clone().into()),
+                },
+                Point::default(),
+            )),
+        }
+    }
+
+    pub fn toplevel(&self, data: &mut State) -> Option<CosmicSurface> {
+        match &self {
+            PointerFocusTarget::WlSurface {
+                toplevel: Some(PointerFocusToplevel::Surface(surface)),
+                ..
+            } => Some(surface.clone()),
+            PointerFocusTarget::WlSurface {
+                toplevel: Some(PointerFocusToplevel::Popup(PopupKind::Xdg(popup))),
+                ..
+            } => get_popup_toplevel(popup)
+                .and_then(|s| {
+                    data.common
+                        .shell
+                        .element_for_surface(&s)
+                        .map(|mapped| (mapped, s))
+                })
+                .and_then(|(m, s)| {
+                    m.windows()
+                        .find(|(w, _)| w.wl_surface().map(|s2| s == s2).unwrap_or(false))
+                        .map(|(s, _)| s)
+                }),
+            PointerFocusTarget::StackUI(stack) => Some(stack.active()),
+            PointerFocusTarget::WindowUI(window) => Some(window.surface()),
+            _ => None,
         }
     }
 }
@@ -131,7 +183,7 @@ impl IsAlive for PointerFocusTarget {
     fn alive(&self) -> bool {
         match self {
             // XXX? does this change anything
-            PointerFocusTarget::WlSurface(s) => s.alive(),
+            PointerFocusTarget::WlSurface { surface, .. } => surface.alive(),
             PointerFocusTarget::StackUI(e) => e.alive(),
             PointerFocusTarget::WindowUI(e) => e.alive(),
             PointerFocusTarget::ResizeFork(f) => f.alive(),
@@ -154,16 +206,56 @@ impl IsAlive for KeyboardFocusTarget {
 
 impl PointerTarget<State> for PointerFocusTarget {
     fn enter(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
+        if let Some(element) = self.toplevel(data) {
+            for session in element.cursor_sessions() {
+                session.set_cursor_pos(Some(
+                    event
+                        .location
+                        .to_buffer(1.0, Transform::Normal, &element.geometry().size.to_f64())
+                        .to_i32_round(),
+                ));
+                if let Some((_, hotspot)) = seat
+                    .cursor_geometry((0.0, 0.0), Duration::from_millis(event.time as u64).into())
+                {
+                    session.set_cursor_hotspot(hotspot);
+                } else {
+                    session.set_cursor_hotspot((0, 0));
+                }
+            }
+        }
+
         match self {
-            PointerFocusTarget::WlSurface(s) => PointerTarget::enter(s, seat, data, event),
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                PointerTarget::enter(surface, seat, data, event)
+            }
             PointerFocusTarget::StackUI(u) => PointerTarget::enter(u, seat, data, event),
             PointerFocusTarget::WindowUI(u) => PointerTarget::enter(u, seat, data, event),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::enter(f, seat, data, event),
         }
     }
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
+        if let Some(element) = self.toplevel(data) {
+            for session in element.cursor_sessions() {
+                session.set_cursor_pos(Some(
+                    event
+                        .location
+                        .to_buffer(1.0, Transform::Normal, &element.geometry().size.to_f64())
+                        .to_i32_round(),
+                ));
+                if let Some((_, hotspot)) = seat
+                    .cursor_geometry((0.0, 0.0), Duration::from_millis(event.time as u64).into())
+                {
+                    session.set_cursor_hotspot(hotspot);
+                } else {
+                    session.set_cursor_hotspot((0, 0));
+                }
+            }
+        }
+
         match self {
-            PointerFocusTarget::WlSurface(s) => PointerTarget::motion(s, seat, data, event),
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                PointerTarget::motion(surface, seat, data, event)
+            }
             PointerFocusTarget::StackUI(u) => PointerTarget::motion(u, seat, data, event),
             PointerFocusTarget::WindowUI(u) => PointerTarget::motion(u, seat, data, event),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::motion(f, seat, data, event),
@@ -171,8 +263,8 @@ impl PointerTarget<State> for PointerFocusTarget {
     }
     fn relative_motion(&self, seat: &Seat<State>, data: &mut State, event: &RelativeMotionEvent) {
         match self {
-            PointerFocusTarget::WlSurface(s) => {
-                PointerTarget::relative_motion(s, seat, data, event)
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                PointerTarget::relative_motion(surface, seat, data, event)
             }
             PointerFocusTarget::StackUI(u) => PointerTarget::relative_motion(u, seat, data, event),
             PointerFocusTarget::WindowUI(u) => PointerTarget::relative_motion(u, seat, data, event),
@@ -183,7 +275,9 @@ impl PointerTarget<State> for PointerFocusTarget {
     }
     fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
         match self {
-            PointerFocusTarget::WlSurface(s) => PointerTarget::button(s, seat, data, event),
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                PointerTarget::button(surface, seat, data, event)
+            }
             PointerFocusTarget::StackUI(u) => PointerTarget::button(u, seat, data, event),
             PointerFocusTarget::WindowUI(u) => PointerTarget::button(u, seat, data, event),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::button(f, seat, data, event),
@@ -191,7 +285,9 @@ impl PointerTarget<State> for PointerFocusTarget {
     }
     fn axis(&self, seat: &Seat<State>, data: &mut State, frame: AxisFrame) {
         match self {
-            PointerFocusTarget::WlSurface(s) => PointerTarget::axis(s, seat, data, frame),
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                PointerTarget::axis(surface, seat, data, frame)
+            }
             PointerFocusTarget::StackUI(u) => PointerTarget::axis(u, seat, data, frame),
             PointerFocusTarget::WindowUI(u) => PointerTarget::axis(u, seat, data, frame),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::axis(f, seat, data, frame),
@@ -199,15 +295,26 @@ impl PointerTarget<State> for PointerFocusTarget {
     }
     fn frame(&self, seat: &Seat<State>, data: &mut State) {
         match self {
-            PointerFocusTarget::WlSurface(s) => PointerTarget::frame(s, seat, data),
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                PointerTarget::frame(surface, seat, data)
+            }
             PointerFocusTarget::StackUI(u) => PointerTarget::frame(u, seat, data),
             PointerFocusTarget::WindowUI(u) => PointerTarget::frame(u, seat, data),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::frame(f, seat, data),
         }
     }
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
+        if let Some(element) = self.toplevel(data) {
+            for session in element.cursor_sessions() {
+                session.set_cursor_pos(None);
+                session.set_cursor_hotspot((0, 0));
+            }
+        }
+
         match self {
-            PointerFocusTarget::WlSurface(s) => PointerTarget::leave(s, seat, data, serial, time),
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                PointerTarget::leave(surface, seat, data, serial, time)
+            }
             PointerFocusTarget::StackUI(u) => PointerTarget::leave(u, seat, data, serial, time),
             PointerFocusTarget::WindowUI(u) => PointerTarget::leave(u, seat, data, serial, time),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::leave(f, seat, data, serial, time),
@@ -220,8 +327,8 @@ impl PointerTarget<State> for PointerFocusTarget {
         event: &GestureSwipeBeginEvent,
     ) {
         match self {
-            PointerFocusTarget::WlSurface(s) => {
-                PointerTarget::gesture_swipe_begin(s, seat, data, event)
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                PointerTarget::gesture_swipe_begin(surface, seat, data, event)
             }
             PointerFocusTarget::StackUI(u) => {
                 PointerTarget::gesture_swipe_begin(u, seat, data, event)
@@ -241,8 +348,8 @@ impl PointerTarget<State> for PointerFocusTarget {
         event: &GestureSwipeUpdateEvent,
     ) {
         match self {
-            PointerFocusTarget::WlSurface(s) => {
-                PointerTarget::gesture_swipe_update(s, seat, data, event)
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                PointerTarget::gesture_swipe_update(surface, seat, data, event)
             }
             PointerFocusTarget::StackUI(u) => {
                 PointerTarget::gesture_swipe_update(u, seat, data, event)
@@ -262,8 +369,8 @@ impl PointerTarget<State> for PointerFocusTarget {
         event: &GestureSwipeEndEvent,
     ) {
         match self {
-            PointerFocusTarget::WlSurface(s) => {
-                PointerTarget::gesture_swipe_end(s, seat, data, event)
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                PointerTarget::gesture_swipe_end(surface, seat, data, event)
             }
             PointerFocusTarget::StackUI(u) => {
                 PointerTarget::gesture_swipe_end(u, seat, data, event)
@@ -283,8 +390,8 @@ impl PointerTarget<State> for PointerFocusTarget {
         event: &GesturePinchBeginEvent,
     ) {
         match self {
-            PointerFocusTarget::WlSurface(s) => {
-                PointerTarget::gesture_pinch_begin(s, seat, data, event)
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                PointerTarget::gesture_pinch_begin(surface, seat, data, event)
             }
             PointerFocusTarget::StackUI(u) => {
                 PointerTarget::gesture_pinch_begin(u, seat, data, event)
@@ -304,8 +411,8 @@ impl PointerTarget<State> for PointerFocusTarget {
         event: &GesturePinchUpdateEvent,
     ) {
         match self {
-            PointerFocusTarget::WlSurface(s) => {
-                PointerTarget::gesture_pinch_update(s, seat, data, event)
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                PointerTarget::gesture_pinch_update(surface, seat, data, event)
             }
             PointerFocusTarget::StackUI(u) => {
                 PointerTarget::gesture_pinch_update(u, seat, data, event)
@@ -325,8 +432,8 @@ impl PointerTarget<State> for PointerFocusTarget {
         event: &GesturePinchEndEvent,
     ) {
         match self {
-            PointerFocusTarget::WlSurface(s) => {
-                PointerTarget::gesture_pinch_end(s, seat, data, event)
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                PointerTarget::gesture_pinch_end(surface, seat, data, event)
             }
             PointerFocusTarget::StackUI(u) => {
                 PointerTarget::gesture_pinch_end(u, seat, data, event)
@@ -346,8 +453,8 @@ impl PointerTarget<State> for PointerFocusTarget {
         event: &GestureHoldBeginEvent,
     ) {
         match self {
-            PointerFocusTarget::WlSurface(s) => {
-                PointerTarget::gesture_hold_begin(s, seat, data, event)
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                PointerTarget::gesture_hold_begin(surface, seat, data, event)
             }
             PointerFocusTarget::StackUI(u) => {
                 PointerTarget::gesture_hold_begin(u, seat, data, event)
@@ -362,8 +469,8 @@ impl PointerTarget<State> for PointerFocusTarget {
     }
     fn gesture_hold_end(&self, seat: &Seat<State>, data: &mut State, event: &GestureHoldEndEvent) {
         match self {
-            PointerFocusTarget::WlSurface(s) => {
-                PointerTarget::gesture_hold_end(s, seat, data, event)
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                PointerTarget::gesture_hold_end(surface, seat, data, event)
             }
             PointerFocusTarget::StackUI(u) => PointerTarget::gesture_hold_end(u, seat, data, event),
             PointerFocusTarget::WindowUI(u) => {
@@ -497,7 +604,7 @@ impl WaylandFocus for KeyboardFocusTarget {
 impl WaylandFocus for PointerFocusTarget {
     fn wl_surface(&self) -> Option<WlSurface> {
         Some(match self {
-            PointerFocusTarget::WlSurface(s) => s.clone(),
+            PointerFocusTarget::WlSurface { surface, .. } => surface.clone(),
             PointerFocusTarget::ResizeFork(_)
             | PointerFocusTarget::StackUI(_)
             | PointerFocusTarget::WindowUI(_) => {
@@ -507,7 +614,7 @@ impl WaylandFocus for PointerFocusTarget {
     }
     fn same_client_as(&self, object_id: &ObjectId) -> bool {
         match self {
-            PointerFocusTarget::WlSurface(s) => s.id().same_client_as(object_id),
+            PointerFocusTarget::WlSurface { surface, .. } => surface.id().same_client_as(object_id),
             PointerFocusTarget::StackUI(stack) => stack
                 .active()
                 .wl_surface()
@@ -522,15 +629,12 @@ impl WaylandFocus for PointerFocusTarget {
     }
 }
 
-impl From<WlSurface> for PointerFocusTarget {
-    fn from(s: WlSurface) -> Self {
-        PointerFocusTarget::WlSurface(s)
-    }
-}
-
 impl From<PopupKind> for PointerFocusTarget {
     fn from(p: PopupKind) -> Self {
-        PointerFocusTarget::WlSurface(p.wl_surface().clone())
+        PointerFocusTarget::WlSurface {
+            surface: p.wl_surface().clone(),
+            toplevel: None,
+        }
     }
 }
 
@@ -542,7 +646,10 @@ impl From<ResizeForkTarget> for PointerFocusTarget {
 
 impl From<LockSurface> for PointerFocusTarget {
     fn from(l: LockSurface) -> Self {
-        PointerFocusTarget::WlSurface(l.wl_surface().clone())
+        PointerFocusTarget::WlSurface {
+            surface: l.wl_surface().clone(),
+            toplevel: None,
+        }
     }
 }
 
