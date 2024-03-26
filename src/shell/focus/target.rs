@@ -18,8 +18,12 @@ use smithay::{
         pointer::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
-            PointerTarget, RelativeMotionEvent,
+            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
+            MotionEvent as PointerMotionEvent, PointerTarget, RelativeMotionEvent,
+        },
+        touch::{
+            DownEvent, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchTarget,
+            UpEvent,
         },
         Seat,
     },
@@ -205,7 +209,7 @@ impl IsAlive for KeyboardFocusTarget {
 }
 
 impl PointerTarget<State> for PointerFocusTarget {
-    fn enter(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
+    fn enter(&self, seat: &Seat<State>, data: &mut State, event: &PointerMotionEvent) {
         if let Some(element) = self.toplevel(data) {
             for session in element.cursor_sessions() {
                 session.set_cursor_pos(Some(
@@ -233,7 +237,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::ResizeFork(f) => PointerTarget::enter(f, seat, data, event),
         }
     }
-    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
+    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &PointerMotionEvent) {
         if let Some(element) = self.toplevel(data) {
             for session in element.cursor_sessions() {
                 session.set_cursor_pos(Some(
@@ -483,6 +487,92 @@ impl PointerTarget<State> for PointerFocusTarget {
     }
 }
 
+impl TouchTarget<State> for PointerFocusTarget {
+    fn down(&self, seat: &Seat<State>, data: &mut State, event: &DownEvent, seq: Serial) {
+        match self {
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                TouchTarget::down(surface, seat, data, event, seq)
+            }
+            // TODO: implement TouchTarget for iced/CosmicWindow/CosmicStack/ResizeFork/Grabs
+            PointerFocusTarget::WindowUI(_window) => {}
+            PointerFocusTarget::StackUI(_stack) => {}
+            PointerFocusTarget::ResizeFork(_fork) => {}
+        }
+    }
+
+    fn up(&self, seat: &Seat<State>, data: &mut State, event: &UpEvent, seq: Serial) {
+        match self {
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                TouchTarget::up(surface, seat, data, event, seq)
+            }
+            PointerFocusTarget::WindowUI(_window) => {}
+            PointerFocusTarget::StackUI(_stack) => {}
+            PointerFocusTarget::ResizeFork(_fork) => {}
+        }
+    }
+
+    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &TouchMotionEvent, seq: Serial) {
+        match self {
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                TouchTarget::motion(surface, seat, data, event, seq)
+            }
+            PointerFocusTarget::WindowUI(_window) => {}
+            PointerFocusTarget::StackUI(_stack) => {}
+            PointerFocusTarget::ResizeFork(_fork) => {}
+        }
+    }
+
+    fn frame(&self, seat: &Seat<State>, data: &mut State, seq: Serial) {
+        match self {
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                TouchTarget::frame(surface, seat, data, seq)
+            }
+            PointerFocusTarget::WindowUI(_window) => {}
+            PointerFocusTarget::StackUI(_stack) => {}
+            PointerFocusTarget::ResizeFork(_fork) => {}
+        }
+    }
+
+    fn cancel(&self, seat: &Seat<State>, data: &mut State, seq: Serial) {
+        match self {
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                TouchTarget::cancel(surface, seat, data, seq)
+            }
+            PointerFocusTarget::WindowUI(_window) => {}
+            PointerFocusTarget::StackUI(_stack) => {}
+            PointerFocusTarget::ResizeFork(_fork) => {}
+        }
+    }
+
+    fn shape(&self, seat: &Seat<State>, data: &mut State, event: &ShapeEvent, seq: Serial) {
+        match self {
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                TouchTarget::shape(surface, seat, data, event, seq)
+            }
+            PointerFocusTarget::WindowUI(_window) => {}
+            PointerFocusTarget::StackUI(_stack) => {}
+            PointerFocusTarget::ResizeFork(_fork) => {}
+        }
+    }
+
+    fn orientation(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &OrientationEvent,
+        seq: Serial,
+    ) {
+        match self {
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                TouchTarget::orientation(surface, seat, data, event, seq)
+            }
+            PointerFocusTarget::WindowUI(_window) => {}
+            PointerFocusTarget::StackUI(_stack) => {}
+            PointerFocusTarget::ResizeFork(_fork) => {}
+        }
+    }
+}
+
 impl KeyboardTarget<State> for KeyboardFocusTarget {
     fn enter(
         &self,
@@ -498,7 +588,7 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
             }
             KeyboardFocusTarget::Group(_) => {}
             KeyboardFocusTarget::LayerSurface(l) => {
-                KeyboardTarget::enter(l, seat, data, keys, serial)
+                KeyboardTarget::enter(l.wl_surface(), seat, data, keys, serial)
             }
             KeyboardFocusTarget::Popup(p) => {
                 KeyboardTarget::enter(p.wl_surface(), seat, data, keys, serial)
@@ -513,7 +603,9 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
             KeyboardFocusTarget::Element(w) => KeyboardTarget::leave(w, seat, data, serial),
             KeyboardFocusTarget::Fullscreen(w) => KeyboardTarget::leave(w, seat, data, serial),
             KeyboardFocusTarget::Group(_) => {}
-            KeyboardFocusTarget::LayerSurface(l) => KeyboardTarget::leave(l, seat, data, serial),
+            KeyboardFocusTarget::LayerSurface(l) => {
+                KeyboardTarget::leave(l.wl_surface(), seat, data, serial)
+            }
             KeyboardFocusTarget::Popup(p) => {
                 KeyboardTarget::leave(p.wl_surface(), seat, data, serial)
             }
@@ -540,7 +632,7 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
             }
             KeyboardFocusTarget::Group(_) => {}
             KeyboardFocusTarget::LayerSurface(l) => {
-                KeyboardTarget::key(l, seat, data, key, state, serial, time)
+                KeyboardTarget::key(l.wl_surface(), seat, data, key, state, serial, time)
             }
             KeyboardFocusTarget::Popup(p) => {
                 KeyboardTarget::key(p.wl_surface(), seat, data, key, state, serial, time)
@@ -566,7 +658,7 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
             }
             KeyboardFocusTarget::Group(_) => {}
             KeyboardFocusTarget::LayerSurface(l) => {
-                KeyboardTarget::modifiers(l, seat, data, modifiers, serial)
+                KeyboardTarget::modifiers(l.wl_surface(), seat, data, modifiers, serial)
             }
             KeyboardFocusTarget::Popup(p) => {
                 KeyboardTarget::modifiers(p.wl_surface(), seat, data, modifiers, serial)

@@ -47,6 +47,7 @@ use smithay::{
             GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
             RelativeMotionEvent,
         },
+        touch::{DownEvent, MotionEvent as TouchMotionEvent, UpEvent},
         Seat, SeatState,
     },
     output::Output,
@@ -1313,19 +1314,18 @@ impl State {
                     let under = State::surface_under(position, &output, &mut self.common.shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
-                    if let Some((target, pos)) = under {
-                        if let Some(wl_surface) = target.wl_surface() {
-                            let serial = SERIAL_COUNTER.next_serial();
-                            let touch = seat.get_touch().unwrap();
-                            touch.down(
-                                serial,
-                                event.time_msec(),
-                                &wl_surface,
-                                position.as_logical() - pos.to_f64(),
-                                event.slot(),
-                            );
-                        }
-                    }
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let touch = seat.get_touch().unwrap();
+                    touch.down(
+                        self,
+                        under,
+                        &DownEvent {
+                            slot: event.slot(),
+                            location: position.as_logical(),
+                            serial,
+                            time: event.time_msec(),
+                        },
+                    );
                 }
             }
             InputEvent::TouchMotion { event, .. } => {
@@ -1346,30 +1346,44 @@ impl State {
                     let under = State::surface_under(position, &output, &mut self.common.shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
-                    if let Some((_target, pos)) = under {
-                        let touch = seat.get_touch().unwrap();
-                        touch.motion(
-                            event.time_msec(),
-                            event.slot(),
-                            position.as_logical() - pos.to_f64(),
-                        );
-                    }
+                    let touch = seat.get_touch().unwrap();
+                    touch.motion(
+                        self,
+                        under,
+                        &TouchMotionEvent {
+                            slot: event.slot(),
+                            location: position.as_logical(),
+                            time: event.time_msec(),
+                        },
+                    );
                 }
             }
             InputEvent::TouchUp { event, .. } => {
                 if let Some(seat) = self.common.seat_with_device(&event.device()) {
                     let serial = SERIAL_COUNTER.next_serial();
                     let touch = seat.get_touch().unwrap();
-                    touch.up(serial, event.time_msec(), event.slot());
+                    touch.up(
+                        self,
+                        &UpEvent {
+                            slot: event.slot(),
+                            time: event.time_msec(),
+                            serial,
+                        },
+                    );
                 }
             }
             InputEvent::TouchCancel { event, .. } => {
                 if let Some(seat) = self.common.seat_with_device(&event.device()) {
                     let touch = seat.get_touch().unwrap();
-                    touch.cancel();
+                    touch.cancel(self);
                 }
             }
-            InputEvent::TouchFrame { event: _, .. } => {}
+            InputEvent::TouchFrame { event, .. } => {
+                if let Some(seat) = self.common.seat_with_device(&event.device()) {
+                    let touch = seat.get_touch().unwrap();
+                    touch.frame(self);
+                }
+            }
             InputEvent::TabletToolAxis { event, .. } => {
                 if let Some(seat) = self.common.seat_with_device(&event.device()).cloned() {
                     let Some(output) =

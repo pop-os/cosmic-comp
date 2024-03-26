@@ -19,6 +19,7 @@ use std::cell::RefCell;
 impl SeatHandler for State {
     type KeyboardFocus = KeyboardFocusTarget;
     type PointerFocus = PointerFocusTarget;
+    type TouchFocus = PointerFocusTarget;
 
     fn seat_state(&mut self) -> &mut SeatState<Self> {
         &mut self.common.seat_state
