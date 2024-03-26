@@ -493,9 +493,11 @@ impl TouchTarget<State> for PointerFocusTarget {
             PointerFocusTarget::WlSurface { surface, .. } => {
                 TouchTarget::down(surface, seat, data, event, seq)
             }
-            // TODO: implement TouchTarget for iced/CosmicWindow/CosmicStack/ResizeFork/Grabs
-            PointerFocusTarget::WindowUI(_window) => {}
-            PointerFocusTarget::StackUI(_stack) => {}
+            PointerFocusTarget::WindowUI(window) => {
+                TouchTarget::down(window, seat, data, event, seq)
+            }
+            PointerFocusTarget::StackUI(stack) => TouchTarget::down(stack, seat, data, event, seq),
+            // TODO: implement TouchTarget for ResizeFork/Grabs
             PointerFocusTarget::ResizeFork(_fork) => {}
         }
     }
@@ -505,8 +507,8 @@ impl TouchTarget<State> for PointerFocusTarget {
             PointerFocusTarget::WlSurface { surface, .. } => {
                 TouchTarget::up(surface, seat, data, event, seq)
             }
-            PointerFocusTarget::WindowUI(_window) => {}
-            PointerFocusTarget::StackUI(_stack) => {}
+            PointerFocusTarget::WindowUI(window) => TouchTarget::up(window, seat, data, event, seq),
+            PointerFocusTarget::StackUI(stack) => TouchTarget::up(stack, seat, data, event, seq),
             PointerFocusTarget::ResizeFork(_fork) => {}
         }
     }
@@ -516,8 +518,12 @@ impl TouchTarget<State> for PointerFocusTarget {
             PointerFocusTarget::WlSurface { surface, .. } => {
                 TouchTarget::motion(surface, seat, data, event, seq)
             }
-            PointerFocusTarget::WindowUI(_window) => {}
-            PointerFocusTarget::StackUI(_stack) => {}
+            PointerFocusTarget::WindowUI(window) => {
+                TouchTarget::motion(window, seat, data, event, seq)
+            }
+            PointerFocusTarget::StackUI(stack) => {
+                TouchTarget::motion(stack, seat, data, event, seq)
+            }
             PointerFocusTarget::ResizeFork(_fork) => {}
         }
     }
@@ -527,8 +533,8 @@ impl TouchTarget<State> for PointerFocusTarget {
             PointerFocusTarget::WlSurface { surface, .. } => {
                 TouchTarget::frame(surface, seat, data, seq)
             }
-            PointerFocusTarget::WindowUI(_window) => {}
-            PointerFocusTarget::StackUI(_stack) => {}
+            PointerFocusTarget::WindowUI(window) => TouchTarget::frame(window, seat, data, seq),
+            PointerFocusTarget::StackUI(stack) => TouchTarget::frame(stack, seat, data, seq),
             PointerFocusTarget::ResizeFork(_fork) => {}
         }
     }
@@ -538,8 +544,8 @@ impl TouchTarget<State> for PointerFocusTarget {
             PointerFocusTarget::WlSurface { surface, .. } => {
                 TouchTarget::cancel(surface, seat, data, seq)
             }
-            PointerFocusTarget::WindowUI(_window) => {}
-            PointerFocusTarget::StackUI(_stack) => {}
+            PointerFocusTarget::WindowUI(window) => TouchTarget::cancel(window, seat, data, seq),
+            PointerFocusTarget::StackUI(stack) => TouchTarget::cancel(stack, seat, data, seq),
             PointerFocusTarget::ResizeFork(_fork) => {}
         }
     }
@@ -549,8 +555,10 @@ impl TouchTarget<State> for PointerFocusTarget {
             PointerFocusTarget::WlSurface { surface, .. } => {
                 TouchTarget::shape(surface, seat, data, event, seq)
             }
-            PointerFocusTarget::WindowUI(_window) => {}
-            PointerFocusTarget::StackUI(_stack) => {}
+            PointerFocusTarget::WindowUI(window) => {
+                TouchTarget::shape(window, seat, data, event, seq)
+            }
+            PointerFocusTarget::StackUI(stack) => TouchTarget::shape(stack, seat, data, event, seq),
             PointerFocusTarget::ResizeFork(_fork) => {}
         }
     }
@@ -566,8 +574,12 @@ impl TouchTarget<State> for PointerFocusTarget {
             PointerFocusTarget::WlSurface { surface, .. } => {
                 TouchTarget::orientation(surface, seat, data, event, seq)
             }
-            PointerFocusTarget::WindowUI(_window) => {}
-            PointerFocusTarget::StackUI(_stack) => {}
+            PointerFocusTarget::WindowUI(window) => {
+                TouchTarget::orientation(window, seat, data, event, seq)
+            }
+            PointerFocusTarget::StackUI(stack) => {
+                TouchTarget::orientation(stack, seat, data, event, seq)
+            }
             PointerFocusTarget::ResizeFork(_fork) => {}
         }
     }

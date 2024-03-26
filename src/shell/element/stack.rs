@@ -42,6 +42,10 @@ use smithay::{
             GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
             PointerTarget, RelativeMotionEvent,
         },
+        touch::{
+            DownEvent, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchTarget,
+            UpEvent,
+        },
         Seat,
     },
     output::Output,
@@ -1424,6 +1428,51 @@ impl PointerTarget<State> for CosmicStack {
         _seat: &Seat<State>,
         _data: &mut State,
         _event: &GestureHoldEndEvent,
+    ) {
+    }
+}
+
+impl TouchTarget<State> for CosmicStack {
+    fn down(&self, seat: &Seat<State>, data: &mut State, event: &DownEvent, seq: Serial) {
+        let mut event = event.clone();
+        let active_window_geo = self.0.with_program(|p| {
+            p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry()
+        });
+        event.location -= active_window_geo.loc.to_f64();
+        TouchTarget::down(&self.0, seat, data, &event, seq)
+    }
+
+    fn up(&self, seat: &Seat<State>, data: &mut State, event: &UpEvent, seq: Serial) {
+        TouchTarget::up(&self.0, seat, data, &event, seq)
+    }
+
+    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &TouchMotionEvent, seq: Serial) {
+        let mut event = event.clone();
+        let active_window_geo = self.0.with_program(|p| {
+            p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry()
+        });
+        event.location -= active_window_geo.loc.to_f64();
+        TouchTarget::motion(&self.0, seat, data, &event, seq)
+    }
+
+    fn frame(&self, seat: &Seat<State>, data: &mut State, seq: Serial) {
+        TouchTarget::frame(&self.0, seat, data, seq)
+    }
+
+    fn cancel(&self, seat: &Seat<State>, data: &mut State, seq: Serial) {
+        TouchTarget::cancel(&self.0, seat, data, seq)
+    }
+
+    fn shape(&self, seat: &Seat<State>, data: &mut State, event: &ShapeEvent, seq: Serial) {
+        TouchTarget::shape(&self.0, seat, data, event, seq)
+    }
+
+    fn orientation(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _event: &OrientationEvent,
+        _seq: Serial,
     ) {
     }
 }
