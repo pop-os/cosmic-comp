@@ -10,7 +10,6 @@ use crate::{
         iced::{IcedElement, Program},
         prelude::*,
     },
-    wayland::handlers::screencopy::SessionHolder,
 };
 use calloop::LoopHandle;
 use cosmic::{iced::Command, widget::mouse_area, Apply};
@@ -39,7 +38,7 @@ use smithay::{
     output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     render_elements,
-    utils::{Buffer as BufferCoords, IsAlive, Logical, Point, Rectangle, Serial, Size, Transform},
+    utils::{Buffer as BufferCoords, IsAlive, Logical, Point, Rectangle, Serial, Size},
     wayland::seat::WaylandFocus,
 };
 use std::{
@@ -50,7 +49,6 @@ use std::{
         atomic::{AtomicBool, AtomicU8, Ordering},
         Arc, Mutex,
     },
-    time::Duration,
 };
 use wayland_backend::server::ObjectId;
 
@@ -221,7 +219,10 @@ impl CosmicWindow {
                 .surface_under(relative_pos, WindowSurfaceType::ALL)
                 .map(|(surface, surface_offset)| {
                     (
-                        PointerFocusTarget::WlSurface(surface),
+                        PointerFocusTarget::WlSurface {
+                            surface,
+                            toplevel: Some(p.window.clone().into()),
+                        },
                         offset + surface_offset,
                     )
                 })

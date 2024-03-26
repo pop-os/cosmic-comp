@@ -732,7 +732,7 @@ impl State {
                                 ptr.frame(self);
                                 return;
                             }
-                            if let PointerFocusTarget::WlSurface(surface) = surface {
+                            if let PointerFocusTarget::WlSurface { surface, .. } = surface {
                                 if under_from_surface_tree(
                                     surface,
                                     position.as_logical() - surface_loc.to_f64(),
@@ -2296,7 +2296,10 @@ impl State {
         if let Some(session_lock) = session_lock {
             return session_lock.surfaces.get(output).map(|surface| {
                 (
-                    PointerFocusTarget::WlSurface(surface.wl_surface().clone()),
+                    PointerFocusTarget::WlSurface {
+                        surface: surface.wl_surface().clone(),
+                        toplevel: None,
+                    },
                     output_geo.loc,
                 )
             });
@@ -2311,7 +2314,10 @@ impl State {
                     WindowSurfaceType::ALL,
                 ) {
                     return Some((
-                        wl_surface.into(),
+                        PointerFocusTarget::WlSurface {
+                            surface: wl_surface,
+                            toplevel: None,
+                        },
                         output_geo.loc + layer_loc.as_global() + surface_loc.as_global(),
                     ));
                 }
@@ -2329,7 +2335,13 @@ impl State {
                         .map(|surface| (surface, X11Surface::geometry(or).loc.as_global()))
                 })
             {
-                return Some((surface.into(), geo));
+                return Some((
+                    PointerFocusTarget::WlSurface {
+                        surface,
+                        toplevel: None,
+                    },
+                    geo,
+                ));
             }
             PointerFocusTarget::under_surface(window, relative_pos.as_logical())
                 .map(|(target, surface_loc)| (target, output_geo.loc + surface_loc.as_global()))
@@ -2346,7 +2358,10 @@ impl State {
                         WindowSurfaceType::ALL,
                     ) {
                         return Some((
-                            wl_surface.into(),
+                            PointerFocusTarget::WlSurface {
+                                surface: wl_surface,
+                                toplevel: None,
+                            },
                             output_geo.loc + layer_loc.as_global() + surface_loc.as_global(),
                         ));
                     }
@@ -2365,7 +2380,13 @@ impl State {
                         .map(|surface| (surface, X11Surface::geometry(or).loc.as_global()))
                 })
             {
-                return Some((surface.into(), geo));
+                return Some((
+                    PointerFocusTarget::WlSurface {
+                        surface,
+                        toplevel: None,
+                    },
+                    geo,
+                ));
             }
             if let Some((target, loc)) = shell.surface_under(global_pos, output) {
                 return Some((target, loc));
@@ -2382,7 +2403,10 @@ impl State {
                         WindowSurfaceType::ALL,
                     ) {
                         return Some((
-                            wl_surface.into(),
+                            PointerFocusTarget::WlSurface {
+                                surface: wl_surface,
+                                toplevel: None,
+                            },
                             output_geo.loc + layer_loc.as_global() + surface_loc.as_global(),
                         ));
                     }

@@ -12,7 +12,6 @@ use crate::{
         iced::{IcedElement, Program},
         prelude::*,
     },
-    wayland::handlers::screencopy::SessionHolder,
 };
 use calloop::LoopHandle;
 use cosmic::{
@@ -47,7 +46,7 @@ use smithay::{
     },
     output::Output,
     render_elements,
-    utils::{Buffer, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size, Transform},
+    utils::{Buffer, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size},
     wayland::seat::WaylandFocus,
 };
 use std::{
@@ -58,7 +57,6 @@ use std::{
         atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
         Arc, Mutex,
     },
-    time::Duration,
 };
 
 mod tab;
@@ -97,7 +95,6 @@ pub struct CosmicStackInternal {
     potential_drag: Arc<Mutex<Option<usize>>>,
     override_alive: Arc<AtomicBool>,
     last_seat: Arc<Mutex<Option<(Seat<State>, Serial)>>>,
-    last_location: Arc<Mutex<Option<(Point<f64, Logical>, Serial, u32)>>>,
     geometry: Arc<Mutex<Option<Rectangle<i32, Global>>>>,
     mask: Arc<Mutex<Option<tiny_skia::Mask>>>,
 }
@@ -169,7 +166,6 @@ impl CosmicStack {
                 potential_drag: Arc::new(Mutex::new(None)),
                 override_alive: Arc::new(AtomicBool::new(true)),
                 last_seat: Arc::new(Mutex::new(None)),
-                last_location: Arc::new(Mutex::new(None)),
                 geometry: Arc::new(Mutex::new(None)),
                 mask: Arc::new(Mutex::new(None)),
             },
@@ -458,7 +454,10 @@ impl CosmicStack {
                 .surface_under(relative_pos, WindowSurfaceType::ALL)
                 .map(|(surface, surface_offset)| {
                     (
-                        PointerFocusTarget::WlSurface(surface),
+                        PointerFocusTarget::WlSurface {
+                            surface,
+                            toplevel: Some(active_window.clone().into()),
+                        },
                         surface_offset + Point::from((0, TAB_HEIGHT)),
                     )
                 })
@@ -519,59 +518,6 @@ impl CosmicStack {
                     Vec::new(), /* TODO */
                     serial,
                 )
-            }
-            active
-        })
-    }
-
-    fn pointer_leave_if_previous(
-        &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        serial: Serial,
-        time: u32,
-        location: Point<f64, Logical>,
-    ) -> usize {
-        self.0.with_program(|p| {
-            let active = p.active.load(Ordering::SeqCst);
-            let previous = p.previous_pointer.swap(active, Ordering::SeqCst);
-            if previous != active {
-                let windows = p.windows.lock().unwrap();
-                if let Some(previous) = windows.get(previous) {
-                    for session in previous.cursor_sessions() {
-                        session.set_cursor_pos(None);
-                    }
-                    PointerTarget::leave(previous, seat, data, serial, time);
-                }
-
-                for session in windows[active].cursor_sessions() {
-                    session.set_cursor_pos(Some(
-                        location
-                            .to_buffer(
-                                1.0,
-                                Transform::Normal,
-                                &windows[active].geometry().size.to_f64(),
-                            )
-                            .to_i32_round(),
-                    ));
-                    if let Some((_, hotspot)) =
-                        seat.cursor_geometry((0.0, 0.0), Duration::from_millis(time as u64).into())
-                    {
-                        session.set_cursor_hotspot(hotspot);
-                    } else {
-                        session.set_cursor_hotspot((0, 0));
-                    }
-                }
-                PointerTarget::enter(
-                    &windows[active],
-                    seat,
-                    data,
-                    &MotionEvent {
-                        location,
-                        serial,
-                        time,
-                    },
-                );
             }
             active
         })
@@ -1208,10 +1154,8 @@ impl PointerTarget<State> for CosmicStack {
 
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
         let mut event = event.clone();
-        let active =
-            self.pointer_leave_if_previous(seat, data, event.serial, event.time, event.location);
-
         self.0.with_program(|p| {
+            let active = p.active.load(Ordering::SeqCst);
             let active_window = &p.windows.lock().unwrap()[active];
             let geo = active_window.geometry();
             let loc = event.location.to_i32_round::<i32>();
@@ -1250,9 +1194,9 @@ impl PointerTarget<State> for CosmicStack {
             *cursor_status.borrow_mut() = CursorImageStatus::default_named();
         });
 
-        let active_window_geo = self
-            .0
-            .with_program(|p| p.windows.lock().unwrap()[active].geometry());
+        let active_window_geo = self.0.with_program(|p| {
+            p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry()
+        });
         event.location -= active_window_geo.loc.to_f64();
 
         PointerTarget::motion(&self.0, seat, data, &event);
@@ -1298,13 +1242,6 @@ impl PointerTarget<State> for CosmicStack {
     }
 
     fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
-        if let Some((location, _serial, _time)) = self
-            .0
-            .with_program(|p| p.last_location.lock().unwrap().clone())
-        {
-            self.pointer_leave_if_previous(seat, data, event.serial, event.time, location);
-        }
-
         match self.0.with_program(|p| p.current_focus()) {
             Focus::Header => {
                 self.0.with_program(|p| {
@@ -1346,13 +1283,6 @@ impl PointerTarget<State> for CosmicStack {
     }
 
     fn axis(&self, seat: &Seat<State>, data: &mut State, frame: AxisFrame) {
-        if let Some((location, serial, time)) = self
-            .0
-            .with_program(|p| p.last_location.lock().unwrap().clone())
-        {
-            self.pointer_leave_if_previous(seat, data, serial, time, location);
-        }
-
         match self.0.with_program(|p| p.current_focus()) {
             Focus::Header => PointerTarget::axis(&self.0, seat, data, frame),
             _ => {}
@@ -1360,13 +1290,6 @@ impl PointerTarget<State> for CosmicStack {
     }
 
     fn frame(&self, seat: &Seat<State>, data: &mut State) {
-        if let Some((location, serial, time)) = self
-            .0
-            .with_program(|p| p.last_location.lock().unwrap().clone())
-        {
-            self.pointer_leave_if_previous(seat, data, serial, time, location);
-        }
-
         match self.0.with_program(|p| p.current_focus()) {
             Focus::Header => PointerTarget::frame(&self.0, seat, data),
             _ => {}
@@ -1374,13 +1297,6 @@ impl PointerTarget<State> for CosmicStack {
     }
 
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
-        if let Some((location, serial, time)) = self
-            .0
-            .with_program(|p| p.last_location.lock().unwrap().clone())
-        {
-            self.pointer_leave_if_previous(seat, data, serial, time, location);
-        }
-
         self.0.with_program(|p| {
             let cursor_state = seat.user_data().get::<CursorState>().unwrap();
             cursor_state.set_shape(CursorShape::Default);
