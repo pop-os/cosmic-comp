@@ -585,7 +585,7 @@ impl Workspace {
             None
         };
 
-        if self.is_tiled(elem) {
+        if self.tiling_layer.mapped().any(|(m, _)| m == elem) {
             let was_maximized = self.floating_layer.unmap(&elem);
             let tiling_state = self.tiling_layer.unmap_minimize(elem, to);
             Some(MinimizedWindow {
