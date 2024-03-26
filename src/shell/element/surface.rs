@@ -18,12 +18,6 @@ use smithay::{
     },
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
-        pointer::{
-            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
-            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
-            PointerTarget, RelativeMotionEvent,
-        },
         Seat,
     },
     output::Output,
@@ -670,11 +664,22 @@ impl KeyboardTarget<State> for CosmicSurface {
         if self.0.is_x11() {
             keys = vec![];
         }
-        KeyboardTarget::enter(&self.0, seat, data, keys, serial)
+
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => {
+                KeyboardTarget::enter(toplevel.wl_surface(), seat, data, keys, serial)
+            }
+            WindowSurface::X11(x11) => KeyboardTarget::enter(x11, seat, data, keys, serial),
+        }
     }
 
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: smithay::utils::Serial) {
-        KeyboardTarget::leave(&self.0, seat, data, serial)
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => {
+                KeyboardTarget::leave(toplevel.wl_surface(), seat, data, serial)
+            }
+            WindowSurface::X11(x11) => KeyboardTarget::leave(x11, seat, data, serial),
+        }
     }
 
     fn key(
@@ -686,7 +691,14 @@ impl KeyboardTarget<State> for CosmicSurface {
         serial: smithay::utils::Serial,
         time: u32,
     ) {
-        KeyboardTarget::key(&self.0, seat, data, key, state, serial, time)
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => {
+                KeyboardTarget::key(toplevel.wl_surface(), seat, data, key, state, serial, time)
+            }
+            WindowSurface::X11(x11) => {
+                KeyboardTarget::key(x11, seat, data, key, state, serial, time)
+            }
+        }
     }
 
     fn modifiers(
@@ -696,110 +708,14 @@ impl KeyboardTarget<State> for CosmicSurface {
         modifiers: ModifiersState,
         serial: smithay::utils::Serial,
     ) {
-        KeyboardTarget::modifiers(&self.0, seat, data, modifiers, serial)
-    }
-}
-
-impl PointerTarget<State> for CosmicSurface {
-    fn enter(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
-        PointerTarget::enter(&self.0, seat, data, event)
-    }
-
-    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
-        PointerTarget::motion(&self.0, seat, data, event)
-    }
-
-    fn relative_motion(&self, seat: &Seat<State>, data: &mut State, event: &RelativeMotionEvent) {
-        PointerTarget::relative_motion(&self.0, seat, data, event)
-    }
-
-    fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
-        PointerTarget::button(&self.0, seat, data, event)
-    }
-
-    fn axis(&self, seat: &Seat<State>, data: &mut State, frame: AxisFrame) {
-        PointerTarget::axis(&self.0, seat, data, frame)
-    }
-
-    fn frame(&self, seat: &Seat<State>, data: &mut State) {
-        PointerTarget::frame(&self.0, seat, data)
-    }
-
-    fn leave(
-        &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        serial: smithay::utils::Serial,
-        time: u32,
-    ) {
-        PointerTarget::leave(&self.0, seat, data, serial, time)
-    }
-
-    fn gesture_swipe_begin(
-        &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &GestureSwipeBeginEvent,
-    ) {
-        PointerTarget::gesture_swipe_begin(&self.0, seat, data, event)
-    }
-
-    fn gesture_swipe_update(
-        &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &GestureSwipeUpdateEvent,
-    ) {
-        PointerTarget::gesture_swipe_update(&self.0, seat, data, event)
-    }
-
-    fn gesture_swipe_end(
-        &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &GestureSwipeEndEvent,
-    ) {
-        PointerTarget::gesture_swipe_end(&self.0, seat, data, event)
-    }
-
-    fn gesture_pinch_begin(
-        &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &GesturePinchBeginEvent,
-    ) {
-        PointerTarget::gesture_pinch_begin(&self.0, seat, data, event)
-    }
-
-    fn gesture_pinch_update(
-        &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &GesturePinchUpdateEvent,
-    ) {
-        PointerTarget::gesture_pinch_update(&self.0, seat, data, event)
-    }
-
-    fn gesture_pinch_end(
-        &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &GesturePinchEndEvent,
-    ) {
-        PointerTarget::gesture_pinch_end(&self.0, seat, data, event)
-    }
-
-    fn gesture_hold_begin(
-        &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &GestureHoldBeginEvent,
-    ) {
-        PointerTarget::gesture_hold_begin(&self.0, seat, data, event)
-    }
-
-    fn gesture_hold_end(&self, seat: &Seat<State>, data: &mut State, event: &GestureHoldEndEvent) {
-        PointerTarget::gesture_hold_end(&self.0, seat, data, event)
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => {
+                KeyboardTarget::modifiers(toplevel.wl_surface(), seat, data, modifiers, serial)
+            }
+            WindowSurface::X11(x11) => {
+                KeyboardTarget::modifiers(x11, seat, data, modifiers, serial)
+            }
+        }
     }
 }
 
