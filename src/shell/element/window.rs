@@ -105,6 +105,48 @@ pub enum Focus {
     ResizeBottomLeft,
 }
 
+impl Focus {
+    fn under(surface: &CosmicSurface, location: Point<f64, Logical>) -> Option<Focus> {
+        let loc = location.to_i32_round::<i32>();
+        let geo = surface.geometry();
+        if loc.y < 0 && loc.x < 0 {
+            Some(Focus::ResizeTopLeft)
+        } else if loc.y < 0 && loc.x >= geo.size.w {
+            Some(Focus::ResizeTopRight)
+        } else if loc.y < 0 {
+            Some(Focus::ResizeTop)
+        } else if loc.y >= SSD_HEIGHT + geo.size.h && loc.x < 0 {
+            Some(Focus::ResizeBottomLeft)
+        } else if loc.y >= SSD_HEIGHT + geo.size.h && loc.x >= geo.size.w {
+            Some(Focus::ResizeBottomRight)
+        } else if loc.y >= SSD_HEIGHT + geo.size.h {
+            Some(Focus::ResizeBottom)
+        } else if loc.x < 0 {
+            Some(Focus::ResizeLeft)
+        } else if loc.x >= geo.size.w {
+            Some(Focus::ResizeRight)
+        } else if loc.y < SSD_HEIGHT {
+            Some(Focus::Header)
+        } else {
+            None
+        }
+    }
+
+    fn cursor_shape(&self) -> CursorShape {
+        match self {
+            Focus::ResizeTopLeft => CursorShape::NorthWestResize,
+            Focus::ResizeTopRight => CursorShape::NorthEastResize,
+            Focus::ResizeTop => CursorShape::NorthResize,
+            Focus::ResizeBottomLeft => CursorShape::SouthWestResize,
+            Focus::ResizeBottomRight => CursorShape::SouthEastResize,
+            Focus::ResizeBottom => CursorShape::SouthResize,
+            Focus::ResizeLeft => CursorShape::WestResize,
+            Focus::ResizeRight => CursorShape::EastResize,
+            Focus::Header => CursorShape::Default,
+        }
+    }
+}
+
 impl CosmicWindowInternal {
     pub fn swap_focus(&self, focus: Option<Focus>) -> Option<Focus> {
         let value = focus.map_or(0, |x| x as u8);
@@ -613,37 +655,14 @@ impl PointerTarget<State> for CosmicWindow {
         let mut event = event.clone();
         self.0.with_program(|p| {
             if p.has_ssd(false) {
-                let geo = p.window.geometry();
-                let loc = event.location.to_i32_round::<i32>();
-                let (next, shape) = if loc.y - geo.loc.y < 0 && loc.x - geo.loc.x < 0 {
-                    (Focus::ResizeTopLeft, CursorShape::NorthWestResize)
-                } else if loc.y - geo.loc.y < 0 && loc.x - geo.loc.x >= geo.size.w {
-                    (Focus::ResizeTopRight, CursorShape::NorthEastResize)
-                } else if loc.y - geo.loc.y < 0 {
-                    (Focus::ResizeTop, CursorShape::NorthResize)
-                } else if loc.y - geo.loc.y >= SSD_HEIGHT + geo.size.h && loc.x - geo.loc.x < 0 {
-                    (Focus::ResizeBottomLeft, CursorShape::SouthWestResize)
-                } else if loc.y - geo.loc.y >= SSD_HEIGHT + geo.size.h
-                    && loc.x - geo.loc.x >= geo.size.w
-                {
-                    (Focus::ResizeBottomRight, CursorShape::SouthEastResize)
-                } else if loc.y - geo.loc.y >= SSD_HEIGHT + geo.size.h {
-                    (Focus::ResizeBottom, CursorShape::SouthResize)
-                } else if loc.x - geo.loc.x < 0 {
-                    (Focus::ResizeLeft, CursorShape::WestResize)
-                } else if loc.x - geo.loc.x >= geo.size.w {
-                    (Focus::ResizeRight, CursorShape::EastResize)
-                } else if loc.y - geo.loc.y < SSD_HEIGHT {
-                    (Focus::Header, CursorShape::Default)
-                } else {
+                let Some(next) = Focus::under(&p.window, event.location) else {
                     return;
                 };
                 let old_focus = p.swap_focus(Some(next));
-
                 assert_eq!(old_focus, None);
 
                 let cursor_state = seat.user_data().get::<CursorState>().unwrap();
-                cursor_state.set_shape(shape);
+                cursor_state.set_shape(next.cursor_shape());
                 let cursor_status = seat
                     .user_data()
                     .get::<RefCell<CursorImageStatus>>()
@@ -660,34 +679,13 @@ impl PointerTarget<State> for CosmicWindow {
         let mut event = event.clone();
         self.0.with_program(|p| {
             if p.has_ssd(false) {
-                let geo = p.window.geometry();
-                let loc = event.location.to_i32_round::<i32>();
-                let (next, shape) = if loc.y < 0 && loc.x < 0 {
-                    (Focus::ResizeTopLeft, CursorShape::NorthWestResize)
-                } else if loc.y < 0 && loc.x >= geo.size.w {
-                    (Focus::ResizeTopRight, CursorShape::NorthEastResize)
-                } else if loc.y < 0 {
-                    (Focus::ResizeTop, CursorShape::NorthResize)
-                } else if loc.y >= SSD_HEIGHT + geo.size.h && loc.x < 0 {
-                    (Focus::ResizeBottomLeft, CursorShape::SouthWestResize)
-                } else if loc.y >= SSD_HEIGHT + geo.size.h && loc.x >= geo.size.w {
-                    (Focus::ResizeBottomRight, CursorShape::SouthEastResize)
-                } else if loc.y >= SSD_HEIGHT + geo.size.h {
-                    (Focus::ResizeBottom, CursorShape::SouthResize)
-                } else if loc.x < 0 {
-                    (Focus::ResizeLeft, CursorShape::WestResize)
-                } else if loc.x >= geo.size.w {
-                    (Focus::ResizeRight, CursorShape::EastResize)
-                } else if loc.y < SSD_HEIGHT {
-                    (Focus::Header, CursorShape::Default)
-                } else {
+                let Some(next) = Focus::under(&p.window, event.location) else {
                     return;
                 };
-
                 let _previous = p.swap_focus(Some(next));
 
                 let cursor_state = seat.user_data().get::<CursorState>().unwrap();
-                cursor_state.set_shape(shape);
+                cursor_state.set_shape(next.cursor_shape());
                 let cursor_status = seat
                     .user_data()
                     .get::<RefCell<CursorImageStatus>>()
