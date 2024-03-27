@@ -714,8 +714,7 @@ impl FloatingLayout {
         }
 
         res.and_then(|(element, space_offset)| {
-            let geometry = self.space.element_geometry(&element).unwrap().as_local();
-            let point = location - geometry.loc.to_f64();
+            let point = location - space_offset.to_f64();
             element
                 .focus_under(point.as_logical())
                 .map(|(surface, surface_offset)| {
