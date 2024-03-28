@@ -225,15 +225,19 @@ impl CosmicWindow {
                 .set_geometry(Rectangle::from_loc_and_size(loc, size));
             p.mask.lock().unwrap().take();
         });
-        self.0.resize(Size::from((geo.size.w, SSD_HEIGHT)));
     }
 
     pub fn on_commit(&self, surface: &WlSurface) {
+        let mut geo = None;
         self.0.with_program(|p| {
             if &p.window == surface {
                 p.window.0.on_commit();
+                geo = Some(p.window.geometry());
             }
-        })
+        });
+        if let Some(geo) = geo {
+            self.0.resize(Size::from((geo.size.w, SSD_HEIGHT)));
+        }
     }
 
     pub fn surface(&self) -> CosmicSurface {
