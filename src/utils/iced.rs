@@ -12,6 +12,7 @@ use cosmic::{
         event::Event,
         keyboard::{Event as KeyboardEvent, Modifiers as IcedModifiers},
         mouse::{Button as MouseButton, Cursor, Event as MouseEvent, ScrollDelta},
+        touch::{Event as TouchEvent, Finger},
         window::{Event as WindowEvent, Id},
         Command, Limits, Point as IcedPoint, Rectangle as IcedRectangle, Size as IcedSize,
     },
@@ -50,6 +51,10 @@ use smithay::{
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
             GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
             PointerTarget, RelativeMotionEvent,
+        },
+        touch::{
+            DownEvent, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchTarget,
+            UpEvent,
         },
         Seat,
     },
@@ -143,6 +148,7 @@ struct IcedElementInternal<P: Program + Send + 'static> {
     // state
     size: Size<i32, Logical>,
     cursor_pos: Option<Point<f64, Logical>>,
+    touch_map: HashMap<Finger, IcedPoint>,
 
     // iced
     theme: Theme,
@@ -191,6 +197,7 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
             pending_update: self.pending_update.clone(),
             size: self.size.clone(),
             cursor_pos: self.cursor_pos.clone(),
+            touch_map: self.touch_map.clone(),
             theme: self.theme.clone(),
             renderer,
             state,
@@ -265,6 +272,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             pending_update: None,
             size,
             cursor_pos: None,
+            touch_map: HashMap::new(),
             theme,
             renderer,
             state,
@@ -422,6 +430,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         internal
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorMoved { position }));
+        // TODO: Update iced widgets to handle touch using event position, not cursor_pos
         internal.cursor_pos = Some(event.location);
         let _ = internal.update(true);
     }
@@ -564,6 +573,102 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         _: &Seat<crate::state::State>,
         _: &mut crate::state::State,
         _: &GestureHoldEndEvent,
+    ) {
+    }
+}
+
+impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedElement<P> {
+    fn down(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        event: &DownEvent,
+        _seq: Serial,
+    ) {
+        let mut internal = self.0.lock().unwrap();
+        let id = Finger(i32::from(event.slot) as u64);
+        let position = IcedPoint::new(event.location.x as f32, event.location.y as f32);
+        internal
+            .state
+            .queue_event(Event::Touch(TouchEvent::FingerPressed { id, position }));
+        internal.touch_map.insert(id, position);
+        internal.cursor_pos = Some(event.location);
+        let _ = internal.update(true);
+    }
+
+    fn up(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        event: &UpEvent,
+        _seq: Serial,
+    ) {
+        let mut internal = self.0.lock().unwrap();
+        let id = Finger(i32::from(event.slot) as u64);
+        if let Some(position) = internal.touch_map.remove(&id) {
+            internal
+                .state
+                .queue_event(Event::Touch(TouchEvent::FingerLifted { id, position }));
+            let _ = internal.update(true);
+        }
+    }
+
+    fn motion(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        event: &TouchMotionEvent,
+        _seq: Serial,
+    ) {
+        let mut internal = self.0.lock().unwrap();
+        let id = Finger(i32::from(event.slot) as u64);
+        let position = IcedPoint::new(event.location.x as f32, event.location.y as f32);
+        internal
+            .state
+            .queue_event(Event::Touch(TouchEvent::FingerMoved { id, position }));
+        internal.touch_map.insert(id, position);
+        internal.cursor_pos = Some(event.location);
+        let _ = internal.update(true);
+    }
+
+    fn frame(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _seq: Serial,
+    ) {
+    }
+
+    fn cancel(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _seq: Serial,
+    ) {
+        let mut internal = self.0.lock().unwrap();
+        for (id, position) in std::mem::take(&mut internal.touch_map) {
+            internal
+                .state
+                .queue_event(Event::Touch(TouchEvent::FingerLost { id, position }));
+        }
+        let _ = internal.update(true);
+    }
+
+    fn shape(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: &ShapeEvent,
+        _seq: Serial,
+    ) {
+    }
+
+    fn orientation(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: &OrientationEvent,
+        _seq: Serial,
     ) {
     }
 }

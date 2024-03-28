@@ -33,6 +33,10 @@ use smithay::{
             GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
             PointerTarget, RelativeMotionEvent,
         },
+        touch::{
+            DownEvent, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchTarget,
+            UpEvent,
+        },
         Seat,
     },
     output::Output,
@@ -94,8 +98,7 @@ impl fmt::Debug for CosmicWindowInternal {
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Focus {
-    None,
-    Header,
+    Header = 1,
     ResizeTop,
     ResizeLeft,
     ResizeRight,
@@ -106,17 +109,67 @@ pub enum Focus {
     ResizeBottomLeft,
 }
 
-impl CosmicWindowInternal {
-    pub fn swap_focus(&self, focus: Focus) -> Focus {
-        unsafe {
-            std::mem::transmute::<u8, Focus>(
-                self.pointer_entered.swap(focus as u8, Ordering::SeqCst),
-            )
+impl Focus {
+    pub fn under(
+        surface: &CosmicSurface,
+        header_height: i32,
+        location: Point<f64, Logical>,
+    ) -> Option<Focus> {
+        let loc = location.to_i32_round::<i32>();
+        let geo = surface.geometry();
+        if loc.y < 0 && loc.x < 0 {
+            Some(Focus::ResizeTopLeft)
+        } else if loc.y < 0 && loc.x >= geo.size.w {
+            Some(Focus::ResizeTopRight)
+        } else if loc.y < 0 {
+            Some(Focus::ResizeTop)
+        } else if loc.y >= header_height + geo.size.h && loc.x < 0 {
+            Some(Focus::ResizeBottomLeft)
+        } else if loc.y >= header_height + geo.size.h && loc.x >= geo.size.w {
+            Some(Focus::ResizeBottomRight)
+        } else if loc.y >= header_height + geo.size.h {
+            Some(Focus::ResizeBottom)
+        } else if loc.x < 0 {
+            Some(Focus::ResizeLeft)
+        } else if loc.x >= geo.size.w {
+            Some(Focus::ResizeRight)
+        } else if loc.y < header_height {
+            Some(Focus::Header)
+        } else {
+            None
         }
     }
 
-    pub fn current_focus(&self) -> Focus {
-        unsafe { std::mem::transmute::<u8, Focus>(self.pointer_entered.load(Ordering::SeqCst)) }
+    pub fn cursor_shape(&self) -> CursorShape {
+        match self {
+            Focus::ResizeTopLeft => CursorShape::NorthWestResize,
+            Focus::ResizeTopRight => CursorShape::NorthEastResize,
+            Focus::ResizeTop => CursorShape::NorthResize,
+            Focus::ResizeBottomLeft => CursorShape::SouthWestResize,
+            Focus::ResizeBottomRight => CursorShape::SouthEastResize,
+            Focus::ResizeBottom => CursorShape::SouthResize,
+            Focus::ResizeLeft => CursorShape::WestResize,
+            Focus::ResizeRight => CursorShape::EastResize,
+            Focus::Header => CursorShape::Default,
+        }
+    }
+
+    pub unsafe fn from_u8(value: u8) -> Option<Focus> {
+        match value {
+            0 => None,
+            focus => unsafe { Some(std::mem::transmute::<u8, Focus>(focus)) },
+        }
+    }
+}
+
+impl CosmicWindowInternal {
+    pub fn swap_focus(&self, focus: Option<Focus>) -> Option<Focus> {
+        let value = focus.map_or(0, |x| x as u8);
+        unsafe { Focus::from_u8(self.pointer_entered.swap(value, Ordering::SeqCst)) }
+    }
+
+    pub fn current_focus(&self) -> Option<Focus> {
+        unsafe { Focus::from_u8(self.pointer_entered.load(Ordering::SeqCst)) }
     }
 
     pub fn has_ssd(&self, pending: bool) -> bool {
@@ -138,7 +191,7 @@ impl CosmicWindow {
                 window,
                 mask: Arc::new(Mutex::new(None)),
                 activated: Arc::new(AtomicBool::new(false)),
-                pointer_entered: Arc::new(AtomicU8::new(Focus::None as u8)),
+                pointer_entered: Arc::new(AtomicU8::new(0)),
                 last_seat: Arc::new(Mutex::new(None)),
                 last_title: Arc::new(Mutex::new(last_title)),
             },
@@ -611,48 +664,14 @@ impl PointerTarget<State> for CosmicWindow {
         let mut event = event.clone();
         self.0.with_program(|p| {
             if p.has_ssd(false) {
-                let geo = p.window.geometry();
-                let loc = event.location.to_i32_round::<i32>();
-                let (old_focus, shape) = if loc.y - geo.loc.y < 0 && loc.x - geo.loc.x < 0 {
-                    (
-                        p.swap_focus(Focus::ResizeTopLeft),
-                        CursorShape::NorthWestResize,
-                    )
-                } else if loc.y - geo.loc.y < 0 && loc.x - geo.loc.x >= geo.size.w {
-                    (
-                        p.swap_focus(Focus::ResizeTopRight),
-                        CursorShape::NorthEastResize,
-                    )
-                } else if loc.y - geo.loc.y < 0 {
-                    (p.swap_focus(Focus::ResizeTop), CursorShape::NorthResize)
-                } else if loc.y - geo.loc.y >= SSD_HEIGHT + geo.size.h && loc.x - geo.loc.x < 0 {
-                    (
-                        p.swap_focus(Focus::ResizeBottomLeft),
-                        CursorShape::SouthWestResize,
-                    )
-                } else if loc.y - geo.loc.y >= SSD_HEIGHT + geo.size.h
-                    && loc.x - geo.loc.x >= geo.size.w
-                {
-                    (
-                        p.swap_focus(Focus::ResizeBottomRight),
-                        CursorShape::SouthEastResize,
-                    )
-                } else if loc.y - geo.loc.y >= SSD_HEIGHT + geo.size.h {
-                    (p.swap_focus(Focus::ResizeBottom), CursorShape::SouthResize)
-                } else if loc.x - geo.loc.x < 0 {
-                    (p.swap_focus(Focus::ResizeLeft), CursorShape::WestResize)
-                } else if loc.x - geo.loc.x >= geo.size.w {
-                    (p.swap_focus(Focus::ResizeRight), CursorShape::EastResize)
-                } else if loc.y - geo.loc.y < SSD_HEIGHT {
-                    (p.swap_focus(Focus::Header), CursorShape::Default)
-                } else {
+                let Some(next) = Focus::under(&p.window, SSD_HEIGHT, event.location) else {
                     return;
                 };
-
-                assert_eq!(old_focus, Focus::None);
+                let old_focus = p.swap_focus(Some(next));
+                assert_eq!(old_focus, None);
 
                 let cursor_state = seat.user_data().get::<CursorState>().unwrap();
-                cursor_state.set_shape(shape);
+                cursor_state.set_shape(next.cursor_shape());
                 let cursor_status = seat
                     .user_data()
                     .get::<RefCell<CursorImageStatus>>()
@@ -669,34 +688,13 @@ impl PointerTarget<State> for CosmicWindow {
         let mut event = event.clone();
         self.0.with_program(|p| {
             if p.has_ssd(false) {
-                let geo = p.window.geometry();
-                let loc = event.location.to_i32_round::<i32>();
-                let (next, shape) = if loc.y < 0 && loc.x < 0 {
-                    (Focus::ResizeTopLeft, CursorShape::NorthWestResize)
-                } else if loc.y < 0 && loc.x >= geo.size.w {
-                    (Focus::ResizeTopRight, CursorShape::NorthEastResize)
-                } else if loc.y < 0 {
-                    (Focus::ResizeTop, CursorShape::NorthResize)
-                } else if loc.y >= SSD_HEIGHT + geo.size.h && loc.x < 0 {
-                    (Focus::ResizeBottomLeft, CursorShape::SouthWestResize)
-                } else if loc.y >= SSD_HEIGHT + geo.size.h && loc.x >= geo.size.w {
-                    (Focus::ResizeBottomRight, CursorShape::SouthEastResize)
-                } else if loc.y >= SSD_HEIGHT + geo.size.h {
-                    (Focus::ResizeBottom, CursorShape::SouthResize)
-                } else if loc.x < 0 {
-                    (Focus::ResizeLeft, CursorShape::WestResize)
-                } else if loc.x >= geo.size.w {
-                    (Focus::ResizeRight, CursorShape::EastResize)
-                } else if loc.y < SSD_HEIGHT {
-                    (Focus::Header, CursorShape::Default)
-                } else {
+                let Some(next) = Focus::under(&p.window, SSD_HEIGHT, event.location) else {
                     return;
                 };
-
-                let _previous = p.swap_focus(next);
+                let _previous = p.swap_focus(Some(next));
 
                 let cursor_state = seat.user_data().get::<CursorState>().unwrap();
-                cursor_state.set_shape(shape);
+                cursor_state.set_shape(next.cursor_shape());
                 let cursor_status = seat
                     .user_data()
                     .get::<RefCell<CursorImageStatus>>()
@@ -719,14 +717,13 @@ impl PointerTarget<State> for CosmicWindow {
 
     fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
         match self.0.with_program(|p| p.current_focus()) {
-            Focus::Header => {
+            Some(Focus::Header) => {
                 self.0.with_program(|p| {
                     *p.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
                 });
                 PointerTarget::button(&self.0, seat, data, event)
             }
-            Focus::None => {}
-            x => {
+            Some(x) => {
                 let serial = event.serial;
                 let seat = seat.clone();
                 let Some(surface) = self.wl_surface() else {
@@ -747,24 +744,25 @@ impl PointerTarget<State> for CosmicWindow {
                             Focus::ResizeBottomRight => ResizeEdge::BOTTOM_RIGHT,
                             Focus::ResizeLeft => ResizeEdge::LEFT,
                             Focus::ResizeRight => ResizeEdge::RIGHT,
-                            Focus::Header | Focus::None => unreachable!(),
+                            Focus::Header => unreachable!(),
                         },
                     )
                 });
             }
+            None => {}
         }
     }
 
     fn axis(&self, seat: &Seat<State>, data: &mut State, frame: AxisFrame) {
         match self.0.with_program(|p| p.current_focus()) {
-            Focus::Header => PointerTarget::axis(&self.0, seat, data, frame),
+            Some(Focus::Header) => PointerTarget::axis(&self.0, seat, data, frame),
             _ => {}
         }
     }
 
     fn frame(&self, seat: &Seat<State>, data: &mut State) {
         match self.0.with_program(|p| p.current_focus()) {
-            Focus::Header => PointerTarget::frame(&self.0, seat, data),
+            Some(Focus::Header) => PointerTarget::frame(&self.0, seat, data),
             _ => {}
         }
     }
@@ -773,7 +771,7 @@ impl PointerTarget<State> for CosmicWindow {
         self.0.with_program(|p| {
             let cursor_state = seat.user_data().get::<CursorState>().unwrap();
             cursor_state.set_shape(CursorShape::Default);
-            let _previous = p.swap_focus(Focus::None);
+            let _previous = p.swap_focus(None);
         });
         PointerTarget::leave(&self.0, seat, data, serial, time)
     }
@@ -839,6 +837,45 @@ impl PointerTarget<State> for CosmicWindow {
         _seat: &Seat<State>,
         _data: &mut State,
         _event: &GestureHoldEndEvent,
+    ) {
+    }
+}
+
+impl TouchTarget<State> for CosmicWindow {
+    fn down(&self, seat: &Seat<State>, data: &mut State, event: &DownEvent, seq: Serial) {
+        let mut event = event.clone();
+        event.location -= self.0.with_program(|p| p.window.geometry().loc.to_f64());
+        TouchTarget::down(&self.0, seat, data, &event, seq)
+    }
+
+    fn up(&self, seat: &Seat<State>, data: &mut State, event: &UpEvent, seq: Serial) {
+        TouchTarget::up(&self.0, seat, data, &event, seq)
+    }
+
+    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &TouchMotionEvent, seq: Serial) {
+        let mut event = event.clone();
+        event.location -= self.0.with_program(|p| p.window.geometry().loc.to_f64());
+        TouchTarget::motion(&self.0, seat, data, &event, seq)
+    }
+
+    fn frame(&self, seat: &Seat<State>, data: &mut State, seq: Serial) {
+        TouchTarget::frame(&self.0, seat, data, seq)
+    }
+
+    fn cancel(&self, seat: &Seat<State>, data: &mut State, seq: Serial) {
+        TouchTarget::cancel(&self.0, seat, data, seq)
+    }
+
+    fn shape(&self, seat: &Seat<State>, data: &mut State, event: &ShapeEvent, seq: Serial) {
+        TouchTarget::shape(&self.0, seat, data, event, seq)
+    }
+
+    fn orientation(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _event: &OrientationEvent,
+        _seq: Serial,
     ) {
     }
 }
