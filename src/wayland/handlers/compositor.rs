@@ -242,14 +242,11 @@ impl CompositorHandler for State {
                     element.clone(),
                     &mut self.common.shell,
                 );
-                if let Some(workspace) = self.common.shell.space_for_mut(&element) {
-                    workspace.commit(surface);
-                }
             }
         }
 
         // and refresh smithays internal state
-        self.common.shell.popups.commit(surface);
+        self.common.shell.on_commit(surface);
 
         // re-arrange layer-surfaces (commits may change size and positioning)
         let layer_output = self

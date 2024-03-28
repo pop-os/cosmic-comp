@@ -1697,6 +1697,18 @@ impl Shell {
             .refresh(Some(&self.workspace_state));
     }
 
+    pub fn on_commit(&mut self, surface: &WlSurface) {
+        if let Some(mapped) = self.element_for_surface(surface) {
+            mapped
+                .windows()
+                .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
+                .unwrap()
+                .0
+                .on_commit();
+        }
+        self.popups.commit(surface);
+    }
+
     pub fn remap_unfullscreened_window(
         &mut self,
         mapped: CosmicMapped,

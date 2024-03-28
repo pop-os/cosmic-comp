@@ -33,10 +33,10 @@ use smithay::{
         glow::{GlowFrame, GlowRenderer},
         ImportAll, ImportMem, Renderer,
     },
-    desktop::{layer_map_for_output, space::SpaceElement, WindowSurfaceType},
+    desktop::{layer_map_for_output, space::SpaceElement},
     input::Seat,
     output::Output,
-    reexports::wayland_server::{protocol::wl_surface::WlSurface, Client, Resource},
+    reexports::wayland_server::{Client, Resource},
     utils::{Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Size},
     wayland::{
         compositor::{add_blocker, Blocker, BlockerState},
@@ -358,29 +358,6 @@ impl Workspace {
         clients.extend(self.tiling_layer.update_animation_state());
         self.floating_layer.update_animation_state();
         clients
-    }
-
-    pub fn commit(&mut self, surface: &WlSurface) {
-        if let Some(mapped) = self.element_for_surface(surface) {
-            mapped
-                .windows()
-                .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
-                .unwrap()
-                .0
-                .on_commit();
-        }
-        if let Some(mapped) = self.minimized_windows.iter().find_map(|m| {
-            m.window
-                .has_surface(surface, WindowSurfaceType::TOPLEVEL)
-                .then_some(&m.window)
-        }) {
-            mapped
-                .windows()
-                .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
-                .unwrap()
-                .0
-                .on_commit();
-        }
     }
 
     pub fn output(&self) -> &Output {
