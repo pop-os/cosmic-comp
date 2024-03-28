@@ -110,7 +110,11 @@ pub enum Focus {
 }
 
 impl Focus {
-    fn under(surface: &CosmicSurface, location: Point<f64, Logical>) -> Option<Focus> {
+    pub fn under(
+        surface: &CosmicSurface,
+        header_height: i32,
+        location: Point<f64, Logical>,
+    ) -> Option<Focus> {
         let loc = location.to_i32_round::<i32>();
         let geo = surface.geometry();
         if loc.y < 0 && loc.x < 0 {
@@ -119,24 +123,24 @@ impl Focus {
             Some(Focus::ResizeTopRight)
         } else if loc.y < 0 {
             Some(Focus::ResizeTop)
-        } else if loc.y >= SSD_HEIGHT + geo.size.h && loc.x < 0 {
+        } else if loc.y >= header_height + geo.size.h && loc.x < 0 {
             Some(Focus::ResizeBottomLeft)
-        } else if loc.y >= SSD_HEIGHT + geo.size.h && loc.x >= geo.size.w {
+        } else if loc.y >= header_height + geo.size.h && loc.x >= geo.size.w {
             Some(Focus::ResizeBottomRight)
-        } else if loc.y >= SSD_HEIGHT + geo.size.h {
+        } else if loc.y >= header_height + geo.size.h {
             Some(Focus::ResizeBottom)
         } else if loc.x < 0 {
             Some(Focus::ResizeLeft)
         } else if loc.x >= geo.size.w {
             Some(Focus::ResizeRight)
-        } else if loc.y < SSD_HEIGHT {
+        } else if loc.y < header_height {
             Some(Focus::Header)
         } else {
             None
         }
     }
 
-    fn cursor_shape(&self) -> CursorShape {
+    pub fn cursor_shape(&self) -> CursorShape {
         match self {
             Focus::ResizeTopLeft => CursorShape::NorthWestResize,
             Focus::ResizeTopRight => CursorShape::NorthEastResize,
@@ -149,22 +153,23 @@ impl Focus {
             Focus::Header => CursorShape::Default,
         }
     }
+
+    pub unsafe fn from_u8(value: u8) -> Option<Focus> {
+        match value {
+            0 => None,
+            focus => unsafe { Some(std::mem::transmute::<u8, Focus>(focus)) },
+        }
+    }
 }
 
 impl CosmicWindowInternal {
     pub fn swap_focus(&self, focus: Option<Focus>) -> Option<Focus> {
         let value = focus.map_or(0, |x| x as u8);
-        match self.pointer_entered.swap(value, Ordering::SeqCst) {
-            0 => None,
-            focus => unsafe { Some(std::mem::transmute::<u8, Focus>(focus)) },
-        }
+        unsafe { Focus::from_u8(self.pointer_entered.swap(value, Ordering::SeqCst)) }
     }
 
     pub fn current_focus(&self) -> Option<Focus> {
-        match self.pointer_entered.load(Ordering::SeqCst) {
-            0 => None,
-            focus => unsafe { Some(std::mem::transmute::<u8, Focus>(focus)) },
-        }
+        unsafe { Focus::from_u8(self.pointer_entered.load(Ordering::SeqCst)) }
     }
 
     pub fn has_ssd(&self, pending: bool) -> bool {
@@ -659,7 +664,7 @@ impl PointerTarget<State> for CosmicWindow {
         let mut event = event.clone();
         self.0.with_program(|p| {
             if p.has_ssd(false) {
-                let Some(next) = Focus::under(&p.window, event.location) else {
+                let Some(next) = Focus::under(&p.window, SSD_HEIGHT, event.location) else {
                     return;
                 };
                 let old_focus = p.swap_focus(Some(next));
@@ -683,7 +688,7 @@ impl PointerTarget<State> for CosmicWindow {
         let mut event = event.clone();
         self.0.with_program(|p| {
             if p.has_ssd(false) {
-                let Some(next) = Focus::under(&p.window, event.location) else {
+                let Some(next) = Focus::under(&p.window, SSD_HEIGHT, event.location) else {
                     return;
                 };
                 let _previous = p.swap_focus(Some(next));
