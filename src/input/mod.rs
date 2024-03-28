@@ -9,7 +9,7 @@ use crate::{
             target::{KeyboardFocusTarget, PointerFocusTarget},
             FocusDirection,
         },
-        grabs::{ResizeEdge, SeatMenuGrabState, SeatMoveGrabState},
+        grabs::{ReleaseMode, ResizeEdge, SeatMenuGrabState, SeatMoveGrabState},
         layout::{
             floating::ResizeGrabMarker,
             tiling::{SwapWindowGrab, TilingLayout},
@@ -982,7 +982,25 @@ impl State {
                                     if let Some(target) =
                                         self.common.shell.element_under(pos, &output)
                                     {
-                                        under = Some(target);
+                                        if seat.get_keyboard().unwrap().modifier_state().logo {
+                                            if let Some(surface) = target.toplevel() {
+                                                let seat_clone = seat.clone();
+                                                self.common.event_loop_handle.insert_idle(
+                                                    move |state| {
+                                                        Shell::move_request(
+                                                            state,
+                                                            &surface,
+                                                            &seat_clone,
+                                                            serial,
+                                                            ReleaseMode::NoMouseButtons,
+                                                            false,
+                                                        )
+                                                    },
+                                                );
+                                            }
+                                        } else {
+                                            under = Some(target);
+                                        }
                                     } else {
                                         let layers = layer_map_for_output(&output);
                                         if let Some(layer) = layers
