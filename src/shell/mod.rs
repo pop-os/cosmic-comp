@@ -1699,12 +1699,7 @@ impl Shell {
 
     pub fn on_commit(&mut self, surface: &WlSurface) {
         if let Some(mapped) = self.element_for_surface(surface) {
-            mapped
-                .windows()
-                .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
-                .unwrap()
-                .0
-                .on_commit();
+            mapped.on_commit(surface);
         }
         self.popups.commit(surface);
     }

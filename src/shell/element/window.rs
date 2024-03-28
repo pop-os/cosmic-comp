@@ -175,6 +175,14 @@ impl CosmicWindow {
         self.0.resize(Size::from((geo.size.w, SSD_HEIGHT)));
     }
 
+    pub fn on_commit(&self, surface: &WlSurface) {
+        self.0.with_program(|p| {
+            if &p.window == surface {
+                p.window.0.on_commit();
+            }
+        })
+    }
+
     pub fn surface(&self) -> CosmicSurface {
         self.0.with_program(|p| p.window.clone())
     }

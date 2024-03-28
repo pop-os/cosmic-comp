@@ -45,6 +45,7 @@ use smithay::{
         Seat,
     },
     output::Output,
+    reexports::wayland_server::protocol::wl_surface::WlSurface,
     render_elements,
     utils::{Buffer, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size},
     wayland::seat::WaylandFocus,
@@ -90,7 +91,6 @@ pub struct CosmicStackInternal {
     scroll_to_focus: Arc<AtomicBool>,
     previous_keyboard: Arc<AtomicUsize>,
     pointer_entered: Arc<AtomicU8>,
-    previous_pointer: Arc<AtomicUsize>,
     reenter: Arc<AtomicBool>,
     potential_drag: Arc<Mutex<Option<usize>>>,
     override_alive: Arc<AtomicBool>,
@@ -130,6 +130,7 @@ pub enum Focus {
     ResizeBottomLeft,
 }
 
+#[derive(Debug, Clone)]
 pub enum MoveResult {
     Handled,
     MoveOut(CosmicSurface, LoopHandle<'static, crate::state::State>),
@@ -161,7 +162,6 @@ impl CosmicStack {
                 scroll_to_focus: Arc::new(AtomicBool::new(false)),
                 previous_keyboard: Arc::new(AtomicUsize::new(0)),
                 pointer_entered: Arc::new(AtomicU8::new(Focus::None as u8)),
-                previous_pointer: Arc::new(AtomicUsize::new(0)),
                 reenter: Arc::new(AtomicBool::new(false)),
                 potential_drag: Arc::new(Mutex::new(None)),
                 override_alive: Arc::new(AtomicBool::new(true)),
@@ -192,7 +192,6 @@ impl CosmicStack {
                 if old_idx == idx {
                     p.reenter.store(true, Ordering::SeqCst);
                     p.previous_keyboard.store(old_idx, Ordering::SeqCst);
-                    p.previous_pointer.store(old_idx, Ordering::SeqCst);
                 }
             } else {
                 let mut windows = p.windows.lock().unwrap();
@@ -201,6 +200,8 @@ impl CosmicStack {
             }
             p.scroll_to_focus.store(true, Ordering::SeqCst);
         });
+        self.0
+            .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
         self.0.force_redraw()
     }
 
@@ -227,6 +228,8 @@ impl CosmicStack {
 
             p.active.fetch_min(windows.len() - 1, Ordering::SeqCst);
         });
+        self.0
+            .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
         self.0.force_redraw()
     }
 
@@ -254,6 +257,8 @@ impl CosmicStack {
 
             Some(window)
         });
+        self.0
+            .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
         self.0.force_redraw();
         window
     }
@@ -273,7 +278,6 @@ impl CosmicStack {
                             })
                     {
                         p.previous_keyboard.store(old, Ordering::SeqCst);
-                        p.previous_pointer.store(old, Ordering::SeqCst);
                         p.scroll_to_focus.store(true, Ordering::SeqCst);
                         true
                     } else {
@@ -297,7 +301,6 @@ impl CosmicStack {
                             })
                     {
                         p.previous_keyboard.store(old, Ordering::SeqCst);
-                        p.previous_pointer.store(old, Ordering::SeqCst);
                         p.scroll_to_focus.store(true, Ordering::SeqCst);
                         true
                     } else {
@@ -333,6 +336,8 @@ impl CosmicStack {
         });
 
         if result {
+            self.0
+                .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
             self.0.force_update();
         }
 
@@ -341,7 +346,7 @@ impl CosmicStack {
 
     pub fn handle_move(&self, direction: Direction) -> MoveResult {
         let loop_handle = self.0.loop_handle();
-        self.0.with_program(|p| {
+        let result = self.0.with_program(|p| {
             if p.group_focused.load(Ordering::SeqCst) {
                 return MoveResult::Default;
             }
@@ -359,7 +364,6 @@ impl CosmicStack {
                 let old = p.active.swap(val, Ordering::SeqCst);
                 windows.swap(old, val);
                 p.previous_keyboard.store(old, Ordering::SeqCst);
-                p.previous_pointer.store(old, Ordering::SeqCst);
                 p.scroll_to_focus.store(true, Ordering::SeqCst);
                 MoveResult::Handled
             } else {
@@ -376,7 +380,15 @@ impl CosmicStack {
 
                 MoveResult::MoveOut(window, loop_handle)
             }
-        })
+        });
+
+        if !matches!(result, MoveResult::Default) {
+            self.0
+                .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
+            self.0.force_update();
+        }
+
+        result
     }
 
     pub fn active(&self) -> CosmicSurface {
@@ -399,9 +411,10 @@ impl CosmicStack {
             if let Some(val) = p.windows.lock().unwrap().iter().position(|w| w == window) {
                 let old = p.active.swap(val, Ordering::SeqCst);
                 p.previous_keyboard.store(old, Ordering::SeqCst);
-                p.previous_pointer.store(old, Ordering::SeqCst);
             }
         });
+        self.0
+            .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
         self.0.force_redraw()
     }
 
@@ -492,7 +505,16 @@ impl CosmicStack {
             *p.geometry.lock().unwrap() = Some(geo);
             p.mask.lock().unwrap().take();
         });
-        self.0.resize(Size::from((geo.size.w, TAB_HEIGHT)));
+    }
+
+    pub fn on_commit(&self, surface: &WlSurface) {
+        if let Some(surface) = self.surfaces().find(|w| w == surface) {
+            surface.0.on_commit();
+            if self.active() == surface {
+                self.0
+                    .resize(Size::from((surface.geometry().size.w, TAB_HEIGHT)));
+            }
+        }
     }
 
     fn keyboard_leave_if_previous(
@@ -673,10 +695,12 @@ impl Program for CosmicStackInternal {
             }
             Message::Activate(idx) => {
                 *self.potential_drag.lock().unwrap() = None;
-                if self.windows.lock().unwrap().get(idx).is_some() {
-                    let old = self.active.swap(idx, Ordering::SeqCst);
-                    self.previous_keyboard.store(old, Ordering::SeqCst);
-                    self.previous_pointer.store(old, Ordering::SeqCst);
+                if let Some(surface) = self.windows.lock().unwrap().get(idx).cloned() {
+                    loop_handle.insert_idle(move |state| {
+                        if let Some(mapped) = state.common.shell.element_for_surface(&surface) {
+                            mapped.stack_ref().unwrap().set_active(&surface);
+                        }
+                    });
                     self.scroll_to_focus.store(true, Ordering::SeqCst);
                 }
             }
@@ -989,7 +1013,8 @@ impl SpaceElement for CosmicStack {
             let mut windows = p.windows.lock().unwrap();
 
             // don't let the stack become empty
-            let active = windows[p.active.load(Ordering::SeqCst)].clone();
+            let old_active = p.active.load(Ordering::SeqCst);
+            let active = windows[old_active].clone();
             windows.retain(IsAlive::alive);
             if windows.is_empty() {
                 windows.push(active);
@@ -1002,6 +1027,12 @@ impl SpaceElement for CosmicStack {
                     (active >= len).then_some(len - 1)
                 });
             let active = p.active.load(Ordering::SeqCst);
+
+            if old_active != active {
+                self.0
+                    .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
+                self.0.force_redraw();
+            }
 
             windows.iter().enumerate().for_each(|(i, w)| {
                 if i == active {

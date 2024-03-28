@@ -413,6 +413,14 @@ impl CosmicMapped {
         }
     }
 
+    pub fn on_commit(&self, surface: &WlSurface) {
+        match &self.element {
+            CosmicMappedInternal::Stack(s) => s.on_commit(surface),
+            CosmicMappedInternal::Window(w) => w.on_commit(surface),
+            _ => {}
+        }
+    }
+
     pub fn min_size(&self) -> Option<Size<i32, Logical>> {
         match &self.element {
             CosmicMappedInternal::Stack(stack) => {
