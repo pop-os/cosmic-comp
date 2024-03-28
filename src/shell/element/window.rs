@@ -115,8 +115,8 @@ impl Focus {
         header_height: i32,
         location: Point<f64, Logical>,
     ) -> Option<Focus> {
-        let loc = location.to_i32_round::<i32>();
         let geo = surface.geometry();
+        let loc = location.to_i32_round::<i32>() - geo.loc;
         if loc.y < 0 && loc.x < 0 {
             Some(Focus::ResizeTopLeft)
         } else if loc.y < 0 && loc.x >= geo.size.w {
