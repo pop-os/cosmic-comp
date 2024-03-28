@@ -2082,27 +2082,8 @@ impl Shell {
         let overview = self.overview_mode.clone();
         self.workspaces.sets.get_mut(output).and_then(|set| {
             set.sticky_layer
-                .space
-                .element_under(location.to_local(output).as_logical())
-                .and_then(|(mapped, element_offset)| {
-                    let geometry = set
-                        .sticky_layer
-                        .space
-                        .element_geometry(mapped)
-                        .unwrap()
-                        .as_local();
-                    let point = location.to_local(output) - geometry.loc.to_f64();
-                    mapped
-                        .focus_under(point.as_logical())
-                        .map(|(surface, surface_offset)| {
-                            (
-                                surface,
-                                (element_offset + surface_offset)
-                                    .as_local()
-                                    .to_global(output),
-                            )
-                        })
-                })
+                .surface_under(location.to_local(output))
+                .map(|(target, offset)| (target, offset.to_global(output)))
                 .or_else(|| set.workspaces[set.active].surface_under(location, overview))
         })
     }
