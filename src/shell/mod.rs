@@ -257,6 +257,13 @@ impl WorkspaceDelta {
     pub fn new_shortcut() -> Self {
         WorkspaceDelta::Shortcut(Instant::now())
     }
+
+    pub fn is_animating(&self) -> bool {
+        matches!(
+            self,
+            WorkspaceDelta::Shortcut(_) | WorkspaceDelta::GestureEnd(_, _)
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -1537,11 +1544,12 @@ impl Shell {
     }
 
     pub fn animations_going(&self) -> bool {
-        self.workspaces
-            .sets
-            .values()
-            .any(|set| set.previously_active.is_some() || set.sticky_layer.animations_going())
-            || !matches!(self.overview_mode, OverviewMode::None)
+        self.workspaces.sets.values().any(|set| {
+            set.previously_active
+                .as_ref()
+                .is_some_and(|(_, delta)| delta.is_animating())
+                || set.sticky_layer.animations_going()
+        }) || !matches!(self.overview_mode, OverviewMode::None)
             || !matches!(self.resize_mode, ResizeMode::None)
             || self
                 .workspaces
