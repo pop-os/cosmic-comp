@@ -670,6 +670,14 @@ impl FloatingLayout {
         window: CosmicMapped,
         position: Point<i32, Local>,
     ) -> (CosmicMapped, Point<i32, Local>) {
+        if self
+            .hovered_stack
+            .as_ref()
+            .is_some_and(|(stack, _)| stack == &window || !stack.alive())
+        {
+            let _ = self.hovered_stack.take();
+        }
+
         if let Some((mapped, geo)) = self.hovered_stack.take() {
             let stack = mapped.stack_ref().unwrap();
             for surface in window.windows().map(|s| s.0) {
