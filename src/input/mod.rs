@@ -2,7 +2,7 @@
 
 use crate::{
     config::{Action, Config, KeyModifiers, KeyPattern},
-    input::gestures::{GestureState, SwipeAction},
+    input::gestures::GestureState,
     shell::{
         focus::{
             target::{KeyboardFocusTarget, PointerFocusTarget},
@@ -26,7 +26,11 @@ use crate::{
     },
 };
 use calloop::{timer::Timer, RegistrationToken};
-use cosmic_comp_config::{workspace::WorkspaceLayout, TileBehavior};
+use cosmic_comp_config::{
+    input::{GestureCommand, GestureConfig},
+    workspace::WorkspaceLayout,
+    TileBehavior,
+};
 use cosmic_config::ConfigSet;
 use smithay::{
     backend::input::{
@@ -1091,7 +1095,7 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
-                    let mut activate_action: Option<SwipeAction> = None;
+                    let mut activate_action: Option<GestureCommand> = None;
                     if let Some(ref mut gesture_state) = self.common.gesture_state {
                         let first_update = gesture_state.update(
                             event.delta(),
@@ -1099,39 +1103,81 @@ impl State {
                         );
                         // Decide on action if first update
                         if first_update {
-                            activate_action = match gesture_state.fingers {
-                                3 => None, // TODO: 3 finger gestures
-                                4 => {
-                                    if self.common.config.cosmic_conf.workspaces.workspace_layout
-                                        == WorkspaceLayout::Horizontal
-                                    {
-                                        match gesture_state.direction {
-                                            Some(Direction::Left) => {
-                                                Some(SwipeAction::NextWorkspace)
-                                            }
-                                            Some(Direction::Right) => {
-                                                Some(SwipeAction::PrevWorkspace)
-                                            }
-                                            _ => None, // TODO: Other actions
-                                        }
-                                    } else {
-                                        match gesture_state.direction {
-                                            Some(Direction::Up) => Some(SwipeAction::NextWorkspace),
-                                            Some(Direction::Down) => {
-                                                Some(SwipeAction::PrevWorkspace)
-                                            }
-                                            _ => None, // TODO: Other actions
-                                        }
-                                    }
-                                }
+                            let target_config = match gesture_state.fingers {
+                                3 => self
+                                    .common
+                                    .config
+                                    .cosmic_conf
+                                    .input_touchpad_gestures
+                                    .three_finger
+                                    .clone(),
+                                4 => self
+                                    .common
+                                    .config
+                                    .cosmic_conf
+                                    .input_touchpad_gestures
+                                    .four_finger
+                                    .clone(),
+                                5 => self
+                                    .common
+                                    .config
+                                    .cosmic_conf
+                                    .input_touchpad_gestures
+                                    .five_finger
+                                    .clone(),
                                 _ => None,
                             };
 
-                            gesture_state.action = activate_action;
+                            activate_action = match target_config {
+                                Some(GestureConfig::WorkspaceDependent(config)) => {
+                                    match (
+                                        self.common.config.cosmic_conf.workspaces.workspace_layout,
+                                        gesture_state.direction,
+                                    ) {
+                                        (WorkspaceLayout::Vertical, Some(Direction::Down)) => {
+                                            config.action_forward.clone()
+                                        }
+                                        (WorkspaceLayout::Vertical, Some(Direction::Up)) => {
+                                            config.action_backward.clone()
+                                        }
+                                        (WorkspaceLayout::Vertical, Some(Direction::Right)) => {
+                                            config.action_side_1.clone()
+                                        }
+                                        (WorkspaceLayout::Vertical, Some(Direction::Left)) => {
+                                            config.action_side_2.clone()
+                                        }
+                                        (WorkspaceLayout::Horizontal, Some(Direction::Down)) => {
+                                            config.action_side_1.clone()
+                                        }
+                                        (WorkspaceLayout::Horizontal, Some(Direction::Up)) => {
+                                            config.action_side_2.clone()
+                                        }
+                                        (WorkspaceLayout::Horizontal, Some(Direction::Right)) => {
+                                            config.action_forward.clone()
+                                        }
+                                        (WorkspaceLayout::Horizontal, Some(Direction::Left)) => {
+                                            config.action_backward.clone()
+                                        }
+                                        _ => None,
+                                    }
+                                }
+                                Some(GestureConfig::Directional(config)) => {
+                                    match gesture_state.direction {
+                                        Some(Direction::Up) => config.action_up.clone(),
+                                        Some(Direction::Down) => config.action_down.clone(),
+                                        Some(Direction::Right) => config.action_right.clone(),
+                                        Some(Direction::Left) => config.action_left.clone(),
+                                        None => None,
+                                    }
+                                }
+                                None => None,
+                            };
+                            gesture_state.action = activate_action.clone();
                         }
 
                         match gesture_state.action {
-                            Some(SwipeAction::NextWorkspace) | Some(SwipeAction::PrevWorkspace) => {
+                            Some(GestureCommand::WorkspaceForward)
+                            | Some(GestureCommand::WorkspaceBackward) => {
                                 self.common.shell.write().unwrap().update_workspace_delta(
                                     &seat.active_output(),
                                     gesture_state.delta,
@@ -1150,7 +1196,7 @@ impl State {
                         );
                     }
                     match activate_action {
-                        Some(SwipeAction::NextWorkspace) => {
+                        Some(GestureCommand::WorkspaceForward) => {
                             let _ = to_next_workspace(
                                 &mut *self.common.shell.write().unwrap(),
                                 &seat,
@@ -1158,7 +1204,7 @@ impl State {
                                 &mut self.common.workspace_state.update(),
                             );
                         }
-                        Some(SwipeAction::PrevWorkspace) => {
+                        Some(GestureCommand::WorkspaceBackward) => {
                             let _ = to_previous_workspace(
                                 &mut *self.common.shell.write().unwrap(),
                                 &seat,
@@ -1182,7 +1228,8 @@ impl State {
                 if let Some(seat) = maybe_seat {
                     if let Some(ref gesture_state) = self.common.gesture_state {
                         match gesture_state.action {
-                            Some(SwipeAction::NextWorkspace) | Some(SwipeAction::PrevWorkspace) => {
+                            Some(GestureCommand::WorkspaceForward)
+                            | Some(GestureCommand::WorkspaceBackward) => {
                                 let velocity = gesture_state.velocity();
                                 let norm_velocity =
                                     if self.common.config.cosmic_conf.workspaces.workspace_layout

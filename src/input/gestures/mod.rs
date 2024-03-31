@@ -1,3 +1,4 @@
+use cosmic_comp_config::input::GestureCommand;
 use smithay::utils::{Logical, Point};
 use std::{collections::VecDeque, time::Duration};
 use tracing::trace;
@@ -13,17 +14,11 @@ pub struct SwipeEvent {
     timestamp: Duration,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum SwipeAction {
-    NextWorkspace,
-    PrevWorkspace,
-}
-
 #[derive(Debug, Clone)]
 pub struct GestureState {
     pub fingers: u32,
     pub direction: Option<Direction>,
-    pub action: Option<SwipeAction>,
+    pub action: Option<GestureCommand>,
     pub delta: f64,
     // Delta tracking inspired by Niri (GPL-3.0) https://github.com/YaLTeR/niri/tree/v0.1.3
     pub history: VecDeque<SwipeEvent>,

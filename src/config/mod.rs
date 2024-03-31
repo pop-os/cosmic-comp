@@ -32,7 +32,7 @@ pub use key_bindings::{Action, KeyModifier, KeyModifiers, KeyPattern};
 mod types;
 pub use self::types::*;
 use cosmic_comp_config::{
-    input::InputConfig,
+    input::{InputConfig, TouchpadGestureConfig},
     workspace::{WorkspaceConfig, WorkspaceLayout},
     CosmicCompConfig, TileBehavior, XkbConfig,
 };
@@ -565,6 +565,11 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
             "input_touchpad" => {
                 let value = get_config::<InputConfig>(&config, "input_touchpad");
                 state.common.config.cosmic_conf.input_touchpad = value;
+                update_input(state);
+            }
+            "input_touchpad_gestures" => {
+                let value = get_config::<TouchpadGestureConfig>(&config, "input_touchpad_gestures");
+                state.common.config.cosmic_conf.input_touchpad_gestures = value;
                 update_input(state);
             }
             "input_devices" => {
