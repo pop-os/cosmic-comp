@@ -2,10 +2,9 @@ use super::{surface::RESIZE_BORDER, window::Focus, CosmicSurface};
 use crate::{
     backend::render::cursor::{CursorShape, CursorState},
     shell::{
-        focus::{target::PointerFocusTarget, FocusDirection},
+        focus::target::PointerFocusTarget,
         grabs::{ReleaseMode, ResizeEdge},
         layout::tiling::NodeDesc,
-        Direction,
     },
     state::State,
     utils::{
@@ -21,7 +20,9 @@ use cosmic::{
     iced_widget::scrollable::AbsoluteOffset,
     theme, widget as cosmic_widget, Apply, Element as CosmicElement,
 };
+use cosmic_settings_config::shortcuts;
 use once_cell::sync::Lazy;
+use shortcuts::action::{Direction, FocusDirection};
 use smithay::{
     backend::{
         input::KeyState,

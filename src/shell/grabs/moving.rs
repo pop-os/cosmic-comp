@@ -863,7 +863,8 @@ impl Drop for MoveGrab {
                             state,
                             Some((
                                 target,
-                                position.as_logical().to_f64() - window.geometry().loc.to_f64() + offset,
+                                position.as_logical().to_f64() - window.geometry().loc.to_f64()
+                                    + offset,
                             )),
                             &MotionEvent {
                                 location: pointer.current_location(),

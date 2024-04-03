@@ -1,3 +1,4 @@
+use cosmic_settings_config::shortcuts;
 use smithay::{
     backend::input::KeyState,
     input::{
@@ -12,7 +13,7 @@ use smithay::{
 use xkbcommon::xkb::Keysym;
 
 use crate::{
-    config::{Action, KeyPattern},
+    config::key_bindings::cosmic_modifiers_from_smithay,
     shell::{layout::tiling::NodeDesc, OverviewMode, Trigger},
     state::State,
 };
@@ -53,12 +54,11 @@ impl KeyboardGrab<State> for SwapWindowGrab {
         let focus_bindings = &data
             .common
             .config
-            .static_conf
-            .key_bindings
+            .shortcuts
             .iter()
-            .filter(|(_, action)| matches!(action, Action::Focus(_)))
+            .filter(|(_, action)| matches!(action, shortcuts::Action::Focus(_)))
             .map(|(pattern, action)| {
-                let Action::Focus(direction) = action else {
+                let shortcuts::Action::Focus(direction) = action else {
                     unreachable!()
                 };
                 (pattern.key, *direction)
@@ -72,14 +72,17 @@ impl KeyboardGrab<State> for SwapWindowGrab {
             return;
         };
 
-        data.handle_action(
-            Action::Focus(direction),
+        data.handle_shortcut_action(
+            shortcuts::Action::Focus(direction),
             &self.seat,
             serial,
             time,
-            KeyPattern {
-                modifiers: modifiers.map(Into::into).unwrap_or_default(),
+            shortcuts::Binding {
+                modifiers: modifiers
+                    .map(cosmic_modifiers_from_smithay)
+                    .unwrap_or_default(),
                 key: Some(Keysym::new(keycode)),
+                description: None,
             },
             None,
             true,

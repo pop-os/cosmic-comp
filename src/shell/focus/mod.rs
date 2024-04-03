@@ -27,16 +27,6 @@ use super::{layout::floating::FloatingLayout, SeatExt};
 
 pub mod target;
 
-#[derive(Debug, serde::Deserialize, Clone, Copy, PartialEq, Eq)]
-pub enum FocusDirection {
-    Left,
-    Right,
-    Up,
-    Down,
-    In,
-    Out,
-}
-
 pub struct FocusStack<'a>(pub(super) Option<&'a IndexSet<CosmicMapped>>);
 pub struct FocusStackMut<'a>(pub(super) &'a mut IndexSet<CosmicMapped>);
 

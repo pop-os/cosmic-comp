@@ -8,6 +8,7 @@ use crate::{
     },
 };
 use cosmic_config::{ConfigGet, CosmicConfigEntry};
+use cosmic_settings_config::{shortcuts, Shortcuts};
 use serde::{Deserialize, Serialize};
 use smithay::wayland::xdg_activation::XdgActivationState;
 pub use smithay::{
@@ -25,66 +26,33 @@ pub use smithay::{
 };
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fs::OpenOptions,
     path::PathBuf,
     sync::{atomic::AtomicBool, Arc, RwLock},
 };
-use tracing::{debug, error, info, warn};
+use tracing::{error, warn};
 
 mod input_config;
-mod key_bindings;
-pub use key_bindings::{Action, KeyModifier, KeyModifiers, KeyPattern};
+pub mod key_bindings;
+pub use key_bindings::{Action, PrivateAction};
 mod types;
 pub use self::types::*;
 use cosmic_comp_config::{
-    input::InputConfig,
-    workspace::{WorkspaceConfig, WorkspaceLayout},
-    CosmicCompConfig, TileBehavior, XkbConfig,
+    input::InputConfig, workspace::WorkspaceConfig, CosmicCompConfig, TileBehavior, XkbConfig,
 };
 
 #[derive(Debug)]
 pub struct Config {
-    pub static_conf: StaticConfig,
     pub dynamic_conf: DynamicConfig,
     pub cosmic_helper: cosmic_config::Config,
     pub cosmic_conf: CosmicCompConfig,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct StaticConfig {
-    pub key_bindings: HashMap<key_bindings::KeyPattern, key_bindings::Action>,
-    pub data_control_enabled: bool,
-}
-
-impl StaticConfig {
-    pub fn get_shortcut_for_action(&self, action: &Action) -> Option<String> {
-        let possible_variants = self
-            .key_bindings
-            .iter()
-            .filter(|(_, a)| *a == action)
-            .map(|(b, _)| b)
-            .collect::<Vec<_>>();
-
-        possible_variants
-            .iter()
-            .find(|b| b.key.is_none()) // prefer short bindings
-            .or_else(|| {
-                possible_variants
-                    .iter() // prefer bindings containing arrow keys
-                    .find(|b| {
-                        matches!(
-                            b.key,
-                            Some(Keysym::Down)
-                                | Some(Keysym::Up)
-                                | Some(Keysym::Left)
-                                | Some(Keysym::Right)
-                        )
-                    })
-            })
-            .or_else(|| possible_variants.first()) // take the first one
-            .map(|binding| binding.to_string())
-    }
+    /// cosmic-config context for `com.system76.CosmicSettings.Shortcuts`
+    pub settings_context: cosmic_config::Config,
+    /// Key bindings from `com.system76.CosmicSettings.Shortcuts`
+    pub shortcuts: Shortcuts,
+    /// System actions from `com.system76.CosmicSettings.Shortcuts`
+    pub system_actions: BTreeMap<shortcuts::action::System, String>,
 }
 
 #[derive(Debug)]
@@ -185,6 +153,7 @@ impl Config {
             .expect("Failed to add cosmic-config to the event loop");
         let xdg = xdg::BaseDirectories::new().ok();
         let workspace = get_config::<WorkspaceConfig>(&config, "workspaces");
+
         let cosmic_comp_config =
             CosmicCompConfig::get_entry(&config).unwrap_or_else(|(errs, c)| {
                 for err in errs {
@@ -192,72 +161,48 @@ impl Config {
                 }
                 c
             });
-        Config {
-            static_conf: Self::load_static(xdg.as_ref(), workspace.workspace_layout),
-            dynamic_conf: Self::load_dynamic(xdg.as_ref()),
-            cosmic_conf: cosmic_comp_config,
-            cosmic_helper: config,
-        }
-    }
 
-    fn load_static(
-        xdg: Option<&xdg::BaseDirectories>,
-        workspace_layout: WorkspaceLayout,
-    ) -> StaticConfig {
-        let mut locations = if let Some(base) = xdg {
-            vec![
-                base.get_config_file("cosmic-comp.ron"),
-                base.get_config_file("cosmic-comp/config.ron"),
-            ]
-        } else {
-            Vec::with_capacity(3)
-        };
-        if cfg!(debug_assertions) {
-            if let Ok(mut cwd) = std::env::current_dir() {
-                cwd.push("config.ron");
-                locations.push(cwd);
-            }
-        }
-        locations.push(PathBuf::from("/etc/cosmic-comp/config.ron"));
-        locations.push(PathBuf::from("/etc/cosmic-comp.ron"));
+        // Source key bindings from com.system76.CosmicSettings.Shortcuts
+        let settings_context = shortcuts::context().unwrap();
+        let system_actions = shortcuts::system_actions(&config);
+        let mut shortcuts = shortcuts::shortcuts(&settings_context);
 
-        for path in locations {
-            debug!("Trying config location: {}", path.display());
-            if path.exists() {
-                info!("Using config at {}", path.display());
-                let Ok(file) = OpenOptions::new().read(true).open(path) else {
-                    error!("Failed to open config file.");
-                    continue;
-                };
-                match ron::de::from_reader::<_, StaticConfig>(file) {
-                    Ok(mut config) => {
-                        key_bindings::add_default_bindings(
-                            &mut config.key_bindings,
-                            workspace_layout,
-                        );
-                        return config;
+        // Add any missing default shortcuts recommended by the compositor.
+        key_bindings::add_default_bindings(&mut shortcuts, workspace.workspace_layout);
+
+        // Listen for updates to the keybindings config.
+        let source = cosmic_config::calloop::ConfigWatchSource::new(&settings_context).expect(
+            "failed to create config watch source for com.system76.CosmicSettings.Shortcuts",
+        );
+        _ = loop_handle.insert_source(source, |(config, keys), (), state| {
+            for key in keys {
+                match key.as_str() {
+                    // Reload the keyboard shortcuts config.
+                    "custom" | "defaults" => {
+                        let mut shortcuts = shortcuts::shortcuts(&config);
+                        let layout =
+                            get_config::<WorkspaceConfig>(&config, "workspaces").workspace_layout;
+                        key_bindings::add_default_bindings(&mut shortcuts, layout);
+                        state.common.config.shortcuts = shortcuts;
                     }
-                    Err(err) => {
-                        error!("Malformed config file (skipping): {}", err);
-                        continue;
+
+                    "system_actions" => {
+                        state.common.config.system_actions = shortcuts::system_actions(&config);
                     }
+
+                    _ => (),
                 }
-            }
-        }
-
-        info!("No config found, consider installing a config file. Using default mapping.");
-
-        let mut config = ron::from_str(include_str!("../../config.ron")).unwrap_or_else(|err| {
-            debug!("Failed to load internal default config: {}", err);
-            StaticConfig {
-                // Small useful keybindings by default
-                key_bindings: HashMap::new(),
-                data_control_enabled: false,
             }
         });
 
-        key_bindings::add_default_bindings(&mut config.key_bindings, workspace_layout);
-        config
+        Config {
+            dynamic_conf: Self::load_dynamic(xdg.as_ref()),
+            cosmic_conf: cosmic_comp_config,
+            cosmic_helper: config,
+            settings_context,
+            shortcuts,
+            system_actions,
+        }
     }
 
     fn load_dynamic(xdg: Option<&xdg::BaseDirectories>) -> DynamicConfig {
@@ -312,6 +257,10 @@ impl Config {
         OutputsConfig {
             config: HashMap::new(),
         }
+    }
+
+    pub fn shortcut_for_action(&self, action: &shortcuts::Action) -> Option<String> {
+        self.shortcuts.shortcut_for_action(action)
     }
 
     pub fn read_outputs(
