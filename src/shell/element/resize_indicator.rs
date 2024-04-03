@@ -1,9 +1,9 @@
 use std::sync::Mutex;
 
 use crate::{
-    config::{Action, Config},
+    config::Config,
     fl,
-    shell::{grabs::ResizeEdge, ResizeDirection},
+    shell::grabs::ResizeEdge,
     utils::iced::{IcedElement, Program},
 };
 
@@ -15,6 +15,7 @@ use cosmic::{
     widget::{icon::from_name, text},
     Apply,
 };
+use cosmic_settings_config::shortcuts::action::{Action, ResizeDirection};
 use smithay::utils::Size;
 
 pub type ResizeIndicator = IcedElement<ResizeIndicatorInternal>;
@@ -30,8 +31,7 @@ pub fn resize_indicator(
             edges: Mutex::new(ResizeEdge::all()),
             direction,
             shortcut1: config
-                .static_conf
-                .key_bindings
+                .shortcuts
                 .iter()
                 .find_map(|(pattern, action)| {
                     (*action == Action::Resizing(ResizeDirection::Outwards)).then_some(pattern)
@@ -39,8 +39,7 @@ pub fn resize_indicator(
                 .map(|pattern| format!("{}: ", pattern.to_string()))
                 .unwrap_or_else(|| crate::fl!("unknown-keybinding")),
             shortcut2: config
-                .static_conf
-                .key_bindings
+                .shortcuts
                 .iter()
                 .find_map(|(pattern, action)| {
                     (*action == Action::Resizing(ResizeDirection::Inwards)).then_some(pattern)

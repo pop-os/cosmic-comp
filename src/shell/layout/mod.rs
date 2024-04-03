@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use cosmic_settings_config::shortcuts::action::Orientation;
 use regex::RegexSet;
 use smithay::{
     desktop::WindowSurface,
@@ -11,22 +12,6 @@ use super::CosmicSurface;
 
 pub mod floating;
 pub mod tiling;
-
-#[derive(Debug, serde::Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Orientation {
-    Horizontal,
-    Vertical,
-}
-
-impl std::ops::Not for Orientation {
-    type Output = Self;
-    fn not(self) -> Self::Output {
-        match self {
-            Orientation::Horizontal => Orientation::Vertical,
-            Orientation::Vertical => Orientation::Horizontal,
-        }
-    }
-}
 
 lazy_static::lazy_static! {
     static ref EXCEPTIONS_APPID: RegexSet = RegexSet::new(&[

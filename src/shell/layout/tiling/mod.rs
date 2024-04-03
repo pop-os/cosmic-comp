@@ -18,12 +18,12 @@ use crate::{
         },
         focus::{
             target::{KeyboardFocusTarget, PointerFocusTarget, WindowGroup},
-            FocusDirection, FocusStackMut,
+            FocusStackMut,
         },
         grabs::ResizeEdge,
         layout::Orientation,
         CosmicSurface, Direction, FocusResult, MoveResult, OutputNotMapped, OverviewMode,
-        ResizeDirection, ResizeMode, Trigger,
+        ResizeMode, Trigger,
     },
     utils::{prelude::*, tween::EaseRectangle},
     wayland::{
@@ -38,6 +38,7 @@ use crate::{
     },
 };
 
+use cosmic_settings_config::shortcuts::action::{FocusDirection, ResizeDirection};
 use id_tree::{InsertBehavior, MoveBehavior, Node, NodeId, NodeIdError, RemoveBehavior, Tree};
 use keyframe::{
     ease,

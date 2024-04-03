@@ -192,26 +192,6 @@ pub enum ManagedLayer {
     Sticky,
 }
 
-#[derive(Debug, serde::Deserialize, Clone, Copy, PartialEq, Eq)]
-pub enum Direction {
-    Left,
-    Right,
-    Up,
-    Down,
-}
-
-impl std::ops::Not for Direction {
-    type Output = Self;
-    fn not(self) -> Self::Output {
-        match self {
-            Direction::Left => Direction::Right,
-            Direction::Right => Direction::Left,
-            Direction::Up => Direction::Down,
-            Direction::Down => Direction::Up,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum FocusResult {
     None,

@@ -6,6 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use cosmic_settings_config::shortcuts::action::ResizeDirection;
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     backend::renderer::{
@@ -36,7 +37,7 @@ use crate::{
             FocusStackMut,
         },
         grabs::{GrabStartData, ReleaseMode, ResizeEdge},
-        CosmicSurface, Direction, ManagedLayer, MoveResult, ResizeDirection, ResizeMode,
+        CosmicSurface, Direction, ManagedLayer, MoveResult, ResizeMode,
     },
     state::State,
     utils::{prelude::*, tween::EaseRectangle},
