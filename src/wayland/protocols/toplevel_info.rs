@@ -100,7 +100,7 @@ where
     ) {
         let instance = data_init.init(resource, ());
         for window in &state.toplevel_info_state().toplevels {
-            send_toplevel_to_client::<D, W>(dh, Some(state.workspace_state()), &instance, window);
+            send_toplevel_to_client::<D, W>(dh, state.workspace_state(), &instance, window);
         }
         state.toplevel_info_state_mut().instances.push(instance);
     }
@@ -213,12 +213,12 @@ where
         }
     }
 
-    pub fn new_toplevel(&mut self, toplevel: &W) {
+    pub fn new_toplevel(&mut self, toplevel: &W, workspace_state: &WorkspaceState<D>) {
         toplevel
             .user_data()
             .insert_if_missing(ToplevelState::default);
         for instance in &self.instances {
-            send_toplevel_to_client::<D, W>(&self.dh, None, instance, toplevel);
+            send_toplevel_to_client::<D, W>(&self.dh, workspace_state, instance, toplevel);
         }
         self.toplevels.push(toplevel.clone());
     }
@@ -265,7 +265,7 @@ where
         self.toplevels.retain(|w| w != toplevel);
     }
 
-    pub fn refresh(&mut self, workspace_state: Option<&WorkspaceState<D>>) {
+    pub fn refresh(&mut self, workspace_state: &WorkspaceState<D>) {
         self.toplevels.retain(|window| {
             let mut state = window
                 .user_data()
@@ -305,7 +305,7 @@ where
 
 fn send_toplevel_to_client<D, W: 'static>(
     dh: &DisplayHandle,
-    workspace_state: Option<&WorkspaceState<D>>,
+    workspace_state: &WorkspaceState<D>,
     info: &ZcosmicToplevelInfoV1,
     window: &W,
 ) where
@@ -422,33 +422,27 @@ fn send_toplevel_to_client<D, W: 'static>(
         handle_state.outputs = state.outputs.clone();
     }
 
-    if let Some(workspace_state) = workspace_state {
-        for new_workspace in state
-            .workspaces
-            .iter()
-            .filter(|w| !handle_state.workspaces.contains(w))
-        {
-            if let Some(handle) =
-                workspace_state.raw_workspace_handle(&new_workspace, &instance.id())
-            {
-                instance.workspace_enter(&handle);
-                changed = true;
-            }
+    for new_workspace in state
+        .workspaces
+        .iter()
+        .filter(|w| !handle_state.workspaces.contains(w))
+    {
+        if let Some(handle) = workspace_state.raw_workspace_handle(&new_workspace, &instance.id()) {
+            instance.workspace_enter(&handle);
+            changed = true;
         }
-        for old_workspace in handle_state
-            .workspaces
-            .iter()
-            .filter(|w| !state.workspaces.contains(w))
-        {
-            if let Some(handle) =
-                workspace_state.raw_workspace_handle(&old_workspace, &instance.id())
-            {
-                instance.workspace_leave(&handle);
-                changed = true;
-            }
-        }
-        handle_state.workspaces = state.workspaces.clone();
     }
+    for old_workspace in handle_state
+        .workspaces
+        .iter()
+        .filter(|w| !state.workspaces.contains(w))
+    {
+        if let Some(handle) = workspace_state.raw_workspace_handle(&old_workspace, &instance.id()) {
+            instance.workspace_leave(&handle);
+            changed = true;
+        }
+    }
+    handle_state.workspaces = state.workspaces.clone();
 
     if changed {
         instance.done();
