@@ -1693,8 +1693,7 @@ impl Shell {
         self.pending_layers.retain(|(s, _, _)| s.alive());
         self.pending_windows.retain(|(s, _, _)| s.alive());
 
-        self.toplevel_info_state
-            .refresh(Some(&self.workspace_state));
+        self.toplevel_info_state.refresh(&self.workspace_state);
     }
 
     pub fn on_commit(&mut self, surface: &WlSurface) {
@@ -1867,7 +1866,11 @@ impl Shell {
             state.common.shell.workspaces.active_mut(&output)
         };
 
-        state.common.shell.toplevel_info_state.new_toplevel(&window);
+        state
+            .common
+            .shell
+            .toplevel_info_state
+            .new_toplevel(&window, &state.common.shell.workspace_state);
         state
             .common
             .shell
