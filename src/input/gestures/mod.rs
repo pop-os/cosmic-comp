@@ -1,8 +1,7 @@
+use cosmic_settings_config::shortcuts::action::Direction;
 use smithay::utils::{Logical, Point};
 use std::{collections::VecDeque, time::Duration};
 use tracing::trace;
-
-use crate::shell::Direction;
 
 const HISTORY_LIMIT: Duration = Duration::from_millis(150);
 const DECELERATION_TOUCHPAD: f64 = 0.997;

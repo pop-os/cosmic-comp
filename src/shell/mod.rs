@@ -14,6 +14,8 @@ use cosmic_comp_config::{
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::{
     State as WState, TilingState,
 };
+use cosmic_settings_config::shortcuts;
+use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection, ResizeDirection};
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     backend::{input::TouchSlot, renderer::element::RenderElementStates},
@@ -48,7 +50,7 @@ use smithay::{
 
 use crate::{
     backend::render::animations::spring::{Spring, SpringParams},
-    config::{Config, KeyModifiers, KeyPattern},
+    config::Config,
     utils::prelude::*,
     wayland::{
         handlers::{
@@ -77,16 +79,14 @@ mod workspace;
 pub use self::element::{CosmicMapped, CosmicMappedRenderElement, CosmicSurface};
 pub use self::seats::*;
 pub use self::workspace::*;
+
 use self::{
     element::{
         resize_indicator::{resize_indicator, ResizeIndicator},
         swap_indicator::{swap_indicator, SwapIndicator},
         CosmicWindow, MaximizedState,
     },
-    focus::{
-        target::{KeyboardFocusTarget, PointerFocusTarget},
-        FocusDirection,
-    },
+    focus::target::{KeyboardFocusTarget, PointerFocusTarget},
     grabs::{
         tab_items, window_items, GrabStartData, Item, MenuGrab, MoveGrab, ReleaseMode, ResizeEdge,
         ResizeGrab,
@@ -104,8 +104,8 @@ const GESTURE_VELOCITY_THRESHOLD: f64 = 0.02;
 
 #[derive(Debug, Clone)]
 pub enum Trigger {
-    KeyboardSwap(KeyPattern, NodeDesc),
-    KeyboardMove(KeyModifiers),
+    KeyboardSwap(shortcuts::Binding, NodeDesc),
+    KeyboardMove(shortcuts::Modifiers),
     Pointer(u32),
     Touch(TouchSlot),
 }
@@ -139,16 +139,10 @@ impl OverviewMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, serde::Deserialize, PartialEq, Eq, Hash)]
-pub enum ResizeDirection {
-    Inwards,
-    Outwards,
-}
-
 #[derive(Debug, Clone)]
 pub enum ResizeMode {
     None,
-    Started(KeyPattern, Instant, ResizeDirection),
+    Started(shortcuts::Binding, Instant, ResizeDirection),
     Ended(Instant, ResizeDirection),
 }
 
@@ -1579,7 +1573,7 @@ impl Shell {
 
     pub fn set_resize_mode(
         &mut self,
-        enabled: Option<(KeyPattern, ResizeDirection)>,
+        enabled: Option<(shortcuts::Binding, ResizeDirection)>,
         config: &Config,
         evlh: LoopHandle<'static, crate::state::State>,
     ) {
@@ -2289,14 +2283,14 @@ impl Shell {
                     is_sticky,
                     tiling_enabled,
                     edge,
-                    &config.static_conf,
+                    config,
                 )) as Box<dyn Iterator<Item = Item>>
             } else {
                 let (tab, _) = mapped
                     .windows()
                     .find(|(s, _)| s.wl_surface().as_deref() == Some(surface))
                     .unwrap();
-                Box::new(tab_items(&mapped, &tab, is_tiled, &config.static_conf))
+                Box::new(tab_items(&mapped, &tab, is_tiled, config))
                     as Box<dyn Iterator<Item = Item>>
             },
             global_position,

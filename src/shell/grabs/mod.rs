@@ -1,3 +1,4 @@
+use cosmic_settings_config::shortcuts;
 use smithay::{
     input::{
         pointer::{
@@ -103,6 +104,36 @@ impl ResizeEdge {
             new_edge.insert(ResizeEdge::LEFT);
         }
         *self = new_edge;
+    }
+}
+
+impl From<shortcuts::action::ResizeEdge> for ResizeEdge {
+    fn from(edge: shortcuts::action::ResizeEdge) -> Self {
+        match edge {
+            shortcuts::action::ResizeEdge::Bottom => ResizeEdge::BOTTOM,
+            shortcuts::action::ResizeEdge::BottomLeft => ResizeEdge::BOTTOM_LEFT,
+            shortcuts::action::ResizeEdge::BottomRight => ResizeEdge::BOTTOM_RIGHT,
+            shortcuts::action::ResizeEdge::Left => ResizeEdge::LEFT,
+            shortcuts::action::ResizeEdge::Right => ResizeEdge::RIGHT,
+            shortcuts::action::ResizeEdge::Top => ResizeEdge::TOP,
+            shortcuts::action::ResizeEdge::TopLeft => ResizeEdge::TOP_LEFT,
+            shortcuts::action::ResizeEdge::TopRight => ResizeEdge::TOP_RIGHT,
+        }
+    }
+}
+
+impl Into<shortcuts::action::ResizeEdge> for ResizeEdge {
+    fn into(self) -> shortcuts::action::ResizeEdge {
+        match self {
+            ResizeEdge::BOTTOM => shortcuts::action::ResizeEdge::Bottom,
+            ResizeEdge::BOTTOM_LEFT => shortcuts::action::ResizeEdge::BottomLeft,
+            ResizeEdge::BOTTOM_RIGHT => shortcuts::action::ResizeEdge::BottomRight,
+            ResizeEdge::LEFT => shortcuts::action::ResizeEdge::Left,
+            ResizeEdge::RIGHT => shortcuts::action::ResizeEdge::Right,
+            ResizeEdge::TOP => shortcuts::action::ResizeEdge::Top,
+            ResizeEdge::TOP_LEFT => shortcuts::action::ResizeEdge::TopLeft,
+            _ => shortcuts::action::ResizeEdge::TopRight,
+        }
     }
 }
 

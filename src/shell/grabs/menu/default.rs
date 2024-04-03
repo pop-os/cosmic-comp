@@ -1,7 +1,8 @@
+use cosmic_settings_config::shortcuts::Action;
 use smithay::{input::pointer::MotionEvent, utils::SERIAL_COUNTER, wayland::seat::WaylandFocus};
 
 use crate::{
-    config::{Action, StaticConfig},
+    config::Config,
     fl,
     shell::{
         element::{CosmicMapped, CosmicWindow},
@@ -93,7 +94,7 @@ pub fn tab_items(
     stack: &CosmicMapped,
     tab: &CosmicSurface,
     is_tiled: bool,
-    config: &StaticConfig,
+    config: &Config,
 ) -> impl Iterator<Item = Item> {
     let unstack_clone_stack = stack.clone();
     let unstack_clone_tab = tab.clone();
@@ -145,7 +146,7 @@ pub fn tab_items(
         Item::new(fl!("window-menu-close"), move |_handle| {
             close_clone.close();
         })
-        .shortcut(config.get_shortcut_for_action(&Action::Close)),
+        .shortcut(config.shortcut_for_action(&Action::Close)),
     ]
     .into_iter()
 }
@@ -157,7 +158,7 @@ pub fn window_items(
     is_sticky: bool,
     tiling_enabled: bool,
     possible_resizes: ResizeEdge,
-    config: &StaticConfig,
+    config: &Config,
 ) -> impl Iterator<Item = Item> {
     let minimize_clone = window.clone();
     let maximize_clone = window.clone();
@@ -181,7 +182,7 @@ pub fn window_items(
                 let mapped = stack_clone.clone();
                 let _ = handle.insert_idle(move |state| toggle_stacking(state, &mapped));
             })
-            .shortcut(config.get_shortcut_for_action(&Action::ToggleStacking)),
+            .shortcut(config.shortcut_for_action(&Action::ToggleStacking)),
         ),
         is_stacked.then_some(
             Item::new(fl!("window-menu-unstack-all"), move |handle| {
@@ -190,7 +191,7 @@ pub fn window_items(
                     toggle_stacking(state, &mapped);
                 });
             })
-            .shortcut(config.get_shortcut_for_action(&Action::ToggleStacking)),
+            .shortcut(config.shortcut_for_action(&Action::ToggleStacking)),
         ),
         Some(Item::Separator),
         Some(
@@ -205,7 +206,7 @@ pub fn window_items(
                         .minimize_request(&mapped);
                 });
             })
-            .shortcut(config.get_shortcut_for_action(&Action::Minimize)),
+            .shortcut(config.shortcut_for_action(&Action::Minimize)),
         ),
         Some(
             Item::new(fl!("window-menu-maximize"), move |handle| {
@@ -216,7 +217,7 @@ pub fn window_items(
                     shell.maximize_toggle(&mapped, &seat);
                 });
             })
-            .shortcut(config.get_shortcut_for_action(&Action::Maximize))
+            .shortcut(config.shortcut_for_action(&Action::Maximize))
             .toggled(window.is_maximized(false)),
         ),
         (tiling_enabled && !is_sticky).then_some(
@@ -230,7 +231,7 @@ pub fn window_items(
                     }
                 });
             })
-            .shortcut(config.get_shortcut_for_action(&Action::ToggleWindowFloating))
+            .shortcut(config.shortcut_for_action(&Action::ToggleWindowFloating))
             .toggled(!is_tiled),
         ),
         Some(Item::Separator),
@@ -410,7 +411,7 @@ pub fn window_items(
                 let mapped = move_prev_clone.clone();
                 let _ = handle.insert_idle(move |state| move_prev_workspace(state, &mapped));
             })
-            .shortcut(config.get_shortcut_for_action(&Action::MoveToPreviousWorkspace))
+            .shortcut(config.shortcut_for_action(&Action::MoveToPreviousWorkspace))
             .disabled(is_sticky),
         ),
         Some(
@@ -418,7 +419,7 @@ pub fn window_items(
                 let mapped = move_next_clone.clone();
                 let _ = handle.insert_idle(move |state| move_next_workspace(state, &mapped));
             })
-            .shortcut(config.get_shortcut_for_action(&Action::MoveToNextWorkspace))
+            .shortcut(config.shortcut_for_action(&Action::MoveToNextWorkspace))
             .disabled(is_sticky),
         ),
         Some(Item::Separator),
@@ -445,7 +446,7 @@ pub fn window_items(
                 Item::new(fl!("window-menu-close"), move |_handle| {
                     close_clone.send_close();
                 })
-                .shortcut(config.get_shortcut_for_action(&Action::Close)),
+                .shortcut(config.shortcut_for_action(&Action::Close)),
             )
         },
     ]
