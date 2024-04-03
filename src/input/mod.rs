@@ -74,6 +74,7 @@ use std::{
     any::Any,
     cell::RefCell,
     collections::HashMap,
+    os::unix::process::CommandExt,
     thread,
     time::{Duration, Instant},
 };
@@ -2285,6 +2286,7 @@ impl State {
                     .env("XDG_ACTIVATION_TOKEN", &*token)
                     .env("DESKTOP_STARTUP_ID", &*token)
                     .env_remove("COSMIC_SESSION_SOCK");
+                unsafe { cmd.pre_exec(|| Ok(crate::utils::rlimit::restore_nofile_limit())) };
 
                 std::thread::spawn(move || match cmd.spawn() {
                     Ok(mut child) => {
