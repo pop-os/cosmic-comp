@@ -57,6 +57,7 @@ xdg-user = "0.2.1"
 xkbcommon = "0.7"
 zbus = "3.15.0"
 profiling = { version = "1.0" }
+rustix = { version = "0.38.32", features = ["process"] }
 
 [dependencies.id_tree]
 branch = "feature/copy_clone"

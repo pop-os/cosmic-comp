@@ -9,7 +9,7 @@ use smithay::{
 };
 
 use anyhow::{Context, Result};
-use std::{env, ffi::OsString, process, sync::Arc};
+use std::{env, ffi::OsString, os::unix::process::CommandExt, process, sync::Arc};
 use tracing::{error, info, warn};
 
 use crate::{
@@ -44,6 +44,8 @@ fn main() -> Result<()> {
     logger::init_logger()?;
     info!("Cosmic starting up!");
 
+    utils::rlimit::increase_nofile_limit();
+
     // init event loop
     let mut event_loop = EventLoop::try_new().with_context(|| "Failed to initialize event loop")?;
     // init wayland
@@ -71,6 +73,8 @@ fn main() -> Result<()> {
         let mut command = process::Command::new(&exec);
         command.args(args);
         command.envs(session::get_env(&state)?);
+        unsafe { command.pre_exec(|| Ok(utils::rlimit::restore_nofile_limit())) };
+
         info!("Running {:?}", exec);
         Some(command.spawn()?)
     } else {
