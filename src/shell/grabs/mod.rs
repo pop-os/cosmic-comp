@@ -7,10 +7,13 @@ use smithay::{
             GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab, PointerInnerHandle,
             RelativeMotionEvent,
         },
-        touch::GrabStartData as TouchGrabStartData,
+        touch::{
+            DownEvent, GrabStartData as TouchGrabStartData, MotionEvent as TouchMotionEvent,
+            TouchGrab, TouchInnerHandle, UpEvent,
+        },
     },
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
-    utils::{Logical, Point},
+    utils::{Logical, Point, Serial},
     xwayland::xwm,
 };
 
@@ -46,6 +49,13 @@ impl GrabStartData {
         match self {
             Self::Touch(touch) => touch.location,
             Self::Pointer(pointer) => pointer.location,
+        }
+    }
+
+    pub fn set_location(&mut self, location: Point<f64, Logical>) {
+        match self {
+            Self::Touch(touch) => touch.location = location,
+            Self::Pointer(pointer) => pointer.location = location,
         }
     }
 }
@@ -152,8 +162,8 @@ impl PointerGrab<State> for ResizeGrab {
         event: &MotionEvent,
     ) {
         match self {
-            ResizeGrab::Floating(grab) => grab.motion(data, handle, focus, event),
-            ResizeGrab::Tiling(grab) => grab.motion(data, handle, focus, event),
+            ResizeGrab::Floating(grab) => PointerGrab::motion(grab, data, handle, focus, event),
+            ResizeGrab::Tiling(grab) => PointerGrab::motion(grab, data, handle, focus, event),
         }
     }
 
@@ -196,8 +206,8 @@ impl PointerGrab<State> for ResizeGrab {
 
     fn frame(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>) {
         match self {
-            ResizeGrab::Floating(grab) => grab.frame(data, handle),
-            ResizeGrab::Tiling(grab) => grab.frame(data, handle),
+            ResizeGrab::Floating(grab) => PointerGrab::frame(grab, data, handle),
+            ResizeGrab::Tiling(grab) => PointerGrab::frame(grab, data, handle),
         }
     }
 
@@ -299,8 +309,72 @@ impl PointerGrab<State> for ResizeGrab {
 
     fn start_data(&self) -> &PointerGrabStartData<State> {
         match self {
-            ResizeGrab::Floating(grab) => grab.start_data(),
-            ResizeGrab::Tiling(grab) => grab.start_data(),
+            ResizeGrab::Floating(grab) => PointerGrab::start_data(grab),
+            ResizeGrab::Tiling(grab) => PointerGrab::start_data(grab),
+        }
+    }
+}
+
+impl TouchGrab<State> for ResizeGrab {
+    fn down(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        event: &DownEvent,
+        seq: Serial,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => TouchGrab::down(grab, data, handle, focus, event, seq),
+            ResizeGrab::Tiling(grab) => TouchGrab::down(grab, data, handle, focus, event, seq),
+        }
+    }
+
+    fn up(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &UpEvent,
+        seq: Serial,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => TouchGrab::up(grab, data, handle, event, seq),
+            ResizeGrab::Tiling(grab) => TouchGrab::up(grab, data, handle, event, seq),
+        }
+    }
+
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        event: &TouchMotionEvent,
+        seq: Serial,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => TouchGrab::motion(grab, data, handle, focus, event, seq),
+            ResizeGrab::Tiling(grab) => TouchGrab::motion(grab, data, handle, focus, event, seq),
+        }
+    }
+
+    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
+        match self {
+            ResizeGrab::Floating(grab) => TouchGrab::frame(grab, data, handle, seq),
+            ResizeGrab::Tiling(grab) => TouchGrab::frame(grab, data, handle, seq),
+        }
+    }
+
+    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
+        match self {
+            ResizeGrab::Floating(grab) => TouchGrab::cancel(grab, data, handle, seq),
+            ResizeGrab::Tiling(grab) => TouchGrab::cancel(grab, data, handle, seq),
+        }
+    }
+
+    fn start_data(&self) -> &TouchGrabStartData<State> {
+        match self {
+            ResizeGrab::Floating(grab) => TouchGrab::start_data(grab),
+            ResizeGrab::Tiling(grab) => TouchGrab::start_data(grab),
         }
     }
 }

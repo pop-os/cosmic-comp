@@ -6,7 +6,7 @@ use crate::{
     shell::{
         element::CosmicMapped,
         focus::target::PointerFocusTarget,
-        grabs::{ReleaseMode, ResizeEdge},
+        grabs::{GrabStartData, ReleaseMode, ResizeEdge},
     },
     utils::prelude::*,
 };
@@ -20,6 +20,10 @@ use smithay::{
             GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
             GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab, PointerInnerHandle,
             RelativeMotionEvent,
+        },
+        touch::{
+            DownEvent, GrabStartData as TouchGrabStartData, MotionEvent as TouchMotionEvent,
+            TouchGrab, TouchInnerHandle, UpEvent,
         },
         Seat,
     },
@@ -47,7 +51,7 @@ pub enum ResizeState {
 }
 
 pub struct ResizeSurfaceGrab {
-    start_data: PointerGrabStartData<State>,
+    start_data: GrabStartData,
     seat: Seat<State>,
     window: CosmicMapped,
     edges: ResizeEdge,
@@ -56,17 +60,9 @@ pub struct ResizeSurfaceGrab {
     release: ReleaseMode,
 }
 
-impl PointerGrab<State> for ResizeSurfaceGrab {
-    fn motion(
-        &mut self,
-        data: &mut State,
-        handle: &mut PointerInnerHandle<'_, State>,
-        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
-        event: &MotionEvent,
-    ) {
-        // While the grab is active, no client has pointer focus
-        handle.motion(data, None, event);
-
+impl ResizeSurfaceGrab {
+    // Returns `true` if grab should be unset
+    fn update_location(&mut self, location: Point<f64, Logical>) -> bool {
         // It is impossible to get `min_size` and `max_size` of dead toplevel, so we return early.
         if !self.window.alive() {
             self.seat
@@ -75,11 +71,10 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
                 .unwrap()
                 .0
                 .store(false, Ordering::SeqCst);
-            handle.unset_grab(data, event.serial, event.time, true);
-            return;
+            return true;
         }
 
-        let (mut dx, mut dy) = (event.location - self.start_data.location).into();
+        let (mut dx, mut dy) = (location - self.start_data.location()).into();
 
         let mut new_window_width = self.initial_window_size.w;
         let mut new_window_height = self.initial_window_size.h;
@@ -125,6 +120,25 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
             self.last_window_size.as_global(),
         ));
         self.window.configure();
+
+        false
+    }
+}
+
+impl PointerGrab<State> for ResizeSurfaceGrab {
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        event: &MotionEvent,
+    ) {
+        // While the grab is active, no client has pointer focus
+        handle.motion(data, None, event);
+
+        if self.update_location(event.location) {
+            handle.unset_grab(data, event.serial, event.time, true);
+        }
     }
 
     fn relative_motion(
@@ -245,7 +259,69 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
     }
 
     fn start_data(&self) -> &PointerGrabStartData<State> {
-        &self.start_data
+        match &self.start_data {
+            GrabStartData::Pointer(start_data) => start_data,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl TouchGrab<State> for ResizeSurfaceGrab {
+    fn down(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        event: &DownEvent,
+        seq: Serial,
+    ) {
+        handle.down(data, None, event, seq)
+    }
+
+    fn up(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &UpEvent,
+        seq: Serial,
+    ) {
+        if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
+            handle.unset_grab(data);
+        }
+
+        handle.up(data, event, seq);
+    }
+
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        event: &TouchMotionEvent,
+        seq: Serial,
+    ) {
+        if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
+            if self.update_location(event.location) {
+                handle.unset_grab(data);
+            }
+        }
+
+        handle.motion(data, None, event, seq);
+    }
+
+    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
+        handle.frame(data, seq)
+    }
+
+    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, _seq: Serial) {
+        handle.unset_grab(data);
+    }
+
+    fn start_data(&self) -> &TouchGrabStartData<State> {
+        match &self.start_data {
+            GrabStartData::Touch(start_data) => start_data,
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -259,7 +335,7 @@ impl ResizeGrabMarker {
 
 impl ResizeSurfaceGrab {
     pub fn new(
-        start_data: PointerGrabStartData<State>,
+        start_data: GrabStartData,
         mapped: CosmicMapped,
         edges: ResizeEdge,
         initial_window_location: Point<i32, Local>,
