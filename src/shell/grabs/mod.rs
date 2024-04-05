@@ -1,9 +1,13 @@
 use smithay::{
-    input::pointer::{
-        AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
-        GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent,
-        GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData as PointerGrabStartData,
-        MotionEvent, PointerGrab, PointerInnerHandle, RelativeMotionEvent,
+    input::{
+        pointer::{
+            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
+            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
+            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
+            GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab, PointerInnerHandle,
+            RelativeMotionEvent,
+        },
+        touch::GrabStartData as TouchGrabStartData,
     },
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
     utils::{Logical, Point},
@@ -16,6 +20,35 @@ use super::{
     focus::target::PointerFocusTarget,
     layout::{floating::ResizeSurfaceGrab, tiling::ResizeForkGrab},
 };
+
+#[derive(Debug, Clone)]
+pub enum GrabStartData {
+    Touch(TouchGrabStartData<State>),
+    Pointer(PointerGrabStartData<State>),
+}
+
+impl GrabStartData {
+    pub fn focus(&self) -> Option<&(PointerFocusTarget, Point<i32, Logical>)> {
+        match self {
+            Self::Touch(touch) => touch.focus.as_ref(),
+            Self::Pointer(pointer) => pointer.focus.as_ref(),
+        }
+    }
+
+    pub fn set_focus(&mut self, focus: Option<(PointerFocusTarget, Point<i32, Logical>)>) {
+        match self {
+            Self::Touch(touch) => touch.focus = focus,
+            Self::Pointer(pointer) => pointer.focus = focus,
+        }
+    }
+
+    pub fn location(&self) -> Point<f64, Logical> {
+        match self {
+            Self::Touch(touch) => touch.location,
+            Self::Pointer(pointer) => pointer.location,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ReleaseMode {

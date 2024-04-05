@@ -3234,7 +3234,10 @@ impl TilingLayout {
                 }
                 _ => None,
             }
-        } else if matches!(overview, OverviewMode::Started(Trigger::Pointer(_), _)) {
+        } else if matches!(
+            overview,
+            OverviewMode::Started(Trigger::Pointer(_) | Trigger::Touch(_), _)
+        ) {
             let non_exclusive_zone = layer_map_for_output(&self.output)
                 .non_exclusive_zone()
                 .as_local();

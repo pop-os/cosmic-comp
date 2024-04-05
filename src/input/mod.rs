@@ -1378,6 +1378,16 @@ impl State {
                 }
             }
             InputEvent::TouchUp { event, .. } => {
+                if let OverviewMode::Started(Trigger::Touch(slot), _) =
+                    self.common.shell.overview_mode().0
+                {
+                    if slot == event.slot() {
+                        self.common
+                            .shell
+                            .set_overview_mode(None, self.common.event_loop_handle.clone());
+                    }
+                }
+
                 if let Some(seat) = self.common.seat_with_device(&event.device()) {
                     let serial = SERIAL_COUNTER.next_serial();
                     let touch = seat.get_touch().unwrap();
