@@ -2912,7 +2912,7 @@ impl Shell {
                     return;
                 };
                 ResizeForkGrab::new(
-                    start_data,
+                    GrabStartData::Pointer(start_data),
                     new_loc.to_f64(),
                     node,
                     left_up_idx,
@@ -3141,7 +3141,7 @@ impl Shell {
                         return;
                     };
                     ResizeForkGrab::new(
-                        start_data,
+                        GrabStartData::Pointer(start_data),
                         seat.get_pointer().unwrap().current_location().as_global(),
                         node,
                         left_up_idx,

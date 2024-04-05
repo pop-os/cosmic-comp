@@ -2,7 +2,11 @@
 
 use crate::{
     backend::render::cursor::{CursorShape, CursorState},
-    shell::{focus::target::PointerFocusTarget, grabs::ReleaseMode, layout::Orientation},
+    shell::{
+        focus::target::PointerFocusTarget,
+        grabs::{GrabStartData, ReleaseMode},
+        layout::Orientation,
+    },
     utils::prelude::*,
 };
 use id_tree::{NodeId, Tree};
@@ -16,10 +20,14 @@ use smithay::{
             GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab, PointerInnerHandle,
             PointerTarget, RelativeMotionEvent,
         },
+        touch::{
+            DownEvent, GrabStartData as TouchGrabStartData, MotionEvent as TouchMotionEvent,
+            OrientationEvent, ShapeEvent, TouchGrab, TouchInnerHandle, TouchTarget, UpEvent,
+        },
         Seat,
     },
     output::WeakOutput,
-    utils::{IsAlive, Logical, Point},
+    utils::{IsAlive, Logical, Point, Serial},
 };
 
 use super::super::{Data, TilingLayout};
@@ -75,11 +83,11 @@ impl PointerTarget<State> for ResizeForkTarget {
                 pointer.set_grab(
                     state,
                     ResizeForkGrab::new(
-                        PointerGrabStartData {
+                        GrabStartData::Pointer(PointerGrabStartData {
                             focus: None,
                             button,
                             location,
-                        },
+                        }),
                         location.as_global(),
                         node,
                         left_up_idx,
@@ -114,8 +122,62 @@ impl PointerTarget<State> for ResizeForkTarget {
     fn gesture_hold_end(&self, _: &Seat<State>, _: &mut State, _: &GestureHoldEndEvent) {}
 }
 
+impl TouchTarget<State> for ResizeForkTarget {
+    fn down(&self, seat: &Seat<State>, data: &mut State, event: &DownEvent, _seq: Serial) {
+        let seat = seat.clone();
+        let node = self.node.clone();
+        let output = self.output.clone();
+        let left_up_idx = self.left_up_idx;
+        let orientation = self.orientation;
+        let serial = event.serial;
+        let slot = event.slot;
+        let location = event.location;
+        data.common.event_loop_handle.insert_idle(move |state| {
+            let touch = seat.get_touch().unwrap();
+            touch.set_grab(
+                state,
+                ResizeForkGrab::new(
+                    GrabStartData::Touch(TouchGrabStartData {
+                        focus: None,
+                        slot,
+                        location,
+                    }),
+                    location.as_global(),
+                    node,
+                    left_up_idx,
+                    orientation,
+                    output,
+                    ReleaseMode::NoMouseButtons,
+                ),
+                serial,
+            )
+        });
+    }
+
+    fn up(&self, _seat: &Seat<State>, _data: &mut State, _event: &UpEvent, _seq: Serial) {}
+    fn motion(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _event: &TouchMotionEvent,
+        _seq: Serial,
+    ) {
+    }
+    fn frame(&self, _seat: &Seat<State>, _data: &mut State, _seq: Serial) {}
+    fn cancel(&self, _seat: &Seat<State>, _data: &mut State, _seq: Serial) {}
+    fn shape(&self, _seat: &Seat<State>, _data: &mut State, _event: &ShapeEvent, _seq: Serial) {}
+    fn orientation(
+        &self,
+        _seat: &Seat<State>,
+        _data: &mut State,
+        _event: &OrientationEvent,
+        _seq: Serial,
+    ) {
+    }
+}
+
 pub struct ResizeForkGrab {
-    start_data: PointerGrabStartData<State>,
+    start_data: GrabStartData,
     last_loc: Point<f64, Global>,
     old_tree: Option<Tree<Data>>,
     accumulated_delta: f64,
@@ -128,7 +190,7 @@ pub struct ResizeForkGrab {
 
 impl ResizeForkGrab {
     pub fn new(
-        start_data: PointerGrabStartData<State>,
+        start_data: GrabStartData,
         pointer_loc: Point<f64, Global>,
         node: NodeId,
         idx: usize,
@@ -150,18 +212,10 @@ impl ResizeForkGrab {
     }
 }
 
-impl PointerGrab<State> for ResizeForkGrab {
-    fn motion(
-        &mut self,
-        data: &mut State,
-        handle: &mut PointerInnerHandle<'_, State>,
-        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
-        event: &MotionEvent,
-    ) {
-        // While the grab is active, no client has pointer focus
-        handle.motion(data, None, event);
-
-        let delta = event.location - self.last_loc.as_logical();
+impl ResizeForkGrab {
+    // Returns `true` if grab should be unset
+    fn update_location(&mut self, data: &mut State, location: Point<f64, Logical>) -> bool {
+        let delta = location - self.last_loc.as_logical();
 
         if let Some(output) = self.output.upgrade() {
             let tiling_layer = &mut data.common.shell.active_space_mut(&output).tiling_layer;
@@ -220,7 +274,7 @@ impl PointerGrab<State> for ResizeForkGrab {
                 let first_elem = iter.next();
                 let second_elem = iter.next();
                 if first_elem.is_none() || second_elem.is_none() {
-                    return handle.unset_grab(data, event.serial, event.time, true);
+                    return true;
                 };
 
                 match tree.get_mut(&self.node).unwrap().data_mut() {
@@ -233,7 +287,7 @@ impl PointerGrab<State> for ResizeForkGrab {
                                 Orientation::Horizontal => 480,
                             }
                         {
-                            return;
+                            return false;
                         };
 
                         let old_size = sizes[self.left_up_idx];
@@ -258,12 +312,30 @@ impl PointerGrab<State> for ResizeForkGrab {
                     _ => unreachable!(),
                 }
 
-                self.last_loc = event.location.as_global();
+                self.last_loc = location.as_global();
                 let blocker = TilingLayout::update_positions(&output, tree, gaps);
                 tiling_layer.pending_blockers.extend(blocker);
             } else {
-                handle.unset_grab(data, event.serial, event.time, true);
+                return true;
             }
+        }
+        false
+    }
+}
+
+impl PointerGrab<State> for ResizeForkGrab {
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        event: &MotionEvent,
+    ) {
+        // While the grab is active, no client has pointer focus
+        handle.motion(data, None, event);
+
+        if self.update_location(data, event.location) {
+            handle.unset_grab(data, event.serial, event.time, true);
         }
     }
 
@@ -385,6 +457,68 @@ impl PointerGrab<State> for ResizeForkGrab {
     }
 
     fn start_data(&self) -> &PointerGrabStartData<State> {
-        &self.start_data
+        match &self.start_data {
+            GrabStartData::Pointer(start_data) => start_data,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl TouchGrab<State> for ResizeForkGrab {
+    fn down(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        event: &DownEvent,
+        seq: Serial,
+    ) {
+        handle.down(data, None, event, seq)
+    }
+
+    fn up(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &UpEvent,
+        seq: Serial,
+    ) {
+        if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
+            handle.unset_grab(data);
+        }
+
+        handle.up(data, event, seq);
+    }
+
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        event: &TouchMotionEvent,
+        seq: Serial,
+    ) {
+        if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
+            if self.update_location(data, event.location) {
+                handle.unset_grab(data);
+            }
+        }
+
+        handle.motion(data, None, event, seq);
+    }
+
+    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
+        handle.frame(data, seq)
+    }
+
+    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, _seq: Serial) {
+        handle.unset_grab(data);
+    }
+
+    fn start_data(&self) -> &TouchGrabStartData<State> {
+        match &self.start_data {
+            GrabStartData::Touch(start_data) => start_data,
+            _ => unreachable!(),
+        }
     }
 }
