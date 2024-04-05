@@ -13,8 +13,7 @@ use std::{env, ffi::OsString, os::unix::process::CommandExt, process, sync::Arc}
 use tracing::{error, info, warn};
 
 use crate::{
-    state::BackendData, utils::prelude::SeatExt,
-    wayland::handlers::compositor::client_compositor_state,
+    shell::SeatExt, state::BackendData, wayland::handlers::compositor::client_compositor_state,
 };
 
 pub mod backend;
@@ -181,7 +180,9 @@ fn init_wayland_display(
         .insert_source(source, |client_stream, _, state| {
             let node = match &state.backend {
                 BackendData::Kms(kms_state) if kms_state.auto_assign => kms_state
-                    .target_node_for_output(&state.common.last_active_seat().active_output()),
+                    .target_node_for_output(
+                        &state.common.shell.seats.last_active().active_output(),
+                    ),
                 _ => None,
             };
 

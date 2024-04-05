@@ -72,7 +72,7 @@ use super::{
         floating::{ResizeState, TiledCorners},
         tiling::NodeDesc,
     },
-    Direction, ManagedLayer,
+    Direction, ManagedLayer, SeatExt,
 };
 
 space_elements! {

@@ -12,14 +12,15 @@ use std::{
 use crate::debug::fps_ui;
 use crate::{
     backend::render::element::DamageElement,
+    config::Config,
     shell::{
         focus::target::WindowGroup,
         grabs::{SeatMenuGrabState, SeatMoveGrabState},
         layout::tiling::ANIMATION_DURATION,
-        CosmicMapped, CosmicMappedRenderElement, OverviewMode, SessionLock, Trigger,
+        CosmicMapped, CosmicMappedRenderElement, OverviewMode, SeatExt, SessionLock, Trigger,
         WorkspaceDelta, WorkspaceRenderElement,
     },
-    state::{Common, Fps},
+    state::Fps,
     utils::prelude::*,
     wayland::{
         handlers::{
@@ -30,6 +31,7 @@ use crate::{
     },
 };
 
+use cosmic::Theme;
 use cosmic_comp_config::workspace::WorkspaceLayout;
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
@@ -56,7 +58,7 @@ use smithay::{
     },
     desktop::{layer_map_for_output, PopupManager},
     output::{Output, OutputNoMode},
-    utils::{IsAlive, Logical, Point, Rectangle, Scale, Transform},
+    utils::{IsAlive, Logical, Monotonic, Point, Rectangle, Scale, Time, Transform},
     wayland::{
         dmabuf::get_dmabuf,
         shell::wlr_layer::Layer,
@@ -387,7 +389,9 @@ pub enum CursorMode {
 #[profiling::function]
 pub fn cursor_elements<'frame, R>(
     renderer: &mut R,
-    state: &Common,
+    shell: &Shell,
+    theme: &Theme,
+    now: Time<Monotonic>,
     output: &Output,
     mode: CursorMode,
     exclude_dnd_icon: bool,
@@ -400,7 +404,7 @@ where
     let scale = output.current_scale().fractional_scale();
     let mut elements = Vec::new();
 
-    for seat in state.seats() {
+    for seat in shell.seats.iter() {
         let pointer = match seat.get_pointer() {
             Some(ptr) => ptr,
             None => continue,
@@ -414,7 +418,7 @@ where
                     seat,
                     location,
                     scale.into(),
-                    state.clock.now(),
+                    now,
                     mode != CursorMode::NotDefault,
                 )
                 .into_iter()
@@ -438,7 +442,7 @@ where
             }
         }
 
-        let theme = state.theme.cosmic();
+        let theme = theme.cosmic();
         if let Some(grab_elements) = seat
             .user_data()
             .get::<SeatMoveGrabState>()
@@ -469,7 +473,10 @@ where
 pub fn workspace_elements<R>(
     _gpu: Option<&DrmNode>,
     renderer: &mut R,
-    state: &mut Common,
+    shell: &Shell,
+    config: &Config,
+    theme: &Theme,
+    now: Time<Monotonic>,
     output: &Output,
     previous: Option<(WorkspaceHandle, usize, WorkspaceDelta)>,
     current: (WorkspaceHandle, usize),
@@ -486,7 +493,9 @@ where
 {
     let mut elements = cursor_elements(
         renderer,
-        state,
+        shell,
+        theme,
+        now,
         output,
         cursor_mode,
         exclude_workspace_overview,
@@ -500,7 +509,8 @@ where
         if let Some(fps) = _fps.as_mut() {
             let fps_overlay = fps_ui(
                 _gpu,
-                state,
+                shell,
+                theme,
                 renderer.glow_renderer_mut(),
                 *fps,
                 Rectangle::from_loc_and_size(
@@ -516,7 +526,7 @@ where
     }
 
     // If session locked, only show session lock surfaces
-    if let Some(session_lock) = &state.shell.session_lock {
+    if let Some(session_lock) = &shell.session_lock {
         elements.extend(
             session_lock_elements(renderer, output, session_lock)
                 .into_iter()
@@ -525,15 +535,13 @@ where
         return Ok(elements);
     }
 
-    let theme = state.theme.cosmic();
-
-    let overview = state.shell.overview_mode();
-    let (resize_mode, resize_indicator) = state.shell.resize_mode();
+    let theme = theme.cosmic();
+    let overview = shell.overview_mode();
+    let (resize_mode, resize_indicator) = shell.resize_mode();
     let resize_indicator = resize_indicator.map(|indicator| (resize_mode, indicator));
     let swap_tree = if let OverviewMode::Started(Trigger::KeyboardSwap(_, desc), _) = &overview.0 {
         if current.0 != desc.handle {
-            state
-                .shell
+            shell
                 .workspaces
                 .space_for_handle(&desc.handle)
                 .map(|w| w.tiling_layer.tree())
@@ -548,7 +556,7 @@ where
         overview.1.map(|indicator| (indicator, swap_tree)),
     );
 
-    let last_active_seat = state.last_active_seat().clone();
+    let last_active_seat = shell.seats.last_active();
     let move_active = last_active_seat
         .user_data()
         .get::<SeatMoveGrabState>()
@@ -559,12 +567,7 @@ where
     let output_size = output.geometry().size;
     let output_scale = output.current_scale().fractional_scale();
 
-    let set = state
-        .shell
-        .workspaces
-        .sets
-        .get(output)
-        .ok_or(OutputNoMode)?;
+    let set = shell.workspaces.sets.get(output).ok_or(OutputNoMode)?;
     let workspace = set
         .workspaces
         .iter()
@@ -593,7 +596,7 @@ where
         Vec::new()
     };
 
-    let active_hint = if state.config.cosmic_conf.active_hint {
+    let active_hint = if config.cosmic_conf.active_hint {
         theme.active_hint as u8
     } else {
         0
@@ -603,8 +606,7 @@ where
     // they need to be over sticky windows, because they could be popups of sticky windows,
     // and we can't differenciate that.
     elements.extend(
-        state
-            .shell
+        shell
             .override_redirect_windows
             .iter()
             .filter(|or| {
@@ -653,7 +655,7 @@ where
         };
 
         let current_focus = (!move_active && is_active_space)
-            .then_some(&last_active_seat)
+            .then_some(last_active_seat)
             .map(|seat| workspace.focus_stack.get(seat));
 
         let (w_elements, p_elements) = set.sticky_layer.render(
@@ -683,10 +685,9 @@ where
 
     let offset = match previous.as_ref() {
         Some((previous, previous_idx, start)) => {
-            let layout = state.config.cosmic_conf.workspaces.workspace_layout;
+            let layout = config.cosmic_conf.workspaces.workspace_layout;
 
-            let workspace = state
-                .shell
+            let workspace = shell
                 .workspaces
                 .space_for_handle(&previous)
                 .ok_or(OutputNoMode)?;
@@ -724,7 +725,7 @@ where
             let (w_elements, p_elements) = workspace
                 .render::<R>(
                     renderer,
-                    (!move_active && is_active_space).then_some(&last_active_seat),
+                    (!move_active && is_active_space).then_some(last_active_seat),
                     overview.clone(),
                     resize_indicator.clone(),
                     active_hint,
@@ -953,7 +954,10 @@ pub fn render_output<'d, R, Target, OffTarget>(
     target: Target,
     damage_tracker: &'d mut OutputDamageTracker,
     age: usize,
-    state: &mut Common,
+    shell: &Shell,
+    config: &Config,
+    theme: &Theme,
+    now: Time<Monotonic>,
     output: &Output,
     cursor_mode: CursorMode,
     fps: Option<&mut Fps>,
@@ -975,8 +979,8 @@ where
     WorkspaceRenderElement<R>: RenderElement<R>,
     Target: Clone,
 {
-    let (previous_workspace, workspace) = state.shell.workspaces.active(output);
-    let (previous_idx, idx) = state.shell.workspaces.active_num(output);
+    let (previous_workspace, workspace) = shell.workspaces.active(output);
+    let (previous_idx, idx) = shell.workspaces.active_num(output);
     let previous_workspace = previous_workspace
         .zip(previous_idx)
         .map(|((w, start), idx)| (w.handle, idx, start));
@@ -989,7 +993,10 @@ where
         damage_tracker,
         age,
         None,
-        state,
+        shell,
+        config,
+        theme,
+        now,
         output,
         previous_workspace,
         workspace,
@@ -1081,7 +1088,7 @@ where
                         })
                     },
                 )? {
-                    frame.success(output.current_transform(), damage, state.clock.now());
+                    frame.success(output.current_transform(), damage, now);
                 }
             }
 
@@ -1099,7 +1106,10 @@ pub fn render_workspace<'d, R, Target, OffTarget>(
     damage_tracker: &'d mut OutputDamageTracker,
     age: usize,
     additional_damage: Option<Vec<Rectangle<i32, Logical>>>,
-    state: &mut Common,
+    shell: &Shell,
+    config: &Config,
+    theme: &Theme,
+    now: Time<Monotonic>,
     output: &Output,
     previous: Option<(WorkspaceHandle, usize, WorkspaceDelta)>,
     current: (WorkspaceHandle, usize),
@@ -1136,7 +1146,10 @@ where
     let mut elements: Vec<CosmicElement<R>> = workspace_elements(
         gpu,
         renderer,
-        state,
+        shell,
+        config,
+        theme,
+        now,
         output,
         previous,
         current,

@@ -846,7 +846,7 @@ impl Drop for MoveGrab {
                         );
                     }
                 }
-                Common::set_focus(
+                Shell::set_focus(
                     state,
                     Some(&KeyboardFocusTarget::from(mapped)),
                     &seat,

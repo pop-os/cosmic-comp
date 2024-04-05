@@ -286,7 +286,10 @@ pub fn render_workspace_to_buffer(
                 dt,
                 age,
                 additional_damage,
-                common,
+                &common.shell,
+                &common.config,
+                &common.theme,
+                common.clock.now(),
                 &output,
                 None,
                 handle,
@@ -311,7 +314,10 @@ pub fn render_workspace_to_buffer(
                 dt,
                 age,
                 additional_damage,
-                common,
+                &common.shell,
+                &common.config,
+                &common.theme,
+                common.clock.now(),
                 &output,
                 None,
                 handle,
@@ -529,7 +535,7 @@ pub fn render_window_to_buffer(
                 .map(Into::<WindowCaptureElement<R>>::into),
         );
 
-        let seat = common.last_active_seat().clone();
+        let seat = common.shell.seats.last_active().clone();
         if let Some(location) = {
             if let Some(mapped) = common.shell.element_for_surface(window) {
                 mapped.cursor_position(&seat).and_then(|mut p| {

@@ -416,7 +416,7 @@ impl Program for CosmicWindowInternal {
                         if let Some(mapped) =
                             state.common.shell.element_for_surface(&surface).cloned()
                         {
-                            let seat = state.common.last_active_seat().clone();
+                            let seat = state.common.shell.seats.last_active().clone();
                             state.common.shell.maximize_toggle(&mapped, &seat)
                         }
                     });

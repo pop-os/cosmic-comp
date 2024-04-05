@@ -45,10 +45,7 @@ impl FractionalScaleHandler for State {
                         .cloned()
                 })
         })
-        .unwrap_or_else(|| {
-            let seat = self.common.last_active_seat();
-            seat.active_output()
-        });
+        .unwrap_or_else(|| self.common.shell.seats.last_active().active_output());
 
         with_states(&surface, |states| {
             with_fractional_scale(states, |fractional_scale| {

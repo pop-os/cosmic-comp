@@ -53,7 +53,7 @@ impl ToplevelManagementHandler for State {
                         .any(|w| &w == window)
                 });
             if let Some((idx, workspace)) = maybe {
-                let seat = seat.unwrap_or(self.common.last_active_seat().clone());
+                let seat = seat.unwrap_or(self.common.shell.seats.last_active().clone());
                 let mapped = workspace
                     .mapped()
                     .find(|m| m.windows().any(|(w, _)| &w == window))
@@ -66,7 +66,7 @@ impl ToplevelManagementHandler for State {
                     WorkspaceDelta::new_shortcut(),
                 ); // TODO: Move pointer?
                 mapped.focus_window(window);
-                Common::set_focus(self, Some(&mapped.clone().into()), &seat, None);
+                Shell::set_focus(self, Some(&mapped.clone().into()), &seat, None);
                 return;
             }
         }
@@ -104,7 +104,17 @@ impl ToplevelManagementHandler for State {
                 .unwrap()
                 .clone();
             let from_handle = from_workspace.handle;
-            let _ = Shell::move_window(self, None, &mapped, &from_handle, &to_handle, false, None);
+            let seat = self.common.shell.seats.last_active().clone();
+            if let Some((target, _)) = self.common.shell.move_window(
+                Some(&seat),
+                &mapped,
+                &from_handle,
+                &to_handle,
+                false,
+                None,
+            ) {
+                Shell::set_focus(self, Some(&target), &seat, None);
+            }
             return;
         }
     }
@@ -115,7 +125,7 @@ impl ToplevelManagementHandler for State {
         window: &<Self as ToplevelInfoHandler>::Window,
         output: Option<Output>,
     ) {
-        let seat = self.common.last_active_seat().clone();
+        let seat = self.common.shell.seats.last_active().clone();
         if let Some(mapped) = self.common.shell.element_for_surface(window).cloned() {
             if let Some(output) = output {
                 let from = self
@@ -177,7 +187,7 @@ impl ToplevelManagementHandler for State {
 
     fn maximize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
         if let Some(mapped) = self.common.shell.element_for_surface(window).cloned() {
-            let seat = self.common.last_active_seat().clone();
+            let seat = self.common.shell.seats.last_active().clone();
             self.common.shell.maximize_request(&mapped, &seat);
         }
     }
@@ -198,7 +208,7 @@ impl ToplevelManagementHandler for State {
 
     fn unminimize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
         if let Some(mut mapped) = self.common.shell.element_for_surface(window).cloned() {
-            let seat = self.common.last_active_seat().clone();
+            let seat = self.common.shell.seats.last_active().clone();
             self.common.shell.unminimize_request(&mapped, &seat);
             if mapped.is_stack() {
                 mapped.stack_ref_mut().unwrap().set_active(window);

@@ -1,4 +1,5 @@
 use calloop::LoopHandle;
+use cosmic::Theme;
 use indexmap::IndexMap;
 use std::{
     collections::HashMap,
@@ -72,8 +73,10 @@ pub mod element;
 pub mod focus;
 pub mod grabs;
 pub mod layout;
+mod seats;
 mod workspace;
 pub use self::element::{CosmicMapped, CosmicMappedRenderElement, CosmicSurface};
+pub use self::seats::*;
 pub use self::workspace::*;
 use self::{
     element::{
@@ -199,6 +202,7 @@ pub struct Shell {
     pub pending_activations: HashMap<ActivationKey, ActivationContext>,
     pub override_redirect_windows: Vec<X11Surface>,
     pub session_lock: Option<SessionLock>,
+    pub seats: Seats,
 
     // wayland_state
     pub layer_shell_state: WlrLayerShellState,
@@ -650,10 +654,10 @@ impl Workspaces {
         }
     }
 
-    pub fn remove_output(
+    pub fn remove_output<'a>(
         &mut self,
         output: &Output,
-        seats: impl Iterator<Item = Seat<State>>,
+        seats: impl Iterator<Item = &'a Seat<State>>,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
         toplevel_info_state: &mut ToplevelInfoState<State, CosmicSurface>,
         xdg_activation_state: &XdgActivationState,
@@ -1024,21 +1028,22 @@ impl Workspaces {
         }
     }
 
-    pub fn update_autotile_behavior(
+    fn update_autotile_behavior<'a>(
         &mut self,
         behavior: TileBehavior,
         guard: &mut WorkspaceUpdateGuard<'_, State>,
-        seats: Vec<Seat<State>>,
+        seats: impl Iterator<Item = &'a Seat<State>>,
     ) {
         self.autotile_behavior = behavior;
         self.apply_tile_change(guard, seats);
     }
 
-    fn apply_tile_change(
+    fn apply_tile_change<'a>(
         &mut self,
         guard: &mut WorkspaceUpdateGuard<'_, State>,
-        seats: Vec<Seat<State>>,
+        seats: impl Iterator<Item = &'a Seat<State>>,
     ) {
+        let seats = seats.cloned().collect::<Vec<_>>();
         for (_, set) in &mut self.sets {
             set.tiling_enabled = self.autotile;
 
@@ -1056,11 +1061,11 @@ impl Workspaces {
         }
     }
 
-    pub fn update_autotile(
+    fn update_autotile<'a>(
         &mut self,
         autotile: bool,
         guard: &mut WorkspaceUpdateGuard<'_, State>,
-        seats: Vec<Seat<State>>,
+        seats: impl Iterator<Item = &'a Seat<State>>,
     ) {
         self.autotile = autotile;
         self.apply_tile_change(guard, seats);
@@ -1105,6 +1110,7 @@ impl Shell {
         Shell {
             popups: PopupManager::default(),
             workspaces: Workspaces::new(config, theme.clone()),
+            seats: Seats::new(),
 
             pending_windows: Vec::new(),
             pending_layers: Vec::new(),
@@ -1139,10 +1145,10 @@ impl Shell {
         self.refresh(); // fixes indicies of any moved workspaces
     }
 
-    pub fn remove_output(&mut self, output: &Output, seats: impl Iterator<Item = Seat<State>>) {
+    pub fn remove_output(&mut self, output: &Output) {
         self.workspaces.remove_output(
             output,
-            seats,
+            self.seats.iter(),
             &mut self.workspace_state.update(),
             &mut self.toplevel_info_state,
             &self.xdg_activation_state,
@@ -1601,11 +1607,10 @@ impl Shell {
         }
     }
 
-    pub fn overview_mode(&mut self) -> (OverviewMode, Option<SwapIndicator>) {
+    pub fn overview_mode(&self) -> (OverviewMode, Option<SwapIndicator>) {
         if let OverviewMode::Ended(_, timestamp) = self.overview_mode {
             if Instant::now().duration_since(timestamp) > ANIMATION_DURATION {
-                self.overview_mode = OverviewMode::None;
-                self.swap_indicator = None;
+                return (OverviewMode::None, None);
             }
         }
 
@@ -1641,11 +1646,10 @@ impl Shell {
         }
     }
 
-    pub fn resize_mode(&mut self) -> (ResizeMode, Option<ResizeIndicator>) {
+    pub fn resize_mode(&self) -> (ResizeMode, Option<ResizeIndicator>) {
         if let ResizeMode::Ended(timestamp, _) = self.resize_mode {
             if Instant::now().duration_since(timestamp) > ANIMATION_DURATION {
-                self.resize_mode = ResizeMode::None;
-                self.resize_indicator = None;
+                return (ResizeMode::None, None);
             }
         }
 
@@ -1673,6 +1677,19 @@ impl Shell {
 
     #[profiling::function]
     pub fn refresh(&mut self) {
+        if let OverviewMode::Ended(_, timestamp) = self.overview_mode {
+            if Instant::now().duration_since(timestamp) > ANIMATION_DURATION {
+                self.overview_mode = OverviewMode::None;
+                self.swap_indicator = None;
+            }
+        }
+        if let ResizeMode::Ended(timestamp, _) = self.resize_mode {
+            if Instant::now().duration_since(timestamp) > ANIMATION_DURATION {
+                self.resize_mode = ResizeMode::None;
+                self.resize_indicator = None;
+            }
+        }
+
         self.popups.cleanup();
 
         self.xdg_activation_state.retain_tokens(|_, data| {
@@ -1764,23 +1781,24 @@ impl Shell {
         };
     }
 
-    pub fn map_window(state: &mut State, window: &CosmicSurface) {
-        let pos = state
-            .common
-            .shell
+    #[must_use]
+    pub fn map_window(
+        &mut self,
+        window: &CosmicSurface,
+        evlh: &LoopHandle<'static, State>,
+        theme: &Theme,
+    ) -> Option<KeyboardFocusTarget> {
+        let pos = self
             .pending_windows
             .iter()
             .position(|(w, _, _)| w == window)
             .unwrap();
-        let (window, seat, output) = state.common.shell.pending_windows.remove(pos);
+        let (window, seat, output) = self.pending_windows.remove(pos);
 
         let parent_is_sticky = if let Some(toplevel) = window.0.toplevel() {
             if let Some(parent) = toplevel.parent() {
-                if let Some(elem) = state.common.shell.element_for_surface(&parent) {
-                    state
-                        .common
-                        .shell
-                        .workspaces
+                if let Some(elem) = self.element_for_surface(&parent) {
+                    self.workspaces
                         .sets
                         .values()
                         .any(|set| set.sticky_layer.mapped().any(|m| m == elem))
@@ -1794,11 +1812,7 @@ impl Shell {
             false
         };
 
-        let pending_activation = state
-            .common
-            .shell
-            .pending_activations
-            .remove(&(&window).into());
+        let pending_activation = self.pending_activations.remove(&(&window).into());
         let workspace_handle = match pending_activation {
             Some(ActivationContext::Workspace(handle)) => Some(handle),
             _ => None,
@@ -1809,22 +1823,16 @@ impl Shell {
 
         // this is beyond stupid, just to make the borrow checker happy
         let workspace = if let Some(handle) = workspace_handle.filter(|handle| {
-            state
-                .common
-                .shell
-                .workspaces
+            self.workspaces
                 .spaces()
                 .any(|space| &space.handle == handle)
         }) {
-            state
-                .common
-                .shell
-                .workspaces
+            self.workspaces
                 .spaces_mut()
                 .find(|space| space.handle == handle)
                 .unwrap()
         } else {
-            state.common.shell.workspaces.active_mut(&output)
+            self.workspaces.active_mut(&output)
         };
         if output != workspace.output {
             output = workspace.output.clone();
@@ -1832,57 +1840,34 @@ impl Shell {
 
         if let Some((mapped, layer, previous_workspace)) = workspace.remove_fullscreen() {
             let old_handle = workspace.handle.clone();
-            let new_workspace_handle = state
-                .common
-                .shell
+            let new_workspace_handle = self
                 .workspaces
                 .space_for_handle(&previous_workspace)
                 .is_some()
                 .then_some(previous_workspace)
                 .unwrap_or(old_handle);
 
-            state.common.shell.remap_unfullscreened_window(
-                mapped,
-                &old_handle,
-                &new_workspace_handle,
-                layer,
-            );
+            self.remap_unfullscreened_window(mapped, &old_handle, &new_workspace_handle, layer);
         };
 
-        let active_handle = state.common.shell.workspaces.active(&output).1.handle;
+        let active_handle = self.active_space(&output).handle;
         let workspace = if let Some(handle) = workspace_handle.filter(|handle| {
-            state
-                .common
-                .shell
-                .workspaces
+            self.workspaces
                 .spaces()
                 .any(|space| &space.handle == handle)
         }) {
-            state
-                .common
-                .shell
-                .workspaces
+            self.workspaces
                 .spaces_mut()
                 .find(|space| space.handle == handle)
                 .unwrap()
         } else {
-            state.common.shell.workspaces.active_mut(&output)
+            self.workspaces.active_mut(&output)
         };
 
-        state
-            .common
-            .shell
-            .toplevel_info_state
-            .new_toplevel(&window, &state.common.shell.workspace_state);
-        state
-            .common
-            .shell
-            .toplevel_info_state
+        self.toplevel_info_state.new_toplevel(&window, &self.workspace_state);
+        self.toplevel_info_state
             .toplevel_enter_output(&window, &output);
-        state
-            .common
-            .shell
-            .toplevel_info_state
+        self.toplevel_info_state
             .toplevel_enter_workspace(&window, &workspace.handle);
 
         let workspace_output = workspace.output.clone();
@@ -1899,16 +1884,16 @@ impl Shell {
             {
                 focused.stack_ref().unwrap().add_window(window, None);
                 if was_activated {
-                    state.common.shell.set_urgent(&workspace_handle);
+                    self.set_urgent(&workspace_handle);
                 }
-                return;
+                return None;
             }
         }
 
         let mapped = CosmicMapped::from(CosmicWindow::new(
             window.clone(),
-            state.common.event_loop_handle.clone(),
-            state.common.theme.clone(),
+            evlh.clone(),
+            theme.clone(),
         ));
         #[cfg(feature = "debug")]
         {
@@ -1935,9 +1920,7 @@ impl Shell {
         }
 
         if !parent_is_sticky && should_be_fullscreen {
-            let from = state
-                .common
-                .shell
+            let from = self
                 .toplevel_management_state
                 .minimize_rectangle(&output, &mapped.active_window());
 
@@ -1945,37 +1928,34 @@ impl Shell {
         }
 
         if parent_is_sticky {
-            let seats = state.common.seats().cloned().collect::<Vec<_>>();
-            state
-                .common
-                .shell
-                .toggle_sticky(seats.iter(), &seat, &mapped);
+            self.toggle_sticky(&seat, &mapped);
         }
 
-        if (workspace_output == seat.active_output() && active_handle == workspace_handle)
+        let new_target = if (workspace_output == seat.active_output()
+            && active_handle == workspace_handle)
             || parent_is_sticky
         {
             // TODO: enforce focus stealing prevention by also checking the same rules as for the else case.
-            Shell::set_focus(
-                state,
-                Some(&KeyboardFocusTarget::from(mapped.clone())),
-                &seat,
-                None,
-            );
-        } else if workspace_empty || was_activated || should_be_fullscreen {
-            Shell::append_focus_stack(state, &mapped, &seat);
-            state.common.shell.set_urgent(&workspace_handle);
+            Some(KeyboardFocusTarget::from(mapped.clone()))
+        } else {
+            if workspace_empty || was_activated || should_be_fullscreen {
+                self.append_focus_stack(&mapped, &seat);
+                self.set_urgent(&workspace_handle);
+            }
+            None
+        };
+
+        let active_space = self.active_space(&output);
+        for mapped in active_space.mapped() {
+            self.update_reactive_popups(mapped);
         }
 
-        let active_space = state.common.shell.active_space(&output);
-        for mapped in active_space.mapped() {
-            state.common.shell.update_reactive_popups(mapped);
-        }
+        new_target
     }
 
-    pub fn map_override_redirect(state: &mut State, window: X11Surface) {
+    pub fn map_override_redirect(&mut self, window: X11Surface) {
         let geo = window.geometry();
-        for (output, overlap) in state.common.shell.outputs().cloned().filter_map(|o| {
+        for (output, overlap) in self.outputs().cloned().filter_map(|o| {
             o.geometry()
                 .as_logical()
                 .intersection(geo)
@@ -1984,18 +1964,17 @@ impl Shell {
             window.output_enter(&output, overlap);
         }
 
-        state.common.shell.override_redirect_windows.push(window);
+        self.override_redirect_windows.push(window);
     }
 
-    pub fn map_layer(state: &mut State, layer_surface: &LayerSurface) {
-        let pos = state
-            .common
-            .shell
+    #[must_use]
+    pub fn map_layer(&mut self, layer_surface: &LayerSurface) -> Option<KeyboardFocusTarget> {
+        let pos = self
             .pending_layers
             .iter()
             .position(|(l, _, _)| l == layer_surface)
             .unwrap();
-        let (layer_surface, output, seat) = state.common.shell.pending_layers.remove(pos);
+        let (layer_surface, output, _seat) = self.pending_layers.remove(pos);
 
         let wants_focus = {
             with_states(layer_surface.wl_surface(), |states| {
@@ -2009,13 +1988,11 @@ impl Shell {
             let mut map = layer_map_for_output(&output);
             map.map_layer(&layer_surface).unwrap();
         }
-        for workspace in state.common.shell.workspaces.spaces_mut() {
+        for workspace in self.workspaces.spaces_mut() {
             workspace.tiling_layer.recalculate();
         }
 
-        if wants_focus {
-            Shell::set_focus(state, Some(&layer_surface.into()), &seat, None)
-        }
+        wants_focus.then(|| layer_surface.into())
     }
 
     pub fn unmap_surface<S>(&mut self, surface: &S, seat: &Seat<State>)
@@ -2101,83 +2078,50 @@ impl Shell {
         })
     }
 
+    #[must_use]
     pub fn move_window(
-        state: &mut State,
+        &mut self,
         seat: Option<&Seat<State>>,
         mapped: &CosmicMapped,
         from: &WorkspaceHandle,
         to: &WorkspaceHandle,
         follow: bool,
         direction: Option<Direction>,
-    ) -> Option<Point<i32, Global>> {
-        let from_output = state
-            .common
-            .shell
-            .workspaces
-            .space_for_handle(from)?
-            .output
-            .clone();
-        let to_output = state
-            .common
-            .shell
-            .workspaces
-            .space_for_handle(to)?
-            .output
-            .clone();
+    ) -> Option<(KeyboardFocusTarget, Point<i32, Global>)> {
+        let from_output = self.workspaces.space_for_handle(from)?.output.clone();
+        let to_output = self.workspaces.space_for_handle(to)?.output.clone();
 
-        let from_workspace = state
-            .common
-            .shell
-            .workspaces
-            .space_for_handle_mut(from)
-            .unwrap(); // checked above
+        let from_workspace = self.workspaces.space_for_handle_mut(from).unwrap(); // checked above
         let window_state = from_workspace.unmap(mapped)?;
         let elements = from_workspace.mapped().cloned().collect::<Vec<_>>();
 
         for (toplevel, _) in mapped.windows() {
-            state
-                .common
-                .shell
-                .toplevel_info_state
+            self.toplevel_info_state
                 .toplevel_leave_workspace(&toplevel, from);
             if from_output != to_output {
-                state
-                    .common
-                    .shell
-                    .toplevel_info_state
+                self.toplevel_info_state
                     .toplevel_leave_output(&toplevel, &from_output);
             }
         }
         for mapped in elements.into_iter() {
-            state.common.shell.update_reactive_popups(&mapped);
+            self.update_reactive_popups(&mapped);
         }
         let new_pos = if follow {
             if let Some(seat) = seat {
                 seat.set_active_output(&to_output);
             }
-            state
-                .common
-                .shell
-                .workspaces
+            self.workspaces
                 .idx_for_handle(&to_output, to)
                 .and_then(|to_idx| {
-                    state
-                        .common
-                        .shell
-                        .activate(&to_output, to_idx, WorkspaceDelta::new_shortcut())
+                    self.activate(&to_output, to_idx, WorkspaceDelta::new_shortcut())
                         .unwrap()
                 })
         } else {
             None
         };
 
-        let any_seat = seat.unwrap_or(state.common.last_active_seat()).clone();
-        let mut to_workspace = state
-            .common
-            .shell
-            .workspaces
-            .space_for_handle_mut(to)
-            .unwrap(); // checked above
+        let any_seat = seat.unwrap_or(self.seats.last_active()).clone();
+        let mut to_workspace = self.workspaces.space_for_handle_mut(to).unwrap(); // checked above
         let focus_stack = seat.map(|seat| to_workspace.focus_stack.get(&seat));
         if window_state.layer == ManagedLayer::Floating || !to_workspace.tiling_enabled {
             to_workspace.floating_layer.map(mapped.clone(), None);
@@ -2194,34 +2138,25 @@ impl Shell {
                 if let Some((mapped, layer, previous_workspace)) = to_workspace.remove_fullscreen()
                 {
                     let old_handle = to.clone();
-                    let new_workspace_handle = state
-                        .common
-                        .shell
+                    let new_workspace_handle = self
                         .workspaces
                         .space_for_handle(&previous_workspace)
                         .is_some()
                         .then_some(previous_workspace)
                         .unwrap_or(old_handle);
 
-                    state.common.shell.remap_unfullscreened_window(
+                    self.remap_unfullscreened_window(
                         mapped,
                         &old_handle,
                         &new_workspace_handle,
                         layer,
                     );
-                    to_workspace = state
-                        .common
-                        .shell
-                        .workspaces
-                        .space_for_handle_mut(to)
-                        .unwrap();
+                    to_workspace = self.workspaces.space_for_handle_mut(to).unwrap();
                     // checked above
                 }
             }
 
-            let from = state
-                .common
-                .shell
+            let from = self
                 .toplevel_management_state
                 .minimize_rectangle(&to_output, &mapped.active_window());
 
@@ -2241,58 +2176,43 @@ impl Shell {
             .collect::<Vec<_>>()
             .into_iter()
         {
-            state.common.shell.update_reactive_popups(&mapped);
+            self.update_reactive_popups(&mapped);
         }
         for (toplevel, _) in mapped.windows() {
             if from_output != to_output {
-                state
-                    .common
-                    .shell
-                    .toplevel_info_state
+                self.toplevel_info_state
                     .toplevel_enter_output(&toplevel, &to_output);
             }
-            state
-                .common
-                .shell
-                .toplevel_info_state
+            self.toplevel_info_state
                 .toplevel_enter_workspace(&toplevel, to);
         }
 
-        if follow {
-            if let Some(seat) = seat {
-                Common::set_focus(state, Some(&focus_target), &seat, None);
-            }
-        }
-
-        new_pos
+        new_pos.map(|pos| (focus_target, pos))
     }
 
+    #[must_use]
     pub fn move_current_window(
-        state: &mut State,
+        &mut self,
         seat: &Seat<State>,
         from_output: &Output,
         to: (&Output, Option<usize>),
         follow: bool,
         direction: Option<Direction>,
-    ) -> Result<Option<Point<i32, Global>>, InvalidWorkspaceIndex> {
+    ) -> Result<Option<(KeyboardFocusTarget, Point<i32, Global>)>, InvalidWorkspaceIndex> {
         let (to_output, to_idx) = to;
-        let to_idx = to_idx.unwrap_or(state.common.shell.workspaces.active_num(to_output).1);
+        let to_idx = to_idx.unwrap_or(self.workspaces.active_num(to_output).1);
 
-        if from_output == to_output
-            && to_idx == state.common.shell.workspaces.active_num(from_output).1
-        {
+        if from_output == to_output && to_idx == self.workspaces.active_num(from_output).1 {
             return Ok(None);
         }
 
-        let to = state
-            .common
-            .shell
+        let to = self
             .workspaces
             .get(to_idx, to_output)
             .map(|ws| ws.handle)
             .ok_or(InvalidWorkspaceIndex)?;
 
-        let from_workspace = state.common.shell.workspaces.active_mut(from_output);
+        let from_workspace = self.workspaces.active_mut(from_output);
         let maybe_window = from_workspace.focus_stack.get(seat).last().cloned();
 
         let Some(mapped) = maybe_window else {
@@ -2301,15 +2221,7 @@ impl Shell {
 
         let from = from_workspace.handle;
 
-        Ok(Shell::move_window(
-            state,
-            Some(seat),
-            &mapped,
-            &from,
-            &to,
-            follow,
-            direction,
-        ))
+        Ok(self.move_window(Some(seat), &mapped, &from, &to, follow, direction))
     }
 
     pub fn update_reactive_popups(&self, mapped: &CosmicMapped) {
@@ -2467,9 +2379,8 @@ impl Shell {
                     return;
                 }
 
-                let seats = state.common.seats().cloned().collect::<Vec<_>>();
                 for workspace in state.common.shell.workspaces.spaces_mut() {
-                    for seat in seats.iter() {
+                    for seat in state.common.shell.seats.iter() {
                         let mut stack = workspace.focus_stack.get_mut(seat);
                         stack.remove(&old_mapped);
                     }
@@ -2673,6 +2584,7 @@ impl Shell {
         }
     }
 
+    #[must_use]
     pub fn next_focus<'a>(&mut self, direction: FocusDirection, seat: &Seat<State>) -> FocusResult {
         let overview = self.overview_mode().0;
         let output = seat.active_output();
@@ -2804,6 +2716,7 @@ impl Shell {
         }
     }
 
+    #[must_use]
     pub fn move_current_element<'a>(
         &mut self,
         direction: Direction,
@@ -3270,6 +3183,7 @@ impl Shell {
         }
     }
 
+    #[must_use]
     pub fn toggle_stacking(&mut self, window: &CosmicMapped) -> Option<KeyboardFocusTarget> {
         if let Some(set) = self
             .workspaces
@@ -3291,6 +3205,7 @@ impl Shell {
         }
     }
 
+    #[must_use]
     pub fn toggle_stacking_focused(&mut self, seat: &Seat<State>) -> Option<KeyboardFocusTarget> {
         let set = self.workspaces.sets.get_mut(&seat.active_output()).unwrap();
         let workspace = &mut set.workspaces[set.active];
@@ -3315,16 +3230,10 @@ impl Shell {
         }
     }
 
-    pub fn toggle_sticky<'a>(
-        &mut self,
-        seats: impl Iterator<Item = &'a Seat<State>>,
-        seat: &Seat<State>,
-        mapped: &CosmicMapped,
-    ) {
+    pub fn toggle_sticky<'a>(&mut self, seat: &Seat<State>, mapped: &CosmicMapped) {
         // clean from focus-stacks
-        let seats = seats.collect::<Vec<_>>();
         for workspace in self.workspaces.spaces_mut() {
-            for seat in seats.iter() {
+            for seat in self.seats.iter() {
                 let mut stack = workspace.focus_stack.get_mut(seat);
                 stack.remove(mapped);
             }
@@ -3393,18 +3302,16 @@ impl Shell {
                 _ => workspace.floating_layer.map(mapped.clone(), geometry.loc),
             }
         }
+
+        self.append_focus_stack(&mapped, seat);
     }
 
-    pub fn toggle_sticky_current<'a>(
-        &mut self,
-        seats: impl Iterator<Item = &'a Seat<State>>,
-        seat: &Seat<State>,
-    ) {
+    pub fn toggle_sticky_current<'a>(&mut self, seat: &Seat<State>) {
         let set = self.workspaces.sets.get_mut(&seat.active_output()).unwrap();
         let workspace = &mut set.workspaces[set.active];
         let maybe_window = workspace.focus_stack.get(seat).iter().next().cloned();
         if let Some(mapped) = maybe_window {
-            self.toggle_sticky(seats, seat, &mapped);
+            self.toggle_sticky(seat, &mapped);
         }
     }
 
@@ -3418,6 +3325,18 @@ impl Shell {
     pub fn set_urgent(&mut self, workspace: &WorkspaceHandle) {
         let mut workspace_guard = self.workspace_state.update();
         workspace_guard.add_workspace_state(workspace, WState::Urgent);
+    }
+
+    pub fn update_autotile(&mut self, autotile: bool) {
+        let mut guard = self.workspace_state.update();
+        self.workspaces
+            .update_autotile(autotile, &mut guard, self.seats.iter())
+    }
+
+    pub fn update_autotile_behavior(&mut self, behavior: TileBehavior) {
+        let mut guard = self.workspace_state.update();
+        self.workspaces
+            .update_autotile_behavior(behavior, &mut guard, self.seats.iter())
     }
 }
 

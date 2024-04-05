@@ -4,7 +4,7 @@ use crate::{
     shell::{
         element::{CosmicMapped, CosmicStack, CosmicWindow},
         layout::tiling::ResizeForkTarget,
-        CosmicSurface,
+        CosmicSurface, SeatExt,
     },
     utils::prelude::*,
     wayland::handlers::{screencopy::SessionHolder, xdg_shell::popup::get_popup_toplevel},

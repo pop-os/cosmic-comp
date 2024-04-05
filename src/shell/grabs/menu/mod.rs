@@ -40,10 +40,11 @@ use smithay::{
 
 use crate::{
     shell::focus::target::PointerFocusTarget,
+    shell::SeatExt,
     state::State,
     utils::{
         iced::{IcedElement, Program},
-        prelude::{Global, OutputExt, PointGlobalExt, PointLocalExt, SeatExt, SizeExt},
+        prelude::{Global, OutputExt, PointGlobalExt, PointLocalExt, SizeExt},
     },
 };
 
@@ -215,7 +216,7 @@ impl Program for ContextMenu {
                 if let Some(Item::Submenu { items, .. }) = self.items.get_mut(idx) {
                     let items = items.clone();
                     let _ = loop_handle.insert_idle(move |state| {
-                        let seat = state.common.last_active_seat();
+                        let seat = state.common.shell.seats.last_active();
                         let grab_state = seat
                             .user_data()
                             .get::<SeatMenuGrabState>()
@@ -300,7 +301,7 @@ impl Program for ContextMenu {
             Message::ItemLeft(idx, _) => {
                 if let Some(Item::Submenu { .. }) = self.items.get_mut(idx) {
                     let _ = loop_handle.insert_idle(|state| {
-                        let seat = state.common.last_active_seat();
+                        let seat = state.common.shell.seats.last_active();
                         let grab_state = seat
                             .user_data()
                             .get::<SeatMenuGrabState>()

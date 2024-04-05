@@ -41,7 +41,7 @@ impl XdgShellHandler for State {
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
-        let seat = self.common.last_active_seat().clone();
+        let seat = self.common.shell.seats.last_active().clone();
         let window = CosmicSurface::from(surface);
         self.common.shell.pending_windows.push((window, seat, None));
         // We will position the window after the first commit, when we know its size hints
@@ -90,7 +90,7 @@ impl XdgShellHandler for State {
                         grab.ungrab(PopupUngrabStrategy::All);
                         return;
                     }
-                    Common::set_focus(self, grab.current_grab().as_ref(), &seat, Some(serial));
+                    Shell::set_focus(self, grab.current_grab().as_ref(), &seat, Some(serial));
                     keyboard.set_grab(PopupKeyboardGrab::new(&grab), serial);
                 }
 
@@ -183,7 +183,7 @@ impl XdgShellHandler for State {
             .element_for_surface(surface.wl_surface())
             .cloned()
         {
-            let seat = self.common.last_active_seat().clone();
+            let seat = self.common.shell.seats.last_active().clone();
             self.common.shell.maximize_request(&mapped, &seat)
         }
     }
@@ -200,7 +200,7 @@ impl XdgShellHandler for State {
     }
 
     fn fullscreen_request(&mut self, surface: ToplevelSurface, output: Option<WlOutput>) {
-        let seat = self.common.last_active_seat().clone();
+        let seat = self.common.shell.seats.last_active().clone();
         let active_output = seat.active_output();
         let output = output
             .as_ref()
@@ -378,7 +378,7 @@ impl XdgShellHandler for State {
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
-        let seat = self.common.last_active_seat().clone();
+        let seat = self.common.shell.seats.last_active().clone();
         self.common.shell.unmap_surface(surface.wl_surface(), &seat);
 
         let output = self

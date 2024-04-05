@@ -48,7 +48,6 @@ use smithay::{
         udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
     },
     desktop::utils::OutputPresentationFeedback,
-    input::Seat,
     output::{Mode as OutputMode, Output, OutputNoMode, PhysicalProperties, Subpixel},
     reexports::{
         calloop::{
@@ -324,12 +323,10 @@ pub fn init_backend(
                         }
                     }
 
-                    let seats = state.common.seats().cloned().collect::<Vec<_>>();
                     state.common.config.read_outputs(
                         &mut state.common.output_configuration_state,
                         &mut state.backend,
                         &mut state.common.shell,
-                        seats.into_iter(),
                         &state.common.event_loop_handle,
                     );
                     for surface in state
@@ -701,12 +698,10 @@ impl State {
         self.common
             .output_configuration_state
             .add_heads(wl_outputs.iter());
-        let seats = self.common.seats().cloned().collect::<Vec<_>>();
         self.common.config.read_outputs(
             &mut self.common.output_configuration_state,
             &mut self.backend,
             &mut self.common.shell,
-            seats.into_iter(),
             &self.common.event_loop_handle,
         );
 
@@ -836,12 +831,10 @@ impl State {
         self.common
             .output_configuration_state
             .add_heads(outputs_added.iter());
-        let seats = self.common.seats().cloned().collect::<Vec<_>>();
         self.common.config.read_outputs(
             &mut self.common.output_configuration_state,
             &mut self.backend,
             &mut self.common.shell,
-            seats.iter().cloned(),
             &self.common.event_loop_handle,
         );
         // Don't remove the outputs, before potentially new ones have been initialized.
@@ -849,9 +842,7 @@ impl State {
         // If we have 0 outputs at some point, we won't quit, but shell doesn't know where to move
         // windows and workspaces to.
         for output in outputs_removed {
-            self.common
-                .shell
-                .remove_output(&output, seats.iter().cloned());
+            self.common.shell.remove_output(&output);
         }
 
         {
@@ -896,18 +887,14 @@ impl State {
             .output_configuration_state
             .remove_heads(outputs_removed.iter());
 
-        let seats = self.common.seats().cloned().collect::<Vec<_>>();
         if self.backend.kms().session.is_active() {
             for output in outputs_removed {
-                self.common
-                    .shell
-                    .remove_output(&output, seats.iter().cloned());
+                self.common.shell.remove_output(&output);
             }
             self.common.config.read_outputs(
                 &mut self.common.output_configuration_state,
                 &mut self.backend,
                 &mut self.common.shell,
-                seats.into_iter(),
                 &self.common.event_loop_handle,
             );
         } else {
@@ -1201,7 +1188,10 @@ impl Surface {
         let mut elements = workspace_elements(
             Some(&render_node),
             &mut renderer,
-            state,
+            &state.shell,
+            &state.config,
+            &state.theme,
+            state.clock.now(),
             &self.output,
             previous_workspace,
             workspace,
@@ -1497,7 +1487,6 @@ impl KmsState {
     pub fn apply_config_for_output(
         &mut self,
         output: &Output,
-        seats: impl Iterator<Item = Seat<State>>,
         shell: &mut Shell,
         test_only: bool,
         loop_handle: &LoopHandle<'_, State>,
@@ -1520,7 +1509,7 @@ impl KmsState {
 
             if !output_config.enabled {
                 if !test_only {
-                    shell.remove_output(output, seats);
+                    shell.remove_output(output);
                     if surface.surface.take().is_some() {
                         // just drop it
                         surface.pending = false;
