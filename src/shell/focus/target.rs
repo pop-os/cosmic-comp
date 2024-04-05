@@ -497,8 +497,8 @@ impl TouchTarget<State> for PointerFocusTarget {
                 TouchTarget::down(window, seat, data, event, seq)
             }
             PointerFocusTarget::StackUI(stack) => TouchTarget::down(stack, seat, data, event, seq),
-            // TODO: implement TouchTarget for ResizeFork/Grabs
-            PointerFocusTarget::ResizeFork(_fork) => {}
+            // TODO: implement TouchTarget for Grabs
+            PointerFocusTarget::ResizeFork(fork) => TouchTarget::down(fork, seat, data, event, seq),
         }
     }
 
@@ -509,7 +509,7 @@ impl TouchTarget<State> for PointerFocusTarget {
             }
             PointerFocusTarget::WindowUI(window) => TouchTarget::up(window, seat, data, event, seq),
             PointerFocusTarget::StackUI(stack) => TouchTarget::up(stack, seat, data, event, seq),
-            PointerFocusTarget::ResizeFork(_fork) => {}
+            PointerFocusTarget::ResizeFork(fork) => TouchTarget::up(fork, seat, data, event, seq),
         }
     }
 
@@ -524,7 +524,9 @@ impl TouchTarget<State> for PointerFocusTarget {
             PointerFocusTarget::StackUI(stack) => {
                 TouchTarget::motion(stack, seat, data, event, seq)
             }
-            PointerFocusTarget::ResizeFork(_fork) => {}
+            PointerFocusTarget::ResizeFork(fork) => {
+                TouchTarget::motion(fork, seat, data, event, seq)
+            }
         }
     }
 
@@ -535,7 +537,7 @@ impl TouchTarget<State> for PointerFocusTarget {
             }
             PointerFocusTarget::WindowUI(window) => TouchTarget::frame(window, seat, data, seq),
             PointerFocusTarget::StackUI(stack) => TouchTarget::frame(stack, seat, data, seq),
-            PointerFocusTarget::ResizeFork(_fork) => {}
+            PointerFocusTarget::ResizeFork(fork) => TouchTarget::frame(fork, seat, data, seq),
         }
     }
 
@@ -546,7 +548,7 @@ impl TouchTarget<State> for PointerFocusTarget {
             }
             PointerFocusTarget::WindowUI(window) => TouchTarget::cancel(window, seat, data, seq),
             PointerFocusTarget::StackUI(stack) => TouchTarget::cancel(stack, seat, data, seq),
-            PointerFocusTarget::ResizeFork(_fork) => {}
+            PointerFocusTarget::ResizeFork(fork) => TouchTarget::cancel(fork, seat, data, seq),
         }
     }
 
@@ -559,7 +561,9 @@ impl TouchTarget<State> for PointerFocusTarget {
                 TouchTarget::shape(window, seat, data, event, seq)
             }
             PointerFocusTarget::StackUI(stack) => TouchTarget::shape(stack, seat, data, event, seq),
-            PointerFocusTarget::ResizeFork(_fork) => {}
+            PointerFocusTarget::ResizeFork(fork) => {
+                TouchTarget::shape(fork, seat, data, event, seq)
+            }
         }
     }
 
@@ -580,7 +584,9 @@ impl TouchTarget<State> for PointerFocusTarget {
             PointerFocusTarget::StackUI(stack) => {
                 TouchTarget::orientation(stack, seat, data, event, seq)
             }
-            PointerFocusTarget::ResizeFork(_fork) => {}
+            PointerFocusTarget::ResizeFork(fork) => {
+                TouchTarget::orientation(fork, seat, data, event, seq)
+            }
         }
     }
 }
