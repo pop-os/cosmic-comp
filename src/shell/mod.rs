@@ -2842,7 +2842,7 @@ impl Shell {
             return;
         }
 
-        if let Some(GrabStartData::Pointer(mut start_data)) =
+        if let Some(mut start_data) =
             check_grab_preconditions(&seat, &surface, None, ReleaseMode::Click)
         {
             let (floating_layer, geometry) = if let Some(set) = state
@@ -2891,8 +2891,10 @@ impl Shell {
             let focus = mapped
                 .focus_under(element_offset.to_f64())
                 .map(|(target, surface_offset)| (target, (surface_offset + element_offset)));
-            start_data.location = new_loc.as_logical().to_f64();
-            start_data.focus = focus.clone();
+            start_data.set_location(new_loc.as_logical().to_f64());
+            start_data.set_focus(focus.clone());
+
+            let is_touch_grab = matches!(start_data, GrabStartData::Touch(_));
 
             let grab: ResizeGrab = if let Some(grab) = floating_layer.resize_request(
                 mapped,
@@ -2912,7 +2914,7 @@ impl Shell {
                     return;
                 };
                 ResizeForkGrab::new(
-                    GrabStartData::Pointer(start_data),
+                    start_data,
                     new_loc.to_f64(),
                     node,
                     left_up_idx,
@@ -2925,19 +2927,23 @@ impl Shell {
                 return;
             };
 
-            let ptr = seat.get_pointer().unwrap();
             let serial = SERIAL_COUNTER.next_serial();
-            ptr.motion(
-                state,
-                focus,
-                &MotionEvent {
-                    location: new_loc.as_logical().to_f64(),
-                    serial,
-                    time: 0,
-                },
-            );
-            ptr.frame(state);
-            ptr.set_grab(state, grab, serial, Focus::Keep);
+            if is_touch_grab {
+                seat.get_touch().unwrap().set_grab(state, grab, serial);
+            } else {
+                let ptr = seat.get_pointer().unwrap();
+                ptr.motion(
+                    state,
+                    focus,
+                    &MotionEvent {
+                        location: new_loc.as_logical().to_f64(),
+                        serial,
+                        time: 0,
+                    },
+                );
+                ptr.frame(state);
+                ptr.set_grab(state, grab, serial, Focus::Keep);
+            }
         }
     }
 
@@ -3100,7 +3106,7 @@ impl Shell {
         edges: ResizeEdge,
     ) {
         let serial = serial.into();
-        if let Some(GrabStartData::Pointer(start_data)) =
+        if let Some(start_data) =
             check_grab_preconditions(&seat, surface, serial, ReleaseMode::NoMouseButtons)
         {
             if let Some(mapped) = state.common.shell.element_for_surface(surface).cloned() {
@@ -3123,6 +3129,8 @@ impl Shell {
                     return;
                 };
 
+                let is_touch_grab = matches!(start_data, GrabStartData::Touch(_));
+
                 let grab: ResizeGrab = if let Some(grab) = floating_layer.resize_request(
                     &mapped,
                     seat,
@@ -3141,7 +3149,7 @@ impl Shell {
                         return;
                     };
                     ResizeForkGrab::new(
-                        GrabStartData::Pointer(start_data),
+                        start_data,
                         seat.get_pointer().unwrap().current_location().as_global(),
                         node,
                         left_up_idx,
@@ -3154,12 +3162,20 @@ impl Shell {
                     return;
                 };
 
-                seat.get_pointer().unwrap().set_grab(
-                    state,
-                    grab,
-                    serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
-                    Focus::Clear,
-                );
+                if is_touch_grab {
+                    seat.get_touch().unwrap().set_grab(
+                        state,
+                        grab,
+                        serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
+                    );
+                } else {
+                    seat.get_pointer().unwrap().set_grab(
+                        state,
+                        grab,
+                        serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
+                        Focus::Clear,
+                    );
+                }
             }
         }
     }
