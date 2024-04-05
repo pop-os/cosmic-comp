@@ -2,7 +2,7 @@
     key_bindings: {
         (modifiers: [Super, Shift], key: "Escape"): Terminate,
         (modifiers: [Super, Ctrl], key: "Escape"): Debug,
-        (modifiers: [Super], key: "Escape"): Spawn("cosmic-greeter"),
+        (modifiers: [Super], key: "Escape"): Spawn("loginctl lock-session"),
         (modifiers: [Super], key: "q"): Close,
 
         (modifiers: [Super], key: "1"): Workspace(1),
