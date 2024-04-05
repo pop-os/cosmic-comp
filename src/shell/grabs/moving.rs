@@ -704,19 +704,17 @@ impl Drop for MoveGrab {
         let window_outputs = self.window_outputs.drain().collect::<HashSet<_>>();
         let previous = self.previous;
         let window = self.window.clone();
+        let is_touch_grab = matches!(self.start_data, GrabStartData::Touch(_));
 
         let _ = self.evlh.0.insert_idle(move |state| {
-            let pointer = seat.get_pointer().unwrap();
-
             let position: Option<(CosmicMapped, Point<i32, Global>)> = if let Some(grab_state) =
                 seat.user_data()
                     .get::<SeatMoveGrabState>()
                     .and_then(|s| s.borrow_mut().take())
             {
                 if grab_state.window.alive() {
-                    let window_location = (pointer.current_location().to_i32_round()
-                        + grab_state.window_offset)
-                        .as_global();
+                    let window_location =
+                        (grab_state.location.to_i32_round() + grab_state.window_offset).as_global();
 
                     let workspace_handle = state.common.shell.active_space(&output).handle;
                     for old_output in window_outputs.iter().filter(|o| *o != &output) {
@@ -826,23 +824,26 @@ impl Drop for MoveGrab {
 
             if let Some((mapped, position)) = position {
                 let serial = SERIAL_COUNTER.next_serial();
-                let current_location = pointer.current_location();
+                if !is_touch_grab {
+                    let pointer = seat.get_pointer().unwrap();
+                    let current_location = pointer.current_location();
 
-                if let Some((target, offset)) =
-                    mapped.focus_under(current_location - position.as_logical().to_f64())
-                {
-                    pointer.motion(
-                        state,
-                        Some((
-                            target,
-                            position.as_logical() - window.geometry().loc + offset,
-                        )),
-                        &MotionEvent {
-                            location: pointer.current_location(),
-                            serial,
-                            time: 0,
-                        },
-                    );
+                    if let Some((target, offset)) =
+                        mapped.focus_under(current_location - position.as_logical().to_f64())
+                    {
+                        pointer.motion(
+                            state,
+                            Some((
+                                target,
+                                position.as_logical() - window.geometry().loc + offset,
+                            )),
+                            &MotionEvent {
+                                location: pointer.current_location(),
+                                serial,
+                                time: 0,
+                            },
+                        );
+                    }
                 }
                 Common::set_focus(
                     state,
