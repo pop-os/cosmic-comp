@@ -48,14 +48,14 @@ pub fn init_backend_auto(
             .outputs()
             .next()
             .with_context(|| "Backend initialized without output")?;
-        let initial_seat = crate::input::add_seat(
+        let initial_seat = crate::shell::create_seat(
             dh,
             &mut state.common.seat_state,
             output,
             &state.common.config,
             "seat-0".into(),
         );
-        state.common.add_seat(initial_seat);
+        state.common.shell.seats.add_seat(initial_seat);
     }
     res
 }

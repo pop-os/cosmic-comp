@@ -134,7 +134,7 @@ impl State {
 
 impl Common {
     fn is_x_focused(&self, xwm: XwmId) -> bool {
-        if let Some(keyboard) = self.last_active_seat().get_keyboard() {
+        if let Some(keyboard) = self.shell.seats.last_active().get_keyboard() {
             if let Some(KeyboardFocusTarget::Element(mapped)) = keyboard.current_focus() {
                 if let Some(surface) = mapped.active_window().x11_surface() {
                     return surface.xwm_id().unwrap() == xwm;
@@ -146,7 +146,7 @@ impl Common {
     }
 
     pub fn update_x11_stacking_order(&mut self) {
-        let active_output = self.last_active_seat().active_output();
+        let active_output = self.shell.seats.last_active().active_output();
         if let Some(xwm) = self
             .shell
             .xwayland_state
@@ -254,7 +254,7 @@ impl XwmHandler for State {
             return;
         }
 
-        let seat = self.common.last_active_seat().clone();
+        let seat = self.common.shell.seats.last_active().clone();
         if let Some(context) = startup_id
             .map(XdgActivationToken::from)
             .and_then(|token| {
@@ -308,7 +308,14 @@ impl XwmHandler for State {
                     }
                 }
             }
-            Shell::map_window(self, &window);
+            if let Some(target) = self.common.shell.map_window(
+                &window,
+                &self.common.event_loop_handle,
+                &self.common.theme,
+            ) {
+                let seat = self.common.shell.seats.last_active().clone();
+                Shell::set_focus(self, Some(&target), &seat, None);
+            }
         }
     }
 
@@ -322,7 +329,7 @@ impl XwmHandler for State {
         {
             return;
         }
-        Shell::map_override_redirect(self, window)
+        self.common.shell.map_override_redirect(window)
     }
 
     fn unmapped_window(&mut self, _xwm: XwmId, window: X11Surface) {
@@ -332,7 +339,7 @@ impl XwmHandler for State {
                 .override_redirect_windows
                 .retain(|or| or != &window);
         } else {
-            let seat = self.common.last_active_seat().clone();
+            let seat = self.common.shell.seats.last_active().clone();
             self.common.shell.unmap_surface(&window, &seat);
         }
 
@@ -459,14 +466,14 @@ impl XwmHandler for State {
         resize_edge: smithay::xwayland::xwm::ResizeEdge,
     ) {
         if let Some(wl_surface) = window.wl_surface() {
-            let seat = self.common.last_active_seat().clone();
+            let seat = self.common.shell.seats.last_active().clone();
             Shell::resize_request(self, &wl_surface, &seat, None, resize_edge.into())
         }
     }
 
     fn move_request(&mut self, _xwm: XwmId, window: X11Surface, _button: u32) {
         if let Some(wl_surface) = window.wl_surface() {
-            let seat = self.common.last_active_seat().clone();
+            let seat = self.common.shell.seats.last_active().clone();
             Shell::move_request(
                 self,
                 &wl_surface,
@@ -480,7 +487,7 @@ impl XwmHandler for State {
 
     fn maximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
         if let Some(mapped) = self.common.shell.element_for_surface(&window).cloned() {
-            let seat = self.common.last_active_seat().clone();
+            let seat = self.common.shell.seats.last_active().clone();
             self.common.shell.maximize_request(&mapped, &seat);
         }
     }
@@ -501,7 +508,7 @@ impl XwmHandler for State {
 
     fn unminimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
         if let Some(mut mapped) = self.common.shell.element_for_surface(&window).cloned() {
-            let seat = self.common.last_active_seat().clone();
+            let seat = self.common.shell.seats.last_active().clone();
             self.common.shell.unminimize_request(&mapped, &seat);
             if mapped.is_stack() {
                 let maybe_surface = mapped.windows().find(|(w, _)| w.is_window(&window));
@@ -513,7 +520,7 @@ impl XwmHandler for State {
     }
 
     fn fullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let seat = self.common.last_active_seat().clone();
+        let seat = self.common.shell.seats.last_active().clone();
         if let Some(mapped) = self.common.shell.element_for_surface(&window).cloned() {
             if let Some((output, handle)) = self
                 .common
@@ -539,7 +546,7 @@ impl XwmHandler for State {
                 }
             }
         } else {
-            let output = self.common.last_active_seat().active_output();
+            let output = seat.active_output();
             if let Some(o) = self
                 .common
                 .shell
@@ -573,7 +580,7 @@ impl XwmHandler for State {
         mime_type: String,
         fd: OwnedFd,
     ) {
-        let seat = self.common.last_active_seat();
+        let seat = self.common.shell.seats.last_active();
         match selection {
             SelectionTarget::Clipboard => {
                 if let Err(err) = request_data_device_client_selection(seat, mime_type, fd) {
@@ -602,7 +609,7 @@ impl XwmHandler for State {
         trace!(?selection, ?mime_types, "Got Selection from Xwayland",);
 
         if self.common.is_x_focused(xwm) {
-            let seat = self.common.last_active_seat();
+            let seat = self.common.shell.seats.last_active();
             match selection {
                 SelectionTarget::Clipboard => {
                     set_data_device_selection(&self.common.display_handle, &seat, mime_types, xwm)
@@ -615,7 +622,7 @@ impl XwmHandler for State {
     }
 
     fn cleared_selection(&mut self, xwm: XwmId, selection: SelectionTarget) {
-        for seat in self.common.seats() {
+        for seat in self.common.shell.seats.iter() {
             match selection {
                 SelectionTarget::Clipboard => {
                     if current_data_device_selection_userdata(seat).as_deref() == Some(&xwm) {

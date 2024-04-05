@@ -3,9 +3,8 @@
 use crate::{
     backend::{kms::KmsState, winit::WinitState, x11::X11State},
     config::{Config, OutputConfig},
-    input::{gestures::GestureState, Devices},
-    shell::{grabs::SeatMoveGrabState, Shell},
-    utils::prelude::*,
+    input::gestures::GestureState,
+    shell::{grabs::SeatMoveGrabState, SeatExt, Shell},
     wayland::protocols::{
         drm::WlDrmState, image_source::ImageSourceState,
         output_configuration::OutputConfigurationState, screencopy::ScreencopyState,
@@ -25,7 +24,6 @@ use smithay::{
     backend::{
         allocator::dmabuf::Dmabuf,
         drm::DrmNode,
-        input::Device,
         renderer::{
             element::{
                 default_primary_scanout_output_compare, utils::select_dmabuf_feedback,
@@ -44,7 +42,7 @@ use smithay::{
             with_surfaces_surface_tree, OutputPresentationFeedback,
         },
     },
-    input::{pointer::CursorImageStatus, Seat, SeatState},
+    input::{pointer::CursorImageStatus, SeatState},
     output::{Mode as OutputMode, Output, Scale},
     reexports::{
         calloop::{LoopHandle, LoopSignal},
@@ -149,10 +147,7 @@ pub struct Common {
     pub event_loop_handle: LoopHandle<'static, State>,
     pub event_loop_signal: LoopSignal,
 
-    //pub output_conf: ConfigurationManager,
     pub shell: Shell,
-    seats: Vec<Seat<State>>,
-    last_active_seat: Option<Seat<State>>,
 
     pub clock: Clock<Monotonic>,
     pub should_stop: bool,
@@ -229,12 +224,11 @@ impl BackendData {
         output: &Output,
         test_only: bool,
         shell: &mut Shell,
-        seats: impl Iterator<Item = Seat<State>>,
         loop_handle: &LoopHandle<'_, State>,
     ) -> Result<(), anyhow::Error> {
         let result = match self {
             BackendData::Kms(ref mut state) => {
-                state.apply_config_for_output(output, seats, shell, test_only, loop_handle)
+                state.apply_config_for_output(output, shell, test_only, loop_handle)
             }
             BackendData::Winit(ref mut state) => state.apply_config_for_output(output, test_only),
             BackendData::X11(ref mut state) => state.apply_config_for_output(output, test_only),
@@ -411,8 +405,6 @@ impl State {
 
                 shell,
 
-                seats: Vec::new(),
-                last_active_seat: None,
                 local_offset,
 
                 clock,
@@ -495,38 +487,6 @@ impl State {
 }
 
 impl Common {
-    pub fn add_seat(&mut self, seat: Seat<State>) {
-        if self.seats.is_empty() {
-            self.last_active_seat = Some(seat.clone());
-        }
-        self.seats.push(seat);
-    }
-
-    pub fn remove_seat(&mut self, seat: &Seat<State>) {
-        self.seats.retain(|s| s != seat);
-        if self.seats.is_empty() {
-            self.last_active_seat = None;
-        } else if self.last_active_seat() == seat {
-            self.last_active_seat = Some(self.seats[0].clone());
-        }
-    }
-
-    pub fn seats(&self) -> impl Iterator<Item = &Seat<State>> {
-        self.seats.iter()
-    }
-
-    pub fn seat_with_device<D: Device>(&self, device: &D) -> Option<&Seat<State>> {
-        self.seats().find(|seat| {
-            let userdata = seat.user_data();
-            let devices = userdata.get::<Devices>().unwrap();
-            devices.has_device(device)
-        })
-    }
-
-    pub fn last_active_seat(&self) -> &Seat<State> {
-        self.last_active_seat.as_ref().expect("No seat?")
-    }
-
     pub fn send_frames(
         &self,
         output: &Output,
@@ -573,6 +533,7 @@ impl Common {
         }
 
         for seat in self
+            .shell
             .seats
             .iter()
             .filter(|seat| &seat.active_output() == output)

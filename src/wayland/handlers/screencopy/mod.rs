@@ -64,7 +64,9 @@ impl ScreencopyHandler for State {
     fn capture_cursor_source(&mut self, _source: &ImageSourceData) -> Option<BufferConstraints> {
         let size = if let Some((geometry, _)) = self
             .common
-            .last_active_seat()
+            .shell
+            .seats
+            .last_active()
             .cursor_geometry((0.0, 0.0), self.common.clock.now())
         {
             geometry.size
@@ -125,7 +127,7 @@ impl ScreencopyHandler for State {
     }
     fn new_cursor_session(&mut self, session: CursorSession) {
         let (pointer_loc, pointer_size, hotspot) = {
-            let seat = self.common.last_active_seat();
+            let seat = self.common.shell.seats.last_active();
 
             let pointer = seat.get_pointer().unwrap();
             let pointer_loc = pointer.current_location().to_i32_round().as_global();
@@ -266,7 +268,7 @@ impl ScreencopyHandler for State {
             return;
         }
 
-        let seat = self.common.last_active_seat().clone();
+        let seat = self.common.shell.seats.last_active().clone();
         render_cursor_to_buffer(self, &session, frame, &seat);
     }
 

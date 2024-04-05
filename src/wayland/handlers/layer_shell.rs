@@ -26,7 +26,7 @@ impl WlrLayerShellHandler for State {
         _layer: Layer,
         namespace: String,
     ) {
-        let seat = self.common.last_active_seat().clone();
+        let seat = self.common.shell.seats.last_active().clone();
         let output = wl_output
             .as_ref()
             .and_then(Output::from_resource)

@@ -7,7 +7,6 @@ use crate::{
 };
 use cosmic_config::{ConfigGet, CosmicConfigEntry};
 use serde::{Deserialize, Serialize};
-use smithay::input::Seat;
 pub use smithay::{
     backend::input::KeyState,
     input::keyboard::{keysyms as KeySyms, Keysym, ModifiersState},
@@ -277,10 +276,8 @@ impl Config {
         output_state: &mut OutputConfigurationState<State>,
         backend: &mut BackendData,
         shell: &mut Shell,
-        seats: impl Iterator<Item = Seat<State>>,
         loop_handle: &LoopHandle<'_, State>,
     ) {
-        let seats = seats.collect::<Vec<_>>();
         let outputs = output_state.outputs().collect::<Vec<_>>();
         let mut infos = outputs
             .iter()
@@ -311,13 +308,9 @@ impl Config {
                     .get::<RefCell<OutputConfig>>()
                     .unwrap()
                     .borrow_mut() = output_config;
-                if let Err(err) = backend.apply_config_for_output(
-                    &output,
-                    false,
-                    shell,
-                    seats.iter().cloned(),
-                    loop_handle,
-                ) {
+                if let Err(err) =
+                    backend.apply_config_for_output(&output, false, shell, loop_handle)
+                {
                     warn!(
                         ?err,
                         "Failed to set new config for output {}.",
@@ -346,13 +339,9 @@ impl Config {
                         .get::<RefCell<OutputConfig>>()
                         .unwrap()
                         .borrow_mut() = output_config;
-                    if let Err(err) = backend.apply_config_for_output(
-                        &output,
-                        false,
-                        shell,
-                        seats.iter().cloned(),
-                        loop_handle,
-                    ) {
+                    if let Err(err) =
+                        backend.apply_config_for_output(&output, false, shell, loop_handle)
+                    {
                         error!(?err, "Failed to reset config for output {}.", output.name());
                     } else {
                         if enabled {
@@ -368,13 +357,9 @@ impl Config {
             self.write_outputs(output_state.outputs());
         } else {
             for output in outputs {
-                if let Err(err) = backend.apply_config_for_output(
-                    &output,
-                    false,
-                    shell,
-                    seats.iter().cloned(),
-                    loop_handle,
-                ) {
+                if let Err(err) =
+                    backend.apply_config_for_output(&output, false, shell, loop_handle)
+                {
                     warn!(
                         ?err,
                         "Failed to set new config for output {}.",
@@ -533,7 +518,8 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
         match key.as_str() {
             "xkb_config" => {
                 let value = get_config::<XkbConfig>(&config, "xkb_config");
-                for seat in state.common.seats().cloned().collect::<Vec<_>>().iter() {
+                let seats = state.common.shell.seats.iter().cloned().collect::<Vec<_>>();
+                for seat in seats.into_iter() {
                     if let Some(keyboard) = seat.get_keyboard() {
                         if let Err(err) = keyboard.set_xkb_config(state, xkb_config_to_wl(&value)) {
                             error!(?err, "Failed to load provided xkb config");
@@ -567,26 +553,14 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 let new = get_config::<bool>(&config, "autotile");
                 if new != state.common.config.cosmic_conf.autotile {
                     state.common.config.cosmic_conf.autotile = new;
-                    let seats: Vec<_> = state.common.seats().cloned().collect();
-                    let mut guard = state.common.shell.workspace_state.update();
-                    state
-                        .common
-                        .shell
-                        .workspaces
-                        .update_autotile(new, &mut guard, seats);
+                    state.common.shell.update_autotile(new);
                 }
             }
             "autotile_behavior" => {
                 let new = get_config::<TileBehavior>(&config, "autotile_behavior");
                 if new != state.common.config.cosmic_conf.autotile_behavior {
                     state.common.config.cosmic_conf.autotile_behavior = new;
-                    let seats: Vec<_> = state.common.seats().cloned().collect();
-                    let mut guard = state.common.shell.workspace_state.update();
-                    state
-                        .common
-                        .shell
-                        .workspaces
-                        .update_autotile_behavior(new, &mut guard, seats);
+                    state.common.shell.update_autotile_behavior(new);
                 }
             }
             "active_hint" => {

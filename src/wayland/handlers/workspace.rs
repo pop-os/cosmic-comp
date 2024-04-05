@@ -47,7 +47,7 @@ impl WorkspaceHandler for State {
                     }
                 }
                 Request::SetTilingState { workspace, state } => {
-                    let seat = self.common.last_active_seat().clone();
+                    let seat = self.common.shell.seats.last_active().clone();
                     if let Some(workspace) = self
                         .common
                         .shell

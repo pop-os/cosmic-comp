@@ -3,7 +3,7 @@
 use crate::{
     backend::render,
     config::OutputConfig,
-    input::Devices,
+    shell::{Devices, SeatExt},
     state::{BackendData, Common},
     utils::prelude::*,
 };
@@ -222,7 +222,10 @@ impl Surface {
             buffer.clone(),
             &mut self.damage_tracker,
             age as usize,
-            state,
+            &state.shell,
+            &state.config,
+            &state.theme,
+            state.clock.now(),
             &self.output,
             render::CursorMode::NotDefault,
             #[cfg(not(feature = "debug"))]
@@ -362,12 +365,10 @@ pub fn init_backend(
         .output_configuration_state
         .add_heads(std::iter::once(&output));
     state.common.shell.add_output(&output);
-    let seats = state.common.seats().cloned().collect::<Vec<_>>();
     state.common.config.read_outputs(
         &mut state.common.output_configuration_state,
         &mut state.backend,
         &mut state.common.shell,
-        seats.iter().cloned(),
         &state.common.event_loop_handle,
     );
     state.launch_xwayland(None);
@@ -394,10 +395,7 @@ pub fn init_backend(
                     .surfaces
                     .retain(|s| s.window.id() != window_id);
                 for output in outputs_removed.into_iter() {
-                    state
-                        .common
-                        .shell
-                        .remove_output(&output, seats.iter().cloned());
+                    state.common.shell.remove_output(&output);
                 }
             }
             X11Event::Resized {
@@ -506,7 +504,7 @@ impl State {
                         .unwrap();
 
                     let device = event.device();
-                    for seat in self.common.seats().cloned().collect::<Vec<_>>().iter() {
+                    for seat in self.common.shell.seats.iter() {
                         let devices = seat.user_data().get::<Devices>().unwrap();
                         if devices.has_device(&device) {
                             seat.set_active_output(&output);

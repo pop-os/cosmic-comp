@@ -8,21 +8,21 @@ use crate::{
         grabs::ReleaseMode,
         CosmicSurface, Shell,
     },
-    state::{Common, State},
+    state::State,
     utils::{prelude::SeatExt, screenshot::screenshot_window},
 };
 
 use super::{Item, ResizeEdge};
 
 fn toggle_stacking(state: &mut State, mapped: &CosmicMapped) {
-    let seat = state.common.last_active_seat().clone();
+    let seat = state.common.shell.seats.last_active().clone();
     if let Some(new_focus) = state.common.shell.toggle_stacking(mapped) {
-        Common::set_focus(state, Some(&new_focus), &seat, None);
+        Shell::set_focus(state, Some(&new_focus), &seat, None);
     }
 }
 
 fn move_prev_workspace(state: &mut State, mapped: &CosmicMapped) {
-    let seat = state.common.last_active_seat().clone();
+    let seat = state.common.shell.seats.last_active().clone();
     let (current_handle, output) = {
         let Some(ws) = state.common.shell.space_for(mapped) else {
             return;
@@ -46,20 +46,21 @@ fn move_prev_workspace(state: &mut State, mapped: &CosmicMapped) {
                 .map(|s| s.handle)
         });
     if let Some(prev_handle) = maybe_handle {
-        Shell::move_window(
-            state,
+        if let Some((target, _)) = state.common.shell.move_window(
             Some(&seat),
             mapped,
             &current_handle,
             &prev_handle,
             true,
             None,
-        );
+        ) {
+            Shell::set_focus(state, Some(&target), &seat, None);
+        }
     }
 }
 
 fn move_next_workspace(state: &mut State, mapped: &CosmicMapped) {
-    let seat = state.common.last_active_seat().clone();
+    let seat = state.common.shell.seats.last_active().clone();
     let (current_handle, output) = {
         let Some(ws) = state.common.shell.space_for(mapped) else {
             return;
@@ -76,15 +77,16 @@ fn move_next_workspace(state: &mut State, mapped: &CosmicMapped) {
         .next()
         .map(|space| space.handle);
     if let Some(next_handle) = maybe_handle {
-        Shell::move_window(
-            state,
+        if let Some((target, _point)) = state.common.shell.move_window(
             Some(&seat),
             mapped,
             &current_handle,
             &next_handle,
             true,
             None,
-        );
+        ) {
+            Shell::set_focus(state, Some(&target), &seat, None)
+        }
     }
 }
 
@@ -112,7 +114,7 @@ pub fn tab_items(
                 )
                 .into();
 
-                let seat = state.common.last_active_seat().clone();
+                let seat = state.common.shell.seats.last_active();
                 let output = seat.active_output();
                 let workspace = state.common.shell.workspaces.active_mut(&output);
                 if is_tiled {
@@ -125,7 +127,7 @@ pub fn tab_items(
                     {
                         workspace.unmaximize_request(&mapped);
                     }
-                    let focus_stack = workspace.focus_stack.get(&seat);
+                    let focus_stack = workspace.focus_stack.get(seat);
                     workspace
                         .tiling_layer
                         .map(mapped, Some(focus_stack.iter()), None);
@@ -204,7 +206,7 @@ pub fn window_items(
             Item::new(fl!("window-menu-maximize"), move |handle| {
                 let mapped = maximize_clone.clone();
                 let _ = handle.insert_idle(move |state| {
-                    let seat = state.common.last_active_seat().clone();
+                    let seat = state.common.shell.seats.last_active().clone();
                     state.common.shell.maximize_toggle(&mapped, &seat);
                 });
             })
@@ -215,7 +217,7 @@ pub fn window_items(
             Item::new(fl!("window-menu-tiled"), move |handle| {
                 let tile_clone = tile_clone.clone();
                 let _ = handle.insert_idle(move |state| {
-                    let seat = state.common.last_active_seat().clone();
+                    let seat = state.common.shell.seats.last_active().clone();
                     if let Some(ws) = state.common.shell.space_for_mut(&tile_clone) {
                         ws.toggle_floating_window(&seat, &tile_clone);
                     }
@@ -236,7 +238,7 @@ pub fn window_items(
             let move_clone = move_clone.clone();
             let _ = handle.insert_idle(move |state| {
                 if let Some(surface) = move_clone.wl_surface() {
-                    let seat = state.common.last_active_seat().clone();
+                    let seat = state.common.shell.seats.last_active().clone();
                     Shell::move_request(state, &surface, &seat, None, ReleaseMode::Click, false);
                 }
             });
@@ -247,7 +249,7 @@ pub fn window_items(
                 Item::new(fl!("window-menu-resize-edge-top"), move |handle| {
                     let resize_clone = resize_top_clone.clone();
                     let _ = handle.insert_idle(move |state| {
-                        let seat = state.common.last_active_seat().clone();
+                        let seat = state.common.shell.seats.last_active().clone();
                         Shell::menu_resize_request(state, &resize_clone, &seat, ResizeEdge::TOP);
                     });
                 })
@@ -255,7 +257,7 @@ pub fn window_items(
                 Item::new(fl!("window-menu-resize-edge-left"), move |handle| {
                     let resize_clone = resize_left_clone.clone();
                     let _ = handle.insert_idle(move |state| {
-                        let seat = state.common.last_active_seat().clone();
+                        let seat = state.common.shell.seats.last_active().clone();
                         Shell::menu_resize_request(state, &resize_clone, &seat, ResizeEdge::LEFT);
                     });
                 })
@@ -263,7 +265,7 @@ pub fn window_items(
                 Item::new(fl!("window-menu-resize-edge-right"), move |handle| {
                     let resize_clone = resize_right_clone.clone();
                     let _ = handle.insert_idle(move |state| {
-                        let seat = state.common.last_active_seat().clone();
+                        let seat = state.common.shell.seats.last_active().clone();
                         Shell::menu_resize_request(state, &resize_clone, &seat, ResizeEdge::RIGHT);
                     });
                 })
@@ -271,7 +273,7 @@ pub fn window_items(
                 Item::new(fl!("window-menu-resize-edge-bottom"), move |handle| {
                     let resize_clone = resize_bottom_clone.clone();
                     let _ = handle.insert_idle(move |state| {
-                        let seat = state.common.last_active_seat().clone();
+                        let seat = state.common.shell.seats.last_active().clone();
                         Shell::menu_resize_request(state, &resize_clone, &seat, ResizeEdge::BOTTOM);
                     });
                 })
@@ -299,12 +301,8 @@ pub fn window_items(
             Item::new(fl!("window-menu-sticky"), move |handle| {
                 let mapped = sticky_clone.clone();
                 let _ = handle.insert_idle(move |state| {
-                    let seat = state.common.last_active_seat().clone();
-                    let seats = state.common.seats().cloned().collect::<Vec<_>>();
-                    state
-                        .common
-                        .shell
-                        .toggle_sticky(seats.iter(), &seat, &mapped);
+                    let seat = state.common.shell.seats.last_active().clone();
+                    state.common.shell.toggle_sticky(&seat, &mapped);
                 });
             })
             .toggled(is_sticky),

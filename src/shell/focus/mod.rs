@@ -20,7 +20,7 @@ use tracing::{debug, trace};
 
 use self::target::{KeyboardFocusTarget, WindowGroup};
 
-use super::layout::floating::FloatingLayout;
+use super::{layout::floating::FloatingLayout, SeatExt};
 
 pub mod target;
 
@@ -99,43 +99,10 @@ impl ActiveFocus {
 }
 
 impl Shell {
-    pub fn append_focus_stack(state: &mut State, mapped: &CosmicMapped, active_seat: &Seat<State>) {
-        if mapped.is_minimized() {
-            return;
-        }
-
-        // update FocusStack and notify layouts about new focus (if any window)
-        let workspace = state.common.shell.space_for_mut(&mapped);
-        let workspace = if workspace.is_none() {
-            state
-                .common
-                .shell
-                .active_space_mut(&active_seat.active_output())
-        } else {
-            workspace.unwrap()
-        };
-
-        let mut focus_stack = workspace.focus_stack.get_mut(active_seat);
-        if Some(mapped) != focus_stack.last() {
-            trace!(?mapped, "Focusing window.");
-            focus_stack.append(&mapped);
-            // also remove popup grabs, if we are switching focus
-            if let Some(mut popup_grab) = active_seat
-                .user_data()
-                .get::<PopupGrabData>()
-                .and_then(|x| x.take())
-            {
-                if !popup_grab.has_ended() {
-                    popup_grab.ungrab(PopupUngrabStrategy::All);
-                }
-            }
-        }
-    }
-
     pub fn set_focus(
         state: &mut State,
         target: Option<&KeyboardFocusTarget>,
-        active_seat: &Seat<State>,
+        seat: &Seat<State>,
         serial: Option<Serial>,
     ) {
         let element = match target {
@@ -150,23 +117,57 @@ impl Shell {
             if mapped.is_minimized() {
                 return;
             }
-            Self::append_focus_stack(state, &mapped, active_seat);
+            state.common.shell.append_focus_stack(&mapped, seat);
         }
 
         // update keyboard focus
-        if let Some(keyboard) = active_seat.get_keyboard() {
-            ActiveFocus::set(active_seat, target.cloned());
+        if let Some(keyboard) = seat.get_keyboard() {
+            ActiveFocus::set(seat, target.cloned());
             keyboard.set_focus(
                 state,
                 target.cloned(),
                 serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
             );
         }
+
+        state.common.shell.update_active();
     }
 
-    fn update_active<'a, 'b>(&mut self, seats: impl Iterator<Item = &'a Seat<State>>) {
+    pub fn append_focus_stack(&mut self, mapped: &CosmicMapped, seat: &Seat<State>) {
+        if mapped.is_minimized() {
+            return;
+        }
+
+        // update FocusStack and notify layouts about new focus (if any window)
+        let workspace = self.space_for_mut(&mapped);
+        let workspace = if workspace.is_none() {
+            self.active_space_mut(&seat.active_output())
+        } else {
+            workspace.unwrap()
+        };
+
+        let mut focus_stack = workspace.focus_stack.get_mut(seat);
+        if Some(mapped) != focus_stack.last() {
+            trace!(?mapped, "Focusing window.");
+            focus_stack.append(&mapped);
+            // also remove popup grabs, if we are switching focus
+            if let Some(mut popup_grab) = seat
+                .user_data()
+                .get::<PopupGrabData>()
+                .and_then(|x| x.take())
+            {
+                if !popup_grab.has_ended() {
+                    popup_grab.ungrab(PopupUngrabStrategy::All);
+                }
+            }
+        }
+    }
+
+    fn update_active<'a, 'b>(&mut self) {
         // update activate status
-        let focused_windows = seats
+        let focused_windows = self
+            .seats
+            .iter()
             .flat_map(|seat| {
                 if matches!(
                     seat.get_keyboard().unwrap().current_focus(),
@@ -231,20 +232,16 @@ fn raise_with_children(floating_layer: &mut FloatingLayout, focused: &CosmicMapp
 }
 
 impl Common {
-    pub fn set_focus(
-        state: &mut State,
-        target: Option<&KeyboardFocusTarget>,
-        active_seat: &Seat<State>,
-        serial: Option<Serial>,
-    ) {
-        Shell::set_focus(state, target, active_seat, serial);
-        let seats = state.common.seats().cloned().collect::<Vec<_>>();
-        state.common.shell.update_active(seats.iter());
-    }
-
     pub fn refresh_focus(state: &mut State) {
-        let seats = state.common.seats().cloned().collect::<Vec<_>>();
-        for seat in seats {
+        for seat in state
+            .common
+            .shell
+            .seats
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
+        {
             let output = seat.active_output();
             if !state.common.shell.outputs().any(|o| o == &output) {
                 seat.set_active_output(&state.common.shell.outputs().next().unwrap());
@@ -254,7 +251,7 @@ impl Common {
 
             if let Some(target) = last_known_focus {
                 if target.alive() {
-                    if focus_target_is_valid(state, &seat, &output, target) {
+                    if focus_target_is_valid(&mut state.common.shell, &seat, &output, target) {
                         continue; // Focus is valid
                     } else {
                         trace!("Wrong Window, focus fixup");
@@ -312,7 +309,7 @@ impl Common {
                 }
 
                 // update keyboard focus
-                let target = update_focus_target(state, &seat, &output);
+                let target = update_focus_target(&state.common.shell, &seat, &output);
                 if let Some(keyboard) = seat.get_keyboard() {
                     debug!("Restoring focus to {:?}", target.as_ref());
                     keyboard.set_focus(state, target.clone(), SERIAL_COUNTER.next_serial());
@@ -321,25 +318,24 @@ impl Common {
             }
         }
 
-        let seats = state.common.seats().cloned().collect::<Vec<_>>();
-        state.common.shell.update_active(seats.iter())
+        state.common.shell.update_active()
     }
 }
 
 fn focus_target_is_valid(
-    state: &mut State,
+    shell: &mut Shell,
     seat: &Seat<State>,
     output: &Output,
     target: KeyboardFocusTarget,
 ) -> bool {
     // If a session lock is active, only lock surfaces can be focused
-    if state.common.shell.session_lock.is_some() {
+    if shell.session_lock.is_some() {
         return matches!(target, KeyboardFocusTarget::LockSurface(_));
     }
 
     // If an exclusive layer shell surface exists (on any output), only exclusive
     // shell surfaces can have focus, on the highest layer with exclusive surfaces.
-    if let Some(layer) = exclusive_layer_surface_layer(state) {
+    if let Some(layer) = exclusive_layer_surface_layer(shell) {
         return if let KeyboardFocusTarget::LayerSurface(layer_surface) = target {
             let data = layer_surface.cached_state();
             (data.keyboard_interactivity, data.layer) == (KeyboardInteractivity::Exclusive, layer)
@@ -350,9 +346,7 @@ fn focus_target_is_valid(
 
     match target {
         KeyboardFocusTarget::Element(mapped) => {
-            let is_sticky = state
-                .common
-                .shell
+            let is_sticky = shell
                 .workspaces
                 .sets
                 .get(output)
@@ -361,13 +355,13 @@ fn focus_target_is_valid(
                 .mapped()
                 .any(|m| m == &mapped);
 
-            let workspace = state.common.shell.active_space(&output);
+            let workspace = shell.active_space(&output);
             let focus_stack = workspace.focus_stack.get(&seat);
             let is_in_focus_stack = focus_stack.last().map(|m| m == &mapped).unwrap_or(false);
             let has_fullscreen = workspace.get_fullscreen().is_some();
 
             if is_sticky && !is_in_focus_stack {
-                Shell::append_focus_stack(state, &mapped, seat);
+                shell.append_focus_stack(&mapped, seat);
             }
 
             (is_sticky || is_in_focus_stack) && !has_fullscreen
@@ -375,16 +369,14 @@ fn focus_target_is_valid(
         KeyboardFocusTarget::LayerSurface(layer) => {
             layer_map_for_output(&output).layers().any(|l| l == &layer)
         }
-        KeyboardFocusTarget::Group(WindowGroup { node, .. }) => state
-            .common
-            .shell
+        KeyboardFocusTarget::Group(WindowGroup { node, .. }) => shell
             .workspaces
             .active(&output)
             .1
             .tiling_layer
             .has_node(&node),
         KeyboardFocusTarget::Fullscreen(window) => {
-            let workspace = state.common.shell.active_space(&output);
+            let workspace = shell.active_space(&output);
             let focus_stack = workspace.focus_stack.get(&seat);
 
             focus_stack
@@ -399,17 +391,17 @@ fn focus_target_is_valid(
 }
 
 fn update_focus_target(
-    state: &State,
+    shell: &Shell,
     seat: &Seat<State>,
     output: &Output,
 ) -> Option<KeyboardFocusTarget> {
-    if let Some(session_lock) = &state.common.shell.session_lock {
+    if let Some(session_lock) = &shell.session_lock {
         session_lock
             .surfaces
             .get(output)
             .cloned()
             .map(KeyboardFocusTarget::from)
-    } else if let Some(layer) = exclusive_layer_surface_layer(state) {
+    } else if let Some(layer) = exclusive_layer_surface_layer(shell) {
         layer_map_for_output(output)
             .layers()
             .find(|layer_surface| {
@@ -419,12 +411,10 @@ fn update_focus_target(
             })
             .cloned()
             .map(KeyboardFocusTarget::from)
-    } else if let Some(surface) = state.common.shell.active_space(&output).get_fullscreen() {
+    } else if let Some(surface) = shell.active_space(&output).get_fullscreen() {
         Some(KeyboardFocusTarget::Fullscreen(surface.clone()))
     } else {
-        state
-            .common
-            .shell
+        shell
             .active_space(&output)
             .focus_stack
             .get(&seat)
@@ -436,9 +426,9 @@ fn update_focus_target(
 
 // Get the top-most layer, if any, with at least one surface with exclusive keyboard interactivity.
 // Only considers surface in `Top` or `Overlay` layer.
-fn exclusive_layer_surface_layer(state: &State) -> Option<Layer> {
+fn exclusive_layer_surface_layer(shell: &Shell) -> Option<Layer> {
     let mut layer = None;
-    for output in state.common.shell.outputs() {
+    for output in shell.outputs() {
         for layer_surface in layer_map_for_output(output).layers() {
             let data = layer_surface.cached_state();
             if data.keyboard_interactivity == KeyboardInteractivity::Exclusive {

@@ -82,12 +82,10 @@ impl State {
                 }
             }
 
-            let seats = self.common.seats().cloned().collect::<Vec<_>>();
             if let Err(err) = self.backend.apply_config_for_output(
                 output,
                 test_only,
                 &mut self.common.shell,
-                seats.iter().cloned(),
                 &self.common.event_loop_handle,
             ) {
                 warn!(
@@ -109,7 +107,6 @@ impl State {
                             output,
                             false,
                             &mut self.common.shell,
-                            seats.iter().cloned(),
                             &self.common.event_loop_handle,
                         ) {
                             error!(?err, "Failed to reset output config for {}.", output.name(),);

@@ -115,7 +115,7 @@ impl XdgActivationHandler for State {
                         }
                     }
                     ActivationContext::Workspace(workspace) => {
-                        let seat = self.common.last_active_seat().clone();
+                        let seat = self.common.shell.seats.last_active().clone();
                         let current_output = seat.active_output();
 
                         if element.is_minimized() {
@@ -159,7 +159,7 @@ impl XdgActivationHandler for State {
                             .space_for(&element)
                             .map(|w| w.handle.clone())
                         {
-                            Shell::append_focus_stack(self, &element, &seat);
+                            self.common.shell.append_focus_stack(&element, &seat);
                             self.common.shell.set_urgent(&w);
                         }
                     }

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    input::Devices,
     shell::focus::target::{KeyboardFocusTarget, PointerFocusTarget},
+    shell::Devices,
     state::State,
 };
 use smithay::{

@@ -78,7 +78,10 @@ impl State {
         });
         if !initial_configure_sent {
             // compute initial dimensions by mapping
-            Shell::map_layer(self, &surface);
+            if let Some(target) = self.common.shell.map_layer(&surface) {
+                let seat = self.common.shell.seats.last_active().clone();
+                Shell::set_focus(self, Some(&target), &seat, None);
+            }
             surface.layer_surface().send_configure();
         }
         initial_configure_sent
@@ -159,7 +162,14 @@ impl CompositorHandler for State {
                         .unwrap_or(false)
                 {
                     window.on_commit();
-                    Shell::map_window(self, &window);
+                    if let Some(target) = self.common.shell.map_window(
+                        &window,
+                        &self.common.event_loop_handle,
+                        &self.common.theme,
+                    ) {
+                        let seat = self.common.shell.seats.last_active().clone();
+                        Shell::set_focus(self, Some(&target), &seat, None);
+                    }
                 }
             }
         }
@@ -187,7 +197,7 @@ impl CompositorHandler for State {
             // session-lock disallows null commits
 
             // if it was a move-grab?
-            let seat = self.common.last_active_seat().clone();
+            let seat = self.common.shell.seats.last_active().clone();
             let moved_window = seat
                 .user_data()
                 .get::<SeatMoveGrabState>()
