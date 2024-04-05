@@ -13,6 +13,7 @@ use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::{
 };
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
+    backend::input::TouchSlot,
     desktop::{
         layer_map_for_output, space::SpaceElement, LayerSurface, PopupKind, PopupManager,
         WindowSurface, WindowSurfaceType,
@@ -85,7 +86,8 @@ use self::{
         FocusDirection,
     },
     grabs::{
-        tab_items, window_items, Item, MenuGrab, MoveGrab, ReleaseMode, ResizeEdge, ResizeGrab,
+        tab_items, window_items, GrabStartData, Item, MenuGrab, MoveGrab, ReleaseMode, ResizeEdge,
+        ResizeGrab,
     },
     layout::{
         floating::{FloatingLayout, ResizeState},
@@ -103,6 +105,7 @@ pub enum Trigger {
     KeyboardSwap(KeyPattern, NodeDesc),
     KeyboardMove(KeyModifiers),
     Pointer(u32),
+    Touch(TouchSlot),
 }
 
 #[derive(Debug, Clone)]
@@ -1180,7 +1183,7 @@ impl Shell {
                 if let Some(set) = self.workspaces.sets.get_mut(output) {
                     if matches!(
                         self.overview_mode,
-                        OverviewMode::Started(Trigger::Pointer(_), _)
+                        OverviewMode::Started(Trigger::Pointer(_) | Trigger::Touch(_), _)
                     ) {
                         set.workspaces[set.active].tiling_layer.cleanup_drag();
                     }
@@ -1229,7 +1232,7 @@ impl Shell {
                 if let Some(set) = self.workspaces.sets.get_mut(output) {
                     if matches!(
                         self.overview_mode,
-                        OverviewMode::Started(Trigger::Pointer(_), _)
+                        OverviewMode::Started(Trigger::Pointer(_) | Trigger::Touch(_), _)
                     ) {
                         set.workspaces[set.active].tiling_layer.cleanup_drag();
                     }
@@ -2338,7 +2341,7 @@ impl Shell {
         target_stack: bool,
     ) {
         let serial = serial.into();
-        if let Some(start_data) =
+        if let Some(GrabStartData::Pointer(start_data)) =
             check_grab_preconditions(&seat, surface, serial, ReleaseMode::NoMouseButtons)
         {
             if let Some(mapped) = state.common.shell.element_for_surface(surface).cloned() {
@@ -2485,20 +2488,22 @@ impl Shell {
                         state.common.theme.clone(),
                     )
                     .into();
-                    start_data.focus = new_mapped.focus_under((0., 0.).into());
+                    start_data.set_focus(new_mapped.focus_under((0., 0.).into()));
                     new_mapped
                 } else {
                     old_mapped.clone()
                 };
 
-                let button = start_data.button;
+                let trigger = match &start_data {
+                    GrabStartData::Pointer(start_data) => Trigger::Pointer(start_data.button),
+                    GrabStartData::Touch(start_data) => Trigger::Touch(start_data.slot),
+                };
                 let active_hint = if state.common.config.cosmic_conf.active_hint {
                     state.common.theme.cosmic().active_hint as u8
                 } else {
                     0
                 };
-                let pointer = seat.get_pointer().unwrap();
-                let pos = pointer.current_location().as_global();
+                let pos = start_data.location().as_global();
 
                 let (initial_window_location, layer, workspace_handle) =
                     if let Some(workspace) = state.common.shell.space_for_mut(&old_mapped) {
@@ -2608,11 +2613,12 @@ impl Shell {
                         .refresh(&state.common.shell.xdg_activation_state);
                 }
 
+                let is_touch_grab = matches!(start_data, GrabStartData::Touch(_));
+
                 let grab = MoveGrab::new(
                     start_data,
                     mapped,
                     seat,
-                    pos,
                     initial_window_location,
                     active_hint as u8,
                     layer,
@@ -2621,18 +2627,26 @@ impl Shell {
                 );
 
                 if grab.is_tiling_grab() {
-                    state.common.shell.set_overview_mode(
-                        Some(Trigger::Pointer(button)),
-                        state.common.event_loop_handle.clone(),
-                    );
+                    state
+                        .common
+                        .shell
+                        .set_overview_mode(Some(trigger), state.common.event_loop_handle.clone());
                 }
 
-                seat.get_pointer().unwrap().set_grab(
-                    state,
-                    grab,
-                    serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
-                    Focus::Clear,
-                );
+                if is_touch_grab {
+                    seat.get_touch().unwrap().set_grab(
+                        state,
+                        grab,
+                        serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
+                    );
+                } else {
+                    seat.get_pointer().unwrap().set_grab(
+                        state,
+                        grab,
+                        serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
+                        Focus::Clear,
+                    );
+                }
             }
         }
     }
@@ -2828,7 +2842,7 @@ impl Shell {
             return;
         }
 
-        if let Some(mut start_data) =
+        if let Some(GrabStartData::Pointer(mut start_data)) =
             check_grab_preconditions(&seat, &surface, None, ReleaseMode::Click)
         {
             let (floating_layer, geometry) = if let Some(set) = state
@@ -3086,7 +3100,7 @@ impl Shell {
         edges: ResizeEdge,
     ) {
         let serial = serial.into();
-        if let Some(start_data) =
+        if let Some(GrabStartData::Pointer(start_data)) =
             check_grab_preconditions(&seat, surface, serial, ReleaseMode::NoMouseButtons)
         {
             if let Some(mapped) = state.common.shell.element_for_surface(surface).cloned() {
@@ -3384,37 +3398,37 @@ pub fn check_grab_preconditions(
     surface: &WlSurface,
     serial: Option<Serial>,
     release: ReleaseMode,
-) -> Option<PointerGrabStartData<State>> {
+) -> Option<GrabStartData> {
     use smithay::reexports::wayland_server::Resource;
 
-    // TODO: touch resize.
     let pointer = seat.get_pointer().unwrap();
+    let touch = seat.get_touch().unwrap();
 
-    let start_data = pointer
-        .grab_start_data()
-        .unwrap_or_else(|| PointerGrabStartData {
-            focus: pointer.current_focus().map(|f| (f, Point::from((0, 0)))),
-            button: 0x110,
-            location: pointer.current_location(),
-        });
+    let start_data =
+        if serial.map_or(false, |serial| touch.has_grab(serial)) {
+            GrabStartData::Touch(touch.grab_start_data().unwrap())
+        } else {
+            GrabStartData::Pointer(pointer.grab_start_data().unwrap_or_else(|| {
+                PointerGrabStartData {
+                    focus: pointer.current_focus().map(|f| (f, Point::from((0, 0)))),
+                    button: 0x110,
+                    location: pointer.current_location(),
+                }
+            }))
+        };
 
     if release == ReleaseMode::NoMouseButtons {
-        // Check that this surface has a click grab.
+        // Check that this surface has a click or touch down grab.
         if !match serial {
-            Some(serial) => pointer.has_grab(serial),
-            None => pointer.is_grabbed(),
+            Some(serial) => pointer.has_grab(serial) || touch.has_grab(serial),
+            None => pointer.is_grabbed() | touch.is_grabbed(),
         } {
             return None;
         }
 
         // If the focus was for a different surface, ignore the request.
-        if start_data.focus.is_none()
-            || !start_data
-                .focus
-                .as_ref()
-                .unwrap()
-                .0
-                .same_client_as(&surface.id())
+        if start_data.focus().is_none()
+            || !start_data.focus().unwrap().0.same_client_as(&surface.id())
         {
             return None;
         }

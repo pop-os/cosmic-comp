@@ -37,14 +37,15 @@ use smithay::{
             GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab, PointerInnerHandle,
             RelativeMotionEvent,
         },
+        touch::{self, GrabStartData as TouchGrabStartData, TouchGrab, TouchInnerHandle},
         Seat,
     },
     output::Output,
-    utils::{IsAlive, Logical, Point, Rectangle, Scale, SERIAL_COUNTER},
+    utils::{IsAlive, Logical, Point, Rectangle, Scale, Serial, SERIAL_COUNTER},
 };
 use std::{cell::RefCell, collections::HashSet, sync::atomic::Ordering, time::Instant};
 
-use super::ReleaseMode;
+use super::{GrabStartData, ReleaseMode};
 
 pub type SeatMoveGrabState = RefCell<Option<MoveGrabState>>;
 
@@ -58,6 +59,7 @@ pub struct MoveGrabState {
     previous: ManagedLayer,
     snapping_zone: Option<SnappingZone>,
     stacking_indicator: Option<(StackHover, Point<i32, Logical>)>,
+    location: Point<f64, Logical>,
 }
 
 impl MoveGrabState {
@@ -90,10 +92,8 @@ impl MoveGrabState {
             0.4
         };
 
-        let cursor_at = seat.get_pointer().unwrap().current_location();
-
         let mut window_geo = self.window.geometry();
-        window_geo.loc += cursor_at.to_i32_round() + self.window_offset;
+        window_geo.loc += self.location.to_i32_round() + self.window_offset;
         if !output
             .geometry()
             .as_logical()
@@ -106,7 +106,7 @@ impl MoveGrabState {
         let output_scale: Scale<f64> = output.current_scale().fractional_scale().into();
         let scaling_offset =
             self.window_offset - self.window_offset.to_f64().upscale(scale).to_i32_round();
-        let render_location = cursor_at.to_i32_round() - output.geometry().loc.as_logical()
+        let render_location = self.location.to_i32_round() - output.geometry().loc.as_logical()
             + self.window_offset
             - scaling_offset;
 
@@ -319,7 +319,7 @@ impl SnappingZone {
 
 pub struct MoveGrab {
     window: CosmicMapped,
-    start_data: PointerGrabStartData<State>,
+    start_data: GrabStartData,
     seat: Seat<State>,
     cursor_output: Output,
     window_outputs: HashSet<Output>,
@@ -329,28 +329,19 @@ pub struct MoveGrab {
     evlh: NotSend<LoopHandle<'static, State>>,
 }
 
-impl PointerGrab<State> for MoveGrab {
-    fn motion(
-        &mut self,
-        state: &mut State,
-        handle: &mut PointerInnerHandle<'_, State>,
-        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
-        event: &MotionEvent,
-    ) {
-        let Some(current_output) = state
-            .common
-            .shell
-            .outputs()
-            .find(|output| {
-                output
-                    .geometry()
-                    .as_logical()
-                    .overlaps_or_touches(Rectangle::from_loc_and_size(
-                        handle.current_location().to_i32_floor(),
-                        (0, 0),
-                    ))
-            })
-            .cloned()
+impl MoveGrab {
+    fn update_location(&mut self, state: &mut State, location: Point<f64, Logical>) {
+        let Some(current_output) =
+            state
+                .common
+                .shell
+                .outputs()
+                .find(|output| {
+                    output.geometry().as_logical().overlaps_or_touches(
+                        Rectangle::from_loc_and_size(location.to_i32_floor(), (0, 0)),
+                    )
+                })
+                .cloned()
         else {
             return;
         };
@@ -371,8 +362,10 @@ impl PointerGrab<State> for MoveGrab {
             .get::<SeatMoveGrabState>()
             .map(|s| s.borrow_mut());
         if let Some(grab_state) = borrow.as_mut().and_then(|s| s.as_mut()) {
+            grab_state.location = location;
+
             let mut window_geo = self.window.geometry();
-            window_geo.loc += event.location.to_i32_round() + grab_state.window_offset;
+            window_geo.loc += location.to_i32_round() + grab_state.window_offset;
             for output in state.common.shell.outputs() {
                 if let Some(overlap) = output.geometry().as_logical().intersection(window_geo) {
                     if self.window_outputs.insert(output.clone()) {
@@ -432,8 +425,7 @@ impl PointerGrab<State> for MoveGrab {
                 .iter()
                 .find(|&x| {
                     x.contains(
-                        handle
-                            .current_location()
+                        location
                             .as_global()
                             .to_local(&current_output)
                             .to_i32_floor(),
@@ -444,6 +436,18 @@ impl PointerGrab<State> for MoveGrab {
             }
         }
         drop(borrow);
+    }
+}
+
+impl PointerGrab<State> for MoveGrab {
+    fn motion(
+        &mut self,
+        state: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        event: &MotionEvent,
+    ) {
+        self.update_location(state, event.location);
 
         // While the grab is active, no client has pointer focus
         handle.motion(state, None, event);
@@ -570,16 +574,75 @@ impl PointerGrab<State> for MoveGrab {
     }
 
     fn start_data(&self) -> &PointerGrabStartData<State> {
-        &self.start_data
+        match &self.start_data {
+            GrabStartData::Pointer(start_data) => start_data,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl TouchGrab<State> for MoveGrab {
+    fn down(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        event: &touch::DownEvent,
+        seq: Serial,
+    ) {
+        handle.down(data, None, event, seq)
+    }
+
+    fn up(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &touch::UpEvent,
+        seq: Serial,
+    ) {
+        if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
+            handle.unset_grab(data);
+        }
+
+        handle.up(data, event, seq);
+    }
+
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        event: &touch::MotionEvent,
+        seq: Serial,
+    ) {
+        if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
+            self.update_location(data, event.location);
+        }
+
+        handle.motion(data, None, event, seq);
+    }
+
+    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
+        handle.frame(data, seq)
+    }
+
+    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, _seq: Serial) {
+        handle.unset_grab(data);
+    }
+
+    fn start_data(&self) -> &TouchGrabStartData<State> {
+        match &self.start_data {
+            GrabStartData::Touch(start_data) => start_data,
+            _ => unreachable!(),
+        }
     }
 }
 
 impl MoveGrab {
     pub fn new(
-        start_data: PointerGrabStartData<State>,
+        start_data: GrabStartData,
         window: CosmicMapped,
         seat: &Seat<State>,
-        initial_cursor_location: Point<f64, Global>,
         initial_window_location: Point<i32, Global>,
         indicator_thickness: u8,
         previous_layer: ManagedLayer,
@@ -594,13 +657,15 @@ impl MoveGrab {
 
         let grab_state = MoveGrabState {
             window: window.clone(),
-            window_offset: (initial_window_location - initial_cursor_location.to_i32_round())
-                .as_logical(),
+            window_offset: (initial_window_location
+                - start_data.location().as_global().to_i32_round())
+            .as_logical(),
             indicator_thickness,
             start: Instant::now(),
             stacking_indicator: None,
             snapping_zone: None,
             previous: previous_layer,
+            location: start_data.location(),
         };
 
         *seat
