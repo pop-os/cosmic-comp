@@ -938,17 +938,17 @@ where
 }
 
 #[profiling::function]
-pub fn render_output<R, Target, OffTarget>(
+pub fn render_output<'d, R, Target, OffTarget>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,
     target: Target,
-    damage_tracker: &mut OutputDamageTracker,
+    damage_tracker: &'d mut OutputDamageTracker,
     age: usize,
     state: &mut Common,
     output: &Output,
     cursor_mode: CursorMode,
     fps: Option<&mut Fps>,
-) -> Result<RenderOutputResult, RenderError<R>>
+) -> Result<RenderOutputResult<'d>, RenderError<R>>
 where
     R: Renderer
         + ImportAll
@@ -1058,7 +1058,7 @@ where
                                     .bind(render_buffer)
                                     .map_err(RenderError::Rendering)?;
                             }
-                            for rect in damage {
+                            for rect in damage.iter() {
                                 renderer
                                     .blit_from(target.clone(), *rect, *rect, TextureFilter::Nearest)
                                     .map_err(RenderError::Rendering)?;
@@ -1083,11 +1083,11 @@ where
 }
 
 #[profiling::function]
-pub fn render_workspace<R, Target, OffTarget>(
+pub fn render_workspace<'d, R, Target, OffTarget>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,
     target: Target,
-    damage_tracker: &mut OutputDamageTracker,
+    damage_tracker: &'d mut OutputDamageTracker,
     age: usize,
     additional_damage: Option<Vec<Rectangle<i32, Logical>>>,
     state: &mut Common,
@@ -1097,7 +1097,7 @@ pub fn render_workspace<R, Target, OffTarget>(
     cursor_mode: CursorMode,
     mut fps: Option<&mut Fps>,
     exclude_workspace_overview: bool,
-) -> Result<(RenderOutputResult, Vec<CosmicElement<R>>), RenderError<R>>
+) -> Result<(RenderOutputResult<'d>, Vec<CosmicElement<R>>), RenderError<R>>
 where
     R: Renderer
         + ImportAll

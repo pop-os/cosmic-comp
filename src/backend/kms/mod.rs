@@ -1268,6 +1268,7 @@ impl Surface {
                     elements.truncate(old_len);
                 }
 
+                let res = res.map(|(a, b)| (a.cloned(), b));
                 std::mem::drop(damage_tracking);
                 (session, frame, res)
             })
@@ -1295,7 +1296,7 @@ impl Surface {
 
                 if frame_result.needs_sync() {
                     if let PrimaryPlaneElement::Swapchain(elem) = &frame_result.primary_element {
-                        elem.sync.wait();
+                        elem.sync.wait()?;
                     }
                 }
 
@@ -1404,7 +1405,13 @@ impl Surface {
 
                             let transform = self.output.current_transform();
 
-                            match submit_buffer(frame, &mut renderer, transform, damage, sync) {
+                            match submit_buffer(
+                                frame,
+                                &mut renderer,
+                                transform,
+                                damage.as_deref(),
+                                sync,
+                            ) {
                                 Ok(Some((frame, damage))) => {
                                     if frame_result.is_empty {
                                         frame.success(transform, damage, state.clock.now());

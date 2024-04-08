@@ -76,7 +76,7 @@ impl WinitState {
                     .bind()
                     .with_context(|| "Failed to bind display")?;
                 self.backend
-                    .submit(damage.as_deref())
+                    .submit(damage.map(|x| x.as_slice()))
                     .with_context(|| "Failed to submit buffer for display")?;
                 #[cfg(feature = "debug")]
                 self.fps.displayed();

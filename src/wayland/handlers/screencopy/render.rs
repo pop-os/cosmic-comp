@@ -58,7 +58,7 @@ pub fn submit_buffer<R>(
     frame: Frame,
     renderer: &mut R,
     transform: Transform,
-    damage: Option<Vec<Rectangle<i32, Physical>>>,
+    damage: Option<&[Rectangle<i32, Physical>]>,
     sync: SyncPoint,
 ) -> Result<Option<(Frame, Vec<Rectangle<i32, BufferCoords>>)>, <R as Renderer>::Error>
 where
@@ -141,13 +141,13 @@ pub fn render_session<F, R>(
 ) -> Result<Option<(Frame, Vec<Rectangle<i32, BufferCoords>>)>, DTError<R>>
 where
     R: ExportMem,
-    F: FnOnce(
+    F: for<'d> FnOnce(
         &WlBuffer,
         &mut R,
-        &mut OutputDamageTracker,
+        &'d mut OutputDamageTracker,
         usize,
         Vec<Rectangle<i32, BufferCoords>>,
-    ) -> Result<RenderOutputResult, DTError<R>>,
+    ) -> Result<RenderOutputResult<'d>, DTError<R>>,
 {
     #[cfg(feature = "debug")]
     puffin::profile_function!();
@@ -165,8 +165,14 @@ where
     );
 
     match res {
-        Ok(result) => submit_buffer(frame, renderer, transform, result.damage, result.sync)
-            .map_err(DTError::Rendering),
+        Ok(result) => submit_buffer(
+            frame,
+            renderer,
+            transform,
+            result.damage.map(|x| x.as_slice()),
+            result.sync,
+        )
+        .map_err(DTError::Rendering),
         Err(err) => {
             frame.fail(FailureReason::Unknown);
             Err(err)
@@ -214,17 +220,17 @@ pub fn render_workspace_to_buffer(
         return;
     }
 
-    fn render_fn<R>(
+    fn render_fn<'d, R>(
         buffer: &WlBuffer,
         renderer: &mut R,
-        dt: &mut OutputDamageTracker,
+        dt: &'d mut OutputDamageTracker,
         age: usize,
         additional_damage: Vec<Rectangle<i32, BufferCoords>>,
         draw_cursor: bool,
         common: &mut Common,
         output: &Output,
         handle: (WorkspaceHandle, usize),
-    ) -> Result<RenderOutputResult, DTError<R>>
+    ) -> Result<RenderOutputResult<'d>, DTError<R>>
     where
         R: Renderer
             + ImportAll
@@ -475,17 +481,17 @@ pub fn render_window_to_buffer(
         return;
     }
 
-    fn render_fn<R>(
+    fn render_fn<'d, R>(
         buffer: &WlBuffer,
         renderer: &mut R,
-        dt: &mut OutputDamageTracker,
+        dt: &'d mut OutputDamageTracker,
         age: usize,
         additional_damage: Vec<Rectangle<i32, BufferCoords>>,
         draw_cursor: bool,
         common: &mut Common,
         window: &CosmicSurface,
         geometry: Rectangle<i32, Logical>,
-    ) -> Result<RenderOutputResult, DTError<R>>
+    ) -> Result<RenderOutputResult<'d>, DTError<R>>
     where
         R: Renderer
             + ImportAll
@@ -734,15 +740,15 @@ pub fn render_cursor_to_buffer(
         return;
     }
 
-    fn render_fn<R>(
+    fn render_fn<'d, R>(
         buffer: &WlBuffer,
         renderer: &mut R,
-        dt: &mut OutputDamageTracker,
+        dt: &'d mut OutputDamageTracker,
         age: usize,
         additional_damage: Vec<Rectangle<i32, BufferCoords>>,
         common: &mut Common,
         seat: &Seat<State>,
-    ) -> Result<RenderOutputResult, DTError<R>>
+    ) -> Result<RenderOutputResult<'d>, DTError<R>>
     where
         R: Renderer
             + ImportAll
