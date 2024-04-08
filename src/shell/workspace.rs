@@ -31,6 +31,7 @@ use smithay::{
         },
         gles::{GlesError, GlesTexture},
         glow::{GlowFrame, GlowRenderer},
+        utils::DamageSet,
         ImportAll, ImportMem, Renderer,
     },
     desktop::{layer_map_for_output, space::SpaceElement},
@@ -1325,7 +1326,7 @@ where
         &self,
         scale: Scale<f64>,
         commit: Option<smithay::backend::renderer::utils::CommitCounter>,
-    ) -> Vec<Rectangle<i32, smithay::utils::Physical>> {
+    ) -> DamageSet<i32, smithay::utils::Physical> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.damage_since(scale, commit),
             WorkspaceRenderElement::Fullscreen(elem) => elem.damage_since(scale, commit),

@@ -8,7 +8,7 @@ use smithay::{
             Element, Id, RenderElement, UnderlyingStorage,
         },
         glow::{GlowFrame, GlowRenderer},
-        utils::CommitCounter,
+        utils::{CommitCounter, DamageSet},
         Frame, ImportAll, ImportMem, Renderer,
     },
     utils::{Buffer as BufferCoords, Logical, Physical, Point, Rectangle, Scale},
@@ -116,7 +116,7 @@ where
         &self,
         scale: Scale<f64>,
         commit: Option<CommitCounter>,
-    ) -> Vec<Rectangle<i32, Physical>> {
+    ) -> DamageSet<i32, Physical> {
         match self {
             CosmicElement::Workspace(elem) => elem.damage_since(scale, commit),
             CosmicElement::Cursor(elem) => elem.damage_since(scale, commit),
@@ -374,11 +374,11 @@ impl Element for DamageElement {
         &self,
         scale: Scale<f64>,
         _commit: Option<CommitCounter>,
-    ) -> Vec<Rectangle<i32, Physical>> {
-        vec![Rectangle::from_loc_and_size(
+    ) -> DamageSet<i32, Physical> {
+        DamageSet::from_slice(&[Rectangle::from_loc_and_size(
             (0, 0),
             self.geometry(scale).size,
-        )]
+        )])
     }
 }
 

@@ -19,6 +19,7 @@ use smithay::{
             },
             gles::element::PixelShaderElement,
             glow::GlowRenderer,
+            utils::DamageSet,
             ImportAll, ImportMem, Renderer,
         },
     },
@@ -1146,7 +1147,7 @@ where
         &self,
         scale: Scale<f64>,
         commit: Option<smithay::backend::renderer::utils::CommitCounter>,
-    ) -> Vec<Rectangle<i32, Physical>> {
+    ) -> DamageSet<i32, Physical> {
         match self {
             CosmicMappedRenderElement::Stack(elem) => elem.damage_since(scale, commit),
             CosmicMappedRenderElement::Window(elem) => elem.damage_since(scale, commit),
