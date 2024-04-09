@@ -78,6 +78,7 @@ use smithay::{
     wayland::{
         dmabuf::{get_dmabuf, DmabufFeedbackBuilder, DmabufGlobal},
         drm_lease::{DrmLease, DrmLeaseState},
+        drm_syncobj::DrmSyncobjState,
         relative_pointer::RelativePointerManagerState,
         seat::WaylandFocus,
         shm::{shm_format_to_fourcc, with_buffer_contents},
@@ -449,6 +450,9 @@ pub fn init_backend(
 
     // Create relative pointer global
     RelativePointerManagerState::new::<State>(&dh);
+
+    // TODO check if main device supports syncobj eventfd?
+    DrmSyncobjState::new::<State>(&dh);
 
     state.launch_xwayland(Some(primary));
 
