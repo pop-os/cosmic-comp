@@ -258,7 +258,8 @@ pub enum SnappingZone {
 }
 
 const SNAP_RANGE: i32 = 32;
-const SNAP_RANGE_TOP: i32 = 24;
+const SNAP_RANGE_MAXIMIZE: i32 = 22;
+const SNAP_RANGE_TOP: i32 = 16;
 
 impl SnappingZone {
     pub fn contains(
@@ -269,8 +270,8 @@ impl SnappingZone {
         if !output_geometry.contains(point) {
             return false;
         }
-        let top_zone_32 = point.y < output_geometry.loc.y + SNAP_RANGE;
-        let top_zone_56 = point.y < output_geometry.loc.y + SNAP_RANGE + SNAP_RANGE_TOP;
+        let top_zone_32 = point.y < output_geometry.loc.y + SNAP_RANGE_MAXIMIZE;
+        let top_zone_56 = point.y < output_geometry.loc.y + SNAP_RANGE_MAXIMIZE + SNAP_RANGE_TOP;
         let left_zone = point.x < output_geometry.loc.x + SNAP_RANGE;
         let right_zone = point.x > output_geometry.loc.x + output_geometry.size.w - SNAP_RANGE;
         let bottom_zone = point.y > output_geometry.loc.y + output_geometry.size.h - SNAP_RANGE;
