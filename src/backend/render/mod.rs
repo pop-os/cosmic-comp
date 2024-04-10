@@ -390,6 +390,7 @@ pub fn cursor_elements<'frame, R>(
     state: &Common,
     output: &Output,
     mode: CursorMode,
+    exclude_dnd_icon: bool,
 ) -> Vec<CosmicElement<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
@@ -427,12 +428,14 @@ where
             );
         }
 
-        if let Some(wl_surface) = get_dnd_icon(seat) {
-            elements.extend(
-                cursor::draw_dnd_icon(renderer, &wl_surface, location.to_i32_round(), scale)
-                    .into_iter()
-                    .map(CosmicElement::Dnd),
-            );
+        if !exclude_dnd_icon {
+            if let Some(wl_surface) = get_dnd_icon(seat) {
+                elements.extend(
+                    cursor::draw_dnd_icon(renderer, &wl_surface, location.to_i32_round(), scale)
+                        .into_iter()
+                        .map(CosmicElement::Dnd),
+                );
+            }
         }
 
         let theme = state.theme.cosmic();
@@ -481,7 +484,13 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
-    let mut elements = cursor_elements(renderer, state, output, cursor_mode);
+    let mut elements = cursor_elements(
+        renderer,
+        state,
+        output,
+        cursor_mode,
+        exclude_workspace_overview,
+    );
 
     #[cfg(feature = "debug")]
     {
