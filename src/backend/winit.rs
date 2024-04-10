@@ -63,7 +63,7 @@ impl WinitState {
             surface.clone(),
             &mut self.damage_tracker,
             age,
-            &state.shell,
+            &*state.shell.read().unwrap(),
             &state.config,
             &state.theme,
             state.clock.now(),
@@ -201,7 +201,7 @@ pub fn init_backend(
                 }
                 PumpStatus::Exit(_) => {
                     let output = state.backend.winit().output.clone();
-                    state.common.shell.remove_output(&output);
+                    state.common.remove_output(&output);
                     if let Some(token) = token.take() {
                         event_loop_handle.remove(token);
                     }
@@ -226,13 +226,21 @@ pub fn init_backend(
         .common
         .output_configuration_state
         .add_heads(std::iter::once(&output));
-    state.common.shell.add_output(&output);
-    state.common.config.read_outputs(
-        &mut state.common.output_configuration_state,
-        &mut state.backend,
-        &mut state.common.shell,
-        &state.common.event_loop_handle,
-    );
+    {
+        state.common.add_output(&output);
+        let mut shell = state.common.shell.write().unwrap();
+        state.common.config.read_outputs(
+            &mut state.common.output_configuration_state,
+            &mut state.backend,
+            &mut *shell,
+            &state.common.event_loop_handle,
+            &mut state.common.workspace_state.update(),
+            &state.common.xdg_activation_state,
+        );
+
+        std::mem::drop(shell);
+        state.common.refresh();
+    }
     state.launch_xwayland(None);
 
     Ok(())
@@ -299,7 +307,7 @@ impl State {
         // here we can handle special cases for winit inputs
         match event {
             WinitEvent::Focus(true) => {
-                for seat in self.common.shell.seats.iter() {
+                for seat in self.common.shell.read().unwrap().seats.iter() {
                     let devices = seat.user_data().get::<Devices>().unwrap();
                     if devices.has_device(&WinitVirtualDevice) {
                         seat.set_active_output(&self.backend.winit().output);

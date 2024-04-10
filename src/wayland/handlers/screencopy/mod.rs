@@ -52,8 +52,9 @@ impl ScreencopyHandler for State {
                 .upgrade()
                 .and_then(|output| constraints_for_output(&output, &mut self.backend)),
             ImageSourceData::Workspace(handle) => {
-                let workspace = self.common.shell.workspaces.space_for_handle(&handle)?;
-                constraints_for_output(workspace.output(), &mut self.backend)
+                let shell = self.common.shell.read().unwrap();
+                let output = shell.workspaces.space_for_handle(&handle)?.output();
+                constraints_for_output(output, &mut self.backend)
             }
             ImageSourceData::Toplevel(window) => {
                 constraints_for_toplevel(window, &mut self.backend)
@@ -65,6 +66,8 @@ impl ScreencopyHandler for State {
         let size = if let Some((geometry, _)) = self
             .common
             .shell
+            .read()
+            .unwrap()
             .seats
             .last_active()
             .cursor_geometry((0.0, 0.0), self.common.clock.now())
@@ -98,8 +101,8 @@ impl ScreencopyHandler for State {
                 output.add_session(session);
             }
             ImageSourceData::Workspace(handle) => {
-                let Some(workspace) = self.common.shell.workspaces.space_for_handle_mut(&handle)
-                else {
+                let mut shell = self.common.shell.write().unwrap();
+                let Some(workspace) = shell.workspaces.space_for_handle_mut(&handle) else {
                     session.stop();
                     return;
                 };
@@ -127,7 +130,14 @@ impl ScreencopyHandler for State {
     }
     fn new_cursor_session(&mut self, session: CursorSession) {
         let (pointer_loc, pointer_size, hotspot) = {
-            let seat = self.common.shell.seats.last_active();
+            let seat = self
+                .common
+                .shell
+                .read()
+                .unwrap()
+                .seats
+                .last_active()
+                .clone();
 
             let pointer = seat.get_pointer().unwrap();
             let pointer_loc = pointer.current_location().to_i32_round().as_global();
@@ -183,8 +193,8 @@ impl ScreencopyHandler for State {
                 output.add_cursor_session(session);
             }
             ImageSourceData::Workspace(handle) => {
-                let Some(workspace) = self.common.shell.workspaces.space_for_handle_mut(&handle)
-                else {
+                let mut shell = self.common.shell.write().unwrap();
+                let Some(workspace) = shell.workspaces.space_for_handle_mut(&handle) else {
                     session.stop();
                     return;
                 };
@@ -215,9 +225,10 @@ impl ScreencopyHandler for State {
                 workspace.add_cursor_session(session);
             }
             ImageSourceData::Toplevel(mut toplevel) => {
-                if let Some(element) = self.common.shell.element_for_surface(&toplevel) {
+                let shell = self.common.shell.read().unwrap();
+                if let Some(element) = shell.element_for_surface(&toplevel) {
                     if element.has_active_window(&toplevel) {
-                        if let Some(workspace) = self.common.shell.space_for(element) {
+                        if let Some(workspace) = shell.space_for(element) {
                             if let Some(geometry) = workspace.element_geometry(element) {
                                 let mut surface_geo = element.active_window_geometry().as_local();
                                 surface_geo.loc += geometry.loc;
@@ -268,12 +279,20 @@ impl ScreencopyHandler for State {
             return;
         }
 
-        let seat = self.common.shell.seats.last_active().clone();
+        let seat = self
+            .common
+            .shell
+            .read()
+            .unwrap()
+            .seats
+            .last_active()
+            .clone();
         render_cursor_to_buffer(self, &session, frame, &seat);
     }
 
     fn frame_aborted(&mut self, frame: Frame) {
-        for mut output in self.common.shell.outputs().cloned() {
+        let shell = self.common.shell.read().unwrap();
+        for mut output in shell.outputs().cloned() {
             output.remove_frame(&frame)
         }
     }
@@ -286,7 +305,13 @@ impl ScreencopyHandler for State {
                 }
             }
             ImageSourceData::Workspace(handle) => {
-                if let Some(workspace) = self.common.shell.workspaces.space_for_handle_mut(&handle)
+                if let Some(workspace) = self
+                    .common
+                    .shell
+                    .write()
+                    .unwrap()
+                    .workspaces
+                    .space_for_handle_mut(&handle)
                 {
                     workspace.remove_session(session)
                 }
@@ -304,7 +329,13 @@ impl ScreencopyHandler for State {
                 }
             }
             ImageSourceData::Workspace(handle) => {
-                if let Some(workspace) = self.common.shell.workspaces.space_for_handle_mut(&handle)
+                if let Some(workspace) = self
+                    .common
+                    .shell
+                    .write()
+                    .unwrap()
+                    .workspaces
+                    .space_for_handle_mut(&handle)
                 {
                     workspace.remove_cursor_session(session)
                 }

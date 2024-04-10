@@ -16,6 +16,7 @@ use crate::{
         CosmicMapped, CosmicSurface, Direction, ManagedLayer,
     },
     utils::prelude::*,
+    wayland::protocols::toplevel_info::{toplevel_enter_output, toplevel_enter_workspace},
 };
 
 use calloop::LoopHandle;
@@ -326,10 +327,10 @@ pub struct MoveGrab {
 
 impl MoveGrab {
     fn update_location(&mut self, state: &mut State, location: Point<f64, Logical>) {
+        let mut shell = state.common.shell.write().unwrap();
+
         let Some(current_output) =
-            state
-                .common
-                .shell
+            shell
                 .outputs()
                 .find(|output| {
                     output.geometry().as_logical().overlaps_or_touches(
@@ -341,9 +342,7 @@ impl MoveGrab {
             return;
         };
         if self.cursor_output != current_output {
-            state
-                .common
-                .shell
+            shell
                 .workspaces
                 .active_mut(&self.cursor_output)
                 .tiling_layer
@@ -362,7 +361,7 @@ impl MoveGrab {
 
             let mut window_geo = self.window.geometry();
             window_geo.loc += location.to_i32_round() + grab_state.window_offset;
-            for output in state.common.shell.outputs() {
+            for output in shell.outputs() {
                 if let Some(overlap) = output.geometry().as_logical().intersection(window_geo) {
                     if self.window_outputs.insert(output.clone()) {
                         self.window.output_enter(output, overlap);
@@ -380,10 +379,7 @@ impl MoveGrab {
                 }
             }
 
-            let indicator_location = state
-                .common
-                .shell
-                .stacking_indicator(&current_output, self.previous);
+            let indicator_location = shell.stacking_indicator(&current_output, self.previous);
             if indicator_location.is_some() != grab_state.stacking_indicator.is_some() {
                 grab_state.stacking_indicator = indicator_location.map(|geo| {
                     let element = stack_hover(
@@ -695,6 +691,13 @@ impl MoveGrab {
     pub fn is_tiling_grab(&self) -> bool {
         self.previous == ManagedLayer::Tiling
     }
+
+    pub fn is_touch_grab(&self) -> bool {
+        match self.start_data {
+            GrabStartData::Touch(_) => true,
+            GrabStartData::Pointer(_) => false,
+        }
+    }
 }
 
 impl Drop for MoveGrab {
@@ -716,23 +719,17 @@ impl Drop for MoveGrab {
                 if grab_state.window.alive() {
                     let window_location =
                         (grab_state.location.to_i32_round() + grab_state.window_offset).as_global();
+                    let mut shell = state.common.shell.write().unwrap();
 
-                    let workspace_handle = state.common.shell.active_space(&output).handle;
+                    let workspace_handle = shell.active_space(&output).handle;
                     for old_output in window_outputs.iter().filter(|o| *o != &output) {
                         grab_state.window.output_leave(old_output);
                     }
+
                     for (window, _) in grab_state.window.windows() {
-                        state
-                            .common
-                            .shell
-                            .toplevel_info_state
-                            .toplevel_enter_output(&window, &output);
+                        toplevel_enter_output(&window, &output);
                         if previous != ManagedLayer::Sticky {
-                            state
-                                .common
-                                .shell
-                                .toplevel_info_state
-                                .toplevel_enter_workspace(&window, &workspace_handle);
+                            toplevel_enter_workspace(&window, &workspace_handle);
                         }
                     }
 
@@ -742,19 +739,15 @@ impl Drop for MoveGrab {
                                 window_location,
                                 grab_state.window.geometry().size.as_global(),
                             ));
-                            let set = state.common.shell.workspaces.sets.get_mut(&output).unwrap();
+                            let set = shell.workspaces.sets.get_mut(&output).unwrap();
                             let (window, location) = set
                                 .sticky_layer
                                 .drop_window(grab_state.window, window_location.to_local(&output));
 
                             Some((window, location.to_global(&output)))
                         }
-                        ManagedLayer::Tiling
-                            if state.common.shell.active_space(&output).tiling_enabled =>
-                        {
-                            let (window, location) = state
-                                .common
-                                .shell
+                        ManagedLayer::Tiling if shell.active_space(&output).tiling_enabled => {
+                            let (window, location) = shell
                                 .active_space_mut(&output)
                                 .tiling_layer
                                 .drop_window(grab_state.window);
@@ -765,8 +758,8 @@ impl Drop for MoveGrab {
                                 window_location,
                                 grab_state.window.geometry().size.as_global(),
                             ));
-                            let theme = state.common.shell.theme.clone();
-                            let workspace = state.common.shell.active_space_mut(&output);
+                            let theme = shell.theme.clone();
+                            let workspace = shell.active_space_mut(&output);
                             let (window, location) = workspace.floating_layer.drop_window(
                                 grab_state.window,
                                 window_location.to_local(&workspace.output),
@@ -775,7 +768,7 @@ impl Drop for MoveGrab {
                             if previous == ManagedLayer::Floating {
                                 if let Some(sz) = grab_state.snapping_zone {
                                     if sz == SnappingZone::Maximize {
-                                        state.common.shell.maximize_toggle(&window, &seat);
+                                        shell.maximize_toggle(&window, &seat);
                                     } else {
                                         let directions = match sz {
                                             SnappingZone::Maximize => vec![],

@@ -107,9 +107,13 @@ impl Shell {
     ) {
         let element = match target {
             Some(KeyboardFocusTarget::Element(mapped)) => Some(mapped.clone()),
-            Some(KeyboardFocusTarget::Fullscreen(window)) => {
-                state.common.shell.element_for_surface(window).cloned()
-            }
+            Some(KeyboardFocusTarget::Fullscreen(window)) => state
+                .common
+                .shell
+                .read()
+                .unwrap()
+                .element_for_surface(window)
+                .cloned(),
             _ => None,
         };
 
@@ -117,7 +121,12 @@ impl Shell {
             if mapped.is_minimized() {
                 return;
             }
-            state.common.shell.append_focus_stack(&mapped, seat);
+            state
+                .common
+                .shell
+                .write()
+                .unwrap()
+                .append_focus_stack(&mapped, seat);
         }
 
         // update keyboard focus
@@ -130,7 +139,7 @@ impl Shell {
             );
         }
 
-        state.common.shell.update_active();
+        state.common.shell.write().unwrap().update_active();
     }
 
     pub fn append_focus_stack(&mut self, mapped: &CosmicMapped, seat: &Seat<State>) {
@@ -233,25 +242,27 @@ fn raise_with_children(floating_layer: &mut FloatingLayout, focused: &CosmicMapp
 
 impl Common {
     pub fn refresh_focus(state: &mut State) {
-        for seat in state
+        let seats = state
             .common
             .shell
+            .read()
+            .unwrap()
             .seats
             .iter()
             .cloned()
-            .collect::<Vec<_>>()
-            .into_iter()
-        {
+            .collect::<Vec<_>>();
+        for seat in seats.into_iter() {
+            let mut shell = state.common.shell.write().unwrap();
             let output = seat.active_output();
-            if !state.common.shell.outputs().any(|o| o == &output) {
-                seat.set_active_output(&state.common.shell.outputs().next().unwrap());
+            if !shell.outputs().any(|o| o == &output) {
+                seat.set_active_output(&shell.outputs().next().unwrap());
                 continue;
             }
             let last_known_focus = ActiveFocus::get(&seat);
 
             if let Some(target) = last_known_focus {
                 if target.alive() {
-                    if focus_target_is_valid(&mut state.common.shell, &seat, &output, target) {
+                    if focus_target_is_valid(&mut *shell, &seat, &output, target) {
                         continue; // Focus is valid
                     } else {
                         trace!("Wrong Window, focus fixup");
@@ -266,6 +277,8 @@ impl Common {
                             if !popup_grab.has_ended() {
                                 if let Some(new) = popup_grab.current_grab() {
                                     trace!("restore focus to previous popup grab");
+                                    std::mem::drop(shell);
+
                                     if let Some(keyboard) = seat.get_keyboard() {
                                         keyboard.set_focus(
                                             state,
@@ -285,7 +298,7 @@ impl Common {
                     trace!("Surface dead, focus fixup");
                 }
             } else {
-                let workspace = state.common.shell.active_space(&output);
+                let workspace = shell.active_space(&output);
                 let focus_stack = workspace.focus_stack.get(&seat);
 
                 if focus_stack.last().is_none() {
@@ -309,7 +322,9 @@ impl Common {
                 }
 
                 // update keyboard focus
-                let target = update_focus_target(&state.common.shell, &seat, &output);
+                let target = update_focus_target(&*shell, &seat, &output);
+                std::mem::drop(shell);
+
                 if let Some(keyboard) = seat.get_keyboard() {
                     debug!("Restoring focus to {:?}", target.as_ref());
                     keyboard.set_focus(state, target.clone(), SERIAL_COUNTER.next_serial());
@@ -318,7 +333,7 @@ impl Common {
             }
         }
 
-        state.common.shell.update_active()
+        state.common.shell.write().unwrap().update_active()
     }
 }
 

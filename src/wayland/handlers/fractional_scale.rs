@@ -41,11 +41,21 @@ impl FractionalScaleHandler for State {
                 .or_else(|| {
                     self.common
                         .shell
+                        .read()
+                        .unwrap()
                         .visible_output_for_surface(&surface)
                         .cloned()
                 })
         })
-        .unwrap_or_else(|| self.common.shell.seats.last_active().active_output());
+        .unwrap_or_else(|| {
+            self.common
+                .shell
+                .read()
+                .unwrap()
+                .seats
+                .last_active()
+                .active_output()
+        });
 
         with_states(&surface, |states| {
             with_fractional_scale(states, |fractional_scale| {

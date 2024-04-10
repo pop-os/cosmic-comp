@@ -3,6 +3,7 @@
 use crate::{
     shell::{element::CosmicWindow, grabs::ReleaseMode, CosmicMapped, CosmicSurface, ManagedLayer},
     utils::prelude::*,
+    wayland::protocols::toplevel_info::{toplevel_enter_output, toplevel_enter_workspace},
 };
 use smithay::{
     delegate_xdg_shell,
@@ -29,7 +30,7 @@ use smithay::{
 use std::cell::Cell;
 use tracing::warn;
 
-use super::{compositor::client_compositor_state, toplevel_management::ToplevelManagementExt};
+use super::{compositor::client_compositor_state, toplevel_management::minimize_rectangle};
 
 pub mod popup;
 
@@ -37,13 +38,14 @@ pub type PopupGrabData = Cell<Option<PopupGrab<State>>>;
 
 impl XdgShellHandler for State {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
-        &mut self.common.shell.xdg_shell_state
+        &mut self.common.xdg_shell_state
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
-        let seat = self.common.shell.seats.last_active().clone();
+        let mut shell = self.common.shell.write().unwrap();
+        let seat = shell.seats.last_active().clone();
         let window = CosmicSurface::from(surface);
-        self.common.shell.pending_windows.push((window, seat, None));
+        shell.pending_windows.push((window, seat, None));
         // We will position the window after the first commit, when we know its size hints
     }
 
@@ -55,11 +57,14 @@ impl XdgShellHandler for State {
 
         if surface.get_parent_surface().is_some() {
             // let other shells deal with their popups
-            self.common.shell.unconstrain_popup(&surface);
+            self.common
+                .shell
+                .read()
+                .unwrap()
+                .unconstrain_popup(&surface);
 
             if surface.send_configure().is_ok() {
                 self.common
-                    .shell
                     .popups
                     .track_popup(PopupKind::from(surface))
                     .unwrap();
@@ -70,16 +75,18 @@ impl XdgShellHandler for State {
     fn grab(&mut self, surface: PopupSurface, seat: WlSeat, serial: Serial) {
         let seat = Seat::from_resource(&seat).unwrap();
         let kind = PopupKind::Xdg(surface);
-        if let Some(root) = find_popup_root_surface(&kind)
-            .ok()
-            .and_then(|root| self.common.shell.element_for_surface(&root))
-        {
-            let target = root.clone().into();
-            let ret = self
-                .common
+        let maybe_root = find_popup_root_surface(&kind).ok().and_then(|root| {
+            self.common
                 .shell
-                .popups
-                .grab_popup(target, kind, &seat, serial);
+                .read()
+                .unwrap()
+                .element_for_surface(&root)
+                .cloned()
+        });
+
+        if let Some(root) = maybe_root {
+            let target = root.into();
+            let ret = self.common.popups.grab_popup(target, kind, &seat, serial);
 
             if let Ok(mut grab) = ret {
                 if let Some(keyboard) = seat.get_keyboard() {
@@ -128,7 +135,11 @@ impl XdgShellHandler for State {
             state.positioner = positioner;
         });
 
-        self.common.shell.unconstrain_popup(&surface);
+        self.common
+            .shell
+            .read()
+            .unwrap()
+            .unconstrain_popup(&surface);
         surface.send_repositioned(token);
         if let Err(err) = surface.send_configure() {
             warn!(
@@ -140,14 +151,26 @@ impl XdgShellHandler for State {
 
     fn move_request(&mut self, surface: ToplevelSurface, seat: WlSeat, serial: Serial) {
         let seat = Seat::from_resource(&seat).unwrap();
-        Shell::move_request(
-            self,
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some((grab, focus)) = shell.move_request(
             surface.wl_surface(),
             &seat,
             serial,
             ReleaseMode::NoMouseButtons,
             false,
-        )
+            &self.common.config,
+            &self.common.event_loop_handle,
+            &self.common.xdg_activation_state,
+        ) {
+            std::mem::drop(shell);
+            if grab.is_touch_grab() {
+                seat.get_touch().unwrap().set_grab(self, grab, serial);
+            } else {
+                seat.get_pointer()
+                    .unwrap()
+                    .set_grab(self, grab, serial, focus)
+            }
+        }
     }
 
     fn resize_request(
@@ -158,70 +181,60 @@ impl XdgShellHandler for State {
         edges: xdg_toplevel::ResizeEdge,
     ) {
         let seat = Seat::from_resource(&seat).unwrap();
-        Shell::resize_request(self, surface.wl_surface(), &seat, serial, edges.into())
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some((grab, focus)) =
+            shell.resize_request(surface.wl_surface(), &seat, serial, edges.into())
+        {
+            std::mem::drop(shell);
+            if grab.is_touch_grab() {
+                seat.get_touch().unwrap().set_grab(self, grab, serial)
+            } else {
+                seat.get_pointer()
+                    .unwrap()
+                    .set_grab(self, grab, serial, focus)
+            }
+        }
     }
 
     fn minimize_request(&mut self, surface: ToplevelSurface) {
-        if let Some(mapped) = self
-            .common
-            .shell
-            .element_for_surface(surface.wl_surface())
-            .cloned()
-        {
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(mapped) = shell.element_for_surface(surface.wl_surface()).cloned() {
             if !mapped.is_stack()
                 || mapped.active_window().wl_surface().as_ref() == Some(surface.wl_surface())
             {
-                self.common.shell.minimize_request(&mapped)
+                shell.minimize_request(&mapped)
             }
         }
     }
 
     fn maximize_request(&mut self, surface: ToplevelSurface) {
-        if let Some(mapped) = self
-            .common
-            .shell
-            .element_for_surface(surface.wl_surface())
-            .cloned()
-        {
-            let seat = self.common.shell.seats.last_active().clone();
-            self.common.shell.maximize_request(&mapped, &seat)
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(mapped) = shell.element_for_surface(surface.wl_surface()).cloned() {
+            let seat = shell.seats.last_active().clone();
+            shell.maximize_request(&mapped, &seat)
         }
     }
 
     fn unmaximize_request(&mut self, surface: ToplevelSurface) {
-        if let Some(mapped) = self
-            .common
-            .shell
-            .element_for_surface(surface.wl_surface())
-            .cloned()
-        {
-            self.common.shell.unmaximize_request(&mapped);
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(mapped) = shell.element_for_surface(surface.wl_surface()).cloned() {
+            shell.unmaximize_request(&mapped);
         }
     }
 
     fn fullscreen_request(&mut self, surface: ToplevelSurface, output: Option<WlOutput>) {
-        let seat = self.common.shell.seats.last_active().clone();
+        let mut shell = self.common.shell.write().unwrap();
+        let seat = shell.seats.last_active().clone();
         let active_output = seat.active_output();
         let output = output
             .as_ref()
             .and_then(Output::from_resource)
             .unwrap_or_else(|| active_output.clone());
 
-        if let Some(mapped) = self
-            .common
-            .shell
-            .element_for_surface(surface.wl_surface())
-            .cloned()
-        {
-            let from = self
-                .common
-                .shell
-                .toplevel_management_state
-                .minimize_rectangle(&output, &mapped.active_window());
+        if let Some(mapped) = shell.element_for_surface(surface.wl_surface()).cloned() {
+            let from = minimize_rectangle(&output, &mapped.active_window());
 
-            if let Some(set) = self
-                .common
-                .shell
+            if let Some(set) = shell
                 .workspaces
                 .sets
                 .values_mut()
@@ -248,19 +261,13 @@ impl XdgShellHandler for State {
                     mapped
                 };
 
-                let workspace_handle = self.common.shell.active_space(&output).handle.clone();
+                let workspace_handle = shell.active_space(&output).handle.clone();
                 for (window, _) in mapped.windows() {
-                    self.common
-                        .shell
-                        .toplevel_info_state
-                        .toplevel_enter_output(&window, &output);
-                    self.common
-                        .shell
-                        .toplevel_info_state
-                        .toplevel_enter_workspace(&window, &workspace_handle);
+                    toplevel_enter_output(&window, &output);
+                    toplevel_enter_workspace(&window, &workspace_handle);
                 }
 
-                let workspace = self.common.shell.active_space_mut(&output);
+                let workspace = shell.active_space_mut(&output);
                 workspace.floating_layer.map(mapped.clone(), None);
 
                 workspace.fullscreen_request(
@@ -269,7 +276,7 @@ impl XdgShellHandler for State {
                     from,
                     &seat,
                 );
-            } else if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
+            } else if let Some(workspace) = shell.space_for_mut(&mapped) {
                 if workspace.output != output {
                     let (mapped, layer) = if mapped
                         .stack_ref()
@@ -300,19 +307,13 @@ impl XdgShellHandler for State {
                     };
                     let handle = workspace.handle.clone();
 
-                    let workspace_handle = self.common.shell.active_space(&output).handle.clone();
+                    let workspace_handle = shell.active_space(&output).handle.clone();
                     for (window, _) in mapped.windows() {
-                        self.common
-                            .shell
-                            .toplevel_info_state
-                            .toplevel_enter_output(&window, &output);
-                        self.common
-                            .shell
-                            .toplevel_info_state
-                            .toplevel_enter_workspace(&window, &workspace_handle);
+                        toplevel_enter_output(&window, &output);
+                        toplevel_enter_workspace(&window, &workspace_handle);
                     }
 
-                    let workspace = self.common.shell.active_space_mut(&output);
+                    let workspace = shell.active_space_mut(&output);
                     workspace.floating_layer.map(mapped.clone(), None);
 
                     workspace.fullscreen_request(
@@ -330,9 +331,7 @@ impl XdgShellHandler for State {
                 }
             }
         } else {
-            if let Some(o) = self
-                .common
-                .shell
+            if let Some(o) = shell
                 .pending_windows
                 .iter_mut()
                 .find(|(s, _, _)| s.wl_surface().as_ref() == Some(surface.wl_surface()))
@@ -344,29 +343,23 @@ impl XdgShellHandler for State {
     }
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
-        if let Some(mapped) = self
-            .common
-            .shell
-            .element_for_surface(surface.wl_surface())
-            .cloned()
-        {
-            if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(mapped) = shell.element_for_surface(surface.wl_surface()).cloned() {
+            if let Some(workspace) = shell.space_for_mut(&mapped) {
                 let (window, _) = mapped
                     .windows()
                     .find(|(w, _)| w.wl_surface().as_ref() == Some(surface.wl_surface()))
                     .unwrap();
                 if let Some((layer, previous_workspace)) = workspace.unfullscreen_request(&window) {
                     let old_handle = workspace.handle.clone();
-                    let new_workspace_handle = self
-                        .common
-                        .shell
+                    let new_workspace_handle = shell
                         .workspaces
                         .space_for_handle(&previous_workspace)
                         .is_some()
                         .then_some(previous_workspace)
                         .unwrap_or(old_handle); // if the workspace doesn't exist anymore, we can still remap on the right layer
 
-                    self.common.shell.remap_unfullscreened_window(
+                    shell.remap_unfullscreened_window(
                         mapped,
                         &old_handle,
                         &new_workspace_handle,
@@ -378,20 +371,26 @@ impl XdgShellHandler for State {
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
-        let seat = self.common.shell.seats.last_active().clone();
-        self.common.shell.unmap_surface(surface.wl_surface(), &seat);
+        let (output, clients) = {
+            let mut shell = self.common.shell.write().unwrap();
+            let seat = shell.seats.last_active().clone();
+            shell.unmap_surface(
+                surface.wl_surface(),
+                &seat,
+                &mut self.common.toplevel_info_state,
+            );
 
-        let output = self
-            .common
-            .shell
-            .visible_output_for_surface(surface.wl_surface())
-            .cloned();
-        if let Some(output) = output.as_ref() {
-            self.common.shell.refresh_active_space(output);
-        }
+            let output = shell
+                .visible_output_for_surface(surface.wl_surface())
+                .cloned();
+            if let Some(output) = output.as_ref() {
+                shell.refresh_active_space(output, &self.common.xdg_activation_state);
+            }
 
-        // animations might be unblocked now
-        let clients = self.common.shell.update_animations();
+            // animations might be unblocked now
+            (output, shell.update_animations())
+        };
+
         {
             let dh = self.common.display_handle.clone();
             for client in clients.values() {
@@ -418,7 +417,23 @@ impl XdgShellHandler for State {
         })
         .unwrap_or_default()
         .loc;
-        Shell::menu_request(self, surface.wl_surface(), &seat, serial, location, false)
+
+        let shell = self.common.shell.read().unwrap();
+        let res = shell.menu_request(
+            surface.wl_surface(),
+            &seat,
+            serial,
+            location,
+            false,
+            &self.common.config,
+            &self.common.event_loop_handle,
+        );
+        if let Some((grab, focus)) = res {
+            std::mem::drop(shell);
+            seat.get_pointer()
+                .unwrap()
+                .set_grab(self, grab, serial, focus)
+        }
     }
 }
 

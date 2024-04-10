@@ -3,10 +3,13 @@
 use crate::{
     shell::Shell,
     state::{BackendData, State},
-    wayland::protocols::output_configuration::OutputConfigurationState,
+    wayland::protocols::{
+        output_configuration::OutputConfigurationState, workspace::WorkspaceUpdateGuard,
+    },
 };
 use cosmic_config::{ConfigGet, CosmicConfigEntry};
 use serde::{Deserialize, Serialize};
+use smithay::wayland::xdg_activation::XdgActivationState;
 pub use smithay::{
     backend::input::KeyState,
     input::keyboard::{keysyms as KeySyms, Keysym, ModifiersState},
@@ -277,6 +280,8 @@ impl Config {
         backend: &mut BackendData,
         shell: &mut Shell,
         loop_handle: &LoopHandle<'_, State>,
+        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+        xdg_activation_state: &XdgActivationState,
     ) {
         let outputs = output_state.outputs().collect::<Vec<_>>();
         let mut infos = outputs
@@ -308,9 +313,14 @@ impl Config {
                     .get::<RefCell<OutputConfig>>()
                     .unwrap()
                     .borrow_mut() = output_config;
-                if let Err(err) =
-                    backend.apply_config_for_output(&output, false, shell, loop_handle)
-                {
+                if let Err(err) = backend.apply_config_for_output(
+                    &output,
+                    false,
+                    shell,
+                    loop_handle,
+                    workspace_state,
+                    xdg_activation_state,
+                ) {
                     warn!(
                         ?err,
                         "Failed to set new config for output {}.",
@@ -339,9 +349,14 @@ impl Config {
                         .get::<RefCell<OutputConfig>>()
                         .unwrap()
                         .borrow_mut() = output_config;
-                    if let Err(err) =
-                        backend.apply_config_for_output(&output, false, shell, loop_handle)
-                    {
+                    if let Err(err) = backend.apply_config_for_output(
+                        &output,
+                        false,
+                        shell,
+                        loop_handle,
+                        workspace_state,
+                        xdg_activation_state,
+                    ) {
                         error!(?err, "Failed to reset config for output {}.", output.name());
                     } else {
                         if enabled {
@@ -357,9 +372,14 @@ impl Config {
             self.write_outputs(output_state.outputs());
         } else {
             for output in outputs {
-                if let Err(err) =
-                    backend.apply_config_for_output(&output, false, shell, loop_handle)
-                {
+                if let Err(err) = backend.apply_config_for_output(
+                    &output,
+                    false,
+                    shell,
+                    loop_handle,
+                    workspace_state,
+                    xdg_activation_state,
+                ) {
                     warn!(
                         ?err,
                         "Failed to set new config for output {}.",
@@ -518,7 +538,15 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
         match key.as_str() {
             "xkb_config" => {
                 let value = get_config::<XkbConfig>(&config, "xkb_config");
-                let seats = state.common.shell.seats.iter().cloned().collect::<Vec<_>>();
+                let seats = state
+                    .common
+                    .shell
+                    .read()
+                    .unwrap()
+                    .seats
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>();
                 for seat in seats.into_iter() {
                     if let Some(keyboard) = seat.get_keyboard() {
                         if let Err(err) = keyboard.set_xkb_config(state, xkb_config_to_wl(&value)) {
@@ -547,27 +575,41 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
             "workspaces" => {
                 state.common.config.cosmic_conf.workspaces =
                     get_config::<WorkspaceConfig>(&config, "workspaces");
-                state.common.shell.update_config(&state.common.config);
+                state.common.update_config();
             }
             "autotile" => {
                 let new = get_config::<bool>(&config, "autotile");
                 if new != state.common.config.cosmic_conf.autotile {
                     state.common.config.cosmic_conf.autotile = new;
-                    state.common.shell.update_autotile(new);
+
+                    let mut shell = state.common.shell.write().unwrap();
+                    let shell_ref = &mut *shell;
+                    shell_ref.workspaces.update_autotile(
+                        new,
+                        &mut state.common.workspace_state.update(),
+                        shell_ref.seats.iter(),
+                    );
                 }
             }
             "autotile_behavior" => {
                 let new = get_config::<TileBehavior>(&config, "autotile_behavior");
                 if new != state.common.config.cosmic_conf.autotile_behavior {
                     state.common.config.cosmic_conf.autotile_behavior = new;
-                    state.common.shell.update_autotile_behavior(new);
+
+                    let mut shell = state.common.shell.write().unwrap();
+                    let shell_ref = &mut *shell;
+                    shell_ref.workspaces.update_autotile_behavior(
+                        new,
+                        &mut state.common.workspace_state.update(),
+                        shell_ref.seats.iter(),
+                    );
                 }
             }
             "active_hint" => {
                 let new = get_config::<bool>(&config, "active_hint");
                 if new != state.common.config.cosmic_conf.active_hint {
                     state.common.config.cosmic_conf.active_hint = new;
-                    state.common.shell.update_config(&state.common.config);
+                    state.common.update_config();
                 }
             }
             _ => {}

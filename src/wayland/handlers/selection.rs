@@ -20,7 +20,6 @@ impl SelectionHandler for State {
     ) {
         if let Some(xwm) = self
             .common
-            .shell
             .xwayland_state
             .as_mut()
             .and_then(|xstate| xstate.xwm.as_mut())
@@ -45,7 +44,6 @@ impl SelectionHandler for State {
     ) {
         if let Some(xwm) = self
             .common
-            .shell
             .xwayland_state
             .as_mut()
             .and_then(|xstate| xstate.xwm.as_mut())

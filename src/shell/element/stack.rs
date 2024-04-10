@@ -5,7 +5,7 @@ use crate::{
         focus::{target::PointerFocusTarget, FocusDirection},
         grabs::{ReleaseMode, ResizeEdge},
         layout::tiling::NodeDesc,
-        Direction, Shell,
+        Direction,
     },
     state::State,
     utils::{
@@ -664,14 +664,25 @@ impl Program for CosmicStackInternal {
                     let active = self.active.load(Ordering::SeqCst);
                     if let Some(surface) = self.windows.lock().unwrap()[active].wl_surface() {
                         loop_handle.insert_idle(move |state| {
-                            Shell::move_request(
-                                state,
+                            let res = state.common.shell.write().unwrap().move_request(
                                 &surface,
                                 &seat,
                                 serial,
                                 ReleaseMode::NoMouseButtons,
                                 false,
+                                &state.common.config,
+                                &state.common.event_loop_handle,
+                                &state.common.xdg_activation_state,
                             );
+                            if let Some((grab, focus)) = res {
+                                if grab.is_touch_grab() {
+                                    seat.get_touch().unwrap().set_grab(state, grab, serial);
+                                } else {
+                                    seat.get_pointer()
+                                        .unwrap()
+                                        .set_grab(state, grab, serial, focus);
+                                }
+                            }
                         });
                     }
                 }
@@ -683,7 +694,13 @@ impl Program for CosmicStackInternal {
                 *self.potential_drag.lock().unwrap() = None;
                 if let Some(surface) = self.windows.lock().unwrap().get(idx).cloned() {
                     loop_handle.insert_idle(move |state| {
-                        if let Some(mapped) = state.common.shell.element_for_surface(&surface) {
+                        if let Some(mapped) = state
+                            .common
+                            .shell
+                            .read()
+                            .unwrap()
+                            .element_for_surface(&surface)
+                        {
                             mapped.stack_ref().unwrap().set_active(&surface);
                         }
                     });
@@ -703,11 +720,10 @@ impl Program for CosmicStackInternal {
                     let active = self.active.load(Ordering::SeqCst);
                     if let Some(surface) = self.windows.lock().unwrap()[active].wl_surface() {
                         loop_handle.insert_idle(move |state| {
-                            if let Some(mapped) =
-                                state.common.shell.element_for_surface(&surface).cloned()
-                            {
+                            let shell = state.common.shell.read().unwrap();
+                            if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
                                 let position = if let Some((output, set)) =
-                                    state.common.shell.workspaces.sets.iter().find(|(_, set)| {
+                                    shell.workspaces.sets.iter().find(|(_, set)| {
                                         set.sticky_layer.mapped().any(|m| m == &mapped)
                                     }) {
                                     set.sticky_layer
@@ -715,9 +731,7 @@ impl Program for CosmicStackInternal {
                                         .unwrap()
                                         .loc
                                         .to_global(output)
-                                } else if let Some(workspace) =
-                                    state.common.shell.space_for_mut(&mapped)
-                                {
+                                } else if let Some(workspace) = shell.space_for(&mapped) {
                                     let Some(elem_geo) = workspace.element_geometry(&mapped) else {
                                         return;
                                     };
@@ -732,14 +746,22 @@ impl Program for CosmicStackInternal {
                                     .current_location()
                                     .to_i32_round();
                                 cursor.y -= TAB_HEIGHT;
-                                Shell::menu_request(
-                                    state,
+                                let res = shell.menu_request(
                                     &surface,
                                     &seat,
                                     serial,
                                     cursor - position.as_logical(),
                                     true,
+                                    &state.common.config,
+                                    &state.common.event_loop_handle,
                                 );
+
+                                std::mem::drop(shell);
+                                if let Some((grab, focus)) = res {
+                                    seat.get_pointer()
+                                        .unwrap()
+                                        .set_grab(state, grab, serial, focus);
+                                }
                             }
                         });
                     }
@@ -749,28 +771,36 @@ impl Program for CosmicStackInternal {
                 if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
                     if let Some(surface) = self.windows.lock().unwrap()[idx].wl_surface() {
                         loop_handle.insert_idle(move |state| {
-                            if let Some(mapped) =
-                                state.common.shell.element_for_surface(&surface).cloned()
-                            {
-                                if let Some(workspace) = state.common.shell.space_for_mut(&mapped) {
+                            let shell = state.common.shell.read().unwrap();
+                            if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
+                                if let Some(workspace) = shell.space_for(&mapped) {
                                     let Some(elem_geo) = workspace.element_geometry(&mapped) else {
                                         return;
                                     };
                                     let position = elem_geo.loc.to_global(&workspace.output);
+
                                     let mut cursor = seat
                                         .get_pointer()
                                         .unwrap()
                                         .current_location()
                                         .to_i32_round();
                                     cursor.y -= TAB_HEIGHT;
-                                    Shell::menu_request(
-                                        state,
+                                    let res = shell.menu_request(
                                         &surface,
                                         &seat,
                                         serial,
                                         cursor - position.as_logical(),
                                         false,
+                                        &state.common.config,
+                                        &state.common.event_loop_handle,
                                     );
+
+                                    std::mem::drop(shell);
+                                    if let Some((grab, focus)) = res {
+                                        seat.get_pointer()
+                                            .unwrap()
+                                            .set_grab(state, grab, serial, focus);
+                                    }
                                 }
                             }
                         });
@@ -1175,18 +1205,30 @@ impl PointerTarget<State> for CosmicStack {
                     .with_program(|p| p.windows.lock().unwrap().get(dragged_out).cloned())
                 {
                     let seat = seat.clone();
+                    let serial = event.serial;
                     surface.try_force_undecorated(false);
                     surface.send_configure();
                     if let Some(surface) = surface.wl_surface() {
                         let _ = data.common.event_loop_handle.insert_idle(move |state| {
-                            Shell::move_request(
-                                state,
+                            let res = state.common.shell.write().unwrap().move_request(
                                 &surface,
                                 &seat,
-                                None,
+                                serial,
                                 ReleaseMode::NoMouseButtons,
                                 true,
-                            )
+                                &state.common.config,
+                                &state.common.event_loop_handle,
+                                &state.common.xdg_activation_state,
+                            );
+                            if let Some((grab, focus)) = res {
+                                if grab.is_touch_grab() {
+                                    seat.get_touch().unwrap().set_grab(state, grab, serial);
+                                } else {
+                                    seat.get_pointer()
+                                        .unwrap()
+                                        .set_grab(state, grab, serial, focus);
+                                }
+                            }
                         });
                     }
                 }
@@ -1220,8 +1262,7 @@ impl PointerTarget<State> for CosmicStack {
                     return;
                 };
                 self.0.loop_handle().insert_idle(move |state| {
-                    Shell::resize_request(
-                        state,
+                    let res = state.common.shell.write().unwrap().resize_request(
                         &surface,
                         &seat,
                         serial,
@@ -1236,7 +1277,16 @@ impl PointerTarget<State> for CosmicStack {
                             Focus::ResizeRight => ResizeEdge::RIGHT,
                             Focus::Header => unreachable!(),
                         },
-                    )
+                    );
+                    if let Some((grab, focus)) = res {
+                        if grab.is_touch_grab() {
+                            seat.get_touch().unwrap().set_grab(state, grab, serial);
+                        } else {
+                            seat.get_pointer()
+                                .unwrap()
+                                .set_grab(state, grab, serial, focus);
+                        }
+                    }
                 });
             }
             None => {}
@@ -1279,14 +1329,25 @@ impl PointerTarget<State> for CosmicStack {
                 surface.send_configure();
                 if let Some(surface) = surface.wl_surface() {
                     let _ = data.common.event_loop_handle.insert_idle(move |state| {
-                        Shell::move_request(
-                            state,
+                        let res = state.common.shell.write().unwrap().move_request(
                             &surface,
                             &seat,
-                            None,
+                            serial,
                             ReleaseMode::NoMouseButtons,
                             true,
-                        )
+                            &state.common.config,
+                            &state.common.event_loop_handle,
+                            &state.common.xdg_activation_state,
+                        );
+                        if let Some((grab, focus)) = res {
+                            if grab.is_touch_grab() {
+                                seat.get_touch().unwrap().set_grab(state, grab, serial);
+                            } else {
+                                seat.get_pointer()
+                                    .unwrap()
+                                    .set_grab(state, grab, serial, focus);
+                            }
+                        }
                     });
                 }
             }

@@ -132,7 +132,7 @@ impl PointerFocusTarget {
         }
     }
 
-    pub fn toplevel(&self, data: &mut State) -> Option<CosmicSurface> {
+    pub fn toplevel(&self, shell: &Shell) -> Option<CosmicSurface> {
         match &self {
             PointerFocusTarget::WlSurface {
                 toplevel: Some(PointerFocusToplevel::Surface(surface)),
@@ -142,12 +142,7 @@ impl PointerFocusTarget {
                 toplevel: Some(PointerFocusToplevel::Popup(PopupKind::Xdg(popup))),
                 ..
             } => get_popup_toplevel(popup)
-                .and_then(|s| {
-                    data.common
-                        .shell
-                        .element_for_surface(&s)
-                        .map(|mapped| (mapped, s))
-                })
+                .and_then(|s| shell.element_for_surface(&s).map(|mapped| (mapped, s)))
                 .and_then(|(m, s)| {
                     m.windows()
                         .find(|(w, _)| w.wl_surface().map(|s2| s == s2).unwrap_or(false))
@@ -210,7 +205,8 @@ impl IsAlive for KeyboardFocusTarget {
 
 impl PointerTarget<State> for PointerFocusTarget {
     fn enter(&self, seat: &Seat<State>, data: &mut State, event: &PointerMotionEvent) {
-        if let Some(element) = self.toplevel(data) {
+        let toplevel = self.toplevel(&*data.common.shell.read().unwrap());
+        if let Some(element) = toplevel {
             for session in element.cursor_sessions() {
                 session.set_cursor_pos(Some(
                     event
@@ -238,7 +234,8 @@ impl PointerTarget<State> for PointerFocusTarget {
         }
     }
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &PointerMotionEvent) {
-        if let Some(element) = self.toplevel(data) {
+        let toplevel = self.toplevel(&*data.common.shell.read().unwrap());
+        if let Some(element) = toplevel {
             for session in element.cursor_sessions() {
                 session.set_cursor_pos(Some(
                     event
@@ -308,7 +305,8 @@ impl PointerTarget<State> for PointerFocusTarget {
         }
     }
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
-        if let Some(element) = self.toplevel(data) {
+        let toplevel = self.toplevel(&*data.common.shell.read().unwrap());
+        if let Some(element) = toplevel {
             for session in element.cursor_sessions() {
                 session.set_cursor_pos(None);
                 session.set_cursor_hotspot((0, 0));

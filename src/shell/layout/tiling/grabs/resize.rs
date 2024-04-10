@@ -218,7 +218,8 @@ impl ResizeForkGrab {
         let delta = location - self.last_loc.as_logical();
 
         if let Some(output) = self.output.upgrade() {
-            let tiling_layer = &mut data.common.shell.active_space_mut(&output).tiling_layer;
+            let mut shell = data.common.shell.write().unwrap();
+            let tiling_layer = &mut shell.active_space_mut(&output).tiling_layer;
             let gaps = tiling_layer.gaps();
 
             let tree = &mut tiling_layer.queue.trees.back_mut().unwrap().0;
@@ -320,6 +321,13 @@ impl ResizeForkGrab {
             }
         }
         false
+    }
+
+    pub fn is_touch_grab(&self) -> bool {
+        match self.start_data {
+            GrabStartData::Touch(_) => true,
+            GrabStartData::Pointer(_) => false,
+        }
     }
 }
 

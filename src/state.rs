@@ -4,12 +4,17 @@ use crate::{
     backend::{kms::KmsState, winit::WinitState, x11::X11State},
     config::{Config, OutputConfig},
     input::gestures::GestureState,
-    shell::{grabs::SeatMoveGrabState, SeatExt, Shell},
+    shell::{grabs::SeatMoveGrabState, CosmicSurface, SeatExt, Shell},
     wayland::protocols::{
-        drm::WlDrmState, image_source::ImageSourceState,
-        output_configuration::OutputConfigurationState, screencopy::ScreencopyState,
-        workspace::WorkspaceClientState,
+        drm::WlDrmState,
+        image_source::ImageSourceState,
+        output_configuration::OutputConfigurationState,
+        screencopy::ScreencopyState,
+        toplevel_info::ToplevelInfoState,
+        toplevel_management::{ManagementCapabilities, ToplevelManagementState},
+        workspace::{WorkspaceClientState, WorkspaceState, WorkspaceUpdateGuard},
     },
+    xwayland::XWaylandState,
 };
 use anyhow::Context;
 use i18n_embed::{
@@ -41,11 +46,13 @@ use smithay::{
             take_presentation_feedback_surface_tree, update_surface_primary_scanout_output,
             with_surfaces_surface_tree, OutputPresentationFeedback,
         },
+        PopupManager,
     },
     input::{pointer::CursorImageStatus, SeatState},
     output::{Mode as OutputMode, Output, Scale},
     reexports::{
         calloop::{LoopHandle, LoopSignal},
+        wayland_protocols::xdg::shell::server::xdg_toplevel::WmCapabilities,
         wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration_manager::Mode,
         wayland_server::{
             backend::{ClientData, ClientId, DisconnectReason},
@@ -71,12 +78,17 @@ use smithay::{
             wlr_data_control::DataControlState,
         },
         session_lock::SessionLockManagerState,
-        shell::{kde::decoration::KdeDecorationState, xdg::decoration::XdgDecorationState},
+        shell::{
+            kde::decoration::KdeDecorationState,
+            wlr_layer::WlrLayerShellState,
+            xdg::{decoration::XdgDecorationState, XdgShellState},
+        },
         shm::ShmState,
         tablet_manager::TabletManagerState,
         text_input::TextInputManagerState,
         viewporter::ViewporterState,
         virtual_keyboard::VirtualKeyboardManagerState,
+        xdg_activation::XdgActivationState,
         xwayland_keyboard_grab::XWaylandKeyboardGrabState,
     },
     xwayland::XWaylandClientData,
@@ -84,6 +96,7 @@ use smithay::{
 use time::UtcOffset;
 use tracing::error;
 
+use std::sync::{Arc, RwLock};
 use std::{cell::RefCell, ffi::OsString, time::Duration};
 use std::{collections::VecDeque, time::Instant};
 
@@ -147,7 +160,8 @@ pub struct Common {
     pub event_loop_handle: LoopHandle<'static, State>,
     pub event_loop_signal: LoopSignal,
 
-    pub shell: Shell,
+    pub popups: PopupManager,
+    pub shell: Arc<RwLock<Shell>>,
 
     pub clock: Clock<Monotonic>,
     pub should_stop: bool,
@@ -179,6 +193,15 @@ pub struct Common {
     pub viewporter_state: ViewporterState,
     pub kde_decoration_state: KdeDecorationState,
     pub xdg_decoration_state: XdgDecorationState,
+
+    // shell-related wayland state
+    pub xdg_shell_state: XdgShellState,
+    pub layer_shell_state: WlrLayerShellState,
+    pub toplevel_info_state: ToplevelInfoState<State, CosmicSurface>,
+    pub toplevel_management_state: ToplevelManagementState,
+    pub xdg_activation_state: XdgActivationState,
+    pub workspace_state: WorkspaceState<State>,
+    pub xwayland_state: Option<XWaylandState>,
 }
 
 #[derive(Debug)]
@@ -225,11 +248,18 @@ impl BackendData {
         test_only: bool,
         shell: &mut Shell,
         loop_handle: &LoopHandle<'_, State>,
+        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+        xdg_activation_state: &XdgActivationState,
     ) -> Result<(), anyhow::Error> {
         let result = match self {
-            BackendData::Kms(ref mut state) => {
-                state.apply_config_for_output(output, shell, test_only, loop_handle)
-            }
+            BackendData::Kms(ref mut state) => state.apply_config_for_output(
+                output,
+                shell,
+                test_only,
+                loop_handle,
+                workspace_state,
+                xdg_activation_state,
+            ),
             BackendData::Winit(ref mut state) => state.apply_config_for_output(output, test_only),
             BackendData::X11(ref mut state) => state.apply_config_for_output(output, test_only),
             _ => unreachable!("No backend set when applying output config"),
@@ -389,7 +419,36 @@ impl State {
             DataControlState::new::<Self, _>(dh, Some(&primary_selection_state), |_| true)
         });
 
-        let shell = Shell::new(&config, dh);
+        let shell = Arc::new(RwLock::new(Shell::new(&config)));
+
+        let layer_shell_state = WlrLayerShellState::new_with_filter::<State, _>(
+            dh,
+            client_should_see_privileged_protocols,
+        );
+        let xdg_shell_state = XdgShellState::new_with_capabilities::<State>(
+            dh,
+            [
+                WmCapabilities::Fullscreen,
+                WmCapabilities::Maximize,
+                WmCapabilities::Minimize,
+                WmCapabilities::WindowMenu,
+            ],
+        );
+        let xdg_activation_state = XdgActivationState::new::<State>(dh);
+        let toplevel_info_state =
+            ToplevelInfoState::new(dh, client_should_see_privileged_protocols);
+        let toplevel_management_state = ToplevelManagementState::new::<State, _>(
+            dh,
+            vec![
+                ManagementCapabilities::Close,
+                ManagementCapabilities::Activate,
+                ManagementCapabilities::Maximize,
+                ManagementCapabilities::Minimize,
+                ManagementCapabilities::MoveToWorkspace,
+            ],
+            client_should_see_privileged_protocols,
+        );
+        let workspace_state = WorkspaceState::new(dh, client_should_see_privileged_protocols);
 
         if let Err(err) = crate::dbus::init(&handle) {
             tracing::warn!(?err, "Failed to initialize dbus handlers");
@@ -403,6 +462,7 @@ impl State {
                 event_loop_handle: handle,
                 event_loop_signal: signal,
 
+                popups: PopupManager::default(),
                 shell,
 
                 local_offset,
@@ -441,6 +501,13 @@ impl State {
                 wl_drm_state,
                 kde_decoration_state,
                 xdg_decoration_state,
+                xdg_shell_state,
+                layer_shell_state,
+                toplevel_info_state,
+                toplevel_management_state,
+                xdg_activation_state,
+                workspace_state,
+                xwayland_state: None,
             },
             backend: BackendData::Unset,
         }
@@ -495,8 +562,9 @@ impl Common {
     ) {
         let time = self.clock.now();
         let throttle = Some(Duration::from_secs(1));
+        let shell = self.shell.read().unwrap();
 
-        if let Some(session_lock) = self.shell.session_lock.as_ref() {
+        if let Some(session_lock) = shell.session_lock.as_ref() {
             if let Some(lock_surface) = session_lock.surfaces.get(output) {
                 with_surfaces_surface_tree(lock_surface.wl_surface(), |_surface, states| {
                     with_fractional_scale(states, |fraction_scale| {
@@ -532,8 +600,7 @@ impl Common {
             }
         }
 
-        for seat in self
-            .shell
+        for seat in shell
             .seats
             .iter()
             .filter(|seat| &seat.active_output() == output)
@@ -595,7 +662,7 @@ impl Common {
             }
         }
 
-        self.shell
+        shell
             .workspaces
             .sets
             .get(output)
@@ -636,7 +703,7 @@ impl Common {
                 }
             });
 
-        let active = self.shell.active_space(output);
+        let active = shell.active_space(output);
         active.mapped().for_each(|mapped| {
             let window = mapped.active_window();
             window.with_surfaces(|surface, states| {
@@ -675,8 +742,7 @@ impl Common {
             window.send_frame(output, time, throttle, |_, _| None);
         });
 
-        for space in self
-            .shell
+        for space in shell
             .workspaces
             .spaces_for_output(output)
             .filter(|w| w.handle != active.handle)
@@ -691,7 +757,7 @@ impl Common {
             })
         }
 
-        self.shell.override_redirect_windows.iter().for_each(|or| {
+        shell.override_redirect_windows.iter().for_each(|or| {
             if let Some(wl_surface) = or.wl_surface() {
                 with_surfaces_surface_tree(&wl_surface, |surface, states| {
                     let primary_scanout_output = update_surface_primary_scanout_output(
@@ -780,8 +846,9 @@ impl Common {
         render_element_states: &RenderElementStates,
     ) -> OutputPresentationFeedback {
         let mut output_presentation_feedback = OutputPresentationFeedback::new(output);
+        let shell = self.shell.read().unwrap();
 
-        let active = self.shell.active_space(output);
+        let active = shell.active_space(output);
         active.mapped().for_each(|mapped| {
             mapped.active_window().take_presentation_feedback(
                 &mut output_presentation_feedback,
@@ -792,7 +859,7 @@ impl Common {
             );
         });
 
-        self.shell.override_redirect_windows.iter().for_each(|or| {
+        shell.override_redirect_windows.iter().for_each(|or| {
             if let Some(wl_surface) = or.wl_surface() {
                 take_presentation_feedback_surface_tree(
                     &wl_surface,

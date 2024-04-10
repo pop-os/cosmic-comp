@@ -206,6 +206,8 @@ pub trait SeatExt {
     fn active_output(&self) -> Output;
     fn set_active_output(&self, output: &Output);
     fn devices(&self) -> &Devices;
+    fn supressed_keys(&self) -> &SupressedKeys;
+    fn modifiers_shortcut_queue(&self) -> &ModifiersShortcutQueue;
 
     fn cursor_geometry(
         &self,
@@ -237,6 +239,14 @@ impl SeatExt for Seat<State> {
 
     fn devices(&self) -> &Devices {
         self.user_data().get::<Devices>().unwrap()
+    }
+
+    fn supressed_keys(&self) -> &SupressedKeys {
+        self.user_data().get::<SupressedKeys>().unwrap()
+    }
+
+    fn modifiers_shortcut_queue(&self) -> &ModifiersShortcutQueue {
+        self.user_data().get::<ModifiersShortcutQueue>().unwrap()
     }
 
     fn cursor_geometry(

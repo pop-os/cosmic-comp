@@ -1,3 +1,6 @@
+use crate::{shell::ActivationKey, state::ClientState, utils::prelude::*};
+use crate::{state::State, wayland::protocols::workspace::WorkspaceHandle};
+use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State as WState;
 use smithay::{
     delegate_xdg_activation,
     input::Seat,
@@ -8,9 +11,6 @@ use smithay::{
 };
 use tracing::debug;
 
-use crate::{shell::ActivationKey, state::ClientState, utils::prelude::*};
-use crate::{state::State, wayland::protocols::workspace::WorkspaceHandle};
-
 #[derive(Debug, Clone, Copy)]
 pub enum ActivationContext {
     UrgentOnly,
@@ -19,7 +19,7 @@ pub enum ActivationContext {
 
 impl XdgActivationHandler for State {
     fn activation_state(&mut self) -> &mut XdgActivationState {
-        &mut self.common.shell.xdg_activation_state
+        &mut self.common.xdg_activation_state
     }
 
     fn token_created(&mut self, token: XdgActivationToken, data: XdgActivationTokenData) -> bool {
@@ -41,7 +41,8 @@ impl XdgActivationHandler for State {
         {
             if let Some(seat) = data.serial.and_then(|(_, seat)| Seat::from_resource(&seat)) {
                 let output = seat.active_output();
-                let workspace = self.common.shell.active_space_mut(&output);
+                let mut shell = self.common.shell.write().unwrap();
+                let workspace = shell.active_space_mut(&output);
                 workspace.pending_tokens.insert(token.clone());
                 let handle = workspace.handle;
                 data.user_data
@@ -84,7 +85,8 @@ impl XdgActivationHandler for State {
 
         if valid {
             let output = seat.active_output();
-            let workspace = self.common.shell.active_space_mut(&output);
+            let mut shell = self.common.shell.write().unwrap();
+            let workspace = shell.active_space_mut(&output);
             workspace.pending_tokens.insert(token.clone());
             let handle = workspace.handle;
             data.user_data
@@ -105,24 +107,24 @@ impl XdgActivationHandler for State {
         surface: WlSurface,
     ) {
         if let Some(context) = token_data.user_data.get::<ActivationContext>() {
-            if let Some(element) = self.common.shell.element_for_surface(&surface).cloned() {
+            let mut shell = self.common.shell.write().unwrap();
+            if let Some(element) = shell.element_for_surface(&surface).cloned() {
                 match context {
                     ActivationContext::UrgentOnly => {
-                        if let Some((workspace, _output)) =
-                            self.common.shell.workspace_for_surface(&surface)
-                        {
-                            self.common.shell.set_urgent(&workspace);
+                        if let Some((workspace, _output)) = shell.workspace_for_surface(&surface) {
+                            let mut workspace_guard = self.common.workspace_state.update();
+                            workspace_guard.add_workspace_state(&workspace, WState::Urgent);
                         }
                     }
                     ActivationContext::Workspace(workspace) => {
-                        let seat = self.common.shell.seats.last_active().clone();
+                        let seat = shell.seats.last_active().clone();
                         let current_output = seat.active_output();
 
                         if element.is_minimized() {
-                            self.common.shell.unminimize_request(&element, &seat);
+                            shell.unminimize_request(&element, &seat);
                         }
 
-                        let current_workspace = self.common.shell.active_space_mut(&current_output);
+                        let current_workspace = shell.active_space_mut(&current_output);
 
                         let in_current_workspace = current_workspace
                             .floating_layer
@@ -152,21 +154,19 @@ impl XdgActivationHandler for State {
 
                         if workspace == &current_workspace.handle || in_current_workspace {
                             let target = element.into();
+
+                            std::mem::drop(shell);
                             Shell::set_focus(self, Some(&target), &seat, None);
-                        } else if let Some(w) = self
-                            .common
-                            .shell
-                            .space_for(&element)
-                            .map(|w| w.handle.clone())
+                        } else if let Some(w) = shell.space_for(&element).map(|w| w.handle.clone())
                         {
-                            self.common.shell.append_focus_stack(&element, &seat);
-                            self.common.shell.set_urgent(&w);
+                            shell.append_focus_stack(&element, &seat);
+                            let mut workspace_guard = self.common.workspace_state.update();
+                            workspace_guard.add_workspace_state(&w, WState::Urgent);
                         }
                     }
                 }
             } else {
-                self.common
-                    .shell
+                shell
                     .pending_activations
                     .insert(ActivationKey::Wayland(surface), context.clone());
             }

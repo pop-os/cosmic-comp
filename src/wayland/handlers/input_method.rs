@@ -12,12 +12,7 @@ use tracing::warn;
 
 impl InputMethodHandler for State {
     fn new_popup(&mut self, surface: PopupSurface) {
-        if let Err(err) = self
-            .common
-            .shell
-            .popups
-            .track_popup(PopupKind::from(surface))
-        {
+        if let Err(err) = self.common.popups.track_popup(PopupKind::from(surface)) {
             warn!("Failed to track popup: {}", err);
         }
     }
@@ -31,6 +26,8 @@ impl InputMethodHandler for State {
     fn parent_geometry(&self, parent: &WlSurface) -> Rectangle<i32, smithay::utils::Logical> {
         self.common
             .shell
+            .read()
+            .unwrap()
             .element_for_surface(parent)
             .map(|e| e.geometry())
             .unwrap_or_default()
