@@ -18,8 +18,10 @@ impl SessionLockHandler for State {
     }
 
     fn lock(&mut self, locker: SessionLocker) {
+        let mut shell = self.common.shell.write().unwrap();
+
         // Reject lock if sesion lock exists and is still valid
-        if let Some(session_lock) = self.common.shell.session_lock.as_ref() {
+        if let Some(session_lock) = shell.session_lock.as_ref() {
             if self
                 .common
                 .display_handle
@@ -32,28 +34,30 @@ impl SessionLockHandler for State {
 
         let ext_session_lock = locker.ext_session_lock().clone();
         locker.lock();
-        self.common.shell.session_lock = Some(SessionLock {
+        shell.session_lock = Some(SessionLock {
             ext_session_lock,
             surfaces: HashMap::new(),
         });
 
-        for output in self.common.shell.outputs() {
+        for output in shell.outputs() {
             self.backend
                 .schedule_render(&self.common.event_loop_handle, &output);
         }
     }
 
     fn unlock(&mut self) {
-        self.common.shell.session_lock = None;
+        let mut shell = self.common.shell.write().unwrap();
+        shell.session_lock = None;
 
-        for output in self.common.shell.outputs() {
+        for output in shell.outputs() {
             self.backend
                 .schedule_render(&self.common.event_loop_handle, &output);
         }
     }
 
     fn new_surface(&mut self, lock_surface: LockSurface, wl_output: WlOutput) {
-        if let Some(session_lock) = &mut self.common.shell.session_lock {
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(session_lock) = &mut shell.session_lock {
             if let Some(output) = Output::from_resource(&wl_output) {
                 lock_surface.with_pending_state(|states| {
                     let size = output.geometry().size;

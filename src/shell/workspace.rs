@@ -12,7 +12,7 @@ use crate::{
     wayland::{
         handlers::screencopy::ScreencopySessions,
         protocols::{
-            toplevel_info::ToplevelInfoState,
+            toplevel_info::{toplevel_enter_output, toplevel_leave_output},
             workspace::{WorkspaceHandle, WorkspaceUpdateGuard},
         },
     },
@@ -365,23 +365,19 @@ impl Workspace {
         &self.output
     }
 
-    pub fn set_output(
-        &mut self,
-        output: &Output,
-        toplevel_info: &mut ToplevelInfoState<State, CosmicSurface>,
-    ) {
+    pub fn set_output(&mut self, output: &Output) {
         self.tiling_layer.set_output(output);
         self.floating_layer.set_output(output);
         for mapped in self.mapped() {
             for (surface, _) in mapped.windows() {
-                toplevel_info.toplevel_leave_output(&surface, &self.output);
-                toplevel_info.toplevel_enter_output(&surface, output);
+                toplevel_leave_output(&surface, &self.output);
+                toplevel_enter_output(&surface, output);
             }
         }
         for window in self.minimized_windows.iter() {
             for (surface, _) in window.window.windows() {
-                toplevel_info.toplevel_leave_output(&surface, &self.output);
-                toplevel_info.toplevel_enter_output(&surface, output);
+                toplevel_leave_output(&surface, &self.output);
+                toplevel_enter_output(&surface, output);
             }
         }
         let output_name = output.name();

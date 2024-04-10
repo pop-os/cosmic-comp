@@ -189,18 +189,16 @@ pub fn render_workspace_to_buffer(
     #[cfg(feature = "debug")]
     puffin::profile_function!();
 
-    let Some(workspace) = state.common.shell.workspaces.space_for_handle(&handle) else {
+    let shell = state.common.shell.read().unwrap();
+    let Some(workspace) = shell.workspaces.space_for_handle(&handle) else {
         session.stop();
         return;
     };
 
     let output = workspace.output().clone();
-    let idx = state
-        .common
-        .shell
-        .workspaces
-        .idx_for_handle(&output, &handle)
-        .unwrap();
+    let idx = shell.workspaces.idx_for_handle(&output, &handle).unwrap();
+    std::mem::drop(shell);
+
     let mode = output
         .current_mode()
         .map(|mode| mode.size.to_logical(1).to_buffer(1, Transform::Normal));
@@ -286,7 +284,7 @@ pub fn render_workspace_to_buffer(
                 dt,
                 age,
                 additional_damage,
-                &common.shell,
+                &*common.shell.read().unwrap(),
                 &common.config,
                 &common.theme,
                 common.clock.now(),
@@ -314,7 +312,7 @@ pub fn render_workspace_to_buffer(
                 dt,
                 age,
                 additional_damage,
-                &common.shell,
+                &*common.shell.read().unwrap(),
                 &common.config,
                 &common.theme,
                 common.clock.now(),
@@ -535,21 +533,23 @@ pub fn render_window_to_buffer(
                 .map(Into::<WindowCaptureElement<R>>::into),
         );
 
-        let seat = common.shell.seats.last_active().clone();
-        if let Some(location) = {
-            if let Some(mapped) = common.shell.element_for_surface(window) {
-                mapped.cursor_position(&seat).and_then(|mut p| {
-                    p -= mapped.active_window_offset().to_f64();
-                    if p.x < 0. || p.y < 0. {
-                        None
-                    } else {
-                        Some(p)
-                    }
-                })
-            } else {
-                None
-            }
-        } {
+        let shell = common.shell.read().unwrap();
+        let seat = shell.seats.last_active().clone();
+        let location = if let Some(mapped) = shell.element_for_surface(window) {
+            mapped.cursor_position(&seat).and_then(|mut p| {
+                p -= mapped.active_window_offset().to_f64();
+                if p.x < 0. || p.y < 0. {
+                    None
+                } else {
+                    Some(p)
+                }
+            })
+        } else {
+            None
+        };
+        std::mem::drop(shell);
+
+        if let Some(location) = location {
             if draw_cursor {
                 elements.extend(
                     cursor::draw_cursor(

@@ -222,7 +222,7 @@ impl Surface {
             buffer.clone(),
             &mut self.damage_tracker,
             age as usize,
-            &state.shell,
+            &*state.shell.read().unwrap(),
             &state.config,
             &state.theme,
             state.clock.now(),
@@ -364,13 +364,21 @@ pub fn init_backend(
         .common
         .output_configuration_state
         .add_heads(std::iter::once(&output));
-    state.common.shell.add_output(&output);
-    state.common.config.read_outputs(
-        &mut state.common.output_configuration_state,
-        &mut state.backend,
-        &mut state.common.shell,
-        &state.common.event_loop_handle,
-    );
+    {
+        state.common.add_output(&output);
+        let mut shell = state.common.shell.write().unwrap();
+        state.common.config.read_outputs(
+            &mut state.common.output_configuration_state,
+            &mut state.backend,
+            &mut *shell,
+            &state.common.event_loop_handle,
+            &mut state.common.workspace_state.update(),
+            &state.common.xdg_activation_state,
+        );
+
+        std::mem::drop(shell);
+        state.common.refresh();
+    }
     state.launch_xwayland(None);
 
     event_loop
@@ -395,7 +403,7 @@ pub fn init_backend(
                     .surfaces
                     .retain(|s| s.window.id() != window_id);
                 for output in outputs_removed.into_iter() {
-                    state.common.shell.remove_output(&output);
+                    state.common.remove_output(&output);
                 }
             }
             X11Event::Resized {
@@ -504,7 +512,7 @@ impl State {
                         .unwrap();
 
                     let device = event.device();
-                    for seat in self.common.shell.seats.iter() {
+                    for seat in self.common.shell.read().unwrap().seats.iter() {
                         let devices = seat.user_data().get::<Devices>().unwrap();
                         if devices.has_device(&device) {
                             seat.set_active_output(&output);
@@ -518,7 +526,7 @@ impl State {
 
         self.process_input_event(event, false);
         // TODO actually figure out the output
-        for output in self.common.shell.outputs() {
+        for output in self.common.shell.read().unwrap().outputs() {
             self.backend.x11().schedule_render(output);
         }
     }

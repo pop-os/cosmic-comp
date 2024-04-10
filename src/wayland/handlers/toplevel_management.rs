@@ -15,15 +15,15 @@ use crate::{
     wayland::protocols::{
         toplevel_info::ToplevelInfoHandler,
         toplevel_management::{
-            delegate_toplevel_management, ManagementWindow, ToplevelManagementHandler,
-            ToplevelManagementState,
+            delegate_toplevel_management, toplevel_rectangle_for, ManagementWindow,
+            ToplevelManagementHandler, ToplevelManagementState,
         },
     },
 };
 
 impl ToplevelManagementHandler for State {
     fn toplevel_management_state(&mut self) -> &mut ToplevelManagementState {
-        &mut self.common.shell.toplevel_management_state
+        &mut self.common.toplevel_management_state
     }
 
     fn activate(
@@ -33,17 +33,10 @@ impl ToplevelManagementHandler for State {
         seat: Option<Seat<Self>>,
     ) {
         self.unminimize(dh, window);
-        for output in self
-            .common
-            .shell
-            .outputs()
-            .cloned()
-            .collect::<Vec<_>>()
-            .iter()
-        {
-            let maybe = self
-                .common
-                .shell
+
+        let mut shell = self.common.shell.write().unwrap();
+        for output in shell.outputs().cloned().collect::<Vec<_>>().iter() {
+            let maybe = shell
                 .workspaces
                 .spaces_for_output(output)
                 .enumerate()
@@ -53,19 +46,22 @@ impl ToplevelManagementHandler for State {
                         .any(|w| &w == window)
                 });
             if let Some((idx, workspace)) = maybe {
-                let seat = seat.unwrap_or(self.common.shell.seats.last_active().clone());
+                let seat = seat.unwrap_or(shell.seats.last_active().clone());
                 let mapped = workspace
                     .mapped()
                     .find(|m| m.windows().any(|(w, _)| &w == window))
                     .unwrap()
                     .clone();
 
-                let _ = self.common.shell.activate(
+                let _ = shell.activate(
                     &output,
                     idx as usize,
                     WorkspaceDelta::new_shortcut(),
+                    &mut self.common.workspace_state.update(),
                 ); // TODO: Move pointer?
                 mapped.focus_window(window);
+
+                std::mem::drop(shell);
                 Shell::set_focus(self, Some(&mapped.clone().into()), &seat, None);
                 return;
             }
@@ -83,16 +79,12 @@ impl ToplevelManagementHandler for State {
         workspace: ZcosmicWorkspaceHandleV1,
         _output: Output,
     ) {
-        let Some(to_handle) = self
-            .common
-            .shell
-            .workspace_state
-            .get_workspace_handle(&workspace)
-        else {
+        let Some(to_handle) = self.common.workspace_state.get_workspace_handle(&workspace) else {
             return;
         };
 
-        let from_workspace = self.common.shell.workspaces.spaces().find(|w| {
+        let mut shell = self.common.shell.write().unwrap();
+        let from_workspace = shell.workspaces.spaces().find(|w| {
             w.mapped()
                 .flat_map(|m| m.windows().map(|(s, _)| s))
                 .any(|w| &w == window)
@@ -104,15 +96,18 @@ impl ToplevelManagementHandler for State {
                 .unwrap()
                 .clone();
             let from_handle = from_workspace.handle;
-            let seat = self.common.shell.seats.last_active().clone();
-            if let Some((target, _)) = self.common.shell.move_window(
+            let seat = shell.seats.last_active().clone();
+            let res = shell.move_window(
                 Some(&seat),
                 &mapped,
                 &from_handle,
                 &to_handle,
                 false,
                 None,
-            ) {
+                &mut self.common.workspace_state.update(),
+            );
+            if let Some((target, _)) = res {
+                std::mem::drop(shell);
                 Shell::set_focus(self, Some(&target), &seat, None);
             }
             return;
@@ -125,29 +120,19 @@ impl ToplevelManagementHandler for State {
         window: &<Self as ToplevelInfoHandler>::Window,
         output: Option<Output>,
     ) {
-        let seat = self.common.shell.seats.last_active().clone();
-        if let Some(mapped) = self.common.shell.element_for_surface(window).cloned() {
+        let mut shell = self.common.shell.write().unwrap();
+        let seat = shell.seats.last_active().clone();
+        if let Some(mapped) = shell.element_for_surface(window).cloned() {
             if let Some(output) = output {
-                let from = self
-                    .common
-                    .shell
-                    .toplevel_management_state
-                    .minimize_rectangle(&output, window);
-                let workspace = self.common.shell.workspaces.active_mut(&output);
+                let from = minimize_rectangle(&output, window);
+                let workspace = shell.workspaces.active_mut(&output);
                 workspace.fullscreen_request(window, None, from, &seat);
-            } else if let Some((output, handle)) = self
-                .common
-                .shell
+            } else if let Some((output, handle)) = shell
                 .space_for(&mapped)
                 .map(|workspace| (workspace.output.clone(), workspace.handle.clone()))
             {
-                let from = self
-                    .common
-                    .shell
-                    .toplevel_management_state
-                    .minimize_rectangle(&output, window);
-                self.common
-                    .shell
+                let from = minimize_rectangle(&output, window);
+                shell
                     .workspaces
                     .space_for_handle_mut(&handle)
                     .unwrap()
@@ -161,20 +146,19 @@ impl ToplevelManagementHandler for State {
         _dh: &DisplayHandle,
         window: &<Self as ToplevelInfoHandler>::Window,
     ) {
-        if let Some(mapped) = self.common.shell.element_for_surface(window).cloned() {
-            if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(mapped) = shell.element_for_surface(window).cloned() {
+            if let Some(workspace) = shell.space_for_mut(&mapped) {
                 if let Some((layer, previous_workspace)) = workspace.unfullscreen_request(window) {
                     let old_handle = workspace.handle.clone();
-                    let new_workspace_handle = self
-                        .common
-                        .shell
+                    let new_workspace_handle = shell
                         .workspaces
                         .space_for_handle(&previous_workspace)
                         .is_some()
                         .then_some(previous_workspace)
                         .unwrap_or(old_handle); // if the workspace doesn't exist anymore, we can still remap on the right layer
 
-                    self.common.shell.remap_unfullscreened_window(
+                    shell.remap_unfullscreened_window(
                         mapped,
                         &old_handle,
                         &new_workspace_handle,
@@ -186,30 +170,34 @@ impl ToplevelManagementHandler for State {
     }
 
     fn maximize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
-        if let Some(mapped) = self.common.shell.element_for_surface(window).cloned() {
-            let seat = self.common.shell.seats.last_active().clone();
-            self.common.shell.maximize_request(&mapped, &seat);
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(mapped) = shell.element_for_surface(window).cloned() {
+            let seat = shell.seats.last_active().clone();
+            shell.maximize_request(&mapped, &seat);
         }
     }
 
     fn unmaximize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
-        if let Some(mapped) = self.common.shell.element_for_surface(window).cloned() {
-            self.common.shell.unmaximize_request(&mapped);
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(mapped) = shell.element_for_surface(window).cloned() {
+            shell.unmaximize_request(&mapped);
         }
     }
 
     fn minimize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
-        if let Some(mapped) = self.common.shell.element_for_surface(window).cloned() {
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(mapped) = shell.element_for_surface(window).cloned() {
             if !mapped.is_stack() || &mapped.active_window() == window {
-                self.common.shell.minimize_request(&mapped);
+                shell.minimize_request(&mapped);
             }
         }
     }
 
     fn unminimize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
-        if let Some(mut mapped) = self.common.shell.element_for_surface(window).cloned() {
-            let seat = self.common.shell.seats.last_active().clone();
-            self.common.shell.unminimize_request(&mapped, &seat);
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(mut mapped) = shell.element_for_surface(window).cloned() {
+            let seat = shell.seats.last_active().clone();
+            shell.unminimize_request(&mapped, &seat);
             if mapped.is_stack() {
                 mapped.stack_ref_mut().unwrap().set_active(window);
             }
@@ -223,43 +211,29 @@ impl ManagementWindow for CosmicSurface {
     }
 }
 
-pub trait ToplevelManagementExt {
-    fn minimize_rectangle(
-        &mut self,
-        output: &Output,
-        window: &CosmicSurface,
-    ) -> Rectangle<i32, Local>;
-}
-
-impl ToplevelManagementExt for ToplevelManagementState {
-    fn minimize_rectangle(
-        &mut self,
-        output: &Output,
-        window: &CosmicSurface,
-    ) -> Rectangle<i32, Local> {
-        self.rectangle_for(window)
-            .find_map(|(surface, relative)| {
-                let map = layer_map_for_output(output);
-                let layer = map.layer_for_surface(&surface, WindowSurfaceType::ALL);
-                layer.and_then(|s| map.layer_geometry(s)).map(|local| {
-                    Rectangle::from_loc_and_size(
-                        Point::from((local.loc.x + relative.loc.x, local.loc.y + relative.loc.y)),
-                        relative.size,
-                    )
-                })
-            })
-            .unwrap_or_else(|| {
-                let output_size = output.geometry().size;
+pub fn minimize_rectangle(output: &Output, window: &CosmicSurface) -> Rectangle<i32, Local> {
+    toplevel_rectangle_for(window)
+        .find_map(|(surface, relative)| {
+            let map = layer_map_for_output(output);
+            let layer = map.layer_for_surface(&surface, WindowSurfaceType::ALL);
+            layer.and_then(|s| map.layer_geometry(s)).map(|local| {
                 Rectangle::from_loc_and_size(
-                    Point::from((
-                        (output_size.w / 2) - 100,
-                        output_size.h - (output_size.h / 3) - 50,
-                    )),
-                    Size::from((200, 100)),
+                    Point::from((local.loc.x + relative.loc.x, local.loc.y + relative.loc.y)),
+                    relative.size,
                 )
             })
-            .as_local()
-    }
+        })
+        .unwrap_or_else(|| {
+            let output_size = output.geometry().size;
+            Rectangle::from_loc_and_size(
+                Point::from((
+                    (output_size.w / 2) - 100,
+                    output_size.h - (output_size.h / 3) - 50,
+                )),
+                Size::from((200, 100)),
+            )
+        })
+        .as_local()
 }
 
 delegate_toplevel_management!(State);

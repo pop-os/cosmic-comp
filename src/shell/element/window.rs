@@ -3,7 +3,6 @@ use crate::{
     shell::{
         focus::target::PointerFocusTarget,
         grabs::{ReleaseMode, ResizeEdge},
-        Shell,
     },
     state::State,
     utils::{
@@ -387,14 +386,25 @@ impl Program for CosmicWindowInternal {
                 if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
                     if let Some(surface) = self.window.wl_surface() {
                         loop_handle.insert_idle(move |state| {
-                            Shell::move_request(
-                                state,
+                            let res = state.common.shell.write().unwrap().move_request(
                                 &surface,
                                 &seat,
                                 serial,
                                 ReleaseMode::NoMouseButtons,
                                 false,
+                                &state.common.config,
+                                &state.common.event_loop_handle,
+                                &state.common.xdg_activation_state,
                             );
+                            if let Some((grab, focus)) = res {
+                                if grab.is_touch_grab() {
+                                    seat.get_touch().unwrap().set_grab(state, grab, serial);
+                                } else {
+                                    seat.get_pointer()
+                                        .unwrap()
+                                        .set_grab(state, grab, serial, focus);
+                                }
+                            }
                         });
                     }
                 }
@@ -402,10 +412,9 @@ impl Program for CosmicWindowInternal {
             Message::Minimize => {
                 if let Some(surface) = self.window.wl_surface() {
                     loop_handle.insert_idle(move |state| {
-                        if let Some(mapped) =
-                            state.common.shell.element_for_surface(&surface).cloned()
-                        {
-                            state.common.shell.minimize_request(&mapped)
+                        let mut shell = state.common.shell.write().unwrap();
+                        if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
+                            shell.minimize_request(&mapped)
                         }
                     });
                 }
@@ -413,11 +422,10 @@ impl Program for CosmicWindowInternal {
             Message::Maximize => {
                 if let Some(surface) = self.window.wl_surface() {
                     loop_handle.insert_idle(move |state| {
-                        if let Some(mapped) =
-                            state.common.shell.element_for_surface(&surface).cloned()
-                        {
-                            let seat = state.common.shell.seats.last_active().clone();
-                            state.common.shell.maximize_toggle(&mapped, &seat)
+                        let mut shell = state.common.shell.write().unwrap();
+                        if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
+                            let seat = shell.seats.last_active().clone();
+                            shell.maximize_toggle(&mapped, &seat)
                         }
                     });
                 }
@@ -427,11 +435,10 @@ impl Program for CosmicWindowInternal {
                 if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
                     if let Some(surface) = self.window.wl_surface() {
                         loop_handle.insert_idle(move |state| {
-                            if let Some(mapped) =
-                                state.common.shell.element_for_surface(&surface).cloned()
-                            {
+                            let shell = state.common.shell.read().unwrap();
+                            if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
                                 let position = if let Some((output, set)) =
-                                    state.common.shell.workspaces.sets.iter().find(|(_, set)| {
+                                    shell.workspaces.sets.iter().find(|(_, set)| {
                                         set.sticky_layer.mapped().any(|m| m == &mapped)
                                     }) {
                                     set.sticky_layer
@@ -439,9 +446,7 @@ impl Program for CosmicWindowInternal {
                                         .unwrap()
                                         .loc
                                         .to_global(output)
-                                } else if let Some(workspace) =
-                                    state.common.shell.space_for_mut(&mapped)
-                                {
+                                } else if let Some(workspace) = shell.space_for(&mapped) {
                                     let Some(elem_geo) = workspace.element_geometry(&mapped) else {
                                         return;
                                     };
@@ -450,20 +455,24 @@ impl Program for CosmicWindowInternal {
                                     return;
                                 };
 
-                                let mut cursor = seat
-                                    .get_pointer()
-                                    .unwrap()
-                                    .current_location()
-                                    .to_i32_round();
+                                let pointer = seat.get_pointer().unwrap();
+                                let mut cursor = pointer.current_location().to_i32_round();
                                 cursor.y -= SSD_HEIGHT;
-                                Shell::menu_request(
-                                    state,
+
+                                let res = shell.menu_request(
                                     &surface,
                                     &seat,
                                     serial,
                                     cursor - position.as_logical(),
                                     false,
+                                    &state.common.config,
+                                    &state.common.event_loop_handle,
                                 );
+
+                                std::mem::drop(shell);
+                                if let Some((grab, focus)) = res {
+                                    pointer.set_grab(state, grab, serial, focus);
+                                }
                             }
                         });
                     }
@@ -734,8 +743,7 @@ impl PointerTarget<State> for CosmicWindow {
                     return;
                 };
                 self.0.loop_handle().insert_idle(move |state| {
-                    Shell::resize_request(
-                        state,
+                    let res = state.common.shell.write().unwrap().resize_request(
                         &surface,
                         &seat,
                         serial,
@@ -750,7 +758,17 @@ impl PointerTarget<State> for CosmicWindow {
                             Focus::ResizeRight => ResizeEdge::RIGHT,
                             Focus::Header => unreachable!(),
                         },
-                    )
+                    );
+
+                    if let Some((grab, focus)) = res {
+                        if grab.is_touch_grab() {
+                            seat.get_touch().unwrap().set_grab(state, grab, serial);
+                        } else {
+                            seat.get_pointer()
+                                .unwrap()
+                                .set_grab(state, grab, serial, focus);
+                        }
+                    }
                 });
             }
             None => {}

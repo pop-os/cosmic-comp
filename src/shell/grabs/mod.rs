@@ -153,6 +153,15 @@ impl From<ResizeForkGrab> for ResizeGrab {
     }
 }
 
+impl ResizeGrab {
+    pub fn is_touch_grab(&self) -> bool {
+        match self {
+            ResizeGrab::Floating(grab) => grab.is_touch_grab(),
+            ResizeGrab::Tiling(grab) => grab.is_touch_grab(),
+        }
+    }
+}
+
 impl PointerGrab<State> for ResizeGrab {
     fn motion(
         &mut self,

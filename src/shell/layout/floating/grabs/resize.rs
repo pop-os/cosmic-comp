@@ -123,6 +123,13 @@ impl ResizeSurfaceGrab {
 
         false
     }
+
+    pub fn is_touch_grab(&self) -> bool {
+        match self.start_data {
+            GrabStartData::Touch(_) => true,
+            GrabStartData::Pointer(_) => false,
+        }
+    }
 }
 
 impl PointerGrab<State> for ResizeSurfaceGrab {

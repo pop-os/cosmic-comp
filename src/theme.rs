@@ -32,13 +32,12 @@ pub fn watch_theme(handle: LoopHandle<'_, State>) -> Result<(), cosmic_config::E
 
         if theme.theme_type != new_theme.theme_type {
             *theme = new_theme;
-            state.common.shell.set_theme(theme.clone());
-            state.common.shell.workspaces.spaces().for_each(|s| {
-                s.mapped().for_each(|m| {
-                    m.update_theme(theme.clone());
-                    m.force_redraw();
-                })
-            });
+            let mut workspace_guard = state.common.workspace_state.update();
+            state.common.shell.write().unwrap().set_theme(
+                theme.clone(),
+                &state.common.xdg_activation_state,
+                &mut workspace_guard,
+            );
         }
     }) {
         tracing::error!("{e}");

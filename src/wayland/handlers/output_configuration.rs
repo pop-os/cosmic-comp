@@ -82,12 +82,16 @@ impl State {
                 }
             }
 
-            if let Err(err) = self.backend.apply_config_for_output(
+            let mut shell = self.common.shell.write().unwrap();
+            let res = self.backend.apply_config_for_output(
                 output,
                 test_only,
-                &mut self.common.shell,
+                &mut *shell,
                 &self.common.event_loop_handle,
-            ) {
+                &mut self.common.workspace_state.update(),
+                &self.common.xdg_activation_state,
+            );
+            if let Err(err) = res {
                 warn!(
                     ?err,
                     "Failed to apply config to {}. Resetting",
@@ -106,8 +110,10 @@ impl State {
                         if let Err(err) = self.backend.apply_config_for_output(
                             output,
                             false,
-                            &mut self.common.shell,
+                            &mut *shell,
                             &self.common.event_loop_handle,
+                            &mut self.common.workspace_state.update(),
+                            &self.common.xdg_activation_state,
                         ) {
                             error!(?err, "Failed to reset output config for {}.", output.name(),);
                         }
@@ -115,6 +121,9 @@ impl State {
                 }
                 return false;
             }
+
+            std::mem::drop(shell);
+            self.common.refresh();
         }
 
         for output in conf

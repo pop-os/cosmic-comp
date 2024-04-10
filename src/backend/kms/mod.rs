@@ -11,8 +11,9 @@ use crate::{
     utils::prelude::*,
     wayland::{
         handlers::screencopy::{submit_buffer, FrameHolder, SessionData},
-        protocols::screencopy::{
-            FailureReason, Frame as ScreencopyFrame, Session as ScreencopySession,
+        protocols::{
+            screencopy::{FailureReason, Frame as ScreencopyFrame, Session as ScreencopySession},
+            workspace::WorkspaceUpdateGuard,
         },
     },
 };
@@ -76,6 +77,7 @@ use smithay::{
         relative_pointer::RelativePointerManagerState,
         seat::WaylandFocus,
         shm::{shm_format_to_fourcc, with_buffer_contents},
+        xdg_activation::XdgActivationState,
     },
 };
 use tracing::{error, info, trace, warn};
@@ -202,7 +204,7 @@ pub fn init_backend(
                 state.backend.kms().input_devices.remove(device.name());
             }
             state.process_input_event(event, true);
-            for output in state.common.shell.outputs() {
+            for output in state.common.shell.read().unwrap().outputs() {
                 if let Err(err) = state.backend.kms().schedule_render(
                     &state.common.event_loop_handle,
                     output,
@@ -326,9 +328,13 @@ pub fn init_backend(
                     state.common.config.read_outputs(
                         &mut state.common.output_configuration_state,
                         &mut state.backend,
-                        &mut state.common.shell,
+                        &mut state.common.shell.write().unwrap(),
                         &state.common.event_loop_handle,
+                        &mut state.common.workspace_state.update(),
+                        &state.common.xdg_activation_state,
                     );
+                    state.common.refresh();
+
                     for surface in state
                         .backend
                         .kms()
@@ -339,7 +345,7 @@ pub fn init_backend(
                         surface.scheduled = false;
                         surface.pending = false;
                     }
-                    for output in state.common.shell.outputs() {
+                    for output in state.common.shell.read().unwrap().outputs() {
                         if let Err(err) = state.backend.kms().schedule_render(
                             &state.common.event_loop_handle,
                             output,
@@ -601,7 +607,7 @@ impl State {
 
         let outputs = device.enumerate_surfaces()?.added; // There are no removed outputs on newly added devices
         let mut wl_outputs = Vec::new();
-        let mut w = self.common.shell.global_space().size.w;
+        let mut w = self.common.shell.read().unwrap().global_space().size.w;
         {
             let backend = self.backend.kms();
             backend
@@ -701,9 +707,12 @@ impl State {
         self.common.config.read_outputs(
             &mut self.common.output_configuration_state,
             &mut self.backend,
-            &mut self.common.shell,
+            &mut *self.common.shell.write().unwrap(),
             &self.common.event_loop_handle,
+            &mut self.common.workspace_state.update(),
+            &self.common.xdg_activation_state,
         );
+        self.common.refresh();
 
         Ok(())
     }
@@ -720,7 +729,7 @@ impl State {
             let backend = self.backend.kms();
             if let Some(device) = backend.devices.get_mut(&drm_node) {
                 let changes = device.enumerate_surfaces()?;
-                let mut w = self.common.shell.global_space().size.w;
+                let mut w = self.common.shell.read().unwrap().global_space().size.w;
                 for crtc in changes.removed {
                     if let Some(pos) = device
                         .non_desktop_connectors
@@ -831,18 +840,23 @@ impl State {
         self.common
             .output_configuration_state
             .add_heads(outputs_added.iter());
-        self.common.config.read_outputs(
-            &mut self.common.output_configuration_state,
-            &mut self.backend,
-            &mut self.common.shell,
-            &self.common.event_loop_handle,
-        );
-        // Don't remove the outputs, before potentially new ones have been initialized.
-        // reading a new config means outputs might become enabled, that were previously disabled.
-        // If we have 0 outputs at some point, we won't quit, but shell doesn't know where to move
-        // windows and workspaces to.
-        for output in outputs_removed {
-            self.common.shell.remove_output(&output);
+        {
+            self.common.config.read_outputs(
+                &mut self.common.output_configuration_state,
+                &mut self.backend,
+                &mut *self.common.shell.write().unwrap(),
+                &self.common.event_loop_handle,
+                &mut self.common.workspace_state.update(),
+                &self.common.xdg_activation_state,
+            );
+            self.common.refresh();
+            // Don't remove the outputs, before potentially new ones have been initialized.
+            // reading a new config means outputs might become enabled, that were previously disabled.
+            // If we have 0 outputs at some point, we won't quit, but shell doesn't know where to move
+            // windows and workspaces to.
+            for output in outputs_removed {
+                self.common.remove_output(&output);
+            }
         }
 
         {
@@ -889,14 +903,17 @@ impl State {
 
         if self.backend.kms().session.is_active() {
             for output in outputs_removed {
-                self.common.shell.remove_output(&output);
+                self.common.remove_output(&output);
             }
             self.common.config.read_outputs(
                 &mut self.common.output_configuration_state,
                 &mut self.backend,
-                &mut self.common.shell,
+                &mut *self.common.shell.write().unwrap(),
                 &self.common.event_loop_handle,
+                &mut self.common.workspace_state.update(),
+                &self.common.xdg_activation_state,
             );
+            self.common.refresh();
         } else {
             self.common.output_configuration_state.update();
         }
@@ -1178,30 +1195,33 @@ impl Surface {
             );
         }
 
-        let (previous_workspace, workspace) = state.shell.workspaces.active(&self.output);
-        let (previous_idx, idx) = state.shell.workspaces.active_num(&self.output);
-        let previous_workspace = previous_workspace
-            .zip(previous_idx)
-            .map(|((w, start), idx)| (w.handle, idx, start));
-        let workspace = (workspace.handle, idx);
+        let mut elements = {
+            let shell = state.shell.read().unwrap();
+            let (previous_workspace, workspace) = shell.workspaces.active(&self.output);
+            let (previous_idx, idx) = shell.workspaces.active_num(&self.output);
+            let previous_workspace = previous_workspace
+                .zip(previous_idx)
+                .map(|((w, start), idx)| (w.handle, idx, start));
+            let workspace = (workspace.handle, idx);
 
-        let mut elements = workspace_elements(
-            Some(&render_node),
-            &mut renderer,
-            &state.shell,
-            &state.config,
-            &state.theme,
-            state.clock.now(),
-            &self.output,
-            previous_workspace,
-            workspace,
-            CursorMode::All,
-            &mut Some(&mut self.fps),
-            false,
-        )
-        .map_err(|err| {
-            anyhow::format_err!("Failed to accumulate elements for rendering: {:?}", err)
-        })?;
+            workspace_elements(
+                Some(&render_node),
+                &mut renderer,
+                &*shell,
+                &state.config,
+                &state.theme,
+                state.clock.now(),
+                &self.output,
+                previous_workspace,
+                workspace,
+                CursorMode::All,
+                &mut Some(&mut self.fps),
+                false,
+            )
+            .map_err(|err| {
+                anyhow::format_err!("Failed to accumulate elements for rendering: {:?}", err)
+            })?
+        };
         self.fps.elements();
 
         let frames: Vec<(
@@ -1490,6 +1510,8 @@ impl KmsState {
         shell: &mut Shell,
         test_only: bool,
         loop_handle: &LoopHandle<'_, State>,
+        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+        xdg_activation_state: &XdgActivationState,
     ) -> Result<(), anyhow::Error> {
         let recreated = if let Some(device) = self
             .devices
@@ -1509,7 +1531,12 @@ impl KmsState {
 
             if !output_config.enabled {
                 if !test_only {
-                    shell.remove_output(output);
+                    shell.workspaces.remove_output(
+                        output,
+                        shell.seats.iter(),
+                        workspace_state,
+                        xdg_activation_state,
+                    );
                     if surface.surface.take().is_some() {
                         // just drop it
                         surface.pending = false;
@@ -1608,7 +1635,9 @@ impl KmsState {
                         surface.surface = Some(target);
                         true
                     };
-                    shell.add_output(output);
+                    shell
+                        .workspaces
+                        .add_output(output, workspace_state, xdg_activation_state);
                     res
                 } else {
                     false
@@ -1748,7 +1777,7 @@ impl KmsState {
                                 &surface.output,
                                 backend.primary_node,
                                 target_node,
-                                &common.shell,
+                                &*common.shell.read().unwrap(),
                             );
 
                             let result = if render_node != target_node {

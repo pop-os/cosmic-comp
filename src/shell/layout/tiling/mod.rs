@@ -28,7 +28,13 @@ use crate::{
     utils::{prelude::*, tween::EaseRectangle},
     wayland::{
         handlers::xdg_shell::popup::get_popup_toplevel,
-        protocols::{toplevel_info::ToplevelInfoState, workspace::WorkspaceHandle},
+        protocols::{
+            toplevel_info::{
+                toplevel_enter_output, toplevel_enter_workspace, toplevel_leave_output,
+                toplevel_leave_workspace,
+            },
+            workspace::WorkspaceHandle,
+        },
     },
 };
 
@@ -633,7 +639,6 @@ impl TilingLayout {
         seat: &Seat<State>,
         focus_stack: impl Iterator<Item = &'a CosmicMapped> + 'a,
         desc: NodeDesc,
-        toplevel_info_state: &mut ToplevelInfoState<State, CosmicSurface>,
     ) -> Option<KeyboardFocusTarget> {
         let this_handle = &desc.handle;
         let mut this_tree = this.queue.trees.back().unwrap().0.copy_clone();
@@ -662,13 +667,13 @@ impl TilingLayout {
                     mapped.output_leave(&this.output);
                     mapped.output_enter(&other.output, mapped.bbox());
                     for (ref surface, _) in mapped.windows() {
-                        toplevel_info_state.toplevel_leave_output(surface, &this.output);
-                        toplevel_info_state.toplevel_enter_output(surface, &other.output);
+                        toplevel_leave_output(surface, &this.output);
+                        toplevel_enter_output(surface, &other.output);
                     }
                 }
                 for (ref surface, _) in mapped.windows() {
-                    toplevel_info_state.toplevel_leave_workspace(surface, this_handle);
-                    toplevel_info_state.toplevel_enter_workspace(surface, other_handle);
+                    toplevel_leave_workspace(surface, this_handle);
+                    toplevel_enter_workspace(surface, other_handle);
                 }
 
                 mapped.set_tiled(true);
@@ -725,13 +730,13 @@ impl TilingLayout {
                         mapped.output_leave(&this.output);
                         mapped.output_enter(&other.output, mapped.bbox());
                         for (ref surface, _) in mapped.windows() {
-                            toplevel_info_state.toplevel_leave_output(surface, &this.output);
-                            toplevel_info_state.toplevel_enter_output(surface, &other.output);
+                            toplevel_leave_output(surface, &this.output);
+                            toplevel_enter_output(surface, &other.output);
                         }
                     }
                     for (ref surface, _) in mapped.windows() {
-                        toplevel_info_state.toplevel_leave_workspace(surface, this_handle);
-                        toplevel_info_state.toplevel_enter_workspace(surface, other_handle);
+                        toplevel_leave_workspace(surface, this_handle);
+                        toplevel_enter_workspace(surface, other_handle);
                     }
 
                     *mapped.tiling_node_id.lock().unwrap() = Some(id.clone());
@@ -759,15 +764,13 @@ impl TilingLayout {
                                 mapped.output_leave(&this.output);
                                 mapped.output_enter(&other.output, mapped.bbox());
                                 for (ref surface, _) in mapped.windows() {
-                                    toplevel_info_state
-                                        .toplevel_leave_output(surface, &this.output);
-                                    toplevel_info_state
-                                        .toplevel_enter_output(surface, &other.output);
+                                    toplevel_leave_output(surface, &this.output);
+                                    toplevel_enter_output(surface, &other.output);
                                 }
                             }
                             for (ref surface, _) in mapped.windows() {
-                                toplevel_info_state.toplevel_leave_workspace(surface, this_handle);
-                                toplevel_info_state.toplevel_enter_workspace(surface, other_handle);
+                                toplevel_leave_workspace(surface, this_handle);
+                                toplevel_enter_workspace(surface, other_handle);
                             }
 
                             *mapped.tiling_node_id.lock().unwrap() = Some(new_id.clone());
@@ -806,7 +809,6 @@ impl TilingLayout {
         mut other: Option<&mut Self>,
         this_desc: &NodeDesc,
         other_desc: &NodeDesc,
-        toplevel_info_state: &mut ToplevelInfoState<State, CosmicSurface>,
     ) -> Option<KeyboardFocusTarget> {
         let other_output = other
             .as_ref()
@@ -860,13 +862,13 @@ impl TilingLayout {
                         mapped.output_leave(&other_output);
                         mapped.output_enter(&this.output, mapped.bbox());
                         for (ref surface, _) in mapped.windows() {
-                            toplevel_info_state.toplevel_leave_output(surface, &other_output);
-                            toplevel_info_state.toplevel_enter_output(surface, &this.output);
+                            toplevel_leave_output(surface, &other_output);
+                            toplevel_enter_output(surface, &this.output);
                         }
                     }
                     for (ref surface, _) in mapped.windows() {
-                        toplevel_info_state.toplevel_leave_workspace(surface, &other_desc.handle);
-                        toplevel_info_state.toplevel_enter_workspace(surface, &this_desc.handle);
+                        toplevel_leave_workspace(surface, &other_desc.handle);
+                        toplevel_enter_workspace(surface, &this_desc.handle);
                     }
                     *mapped.tiling_node_id.lock().unwrap() = Some(this_desc.node.clone());
                 }
@@ -875,13 +877,13 @@ impl TilingLayout {
                         mapped.output_leave(&this.output);
                         mapped.output_enter(&other_output, mapped.bbox());
                         for (ref surface, _) in mapped.windows() {
-                            toplevel_info_state.toplevel_leave_output(surface, &this.output);
-                            toplevel_info_state.toplevel_enter_output(surface, &other_output);
+                            toplevel_leave_output(surface, &this.output);
+                            toplevel_enter_output(surface, &other_output);
                         }
                     }
                     for (ref surface, _) in mapped.windows() {
-                        toplevel_info_state.toplevel_leave_workspace(surface, &this_desc.handle);
-                        toplevel_info_state.toplevel_enter_workspace(surface, &other_desc.handle);
+                        toplevel_leave_workspace(surface, &this_desc.handle);
+                        toplevel_enter_workspace(surface, &other_desc.handle);
                     }
                     *mapped.tiling_node_id.lock().unwrap() = Some(other_desc.node.clone());
                 }
@@ -914,17 +916,13 @@ impl TilingLayout {
                                 mapped.output_leave(&this.output);
                                 mapped.output_enter(&other_output, mapped.bbox());
                                 for (ref surface, _) in mapped.windows() {
-                                    toplevel_info_state
-                                        .toplevel_leave_output(surface, &this.output);
-                                    toplevel_info_state
-                                        .toplevel_enter_output(surface, &other_output);
+                                    toplevel_leave_output(surface, &this.output);
+                                    toplevel_enter_output(surface, &other_output);
                                 }
                             }
                             for (ref surface, _) in mapped.windows() {
-                                toplevel_info_state
-                                    .toplevel_leave_workspace(surface, &this_desc.handle);
-                                toplevel_info_state
-                                    .toplevel_enter_workspace(surface, &other_desc.handle);
+                                toplevel_leave_workspace(surface, &this_desc.handle);
+                                toplevel_enter_workspace(surface, &other_desc.handle);
                             }
                             *mapped.tiling_node_id.lock().unwrap() = Some(new_id.clone());
                         }
@@ -964,17 +962,13 @@ impl TilingLayout {
                                 mapped.output_leave(&other_output);
                                 mapped.output_enter(&this.output, mapped.bbox());
                                 for (ref surface, _) in mapped.windows() {
-                                    toplevel_info_state
-                                        .toplevel_leave_output(surface, &other_output);
-                                    toplevel_info_state
-                                        .toplevel_enter_output(surface, &this.output);
+                                    toplevel_leave_output(surface, &other_output);
+                                    toplevel_enter_output(surface, &this.output);
                                 }
                             }
                             for (ref surface, _) in mapped.windows() {
-                                toplevel_info_state
-                                    .toplevel_leave_workspace(surface, &other_desc.handle);
-                                toplevel_info_state
-                                    .toplevel_enter_workspace(surface, &this_desc.handle);
+                                toplevel_leave_workspace(surface, &other_desc.handle);
+                                toplevel_enter_workspace(surface, &this_desc.handle);
                             }
                             *mapped.tiling_node_id.lock().unwrap() = Some(new_id.clone());
                         }
@@ -1034,23 +1028,23 @@ impl TilingLayout {
                     if this.output != other_output {
                         surface.output_leave(&other_output);
                         surface.output_enter(&this.output, surface.bbox());
-                        toplevel_info_state.toplevel_leave_output(&surface, &other_output);
-                        toplevel_info_state.toplevel_enter_output(&surface, &this.output);
+                        toplevel_leave_output(&surface, &other_output);
+                        toplevel_enter_output(&surface, &this.output);
                     }
                     if this_desc.handle != other_desc.handle {
-                        toplevel_info_state.toplevel_leave_workspace(&surface, &other_desc.handle);
-                        toplevel_info_state.toplevel_enter_workspace(&surface, &this_desc.handle);
+                        toplevel_leave_workspace(&surface, &other_desc.handle);
+                        toplevel_enter_workspace(&surface, &this_desc.handle);
                     }
                     this_stack.add_window(surface, Some(this_idx + i));
                 }
                 if this.output != other_output {
                     this_surface.output_leave(&this.output);
-                    toplevel_info_state.toplevel_leave_output(&this_surface, &this.output);
-                    toplevel_info_state.toplevel_enter_output(&this_surface, &other_output);
+                    toplevel_leave_output(this_surface, &this.output);
+                    toplevel_enter_output(this_surface, &other_output);
                 }
                 if this_desc.handle != other_desc.handle {
-                    toplevel_info_state.toplevel_leave_workspace(&this_surface, &this_desc.handle);
-                    toplevel_info_state.toplevel_enter_workspace(&this_surface, &other_desc.handle);
+                    toplevel_leave_workspace(this_surface, &this_desc.handle);
+                    toplevel_enter_workspace(this_surface, &other_desc.handle);
                 }
                 this_stack.remove_window(&this_surface);
 
@@ -1121,24 +1115,23 @@ impl TilingLayout {
                     if this.output != other_output {
                         surface.output_leave(&this.output);
                         surface.output_enter(&other_output, surface.bbox());
-                        toplevel_info_state.toplevel_leave_output(&surface, &this.output);
-                        toplevel_info_state.toplevel_enter_output(&surface, &other_output);
+                        toplevel_leave_output(&surface, &this.output);
+                        toplevel_enter_output(&surface, &other_output);
                     }
                     if this_desc.handle != other_desc.handle {
-                        toplevel_info_state.toplevel_leave_workspace(&surface, &this_desc.handle);
-                        toplevel_info_state.toplevel_enter_workspace(&surface, &other_desc.handle);
+                        toplevel_leave_workspace(&surface, &this_desc.handle);
+                        toplevel_enter_workspace(&surface, &other_desc.handle);
                     }
                     other_stack.add_window(surface, Some(other_idx + i));
                 }
                 if this.output != other_output {
                     other_surface.output_leave(&other_output);
-                    toplevel_info_state.toplevel_leave_output(&other_surface, &other_output);
-                    toplevel_info_state.toplevel_enter_output(&other_surface, &this.output);
+                    toplevel_leave_output(other_surface, &other_output);
+                    toplevel_enter_output(other_surface, &this.output);
                 }
                 if this_desc.handle != other_desc.handle {
-                    toplevel_info_state
-                        .toplevel_leave_workspace(&other_surface, &other_desc.handle);
-                    toplevel_info_state.toplevel_enter_workspace(&other_surface, &this_desc.handle);
+                    toplevel_leave_workspace(other_surface, &other_desc.handle);
+                    toplevel_enter_workspace(other_surface, &this_desc.handle);
                 }
                 other_stack.remove_window(&other_surface);
 
@@ -1205,17 +1198,16 @@ impl TilingLayout {
                 other_stack.add_window(this_surface.clone(), Some(other_idx));
 
                 if this.output != other_output {
-                    toplevel_info_state.toplevel_leave_output(&this_surface, &this.output);
-                    toplevel_info_state.toplevel_leave_output(&other_surface, &other_output);
-                    toplevel_info_state.toplevel_enter_output(&this_surface, &other_output);
-                    toplevel_info_state.toplevel_enter_output(&other_surface, &this.output);
+                    toplevel_leave_output(this_surface, &this.output);
+                    toplevel_leave_output(other_surface, &other_output);
+                    toplevel_enter_output(this_surface, &other_output);
+                    toplevel_enter_output(other_surface, &this.output);
                 }
                 if this_desc.handle != other_desc.handle {
-                    toplevel_info_state.toplevel_leave_workspace(&this_surface, &this_desc.handle);
-                    toplevel_info_state
-                        .toplevel_leave_workspace(&other_surface, &other_desc.handle);
-                    toplevel_info_state.toplevel_enter_workspace(&this_surface, &other_desc.handle);
-                    toplevel_info_state.toplevel_enter_workspace(&other_surface, &this_desc.handle);
+                    toplevel_leave_workspace(this_surface, &this_desc.handle);
+                    toplevel_leave_workspace(other_surface, &other_desc.handle);
+                    toplevel_enter_workspace(this_surface, &other_desc.handle);
+                    toplevel_enter_workspace(other_surface, &this_desc.handle);
                 }
 
                 other_stack.remove_window(&other_surface);
@@ -1802,7 +1794,7 @@ impl TilingLayout {
     }
 
     pub fn next_focus<'a>(
-        &mut self,
+        &self,
         direction: FocusDirection,
         seat: &Seat<State>,
         focus_stack: impl Iterator<Item = &'a CosmicMapped> + 'a,

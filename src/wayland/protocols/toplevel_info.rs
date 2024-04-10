@@ -185,6 +185,30 @@ where
     }
 }
 
+pub fn toplevel_enter_output(toplevel: &impl Window, output: &Output) {
+    if let Some(state) = toplevel.user_data().get::<ToplevelState>() {
+        state.lock().unwrap().outputs.push(output.clone());
+    }
+}
+
+pub fn toplevel_leave_output(toplevel: &impl Window, output: &Output) {
+    if let Some(state) = toplevel.user_data().get::<ToplevelState>() {
+        state.lock().unwrap().outputs.retain(|o| o != output);
+    }
+}
+
+pub fn toplevel_enter_workspace(toplevel: &impl Window, workspace: &WorkspaceHandle) {
+    if let Some(state) = toplevel.user_data().get::<ToplevelState>() {
+        state.lock().unwrap().workspaces.push(workspace.clone());
+    }
+}
+
+pub fn toplevel_leave_workspace(toplevel: &impl Window, workspace: &WorkspaceHandle) {
+    if let Some(state) = toplevel.user_data().get::<ToplevelState>() {
+        state.lock().unwrap().workspaces.retain(|w| w != workspace);
+    }
+}
+
 impl<D, W> ToplevelInfoState<D, W>
 where
     D: GlobalDispatch<ZcosmicToplevelInfoV1, ToplevelInfoGlobalData>
@@ -221,30 +245,6 @@ where
             send_toplevel_to_client::<D, W>(&self.dh, workspace_state, instance, toplevel);
         }
         self.toplevels.push(toplevel.clone());
-    }
-
-    pub fn toplevel_enter_output(&mut self, toplevel: &W, output: &Output) {
-        if let Some(state) = toplevel.user_data().get::<ToplevelState>() {
-            state.lock().unwrap().outputs.push(output.clone());
-        }
-    }
-
-    pub fn toplevel_leave_output(&mut self, toplevel: &W, output: &Output) {
-        if let Some(state) = toplevel.user_data().get::<ToplevelState>() {
-            state.lock().unwrap().outputs.retain(|o| o != output);
-        }
-    }
-
-    pub fn toplevel_enter_workspace(&mut self, toplevel: &W, workspace: &WorkspaceHandle) {
-        if let Some(state) = toplevel.user_data().get::<ToplevelState>() {
-            state.lock().unwrap().workspaces.push(workspace.clone());
-        }
-    }
-
-    pub fn toplevel_leave_workspace(&mut self, toplevel: &W, workspace: &WorkspaceHandle) {
-        if let Some(state) = toplevel.user_data().get::<ToplevelState>() {
-            state.lock().unwrap().workspaces.retain(|w| w != workspace);
-        }
     }
 
     pub fn remove_toplevel(&mut self, toplevel: &W) {

@@ -14,10 +14,10 @@ impl ToplevelInfoHandler for State {
     type Window = CosmicSurface;
 
     fn toplevel_info_state(&self) -> &ToplevelInfoState<State, Self::Window> {
-        &self.common.shell.toplevel_info_state
+        &self.common.toplevel_info_state
     }
     fn toplevel_info_state_mut(&mut self) -> &mut ToplevelInfoState<State, Self::Window> {
-        &mut self.common.shell.toplevel_info_state
+        &mut self.common.toplevel_info_state
     }
 }
 

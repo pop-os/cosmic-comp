@@ -14,7 +14,6 @@ pub fn ready(state: &State) {
                 "DISPLAY",
                 &state
                     .common
-                    .shell
                     .xwayland_state
                     .as_ref()
                     .map(|s| format!(":{}", s.display))

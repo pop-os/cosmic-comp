@@ -26,66 +26,57 @@ use smithay::{
 };
 use std::sync::Mutex;
 
-impl State {
-    fn toplevel_ensure_initial_configure(&mut self, toplevel: &ToplevelSurface) -> bool {
-        // send the initial configure if relevant
-        let initial_configure_sent = with_states(toplevel.wl_surface(), |states| {
+fn toplevel_ensure_initial_configure(toplevel: &ToplevelSurface) -> bool {
+    // send the initial configure if relevant
+    let initial_configure_sent = with_states(toplevel.wl_surface(), |states| {
+        states
+            .data_map
+            .get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .initial_configure_sent
+    });
+    if !initial_configure_sent {
+        // TODO: query expected size from shell (without inserting and mapping)
+        toplevel.with_pending_state(|states| states.size = None);
+        toplevel.send_configure();
+    }
+    initial_configure_sent
+}
+
+fn xdg_popup_ensure_initial_configure(popup: &PopupKind) {
+    if let PopupKind::Xdg(ref popup) = popup {
+        let initial_configure_sent = with_states(popup.wl_surface(), |states| {
             states
                 .data_map
-                .get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
+                .get::<Mutex<XdgPopupSurfaceRoleAttributes>>()
                 .unwrap()
                 .lock()
                 .unwrap()
                 .initial_configure_sent
         });
         if !initial_configure_sent {
-            // TODO: query expected size from shell (without inserting and mapping)
-            toplevel.with_pending_state(|states| states.size = None);
-            toplevel.send_configure();
+            // NOTE: This should never fail as the initial configure is always
+            // allowed.
+            popup.send_configure().expect("initial configure failed");
         }
-        initial_configure_sent
     }
+}
 
-    fn xdg_popup_ensure_initial_configure(&mut self, popup: &PopupKind) {
-        if let PopupKind::Xdg(ref popup) = popup {
-            let initial_configure_sent = with_states(popup.wl_surface(), |states| {
-                states
-                    .data_map
-                    .get::<Mutex<XdgPopupSurfaceRoleAttributes>>()
-                    .unwrap()
-                    .lock()
-                    .unwrap()
-                    .initial_configure_sent
-            });
-            if !initial_configure_sent {
-                // NOTE: This should never fail as the initial configure is always
-                // allowed.
-                popup.send_configure().expect("initial configure failed");
-            }
-        }
-    }
+fn layer_surface_check_inital_configure(surface: &LayerSurface) -> bool {
+    // send the initial configure if relevant
+    let initial_configure_sent = with_states(surface.wl_surface(), |states| {
+        states
+            .data_map
+            .get::<Mutex<LayerSurfaceAttributes>>()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .initial_configure_sent
+    });
 
-    fn layer_surface_ensure_inital_configure(&mut self, surface: &LayerSurface) -> bool {
-        // send the initial configure if relevant
-        let initial_configure_sent = with_states(surface.wl_surface(), |states| {
-            states
-                .data_map
-                .get::<Mutex<LayerSurfaceAttributes>>()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .initial_configure_sent
-        });
-        if !initial_configure_sent {
-            // compute initial dimensions by mapping
-            if let Some(target) = self.common.shell.map_layer(&surface) {
-                let seat = self.common.shell.seats.last_active().clone();
-                Shell::set_focus(self, Some(&target), &seat, None);
-            }
-            surface.layer_surface().send_configure();
-        }
-        initial_configure_sent
-    }
+    initial_configure_sent
 }
 
 pub fn client_compositor_state<'a>(client: &'a Client) -> &'a CompositorClientState {
@@ -147,48 +138,67 @@ impl CompositorHandler for State {
         // first load the buffer for various smithay helper functions (which also initializes the RendererSurfaceState)
         on_commit_buffer_handler::<Self>(surface);
 
+        // and refresh smithays internal state
+        self.common.on_commit(surface);
+
+        let mut shell = self.common.shell.write().unwrap();
+
+        // schedule a new render
+        if let Some(output) = shell.visible_output_for_surface(surface) {
+            self.backend
+                .schedule_render(&self.common.event_loop_handle, &output);
+        }
+
         // handle initial configure events and map windows if necessary
-        if let Some((window, _, _)) = self
-            .common
-            .shell
+        if let Some((window, _, _)) = shell
             .pending_windows
             .iter()
             .find(|(window, _, _)| window.wl_surface().as_ref() == Some(surface))
             .cloned()
         {
             if let Some(toplevel) = window.0.toplevel() {
-                if self.toplevel_ensure_initial_configure(&toplevel)
+                if toplevel_ensure_initial_configure(&toplevel)
                     && with_renderer_surface_state(&surface, |state| state.buffer().is_some())
                         .unwrap_or(false)
                 {
                     window.on_commit();
-                    if let Some(target) = self.common.shell.map_window(
+                    let res = shell.map_window(
                         &window,
+                        &mut self.common.toplevel_info_state,
+                        &mut self.common.workspace_state,
                         &self.common.event_loop_handle,
-                        &self.common.theme,
-                    ) {
-                        let seat = self.common.shell.seats.last_active().clone();
+                    );
+                    if let Some(target) = res {
+                        let seat = shell.seats.last_active().clone();
+                        std::mem::drop(shell);
                         Shell::set_focus(self, Some(&target), &seat, None);
+                        return;
                     }
                 }
             }
         }
 
-        if let Some((layer_surface, _, _)) = self
-            .common
-            .shell
+        if let Some((layer_surface, _, _)) = shell
             .pending_layers
             .iter()
             .find(|(layer_surface, _, _)| layer_surface.wl_surface() == surface)
             .cloned()
         {
-            if !self.layer_surface_ensure_inital_configure(&layer_surface) {
+            if !layer_surface_check_inital_configure(&layer_surface) {
+                // compute initial dimensions by mapping
+                if let Some(target) = shell.map_layer(&layer_surface) {
+                    let seat = shell.seats.last_active().clone();
+                    std::mem::drop(shell);
+                    Shell::set_focus(self, Some(&target), &seat, None);
+                }
+                layer_surface.layer_surface().send_configure();
                 return;
             }
         };
 
-        if let Some(popup) = self.common.shell.popups.find_popup(surface) {
-            self.xdg_popup_ensure_initial_configure(&popup);
+        if let Some(popup) = self.common.popups.find_popup(surface) {
+            xdg_popup_ensure_initial_configure(&popup);
+            return;
         }
 
         if with_renderer_surface_state(surface, |state| state.buffer().is_none()).unwrap_or(false) {
@@ -197,7 +207,7 @@ impl CompositorHandler for State {
             // session-lock disallows null commits
 
             // if it was a move-grab?
-            let seat = self.common.shell.seats.last_active().clone();
+            let seat = shell.seats.last_active().clone();
             let moved_window = seat
                 .user_data()
                 .get::<SeatMoveGrabState>()
@@ -228,9 +238,11 @@ impl CompositorHandler for State {
                         stack.remove_idx(i);
                     }
                 } else {
+                    std::mem::drop(shell);
                     seat.get_pointer()
                         .unwrap()
                         .unset_grab(self, SERIAL_COUNTER.next_serial(), 0);
+                    return;
                 }
             }
 
@@ -247,21 +259,16 @@ impl CompositorHandler for State {
             // If we would re-position the window inside the grab we would get a weird jittery animation.
             // We only want to resize once the client has acknoledged & commited the new size,
             // so we need to carefully track the state through different handlers.
-            if let Some(element) = self.common.shell.element_for_surface(surface).cloned() {
+            if let Some(element) = shell.element_for_surface(surface).cloned() {
                 crate::shell::layout::floating::ResizeSurfaceGrab::apply_resize_to_location(
                     element.clone(),
-                    &mut self.common.shell,
+                    &mut *shell,
                 );
             }
         }
 
-        // and refresh smithays internal state
-        self.common.shell.on_commit(surface);
-
         // re-arrange layer-surfaces (commits may change size and positioning)
-        let layer_output = self
-            .common
-            .shell
+        let layer_output = shell
             .outputs()
             .find(|o| {
                 let map = layer_map_for_output(o);
@@ -269,17 +276,12 @@ impl CompositorHandler for State {
                     .is_some()
             })
             .cloned();
+
         if let Some(output) = layer_output {
             let changed = layer_map_for_output(&output).arrange();
             if changed {
-                self.common.shell.workspaces.recalculate();
+                shell.workspaces.recalculate();
             }
-        }
-
-        // schedule a new render
-        if let Some(output) = self.common.shell.visible_output_for_surface(surface) {
-            self.backend
-                .schedule_render(&self.common.event_loop_handle, &output);
         }
     }
 }

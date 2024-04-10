@@ -16,7 +16,7 @@ use smithay::{
 
 impl WlrLayerShellHandler for State {
     fn shell_state(&mut self) -> &mut WlrLayerShellState {
-        &mut self.common.shell.layer_shell_state
+        &mut self.common.layer_shell_state
     }
 
     fn new_layer_surface(
@@ -26,24 +26,22 @@ impl WlrLayerShellHandler for State {
         _layer: Layer,
         namespace: String,
     ) {
-        let seat = self.common.shell.seats.last_active().clone();
+        let mut shell = self.common.shell.write().unwrap();
+        let seat = shell.seats.last_active().clone();
         let output = wl_output
             .as_ref()
             .and_then(Output::from_resource)
             .unwrap_or_else(|| seat.active_output());
-        self.common.shell.pending_layers.push((
-            LayerSurface::new(surface, namespace),
-            output,
-            seat,
-        ));
+        shell
+            .pending_layers
+            .push((LayerSurface::new(surface, namespace), output, seat));
     }
 
     fn new_popup(&mut self, _parent: WlrLayerSurface, popup: PopupSurface) {
-        self.common.shell.unconstrain_popup(&popup);
+        self.common.shell.read().unwrap().unconstrain_popup(&popup);
 
         if popup.send_configure().is_ok() {
             self.common
-                .shell
                 .popups
                 .track_popup(PopupKind::from(popup))
                 .unwrap();
@@ -51,9 +49,8 @@ impl WlrLayerShellHandler for State {
     }
 
     fn layer_destroyed(&mut self, surface: WlrLayerSurface) {
-        let maybe_output = self
-            .common
-            .shell
+        let mut shell = self.common.shell.write().unwrap();
+        let maybe_output = shell
             .outputs()
             .find(|o| {
                 let map = layer_map_for_output(o);
@@ -72,7 +69,7 @@ impl WlrLayerShellHandler for State {
                 map.unmap_layer(&layer);
             }
 
-            self.common.shell.workspaces.recalculate();
+            shell.workspaces.recalculate();
 
             self.backend
                 .schedule_render(&self.common.event_loop_handle, &output);

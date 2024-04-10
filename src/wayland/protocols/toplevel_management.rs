@@ -71,6 +71,29 @@ where
     }
 }
 
+pub fn toplevel_rectangle_for(
+    window: &impl ManagementWindow,
+) -> impl Iterator<Item = (WlSurface, Rectangle<i32, Logical>)> {
+    if let Some(state) = window.user_data().get::<ToplevelState>() {
+        let mut state = state.lock().unwrap();
+        state
+            .rectangles
+            .retain(|(surface, _)| surface.upgrade().is_ok());
+        Some(
+            state
+                .rectangles
+                .iter()
+                .map(|(surface, rect)| (surface.upgrade().unwrap(), *rect))
+                .collect::<Vec<_>>()
+                .into_iter(),
+        )
+        .into_iter()
+        .flatten()
+    } else {
+        None.into_iter().flatten()
+    }
+}
+
 pub struct ToplevelManagerGlobalData {
     filter: Box<dyn for<'a> Fn(&'a Client) -> bool + Send + Sync>,
 }
@@ -99,30 +122,6 @@ impl ToplevelManagementState {
             capabilities,
             instances: Vec::new(),
             global,
-        }
-    }
-
-    pub fn rectangle_for(
-        &mut self,
-        window: &impl ManagementWindow,
-    ) -> impl Iterator<Item = (WlSurface, Rectangle<i32, Logical>)> {
-        if let Some(state) = window.user_data().get::<ToplevelState>() {
-            let mut state = state.lock().unwrap();
-            state
-                .rectangles
-                .retain(|(surface, _)| surface.upgrade().is_ok());
-            Some(
-                state
-                    .rectangles
-                    .iter()
-                    .map(|(surface, rect)| (surface.upgrade().unwrap(), *rect))
-                    .collect::<Vec<_>>()
-                    .into_iter(),
-            )
-            .into_iter()
-            .flatten()
-        } else {
-            None.into_iter().flatten()
         }
     }
 

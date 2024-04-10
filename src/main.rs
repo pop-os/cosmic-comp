@@ -92,7 +92,16 @@ fn main() -> Result<()> {
     // run the event loop
     event_loop.run(None, &mut state, |state| {
         // shall we shut down?
-        if state.common.shell.outputs().next().is_none() || state.common.should_stop {
+        if state
+            .common
+            .shell
+            .read()
+            .unwrap()
+            .outputs()
+            .next()
+            .is_none()
+            || state.common.should_stop
+        {
             info!("Shutting down");
             state.common.event_loop_signal.stop();
             state.common.event_loop_signal.wakeup();
@@ -100,29 +109,25 @@ fn main() -> Result<()> {
         }
 
         // trigger routines
-        let clients = state.common.shell.update_animations();
+        let clients = state.common.shell.write().unwrap().update_animations();
         {
             let dh = state.common.display_handle.clone();
             for client in clients.values() {
                 client_compositor_state(&client).blocker_cleared(state, &dh);
             }
         }
-        state.common.shell.refresh();
+        state.common.refresh();
         state::Common::refresh_focus(state);
         state.common.update_x11_stacking_order();
 
-        if state.common.shell.animations_going() {
-            for output in state
-                .common
-                .shell
-                .outputs()
-                .cloned()
-                .collect::<Vec<_>>()
-                .into_iter()
-            {
-                state
-                    .backend
-                    .schedule_render(&state.common.event_loop_handle, &output);
+        {
+            let shell = state.common.shell.read().unwrap();
+            if shell.animations_going() {
+                for output in shell.outputs().cloned().collect::<Vec<_>>().into_iter() {
+                    state
+                        .backend
+                        .schedule_render(&state.common.event_loop_handle, &output);
+                }
             }
         }
 
@@ -181,7 +186,14 @@ fn init_wayland_display(
             let node = match &state.backend {
                 BackendData::Kms(kms_state) if kms_state.auto_assign => kms_state
                     .target_node_for_output(
-                        &state.common.shell.seats.last_active().active_output(),
+                        &state
+                            .common
+                            .shell
+                            .read()
+                            .unwrap()
+                            .seats
+                            .last_active()
+                            .active_output(),
                     ),
                 _ => None,
             };
