@@ -445,7 +445,7 @@ where
             .unwrap()
             .borrow()
             .as_ref()
-            .map(|state| state.render::<CosmicElement<R>, R>(renderer, seat, output, theme))
+            .map(|state| state.render::<CosmicElement<R>, R>(renderer, output, theme))
         {
             elements.extend(grab_elements);
         }

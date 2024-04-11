@@ -60,17 +60,12 @@ pub struct MoveGrabState {
     snapping_zone: Option<SnappingZone>,
     stacking_indicator: Option<(StackHover, Point<i32, Logical>)>,
     location: Point<f64, Logical>,
+    cursor_output: Output,
 }
 
 impl MoveGrabState {
     #[profiling::function]
-    pub fn render<I, R>(
-        &self,
-        renderer: &mut R,
-        seat: &Seat<State>,
-        output: &Output,
-        theme: &CosmicTheme,
-    ) -> Vec<I>
+    pub fn render<I, R>(&self, renderer: &mut R, output: &Output, theme: &CosmicTheme) -> Vec<I>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         <R as Renderer>::TextureId: 'static,
@@ -86,7 +81,7 @@ impl MoveGrabState {
         } else {
             1.0
         };
-        let alpha = if &seat.active_output() == output {
+        let alpha = if &self.cursor_output == output {
             1.0
         } else {
             0.4
@@ -147,7 +142,7 @@ impl MoveGrabState {
         };
 
         let snapping_indicator = match &self.snapping_zone {
-            Some(t) if &seat.active_output() == output => {
+            Some(t) if &self.cursor_output == output => {
                 let base_color = theme.palette.neutral_9;
                 let overlay_geometry = t.overlay_geometry(non_exclusive_geometry);
                 vec![
@@ -363,6 +358,7 @@ impl MoveGrab {
             .map(|s| s.borrow_mut());
         if let Some(grab_state) = borrow.as_mut().and_then(|s| s.as_mut()) {
             grab_state.location = location;
+            grab_state.cursor_output = self.cursor_output.clone();
 
             let mut window_geo = self.window.geometry();
             window_geo.loc += location.to_i32_round() + grab_state.window_offset;
@@ -644,15 +640,15 @@ impl MoveGrab {
         window: CosmicMapped,
         seat: &Seat<State>,
         initial_window_location: Point<i32, Global>,
+        cursor_output: Output,
         indicator_thickness: u8,
         previous_layer: ManagedLayer,
         release: ReleaseMode,
         evlh: LoopHandle<'static, State>,
     ) -> MoveGrab {
-        let output = seat.active_output();
         let mut outputs = HashSet::new();
-        outputs.insert(output.clone());
-        window.output_enter(&output, window.geometry()); // not accurate but...
+        outputs.insert(cursor_output.clone());
+        window.output_enter(&cursor_output, window.geometry()); // not accurate but...
         window.moved_since_mapped.store(true, Ordering::SeqCst);
 
         let grab_state = MoveGrabState {
@@ -666,6 +662,7 @@ impl MoveGrab {
             snapping_zone: None,
             previous: previous_layer,
             location: start_data.location(),
+            cursor_output: cursor_output.clone(),
         };
 
         *seat
@@ -684,7 +681,7 @@ impl MoveGrab {
             start_data,
             seat: seat.clone(),
             window_outputs: outputs,
-            cursor_output: output,
+            cursor_output,
             previous: previous_layer,
             release,
             evlh: NotSend(evlh),
@@ -699,7 +696,7 @@ impl MoveGrab {
 impl Drop for MoveGrab {
     fn drop(&mut self) {
         // No more buttons are pressed, release the grab.
-        let output = self.seat.active_output();
+        let output = self.cursor_output.clone();
         let seat = self.seat.clone();
         let window_outputs = self.window_outputs.drain().collect::<HashSet<_>>();
         let previous = self.previous;

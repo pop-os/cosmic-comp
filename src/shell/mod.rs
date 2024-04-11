@@ -2460,7 +2460,6 @@ impl Shell {
         move_out_of_stack: bool,
     ) {
         let serial = serial.into();
-        let output = seat.active_output();
 
         if let Some(mut start_data) = check_grab_preconditions(&seat, surface, serial, release) {
             if let Some(mut old_mapped) = state.common.shell.element_for_surface(surface).cloned() {
@@ -2505,91 +2504,113 @@ impl Shell {
                 };
                 let pos = start_data.location().as_global();
 
-                let (initial_window_location, layer, workspace_handle) =
-                    if let Some(workspace) = state.common.shell.space_for_mut(&old_mapped) {
-                        if workspace
-                            .fullscreen
-                            .as_ref()
-                            .is_some_and(|f| f.surface == window)
-                        {
-                            let _ = workspace.remove_fullscreen(); // We are moving this window, we don't need to send it back to it's original workspace
-                        }
-
-                        let Some(elem_geo) = workspace.element_geometry(&old_mapped) else {
-                            return;
-                        };
-                        let mut initial_window_location = elem_geo.loc.to_global(&output);
-
-                        if mapped.maximized_state.lock().unwrap().is_some() {
-                            // If surface is maximized then unmaximize it
-                            let new_size = workspace.unmaximize_request(&mapped);
-                            let ratio = pos.to_local(&output).x / output.geometry().size.w as f64;
-
-                            initial_window_location = new_size
-                                .map(|size| (pos.x - (size.w as f64 * ratio), pos.y).into())
-                                .unwrap_or_else(|| pos)
-                                .to_i32_round();
-                        }
-
-                        let layer = if mapped == old_mapped {
-                            let was_floating = workspace.floating_layer.unmap(&mapped);
-                            let was_tiled = workspace.tiling_layer.unmap_as_placeholder(&mapped);
-                            assert!(was_floating != was_tiled.is_some());
-                            was_tiled.is_some()
-                        } else {
-                            workspace
-                                .tiling_layer
-                                .mapped()
-                                .any(|(m, _)| m == &old_mapped)
-                        }
-                        .then_some(ManagedLayer::Tiling)
-                        .unwrap_or(ManagedLayer::Floating);
-
-                        (initial_window_location, layer, workspace.handle)
-                    } else if let Some(sticky_layer) = state
-                        .common
-                        .shell
-                        .workspaces
-                        .sets
-                        .get_mut(&output)
-                        .filter(|set| set.sticky_layer.mapped().any(|m| m == &old_mapped))
-                        .map(|set| &mut set.sticky_layer)
-                    {
-                        let mut initial_window_location = sticky_layer
-                            .element_geometry(&old_mapped)
-                            .unwrap()
-                            .loc
-                            .to_global(&output);
-
-                        if let Some(state) = mapped.maximized_state.lock().unwrap().take() {
-                            // If surface is maximized then unmaximize it
-                            mapped.set_maximized(false);
-                            let new_size = state.original_geometry.size.as_logical();
-                            sticky_layer.map_internal(
-                                mapped.clone(),
-                                Some(state.original_geometry.loc),
-                                Some(new_size),
-                                None,
-                            );
-
-                            let ratio = pos.to_local(&output).x / output.geometry().size.w as f64;
-                            initial_window_location =
-                                Point::<f64, _>::from((pos.x - (new_size.w as f64 * ratio), pos.y))
-                                    .to_i32_round();
-                        }
-
-                        if mapped == old_mapped {
-                            sticky_layer.unmap(&mapped);
-                        }
-
-                        (
-                            initial_window_location,
-                            ManagedLayer::Sticky,
-                            state.common.shell.active_space(&output).handle,
+                let cursor_output = if let Some(output) = state
+                    .common
+                    .shell
+                    .outputs()
+                    .find(|output| {
+                        output.geometry().as_logical().overlaps_or_touches(
+                            Rectangle::from_loc_and_size(
+                                start_data.location().to_i32_floor(),
+                                (0, 0),
+                            ),
                         )
-                    } else {
+                    })
+                    .cloned()
+                {
+                    output
+                } else {
+                    seat.active_output()
+                };
+
+                let (initial_window_location, layer, workspace_handle) = if let Some(workspace) =
+                    state.common.shell.space_for_mut(&old_mapped)
+                {
+                    if workspace
+                        .fullscreen
+                        .as_ref()
+                        .is_some_and(|f| f.surface == window)
+                    {
+                        let _ = workspace.remove_fullscreen(); // We are moving this window, we don't need to send it back to it's original workspace
+                    }
+
+                    let Some(elem_geo) = workspace.element_geometry(&old_mapped) else {
                         return;
                     };
+                    let mut initial_window_location = elem_geo.loc.to_global(&workspace.output());
+
+                    if mapped.maximized_state.lock().unwrap().is_some() {
+                        // If surface is maximized then unmaximize it
+                        let new_size = workspace.unmaximize_request(&mapped);
+                        let output = workspace.output();
+                        let ratio = pos.to_local(output).x / output.geometry().size.w as f64;
+
+                        initial_window_location = new_size
+                            .map(|size| (pos.x - (size.w as f64 * ratio), pos.y).into())
+                            .unwrap_or_else(|| pos)
+                            .to_i32_round();
+                    }
+
+                    let layer = if mapped == old_mapped {
+                        let was_floating = workspace.floating_layer.unmap(&mapped);
+                        let was_tiled = workspace.tiling_layer.unmap_as_placeholder(&mapped);
+                        assert!(was_floating != was_tiled.is_some());
+                        was_tiled.is_some()
+                    } else {
+                        workspace
+                            .tiling_layer
+                            .mapped()
+                            .any(|(m, _)| m == &old_mapped)
+                    }
+                    .then_some(ManagedLayer::Tiling)
+                    .unwrap_or(ManagedLayer::Floating);
+
+                    (initial_window_location, layer, workspace.handle)
+                } else if let Some(sticky_layer) = state
+                    .common
+                    .shell
+                    .workspaces
+                    .sets
+                    .get_mut(&cursor_output)
+                    .filter(|set| set.sticky_layer.mapped().any(|m| m == &old_mapped))
+                    .map(|set| &mut set.sticky_layer)
+                {
+                    let mut initial_window_location = sticky_layer
+                        .element_geometry(&old_mapped)
+                        .unwrap()
+                        .loc
+                        .to_global(&cursor_output);
+
+                    if let Some(state) = mapped.maximized_state.lock().unwrap().take() {
+                        // If surface is maximized then unmaximize it
+                        mapped.set_maximized(false);
+                        let new_size = state.original_geometry.size.as_logical();
+                        sticky_layer.map_internal(
+                            mapped.clone(),
+                            Some(state.original_geometry.loc),
+                            Some(new_size),
+                            None,
+                        );
+
+                        let ratio =
+                            pos.to_local(&cursor_output).x / cursor_output.geometry().size.w as f64;
+                        initial_window_location =
+                            Point::<f64, _>::from((pos.x - (new_size.w as f64 * ratio), pos.y))
+                                .to_i32_round();
+                    }
+
+                    if mapped == old_mapped {
+                        sticky_layer.unmap(&mapped);
+                    }
+
+                    (
+                        initial_window_location,
+                        ManagedLayer::Sticky,
+                        state.common.shell.active_space(&cursor_output).handle,
+                    )
+                } else {
+                    return;
+                };
 
                 state
                     .common
@@ -2600,7 +2621,7 @@ impl Shell {
                     .common
                     .shell
                     .toplevel_info_state
-                    .toplevel_leave_output(&window, &output);
+                    .toplevel_leave_output(&window, &cursor_output);
 
                 if move_out_of_stack {
                     old_mapped.stack_ref_mut().unwrap().remove_window(&window);
@@ -2620,6 +2641,7 @@ impl Shell {
                     mapped,
                     seat,
                     initial_window_location,
+                    cursor_output,
                     active_hint as u8,
                     layer,
                     release,
