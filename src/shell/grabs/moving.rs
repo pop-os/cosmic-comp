@@ -147,7 +147,7 @@ impl MoveGrabState {
         };
 
         let snapping_indicator = match &self.snapping_zone {
-            Some(t) => {
+            Some(t) if &seat.active_output() == output => {
                 let base_color = theme.palette.neutral_9;
                 let overlay_geometry = t.overlay_geometry(non_exclusive_geometry);
                 vec![
@@ -177,7 +177,7 @@ impl MoveGrabState {
                     .into(),
                 ]
             }
-            None => vec![],
+            _ => vec![],
         };
 
         let (window_elements, popup_elements) = self
