@@ -31,7 +31,7 @@ impl Window for CosmicSurface {
     }
 
     fn is_activated(&self) -> bool {
-        !self.is_minimized() && CosmicSurface::is_activated(self, false)
+        !self.is_minimized() && CosmicSurface::is_activated(self, true)
     }
 
     fn is_maximized(&self) -> bool {
