@@ -162,12 +162,14 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
         match self.release {
             ReleaseMode::NoMouseButtons => {
                 if handle.current_pressed().is_empty() {
-                    self.ungrab(data, handle, event.serial, event.time);
+                    self.ungrab();
+                    handle.unset_grab(data, event.serial, event.time, true);
                 }
             }
             ReleaseMode::Click => {
                 if event.state == ButtonState::Pressed {
-                    self.ungrab(data, handle, event.serial, event.time);
+                    self.ungrab();
+                    handle.unset_grab(data, event.serial, event.time, true);
                 }
             }
         }
@@ -286,6 +288,7 @@ impl TouchGrab<State> for ResizeSurfaceGrab {
         seq: Serial,
     ) {
         if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
+            self.ungrab();
             handle.unset_grab(data);
         }
 
@@ -314,6 +317,7 @@ impl TouchGrab<State> for ResizeSurfaceGrab {
     }
 
     fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, _seq: Serial) {
+        self.ungrab();
         handle.unset_grab(data);
     }
 
@@ -456,13 +460,7 @@ impl ResizeSurfaceGrab {
         }
     }
 
-    fn ungrab(
-        &mut self,
-        data: &mut State,
-        handle: &mut PointerInnerHandle<'_, State>,
-        serial: Serial,
-        time: u32,
-    ) {
+    fn ungrab(&mut self) {
         // No more buttons are pressed, release the grab.
         self.seat
             .user_data()
@@ -470,7 +468,6 @@ impl ResizeSurfaceGrab {
             .unwrap()
             .0
             .store(false, Ordering::SeqCst);
-        handle.unset_grab(data, serial, time, true);
 
         // If toplevel is dead, we can't resize it, so we return early.
         if !self.window.alive() {
