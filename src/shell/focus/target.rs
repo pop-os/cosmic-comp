@@ -497,7 +497,6 @@ impl TouchTarget<State> for PointerFocusTarget {
                 TouchTarget::down(window, seat, data, event, seq)
             }
             PointerFocusTarget::StackUI(stack) => TouchTarget::down(stack, seat, data, event, seq),
-            // TODO: implement TouchTarget for Grabs
             PointerFocusTarget::ResizeFork(fork) => TouchTarget::down(fork, seat, data, event, seq),
         }
     }
