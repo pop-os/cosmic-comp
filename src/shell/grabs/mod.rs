@@ -313,6 +313,13 @@ impl PointerGrab<State> for ResizeGrab {
             ResizeGrab::Tiling(grab) => PointerGrab::start_data(grab),
         }
     }
+
+    fn unset(&mut self, data: &mut State) {
+        match self {
+            ResizeGrab::Floating(grab) => PointerGrab::unset(grab, data),
+            ResizeGrab::Tiling(grab) => PointerGrab::unset(grab, data),
+        }
+    }
 }
 
 impl TouchGrab<State> for ResizeGrab {
@@ -375,6 +382,13 @@ impl TouchGrab<State> for ResizeGrab {
         match self {
             ResizeGrab::Floating(grab) => TouchGrab::start_data(grab),
             ResizeGrab::Tiling(grab) => TouchGrab::start_data(grab),
+        }
+    }
+
+    fn unset(&mut self, data: &mut State) {
+        match self {
+            ResizeGrab::Floating(grab) => TouchGrab::unset(grab, data),
+            ResizeGrab::Tiling(grab) => TouchGrab::unset(grab, data),
         }
     }
 }

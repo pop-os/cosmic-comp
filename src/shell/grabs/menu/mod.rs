@@ -634,6 +634,8 @@ impl PointerGrab<State> for MenuGrab {
     fn start_data(&self) -> &PointerGrabStartData<State> {
         &self.start_data
     }
+
+    fn unset(&mut self, _data: &mut State) {}
 }
 
 impl MenuGrab {

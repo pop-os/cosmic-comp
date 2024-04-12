@@ -575,6 +575,8 @@ impl PointerGrab<State> for MoveGrab {
             _ => unreachable!(),
         }
     }
+
+    fn unset(&mut self, _data: &mut State) {}
 }
 
 impl TouchGrab<State> for MoveGrab {
@@ -632,6 +634,8 @@ impl TouchGrab<State> for MoveGrab {
             _ => unreachable!(),
         }
     }
+
+    fn unset(&mut self, _data: &mut State) {}
 }
 
 impl MoveGrab {

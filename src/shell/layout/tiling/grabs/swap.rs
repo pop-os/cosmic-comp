@@ -99,4 +99,6 @@ impl KeyboardGrab<State> for SwapWindowGrab {
     fn start_data(&self) -> &KeyboardGrabStartData<State> {
         &KeyboardGrabStartData { focus: None }
     }
+
+    fn unset(&mut self, _state: &mut State) {}
 }

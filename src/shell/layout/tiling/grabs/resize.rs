@@ -462,6 +462,8 @@ impl PointerGrab<State> for ResizeForkGrab {
             _ => unreachable!(),
         }
     }
+
+    fn unset(&mut self, _data: &mut State) {}
 }
 
 impl TouchGrab<State> for ResizeForkGrab {
@@ -521,4 +523,6 @@ impl TouchGrab<State> for ResizeForkGrab {
             _ => unreachable!(),
         }
     }
+
+    fn unset(&mut self, _data: &mut State) {}
 }
