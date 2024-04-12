@@ -162,13 +162,11 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
         match self.release {
             ReleaseMode::NoMouseButtons => {
                 if handle.current_pressed().is_empty() {
-                    self.ungrab();
                     handle.unset_grab(data, event.serial, event.time, true);
                 }
             }
             ReleaseMode::Click => {
                 if event.state == ButtonState::Pressed {
-                    self.ungrab();
                     handle.unset_grab(data, event.serial, event.time, true);
                 }
             }
@@ -266,6 +264,10 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
             _ => unreachable!(),
         }
     }
+
+    fn unset(&mut self, _data: &mut State) {
+        self.ungrab();
+    }
 }
 
 impl TouchGrab<State> for ResizeSurfaceGrab {
@@ -288,7 +290,6 @@ impl TouchGrab<State> for ResizeSurfaceGrab {
         seq: Serial,
     ) {
         if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
-            self.ungrab();
             handle.unset_grab(data);
         }
 
@@ -317,7 +318,6 @@ impl TouchGrab<State> for ResizeSurfaceGrab {
     }
 
     fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, _seq: Serial) {
-        self.ungrab();
         handle.unset_grab(data);
     }
 
@@ -326,6 +326,10 @@ impl TouchGrab<State> for ResizeSurfaceGrab {
             GrabStartData::Touch(start_data) => start_data,
             _ => unreachable!(),
         }
+    }
+
+    fn unset(&mut self, _data: &mut State) {
+        self.ungrab();
     }
 }
 
