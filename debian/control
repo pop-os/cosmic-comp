@@ -10,6 +10,7 @@ Build-Depends:
     libfontconfig-dev,
     libgbm-dev,
     libinput-dev,
+    libpixman-1-dev,
     libseat-dev,
     libsystemd-dev,
     libudev-dev,
