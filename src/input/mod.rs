@@ -1682,7 +1682,7 @@ impl State {
                     pointer.unset_grab(self, serial, time);
                 }
                 if keyboard.is_grabbed() {
-                    keyboard.unset_grab();
+                    keyboard.unset_grab(self);
                 }
             }
             Action::Workspace(key_num) => {
@@ -2302,7 +2302,9 @@ impl State {
                 if let Some(focus) = keyboard_handle.current_focus() {
                     if let Some(descriptor) = workspace.node_desc(focus) {
                         let grab = SwapWindowGrab::new(seat.clone(), descriptor.clone());
-                        keyboard_handle.set_grab(grab, serial);
+                        drop(shell);
+                        keyboard_handle.set_grab(self, grab, serial);
+                        let mut shell = self.common.shell.write().unwrap();
                         shell.set_overview_mode(
                             Some(Trigger::KeyboardSwap(pattern, descriptor)),
                             self.common.event_loop_handle.clone(),

@@ -98,7 +98,7 @@ impl XdgShellHandler for State {
                         return;
                     }
                     Shell::set_focus(self, grab.current_grab().as_ref(), &seat, Some(serial));
-                    keyboard.set_grab(PopupKeyboardGrab::new(&grab), serial);
+                    keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
                 }
 
                 if let Some(pointer) = seat.get_pointer() {

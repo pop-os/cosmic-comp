@@ -541,7 +541,7 @@ impl PointerGrab<State> for MenuGrab {
             .any(|elem| elem.pointer_entered);
         if !any_entered {
             if event.state == ButtonState::Pressed {
-                handle.unset_grab(state, event.serial, event.time, true);
+                handle.unset_grab(self, state, event.serial, event.time, true);
             }
         } else {
             let selected = {
@@ -554,7 +554,7 @@ impl PointerGrab<State> for MenuGrab {
                 selected
             };
             if selected && event.state == ButtonState::Released {
-                handle.unset_grab(state, event.serial, event.time, true);
+                handle.unset_grab(self, state, event.serial, event.time, true);
             } else {
                 handle.button(state, event);
             }
