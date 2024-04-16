@@ -5,7 +5,7 @@ use smithay::{
         element::{
             surface::WaylandSurfaceRenderElement,
             utils::{Relocate, RelocateRenderElement},
-            Element, Id, RenderElement, UnderlyingStorage,
+            Element, Id, Kind, RenderElement, UnderlyingStorage,
         },
         glow::{GlowFrame, GlowRenderer},
         utils::{CommitCounter, DamageSet},
@@ -149,6 +149,18 @@ where
             CosmicElement::AdditionalDamage(elem) => elem.alpha(),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.alpha(),
+        }
+    }
+
+    fn kind(&self) -> Kind {
+        match self {
+            CosmicElement::Workspace(elem) => elem.kind(),
+            CosmicElement::Cursor(elem) => elem.kind(),
+            CosmicElement::Dnd(elem) => elem.kind(),
+            CosmicElement::MoveGrab(elem) => elem.kind(),
+            CosmicElement::AdditionalDamage(elem) => elem.kind(),
+            #[cfg(feature = "debug")]
+            CosmicElement::Egui(elem) => elem.kind(),
         }
     }
 }
