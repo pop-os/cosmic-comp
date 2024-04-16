@@ -444,7 +444,7 @@ impl PointerGrab<State> for MoveGrab {
         // While the grab is active, no client has pointer focus
         handle.motion(state, None, event);
         if !self.window.alive() {
-            handle.unset_grab(state, event.serial, event.time, true);
+            handle.unset_grab(self, state, event.serial, event.time, true);
         }
     }
 
@@ -469,12 +469,12 @@ impl PointerGrab<State> for MoveGrab {
         match self.release {
             ReleaseMode::NoMouseButtons => {
                 if handle.current_pressed().is_empty() {
-                    handle.unset_grab(state, event.serial, event.time, true);
+                    handle.unset_grab(self, state, event.serial, event.time, true);
                 }
             }
             ReleaseMode::Click => {
                 if event.state == ButtonState::Pressed {
-                    handle.unset_grab(state, event.serial, event.time, true);
+                    handle.unset_grab(self, state, event.serial, event.time, true);
                 }
             }
         }
@@ -595,7 +595,7 @@ impl TouchGrab<State> for MoveGrab {
         seq: Serial,
     ) {
         if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
-            handle.unset_grab(data);
+            handle.unset_grab(self, data);
         }
 
         handle.up(data, event, seq);
@@ -621,7 +621,7 @@ impl TouchGrab<State> for MoveGrab {
     }
 
     fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, _seq: Serial) {
-        handle.unset_grab(data);
+        handle.unset_grab(self, data);
     }
 
     fn start_data(&self) -> &TouchGrabStartData<State> {

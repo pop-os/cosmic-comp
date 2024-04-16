@@ -41,7 +41,7 @@ impl KeyboardGrab<State> for SwapWindowGrab {
     ) {
         if !matches!(&data.common.shell.read().unwrap().overview_mode, OverviewMode::Started(Trigger::KeyboardSwap(_, d), _) if d == &self.desc)
         {
-            handle.unset_grab(data, serial, false);
+            handle.unset_grab(self, data, serial, false);
             return;
         }
 
