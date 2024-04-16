@@ -79,6 +79,7 @@ features = [
   "use_system_lib",
   "renderer_glow",
   "renderer_multi",
+  "renderer_pixman",
   "wayland_frontend",
   "xwayland",
 ]
