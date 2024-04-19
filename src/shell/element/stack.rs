@@ -596,6 +596,45 @@ impl CosmicStack {
     pub(crate) fn force_redraw(&self) {
         self.0.force_redraw();
     }
+
+    fn start_drag(&self, data: &mut State, seat: &Seat<State>, serial: Serial) {
+        if let Some(dragged_out) = self
+            .0
+            .with_program(|p| p.potential_drag.lock().unwrap().take())
+        {
+            if let Some(surface) = self
+                .0
+                .with_program(|p| p.windows.lock().unwrap().get(dragged_out).cloned())
+            {
+                let seat = seat.clone();
+                surface.try_force_undecorated(false);
+                surface.send_configure();
+                if let Some(surface) = surface.wl_surface() {
+                    let _ = data.common.event_loop_handle.insert_idle(move |state| {
+                        let res = state.common.shell.write().unwrap().move_request(
+                            &surface,
+                            &seat,
+                            serial,
+                            ReleaseMode::NoMouseButtons,
+                            true,
+                            &state.common.config,
+                            &state.common.event_loop_handle,
+                            &state.common.xdg_activation_state,
+                        );
+                        if let Some((grab, focus)) = res {
+                            if grab.is_touch_grab() {
+                                seat.get_touch().unwrap().set_grab(state, grab, serial);
+                            } else {
+                                seat.get_pointer()
+                                    .unwrap()
+                                    .set_grab(state, grab, serial, focus);
+                            }
+                        }
+                    });
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1196,43 +1235,7 @@ impl PointerTarget<State> for CosmicStack {
             || event.location.x < 64.0
             || event.location.x > (active_window_geo.size.w as f64 - 64.0)
         {
-            if let Some(dragged_out) = self
-                .0
-                .with_program(|p| p.potential_drag.lock().unwrap().take())
-            {
-                if let Some(surface) = self
-                    .0
-                    .with_program(|p| p.windows.lock().unwrap().get(dragged_out).cloned())
-                {
-                    let seat = seat.clone();
-                    let serial = event.serial;
-                    surface.try_force_undecorated(false);
-                    surface.send_configure();
-                    if let Some(surface) = surface.wl_surface() {
-                        let _ = data.common.event_loop_handle.insert_idle(move |state| {
-                            let res = state.common.shell.write().unwrap().move_request(
-                                &surface,
-                                &seat,
-                                serial,
-                                ReleaseMode::NoMouseButtons,
-                                true,
-                                &state.common.config,
-                                &state.common.event_loop_handle,
-                                &state.common.xdg_activation_state,
-                            );
-                            if let Some((grab, focus)) = res {
-                                if grab.is_touch_grab() {
-                                    seat.get_touch().unwrap().set_grab(state, grab, serial);
-                                } else {
-                                    seat.get_pointer()
-                                        .unwrap()
-                                        .set_grab(state, grab, serial, focus);
-                                }
-                            }
-                        });
-                    }
-                }
-            }
+            self.start_drag(data, seat, event.serial);
         }
     }
 
@@ -1423,6 +1426,7 @@ impl TouchTarget<State> for CosmicStack {
     fn down(&self, seat: &Seat<State>, data: &mut State, event: &DownEvent, seq: Serial) {
         let mut event = event.clone();
         let active_window_geo = self.0.with_program(|p| {
+            *p.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
             p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry()
         });
         event.location -= active_window_geo.loc.to_f64();
@@ -1439,7 +1443,15 @@ impl TouchTarget<State> for CosmicStack {
             p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry()
         });
         event.location -= active_window_geo.loc.to_f64();
-        TouchTarget::motion(&self.0, seat, data, &event, seq)
+        TouchTarget::motion(&self.0, seat, data, &event, seq);
+
+        if event.location.y < 0.0
+            || event.location.y > TAB_HEIGHT as f64
+            || event.location.x < 64.0
+            || event.location.x > (active_window_geo.size.w as f64 - 64.0)
+        {
+            self.start_drag(data, seat, seq);
+        }
     }
 
     fn frame(&self, seat: &Seat<State>, data: &mut State, seq: Serial) {
