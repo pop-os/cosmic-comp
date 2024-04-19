@@ -198,6 +198,7 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
+                    self.common.idle_notifier_state.notify_activity(&seat);
                     let current_output = seat.active_output();
                     let shortcuts_inhibited = self
                         .common
@@ -512,6 +513,7 @@ impl State {
 
                 let mut shell = self.common.shell.write().unwrap();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                    self.common.idle_notifier_state.notify_activity(&seat);
                     let current_output = seat.active_output();
 
                     let mut position = seat.get_pointer().unwrap().current_location().as_global();
@@ -718,6 +720,7 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
+                    self.common.idle_notifier_state.notify_activity(&seat);
                     let output = seat.active_output();
                     let geometry = output.geometry();
                     let position = geometry.loc.to_f64()
@@ -785,6 +788,7 @@ impl State {
 
                 let mut shell = self.common.shell.write().unwrap();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                    self.common.idle_notifier_state.notify_activity(&seat);
                     #[cfg(feature = "debug")]
                     if shell.seats.iter().position(|x| x == &seat).unwrap() == 0
                         && self.common.egui.active
@@ -994,6 +998,7 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
+                    self.common.idle_notifier_state.notify_activity(&seat);
                     #[cfg(feature = "debug")]
                     if self
                         .common
@@ -1065,6 +1070,7 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
+                    self.common.idle_notifier_state.notify_activity(&seat);
                     if event.fingers() >= 3 {
                         self.common.gesture_state = Some(GestureState::new(event.fingers()));
                     } else {
@@ -1091,6 +1097,7 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
+                    self.common.idle_notifier_state.notify_activity(&seat);
                     let mut activate_action: Option<SwipeAction> = None;
                     if let Some(ref mut gesture_state) = self.common.gesture_state {
                         let first_update = gesture_state.update(
@@ -1180,6 +1187,7 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
+                    self.common.idle_notifier_state.notify_activity(&seat);
                     if let Some(ref gesture_state) = self.common.gesture_state {
                         match gesture_state.action {
                             Some(SwipeAction::NextWorkspace) | Some(SwipeAction::PrevWorkspace) => {
@@ -1225,6 +1233,7 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
+                    self.common.idle_notifier_state.notify_activity(&seat);
                     let serial = SERIAL_COUNTER.next_serial();
                     let pointer = seat.get_pointer().unwrap();
                     pointer.gesture_pinch_begin(
@@ -1247,6 +1256,7 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
+                    self.common.idle_notifier_state.notify_activity(&seat);
                     let pointer = seat.get_pointer().unwrap();
                     pointer.gesture_pinch_update(
                         self,
@@ -1269,6 +1279,7 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
+                    self.common.idle_notifier_state.notify_activity(&seat);
                     let serial = SERIAL_COUNTER.next_serial();
                     let pointer = seat.get_pointer().unwrap();
                     pointer.gesture_pinch_end(
@@ -1291,6 +1302,7 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
+                    self.common.idle_notifier_state.notify_activity(&seat);
                     let serial = SERIAL_COUNTER.next_serial();
                     let pointer = seat.get_pointer().unwrap();
                     pointer.gesture_hold_begin(
@@ -1313,6 +1325,7 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
+                    self.common.idle_notifier_state.notify_activity(&seat);
                     let serial = SERIAL_COUNTER.next_serial();
                     let pointer = seat.get_pointer().unwrap();
                     pointer.gesture_hold_end(
@@ -1328,6 +1341,7 @@ impl State {
             InputEvent::TouchDown { event, .. } => {
                 let mut shell = self.common.shell.write().unwrap();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                    self.common.idle_notifier_state.notify_activity(&seat);
                     let Some(output) =
                         mapped_output_for_device(&self.common.config, &*shell, &event.device())
                             .cloned()
@@ -1364,6 +1378,7 @@ impl State {
             InputEvent::TouchMotion { event, .. } => {
                 let mut shell = self.common.shell.write().unwrap();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                    self.common.idle_notifier_state.notify_activity(&seat);
                     let Some(output) =
                         mapped_output_for_device(&self.common.config, &*shell, &event.device())
                             .cloned()
@@ -1405,6 +1420,7 @@ impl State {
 
                 let maybe_seat = shell.seats.for_device(&event.device()).cloned();
                 if let Some(seat) = maybe_seat {
+                    self.common.idle_notifier_state.notify_activity(&seat);
                     std::mem::drop(shell);
                     let serial = SERIAL_COUNTER.next_serial();
                     let touch = seat.get_touch().unwrap();
@@ -1428,6 +1444,7 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
+                    self.common.idle_notifier_state.notify_activity(&seat);
                     let touch = seat.get_touch().unwrap();
                     touch.cancel(self);
                 }
@@ -1442,6 +1459,7 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
+                    self.common.idle_notifier_state.notify_activity(&seat);
                     let touch = seat.get_touch().unwrap();
                     touch.frame(self);
                 }
@@ -1449,6 +1467,7 @@ impl State {
             InputEvent::TabletToolAxis { event, .. } => {
                 let mut shell = self.common.shell.write().unwrap();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                    self.common.idle_notifier_state.notify_activity(&seat);
                     let Some(output) =
                         mapped_output_for_device(&self.common.config, &shell, &event.device())
                             .cloned()
@@ -1516,6 +1535,7 @@ impl State {
             InputEvent::TabletToolProximity { event, .. } => {
                 let mut shell = self.common.shell.write().unwrap();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                    self.common.idle_notifier_state.notify_activity(&seat);
                     let Some(output) =
                         mapped_output_for_device(&self.common.config, &shell, &event.device())
                             .cloned()
@@ -1580,6 +1600,7 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
+                    self.common.idle_notifier_state.notify_activity(&seat);
                     if let Some(tool) = seat.tablet_seat().get_tool(&event.tool()) {
                         match event.tip_state() {
                             TabletToolTipState::Down => {
@@ -1602,6 +1623,7 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
+                    self.common.idle_notifier_state.notify_activity(&seat);
                     if let Some(tool) = seat.tablet_seat().get_tool(&event.tool()) {
                         tool.button(
                             event.button(),
