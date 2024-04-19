@@ -15,8 +15,8 @@ use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     backend::input::TouchSlot,
     desktop::{
-        layer_map_for_output, space::SpaceElement, LayerSurface, PopupKind, WindowSurface,
-        WindowSurfaceType,
+        layer_map_for_output, space::SpaceElement, utils::surface_primary_scanout_output,
+        LayerSurface, PopupKind, WindowSurface, WindowSurfaceType,
     },
     input::{
         pointer::{Focus, GrabStartData as PointerGrabStartData},
@@ -1105,6 +1105,18 @@ impl Common {
         );
         self.popups.cleanup();
         self.toplevel_info_state.refresh(&self.workspace_state);
+        self.refresh_idle_inhibit();
+    }
+
+    pub fn refresh_idle_inhibit(&mut self) {
+        self.idle_inhibiting_surfaces.retain(|s| s.alive());
+
+        let is_inhibited = self.idle_inhibiting_surfaces.iter().any(|surface| {
+            with_states(surface, |states| {
+                surface_primary_scanout_output(surface, states).is_some()
+            })
+        });
+        self.idle_notifier_state.set_is_inhibited(is_inhibited);
     }
 
     pub fn on_commit(&mut self, surface: &WlSurface) {

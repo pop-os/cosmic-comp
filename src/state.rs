@@ -65,6 +65,8 @@ use smithay::{
         compositor::{CompositorClientState, CompositorState},
         dmabuf::{DmabufFeedback, DmabufGlobal, DmabufState},
         fractional_scale::{with_fractional_scale, FractionalScaleManagerState},
+        idle_inhibit::IdleInhibitManagerState,
+        idle_notify::IdleNotifierState,
         input_method::InputMethodManagerState,
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState,
         output::OutputManagerState,
@@ -96,8 +98,11 @@ use smithay::{
 use time::UtcOffset;
 use tracing::error;
 
-use std::sync::{Arc, RwLock};
 use std::{cell::RefCell, ffi::OsString, time::Duration};
+use std::{
+    collections::HashSet,
+    sync::{Arc, RwLock},
+};
 use std::{collections::VecDeque, time::Instant};
 
 #[derive(RustEmbed)]
@@ -188,6 +193,9 @@ pub struct Common {
     pub screencopy_state: ScreencopyState,
     pub seat_state: SeatState<State>,
     pub session_lock_manager_state: SessionLockManagerState,
+    pub idle_notifier_state: IdleNotifierState<State>,
+    pub idle_inhibit_manager_state: IdleInhibitManagerState,
+    pub idle_inhibiting_surfaces: HashSet<WlSurface>,
     pub shm_state: ShmState,
     pub wl_drm_state: WlDrmState<Option<DrmNode>>,
     pub viewporter_state: ViewporterState,
@@ -415,6 +423,10 @@ impl State {
         TextInputManagerState::new::<Self>(&dh);
         VirtualKeyboardManagerState::new::<State, _>(&dh, client_should_see_privileged_protocols);
 
+        let idle_notifier_state = IdleNotifierState::<Self>::new(&dh, handle.clone());
+        let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(&dh);
+        let idle_inhibiting_surfaces = HashSet::new();
+
         let data_control_state = config.static_conf.data_control_enabled.then(|| {
             DataControlState::new::<Self, _>(dh, Some(&primary_selection_state), |_| true)
         });
@@ -486,6 +498,9 @@ impl State {
                 data_device_state,
                 dmabuf_state,
                 fractional_scale_state,
+                idle_notifier_state,
+                idle_inhibit_manager_state,
+                idle_inhibiting_surfaces,
                 image_source_state,
                 screencopy_state,
                 shm_state,
