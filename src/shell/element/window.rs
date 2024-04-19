@@ -866,7 +866,10 @@ impl PointerTarget<State> for CosmicWindow {
 impl TouchTarget<State> for CosmicWindow {
     fn down(&self, seat: &Seat<State>, data: &mut State, event: &DownEvent, seq: Serial) {
         let mut event = event.clone();
-        event.location -= self.0.with_program(|p| p.window.geometry().loc.to_f64());
+        self.0.with_program(|p| {
+            event.location -= p.window.geometry().loc.to_f64();
+            *p.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
+        });
         TouchTarget::down(&self.0, seat, data, &event, seq)
     }
 
