@@ -42,7 +42,7 @@ use smithay::{
         Seat,
     },
     output::Output,
-    utils::{IsAlive, Logical, Point, Rectangle, Scale, Serial, SERIAL_COUNTER},
+    utils::{IsAlive, Logical, Point, Rectangle, Scale, Serial, Size, SERIAL_COUNTER},
 };
 use std::{cell::RefCell, collections::HashSet, sync::atomic::Ordering, time::Instant};
 
@@ -142,10 +142,12 @@ impl MoveGrabState {
             layers.non_exclusive_zone()
         };
 
+        let gaps = (theme.gaps.0 as i32, theme.gaps.1 as i32);
+
         let snapping_indicator = match &self.snapping_zone {
             Some(t) if &self.cursor_output == output => {
                 let base_color = theme.palette.neutral_9;
-                let overlay_geometry = t.overlay_geometry(non_exclusive_geometry);
+                let overlay_geometry = t.overlay_geometry(non_exclusive_geometry, gaps);
                 vec![
                     CosmicMappedRenderElement::from(IndicatorShader::element(
                         renderer,
@@ -165,7 +167,7 @@ impl MoveGrabState {
                     CosmicMappedRenderElement::from(BackdropShader::element(
                         renderer,
                         Key::Window(Usage::SnappingIndicator, self.window.clone()),
-                        t.overlay_geometry(non_exclusive_geometry),
+                        t.overlay_geometry(non_exclusive_geometry, gaps),
                         theme.radius_s()[0], // TODO: Fix once shaders support 4 corner radii customization
                         0.4,
                         [base_color.red, base_color.green, base_color.blue],
@@ -290,24 +292,31 @@ impl SnappingZone {
     pub fn overlay_geometry(
         &self,
         non_exclusive_geometry: Rectangle<i32, Logical>,
+        gaps: (i32, i32),
     ) -> Rectangle<i32, Local> {
         match self {
             SnappingZone::Maximize => non_exclusive_geometry.as_local(),
-            SnappingZone::Top => TiledCorners::Top.relative_geometry(non_exclusive_geometry),
+            SnappingZone::Top => TiledCorners::Top.relative_geometry(non_exclusive_geometry, gaps),
             SnappingZone::TopLeft => {
-                TiledCorners::TopLeft.relative_geometry(non_exclusive_geometry)
+                TiledCorners::TopLeft.relative_geometry(non_exclusive_geometry, gaps)
             }
-            SnappingZone::Left => TiledCorners::Left.relative_geometry(non_exclusive_geometry),
+            SnappingZone::Left => {
+                TiledCorners::Left.relative_geometry(non_exclusive_geometry, gaps)
+            }
             SnappingZone::BottomLeft => {
-                TiledCorners::BottomLeft.relative_geometry(non_exclusive_geometry)
+                TiledCorners::BottomLeft.relative_geometry(non_exclusive_geometry, gaps)
             }
-            SnappingZone::Bottom => TiledCorners::Bottom.relative_geometry(non_exclusive_geometry),
+            SnappingZone::Bottom => {
+                TiledCorners::Bottom.relative_geometry(non_exclusive_geometry, gaps)
+            }
             SnappingZone::BottomRight => {
-                TiledCorners::BottomRight.relative_geometry(non_exclusive_geometry)
+                TiledCorners::BottomRight.relative_geometry(non_exclusive_geometry, gaps)
             }
-            SnappingZone::Right => TiledCorners::Right.relative_geometry(non_exclusive_geometry),
+            SnappingZone::Right => {
+                TiledCorners::Right.relative_geometry(non_exclusive_geometry, gaps)
+            }
             SnappingZone::TopRight => {
-                TiledCorners::TopRight.relative_geometry(non_exclusive_geometry)
+                TiledCorners::TopRight.relative_geometry(non_exclusive_geometry, gaps)
             }
         }
     }
