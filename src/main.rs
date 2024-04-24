@@ -9,6 +9,7 @@ use smithay::{
 };
 
 use anyhow::{Context, Result};
+use state::State;
 use std::{env, ffi::OsString, os::unix::process::CommandExt, process, sync::Arc};
 use tracing::{error, info, warn};
 
@@ -40,6 +41,51 @@ pub mod xwayland;
 static GLOBAL: profiling::tracy_client::ProfiledAllocator<std::alloc::System> =
     profiling::tracy_client::ProfiledAllocator::new(std::alloc::System, 10);
 
+// called by the Xwayland source, either after starting or failing
+impl State {
+    fn notify_ready(&mut self) {
+        // TODO: Don't notify again, but potentially import updated env-variables
+        // into systemd and the session?
+        self.ready.call_once(|| {
+            // potentially tell systemd we are setup now
+            #[cfg(feature = "systemd")]
+            if let state::BackendData::Kms(_) = &self.backend {
+                systemd::ready(&self.common);
+            }
+
+            // potentially tell the session we are setup now
+            if let Err(err) =
+                session::setup_socket(self.common.event_loop_handle.clone(), &self.common)
+            {
+                warn!(?err, "Failed to setup cosmic-session communication");
+            }
+
+            let mut args = env::args().skip(1);
+            self.common.kiosk_child = if let Some(exec) = args.next() {
+                // Run command in kiosk mode
+                let mut command = process::Command::new(&exec);
+                command.args(args);
+                command.envs(
+                    session::get_env(&self.common).expect("WAYLAND_DISPLAY should be valid UTF-8"),
+                );
+                unsafe { command.pre_exec(|| Ok(utils::rlimit::restore_nofile_limit())) };
+
+                info!("Running {:?}", exec);
+                command
+                    .spawn()
+                    .map_err(|err| {
+                        // TODO: replace with `inspect_err` once stable
+                        error!(?err, "Error running kiosk child.");
+                        err
+                    })
+                    .ok()
+            } else {
+                None
+            };
+        });
+    }
+}
+
 fn main() -> Result<()> {
     // setup logger
     logger::init_logger()?;
@@ -60,27 +106,6 @@ fn main() -> Result<()> {
     );
     // init backend
     backend::init_backend_auto(&display, &mut event_loop, &mut state)?;
-    // potentially tell systemd we are setup now
-    #[cfg(feature = "systemd")]
-    if let state::BackendData::Kms(_) = &state.backend {
-        systemd::ready(&state);
-    }
-    // potentially tell the session we are setup now
-    session::setup_socket(event_loop.handle(), &state)?;
-
-    let mut args = env::args().skip(1);
-    let mut child_opt = if let Some(exec) = args.next() {
-        // Run command in kiosk mode
-        let mut command = process::Command::new(&exec);
-        command.args(args);
-        command.envs(session::get_env(&state)?);
-        unsafe { command.pre_exec(|| Ok(utils::rlimit::restore_nofile_limit())) };
-
-        info!("Running {:?}", exec);
-        Some(command.spawn()?)
-    } else {
-        None
-    };
 
     if let Err(err) = theme::watch_theme(event_loop.handle()) {
         warn!(?err, "Failed to watch theme");
@@ -137,7 +162,7 @@ fn main() -> Result<()> {
         let _ = state.common.display_handle.flush_clients();
 
         // check if kiosk child is running
-        if let Some(ref mut child) = child_opt {
+        if let Some(child) = state.common.kiosk_child.as_mut() {
             match child.try_wait() {
                 // Kiosk child exited with status
                 Ok(Some(exit_status)) => {
@@ -161,7 +186,7 @@ fn main() -> Result<()> {
     })?;
 
     // kill kiosk child if loop exited
-    if let Some(mut child) = child_opt {
+    if let Some(mut child) = state.common.kiosk_child.take() {
         let _ = child.kill();
     }
 

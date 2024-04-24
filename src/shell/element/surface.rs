@@ -559,7 +559,7 @@ impl CosmicSurface {
     ) -> (Vec<C>, Vec<C>)
     where
         R: Renderer + ImportAll,
-        <R as Renderer>::TextureId: 'static,
+        <R as Renderer>::TextureId: Clone + 'static,
         C: From<WaylandSurfaceRenderElement<R>>,
     {
         match self.0.underlying_surface() {
@@ -734,7 +734,7 @@ impl X11Relatable for CosmicSurface {
 impl<R> AsRenderElements<R> for CosmicSurface
 where
     R: Renderer + ImportAll,
-    <R as Renderer>::TextureId: 'static,
+    <R as Renderer>::TextureId: Clone + 'static,
 {
     type RenderElement = WaylandSurfaceRenderElement<R>;
 

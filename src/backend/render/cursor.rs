@@ -161,7 +161,7 @@ pub fn draw_surface_cursor<R>(
 ) -> Vec<(CursorRenderElement<R>, Point<i32, BufferCoords>)>
 where
     R: Renderer + ImportAll,
-    <R as Renderer>::TextureId: 'static,
+    <R as Renderer>::TextureId: Clone + 'static,
 {
     let position = location.into();
     let scale = scale.into();
@@ -202,7 +202,7 @@ pub fn draw_dnd_icon<R>(
 ) -> Vec<WaylandSurfaceRenderElement<R>>
 where
     R: Renderer + ImportAll,
-    <R as Renderer>::TextureId: 'static,
+    <R as Renderer>::TextureId: Clone + 'static,
 {
     if get_role(&surface) != Some("dnd_icon") {
         warn!(

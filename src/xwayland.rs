@@ -1,4 +1,4 @@
-use std::{ffi::OsString, os::unix::io::OwnedFd};
+use std::{ffi::OsString, os::unix::io::OwnedFd, process::Stdio};
 
 use crate::{
     backend::render::cursor::{load_cursor_theme, Cursor, CursorShape},
@@ -39,8 +39,6 @@ use tracing::{error, trace, warn};
 pub struct XWaylandState {
     pub xwm: Option<X11Wm>,
     pub display: u32,
-    #[allow(unused)]
-    xwayland: XWayland,
 }
 
 impl State {
@@ -49,84 +47,84 @@ impl State {
             return;
         }
 
-        let (xwayland, source) = XWayland::new(&self.common.display_handle);
-        let token =
-            match self
-                .common
-                .event_loop_handle
-                .insert_source(source, move |event, _, data| match event {
-                    XWaylandEvent::Ready {
-                        connection,
-                        client,
-                        client_fd: _,
-                        display: _,
-                    } => {
-                        let mut wm = match X11Wm::start_wm(
-                            data.common.event_loop_handle.clone(),
-                            data.common.display_handle.clone(),
-                            connection,
-                            client,
-                        ) {
-                            Ok(wm) => wm,
-                            Err(err) => {
-                                error!(?err, "Failed to start Xwayland WM");
-                                return;
-                            }
-                        };
-
-                        let (theme, size) = load_cursor_theme();
-                        let cursor = Cursor::load(&theme, CursorShape::Default, size);
-                        let image = cursor.get_image(1, 0);
-                        if let Err(err) = wm.set_cursor(
-                            &image.pixels_rgba,
-                            Size::from((image.width as u16, image.height as u16)),
-                            Point::from((image.xhot as u16, image.yhot as u16)),
-                        ) {
-                            warn!(
-                                id = ?wm.id(),
-                                ?err,
-                                "Failed to set default cursor for Xwayland WM",
-                            );
-                        }
-
-                        let xwayland_state = data.common.xwayland_state.as_mut().unwrap();
-                        xwayland_state.xwm = Some(wm);
-                    }
-                    XWaylandEvent::Exited => {
-                        if let Some(mut xwayland_state) = data.common.xwayland_state.take() {
-                            xwayland_state.xwm = None;
-                        }
-                    }
-                }) {
-                Ok(token) => token,
-                Err(err) => {
-                    error!(?err, "Failed to listen for Xwayland");
-                    return;
-                }
-            };
-
-        match xwayland.start(
-            self.common.event_loop_handle.clone(),
+        let (xwayland, client) = match XWayland::spawn(
+            &self.common.display_handle,
             None,
-            //vec![("WAYLAND_DEBUG", "client")].into_iter(),
             std::iter::empty::<(OsString, OsString)>(),
             true,
+            Stdio::null(),
+            Stdio::null(),
             |user_data| {
                 if let Some(node) = render_node {
                     user_data.insert_if_missing(|| node);
                 }
             },
         ) {
-            Ok(display) => {
-                self.common.xwayland_state = Some(XWaylandState {
-                    xwayland,
-                    xwm: None,
-                    display,
-                });
-            }
+            Ok((xwayland, client)) => (xwayland, client),
             Err(err) => {
                 error!(?err, "Failed to start Xwayland.");
-                self.common.event_loop_handle.remove(token);
+                self.notify_ready();
+                return;
+            }
+        };
+
+        match self
+            .common
+            .event_loop_handle
+            .insert_source(xwayland, move |event, _, data| match event {
+                XWaylandEvent::Ready {
+                    x11_socket,
+                    display_number,
+                } => {
+                    data.common.xwayland_state = Some(XWaylandState {
+                        xwm: None,
+                        display: display_number,
+                    });
+
+                    let mut wm = match X11Wm::start_wm(
+                        data.common.event_loop_handle.clone(),
+                        data.common.display_handle.clone(),
+                        x11_socket,
+                        client.clone(),
+                    ) {
+                        Ok(wm) => wm,
+                        Err(err) => {
+                            error!(?err, "Failed to start Xwayland WM");
+                            return;
+                        }
+                    };
+
+                    let (theme, size) = load_cursor_theme();
+                    let cursor = Cursor::load(&theme, CursorShape::Default, size);
+                    let image = cursor.get_image(1, 0);
+                    if let Err(err) = wm.set_cursor(
+                        &image.pixels_rgba,
+                        Size::from((image.width as u16, image.height as u16)),
+                        Point::from((image.xhot as u16, image.yhot as u16)),
+                    ) {
+                        warn!(
+                            id = ?wm.id(),
+                            ?err,
+                            "Failed to set default cursor for Xwayland WM",
+                        );
+                    }
+
+                    let xwayland_state = data.common.xwayland_state.as_mut().unwrap();
+                    xwayland_state.xwm = Some(wm);
+                    data.notify_ready();
+                }
+                XWaylandEvent::Error => {
+                    if let Some(mut xwayland_state) = data.common.xwayland_state.take() {
+                        xwayland_state.xwm = None;
+                    }
+                    data.notify_ready();
+                }
+            }) {
+            Ok(_token) => {}
+            Err(err) => {
+                error!(?err, "Failed to listen for Xwayland");
+                self.notify_ready();
+                return;
             }
         }
     }
