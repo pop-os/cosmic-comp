@@ -4,7 +4,7 @@ use smithay::output::Output;
 use tracing::{error, warn};
 
 use crate::{
-    config::OutputConfig,
+    config::{OutputConfig, OutputState},
     state::State,
     wayland::protocols::output_configuration::{
         delegate_output_configuration, ModeConfiguration, OutputConfiguration,
@@ -76,9 +76,9 @@ impl State {
                     if let Some(position) = position {
                         current_config.position = (*position).into();
                     }
-                    current_config.enabled = true;
+                    current_config.enabled = OutputState::Enabled;
                 } else {
-                    current_config.enabled = false;
+                    current_config.enabled = OutputState::Disabled;
                 }
             }
 
