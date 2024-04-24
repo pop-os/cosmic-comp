@@ -5,7 +5,7 @@ use crate::{
         element::{CosmicElement, DamageElement},
         workspace_elements, CLEAR_COLOR,
     },
-    config::OutputConfig,
+    config::{OutputConfig, OutputState},
     shell::Shell,
     state::{BackendData, Common, Fps, SurfaceDmabufFeedback},
     utils::prelude::*,
@@ -36,14 +36,18 @@ use smithay::{
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
             buffer_dimensions,
-            damage::Error as RenderError,
-            element::{Element, RenderElementStates},
-            gles::GlesRenderbuffer,
+            damage::{Error as RenderError, OutputDamageTracker},
+            element::{
+                texture::{TextureRenderBuffer, TextureRenderElement},
+                utils::{constrain_render_elements, ConstrainAlign, ConstrainScaleBehavior},
+                Element, Kind, RenderElementStates,
+            },
+            gles::{GlesRenderbuffer, GlesTexture},
             glow::GlowRenderer,
             multigpu::{gbm::GbmGlesBackend, Error as MultiError, GpuManager},
             sync::SyncPoint,
             utils::with_renderer_surface_state,
-            Bind, ImportDma, Offscreen,
+            Bind, ImportDma, Offscreen, Renderer, Texture,
         },
         session::{libseat::LibSeatSession, Event as SessionEvent, Session},
         udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
@@ -155,7 +159,11 @@ impl fmt::Debug for Device {
 pub struct Surface {
     surface: Option<GbmDrmCompositor>,
     connector: connector::Handle,
+
     output: Output,
+    mirroring: Option<Output>,
+    mirroring_textures: HashMap<DrmNode, MirroringState>,
+
     refresh_rate: u32,
     vrr: bool,
     scheduled: bool,
@@ -163,6 +171,45 @@ pub struct Surface {
     render_timer_token: Option<RegistrationToken>,
     fps: Fps,
     feedback: HashMap<DrmNode, SurfaceDmabufFeedback>,
+}
+
+#[derive(Debug)]
+struct MirroringState {
+    texture: TextureRenderBuffer<GlesTexture>,
+    damage_tracker: OutputDamageTracker,
+}
+
+impl MirroringState {
+    fn new_with_renderer(
+        renderer: &mut GlMultiRenderer,
+        format: Fourcc,
+        output: &Output,
+    ) -> Result<Self> {
+        let size = output
+            .current_mode()
+            .map(|mode| mode.size)
+            .unwrap_or_default()
+            .to_logical(1)
+            .to_buffer(1, Transform::Normal);
+        let opaque_regions = vec![Rectangle::from_loc_and_size((0, 0), size)];
+
+        let texture = Offscreen::<GlesTexture>::create_buffer(renderer, format, size)?;
+        let transform = output.current_transform();
+        let texture_buffer = TextureRenderBuffer::from_texture(
+            renderer,
+            texture,
+            1,
+            transform,
+            Some(opaque_regions),
+        );
+
+        let damage_tracker = OutputDamageTracker::from_output(output);
+
+        Ok(MirroringState {
+            texture: texture_buffer,
+            damage_tracker,
+        })
+    }
 }
 
 pub type GbmDrmCompositor = DrmCompositor<
@@ -1036,6 +1083,8 @@ impl Device {
 
         let data = Surface {
             output: output.clone(),
+            mirroring: None,
+            mirroring_textures: HashMap::new(),
             surface: None,
             connector: conn,
             vrr,
@@ -1183,7 +1232,7 @@ impl Surface {
                 api.renderer(&render_node, &target_node, compositor.format())
                     .unwrap(),
             ),
-            None => (target_node, api.single_renderer(&target_node).unwrap()),
+            _ => (target_node, api.single_renderer(&target_node).unwrap()),
         };
 
         self.fps.start();
@@ -1197,8 +1246,10 @@ impl Surface {
 
         let mut elements = {
             let shell = state.shell.read().unwrap();
-            let (previous_workspace, workspace) = shell.workspaces.active(&self.output);
-            let (previous_idx, idx) = shell.workspaces.active_num(&self.output);
+            let output = self.mirroring.as_ref().unwrap_or(&self.output);
+
+            let (previous_workspace, workspace) = shell.workspaces.active(output);
+            let (previous_idx, idx) = shell.workspaces.active_num(output);
             let previous_workspace = previous_workspace
                 .zip(previous_idx)
                 .map(|((w, start), idx)| (w.handle, idx, start));
@@ -1211,7 +1262,7 @@ impl Surface {
                 &state.config,
                 &state.theme,
                 state.clock.now(),
-                &self.output,
+                output,
                 previous_workspace,
                 workspace,
                 CursorMode::All,
@@ -1229,73 +1280,166 @@ impl Surface {
             ScreencopyFrame,
             Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), OutputNoMode>,
         )> = self
-            .output
-            .take_pending_frames()
-            .into_iter()
-            .map(|(session, frame)| {
-                let additional_damage = frame.damage();
-                let session_data = session.user_data().get::<SessionData>().unwrap();
-                let mut damage_tracking = session_data.borrow_mut();
+            .mirroring
+            .is_none()
+            .then(|| {
+                self.output
+                    .take_pending_frames()
+                    .into_iter()
+                    .map(|(session, frame)| {
+                        let additional_damage = frame.damage();
+                        let session_data = session.user_data().get::<SessionData>().unwrap();
+                        let mut damage_tracking = session_data.borrow_mut();
 
-                let old_len = if !additional_damage.is_empty() {
-                    let area = self
-                        .output
-                        .current_mode()
-                        .unwrap()
-                        /* TODO: Mode is Buffer..., why is this Physical in the first place */
-                        .size
-                        .to_logical(1)
-                        .to_buffer(1, Transform::Normal)
-                        .to_f64();
+                        let old_len = if !additional_damage.is_empty() {
+                            let area = self
+                            .output
+                            .current_mode()
+                            .unwrap()
+                            /* TODO: Mode is Buffer..., why is this Physical in the first place */
+                            .size
+                            .to_logical(1)
+                            .to_buffer(1, Transform::Normal)
+                            .to_f64();
 
-                    let old_len = elements.len();
-                    elements.extend(
-                        additional_damage
-                            .into_iter()
-                            .map(|rect| {
-                                rect.to_f64()
-                                    .to_logical(
-                                        self.output.current_scale().fractional_scale(),
-                                        self.output.current_transform(),
-                                        &area,
-                                    )
-                                    .to_i32_round()
-                            })
-                            .map(DamageElement::new)
-                            .map(Into::into),
-                    );
+                            let old_len = elements.len();
+                            elements.extend(
+                                additional_damage
+                                    .into_iter()
+                                    .map(|rect| {
+                                        rect.to_f64()
+                                            .to_logical(
+                                                self.output.current_scale().fractional_scale(),
+                                                self.output.current_transform(),
+                                                &area,
+                                            )
+                                            .to_i32_round()
+                                    })
+                                    .map(DamageElement::new)
+                                    .map(Into::into),
+                            );
 
-                    Some(old_len)
-                } else {
-                    None
-                };
+                            Some(old_len)
+                        } else {
+                            None
+                        };
 
-                let buffer = frame.buffer();
-                let age = damage_tracking.age_for_buffer(&buffer);
-                let res = damage_tracking.dt.damage_output(age, &elements);
+                        let buffer = frame.buffer();
+                        let age = damage_tracking.age_for_buffer(&buffer);
+                        let res = damage_tracking.dt.damage_output(age, &elements);
 
-                if let Some(old_len) = old_len {
-                    elements.truncate(old_len);
-                }
+                        if let Some(old_len) = old_len {
+                            elements.truncate(old_len);
+                        }
 
-                let res = res.map(|(a, b)| (a.cloned(), b));
-                std::mem::drop(damage_tracking);
-                (session, frame, res)
+                        let res = res.map(|(a, b)| (a.cloned(), b));
+                        std::mem::drop(damage_tracking);
+                        (session, frame, res)
+                    })
+                    .collect()
             })
-            .collect();
+            .unwrap_or_default();
 
-        let res = compositor.render_frame(
-            &mut renderer,
-            &elements,
-            CLEAR_COLOR, // TODO use a theme neutral color
-        );
+        let res = if let Some(mirrored_output) = self.mirroring.as_ref().filter(|mirrored_output| {
+            mirrored_output.current_mode().is_some_and(|mirror_mode| {
+                self.output
+                    .current_mode()
+                    .is_some_and(|mode| mode != mirror_mode)
+            })
+        }) {
+            let mirroring_state = {
+                let entry = self.mirroring_textures.entry(*target_node);
+                let mut new_state = None;
+                if matches!(entry, std::collections::hash_map::Entry::Vacant(_)) {
+                    new_state = Some(MirroringState::new_with_renderer(
+                        &mut renderer,
+                        compositor.format(),
+                        mirrored_output,
+                    )?);
+                }
+                // I really want a failable initializer...
+                entry.or_insert_with(|| new_state.unwrap())
+            };
+
+            mirroring_state
+                .texture
+                .render()
+                .draw::<_, <GlMultiRenderer as Renderer>::Error>(|tex| {
+                    let res = match mirroring_state.damage_tracker.render_output_with(
+                        &mut renderer,
+                        tex.clone(),
+                        1,
+                        &elements,
+                        CLEAR_COLOR,
+                    ) {
+                        Ok(res) => res,
+                        Err(RenderError::Rendering(err)) => return Err(err),
+                        Err(RenderError::OutputNoMode(_)) => unreachable!(),
+                    };
+
+                    renderer.wait(&res.sync)?;
+
+                    let transform = mirrored_output.current_transform();
+                    let area = tex.size().to_logical(1, transform);
+
+                    Ok(res
+                        .damage
+                        .cloned()
+                        .map(|v| {
+                            v.into_iter()
+                                .map(|r| r.to_logical(1).to_buffer(1, transform, &area))
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default())
+                })
+                .context("Failed to draw to offscreen render target")?;
+
+            let texture_elem = TextureRenderElement::from_texture_render_buffer(
+                (0., 0.),
+                &mirroring_state.texture,
+                Some(1.0),
+                None,
+                None,
+                Kind::Unspecified,
+            );
+            let texture_geometry = texture_elem.geometry(1.0.into());
+            elements = constrain_render_elements(
+                std::iter::once(texture_elem),
+                (0, 0),
+                Rectangle::from_loc_and_size(
+                    (0, 0),
+                    self.output
+                        .geometry()
+                        .size
+                        .as_logical()
+                        .to_f64()
+                        .to_physical(self.output.current_scale().fractional_scale())
+                        .to_i32_round(),
+                ),
+                texture_geometry,
+                ConstrainScaleBehavior::Fit,
+                ConstrainAlign::CENTER,
+                1.0,
+            )
+            .map(CosmicElement::Mirror)
+            .collect::<Vec<_>>();
+
+            renderer = api.single_renderer(&target_node).unwrap();
+            compositor.render_frame(&mut renderer, &elements, [0.0, 0.0, 0.0, 1.0])
+        } else {
+            compositor.render_frame(
+                &mut renderer,
+                &elements,
+                CLEAR_COLOR, // TODO use a theme neutral color
+            )
+        };
         self.fps.render();
 
         match res {
             Ok(frame_result) => {
                 let (tx, rx) = std::sync::mpsc::channel();
 
-                let feedback = if !frame_result.is_empty {
+                let feedback = if !frame_result.is_empty && self.mirroring.is_none() {
                     Some((
                         state.take_presentation_feedback(&self.output, &frame_result.states),
                         rx,
@@ -1462,31 +1606,33 @@ impl Surface {
                     }
                 };
 
-                state.send_frames(&self.output, &frame_result.states, |source_node| {
-                    Some(
-                        self.feedback
-                            .entry(source_node)
-                            .or_insert_with(|| {
-                                let render_formats = api
-                                    .single_renderer(&source_node)
-                                    .unwrap()
-                                    .dmabuf_formats()
-                                    .collect::<HashSet<_>>();
-                                let target_formats = api
-                                    .single_renderer(target_node)
-                                    .unwrap()
-                                    .dmabuf_formats()
-                                    .collect::<HashSet<_>>();
-                                get_surface_dmabuf_feedback(
-                                    source_node,
-                                    render_formats,
-                                    target_formats,
-                                    compositor,
-                                )
-                            })
-                            .clone(),
-                    )
-                });
+                if self.mirroring.is_none() {
+                    state.send_frames(&self.output, &frame_result.states, |source_node| {
+                        Some(
+                            self.feedback
+                                .entry(source_node)
+                                .or_insert_with(|| {
+                                    let render_formats = api
+                                        .single_renderer(&source_node)
+                                        .unwrap()
+                                        .dmabuf_formats()
+                                        .collect::<HashSet<_>>();
+                                    let target_formats = api
+                                        .single_renderer(target_node)
+                                        .unwrap()
+                                        .dmabuf_formats()
+                                        .collect::<HashSet<_>>();
+                                    get_surface_dmabuf_feedback(
+                                        source_node,
+                                        render_formats,
+                                        target_formats,
+                                        compositor,
+                                    )
+                                })
+                                .clone(),
+                        )
+                    });
+                }
             }
             Err(err) => {
                 compositor.reset_buffers();
@@ -1513,6 +1659,17 @@ impl KmsState {
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
         xdg_activation_state: &XdgActivationState,
     ) -> Result<(), anyhow::Error> {
+        let outputs = self
+            .devices
+            .values()
+            .flat_map(|device| {
+                device
+                    .surfaces
+                    .values()
+                    .map(|surface| surface.output.clone())
+            })
+            .collect::<Vec<_>>();
+
         let recreated = if let Some(device) = self
             .devices
             .values_mut()
@@ -1528,8 +1685,19 @@ impl KmsState {
                 .get::<RefCell<OutputConfig>>()
                 .unwrap()
                 .borrow();
+            let mirrored_output = if let OutputState::Mirroring(conn) = &output_config.enabled {
+                Some(
+                    outputs
+                        .iter()
+                        .find(|output| &output.name() == conn)
+                        .cloned()
+                        .ok_or(anyhow::anyhow!("Unable to find mirroring output"))?,
+                )
+            } else {
+                None
+            };
 
-            if !output_config.enabled {
+            if output_config.enabled == OutputState::Disabled {
                 if !test_only {
                     shell.workspaces.remove_output(
                         output,
@@ -1541,6 +1709,7 @@ impl KmsState {
                         // just drop it
                         surface.pending = false;
                     }
+                    surface.mirroring_textures.clear();
                 }
                 false
             } else {
@@ -1635,9 +1804,22 @@ impl KmsState {
                         surface.surface = Some(target);
                         true
                     };
-                    shell
-                        .workspaces
-                        .add_output(output, workspace_state, xdg_activation_state);
+
+                    if mirrored_output != surface.mirroring {
+                        shell.workspaces.remove_output(
+                            output,
+                            shell.seats.iter(),
+                            workspace_state,
+                            xdg_activation_state,
+                        );
+                        surface.mirroring = mirrored_output.clone();
+                        surface.mirroring_textures.clear();
+                    }
+                    if mirrored_output.is_none() {
+                        shell
+                            .workspaces
+                            .add_output(output, workspace_state, xdg_activation_state);
+                    }
                     res
                 } else {
                     false
@@ -1737,11 +1919,13 @@ impl KmsState {
         output: &Output,
         estimated_rendertime: Option<Duration>,
     ) -> Result<(), InsertError<Timer>> {
-        if let Some((device, crtc, surface)) = self
+        for (device, crtc, surface) in self
             .devices
             .iter_mut()
             .flat_map(|(node, d)| d.surfaces.iter_mut().map(move |(c, s)| (node, c, s)))
-            .find(|(_, _, s)| s.output == *output)
+            .filter(|(_, _, s)| {
+                s.output == *output || s.mirroring.as_ref().is_some_and(|o| o == output)
+            })
         {
             if surface.surface.is_none() {
                 return Ok(());
@@ -1774,7 +1958,7 @@ impl KmsState {
                             let common = &mut state.common;
                             let target_node = target_device.render_node;
                             let render_node = render_node_for_output(
-                                &surface.output,
+                                surface.mirroring.as_ref().unwrap_or(&surface.output),
                                 backend.primary_node,
                                 target_node,
                                 &*common.shell.read().unwrap(),

@@ -109,8 +109,18 @@ impl From<Output> for OutputInfo {
     }
 }
 
-fn default_enabled() -> bool {
-    true
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum OutputState {
+    #[serde(rename = "true")]
+    Enabled,
+    #[serde(rename = "false")]
+    Disabled,
+    Mirroring(String),
+}
+
+fn default_enabled() -> OutputState {
+    OutputState::Enabled
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
@@ -122,7 +132,7 @@ pub struct OutputConfig {
     pub transform: Transform,
     pub position: (i32, i32),
     #[serde(default = "default_enabled")]
-    pub enabled: bool,
+    pub enabled: OutputState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_bpc: Option<u32>,
 }
@@ -135,7 +145,7 @@ impl Default for OutputConfig {
             scale: 1.0,
             transform: Transform::Normal,
             position: (0, 0),
-            enabled: true,
+            enabled: OutputState::Enabled,
             max_bpc: None,
         }
     }
@@ -257,8 +267,32 @@ impl Config {
     fn load_outputs(path: &Option<PathBuf>) -> OutputsConfig {
         if let Some(path) = path.as_ref() {
             if path.exists() {
-                match ron::de::from_reader(OpenOptions::new().read(true).open(path).unwrap()) {
-                    Ok(config) => return config,
+                match ron::de::from_reader::<_, OutputsConfig>(
+                    OpenOptions::new().read(true).open(path).unwrap(),
+                ) {
+                    Ok(mut config) => {
+                        for (info, config) in config.config.iter_mut() {
+                            let config_clone = config.clone();
+                            for conf in config.iter_mut() {
+                                if let OutputState::Mirroring(conn) = &conf.enabled {
+                                    if let Some((j, _)) = info
+                                        .iter()
+                                        .enumerate()
+                                        .find(|(_, info)| &info.connector == conn)
+                                    {
+                                        if config_clone[j].enabled != OutputState::Enabled {
+                                            warn!("Invalid Mirroring tag, overriding with `Enabled` instead");
+                                            conf.enabled = OutputState::Enabled;
+                                        }
+                                    } else {
+                                        warn!("Invalid Mirroring tag, overriding with `Enabled` instead");
+                                        conf.enabled = OutputState::Enabled;
+                                    }
+                                }
+                            }
+                        }
+                        return config;
+                    }
                     Err(err) => {
                         warn!(?err, "Failed to read output_config, resetting..");
                         if let Err(err) = std::fs::remove_file(path) {
@@ -307,7 +341,7 @@ impl Config {
             for (name, output_config) in infos.iter().map(|o| &o.connector).zip(configs.into_iter())
             {
                 let output = outputs.iter().find(|o| &o.name() == name).unwrap().clone();
-                let enabled = output_config.enabled;
+                let enabled = output_config.enabled.clone();
                 *output
                     .user_data()
                     .get::<RefCell<OutputConfig>>()
@@ -329,7 +363,7 @@ impl Config {
                     reset = true;
                     break;
                 } else {
-                    if enabled {
+                    if enabled == OutputState::Enabled {
                         output_state.enable_head(&output);
                     } else {
                         output_state.disable_head(&output);
@@ -343,7 +377,7 @@ impl Config {
                     .into_iter()
                     .zip(known_good_configs.into_iter())
                 {
-                    let enabled = output_config.enabled;
+                    let enabled = output_config.enabled.clone();
                     *output
                         .user_data()
                         .get::<RefCell<OutputConfig>>()
@@ -359,7 +393,7 @@ impl Config {
                     ) {
                         error!(?err, "Failed to reset config for output {}.", output.name());
                     } else {
-                        if enabled {
+                        if enabled == OutputState::Enabled {
                             output_state.enable_head(&output);
                         } else {
                             output_state.disable_head(&output);
@@ -392,6 +426,7 @@ impl Config {
                         .unwrap()
                         .borrow()
                         .enabled
+                        == OutputState::Enabled
                     {
                         output_state.enable_head(&output);
                     } else {
