@@ -458,8 +458,11 @@ pub fn init_backend(
                     }
                 }
             }
-            X11Event::Input(event) => state.process_x11_event(event),
-            X11Event::Focus(_) => {} // TODO: release all keys when losing focus and make sure to go through our keyboard filter code
+            X11Event::Input {
+                event,
+                window_id: _,
+            } => state.process_x11_event(event),
+            X11Event::Focus { .. } => {} // TODO: release all keys when losing focus and make sure to go through our keyboard filter code
         })
         .map_err(|_| anyhow::anyhow!("Failed to insert X11 Backend into event loop"))?;
 
