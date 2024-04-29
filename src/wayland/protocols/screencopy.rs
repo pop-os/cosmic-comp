@@ -23,6 +23,7 @@ use smithay::{reexports::wayland_server::protocol::wl_buffer::WlBuffer, utils::P
 use smithay::{
     reexports::wayland_server::{
         protocol::wl_shm, Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
+        Weak,
     },
     utils::Rectangle,
 };
@@ -418,7 +419,9 @@ struct FrameInner {
     constraints: Option<BufferConstraints>,
     buffer: Option<WlBuffer>,
     damage: Vec<Rectangle<i32, BufferCoords>>,
-    obj: ZcosmicScreencopySessionV2,
+    // `SessionInner` contains a `Vec<Frame>`, so use a weak reference here to
+    // avoid a cycle.
+    obj: Weak<ZcosmicScreencopySessionV2>,
     capture_requested: bool,
     failed: Option<FailureReason>,
 }
@@ -432,7 +435,7 @@ impl FrameInner {
             constraints: constraints.into(),
             buffer: None,
             damage: Vec::new(),
-            obj,
+            obj: obj.downgrade(),
             capture_requested: false,
             failed: None,
         }
@@ -1019,7 +1022,8 @@ where
                     .known_cursor_sessions
                     .iter()
                     .find(|session| {
-                        session.inner.lock().unwrap().session.as_ref() == Some(&inner.obj)
+                        session.inner.lock().unwrap().session.as_ref()
+                            == inner.obj.upgrade().ok().as_ref()
                     })
                     .map(|s| CursorSession {
                         obj: s.obj.clone(),
