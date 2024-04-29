@@ -54,13 +54,15 @@ struct OutputMngrInstance {
     obj: ZwlrOutputManagerV1,
     active: Arc<AtomicBool>,
     heads: Vec<OutputHeadInstance>,
+    stale_modes: Vec<ZwlrOutputModeV1>,
 }
 
 #[derive(Debug)]
 struct OutputHeadInstance {
+    obj: ZwlrOutputHeadV1,
     output: Output,
-    head: ZwlrOutputHeadV1,
     modes: Vec<ZwlrOutputModeV1>,
+    finished: bool,
 }
 
 pub struct OutputMngrInstanceData {
@@ -163,6 +165,7 @@ where
             obj: data_init.init(resource, data),
             heads: Vec::new(),
             active,
+            stale_modes: Vec::new(),
         };
 
         let mngr_state = state.output_configuration_state();
@@ -234,22 +237,27 @@ where
         + 'static,
 {
     fn request(
-        _state: &mut D,
+        state: &mut D,
         _client: &Client,
-        _obj: &ZwlrOutputHeadV1,
+        obj: &ZwlrOutputHeadV1,
         request: zwlr_output_head_v1::Request,
         _data: &Output,
         _dh: &DisplayHandle,
         _data_init: &mut DataInit<'_, D>,
     ) {
         match request {
+            zwlr_output_head_v1::Request::Release => {
+                for instance in &mut state.output_configuration_state().instances {
+                    instance.heads.retain(|h| &h.obj != obj);
+                }
+            }
             _ => {}
         }
     }
 
-    fn destroyed(state: &mut D, _client: ClientId, resource: &ZwlrOutputHeadV1, _data: &Output) {
+    fn destroyed(state: &mut D, _client: ClientId, obj: &ZwlrOutputHeadV1, _data: &Output) {
         for instance in &mut state.output_configuration_state().instances {
-            instance.heads.retain(|h| &h.head != resource);
+            instance.heads.retain(|h| &h.obj != obj);
         }
     }
 }
@@ -266,16 +274,32 @@ where
         + 'static,
 {
     fn request(
-        _state: &mut D,
+        state: &mut D,
         _client: &Client,
-        _obj: &ZwlrOutputModeV1,
+        obj: &ZwlrOutputModeV1,
         request: zwlr_output_mode_v1::Request,
         _data: &Mode,
         _dh: &DisplayHandle,
         _data_init: &mut DataInit<'_, D>,
     ) {
         match request {
+            zwlr_output_mode_v1::Request::Release => {
+                for instance in &mut state.output_configuration_state().instances {
+                    instance.stale_modes.retain(|mode| mode != obj)
+                }
+            }
             _ => {}
+        }
+    }
+
+    fn destroyed(
+        state: &mut D,
+        _client: wayland_backend::server::ClientId,
+        obj: &ZwlrOutputModeV1,
+        _data: &Mode,
+    ) {
+        for instance in &mut state.output_configuration_state().instances {
+            instance.stale_modes.retain(|mode| mode != obj)
         }
     }
 }
@@ -351,9 +375,7 @@ where
                             inner
                                 .instances
                                 .iter()
-                                .find_map(|instance| {
-                                    instance.heads.iter().find(|h| h.head == *head)
-                                })
+                                .find_map(|instance| instance.heads.iter().find(|h| h.obj == *head))
                                 .map(|i| i.output.clone())
                         } {
                             Some(o) => o,
@@ -382,6 +404,33 @@ where
                         return obj.post_error(code, "Incomplete configuration".to_string());
                     }
                 };
+
+                let configured_outputs = final_conf
+                    .iter()
+                    .map(|(o, _)| o.clone())
+                    .collect::<Vec<_>>();
+
+                // handle potential races of destroyed heads and modes with cancel instead of a protocol error
+                // 1. If len doesn't match some outputs aren't configured (technically a protocol error)
+                // 2. If any configured output isn't in our list anymore, but we passed the len()-test,
+                //      we raced a new head and a destroyed head, so again cancel.
+                // 3. If the selected mode isn't in our list anymore, we probably already send `finished` for
+                //    the mode, but got no release yet. So again, racy -> cancel.
+                if configured_outputs.len() != inner.outputs.len()
+                    || configured_outputs
+                        .iter()
+                        .any(|o| !inner.outputs.contains(o))
+                    || final_conf.iter().any(|(o, c)| match c {
+                        OutputConfiguration::Enabled { mode, .. } => match mode {
+                            Some(ModeConfiguration::Mode(m)) => !o.modes().contains(m),
+                            _ => false,
+                        },
+                        _ => false,
+                    })
+                {
+                    obj.cancelled();
+                    return;
+                }
 
                 let result = if matches!(x, zwlr_output_configuration_v1::Request::Test) {
                     state.test_configuration(final_conf)
@@ -516,7 +565,7 @@ where
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
         let global = dh.create_global::<D, ZwlrOutputManagerV1, _>(
-            2,
+            3,
             OutputMngrGlobalData {
                 filter: Box::new(client_filter),
             },
@@ -590,19 +639,28 @@ where
 
         for output in std::mem::take(&mut self.removed_outputs).into_iter() {
             for instance in &mut self.instances {
-                instance.heads.retain_mut(|head| {
+                let mut removed_heads = Vec::new();
+                for head in &mut instance.heads {
                     if &head.output == &output {
-                        for mode in &head.modes {
-                            mode.finished();
+                        if head.obj.version() < zwlr_output_head_v1::REQ_RELEASE_SINCE {
+                            removed_heads.push(head.obj.clone());
                         }
-                        head.head.finished();
-                        false
-                    } else {
-                        true
+                        for mode in &mut head.modes {
+                            mode.finished();
+                            if mode.version() < zwlr_output_mode_v1::REQ_RELEASE_SINCE {
+                                // on >=v3 we keep the obj around until we get a release-request
+                                // otherwise we will drop this with the head
+                                instance.stale_modes.push(mode.clone());
+                            }
+                        }
+                        head.obj.finished();
+                        head.finished = true;
                     }
-                });
+                }
+                instance.heads.retain(|h| !removed_heads.contains(&h.obj))
             }
         }
+
         for output in &self.outputs {
             {
                 let state = output.user_data().get::<OutputState>().unwrap();
@@ -618,6 +676,7 @@ where
                 send_head_to_client::<D>(&self.dh, manager, output);
             }
         }
+
         for manager in self.instances.iter() {
             manager.obj.done(self.serial_counter);
         }
@@ -638,7 +697,12 @@ where
         + OutputConfigurationHandler
         + 'static,
 {
-    let instance = match mngr.heads.iter_mut().find(|i| i.output == *output) {
+    let instance = match mngr
+        .heads
+        .iter_mut()
+        .filter(|i| !i.finished)
+        .find(|i| i.output == *output)
+    {
         Some(i) => i,
         None => {
             if let Ok(client) = dh.get_client(mngr.obj.id()) {
@@ -649,9 +713,10 @@ where
                 ) {
                     mngr.obj.head(&head);
                     let data = OutputHeadInstance {
-                        head,
+                        obj: head,
                         modes: Vec::new(),
                         output: output.clone(),
+                        finished: false,
                     };
                     mngr.heads.push(data);
                     mngr.heads.last_mut().unwrap()
@@ -664,13 +729,11 @@ where
         }
     };
 
-    instance.head.name(output.name());
-    instance.head.description(output.description());
+    instance.obj.name(output.name());
+    instance.obj.description(output.description());
     let physical = output.physical_properties();
     if !(physical.size.w == 0 || physical.size.h == 0) {
-        instance
-            .head
-            .physical_size(physical.size.w, physical.size.h);
+        instance.obj.physical_size(physical.size.w, physical.size.h);
     }
 
     let inner = output
@@ -685,11 +748,16 @@ where
     instance.modes.retain_mut(|m| {
         if !output_modes.contains(m.data::<Mode>().unwrap()) {
             m.finished();
+            if m.version() < zwlr_output_mode_v1::REQ_RELEASE_SINCE {
+                // on >=v3 we keep the obj around until we get a release-request
+                mngr.stale_modes.push(m.clone());
+            }
             false
         } else {
             true
         }
     });
+
     // update other modes
     for output_mode in output_modes.into_iter() {
         if let Some(mode) = if let Some(wlr_mode) = instance
@@ -698,14 +766,14 @@ where
             .find(|mode| *mode.data::<Mode>().unwrap() == output_mode)
         {
             Some(wlr_mode)
-        } else if let Ok(client) = dh.get_client(instance.head.id()) {
+        } else if let Ok(client) = dh.get_client(instance.obj.id()) {
             // create the mode if it does not exist yet
             if let Ok(mode) = client.create_resource::<ZwlrOutputModeV1, _, D>(
                 dh,
-                instance.head.version(),
+                instance.obj.version(),
                 output_mode,
             ) {
-                instance.head.mode(&mode);
+                instance.obj.mode(&mode);
                 mode.size(output_mode.size.w, output_mode.size.h);
                 mode.refresh(output_mode.refresh);
                 if output
@@ -729,27 +797,27 @@ where
                     .map(|c| c == output_mode)
                     .unwrap_or(false)
             {
-                instance.head.current_mode(&*mode);
+                instance.obj.current_mode(&*mode);
             }
         }
     }
 
-    instance.head.enabled(if inner.enabled { 1 } else { 0 });
+    instance.obj.enabled(if inner.enabled { 1 } else { 0 });
     if inner.enabled {
         let point = output.current_location();
-        instance.head.position(point.x, point.y);
-        instance.head.transform(output.current_transform().into());
+        instance.obj.position(point.x, point.y);
+        instance.obj.transform(output.current_transform().into());
         instance
-            .head
+            .obj
             .scale(output.current_scale().fractional_scale());
     }
 
     if mngr.obj.version() >= zwlr_output_head_v1::EVT_MAKE_SINCE {
         if physical.make != "Unknown" {
-            instance.head.make(physical.make.clone());
+            instance.obj.make(physical.make.clone());
         }
         if physical.model != "Unknown" {
-            instance.head.model(physical.model);
+            instance.obj.model(physical.model);
         }
     }
 }
