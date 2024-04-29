@@ -92,6 +92,7 @@ pub struct PendingOutputConfigurationInner {
     position: Option<Point<i32, Logical>>,
     transform: Option<Transform>,
     scale: Option<f64>,
+    adaptive_sync: Option<bool>,
 }
 pub type PendingOutputConfiguration = Mutex<PendingOutputConfigurationInner>;
 
@@ -102,6 +103,7 @@ pub enum OutputConfiguration {
         position: Option<Point<i32, Logical>>,
         transform: Option<Transform>,
         scale: Option<f64>,
+        adaptive_sync: Option<bool>,
     },
     Disabled,
 }
@@ -128,6 +130,7 @@ impl<'a> TryFrom<&'a mut PendingOutputConfigurationInner> for OutputConfiguratio
             position: pending.position,
             transform: pending.transform,
             scale: pending.scale,
+            adaptive_sync: pending.adaptive_sync,
         })
     }
 }
@@ -543,6 +546,29 @@ where
                     }
                 });
             }
+            zwlr_output_configuration_head_v1::Request::SetAdaptiveSync { state } => {
+                let mut pending = data.lock().unwrap();
+                if pending.adaptive_sync.is_some() {
+                    obj.post_error(
+                        zwlr_output_configuration_head_v1::Error::AlreadySet,
+                        format!("{:?} already had adaptive sync configured", obj),
+                    );
+                    return;
+                }
+                pending.adaptive_sync = Some(match state.into_result() {
+                    Ok(state) => match state {
+                        zwlr_output_head_v1::AdaptiveSyncState::Enabled => true,
+                        _ => false,
+                    },
+                    Err(err) => {
+                        obj.post_error(
+                            zwlr_output_configuration_head_v1::Error::InvalidAdaptiveSyncState,
+                            format!("Invalid adaptive sync value: {:?}", err),
+                        );
+                        return;
+                    }
+                });
+            }
             _ => {}
         }
     }
@@ -565,7 +591,7 @@ where
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
         let global = dh.create_global::<D, ZwlrOutputManagerV1, _>(
-            3,
+            4,
             OutputMngrGlobalData {
                 filter: Box::new(client_filter),
             },
@@ -810,9 +836,16 @@ where
         instance
             .obj
             .scale(output.current_scale().fractional_scale());
+        if instance.obj.version() >= zwlr_output_head_v1::EVT_ADAPTIVE_SYNC_SINCE {
+            instance.obj.adaptive_sync(if output.adaptive_sync() {
+                zwlr_output_head_v1::AdaptiveSyncState::Enabled
+            } else {
+                zwlr_output_head_v1::AdaptiveSyncState::Disabled
+            });
+        }
     }
 
-    if mngr.obj.version() >= zwlr_output_head_v1::EVT_MAKE_SINCE {
+    if instance.obj.version() >= zwlr_output_head_v1::EVT_MAKE_SINCE {
         if physical.make != "Unknown" {
             instance.obj.make(physical.make.clone());
         }
@@ -845,3 +878,5 @@ macro_rules! delegate_output_configuration {
     };
 }
 pub(crate) use delegate_output_configuration;
+
+use crate::utils::prelude::OutputExt;

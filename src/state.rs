@@ -5,6 +5,7 @@ use crate::{
     config::{Config, OutputConfig},
     input::gestures::GestureState,
     shell::{grabs::SeatMoveGrabState, CosmicSurface, SeatExt, Shell},
+    utils::prelude::OutputExt,
     wayland::protocols::{
         drm::WlDrmState,
         image_source::ImageSourceState,
@@ -280,6 +281,7 @@ impl BackendData {
                 .get::<RefCell<OutputConfig>>()
                 .unwrap()
                 .borrow();
+
             let mode = Some(OutputMode {
                 size: final_config.mode_size(),
                 refresh: final_config.mode_refresh() as i32,
@@ -295,6 +297,9 @@ impl BackendData {
             let location =
                 Some(final_config.position.into()).filter(|x| *x != output.current_location());
             output.change_current_state(mode, transform, scale.map(Scale::Fractional), location);
+
+            output.set_adaptive_sync(final_config.vrr);
+
             layer_map_for_output(output).arrange();
         }
 

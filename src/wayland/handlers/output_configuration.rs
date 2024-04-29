@@ -55,6 +55,7 @@ impl State {
                     scale,
                     transform,
                     position,
+                    adaptive_sync,
                 } = conf
                 {
                     match mode {
@@ -75,6 +76,9 @@ impl State {
                     }
                     if let Some(position) = position {
                         current_config.position = (*position).into();
+                    }
+                    if let Some(vrr) = adaptive_sync {
+                        current_config.vrr = *vrr;
                     }
                     current_config.enabled = OutputState::Enabled;
                 } else {
