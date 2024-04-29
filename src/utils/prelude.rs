@@ -1,5 +1,5 @@
 use smithay::{
-    output::Output,
+    output::{Output, WeakOutput},
     utils::{Rectangle, Transform},
 };
 
@@ -8,15 +8,22 @@ pub use crate::shell::{SeatExt, Shell, Workspace};
 pub use crate::state::{Common, State};
 pub use crate::wayland::handlers::xdg_shell::popup::update_reactive_popups;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex,
+};
 
 pub trait OutputExt {
     fn geometry(&self) -> Rectangle<i32, Global>;
     fn adaptive_sync(&self) -> bool;
     fn set_adaptive_sync(&self, vrr: bool);
+    fn mirroring(&self) -> Option<Output>;
+    fn set_mirroring(&self, output: Option<Output>);
 }
 
 struct Vrr(AtomicBool);
+
+struct Mirroring(Mutex<Option<WeakOutput>>);
 
 impl OutputExt for Output {
     fn geometry(&self) -> Rectangle<i32, Global> {
@@ -48,5 +55,22 @@ impl OutputExt for Output {
             .unwrap()
             .0
             .store(vrr, Ordering::SeqCst);
+    }
+
+    fn mirroring(&self) -> Option<Output> {
+        self.user_data().get::<Mirroring>().and_then(|mirroring| {
+            mirroring
+                .0
+                .lock()
+                .unwrap()
+                .clone()
+                .and_then(|o| o.upgrade())
+        })
+    }
+    fn set_mirroring(&self, output: Option<Output>) {
+        let user_data = self.user_data();
+        user_data.insert_if_missing_threadsafe(|| Mirroring(Mutex::new(None)));
+        *user_data.get::<Mirroring>().unwrap().0.lock().unwrap() =
+            output.map(|output| output.downgrade());
     }
 }

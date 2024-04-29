@@ -51,6 +51,7 @@ impl State {
                 backups.push((output, current_config.clone()));
 
                 if let OutputConfiguration::Enabled {
+                    mirroring,
                     mode,
                     scale,
                     transform,
@@ -80,7 +81,11 @@ impl State {
                     if let Some(vrr) = adaptive_sync {
                         current_config.vrr = *vrr;
                     }
-                    current_config.enabled = OutputState::Enabled;
+                    if let Some(mirror) = mirroring {
+                        current_config.enabled = OutputState::Mirroring(mirror.name());
+                    } else {
+                        current_config.enabled = OutputState::Enabled;
+                    }
                 } else {
                     current_config.enabled = OutputState::Disabled;
                 }
