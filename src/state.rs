@@ -2,7 +2,7 @@
 
 use crate::{
     backend::{kms::KmsState, winit::WinitState, x11::X11State},
-    config::{Config, OutputConfig},
+    config::{Config, OutputConfig, OutputState},
     input::gestures::GestureState,
     shell::{grabs::SeatMoveGrabState, CosmicSurface, SeatExt, Shell},
     utils::prelude::OutputExt,
@@ -299,6 +299,13 @@ impl BackendData {
             output.change_current_state(mode, transform, scale.map(Scale::Fractional), location);
 
             output.set_adaptive_sync(final_config.vrr);
+            output.set_mirroring(match &final_config.enabled {
+                OutputState::Mirroring(conn) => shell
+                    .outputs()
+                    .find(|output| &output.name() == conn)
+                    .cloned(),
+                _ => None,
+            });
 
             layer_map_for_output(output).arrange();
         }

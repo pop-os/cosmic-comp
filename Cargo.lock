@@ -929,11 +929,12 @@ dependencies = [
 [[package]]
 name = "cosmic-protocols"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-protocols?branch=main#1cc4a1393d0f8be4d444666e260fdb811b400f49"
+source = "git+https://github.com/pop-os/cosmic-protocols?branch=main#1316f9e1148ec65351471d8a046ffc82171b066e"
 dependencies = [
  "bitflags 2.4.2",
  "wayland-backend",
  "wayland-protocols",
+ "wayland-protocols-wlr",
  "wayland-scanner",
  "wayland-server",
 ]
@@ -1082,7 +1083,7 @@ version = "0.19.0"
 source = "git+https://github.com/gfx-rs/wgpu?rev=20fda69#20fda698341efbdc870b8027d6d49f5bf3f36109"
 dependencies = [
  "bitflags 2.4.2",
- "libloading 0.8.1",
+ "libloading 0.7.4",
  "winapi",
 ]
 
@@ -1233,7 +1234,7 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330c60081dcc4c72131f8eb70510f1ac07223e5d4163db481a04a0befcffa412"
 dependencies = [
- "libloading 0.8.1",
+ "libloading 0.7.4",
 ]
 
 [[package]]
@@ -2167,7 +2168,7 @@ dependencies = [
  "bitflags 2.4.2",
  "com",
  "libc",
- "libloading 0.8.1",
+ "libloading 0.7.4",
  "thiserror",
  "widestring",
  "winapi",
@@ -5749,7 +5750,7 @@ dependencies = [
  "js-sys",
  "khronos-egl",
  "libc",
- "libloading 0.8.1",
+ "libloading 0.7.4",
  "log",
  "metal",
  "naga",
