@@ -13,6 +13,7 @@ pub struct CosmicCompConfig {
     pub workspaces: workspace::WorkspaceConfig,
     pub input_default: input::InputConfig,
     pub input_touchpad: input::InputConfig,
+    pub input_touchpad_gestures: input::TouchpadGestureConfig,
     pub input_devices: HashMap<String, input::InputConfig>,
     pub xkb_config: XkbConfig,
     /// Autotiling enabled
@@ -31,6 +32,7 @@ impl Default for CosmicCompConfig {
             workspaces: Default::default(),
             input_default: Default::default(),
             input_touchpad: Default::default(),
+            input_touchpad_gestures: Default::default(),
             input_devices: Default::default(),
             xkb_config: Default::default(),
             autotile: Default::default(),

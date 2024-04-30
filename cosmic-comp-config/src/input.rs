@@ -46,6 +46,43 @@ pub struct ScrollConfig {
     pub scroll_button: Option<u32>,
     pub scroll_factor: Option<f64>,
 }
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct TouchpadGestureConfig {
+    pub three_finger: Option<GestureConfig>,
+    pub four_finger: Option<GestureConfig>,
+    pub five_finger: Option<GestureConfig>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum GestureConfig {
+    WorkspaceDependent(RelativeGestureConfig),
+    Directional(AbsoluteGestureConfig),
+}
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct RelativeGestureConfig {
+    pub action_forward: Option<GestureCommand>,
+    pub action_backward: Option<GestureCommand>,
+    pub action_side_1: Option<GestureCommand>,
+    pub action_side_2: Option<GestureCommand>,
+}
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct AbsoluteGestureConfig {
+    pub action_up: Option<GestureCommand>,
+    pub action_down: Option<GestureCommand>,
+    pub action_left: Option<GestureCommand>,
+    pub action_right: Option<GestureCommand>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum GestureCommand {
+    WorkspaceForward,
+    WorkspaceBackward,
+    WorkspaceOverviewEnable,
+    WorkspaceOverviewDisable,
+    WindowUp,
+    WindowDown,
+    WindowLeft,
+    WindowRight,
+    Custom(String),
+}
 
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum DeviceState {
