@@ -429,8 +429,14 @@ where
         }
     }
 
-    instance.obj.enabled(if inner.enabled { 1 } else { 0 });
-    if inner.enabled {
+    instance
+        .obj
+        .enabled(if inner.enabled || output.mirroring().is_some() {
+            1
+        } else {
+            0
+        });
+    if inner.enabled || output.mirroring().is_some() {
         let point = output.current_location();
         instance.obj.position(point.x, point.y);
         instance.obj.transform(output.current_transform().into());
