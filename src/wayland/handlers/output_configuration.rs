@@ -137,14 +137,31 @@ impl State {
 
         for output in conf
             .iter()
-            .filter(|(_, c)| matches!(c, OutputConfiguration::Enabled { .. }))
+            .filter(|(_, c)| {
+                matches!(
+                    c,
+                    OutputConfiguration::Enabled {
+                        mirroring: None,
+                        ..
+                    }
+                )
+            })
             .map(|(o, _)| o)
         {
             self.common.output_configuration_state.enable_head(output);
         }
         for output in conf
             .iter()
-            .filter(|(_, c)| matches!(c, OutputConfiguration::Disabled))
+            .filter(|(_, c)| {
+                matches!(
+                    c,
+                    OutputConfiguration::Disabled
+                        | OutputConfiguration::Enabled {
+                            mirroring: Some(_),
+                            ..
+                        }
+                )
+            })
             .map(|(o, _)| o)
         {
             self.common.output_configuration_state.disable_head(output);
