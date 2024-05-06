@@ -35,16 +35,14 @@ where
         + 'static,
 {
     fn bind(
-        state: &mut D,
+        _state: &mut D,
         _dh: &DisplayHandle,
         _client: &Client,
         resource: New<ZcosmicOutputManagerV1>,
         _global_data: &OutputMngrGlobalData,
         data_init: &mut DataInit<'_, D>,
     ) {
-        let obj = data_init.init(resource, ());
-        let mngr_state = state.output_configuration_state();
-        mngr_state.extension_instances.push(obj);
+        data_init.init(resource, ());
     }
 
     fn can_view(client: Client, global_data: &OutputMngrGlobalData) -> bool {
@@ -55,7 +53,7 @@ where
 impl<D> Dispatch<ZcosmicOutputManagerV1, (), D> for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
-        + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>
+        + Dispatch<ZwlrOutputManagerV1, ()>
         + Dispatch<ZwlrOutputHeadV1, Output>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
@@ -110,9 +108,36 @@ where
                 extended,
                 config_head,
             } => {
-                if let Some(pending) = config_head.data::<PendingOutputConfiguration>() {
-                    let obj = data_init.init(extended, config_head.downgrade());
-                    pending.lock().unwrap().extension_obj = Some(obj);
+                data_init.init(extended, config_head.downgrade());
+            }
+            _ => {}
+        }
+    }
+}
+
+impl<D> Dispatch<ZcosmicOutputHeadV1, Weak<ZwlrOutputHeadV1>, D> for OutputConfigurationState<D>
+where
+    D: OutputConfigurationHandler + 'static,
+{
+    fn request(
+        state: &mut D,
+        _client: &Client,
+        obj: &ZcosmicOutputHeadV1,
+        request: zcosmic_output_head_v1::Request,
+        _data: &Weak<ZwlrOutputHeadV1>,
+        _dh: &DisplayHandle,
+        _data_init: &mut DataInit<'_, D>,
+    ) {
+        match request {
+            zcosmic_output_head_v1::Request::Release => {
+                let inner = state.output_configuration_state();
+                if let Some(head) = inner
+                    .instances
+                    .iter_mut()
+                    .flat_map(|instance| instance.heads.iter_mut())
+                    .find(|head| head.extension_obj.as_ref().is_some_and(|o| o == obj))
+                {
+                    head.extension_obj.take();
                 }
             }
             _ => {}
@@ -120,24 +145,11 @@ where
     }
 }
 
-impl<D> Dispatch<ZcosmicOutputHeadV1, Weak<ZwlrOutputHeadV1>, D> for OutputConfigurationState<D> {
-    fn request(
-        _state: &mut D,
-        _client: &Client,
-        _obj: &ZcosmicOutputHeadV1,
-        _request: zcosmic_output_head_v1::Request,
-        _data: &Weak<ZwlrOutputHeadV1>,
-        _dh: &DisplayHandle,
-        _data_init: &mut DataInit<'_, D>,
-    ) {
-    }
-}
-
 impl<D> Dispatch<ZcosmicOutputConfigurationV1, Weak<ZwlrOutputConfigurationV1>, D>
     for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
-        + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>
+        + Dispatch<ZwlrOutputManagerV1, ()>
         + Dispatch<ZwlrOutputHeadV1, Output>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
@@ -209,22 +221,10 @@ where
                     }
                 }
             }
-            zcosmic_output_configuration_v1::Request::Destroy => {
+            zcosmic_output_configuration_v1::Request::Release => {
                 if let Ok(obj) = obj.upgrade() {
                     if let Some(data) = obj.data::<PendingConfiguration>() {
-                        let mut pending = data.lock().unwrap();
-                        let _ = pending.extension_obj.take();
-                        pending.heads.retain(|(_, conf)| match conf {
-                            Some(head) => {
-                                if let Some(data) = head.data::<PendingOutputConfiguration>() {
-                                    let output_conf = data.lock().unwrap();
-                                    output_conf.mirroring.is_none()
-                                } else {
-                                    true
-                                }
-                            }
-                            None => true,
-                        })
+                        data.lock().unwrap().extension_obj.take();
                     }
                 }
             }
@@ -237,7 +237,7 @@ impl<D> Dispatch<ZcosmicOutputConfigurationHeadV1, Weak<ZwlrOutputConfigurationH
     for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
-        + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>
+        + Dispatch<ZwlrOutputManagerV1, ()>
         + Dispatch<ZwlrOutputHeadV1, Output>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>

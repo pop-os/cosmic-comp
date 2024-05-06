@@ -18,20 +18,14 @@ use smithay::{
     },
     utils::{Point, Size},
 };
-use std::{
-    convert::TryInto,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-};
+use std::convert::TryInto;
 
 use crate::wayland::protocols::output_configuration::*;
 
 impl<D> GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData, D> for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
-        + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>
+        + Dispatch<ZwlrOutputManagerV1, ()>
         + Dispatch<ZwlrOutputHeadV1, Output>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
@@ -47,15 +41,9 @@ where
         _global_data: &OutputMngrGlobalData,
         data_init: &mut DataInit<'_, D>,
     ) {
-        let active = Arc::new(AtomicBool::new(true));
-        let data = OutputMngrInstanceData {
-            active: active.clone(),
-        };
         let mut instance = OutputMngrInstance {
-            obj: data_init.init(resource, data),
+            obj: data_init.init(resource, ()),
             heads: Vec::new(),
-            active,
-            stale_modes: Vec::new(),
         };
 
         let mngr_state = state.output_configuration_state();
@@ -71,10 +59,10 @@ where
     }
 }
 
-impl<D> Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData, D> for OutputConfigurationState<D>
+impl<D> Dispatch<ZwlrOutputManagerV1, (), D> for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
-        + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>
+        + Dispatch<ZwlrOutputManagerV1, ()>
         + Dispatch<ZwlrOutputHeadV1, Output>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
@@ -85,9 +73,9 @@ where
     fn request(
         state: &mut D,
         _client: &Client,
-        _obj: &ZwlrOutputManagerV1,
+        obj: &ZwlrOutputManagerV1,
         request: zwlr_output_manager_v1::Request,
-        data: &OutputMngrInstanceData,
+        _data: &(),
         _dh: &DisplayHandle,
         data_init: &mut DataInit<'_, D>,
     ) {
@@ -109,17 +97,29 @@ where
                 }
             }
             zwlr_output_manager_v1::Request::Stop => {
-                data.active.store(false, Ordering::SeqCst);
+                let state = state.output_configuration_state();
+                state.instances.retain(|instance| instance.obj != *obj);
+                obj.finished();
             }
             _ => {}
         }
+    }
+
+    fn destroyed(
+        state: &mut D,
+        _client: wayland_backend::server::ClientId,
+        obj: &ZwlrOutputManagerV1,
+        _data: &(),
+    ) {
+        let state = state.output_configuration_state();
+        state.instances.retain(|instance| instance.obj != *obj);
     }
 }
 
 impl<D> Dispatch<ZwlrOutputHeadV1, Output, D> for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
-        + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>
+        + Dispatch<ZwlrOutputManagerV1, ()>
         + Dispatch<ZwlrOutputHeadV1, Output>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
@@ -156,7 +156,7 @@ where
 impl<D> Dispatch<ZwlrOutputModeV1, Mode, D> for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
-        + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>
+        + Dispatch<ZwlrOutputManagerV1, ()>
         + Dispatch<ZwlrOutputHeadV1, Output>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
@@ -175,22 +175,14 @@ where
     ) {
         match request {
             zwlr_output_mode_v1::Request::Release => {
-                for instance in &mut state.output_configuration_state().instances {
-                    instance.stale_modes.retain(|mode| mode != obj)
+                let state = state.output_configuration_state();
+                for instance in &mut state.instances {
+                    for head in &mut instance.heads {
+                        head.modes.retain(|mode| mode != obj)
+                    }
                 }
             }
             _ => {}
-        }
-    }
-
-    fn destroyed(
-        state: &mut D,
-        _client: wayland_backend::server::ClientId,
-        obj: &ZwlrOutputModeV1,
-        _data: &Mode,
-    ) {
-        for instance in &mut state.output_configuration_state().instances {
-            instance.stale_modes.retain(|mode| mode != obj)
         }
     }
 }
@@ -198,7 +190,7 @@ where
 impl<D> Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration, D> for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
-        + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>
+        + Dispatch<ZwlrOutputManagerV1, ()>
         + Dispatch<ZwlrOutputHeadV1, Output>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
@@ -389,7 +381,7 @@ impl<D> Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration, D>
     for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
-        + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>
+        + Dispatch<ZwlrOutputManagerV1, ()>
         + Dispatch<ZwlrOutputHeadV1, Output>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
