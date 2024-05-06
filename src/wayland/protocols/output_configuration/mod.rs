@@ -13,7 +13,7 @@ use smithay::{
             zwlr_output_configuration_v1::ZwlrOutputConfigurationV1,
             zwlr_output_head_v1::{self, ZwlrOutputHeadV1},
             zwlr_output_manager_v1::ZwlrOutputManagerV1,
-            zwlr_output_mode_v1::{self, ZwlrOutputModeV1},
+            zwlr_output_mode_v1::ZwlrOutputModeV1,
         },
         wayland_server::{
             backend::GlobalId, protocol::wl_output::WlOutput, Client, Dispatch, DisplayHandle,
@@ -23,13 +23,7 @@ use smithay::{
     utils::{Logical, Physical, Point, Size, Transform},
     wayland::output::WlOutputData,
 };
-use std::{
-    convert::TryFrom,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
-};
+use std::{convert::TryFrom, sync::Mutex};
 
 mod handlers;
 
@@ -38,7 +32,6 @@ pub struct OutputConfigurationState<D> {
     outputs: Vec<Output>,
     removed_outputs: Vec<Output>,
     instances: Vec<OutputMngrInstance>,
-    extension_instances: Vec<ZcosmicOutputManagerV1>,
     serial_counter: u32,
     global: GlobalId,
     extension_global: GlobalId,
@@ -60,9 +53,7 @@ pub struct OutputMngrGlobalData {
 #[derive(Debug)]
 struct OutputMngrInstance {
     obj: ZwlrOutputManagerV1,
-    active: Arc<AtomicBool>,
     heads: Vec<OutputHeadInstance>,
-    stale_modes: Vec<ZwlrOutputModeV1>,
 }
 
 #[derive(Debug)]
@@ -72,10 +63,6 @@ struct OutputHeadInstance {
     output: Output,
     modes: Vec<ZwlrOutputModeV1>,
     finished: bool,
-}
-
-pub struct OutputMngrInstanceData {
-    active: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Default)]
@@ -99,7 +86,6 @@ pub enum ModeConfiguration<M: Clone> {
 
 #[derive(Debug, Default, Clone)]
 pub struct PendingOutputConfigurationInner {
-    extension_obj: Option<ZcosmicOutputConfigurationHeadV1>,
     mirroring: Option<Output>,
     mode: Option<ModeConfiguration<ZwlrOutputModeV1>>,
     position: Option<Point<i32, Logical>>,
@@ -160,7 +146,7 @@ impl<D> OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + GlobalDispatch<WlOutput, WlOutputData>
-        + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>
+        + Dispatch<ZwlrOutputManagerV1, ()>
         + Dispatch<ZwlrOutputHeadV1, Output>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
@@ -195,7 +181,6 @@ where
             outputs: Vec::new(),
             removed_outputs: Vec::new(),
             instances: Vec::new(),
-            extension_instances: Vec::new(),
             serial_counter: 0,
             global,
             extension_global,
@@ -260,7 +245,6 @@ where
     }
 
     pub fn update(&mut self) {
-        self.instances.retain(|x| x.active.load(Ordering::SeqCst));
         self.serial_counter += 1;
 
         for output in std::mem::take(&mut self.removed_outputs).into_iter() {
@@ -273,11 +257,6 @@ where
                         }
                         for mode in &mut head.modes {
                             mode.finished();
-                            if mode.version() < zwlr_output_mode_v1::REQ_RELEASE_SINCE {
-                                // on >=v3 we keep the obj around until we get a release-request
-                                // otherwise we will drop this with the head
-                                instance.stale_modes.push(mode.clone());
-                            }
                         }
                         head.obj.finished();
                         head.finished = true;
@@ -316,7 +295,7 @@ where
 fn send_head_to_client<D>(dh: &DisplayHandle, mngr: &mut OutputMngrInstance, output: &Output)
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
-        + Dispatch<ZwlrOutputManagerV1, OutputMngrInstanceData>
+        + Dispatch<ZwlrOutputManagerV1, ()>
         + Dispatch<ZwlrOutputHeadV1, Output>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
@@ -375,10 +354,6 @@ where
     instance.modes.retain_mut(|m| {
         if !output_modes.contains(m.data::<Mode>().unwrap()) {
             m.finished();
-            if m.version() < zwlr_output_mode_v1::REQ_RELEASE_SINCE {
-                // on >=v3 we keep the obj around until we get a release-request
-                mngr.stale_modes.push(m.clone());
-            }
             false
         } else {
             true
@@ -474,7 +449,7 @@ macro_rules! delegate_output_configuration {
             smithay::reexports::wayland_protocols_wlr::output_management::v1::server::zwlr_output_manager_v1::ZwlrOutputManagerV1: $crate::wayland::protocols::output_configuration::OutputMngrGlobalData
         ] => $crate::wayland::protocols::output_configuration::OutputConfigurationState<Self>);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            smithay::reexports::wayland_protocols_wlr::output_management::v1::server::zwlr_output_manager_v1::ZwlrOutputManagerV1: $crate::wayland::protocols::output_configuration::OutputMngrInstanceData
+            smithay::reexports::wayland_protocols_wlr::output_management::v1::server::zwlr_output_manager_v1::ZwlrOutputManagerV1: ()
         ] => $crate::wayland::protocols::output_configuration::OutputConfigurationState<Self>);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
             smithay::reexports::wayland_protocols_wlr::output_management::v1::server::zwlr_output_head_v1::ZwlrOutputHeadV1: smithay::output::Output
