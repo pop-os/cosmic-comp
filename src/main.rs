@@ -13,7 +13,9 @@ use std::{env, ffi::OsString, os::unix::process::CommandExt, process, sync::Arc}
 use tracing::{error, info, warn};
 
 use crate::{
-    shell::SeatExt, state::BackendData, wayland::handlers::compositor::client_compositor_state,
+    shell::SeatExt,
+    state::{BackendData, ClientState},
+    wayland::handlers::compositor::client_compositor_state,
 };
 
 pub mod backend;
@@ -198,14 +200,12 @@ fn init_wayland_display(
                 _ => None,
             };
 
+            let client_state = state.new_client_state();
             if let Err(err) = state.common.display_handle.insert_client(
                 client_stream,
-                Arc::new(if cfg!(debug_assertions) {
-                    state.new_privileged_client_state()
-                } else if let Some(node) = node {
-                    state.new_client_state_with_node(node)
-                } else {
-                    state.new_client_state()
+                Arc::new(ClientState {
+                    advertised_drm_node: node.or(client_state.advertised_drm_node),
+                    ..client_state
                 }),
             ) {
                 warn!(?err, "Error adding wayland client")

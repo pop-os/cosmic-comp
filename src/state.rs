@@ -364,8 +364,8 @@ pub fn client_is_privileged(client: &Client) -> bool {
         .map_or(false, |client_state| client_state.privileged)
 }
 
-pub fn client_should_see_privileged_protocols(client: &Client) -> bool {
-    if std::env::var("COSMIC_ENABLE_WAYLAND_SECURITY")
+fn enable_wayland_security() -> bool {
+    std::env::var("COSMIC_ENABLE_WAYLAND_SECURITY")
         .map(|x| {
             x == "1"
                 || x.to_lowercase() == "true"
@@ -373,11 +373,6 @@ pub fn client_should_see_privileged_protocols(client: &Client) -> bool {
                 || x.to_lowercase() == "y"
         })
         .unwrap_or(false)
-    {
-        client_is_privileged(client)
-    } else {
-        client_is_privileged(client) || client_has_no_security_context(client)
-    }
 }
 
 impl State {
@@ -409,14 +404,11 @@ impl State {
         let fractional_scale_state = FractionalScaleManagerState::new::<State>(dh);
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<Self>(dh);
         let output_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
-        let output_configuration_state =
-            OutputConfigurationState::new(dh, client_should_see_privileged_protocols);
+        let output_configuration_state = OutputConfigurationState::new(dh, client_is_privileged);
         let presentation_state = PresentationState::new::<Self>(dh, clock.id() as u32);
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
-        let image_source_state =
-            ImageSourceState::new::<Self, _>(dh, client_should_see_privileged_protocols);
-        let screencopy_state =
-            ScreencopyState::new::<Self, _>(dh, client_should_see_privileged_protocols);
+        let image_source_state = ImageSourceState::new::<Self, _>(dh, client_is_privileged);
+        let screencopy_state = ScreencopyState::new::<Self, _>(dh, client_is_privileged);
         let shm_state =
             ShmState::new::<Self>(dh, vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888]);
         let seat_state = SeatState::<Self>::new();
@@ -425,15 +417,15 @@ impl State {
         let kde_decoration_state = KdeDecorationState::new::<Self>(&dh, Mode::Client);
         let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
         let session_lock_manager_state =
-            SessionLockManagerState::new::<Self, _>(&dh, client_should_see_privileged_protocols);
+            SessionLockManagerState::new::<Self, _>(&dh, client_is_privileged);
         XWaylandKeyboardGrabState::new::<Self>(&dh);
         PointerConstraintsState::new::<Self>(&dh);
         PointerGesturesState::new::<Self>(&dh);
         TabletManagerState::new::<Self>(&dh);
         SecurityContextState::new::<Self, _>(&dh, client_has_no_security_context);
-        InputMethodManagerState::new::<Self, _>(&dh, client_should_see_privileged_protocols);
+        InputMethodManagerState::new::<Self, _>(&dh, client_is_privileged);
         TextInputManagerState::new::<Self>(&dh);
-        VirtualKeyboardManagerState::new::<State, _>(&dh, client_should_see_privileged_protocols);
+        VirtualKeyboardManagerState::new::<State, _>(&dh, client_is_privileged);
 
         let idle_notifier_state = IdleNotifierState::<Self>::new(&dh, handle.clone());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(&dh);
@@ -445,10 +437,8 @@ impl State {
 
         let shell = Arc::new(RwLock::new(Shell::new(&config)));
 
-        let layer_shell_state = WlrLayerShellState::new_with_filter::<State, _>(
-            dh,
-            client_should_see_privileged_protocols,
-        );
+        let layer_shell_state =
+            WlrLayerShellState::new_with_filter::<State, _>(dh, client_is_privileged);
         let xdg_shell_state = XdgShellState::new_with_capabilities::<State>(
             dh,
             [
@@ -459,8 +449,7 @@ impl State {
             ],
         );
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
-        let toplevel_info_state =
-            ToplevelInfoState::new(dh, client_should_see_privileged_protocols);
+        let toplevel_info_state = ToplevelInfoState::new(dh, client_is_privileged);
         let toplevel_management_state = ToplevelManagementState::new::<State, _>(
             dh,
             vec![
@@ -470,9 +459,9 @@ impl State {
                 ManagementCapabilities::Minimize,
                 ManagementCapabilities::MoveToWorkspace,
             ],
-            client_should_see_privileged_protocols,
+            client_is_privileged,
         );
-        let workspace_state = WorkspaceState::new(dh, client_should_see_privileged_protocols);
+        let workspace_state = WorkspaceState::new(dh, client_is_privileged);
 
         if let Err(err) = crate::dbus::init(&handle) {
             tracing::warn!(?err, "Failed to initialize dbus handlers");
@@ -548,32 +537,7 @@ impl State {
                 BackendData::Kms(kms_state) => Some(kms_state.primary_node),
                 _ => None,
             },
-            privileged: false,
-            evls: self.common.event_loop_signal.clone(),
-            security_context: None,
-        }
-    }
-
-    pub fn new_client_state_with_node(&self, drm_node: DrmNode) -> ClientState {
-        ClientState {
-            compositor_client_state: CompositorClientState::default(),
-            workspace_client_state: WorkspaceClientState::default(),
-            advertised_drm_node: Some(drm_node),
-            privileged: false,
-            evls: self.common.event_loop_signal.clone(),
-            security_context: None,
-        }
-    }
-
-    pub fn new_privileged_client_state(&self) -> ClientState {
-        ClientState {
-            compositor_client_state: CompositorClientState::default(),
-            workspace_client_state: WorkspaceClientState::default(),
-            advertised_drm_node: match &self.backend {
-                BackendData::Kms(kms_state) => Some(kms_state.primary_node),
-                _ => None,
-            },
-            privileged: true,
+            privileged: !enable_wayland_security(),
             evls: self.common.event_loop_signal.clone(),
             security_context: None,
         }
