@@ -96,7 +96,10 @@ impl State {
             .insert_source(listener, move |client_stream, _, state: &mut State| {
                 if let Err(err) = state.common.display_handle.insert_client(
                     client_stream,
-                    Arc::new(state.new_client_state_with_node(render_node)),
+                    Arc::new(ClientState {
+                        advertised_drm_node: Some(render_node),
+                        ..state.new_client_state()
+                    }),
                 ) {
                     warn!(
                         socket_name = socket_name_clone,

@@ -19,7 +19,7 @@ use std::{
 };
 use tracing::{error, warn};
 
-use crate::state::State;
+use crate::state::{ClientState, State};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "message")]
@@ -146,7 +146,11 @@ pub fn setup_socket(handle: LoopHandle<State>, state: &State) -> Result<()> {
                                                         continue;
                                                     }
                                                     let stream = unsafe { UnixStream::from_raw_fd(fd) };
-                                                    if let Err(err) = state.common.display_handle.insert_client(stream, Arc::new(state.new_privileged_client_state())) {
+                                                    let client_state = Arc::new(ClientState {
+                                                        privileged: true,
+                                                        ..state.new_client_state()
+                                                    });
+                                                    if let Err(err) = state.common.display_handle.insert_client(stream, client_state) {
                                                         warn!(?err, "Failed to add privileged client to display");
                                                     }
                                                 }
