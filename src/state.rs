@@ -99,12 +99,14 @@ use smithay::{
 use time::UtcOffset;
 use tracing::error;
 
-use std::{cell::RefCell, ffi::OsString, time::Duration};
 use std::{
-    collections::HashSet,
-    sync::{Arc, RwLock},
+    cell::RefCell,
+    collections::{HashSet, VecDeque},
+    ffi::OsString,
+    process::Child,
+    sync::{Arc, Once, RwLock},
+    time::{Duration, Instant},
 };
-use std::{collections::VecDeque, time::Instant};
 
 #[derive(RustEmbed)]
 #[folder = "resources/i18n"]
@@ -155,6 +157,7 @@ pub fn advertised_node_for_surface(w: &WlSurface, dh: &DisplayHandle) -> Option<
 pub struct State {
     pub backend: BackendData,
     pub common: Common,
+    pub ready: Once,
 }
 
 #[derive(Debug)]
@@ -174,6 +177,7 @@ pub struct Common {
     pub local_offset: time::UtcOffset,
     pub gesture_state: Option<GestureState>,
 
+    pub kiosk_child: Option<Child>,
     pub theme: cosmic::Theme,
 
     #[cfg(feature = "debug")]
@@ -484,6 +488,7 @@ impl State {
                 should_stop: false,
                 gesture_state: None,
 
+                kiosk_child: None,
                 theme: cosmic::theme::system_preference(),
 
                 #[cfg(feature = "debug")]
@@ -526,6 +531,7 @@ impl State {
                 xwayland_state: None,
             },
             backend: BackendData::Unset,
+            ready: Once::new(),
         }
     }
 

@@ -32,6 +32,8 @@ impl InputMethodHandler for State {
             .map(|e| e.geometry())
             .unwrap_or_default()
     }
+
+    fn popup_repositioned(&mut self, _: PopupSurface) {}
 }
 
 delegate_input_method_manager!(State);

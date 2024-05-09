@@ -28,7 +28,7 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
     ) -> anyhow::Result<()>
     where
         R: Renderer + ImportAll + Offscreen<GlesRenderbuffer> + ExportMem,
-        <R as Renderer>::TextureId: 'static,
+        <R as Renderer>::TextureId: Clone + 'static,
         <R as Renderer>::Error: Send + Sync + 'static,
     {
         let bbox = bbox_from_surface_tree(&window.wl_surface().unwrap(), (0, 0));

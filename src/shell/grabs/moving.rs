@@ -42,7 +42,7 @@ use smithay::{
         Seat,
     },
     output::Output,
-    utils::{IsAlive, Logical, Point, Rectangle, Scale, Serial, Size, SERIAL_COUNTER},
+    utils::{IsAlive, Logical, Point, Rectangle, Scale, Serial, SERIAL_COUNTER},
 };
 use std::{cell::RefCell, collections::HashSet, sync::atomic::Ordering, time::Instant};
 
@@ -69,7 +69,7 @@ impl MoveGrabState {
     pub fn render<I, R>(&self, renderer: &mut R, output: &Output, theme: &CosmicTheme) -> Vec<I>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-        <R as Renderer>::TextureId: 'static,
+        <R as Renderer>::TextureId: Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         I: From<CosmicMappedRenderElement<R>>,
     {
