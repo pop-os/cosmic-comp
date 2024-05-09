@@ -1039,7 +1039,10 @@ impl State {
                             frame =
                                 frame.value(Axis::Horizontal, scroll_factor * horizontal_amount);
                             if let Some(discrete) = event.amount_v120(Axis::Horizontal) {
-                                frame = frame.v120(Axis::Horizontal, discrete as i32);
+                                frame = frame.v120(
+                                    Axis::Horizontal,
+                                    (discrete * scroll_factor).round() as i32,
+                                );
                             }
                         } else if event.source() == AxisSource::Finger {
                             frame = frame.stop(Axis::Horizontal);
@@ -1049,7 +1052,10 @@ impl State {
                         if vertical_amount != 0.0 {
                             frame = frame.value(Axis::Vertical, scroll_factor * vertical_amount);
                             if let Some(discrete) = event.amount_v120(Axis::Vertical) {
-                                frame = frame.v120(Axis::Vertical, discrete as i32);
+                                frame = frame.v120(
+                                    Axis::Vertical,
+                                    (discrete * scroll_factor).round() as i32,
+                                );
                             }
                         } else if event.source() == AxisSource::Finger {
                             frame = frame.stop(Axis::Vertical);
