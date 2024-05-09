@@ -35,6 +35,7 @@ pub mod dbus;
 pub mod debug;
 pub mod hooks;
 pub mod input;
+pub mod libei;
 mod logger;
 pub mod session;
 pub mod shell;
@@ -155,6 +156,8 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
     );
     // init backend
     backend::init_backend_auto(&display, &mut event_loop, &mut state)?;
+
+    libei::listen_eis(&event_loop.handle());
 
     if let Err(err) = theme::watch_theme(event_loop.handle()) {
         warn!(?err, "Failed to watch theme");
