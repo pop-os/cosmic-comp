@@ -97,6 +97,7 @@ features = [
     "backend_drm",
     "backend_gbm",
     "backend_egl",
+    "backend_libei",
     "backend_libinput",
     "backend_session_libseat",
     "backend_udev",
