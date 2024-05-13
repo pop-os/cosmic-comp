@@ -55,6 +55,7 @@ use smithay::{
     wayland::seat::WaylandFocus,
 };
 use std::{
+    borrow::Cow,
     cell::RefCell,
     fmt,
     hash::Hash,
@@ -609,7 +610,7 @@ impl CosmicStack {
                 let seat = seat.clone();
                 surface.try_force_undecorated(false);
                 surface.send_configure();
-                if let Some(surface) = surface.wl_surface() {
+                if let Some(surface) = surface.wl_surface().map(Cow::into_owned) {
                     let _ = data.common.event_loop_handle.insert_idle(move |state| {
                         let res = state.common.shell.write().unwrap().move_request(
                             &surface,
@@ -701,7 +702,10 @@ impl Program for CosmicStackInternal {
             Message::DragStart => {
                 if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
                     let active = self.active.load(Ordering::SeqCst);
-                    if let Some(surface) = self.windows.lock().unwrap()[active].wl_surface() {
+                    if let Some(surface) = self.windows.lock().unwrap()[active]
+                        .wl_surface()
+                        .map(Cow::into_owned)
+                    {
                         loop_handle.insert_idle(move |state| {
                             let res = state.common.shell.write().unwrap().move_request(
                                 &surface,
@@ -757,7 +761,10 @@ impl Program for CosmicStackInternal {
             Message::Menu => {
                 if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
                     let active = self.active.load(Ordering::SeqCst);
-                    if let Some(surface) = self.windows.lock().unwrap()[active].wl_surface() {
+                    if let Some(surface) = self.windows.lock().unwrap()[active]
+                        .wl_surface()
+                        .map(Cow::into_owned)
+                    {
                         loop_handle.insert_idle(move |state| {
                             let shell = state.common.shell.read().unwrap();
                             if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
@@ -808,7 +815,10 @@ impl Program for CosmicStackInternal {
             }
             Message::TabMenu(idx) => {
                 if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
-                    if let Some(surface) = self.windows.lock().unwrap()[idx].wl_surface() {
+                    if let Some(surface) = self.windows.lock().unwrap()[idx]
+                        .wl_surface()
+                        .map(Cow::into_owned)
+                    {
                         loop_handle.insert_idle(move |state| {
                             let shell = state.common.shell.read().unwrap();
                             if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
@@ -1260,7 +1270,7 @@ impl PointerTarget<State> for CosmicStack {
                 let seat = seat.clone();
                 let Some(surface) = self.0.with_program(|p| {
                     let window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
-                    window.wl_surface()
+                    window.wl_surface().map(Cow::into_owned)
                 }) else {
                     return;
                 };
@@ -1330,7 +1340,7 @@ impl PointerTarget<State> for CosmicStack {
                 let seat = seat.clone();
                 surface.try_force_undecorated(false);
                 surface.send_configure();
-                if let Some(surface) = surface.wl_surface() {
+                if let Some(surface) = surface.wl_surface().map(Cow::into_owned) {
                     let _ = data.common.event_loop_handle.insert_idle(move |state| {
                         let res = state.common.shell.write().unwrap().move_request(
                             &surface,

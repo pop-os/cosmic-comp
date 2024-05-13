@@ -58,7 +58,7 @@ pub fn new_decoration(mapped: &CosmicMapped, surface: &WlSurface) -> KdeMode {
     if mapped.is_stack() {
         if let Some((window, _)) = mapped
             .windows()
-            .find(|(window, _)| window.wl_surface().as_ref() == Some(surface))
+            .find(|(window, _)| window.wl_surface().as_deref() == Some(surface))
         {
             if let Some(toplevel) = window.0.toplevel() {
                 toplevel
@@ -70,7 +70,7 @@ pub fn new_decoration(mapped: &CosmicMapped, surface: &WlSurface) -> KdeMode {
     } else {
         if let Some((window, _)) = mapped
             .windows()
-            .find(|(window, _)| window.wl_surface().as_ref() == Some(surface))
+            .find(|(window, _)| window.wl_surface().as_deref() == Some(surface))
         {
             if let Some(toplevel) = window.0.toplevel() {
                 toplevel
@@ -85,7 +85,7 @@ pub fn new_decoration(mapped: &CosmicMapped, surface: &WlSurface) -> KdeMode {
 pub fn request_mode(mapped: &CosmicMapped, surface: &WlSurface, mode: XdgMode) {
     if let Some((window, _)) = mapped
         .windows()
-        .find(|(window, _)| window.wl_surface().as_ref() == Some(surface))
+        .find(|(window, _)| window.wl_surface().as_deref() == Some(surface))
     {
         if let Some(toplevel) = window.0.toplevel() {
             PreferredDecorationMode::update(&window.0, Some(mode));
@@ -100,7 +100,7 @@ pub fn request_mode(mapped: &CosmicMapped, surface: &WlSurface, mode: XdgMode) {
 pub fn unset_mode(mapped: &CosmicMapped, surface: &WlSurface) {
     if let Some((window, _)) = mapped
         .windows()
-        .find(|(window, _)| window.wl_surface().as_ref() == Some(surface))
+        .find(|(window, _)| window.wl_surface().as_deref() == Some(surface))
     {
         if let Some(toplevel) = window.0.toplevel() {
             PreferredDecorationMode::update(&window.0, None);

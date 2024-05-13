@@ -1,4 +1,4 @@
-use std::{sync::Weak, time::Duration};
+use std::{borrow::Cow, sync::Weak, time::Duration};
 
 use crate::{
     shell::{
@@ -79,12 +79,12 @@ impl From<KeyboardFocusTarget> for PointerFocusTarget {
                 let window = elem.active_window();
                 let surface = window.wl_surface().unwrap();
                 PointerFocusTarget::WlSurface {
-                    surface,
+                    surface: surface.into_owned(),
                     toplevel: Some(window.into()),
                 }
             }
             KeyboardFocusTarget::Fullscreen(elem) => PointerFocusTarget::WlSurface {
-                surface: elem.wl_surface().unwrap(),
+                surface: elem.wl_surface().unwrap().into_owned(),
                 toplevel: Some(elem.into()),
             },
             KeyboardFocusTarget::LayerSurface(layer) => PointerFocusTarget::WlSurface {
@@ -145,7 +145,7 @@ impl PointerFocusTarget {
                 .and_then(|s| shell.element_for_surface(&s).map(|mapped| (mapped, s)))
                 .and_then(|(m, s)| {
                     m.windows()
-                        .find(|(w, _)| w.wl_surface().map(|s2| s == s2).unwrap_or(false))
+                        .find(|(w, _)| w.wl_surface().map(|s2| s == *s2).unwrap_or(false))
                         .map(|(s, _)| s)
                 }),
             PointerFocusTarget::StackUI(stack) => Some(stack.active()),
@@ -156,10 +156,12 @@ impl PointerFocusTarget {
 }
 
 impl KeyboardFocusTarget {
-    pub fn toplevel(&self) -> Option<WlSurface> {
+    pub fn toplevel(&self) -> Option<Cow<'_, WlSurface>> {
         match self {
             KeyboardFocusTarget::Element(mapped) => mapped.wl_surface(),
-            KeyboardFocusTarget::Popup(PopupKind::Xdg(xdg)) => get_popup_toplevel(&xdg),
+            KeyboardFocusTarget::Popup(PopupKind::Xdg(xdg)) => {
+                get_popup_toplevel(&xdg).map(Cow::Owned)
+            }
             _ => None,
         }
     }
@@ -686,14 +688,14 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
 }
 
 impl WaylandFocus for KeyboardFocusTarget {
-    fn wl_surface(&self) -> Option<WlSurface> {
+    fn wl_surface(&self) -> Option<Cow<'_, WlSurface>> {
         match self {
             KeyboardFocusTarget::Element(w) => WaylandFocus::wl_surface(w),
             KeyboardFocusTarget::Fullscreen(w) => WaylandFocus::wl_surface(w),
             KeyboardFocusTarget::Group(_) => None,
-            KeyboardFocusTarget::LayerSurface(l) => Some(l.wl_surface().clone()),
-            KeyboardFocusTarget::Popup(p) => Some(p.wl_surface().clone()),
-            KeyboardFocusTarget::LockSurface(l) => Some(l.wl_surface().clone()),
+            KeyboardFocusTarget::LayerSurface(l) => Some(Cow::Borrowed(l.wl_surface())),
+            KeyboardFocusTarget::Popup(p) => Some(Cow::Borrowed(p.wl_surface())),
+            KeyboardFocusTarget::LockSurface(l) => Some(Cow::Borrowed(l.wl_surface())),
         }
     }
     fn same_client_as(&self, object_id: &ObjectId) -> bool {
@@ -709,9 +711,9 @@ impl WaylandFocus for KeyboardFocusTarget {
 }
 
 impl WaylandFocus for PointerFocusTarget {
-    fn wl_surface(&self) -> Option<WlSurface> {
+    fn wl_surface(&self) -> Option<Cow<'_, WlSurface>> {
         Some(match self {
-            PointerFocusTarget::WlSurface { surface, .. } => surface.clone(),
+            PointerFocusTarget::WlSurface { surface, .. } => Cow::Borrowed(surface),
             PointerFocusTarget::ResizeFork(_)
             | PointerFocusTarget::StackUI(_)
             | PointerFocusTarget::WindowUI(_) => {

@@ -72,6 +72,7 @@ use xkbcommon::xkb::{Keycode, Keysym};
 
 use std::{
     any::Any,
+    borrow::Cow,
     cell::RefCell,
     os::unix::process::CommandExt,
     thread,
@@ -642,8 +643,8 @@ impl State {
                     ptr.frame(self);
 
                     // If pointer is now in a constraint region, activate it
-                    if let Some((under, surface_location)) =
-                        new_under.and_then(|(target, loc)| Some((target.wl_surface()?, loc)))
+                    if let Some((under, surface_location)) = new_under
+                        .and_then(|(target, loc)| Some((target.wl_surface()?.into_owned(), loc)))
                     {
                         with_pointer_constraint(&under, &ptr, |constraint| match constraint {
                             Some(constraint) if !constraint.is_active() => {
@@ -872,7 +873,9 @@ impl State {
                                     // These cases are handled by the XwaylandKeyboardGrab.
                                     if let Some(target) = shell.element_under(pos, &output) {
                                         if seat.get_keyboard().unwrap().modifier_state().logo {
-                                            if let Some(surface) = target.toplevel() {
+                                            if let Some(surface) =
+                                                target.toplevel().map(Cow::into_owned)
+                                            {
                                                 let seat_clone = seat.clone();
                                                 self.common.event_loop_handle.insert_idle(
                                                     move |state| {
@@ -1523,7 +1526,8 @@ impl State {
 
                         tool.motion(
                             position.as_logical(),
-                            under.and_then(|(f, loc)| f.wl_surface().map(|s| (s, loc))),
+                            under
+                                .and_then(|(f, loc)| f.wl_surface().map(|s| (s.into_owned(), loc))),
                             &tablet,
                             SERIAL_COUNTER.next_serial(),
                             event.time_msec(),
@@ -1573,9 +1577,9 @@ impl State {
                     if let Some(tablet) = tablet {
                         match event.state() {
                             ProximityState::In => {
-                                if let Some(under) =
-                                    under.and_then(|(f, loc)| f.wl_surface().map(|s| (s, loc)))
-                                {
+                                if let Some(under) = under.and_then(|(f, loc)| {
+                                    f.wl_surface().map(|s| (s.into_owned(), loc))
+                                }) {
                                     tool.proximity_in(
                                         position.as_logical(),
                                         under,

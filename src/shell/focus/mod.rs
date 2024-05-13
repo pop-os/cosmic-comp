@@ -15,7 +15,7 @@ use smithay::{
         shell::wlr_layer::{KeyboardInteractivity, Layer},
     },
 };
-use std::cell::RefCell;
+use std::{borrow::Cow, cell::RefCell};
 use tracing::{debug, trace};
 
 use self::target::{KeyboardFocusTarget, WindowGroup};
@@ -229,7 +229,7 @@ fn raise_with_children(floating_layer: &mut FloatingLayout, focused: &CosmicMapp
                     .0
                     .toplevel()
                     .and_then(|toplevel| toplevel.parent());
-                parent == focused.active_window().wl_surface()
+                parent == focused.active_window().wl_surface().map(Cow::into_owned)
             })
             .cloned()
             .collect::<Vec<_>>()

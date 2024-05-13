@@ -31,7 +31,7 @@ use smithay::{
         },
         gles::{GlesError, GlesTexture},
         glow::{GlowFrame, GlowRenderer},
-        utils::DamageSet,
+        utils::{DamageSet, OpaqueRegions},
         ImportAll, ImportMem, Renderer,
     },
     desktop::{layer_map_for_output, space::SpaceElement},
@@ -328,7 +328,7 @@ impl Workspace {
                     if let Some(signal) = f.animation_signal.take() {
                         signal.store(true, Ordering::SeqCst);
                         if let Some(client) =
-                            f.surface.wl_surface().as_ref().and_then(Resource::client)
+                            f.surface.wl_surface().as_deref().and_then(Resource::client)
                         {
                             clients.insert(client.id(), client);
                         }
@@ -342,7 +342,7 @@ impl Workspace {
                     if let Some(signal) = f.animation_signal.take() {
                         signal.store(true, Ordering::SeqCst);
                         if let Some(client) =
-                            f.surface.wl_surface().as_ref().and_then(Resource::client)
+                            f.surface.wl_surface().as_deref().and_then(Resource::client)
                         {
                             clients.insert(client.id(), client);
                         }
@@ -823,7 +823,7 @@ impl Workspace {
             if self
                 .fullscreen
                 .as_ref()
-                .is_some_and(|f| f.surface.wl_surface().as_ref() == Some(&toplevel))
+                .is_some_and(|f| f.surface.wl_surface().as_deref() == Some(&toplevel))
             {
                 return false;
             }
@@ -1332,7 +1332,7 @@ where
         }
     }
 
-    fn opaque_regions(&self, scale: Scale<f64>) -> Vec<Rectangle<i32, smithay::utils::Physical>> {
+    fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, smithay::utils::Physical> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.opaque_regions(scale),
             WorkspaceRenderElement::Fullscreen(elem) => elem.opaque_regions(scale),

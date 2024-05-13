@@ -93,6 +93,7 @@ use smithay::{
         virtual_keyboard::VirtualKeyboardManagerState,
         xdg_activation::XdgActivationState,
         xwayland_keyboard_grab::XWaylandKeyboardGrabState,
+        xwayland_shell::XWaylandShellState,
     },
     xwayland::XWaylandClientData,
 };
@@ -219,6 +220,7 @@ pub struct Common {
     pub xdg_activation_state: XdgActivationState,
     pub workspace_state: WorkspaceState<State>,
     pub xwayland_state: Option<XWaylandState>,
+    pub xwayland_shell_state: XWaylandShellState,
 }
 
 #[derive(Debug)]
@@ -427,6 +429,7 @@ impl State {
         let session_lock_manager_state =
             SessionLockManagerState::new::<Self, _>(&dh, client_is_privileged);
         XWaylandKeyboardGrabState::new::<Self>(&dh);
+        let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
         PointerConstraintsState::new::<Self>(&dh);
         PointerGesturesState::new::<Self>(&dh);
         TabletManagerState::new::<Self>(&dh);
@@ -533,6 +536,7 @@ impl State {
                 xdg_activation_state,
                 workspace_state,
                 xwayland_state: None,
+                xwayland_shell_state,
             },
             backend: BackendData::Unset,
             ready: Once::new(),

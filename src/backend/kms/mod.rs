@@ -1478,7 +1478,7 @@ impl Surface {
                                 let buffer = frame.buffer();
                                 if let Ok(dmabuf) = get_dmabuf(&buffer) {
                                     renderer
-                                        .bind(dmabuf)
+                                        .bind(dmabuf.clone())
                                         .map_err(RenderError::<GlMultiRenderer>::Rendering)?;
                                 } else {
                                     let size = buffer_dimensions(&buffer).ok_or(RenderError::<

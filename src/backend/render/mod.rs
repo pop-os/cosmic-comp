@@ -1057,7 +1057,9 @@ where
 
                         if let (Some(ref damage), _) = &res {
                             if let Ok(dmabuf) = get_dmabuf(buffer) {
-                                renderer.bind(dmabuf).map_err(RenderError::Rendering)?;
+                                renderer
+                                    .bind(dmabuf.clone())
+                                    .map_err(RenderError::Rendering)?;
                             } else {
                                 let size = buffer_dimensions(buffer).unwrap();
                                 let format = with_buffer_contents(buffer, |_, _, data| {

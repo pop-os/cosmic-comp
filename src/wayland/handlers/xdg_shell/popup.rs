@@ -59,7 +59,7 @@ impl Shell {
 
                 let (window, offset) = elem
                     .windows()
-                    .find(|(w, _)| w.wl_surface().as_ref() == Some(&parent))
+                    .find(|(w, _)| w.wl_surface().as_deref() == Some(&parent))
                     .unwrap();
                 let window_geo_offset = window.geometry().loc;
                 let window_loc: Point<i32, Global> =

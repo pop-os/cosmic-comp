@@ -525,11 +525,31 @@ impl TouchGrab<State> for ResizeForkGrab {
         handle.unset_grab(self, data);
     }
 
+    fn shape(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &ShapeEvent,
+        seq: Serial,
+    ) {
+        handle.shape(data, event, seq)
+    }
+
     fn start_data(&self) -> &TouchGrabStartData<State> {
         match &self.start_data {
             GrabStartData::Touch(start_data) => start_data,
             _ => unreachable!(),
         }
+    }
+
+    fn orientation(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &OrientationEvent,
+        seq: Serial,
+    ) {
+        handle.orientation(data, event, seq)
     }
 
     fn unset(&mut self, _data: &mut State) {}

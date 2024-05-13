@@ -107,7 +107,7 @@ impl CompositorHandler for State {
                     .buffer
                     .as_ref()
                     .and_then(|assignment| match assignment {
-                        BufferAssignment::NewBuffer(buffer) => get_dmabuf(buffer).ok(),
+                        BufferAssignment::NewBuffer(buffer) => get_dmabuf(buffer).ok().cloned(),
                         _ => None,
                     })
             });
@@ -134,7 +134,7 @@ impl CompositorHandler for State {
     }
 
     fn commit(&mut self, surface: &WlSurface) {
-        X11Wm::commit_hook::<State>(surface);
+        X11Wm::commit_hook::<State>(self, surface);
         // first load the buffer for various smithay helper functions (which also initializes the RendererSurfaceState)
         on_commit_buffer_handler::<Self>(surface);
 
@@ -153,7 +153,7 @@ impl CompositorHandler for State {
         if let Some((window, _, _)) = shell
             .pending_windows
             .iter()
-            .find(|(window, _, _)| window.wl_surface().as_ref() == Some(surface))
+            .find(|(window, _, _)| window.wl_surface().as_deref() == Some(surface))
             .cloned()
         {
             if let Some(toplevel) = window.0.toplevel() {
@@ -220,7 +220,7 @@ impl CompositorHandler for State {
                         .windows()
                         .any(|(s, _)| {
                             s.wl_surface()
-                                .as_ref()
+                                .as_deref()
                                 .map(|s| s == surface)
                                 .unwrap_or(false)
                         })
@@ -231,7 +231,7 @@ impl CompositorHandler for State {
                     let stack = window.stack_ref_mut().unwrap();
                     if let Some(i) = stack.surfaces().position(|s| {
                         s.wl_surface()
-                            .as_ref()
+                            .as_deref()
                             .map(|s| s == surface)
                             .unwrap_or(false)
                     }) {

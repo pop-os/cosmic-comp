@@ -200,7 +200,7 @@ impl XdgShellHandler for State {
         let mut shell = self.common.shell.write().unwrap();
         if let Some(mapped) = shell.element_for_surface(surface.wl_surface()).cloned() {
             if !mapped.is_stack()
-                || mapped.active_window().wl_surface().as_ref() == Some(surface.wl_surface())
+                || mapped.active_window().wl_surface().as_deref() == Some(surface.wl_surface())
             {
                 shell.minimize_request(&mapped)
             }
@@ -248,7 +248,7 @@ impl XdgShellHandler for State {
                     let stack = mapped.stack_ref().unwrap();
                     let surface = stack
                         .surfaces()
-                        .find(|s| s.wl_surface().as_ref() == Some(surface.wl_surface()))
+                        .find(|s| s.wl_surface().as_deref() == Some(surface.wl_surface()))
                         .unwrap();
                     stack.remove_window(&surface);
                     CosmicMapped::from(CosmicWindow::new(
@@ -286,7 +286,7 @@ impl XdgShellHandler for State {
                         let stack = mapped.stack_ref().unwrap();
                         let surface = stack
                             .surfaces()
-                            .find(|s| s.wl_surface().as_ref() == Some(surface.wl_surface()))
+                            .find(|s| s.wl_surface().as_deref() == Some(surface.wl_surface()))
                             .unwrap();
                         stack.remove_window(&surface);
                         (
@@ -325,7 +325,7 @@ impl XdgShellHandler for State {
                 } else {
                     let (window, _) = mapped
                         .windows()
-                        .find(|(w, _)| w.wl_surface().as_ref() == Some(surface.wl_surface()))
+                        .find(|(w, _)| w.wl_surface().as_deref() == Some(surface.wl_surface()))
                         .unwrap();
                     workspace.fullscreen_request(&window, None, from, &seat)
                 }
@@ -334,7 +334,7 @@ impl XdgShellHandler for State {
             if let Some(o) = shell
                 .pending_windows
                 .iter_mut()
-                .find(|(s, _, _)| s.wl_surface().as_ref() == Some(surface.wl_surface()))
+                .find(|(s, _, _)| s.wl_surface().as_deref() == Some(surface.wl_surface()))
                 .map(|(_, _, o)| o)
             {
                 *o = Some(output);
@@ -348,7 +348,7 @@ impl XdgShellHandler for State {
             if let Some(workspace) = shell.space_for_mut(&mapped) {
                 let (window, _) = mapped
                     .windows()
-                    .find(|(w, _)| w.wl_surface().as_ref() == Some(surface.wl_surface()))
+                    .find(|(w, _)| w.wl_surface().as_deref() == Some(surface.wl_surface()))
                     .unwrap();
                 if let Some((layer, previous_workspace)) = workspace.unfullscreen_request(&window) {
                     let old_handle = workspace.handle.clone();

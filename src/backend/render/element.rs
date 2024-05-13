@@ -10,7 +10,7 @@ use smithay::{
         },
         gles::GlesTexture,
         glow::{GlowFrame, GlowRenderer},
-        utils::{CommitCounter, DamageSet},
+        utils::{CommitCounter, DamageSet, OpaqueRegions},
         Frame, ImportAll, ImportMem, Renderer,
     },
     utils::{Buffer as BufferCoords, Logical, Physical, Point, Rectangle, Scale},
@@ -142,7 +142,7 @@ where
         }
     }
 
-    fn opaque_regions(&self, scale: Scale<f64>) -> Vec<Rectangle<i32, Physical>> {
+    fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
         match self {
             CosmicElement::Workspace(elem) => elem.opaque_regions(scale),
             CosmicElement::Cursor(elem) => elem.opaque_regions(scale),

@@ -2791,7 +2791,7 @@ impl TilingLayout {
                     .find(|node| match node.data() {
                         Data::Mapped { mapped, .. } => mapped
                             .windows()
-                            .any(|(w, _)| w.wl_surface().as_ref() == Some(&toplevel_surface)),
+                            .any(|(w, _)| w.wl_surface().as_deref() == Some(&toplevel_surface)),
                         _ => false,
                     })?;
 

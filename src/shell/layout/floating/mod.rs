@@ -1132,7 +1132,7 @@ impl FloatingLayout {
                 };
                 self.space
                     .elements()
-                    .find(|elem| elem.wl_surface().as_ref() == Some(&toplevel_surface))
+                    .find(|elem| elem.wl_surface().as_deref() == Some(&toplevel_surface))
             }
             KeyboardFocusTarget::Element(elem) => self.space.elements().find(|x| *x == &elem),
             _ => None,

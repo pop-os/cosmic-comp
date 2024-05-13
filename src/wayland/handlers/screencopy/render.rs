@@ -280,7 +280,7 @@ pub fn render_workspace_to_buffer(
             render_workspace::<_, _, GlesRenderbuffer>(
                 None,
                 renderer,
-                dmabuf,
+                dmabuf.clone(),
                 dt,
                 age,
                 additional_damage,
@@ -581,7 +581,7 @@ pub fn render_window_to_buffer(
         }
 
         if let Ok(dmabuf) = get_dmabuf(buffer) {
-            renderer.bind(dmabuf).map_err(DTError::Rendering)?;
+            renderer.bind(dmabuf.clone()).map_err(DTError::Rendering)?;
         } else {
             let size = buffer_dimensions(buffer).unwrap();
             let format =
@@ -794,7 +794,7 @@ pub fn render_cursor_to_buffer(
         );
 
         if let Ok(dmabuf) = get_dmabuf(buffer) {
-            renderer.bind(dmabuf).map_err(DTError::Rendering)?;
+            renderer.bind(dmabuf.clone()).map_err(DTError::Rendering)?;
         } else {
             let size = buffer_dimensions(buffer).unwrap();
             let format =

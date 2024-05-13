@@ -9,7 +9,7 @@ use smithay::{
         },
         touch::{
             DownEvent, GrabStartData as TouchGrabStartData, MotionEvent as TouchMotionEvent,
-            TouchGrab, TouchInnerHandle, UpEvent,
+            OrientationEvent, ShapeEvent, TouchGrab, TouchInnerHandle, UpEvent,
         },
     },
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
@@ -384,6 +384,32 @@ impl TouchGrab<State> for ResizeGrab {
         match self {
             ResizeGrab::Floating(grab) => TouchGrab::cancel(grab, data, handle, seq),
             ResizeGrab::Tiling(grab) => TouchGrab::cancel(grab, data, handle, seq),
+        }
+    }
+
+    fn shape(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &ShapeEvent,
+        seq: Serial,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => TouchGrab::shape(grab, data, handle, event, seq),
+            ResizeGrab::Tiling(grab) => TouchGrab::shape(grab, data, handle, event, seq),
+        }
+    }
+
+    fn orientation(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &OrientationEvent,
+        seq: Serial,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => TouchGrab::orientation(grab, data, handle, event, seq),
+            ResizeGrab::Tiling(grab) => TouchGrab::orientation(grab, data, handle, event, seq),
         }
     }
 
