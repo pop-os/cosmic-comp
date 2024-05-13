@@ -63,7 +63,7 @@ impl MenuGrabState {
     pub fn render<I, R>(&self, renderer: &mut R, output: &Output) -> Vec<I>
     where
         R: Renderer + ImportMem,
-        <R as Renderer>::TextureId: 'static,
+        <R as Renderer>::TextureId: Clone + 'static,
         I: From<MemoryRenderBufferRenderElement<R>>,
     {
         let scale = output.current_scale().fractional_scale();

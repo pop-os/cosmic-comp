@@ -19,7 +19,7 @@ use smithay::{
             },
             gles::element::PixelShaderElement,
             glow::GlowRenderer,
-            utils::DamageSet,
+            utils::{DamageSet, OpaqueRegions},
             ImportAll, ImportMem, Renderer,
         },
     },
@@ -42,6 +42,7 @@ use smithay::{
 };
 
 use std::{
+    borrow::Cow,
     collections::HashMap,
     fmt,
     hash::Hash,
@@ -222,7 +223,7 @@ impl CosmicMapped {
             };
 
             if surface_type.contains(WindowSurfaceType::TOPLEVEL) {
-                if toplevel == *surface {
+                if *toplevel == *surface {
                     return true;
                 }
             }
@@ -936,10 +937,14 @@ impl KeyboardTarget<State> for CosmicMapped {
 }
 
 impl WaylandFocus for CosmicMapped {
-    fn wl_surface(&self) -> Option<WlSurface> {
+    fn wl_surface(&self) -> Option<Cow<'_, WlSurface>> {
         match &self.element {
-            CosmicMappedInternal::Window(w) => w.surface().wl_surface().clone(),
-            CosmicMappedInternal::Stack(s) => s.active().wl_surface().clone(),
+            CosmicMappedInternal::Window(w) => {
+                w.surface().wl_surface().map(|s| Cow::Owned(s.into_owned()))
+            }
+            CosmicMappedInternal::Stack(s) => {
+                s.active().wl_surface().map(|s| Cow::Owned(s.into_owned()))
+            }
             _ => None,
         }
     }
@@ -1168,7 +1173,7 @@ where
         }
     }
 
-    fn opaque_regions(&self, scale: Scale<f64>) -> Vec<Rectangle<i32, Physical>> {
+    fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
         match self {
             CosmicMappedRenderElement::Stack(elem) => elem.opaque_regions(scale),
             CosmicMappedRenderElement::Window(elem) => elem.opaque_regions(scale),

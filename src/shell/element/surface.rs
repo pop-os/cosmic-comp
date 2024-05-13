@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
@@ -69,7 +70,7 @@ impl From<X11Surface> for CosmicSurface {
 
 impl PartialEq<WlSurface> for CosmicSurface {
     fn eq(&self, other: &WlSurface) -> bool {
-        self.wl_surface().map_or(false, |s| &s == other)
+        self.wl_surface().map_or(false, |s| &*s == other)
     }
 }
 
@@ -720,7 +721,7 @@ impl KeyboardTarget<State> for CosmicSurface {
 }
 
 impl WaylandFocus for CosmicSurface {
-    fn wl_surface(&self) -> Option<WlSurface> {
+    fn wl_surface(&self) -> Option<Cow<'_, WlSurface>> {
         self.0.wl_surface()
     }
 }

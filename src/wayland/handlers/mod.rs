@@ -38,3 +38,4 @@ pub mod workspace;
 pub mod xdg_activation;
 pub mod xdg_shell;
 pub mod xwayland_keyboard_grab;
+pub mod xwayland_shell;

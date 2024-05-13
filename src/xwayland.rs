@@ -83,7 +83,6 @@ impl State {
 
                     let mut wm = match X11Wm::start_wm(
                         data.common.event_loop_handle.clone(),
-                        data.common.display_handle.clone(),
                         x11_socket,
                         client.clone(),
                     ) {

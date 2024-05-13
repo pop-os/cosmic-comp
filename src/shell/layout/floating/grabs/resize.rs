@@ -23,7 +23,7 @@ use smithay::{
         },
         touch::{
             DownEvent, GrabStartData as TouchGrabStartData, MotionEvent as TouchMotionEvent,
-            TouchGrab, TouchInnerHandle, UpEvent,
+            OrientationEvent, ShapeEvent, TouchGrab, TouchInnerHandle, UpEvent,
         },
         Seat,
     },
@@ -326,6 +326,26 @@ impl TouchGrab<State> for ResizeSurfaceGrab {
 
     fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, _seq: Serial) {
         handle.unset_grab(self, data);
+    }
+
+    fn shape(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &ShapeEvent,
+        seq: Serial,
+    ) {
+        handle.shape(data, event, seq)
+    }
+
+    fn orientation(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &OrientationEvent,
+        seq: Serial,
+    ) {
+        handle.orientation(data, event, seq)
     }
 
     fn start_data(&self) -> &TouchGrabStartData<State> {

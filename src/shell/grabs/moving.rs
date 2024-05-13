@@ -633,6 +633,26 @@ impl TouchGrab<State> for MoveGrab {
         handle.unset_grab(self, data);
     }
 
+    fn shape(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &touch::ShapeEvent,
+        seq: Serial,
+    ) {
+        handle.shape(data, event, seq)
+    }
+
+    fn orientation(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &touch::OrientationEvent,
+        seq: Serial,
+    ) {
+        handle.orientation(data, event, seq)
+    }
+
     fn start_data(&self) -> &TouchGrabStartData<State> {
         match &self.start_data {
             GrabStartData::Touch(start_data) => start_data,

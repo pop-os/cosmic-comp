@@ -45,6 +45,7 @@ use smithay::{
     wayland::seat::WaylandFocus,
 };
 use std::{
+    borrow::Cow,
     cell::RefCell,
     fmt,
     hash::Hash,
@@ -384,7 +385,7 @@ impl Program for CosmicWindowInternal {
         match message {
             Message::DragStart => {
                 if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
-                    if let Some(surface) = self.window.wl_surface() {
+                    if let Some(surface) = self.window.wl_surface().map(Cow::into_owned) {
                         loop_handle.insert_idle(move |state| {
                             let res = state.common.shell.write().unwrap().move_request(
                                 &surface,
@@ -410,7 +411,7 @@ impl Program for CosmicWindowInternal {
                 }
             }
             Message::Minimize => {
-                if let Some(surface) = self.window.wl_surface() {
+                if let Some(surface) = self.window.wl_surface().map(Cow::into_owned) {
                     loop_handle.insert_idle(move |state| {
                         let mut shell = state.common.shell.write().unwrap();
                         if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
@@ -420,7 +421,7 @@ impl Program for CosmicWindowInternal {
                 }
             }
             Message::Maximize => {
-                if let Some(surface) = self.window.wl_surface() {
+                if let Some(surface) = self.window.wl_surface().map(Cow::into_owned) {
                     loop_handle.insert_idle(move |state| {
                         let mut shell = state.common.shell.write().unwrap();
                         if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
@@ -433,7 +434,7 @@ impl Program for CosmicWindowInternal {
             Message::Close => self.window.close(),
             Message::Menu => {
                 if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
-                    if let Some(surface) = self.window.wl_surface() {
+                    if let Some(surface) = self.window.wl_surface().map(Cow::into_owned) {
                         loop_handle.insert_idle(move |state| {
                             let shell = state.common.shell.read().unwrap();
                             if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
@@ -739,7 +740,7 @@ impl PointerTarget<State> for CosmicWindow {
             Some(x) => {
                 let serial = event.serial;
                 let seat = seat.clone();
-                let Some(surface) = self.wl_surface() else {
+                let Some(surface) = self.wl_surface().map(Cow::into_owned) else {
                     return;
                 };
                 self.0.loop_handle().insert_idle(move |state| {
@@ -906,8 +907,12 @@ impl TouchTarget<State> for CosmicWindow {
 }
 
 impl WaylandFocus for CosmicWindow {
-    fn wl_surface(&self) -> Option<WlSurface> {
-        self.0.with_program(|p| p.window.wl_surface())
+    fn wl_surface(&self) -> Option<Cow<'_, WlSurface>> {
+        self.0.with_program(|p| {
+            p.window
+                .wl_surface()
+                .map(|s| Cow::Owned(Cow::into_owned(s)))
+        })
     }
 
     fn same_client_as(&self, object_id: &ObjectId) -> bool {

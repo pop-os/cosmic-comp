@@ -2206,7 +2206,7 @@ impl Shell {
         let mapped = self.element_for_surface(surface).cloned()?;
         let (_, relative_loc) = mapped
             .windows()
-            .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
+            .find(|(w, _)| w.wl_surface().as_deref() == Some(surface))
             .unwrap();
 
         let (global_position, edge, is_tiled, is_stacked, is_sticky, tiling_enabled) =
@@ -2279,7 +2279,7 @@ impl Shell {
             } else {
                 let (tab, _) = mapped
                     .windows()
-                    .find(|(s, _)| s.wl_surface().as_ref() == Some(surface))
+                    .find(|(s, _)| s.wl_surface().as_deref() == Some(surface))
                     .unwrap();
                 Box::new(tab_items(&mapped, &tab, is_tiled, &config.static_conf))
                     as Box<dyn Iterator<Item = Item>>
@@ -2320,7 +2320,7 @@ impl Shell {
 
         let (window, _) = old_mapped
             .windows()
-            .find(|(w, _)| w.wl_surface().as_ref() == Some(surface))
+            .find(|(w, _)| w.wl_surface().as_deref() == Some(surface))
             .unwrap();
 
         let mapped = if move_out_of_stack {
@@ -2502,7 +2502,7 @@ impl Shell {
                     .space
                     .elements()
                     .chain(workspace.mapped())
-                    .find(|elem| elem.wl_surface().as_ref() == Some(&toplevel_surface))
+                    .find(|elem| elem.wl_surface().as_deref() == Some(&toplevel_surface))
             }
             KeyboardFocusTarget::Element(elem) => sticky_layer
                 .space
@@ -2664,7 +2664,8 @@ impl Shell {
         ),
         (ResizeGrab, Focus),
     )> {
-        let surface = mapped.active_window().wl_surface()?;
+        let active_window = mapped.active_window();
+        let surface = active_window.wl_surface()?;
         if mapped.is_fullscreen(true) || mapped.is_maximized(true) {
             return None;
         }
