@@ -7,7 +7,7 @@ use crate::{
     state::{BackendData, Common},
     utils::prelude::*,
 };
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use smithay::{
     backend::{
         allocator::{
@@ -15,14 +15,14 @@ use smithay::{
             gbm::{GbmAllocator, GbmBufferFlags},
             vulkan::{ImageUsageFlags, VulkanAllocator},
         },
-        drm::{DrmDeviceFd, DrmNode},
+        drm::{DrmDeviceFd, DrmNode, NodeType},
         egl::{EGLContext, EGLDevice, EGLDisplay},
         input::{Event, InputEvent},
         renderer::{
             damage::{OutputDamageTracker, RenderOutputResult},
             gles::GlesRenderbuffer,
             glow::GlowRenderer,
-            Bind, ImportDma, ImportEgl,
+            Bind, ImportDma,
         },
         vulkan::{version::Version, Instance, PhysicalDevice},
         x11::{Window, WindowBuilder, X11Backend, X11Event, X11Handle, X11Input, X11Surface},
@@ -343,7 +343,7 @@ pub fn init_backend(
         unsafe { GlowRenderer::new(context) }.with_context(|| "Failed to initialize renderer")?;
 
     init_shaders(&mut renderer).context("Failed to initialize renderer")?;
-    init_egl_client_side(dh, state, &drm_node, &mut renderer)?;
+    init_egl_client_side(dh, state, drm_node, &mut renderer)?;
 
     state.backend = BackendData::X11(X11State {
         handle,
@@ -472,27 +472,32 @@ pub fn init_backend(
 fn init_egl_client_side<R>(
     dh: &DisplayHandle,
     state: &mut State,
-    render_node: &DrmNode,
+    render_node: DrmNode,
     renderer: &mut R,
 ) -> Result<()>
 where
-    R: ImportEgl + ImportDma,
+    R: ImportDma,
 {
-    if let Err(err) = renderer.bind_wl_display(dh) {
-        warn!(
-            ?err,
-            "Unable to initialize bind display to EGL. Some older clients may not work correctly."
-        )
-    }
-
     let default_feedback =
         DmabufFeedbackBuilder::new(render_node.dev_id(), renderer.dmabuf_formats())
             .build()
             .unwrap();
-    state
+    let dmabuf_global = state
         .common
         .dmabuf_state
         .create_global_with_default_feedback::<State>(dh, &default_feedback);
+    let _drm_global_id = state.common.wl_drm_state.create_global::<State>(
+        dh,
+        render_node
+            .dev_path_with_type(NodeType::Render)
+            .or_else(|| render_node.dev_path())
+            .ok_or(anyhow!(
+                "Could not determine path for gpu node: {}",
+                render_node
+            ))?,
+        renderer.dmabuf_formats().collect(),
+        &dmabuf_global,
+    );
 
     info!("EGL hardware-acceleration enabled.");
 

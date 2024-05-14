@@ -76,7 +76,6 @@ features = [
   "backend_vulkan",
   "backend_x11",
   "desktop",
-  "use_system_lib",
   "renderer_glow",
   "renderer_multi",
   "renderer_pixman",
