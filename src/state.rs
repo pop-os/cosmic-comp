@@ -140,9 +140,8 @@ impl ClientData for ClientState {
     }
 }
 
-pub fn advertised_node_for_surface(w: &WlSurface, dh: &DisplayHandle) -> Option<DrmNode> {
+pub fn advertised_node_for_client(client: &Client) -> Option<DrmNode> {
     // Lets check the global drm-node the client got either through default-feedback or wl_drm
-    let client = dh.get_client(w.id()).ok()?;
     if let Some(normal_client) = client.get_data::<ClientState>() {
         return normal_client.advertised_drm_node.clone();
     }
@@ -151,6 +150,11 @@ pub fn advertised_node_for_surface(w: &WlSurface, dh: &DisplayHandle) -> Option<
         return xwayland_client.user_data().get::<DrmNode>().cloned();
     }
     None
+}
+
+pub fn advertised_node_for_surface(w: &WlSurface, dh: &DisplayHandle) -> Option<DrmNode> {
+    let client = dh.get_client(w.id()).ok()?;
+    advertised_node_for_client(&client)
 }
 
 #[derive(Debug)]

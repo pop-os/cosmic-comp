@@ -14,12 +14,11 @@ use smithay::{
         dmabuf::{DmabufFeedbackBuilder, DmabufGlobal},
         socket::ListeningSocketSource,
     },
-    xwayland::XWaylandClientData,
 };
 use std::sync::Arc;
 use tracing::{info, warn};
 
-use crate::state::{ClientState, State};
+use crate::state::{advertised_node_for_client, ClientState, State};
 
 #[derive(Debug)]
 pub struct Socket {
@@ -48,17 +47,7 @@ impl State {
         );
 
         // initialize globals
-        let filter = move |client: &Client| {
-            if let Some(normal_client) = client.get_data::<ClientState>() {
-                let dev_id = normal_client.advertised_drm_node.unwrap();
-                return dev_id == render_node;
-            }
-            if let Some(xwayland_client) = client.get_data::<XWaylandClientData>() {
-                let dev_id = xwayland_client.user_data().get::<DrmNode>().unwrap();
-                return *dev_id == render_node;
-            }
-            false
-        };
+        let filter = move |client: &Client| advertised_node_for_client(client) == Some(render_node);
 
         let feedback = DmabufFeedbackBuilder::new(render_node.dev_id(), formats.clone())
             .build()
