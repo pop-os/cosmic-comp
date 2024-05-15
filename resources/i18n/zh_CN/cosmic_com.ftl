@@ -1,1 +1,23 @@
-
+grow-window = Grow
+shrink-window = Shrink
+swap-windows = Swap Windows
+stack-windows = Stack Windows
+unknown-keybinding = <unset>
+window-menu-minimize = 最小化
+window-menu-maximize = 最大化
+window-menu-tiled = 
+window-menu-screenshot = 截图
+window-menu-move = Move
+window-menu-resize = 调整窗口大小
+window-menu-move-prev-workspace = Move to previous workspace
+window-menu-move-next-workspace = Move to next workspace
+window-menu-stack = Create window stack
+window-menu-unstack-all = Unstack windows
+window-menu-unstack = Unstack window
+window-menu-sticky = Sticky window
+window-menu-close = Close
+window-menu-close-all = Close all windows
+window-menu-resize-edge-top = Top
+window-menu-resize-edge-left = Left
+window-menu-resize-edge-right = Right
+window-menu-resize-edge-bottom = Bottom
