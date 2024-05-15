@@ -145,17 +145,12 @@ impl State {
             InputEvent::DeviceAdded { device } => {
                 let shell = self.common.shell.read().unwrap();
                 let seat = shell.seats.last_active();
-                for cap in seat.devices().add_device(&device) {
-                    match cap {
-                        DeviceCapability::TabletTool => {
-                            seat.tablet_seat().add_tablet::<Self>(
-                                &self.common.display_handle,
-                                &TabletDescriptor::from(&device),
-                            );
-                        }
-                        // TODO: Handle touch
-                        _ => {}
-                    }
+                seat.devices().add_device(&device);
+                if device.has_capability(DeviceCapability::TabletTool) {
+                    seat.tablet_seat().add_tablet::<Self>(
+                        &self.common.display_handle,
+                        &TabletDescriptor::from(&device),
+                    );
                 }
                 #[cfg(feature = "debug")]
                 {
@@ -166,14 +161,12 @@ impl State {
                 for seat in &mut self.common.shell.read().unwrap().seats.iter() {
                     let devices = seat.devices();
                     if devices.has_device(&device) {
-                        for cap in devices.remove_device(&device) {
-                            match cap {
-                                DeviceCapability::TabletTool => {
-                                    seat.tablet_seat()
-                                        .remove_tablet(&TabletDescriptor::from(&device));
-                                }
-                                // TODO: Handle touch
-                                _ => {}
+                        devices.remove_device(&device);
+                        if device.has_capability(DeviceCapability::TabletTool) {
+                            seat.tablet_seat()
+                                .remove_tablet(&TabletDescriptor::from(&device));
+                            if seat.tablet_seat().count_tablets() == 0 {
+                                seat.tablet_seat().clear_tools();
                             }
                         }
                         break;
@@ -1574,9 +1567,10 @@ impl State {
                     let tablet_seat = seat.tablet_seat();
 
                     let tablet = tablet_seat.get_tablet(&TabletDescriptor::from(&event.device()));
-                    let tool = tablet_seat.get_tool(&event.tool());
+                    let tool =
+                        tablet_seat.add_tool::<Self>(&self.common.display_handle, &event.tool());
 
-                    if let (Some(tablet), Some(tool)) = (tablet, tool) {
+                    if let Some(tablet) = tablet {
                         match event.state() {
                             ProximityState::In => {
                                 if let Some(under) =
