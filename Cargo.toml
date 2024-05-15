@@ -118,4 +118,16 @@ inherits = "release"
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = {git = "https://github.com/smithay//smithay", rev = "64356be"}
+# smithay = {git = "https://github.com/smithay//smithay", rev = "f7638e8"}
+smithay = {git = "https://github.com/ids1024/smithay", branch = "wl_fixes"}
+
+[patch.crates-io]
+wayland-egl = { git = "https://github.com/ids1024/wayland-rs", branch = "wl-fixes" }
+wayland-protocols = { git = "https://github.com/ids1024/wayland-rs", branch = "wl-fixes" }
+wayland-protocols-wlr = { git = "https://github.com/ids1024/wayland-rs", branch = "wl-fixes" }
+wayland-protocols-misc = { git = "https://github.com/ids1024/wayland-rs", branch = "wl-fixes" }
+wayland-server = { git = "https://github.com/ids1024/wayland-rs", branch = "wl-fixes" }
+wayland-client = { git = "https://github.com/ids1024/wayland-rs", branch = "wl-fixes" }
+wayland-sys = { git = "https://github.com/ids1024/wayland-rs", branch = "wl-fixes" }
+wayland-backend = { git = "https://github.com/ids1024/wayland-rs", branch = "wl-fixes" }
+wayland-scanner = { git = "https://github.com/ids1024/wayland-rs", branch = "wl-fixes" }

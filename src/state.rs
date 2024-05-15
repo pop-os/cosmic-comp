@@ -65,6 +65,7 @@ use smithay::{
     wayland::{
         compositor::{CompositorClientState, CompositorState},
         dmabuf::{DmabufFeedback, DmabufGlobal, DmabufState},
+        fixes::FixesState,
         fractional_scale::{with_fractional_scale, FractionalScaleManagerState},
         idle_inhibit::IdleInhibitManagerState,
         idle_notify::IdleNotifierState,
@@ -93,6 +94,7 @@ use smithay::{
         virtual_keyboard::VirtualKeyboardManagerState,
         xdg_activation::XdgActivationState,
         xwayland_keyboard_grab::XWaylandKeyboardGrabState,
+        xwayland_shell::XWaylandShellState,
     },
     xwayland::XWaylandClientData,
 };
@@ -219,6 +221,7 @@ pub struct Common {
     pub xdg_activation_state: XdgActivationState,
     pub workspace_state: WorkspaceState<State>,
     pub xwayland_state: Option<XWaylandState>,
+    pub xwayland_shell_state: XWaylandShellState,
 }
 
 #[derive(Debug)]
@@ -427,6 +430,7 @@ impl State {
         let session_lock_manager_state =
             SessionLockManagerState::new::<Self, _>(&dh, client_is_privileged);
         XWaylandKeyboardGrabState::new::<Self>(&dh);
+        let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
         PointerConstraintsState::new::<Self>(&dh);
         PointerGesturesState::new::<Self>(&dh);
         TabletManagerState::new::<Self>(&dh);
@@ -434,6 +438,7 @@ impl State {
         InputMethodManagerState::new::<Self, _>(&dh, client_is_privileged);
         TextInputManagerState::new::<Self>(&dh);
         VirtualKeyboardManagerState::new::<State, _>(&dh, client_is_privileged);
+        FixesState::new::<Self>(&dh);
 
         let idle_notifier_state = IdleNotifierState::<Self>::new(&dh, handle.clone());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(&dh);
@@ -533,6 +538,7 @@ impl State {
                 xdg_activation_state,
                 workspace_state,
                 xwayland_state: None,
+                xwayland_shell_state,
             },
             backend: BackendData::Unset,
             ready: Once::new(),

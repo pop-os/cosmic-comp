@@ -134,7 +134,7 @@ impl CompositorHandler for State {
     }
 
     fn commit(&mut self, surface: &WlSurface) {
-        X11Wm::commit_hook::<State>(surface);
+        X11Wm::commit_hook::<State>(self, surface);
         // first load the buffer for various smithay helper functions (which also initializes the RendererSurfaceState)
         on_commit_buffer_handler::<Self>(surface);
 
