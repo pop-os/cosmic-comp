@@ -1,7 +1,7 @@
 grow-window = 窗口扩大
 shrink-window = 窗口缩小
 swap-windows = 改换窗口
-stack-windows = Stack Windows
+stack-windows = 堆叠窗口
 unknown-keybinding = <unset>
 window-menu-minimize = 最小化
 window-menu-maximize = 最大化
@@ -11,7 +11,7 @@ window-menu-move = Move
 window-menu-resize = 重置窗口大小
 window-menu-move-prev-workspace = 移动到上一个工作区
 window-menu-move-next-workspace = 移动到下一个工作区
-window-menu-stack = 设置堆叠模式
+window-menu-stack = 堆叠模式
 window-menu-unstack-all = 非堆叠模式(所有窗口)
 window-menu-unstack =  非堆叠模式(当前窗口)
 window-menu-sticky = 置顶
