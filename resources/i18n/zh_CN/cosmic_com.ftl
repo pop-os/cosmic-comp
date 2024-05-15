@@ -1,5 +1,5 @@
-grow-window = Grow
-shrink-window = Shrink
+grow-window = 窗口扩大
+shrink-window = 窗口缩小
 swap-windows = Swap Windows
 stack-windows = Stack Windows
 unknown-keybinding = <unset>
