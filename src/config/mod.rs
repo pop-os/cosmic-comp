@@ -584,6 +584,10 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     .collect::<Vec<_>>();
                 for seat in seats.into_iter() {
                     if let Some(keyboard) = seat.get_keyboard() {
+                        keyboard.change_repeat_info(
+                            (value.repeat_rate as i32).abs(), // Negative values are illegal
+                            (value.repeat_delay as i32).abs(),
+                        );
                         if let Err(err) = keyboard.set_xkb_config(state, xkb_config_to_wl(&value)) {
                             error!(?err, "Failed to load provided xkb config");
                             // TODO Revert to default?
