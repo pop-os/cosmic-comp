@@ -54,6 +54,10 @@ pub struct XkbConfig {
     pub layout: String,
     pub variant: String,
     pub options: Option<String>,
+    #[serde(default = "default_repeat_delay")]
+    pub repeat_delay: u32,
+    #[serde(default = "default_repeat_rate")]
+    pub repeat_rate: u32,
 }
 
 impl Default for XkbConfig {
@@ -64,6 +68,16 @@ impl Default for XkbConfig {
             layout: String::new(),
             variant: String::new(),
             options: None,
+            repeat_delay: default_repeat_delay(),
+            repeat_rate: default_repeat_rate(),
         }
     }
+}
+
+fn default_repeat_rate() -> u32 {
+    25
+}
+
+fn default_repeat_delay() -> u32 {
+    600
 }
