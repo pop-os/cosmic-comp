@@ -80,6 +80,7 @@
         (modifiers: [Super], key: "slash"): Spawn("cosmic-launcher"),
         (modifiers: [Super]): Spawn("cosmic-launcher"),
         (modifiers: [Alt], key: "Tab"): Spawn("cosmic-launcher alt-tab"),
+        (modifiers: [Super], key: "Tab"): Spawn("cosmic-launcher alt-tab"),
 
         (modifiers: [], key: "Print"): Spawn("cosmic-screenshot"),
 
