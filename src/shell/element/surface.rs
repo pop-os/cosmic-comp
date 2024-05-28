@@ -415,9 +415,9 @@ impl CosmicSurface {
         }
         .map(|size| {
             if self.is_decorated(false) {
-                size + (0, SSD_HEIGHT).into()
-            } else {
                 size
+            } else {
+                size + (0, SSD_HEIGHT).into()
             }
         })
     }
@@ -434,9 +434,9 @@ impl CosmicSurface {
         }
         .map(|size| {
             if self.is_decorated(false) {
-                size + (0, SSD_HEIGHT).into()
-            } else {
                 size
+            } else {
+                size + (0, SSD_HEIGHT).into()
             }
         })
     }
