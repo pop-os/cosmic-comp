@@ -1171,6 +1171,26 @@ impl FloatingLayout {
             *element.last_geometry.lock().unwrap() = None;
             self.map_internal(element, None, None, None);
         }
+
+        // update maximized elements
+        let update = self
+            .space
+            .elements()
+            .find(|e| e.is_maximized(false))
+            .map(|mapped| {
+                let output = self.space.outputs().next().unwrap().clone();
+                let layers = layer_map_for_output(&output);
+                let geometry = layers.non_exclusive_zone().as_local();
+
+                mapped.set_bounds(geometry.size.as_logical());
+                mapped.set_geometry(geometry.to_global(&output));
+                mapped.configure();
+
+                (mapped.clone(), geometry.loc)
+            });
+        if let Some((mapped, position)) = update {
+            self.space.map_element(mapped, position.as_logical(), true);
+        }
     }
 
     pub fn animations_going(&self) -> bool {
