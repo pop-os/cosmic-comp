@@ -892,8 +892,10 @@ impl State {
                                                             &state.common.xdg_activation_state,
                                                         );
                                                         if let Some((target, focus)) = res {
-                                                            seat_clone.modifiers_shortcut_queue().clear();
-                                                            
+                                                            seat_clone
+                                                                .modifiers_shortcut_queue()
+                                                                .clear();
+
                                                             std::mem::drop(shell);
                                                             if target.is_touch_grab() {
                                                                 seat_clone
