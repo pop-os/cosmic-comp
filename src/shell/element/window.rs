@@ -11,7 +11,7 @@ use crate::{
     },
 };
 use calloop::LoopHandle;
-use cosmic::{iced::Command, widget::mouse_area, Apply};
+use cosmic::{config::Density, iced::Command, widget::mouse_area, Apply};
 use smithay::{
     backend::{
         input::KeyState,
@@ -551,6 +551,7 @@ impl Program for CosmicWindowInternal {
             .on_minimize(Message::Minimize)
             .on_maximize(Message::Maximize)
             .on_close(Message::Close)
+            .density(Density::Compact)
             .apply(mouse_area)
             .on_right_press(Message::Menu)
             .into()
