@@ -83,7 +83,7 @@ impl PartialEq<X11Surface> for CosmicSurface {
 #[derive(Default)]
 struct Minimized(AtomicBool);
 
-pub const SSD_HEIGHT: i32 = 48;
+pub const SSD_HEIGHT: i32 = 36;
 pub const RESIZE_BORDER: i32 = 10;
 
 impl CosmicSurface {
