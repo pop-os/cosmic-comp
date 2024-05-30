@@ -1173,10 +1173,10 @@ impl FloatingLayout {
         }
 
         // update maximized elements
-        let update = self
+        let update: Vec<_> = self
             .space
             .elements()
-            .find(|e| e.is_maximized(false))
+            .filter(|e| e.is_maximized(true))
             .map(|mapped| {
                 let output = self.space.outputs().next().unwrap().clone();
                 let layers = layer_map_for_output(&output);
@@ -1186,10 +1186,13 @@ impl FloatingLayout {
                 mapped.set_geometry(geometry.to_global(&output));
                 mapped.configure();
 
-                (mapped.clone(), geometry.loc)
-            });
-        if let Some((mapped, position)) = update {
-            self.space.map_element(mapped, position.as_logical(), true);
+                (mapped.clone(), geometry.loc, mapped.is_activated(true))
+            })
+            .collect();
+
+        for (mapped, position, is_activated) in update {
+            self.space
+                .map_element(mapped, position.as_logical(), is_activated);
         }
     }
 
