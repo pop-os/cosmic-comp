@@ -9,9 +9,12 @@ use smithay::{
     desktop::{layer_map_for_output, PopupUngrabStrategy},
     input::Seat,
     output::Output,
+    reexports::wayland_server::Resource,
     utils::{IsAlive, Serial, SERIAL_COUNTER},
     wayland::{
         seat::WaylandFocus,
+        selection::data_device::set_data_device_focus,
+        selection::primary_selection::set_primary_focus,
         shell::wlr_layer::{KeyboardInteractivity, Layer},
     },
 };
@@ -251,7 +254,7 @@ impl Common {
             .iter()
             .cloned()
             .collect::<Vec<_>>();
-        for seat in seats.into_iter() {
+        for seat in &seats {
             let mut shell = state.common.shell.write().unwrap();
             let output = seat.active_output();
             if !shell.outputs().any(|o| o == &output) {
@@ -330,6 +333,22 @@ impl Common {
                     keyboard.set_focus(state, target.clone(), SERIAL_COUNTER.next_serial());
                     ActiveFocus::set(&seat, target);
                 }
+            }
+        }
+
+        // Update clipboard and primary focus
+        //
+        // For now, needs to be here instead of in `focus_changed` to update focus
+        // when the active element of a stack changes.
+        for seat in &seats {
+            if let Some(keyboard) = seat.get_keyboard() {
+                let focus = keyboard.current_focus();
+                let client = focus
+                    .as_ref()
+                    .and_then(|t| t.wl_surface())
+                    .and_then(|s| state.common.display_handle.get_client(s.id()).ok());
+                set_data_device_focus(&state.common.display_handle, &seat, client.clone());
+                set_primary_focus(&state.common.display_handle, &seat, client);
             }
         }
 

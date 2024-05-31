@@ -8,11 +8,6 @@ use crate::{
 use smithay::{
     delegate_seat,
     input::{keyboard::LedState, pointer::CursorImageStatus, SeatHandler, SeatState},
-    reexports::wayland_server::Resource,
-    wayland::{
-        seat::WaylandFocus, selection::data_device::set_data_device_focus,
-        selection::primary_selection::set_primary_focus,
-    },
 };
 use std::cell::RefCell;
 
@@ -39,17 +34,9 @@ impl SeatHandler for State {
 
     fn focus_changed(
         &mut self,
-        seat: &smithay::input::Seat<Self>,
-        focused: Option<&Self::KeyboardFocus>,
+        _seat: &smithay::input::Seat<Self>,
+        _focused: Option<&Self::KeyboardFocus>,
     ) {
-        let dh = &self.common.display_handle;
-        if let Some(client) = focused
-            .and_then(|t| t.wl_surface())
-            .and_then(|s| dh.get_client(s.id()).ok())
-        {
-            set_data_device_focus(dh, seat, Some(client.clone()));
-            set_primary_focus(dh, seat, Some(client))
-        }
     }
 
     fn led_state_changed(&mut self, seat: &smithay::input::Seat<Self>, led_state: LedState) {
