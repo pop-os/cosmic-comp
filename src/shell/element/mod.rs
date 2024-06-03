@@ -952,7 +952,7 @@ impl WaylandFocus for CosmicMapped {
     fn same_client_as(&self, object_id: &ObjectId) -> bool {
         match &self.element {
             CosmicMappedInternal::Window(w) => w.surface().same_client_as(object_id),
-            CosmicMappedInternal::Stack(s) => s.surfaces().any(|w| w.same_client_as(object_id)),
+            CosmicMappedInternal::Stack(s) => s.active().same_client_as(object_id),
             _ => false,
         }
     }
