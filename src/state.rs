@@ -63,6 +63,7 @@ use smithay::{
     },
     utils::{Clock, IsAlive, Monotonic},
     wayland::{
+        alpha_modifier::AlphaModifierState,
         compositor::{CompositorClientState, CompositorState},
         dmabuf::{DmabufFeedback, DmabufGlobal, DmabufState},
         fractional_scale::{with_fractional_scale, FractionalScaleManagerState},
@@ -437,6 +438,7 @@ impl State {
         InputMethodManagerState::new::<Self, _>(&dh, client_is_privileged);
         TextInputManagerState::new::<Self>(&dh);
         VirtualKeyboardManagerState::new::<State, _>(&dh, client_is_privileged);
+        AlphaModifierState::new::<Self>(&dh);
 
         let idle_notifier_state = IdleNotifierState::<Self>::new(&dh, handle.clone());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(&dh);

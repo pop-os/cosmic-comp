@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+pub mod alpha_modifier;
 pub mod buffer;
 pub mod compositor;
 pub mod data_control;
