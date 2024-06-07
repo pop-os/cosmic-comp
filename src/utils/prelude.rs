@@ -4,13 +4,17 @@ use smithay::{
 };
 
 pub use super::geometry::*;
+use crate::config::{OutputConfig, OutputState};
 pub use crate::shell::{SeatExt, Shell, Workspace};
 pub use crate::state::{Common, State};
 pub use crate::wayland::handlers::xdg_shell::popup::update_reactive_popups;
 
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Mutex,
+use std::{
+    cell::{Ref, RefCell, RefMut},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
 };
 
 pub trait OutputExt {
@@ -19,6 +23,10 @@ pub trait OutputExt {
     fn set_adaptive_sync(&self, vrr: bool);
     fn mirroring(&self) -> Option<Output>;
     fn set_mirroring(&self, output: Option<Output>);
+
+    fn is_enabled(&self) -> bool;
+    fn config(&self) -> Ref<'_, OutputConfig>;
+    fn config_mut(&self) -> RefMut<'_, OutputConfig>;
 }
 
 struct Vrr(AtomicBool);
@@ -72,5 +80,26 @@ impl OutputExt for Output {
         user_data.insert_if_missing_threadsafe(|| Mirroring(Mutex::new(None)));
         *user_data.get::<Mirroring>().unwrap().0.lock().unwrap() =
             output.map(|output| output.downgrade());
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.user_data()
+            .get::<RefCell<OutputConfig>>()
+            .map(|conf| conf.borrow().enabled != OutputState::Disabled)
+            .unwrap_or(false)
+    }
+
+    fn config(&self) -> Ref<'_, OutputConfig> {
+        self.user_data()
+            .get::<RefCell<OutputConfig>>()
+            .unwrap()
+            .borrow()
+    }
+
+    fn config_mut(&self) -> RefMut<'_, OutputConfig> {
+        self.user_data()
+            .get::<RefCell<OutputConfig>>()
+            .unwrap()
+            .borrow_mut()
     }
 }

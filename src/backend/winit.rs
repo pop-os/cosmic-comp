@@ -107,15 +107,15 @@ impl WinitState {
         Ok(())
     }
 
-    pub fn apply_config_for_output(
+    pub fn apply_config_for_outputs(
         &mut self,
-        output: &Output,
         test_only: bool,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<Vec<Output>, anyhow::Error> {
         // TODO: if we ever have multiple winit outputs, don't ignore config.enabled
         // reset size
         let size = self.backend.window_size();
-        let mut config = output
+        let mut config = self
+            .output
             .user_data()
             .get::<RefCell<OutputConfig>>()
             .unwrap()
@@ -126,7 +126,7 @@ impl WinitState {
             }
             Err(anyhow::anyhow!("Cannot set window size"))
         } else {
-            Ok(())
+            Ok(vec![self.output.clone()])
         }
     }
 }
@@ -229,17 +229,15 @@ pub fn init_backend(
         .add_heads(std::iter::once(&output));
     {
         state.common.add_output(&output);
-        let mut shell = state.common.shell.write().unwrap();
         state.common.config.read_outputs(
             &mut state.common.output_configuration_state,
             &mut state.backend,
-            &mut *shell,
+            &state.common.shell,
             &state.common.event_loop_handle,
             &mut state.common.workspace_state.update(),
             &state.common.xdg_activation_state,
+            state.common.startup_done.clone(),
         );
-
-        std::mem::drop(shell);
         state.common.refresh();
     }
     state.launch_xwayland(None);

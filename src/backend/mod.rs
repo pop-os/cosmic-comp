@@ -65,6 +65,15 @@ pub fn init_backend_auto(
             .unwrap()
             .seats
             .add_seat(initial_seat);
+
+        {
+            {
+                let (lock, cvar) = &*state.common.startup_done;
+                let mut startup = lock.lock().unwrap();
+                *startup = true;
+                cvar.notify_all();
+            }
+        }
     }
     res
 }

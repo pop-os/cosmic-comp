@@ -90,50 +90,43 @@ impl State {
                     current_config.enabled = OutputState::Disabled;
                 }
             }
-
-            let mut shell = self.common.shell.write().unwrap();
-            let res = self.backend.apply_config_for_output(
-                output,
-                test_only,
-                &mut *shell,
-                &self.common.event_loop_handle,
-                &mut self.common.workspace_state.update(),
-                &self.common.xdg_activation_state,
-            );
-            if let Err(err) = res {
-                warn!(
-                    ?err,
-                    "Failed to apply config to {}. Resetting",
-                    output.name(),
-                );
-                for (output, backup) in backups {
-                    {
-                        let mut current_config = output
-                            .user_data()
-                            .get::<RefCell<OutputConfig>>()
-                            .unwrap()
-                            .borrow_mut();
-                        *current_config = backup;
-                    }
-                    if !test_only {
-                        if let Err(err) = self.backend.apply_config_for_output(
-                            output,
-                            false,
-                            &mut *shell,
-                            &self.common.event_loop_handle,
-                            &mut self.common.workspace_state.update(),
-                            &self.common.xdg_activation_state,
-                        ) {
-                            error!(?err, "Failed to reset output config for {}.", output.name(),);
-                        }
-                    }
-                }
-                return false;
-            }
-
-            std::mem::drop(shell);
-            self.common.refresh();
         }
+
+        let res = self.backend.apply_config_for_outputs(
+            test_only,
+            &self.common.event_loop_handle,
+            self.common.shell.clone(),
+            &mut self.common.workspace_state.update(),
+            &self.common.xdg_activation_state,
+            self.common.startup_done.clone(),
+        );
+        if let Err(err) = res {
+            warn!(?err, "Failed to apply config. Resetting");
+            for (output, backup) in backups {
+                {
+                    let mut current_config = output
+                        .user_data()
+                        .get::<RefCell<OutputConfig>>()
+                        .unwrap()
+                        .borrow_mut();
+                    *current_config = backup;
+                }
+            }
+            if !test_only {
+                if let Err(err) = self.backend.apply_config_for_outputs(
+                    false,
+                    &self.common.event_loop_handle,
+                    self.common.shell.clone(),
+                    &mut self.common.workspace_state.update(),
+                    &self.common.xdg_activation_state,
+                    self.common.startup_done.clone(),
+                ) {
+                    error!(?err, "Failed to reset output config.");
+                }
+            }
+            return false;
+        }
+        self.common.refresh();
 
         for output in conf
             .iter()
