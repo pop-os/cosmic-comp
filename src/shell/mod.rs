@@ -7,7 +7,10 @@ use std::{
 };
 use wayland_backend::server::ClientId;
 
-use cosmic_comp_config::{workspace::WorkspaceMode, TileBehavior};
+use cosmic_comp_config::{
+    workspace::{WorkspaceLayout, WorkspaceMode},
+    TileBehavior,
+};
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::{
     State as WState, TilingState,
 };
@@ -200,6 +203,7 @@ pub struct Shell {
     pub seats: Seats,
 
     theme: cosmic::Theme,
+    pub active_hint: bool,
     overview_mode: OverviewMode,
     swap_indicator: Option<SwapIndicator>,
     resize_mode: ResizeMode,
@@ -212,6 +216,9 @@ pub struct Shell {
         Output,
     )>,
     resize_indicator: Option<ResizeIndicator>,
+
+    #[cfg(feature = "debug")]
+    debug_active: bool,
 }
 
 #[derive(Debug)]
@@ -552,6 +559,7 @@ impl WorkspaceSet {
 pub struct Workspaces {
     pub sets: IndexMap<Output, WorkspaceSet>,
     backup_set: Option<WorkspaceSet>,
+    pub layout: WorkspaceLayout,
     mode: WorkspaceMode,
     autotile: bool,
     autotile_behavior: TileBehavior,
@@ -563,6 +571,7 @@ impl Workspaces {
         Workspaces {
             sets: IndexMap::new(),
             backup_set: None,
+            layout: config.cosmic_conf.workspaces.workspace_layout,
             mode: config.cosmic_conf.workspaces.workspace_mode,
             autotile: config.cosmic_conf.autotile,
             autotile_behavior: config.cosmic_conf.autotile_behavior,
@@ -736,6 +745,7 @@ impl Workspaces {
     ) {
         let old_mode = self.mode;
         self.mode = config.cosmic_conf.workspaces.workspace_mode;
+        self.layout = config.cosmic_conf.workspaces.workspace_layout;
 
         if self.sets.len() <= 1 {
             return;
@@ -1091,6 +1101,8 @@ impl Common {
 
     pub fn update_config(&mut self) {
         let mut shell = self.shell.write().unwrap();
+        shell.active_hint = self.config.cosmic_conf.active_hint;
+
         let mut workspace_state = self.workspace_state.update();
         shell.workspaces.update_config(
             &self.config,
@@ -1147,11 +1159,15 @@ impl Shell {
             session_lock: None,
 
             theme,
+            active_hint: config.cosmic_conf.active_hint,
             overview_mode: OverviewMode::None,
             swap_indicator: None,
             resize_mode: ResizeMode::None,
             resize_state: None,
             resize_indicator: None,
+
+            #[cfg(feature = "debug")]
+            debug_active: false,
         }
     }
 
@@ -1833,7 +1849,7 @@ impl Shell {
         ));
         #[cfg(feature = "debug")]
         {
-            mapped.set_debug(state.common.egui.active);
+            mapped.set_debug(self.debug_active);
         }
 
         let workspace_empty = workspace.mapped().next().is_none();
@@ -3160,6 +3176,10 @@ impl Shell {
         self.refresh(xdg_activation_state, workspace_state);
         self.workspaces
             .set_theme(theme.clone(), xdg_activation_state);
+    }
+
+    pub fn theme(&self) -> &cosmic::Theme {
+        &self.theme
     }
 
     pub fn take_presentation_feedback(
