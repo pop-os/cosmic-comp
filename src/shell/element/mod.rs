@@ -4,7 +4,7 @@ use crate::{
         GlMultiError, GlMultiFrame, GlMultiRenderer,
     },
     state::State,
-    utils::prelude::*,
+    utils::{iced::IcedElementInternal, prelude::*},
 };
 use calloop::LoopHandle;
 use id_tree::NodeId;
@@ -40,13 +40,15 @@ use smithay::{
     },
     xwayland::{xwm::X11Relatable, X11Surface},
 };
+use stack::CosmicStackInternal;
+use window::CosmicWindowInternal;
 
 use std::{
     borrow::Cow,
     collections::HashMap,
     fmt,
     hash::Hash,
-    sync::{atomic::AtomicBool, Arc, Mutex},
+    sync::{atomic::AtomicBool, Arc, Mutex, Weak},
 };
 
 pub mod surface;
@@ -123,6 +125,46 @@ impl fmt::Debug for CosmicMapped {
             .field("moved_since_mapped", &self.moved_since_mapped)
             .field("floating_tiled", &self.floating_tiled)
             .finish()
+    }
+}
+
+#[derive(Clone)]
+pub struct CosmicMappedKey(CosmicMappedKeyInner);
+#[derive(Clone)]
+enum CosmicMappedKeyInner {
+    Window(Weak<Mutex<IcedElementInternal<CosmicWindowInternal>>>),
+    Stack(Weak<Mutex<IcedElementInternal<CosmicStackInternal>>>),
+}
+
+impl Hash for CosmicMappedKey {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match &self.0 {
+            CosmicMappedKeyInner::Window(weak) => weak.as_ptr().hash(state),
+            CosmicMappedKeyInner::Stack(weak) => weak.as_ptr().hash(state),
+        }
+    }
+}
+
+impl IsAlive for CosmicMappedKey {
+    fn alive(&self) -> bool {
+        match &self.0 {
+            CosmicMappedKeyInner::Window(weak) => weak.strong_count() > 0,
+            CosmicMappedKeyInner::Stack(weak) => weak.strong_count() > 0,
+        }
+    }
+}
+
+impl PartialEq for CosmicMappedKey {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.0, &other.0) {
+            (CosmicMappedKeyInner::Window(weak1), CosmicMappedKeyInner::Window(weak2)) => {
+                Weak::ptr_eq(weak1, weak2)
+            }
+            (CosmicMappedKeyInner::Stack(weak1), CosmicMappedKeyInner::Stack(weak2)) => {
+                Weak::ptr_eq(weak1, weak2)
+            }
+            _ => false,
+        }
     }
 }
 
@@ -834,6 +876,18 @@ impl CosmicMapped {
             CosmicMappedInternal::Stack(s) => s.force_redraw(),
             CosmicMappedInternal::_GenericCatcher(_) => {}
         }
+    }
+
+    pub fn key(&self) -> CosmicMappedKey {
+        CosmicMappedKey(match &self.element {
+            CosmicMappedInternal::Stack(stack) => {
+                CosmicMappedKeyInner::Stack(Arc::downgrade(&stack.0 .0))
+            }
+            CosmicMappedInternal::Window(window) => {
+                CosmicMappedKeyInner::Window(Arc::downgrade(&window.0 .0))
+            }
+            _ => unreachable!(),
+        })
     }
 }
 

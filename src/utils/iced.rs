@@ -67,7 +67,7 @@ use smithay::{
     },
 };
 
-pub struct IcedElement<P: Program + Send + 'static>(Arc<Mutex<IcedElementInternal<P>>>);
+pub struct IcedElement<P: Program + Send + 'static>(pub(crate) Arc<Mutex<IcedElementInternal<P>>>);
 
 impl<P: Program + Send + 'static> fmt::Debug for IcedElement<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -75,8 +75,8 @@ impl<P: Program + Send + 'static> fmt::Debug for IcedElement<P> {
     }
 }
 
-// SAFETY: We cannot really be sure about `iced_native::program::State` sadly,
-// but the rest should be fine.
+// SAFETY: It is not, we need to make sure we never move this into another thread and drop it there,
+//  as on drop it could trigger RefCells in calloop.
 unsafe impl<P: Program + Send + 'static> Send for IcedElementInternal<P> {}
 
 impl<P: Program + Send + 'static> Clone for IcedElement<P> {
@@ -139,7 +139,7 @@ impl<P: Program> IcedProgram for ProgramWrapper<P> {
     }
 }
 
-struct IcedElementInternal<P: Program + Send + 'static> {
+pub(crate) struct IcedElementInternal<P: Program + Send + 'static> {
     // draw buffer
     outputs: HashSet<Output>,
     buffers: HashMap<OrderedFloat<f64>, (MemoryRenderBuffer, Option<(Vec<Primitive>, Color)>)>,

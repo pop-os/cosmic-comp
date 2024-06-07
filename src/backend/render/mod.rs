@@ -4,7 +4,7 @@ use std::{
     borrow::{Borrow, BorrowMut},
     cell::RefCell,
     collections::HashMap,
-    sync::Weak,
+    sync::{Arc, RwLock, Weak},
     time::Instant,
 };
 
@@ -14,6 +14,7 @@ use crate::{
     backend::render::element::DamageElement,
     config::Config,
     shell::{
+        element::CosmicMappedKey,
         focus::target::WindowGroup,
         grabs::{SeatMenuGrabState, SeatMoveGrabState},
         layout::tiling::ANIMATION_DURATION,
@@ -112,7 +113,7 @@ pub enum Usage {
 pub enum Key {
     Static(Id),
     Group(Weak<()>),
-    Window(Usage, CosmicMapped),
+    Window(Usage, CosmicMappedKey),
 }
 impl std::hash::Hash for Key {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
