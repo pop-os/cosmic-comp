@@ -59,7 +59,7 @@ impl State {
             Stdio::null(),
             |user_data| {
                 if let Some(node) = render_node {
-                    user_data.insert_if_missing(|| node);
+                    user_data.insert_if_missing_threadsafe(|| node);
                 }
             },
         ) {
