@@ -2,6 +2,7 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     ops::{Deref, DerefMut},
+    sync::Mutex,
 };
 
 use smithay::{
@@ -16,9 +17,9 @@ use crate::{
 };
 
 type ScreencopySessionsData = RefCell<ScreencopySessions>;
-type PendingScreencopyBuffers = RefCell<Vec<(Session, DropableFrame)>>;
+type PendingScreencopyBuffers = Mutex<Vec<(Session, DropableFrame)>>;
 
-pub type SessionData = RefCell<SessionUserData>;
+pub type SessionData = Mutex<SessionUserData>;
 
 pub struct SessionUserData {
     pub dt: OutputDamageTracker,
@@ -148,16 +149,17 @@ impl SessionHolder for Output {
 impl FrameHolder for Output {
     fn add_frame(&mut self, session: Session, frame: Frame) {
         self.user_data()
-            .insert_if_missing(PendingScreencopyBuffers::default);
+            .insert_if_missing_threadsafe(PendingScreencopyBuffers::default);
         self.user_data()
             .get::<PendingScreencopyBuffers>()
             .unwrap()
-            .borrow_mut()
+            .lock()
+            .unwrap()
             .push((session, DropableFrame(Some(frame))));
     }
     fn remove_frame(&mut self, frame: &Frame) {
         if let Some(pending) = self.user_data().get::<PendingScreencopyBuffers>() {
-            pending.borrow_mut().retain(|(_, f)| f != frame);
+            pending.lock().unwrap().retain(|(_, f)| f != frame);
         }
     }
     fn take_pending_frames(&self) -> Vec<(Session, Frame)> {
@@ -165,7 +167,8 @@ impl FrameHolder for Output {
             .get::<PendingScreencopyBuffers>()
             .map(|pending| {
                 pending
-                    .borrow_mut()
+                    .lock()
+                    .unwrap()
                     .split_off(0)
                     .into_iter()
                     .map(|(s, mut f)| (s, f.0.take().unwrap()))
