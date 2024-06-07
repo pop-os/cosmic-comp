@@ -13,7 +13,7 @@ impl DrmLeaseHandler for State {
     fn drm_lease_state(&mut self, node: DrmNode) -> &mut DrmLeaseState {
         self.backend
             .kms()
-            .devices
+            .drm_devices
             .get_mut(&node)
             .unwrap()
             .leasing_global
@@ -29,14 +29,14 @@ impl DrmLeaseHandler for State {
         let backend = self
             .backend
             .kms()
-            .devices
+            .drm_devices
             .get_mut(&node)
             .ok_or(LeaseRejected::default())?;
 
         let mut builder = DrmLeaseBuilder::new(&backend.drm);
         for conn in request.connectors {
             if let Some((_, crtc)) = backend
-                .non_desktop_connectors
+                .leased_connectors
                 .iter()
                 .find(|(handle, _)| *handle == conn)
             {
@@ -63,14 +63,14 @@ impl DrmLeaseHandler for State {
     }
 
     fn new_active_lease(&mut self, node: DrmNode, lease: DrmLease) {
-        if let Some(backend) = self.backend.kms().devices.get_mut(&node) {
+        if let Some(backend) = self.backend.kms().drm_devices.get_mut(&node) {
             backend.active_leases.push(lease);
         }
         // else the backend is gone, drop the lease
     }
 
     fn lease_destroyed(&mut self, node: DrmNode, lease: u32) {
-        if let Some(backend) = self.backend.kms().devices.get_mut(&node) {
+        if let Some(backend) = self.backend.kms().drm_devices.get_mut(&node) {
             backend.active_leases.retain(|l| l.id() != lease);
         }
     }

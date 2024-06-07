@@ -99,7 +99,7 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
         let res = match &mut state.backend {
             BackendData::Kms(kms) => {
                 let node = advertised_node_for_surface(&wl_surface, &state.common.display_handle)
-                    .unwrap_or(kms.primary_node);
+                    .unwrap_or(kms.primary_node.expect("No Software Rendering"));
                 kms.api
                     .single_renderer(&node)
                     .with_context(|| "Failed to get renderer for screenshot")

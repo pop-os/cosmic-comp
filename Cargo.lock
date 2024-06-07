@@ -887,6 +887,7 @@ dependencies = [
  "sendfd",
  "serde",
  "serde_json",
+ "smallvec",
  "smithay",
  "smithay-egui",
  "thiserror",

@@ -13,11 +13,7 @@ use state::State;
 use std::{env, ffi::OsString, os::unix::process::CommandExt, process, sync::Arc};
 use tracing::{error, info, warn};
 
-use crate::{
-    shell::SeatExt,
-    state::{BackendData, ClientState},
-    wayland::handlers::compositor::client_compositor_state,
-};
+use crate::wayland::handlers::compositor::client_compositor_state;
 
 pub mod backend;
 pub mod config;
@@ -91,6 +87,10 @@ fn main() -> Result<()> {
     logger::init_logger()?;
     info!("Cosmic starting up!");
 
+    #[cfg(feature = "profile-with-tracy")]
+    profiling::tracy_client::Client::start();
+    profiling::register_thread!("Main Thread");
+
     utils::rlimit::increase_nofile_limit();
 
     // init event loop
@@ -110,11 +110,6 @@ fn main() -> Result<()> {
     if let Err(err) = theme::watch_theme(event_loop.handle()) {
         warn!(?err, "Failed to watch theme");
     }
-
-    #[cfg(feature = "profile-with-tracy")]
-    profiling::tracy_client::Client::start();
-
-    profiling::register_thread!("Main Thread");
 
     // run the event loop
     event_loop.run(None, &mut state, |state| {
@@ -210,29 +205,12 @@ fn init_wayland_display(
     event_loop
         .handle()
         .insert_source(source, |client_stream, _, state| {
-            let node = match &state.backend {
-                BackendData::Kms(kms_state) if kms_state.auto_assign => kms_state
-                    .target_node_for_output(
-                        &state
-                            .common
-                            .shell
-                            .read()
-                            .unwrap()
-                            .seats
-                            .last_active()
-                            .active_output(),
-                    ),
-                _ => None,
-            };
-
             let client_state = state.new_client_state();
-            if let Err(err) = state.common.display_handle.insert_client(
-                client_stream,
-                Arc::new(ClientState {
-                    advertised_drm_node: node.or(client_state.advertised_drm_node),
-                    ..client_state
-                }),
-            ) {
+            if let Err(err) = state
+                .common
+                .display_handle
+                .insert_client(client_stream, Arc::new(client_state))
+            {
                 warn!(?err, "Error adding wayland client")
             };
         })

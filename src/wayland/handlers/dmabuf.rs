@@ -35,12 +35,13 @@ impl DmabufHandler for State {
 
                 if let BackendData::Kms(kms_state) = &mut self.backend {
                     if let Some(device) = kms_state
-                        .devices
+                        .drm_devices
                         .values_mut()
                         .find(|dev| dev.render_node == node)
                     {
                         device.active_buffers.insert(buffer.downgrade());
                     }
+                    kms_state.refresh_used_devices();
                 }
             }
             Ok(None) => {

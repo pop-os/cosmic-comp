@@ -342,11 +342,7 @@ impl BackendData {
             // Winit has a very strict render-loop and skipping frames breaks atleast the wayland winit-backend.
             // Swapping with damage (which should be empty on these frames) is likely good enough anyway.
             BackendData::X11(ref mut state) => state.schedule_render(output),
-            BackendData::Kms(ref mut state) => {
-                if let Err(err) = state.schedule_render(loop_handle, output, None) {
-                    error!(?err, "Failed to schedule event, are we shutting down?");
-                }
-            }
+            BackendData::Kms(ref mut state) => state.schedule_render(output),
             _ => unreachable!("No backend was initialized"),
         }
     }
@@ -554,7 +550,7 @@ impl State {
             compositor_client_state: CompositorClientState::default(),
             workspace_client_state: WorkspaceClientState::default(),
             advertised_drm_node: match &self.backend {
-                BackendData::Kms(kms_state) => Some(kms_state.primary_node),
+                BackendData::Kms(kms_state) => kms_state.primary_node,
                 _ => None,
             },
             privileged: !enable_wayland_security(),
