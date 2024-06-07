@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, cell::RefCell, collections::HashMap};
+use std::{borrow::Borrow, collections::HashMap, sync::Mutex};
 
 use smithay::{
     backend::{
@@ -92,8 +92,8 @@ impl ScreencopyHandler for State {
                     return;
                 };
 
-                session.user_data().insert_if_missing(|| {
-                    RefCell::new(SessionUserData::new(OutputDamageTracker::from_output(
+                session.user_data().insert_if_missing_threadsafe(|| {
+                    Mutex::new(SessionUserData::new(OutputDamageTracker::from_output(
                         &output,
                     )))
                 });
@@ -107,8 +107,8 @@ impl ScreencopyHandler for State {
                     return;
                 };
 
-                session.user_data().insert_if_missing(|| {
-                    RefCell::new(SessionUserData::new(OutputDamageTracker::from_output(
+                session.user_data().insert_if_missing_threadsafe(|| {
+                    Mutex::new(SessionUserData::new(OutputDamageTracker::from_output(
                         workspace.output(),
                     )))
                 });
@@ -116,8 +116,8 @@ impl ScreencopyHandler for State {
             }
             ImageSourceData::Toplevel(mut toplevel) => {
                 let size = toplevel.geometry().size.to_physical(1);
-                session.user_data().insert_if_missing(|| {
-                    RefCell::new(SessionUserData::new(OutputDamageTracker::new(
+                session.user_data().insert_if_missing_threadsafe(|| {
+                    Mutex::new(SessionUserData::new(OutputDamageTracker::new(
                         size,
                         1.0,
                         Transform::Normal,
@@ -153,8 +153,8 @@ impl ScreencopyHandler for State {
             (pointer_loc, pointer_size, hotspot)
         };
 
-        session.user_data().insert_if_missing(|| {
-            RefCell::new(SessionUserData::new(OutputDamageTracker::new(
+        session.user_data().insert_if_missing_threadsafe(|| {
+            Mutex::new(SessionUserData::new(OutputDamageTracker::new(
                 pointer_size.to_logical(1, Transform::Normal).to_physical(1),
                 1.0,
                 Transform::Normal,

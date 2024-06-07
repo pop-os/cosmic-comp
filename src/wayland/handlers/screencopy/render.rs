@@ -152,7 +152,7 @@ where
     #[cfg(feature = "debug")]
     puffin::profile_function!();
 
-    let mut session_damage_tracking = session.borrow_mut();
+    let mut session_damage_tracking = session.lock().unwrap();
 
     let buffer = frame.buffer();
     let age = session_damage_tracking.age_for_buffer(&buffer);
@@ -212,7 +212,7 @@ pub fn render_workspace_to_buffer(
         };
         session.update_constraints(constraints);
         if let Some(data) = session.user_data().get::<SessionData>() {
-            *data.borrow_mut() = SessionUserData::new(OutputDamageTracker::from_output(&output));
+            *data.lock().unwrap() = SessionUserData::new(OutputDamageTracker::from_output(&output));
         }
         frame.fail(FailureReason::BufferConstraints);
         return;
@@ -478,7 +478,7 @@ pub fn render_window_to_buffer(
         session.update_constraints(constraints);
         if let Some(data) = session.user_data().get::<SessionData>() {
             let size = geometry.size.to_physical(1);
-            *data.borrow_mut() =
+            *data.lock().unwrap() =
                 SessionUserData::new(OutputDamageTracker::new(size, 1.0, Transform::Normal));
         }
         frame.fail(FailureReason::BufferConstraints);
@@ -736,7 +736,7 @@ pub fn render_cursor_to_buffer(
         };
         session.update_constraints(constraints);
         if let Some(data) = session.user_data().get::<SessionData>() {
-            *data.borrow_mut() = SessionUserData::new(OutputDamageTracker::new(
+            *data.lock().unwrap() = SessionUserData::new(OutputDamageTracker::new(
                 cursor_size.to_logical(1, Transform::Normal).to_physical(1),
                 1.0,
                 Transform::Normal,
