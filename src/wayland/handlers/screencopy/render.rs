@@ -149,9 +149,6 @@ where
         Vec<Rectangle<i32, BufferCoords>>,
     ) -> Result<RenderOutputResult<'d>, DTError<R>>,
 {
-    #[cfg(feature = "debug")]
-    puffin::profile_function!();
-
     let mut session_damage_tracking = session.lock().unwrap();
 
     let buffer = frame.buffer();
@@ -186,9 +183,6 @@ pub fn render_workspace_to_buffer(
     frame: Frame,
     handle: WorkspaceHandle,
 ) {
-    #[cfg(feature = "debug")]
-    puffin::profile_function!();
-
     let shell = state.common.shell.read().unwrap();
     let Some(workspace) = shell.workspaces.space_for_handle(&handle) else {
         session.stop();
@@ -455,9 +449,6 @@ pub fn render_window_to_buffer(
     frame: Frame,
     toplevel: &CosmicSurface,
 ) {
-    #[cfg(feature = "debug")]
-    puffin::profile_function!();
-
     if !toplevel.alive() {
         session.stop();
         return;

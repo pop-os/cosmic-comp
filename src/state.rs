@@ -186,9 +186,6 @@ pub struct Common {
     pub kiosk_child: Option<Child>,
     pub theme: cosmic::Theme,
 
-    #[cfg(feature = "debug")]
-    pub egui: Egui,
-
     // wayland state
     pub compositor_state: CompositorState,
     pub data_device_state: DataDeviceState,
@@ -515,15 +512,6 @@ impl State {
 
                 kiosk_child: None,
                 theme: cosmic::theme::system_preference(),
-
-                #[cfg(feature = "debug")]
-                egui: Egui {
-                    active: false,
-                    state: smithay_egui::EguiState::new(Rectangle::from_loc_and_size(
-                        (0, 0),
-                        (800, 600),
-                    )),
-                },
 
                 compositor_state,
                 data_device_state,
@@ -969,13 +957,6 @@ impl Common {
             layer_surface.send_frame(output, time, throttle, surface_primary_scanout_output);
         }
     }
-}
-
-#[cfg(feature = "debug")]
-#[derive(Debug)]
-pub struct Egui {
-    pub active: bool,
-    pub state: smithay_egui::EguiState,
 }
 
 #[derive(Debug)]
