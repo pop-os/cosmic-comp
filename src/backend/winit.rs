@@ -31,11 +31,8 @@ use smithay::{
     utils::Transform,
     wayland::dmabuf::DmabufFeedbackBuilder,
 };
-use std::{cell::RefCell, time::Duration};
+use std::{borrow::BorrowMut, cell::RefCell, time::Duration};
 use tracing::{error, info, warn};
-
-#[cfg(feature = "debug")]
-use crate::state::Fps;
 
 use super::render::{init_shaders, CursorMode};
 
@@ -45,8 +42,6 @@ pub struct WinitState {
     pub backend: WinitGraphicsBackend<GlowRenderer>,
     output: Output,
     damage_tracker: OutputDamageTracker,
-    #[cfg(feature = "debug")]
-    fps: Fps,
 }
 
 impl WinitState {
@@ -68,10 +63,6 @@ impl WinitState {
             state.clock.now(),
             &self.output,
             CursorMode::NotDefault,
-            #[cfg(not(feature = "debug"))]
-            None,
-            #[cfg(feature = "debug")]
-            Some(&mut self.fps),
         ) {
             Ok(RenderOutputResult { damage, states, .. }) => {
                 self.backend
@@ -80,8 +71,6 @@ impl WinitState {
                 self.backend
                     .submit(damage.map(|x| x.as_slice()))
                     .with_context(|| "Failed to submit buffer for display")?;
-                #[cfg(feature = "debug")]
-                self.fps.displayed();
                 state.send_frames(&self.output);
                 state.update_primary_output(&self.output, &states);
                 state.send_dmabuf_feedback(&self.output, &states, |_| None);
@@ -215,15 +204,10 @@ pub fn init_backend(
         .map_err(|_| anyhow::anyhow!("Failed to init eventloop timer for winit"))?;
     event_ping.ping();
 
-    #[cfg(feature = "debug")]
-    let fps = Fps::new(backend.renderer());
-
     state.backend = BackendData::Winit(WinitState {
         backend,
         output: output.clone(),
         damage_tracker: OutputDamageTracker::from_output(&output),
-        #[cfg(feature = "debug")]
-        fps,
     });
 
     state

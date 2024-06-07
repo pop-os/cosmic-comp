@@ -284,7 +284,6 @@ pub fn render_workspace_to_buffer(
                 None,
                 handle,
                 cursor_mode,
-                None,
                 true,
             )
             .map(|res| res.0)
@@ -310,7 +309,6 @@ pub fn render_workspace_to_buffer(
                 None,
                 handle,
                 cursor_mode,
-                None,
                 true,
             )
             .map(|res| res.0)

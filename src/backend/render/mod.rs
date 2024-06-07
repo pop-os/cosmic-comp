@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
-    borrow::{Borrow, BorrowMut},
+    borrow::Borrow,
     cell::RefCell,
     collections::HashMap,
     sync::{Arc, RwLock, Weak},
@@ -66,11 +66,16 @@ use smithay::{
     },
 };
 
+#[cfg(feature = "debug")]
+use smithay_egui::EguiState;
+
 pub mod animations;
 
 pub mod cursor;
 pub mod element;
 use self::element::{AsGlowRenderer, CosmicElement};
+
+use super::kms::Timings;
 
 pub type GlMultiRenderer<'a> =
     MultiRenderer<'a, 'a, GbmGlowBackend<DrmDeviceFd>, GbmGlowBackend<DrmDeviceFd>>;
@@ -456,6 +461,9 @@ where
     elements
 }
 
+#[cfg(not(feature = "debug"))]
+pub type EguiState = ();
+
 #[profiling::function]
 pub fn workspace_elements<R>(
     _gpu: Option<&DrmNode>,
@@ -466,8 +474,8 @@ pub fn workspace_elements<R>(
     previous: Option<(WorkspaceHandle, usize, WorkspaceDelta)>,
     current: (WorkspaceHandle, usize),
     cursor_mode: CursorMode,
-    _fps: &mut Option<&mut Fps>,
     exclude_workspace_overview: bool,
+    _fps: Option<(&EguiState, &Timings)>,
 ) -> Result<Vec<CosmicElement<R>>, RenderError<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
@@ -500,13 +508,15 @@ where
         let output_geo = output.geometry();
         let scale = output.current_scale().fractional_scale();
 
-        if let Some(fps) = _fps.as_mut() {
+        if let Some((state, timings)) = _fps.as_mut() {
+            let debug_active = shell.read().unwrap().debug_active;
             let fps_overlay = fps_ui(
                 _gpu,
-                shell,
-                theme,
+                debug_active,
+                seats.iter(),
                 renderer.glow_renderer_mut(),
-                *fps,
+                state,
+                timings,
                 Rectangle::from_loc_and_size(
                     (0, 0),
                     (output_geo.size.w.min(400), output_geo.size.h.min(800)),
@@ -954,7 +964,6 @@ pub fn render_output<'d, R, Target, OffTarget>(
     now: Time<Monotonic>,
     output: &Output,
     cursor_mode: CursorMode,
-    fps: Option<&mut Fps>,
 ) -> Result<RenderOutputResult<'d>, RenderError<R>>
 where
     R: Renderer
@@ -995,7 +1004,6 @@ where
         previous_workspace,
         workspace,
         cursor_mode,
-        fps,
         false,
     );
 
@@ -1108,7 +1116,6 @@ pub fn render_workspace<'d, R, Target, OffTarget>(
     previous: Option<(WorkspaceHandle, usize, WorkspaceDelta)>,
     current: (WorkspaceHandle, usize),
     cursor_mode: CursorMode,
-    mut fps: Option<&mut Fps>,
     exclude_workspace_overview: bool,
 ) -> Result<(RenderOutputResult<'d>, Vec<CosmicElement<R>>), RenderError<R>>
 where
@@ -1126,10 +1133,6 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
-    if let Some(ref mut fps) = fps {
-        fps.start();
-    }
-
     let mut elements: Vec<CosmicElement<R>> = workspace_elements(
         gpu,
         renderer,
@@ -1139,8 +1142,8 @@ where
         previous,
         current,
         cursor_mode,
-        &mut fps,
         exclude_workspace_overview,
+        None,
     )?;
 
     if let Some(additional_damage) = additional_damage {
@@ -1154,10 +1157,6 @@ where
         );
     }
 
-    if let Some(fps) = fps.as_mut() {
-        fps.elements();
-    }
-
     renderer.bind(target).map_err(RenderError::Rendering)?;
     let res = damage_tracker.render_output(
         renderer,
@@ -1165,10 +1164,6 @@ where
         &elements,
         CLEAR_COLOR, // TODO use a theme neutral color
     );
-
-    if let Some(fps) = fps.as_mut() {
-        fps.render();
-    }
 
     res.map(|res| (res, elements))
 }

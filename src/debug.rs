@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use crate::{
+    backend::kms::Timings,
     shell::focus::target::{KeyboardFocusTarget, PointerFocusTarget},
     state::{Common, Fps},
 };
@@ -24,46 +25,48 @@ use smithay::{
 
 pub const ELEMENTS_COLOR: Color32 = Color32::from_rgb(70, 198, 115);
 pub const RENDER_COLOR: Color32 = Color32::from_rgb(29, 114, 58);
-pub const SCREENCOPY_COLOR: Color32 = Color32::from_rgb(253, 178, 39);
+pub const SUBMITTED_COLOR: Color32 = Color32::from_rgb(253, 178, 39);
 pub const DISPLAY_COLOR: Color32 = Color32::from_rgb(41, 184, 209);
 
-pub fn fps_ui(
+pub fn fps_ui<'a>(
     gpu: Option<&DrmNode>,
-    state: &Common,
+    debug_active: bool,
+    seats: impl Iterator<Item = &'a Seat<State>>,
     renderer: &mut GlowRenderer,
-    fps: &mut Fps,
+    state: &EguiState,
+    timings: &Timings,
     area: Rectangle<i32, Logical>,
     scale: f64,
 ) -> Result<TextureRenderElement<GlesTexture>, GlesError> {
     use egui_plot::{Bar, BarChart, Legend, Plot};
 
     let (max, min, avg, avg_fps) = (
-        fps.max_frametime().as_secs_f64(),
-        fps.min_frametime().as_secs_f64(),
-        fps.avg_frametime().as_secs_f64(),
-        fps.avg_fps(),
+        timings.max_frametime().as_secs_f64(),
+        timings.min_frametime().as_secs_f64(),
+        timings.avg_frametime().as_secs_f64(),
+        timings.avg_fps(),
     );
     let (max_disp, min_disp) = (
-        fps.max_time_to_display().as_secs_f64(),
-        fps.min_time_to_display().as_secs_f64(),
+        timings.max_time_to_display().as_secs_f64(),
+        timings.min_time_to_display().as_secs_f64(),
     );
 
     let amount = avg_fps.round() as usize * 2;
     let ((bars_elements, bars_render), (bars_screencopy, bars_displayed)): (
         (Vec<Bar>, Vec<Bar>),
         (Vec<Bar>, Vec<Bar>),
-    ) = fps
-        .frames
+    ) = timings
+        .previous_frames
         .iter()
         .rev()
         .take(amount)
         .rev()
         .enumerate()
         .map(|(i, frame)| {
-            let elements_val = frame.duration_elements.as_secs_f64();
-            let render_val = frame.duration_render.as_secs_f64();
-            let screencopy_val = frame
-                .duration_screencopy
+            let elements_val = frame.render_duration_elements.as_secs_f64();
+            let render_val = frame.render_duration_draw.as_secs_f64();
+            let submitted_val = frame
+                .presentation_submitted
                 .as_ref()
                 .map(|val| val.as_secs_f64())
                 .unwrap_or(0.0);
@@ -93,7 +96,7 @@ pub fn fps_ui(
     let vendors = HashMap::from([
         (
             "0x10de",
-            fps.state
+            state
                 .with_image(renderer, "nvidia", |image, ctx| {
                     (image.texture_id(ctx), image.size_vec2())
                 })
@@ -101,7 +104,7 @@ pub fn fps_ui(
         ),
         (
             "0x1002",
-            fps.state
+            state
                 .with_image(renderer, "amd", |image, ctx| {
                     (image.texture_id(ctx), image.size_vec2())
                 })
@@ -109,7 +112,7 @@ pub fn fps_ui(
         ),
         (
             "0x8086",
-            fps.state
+            state
                 .with_image(renderer, "intel", |image, ctx| {
                     (image.texture_id(ctx), image.size_vec2())
                 })
@@ -117,7 +120,7 @@ pub fn fps_ui(
         ),
     ]);
 
-    fps.state.render(
+    state.render(
         |ctx| {
             egui::Area::new("main")
                 .anchor(egui::Align2::LEFT_TOP, (10.0, 10.0))
@@ -130,7 +133,7 @@ pub fn fps_ui(
                         ui.label(format!(": {hash}"));
                     }
 
-                    if !state.egui.active {
+                    if !debug_active {
                         ui.label("Press Super+Escape for debug overlay");
                     } else {
                         ui.set_max_width(300.0);
@@ -187,7 +190,7 @@ pub fn fps_ui(
 
                         ui.separator();
                         ui.label(egui::RichText::new("Input States").heading());
-                        for seat in state.seats() {
+                        for seat in seats {
                             ui.label(egui::RichText::new(format!("\t{}", seat.name())).strong());
                             if let Some(ptr) = seat.get_pointer() {
                                 egui::Frame::none()

@@ -38,11 +38,8 @@ use smithay::{
     utils::{DeviceFd, Transform},
     wayland::dmabuf::DmabufFeedbackBuilder,
 };
-use std::{cell::RefCell, os::unix::io::OwnedFd, time::Duration};
+use std::{borrow::BorrowMut, cell::RefCell, os::unix::io::OwnedFd, time::Duration};
 use tracing::{debug, error, info, warn};
-
-#[cfg(feature = "debug")]
-use crate::state::Fps;
 
 use super::render::init_shaders;
 
@@ -149,8 +146,6 @@ impl X11State {
             render: ping.clone(),
             dirty: false,
             pending: true,
-            #[cfg(feature = "debug")]
-            fps: Fps::new(&mut self.renderer),
         });
 
         // schedule first render
@@ -203,8 +198,6 @@ pub struct Surface {
     render: ping::Ping,
     dirty: bool,
     pending: bool,
-    #[cfg(feature = "debug")]
-    fps: Fps,
 }
 
 impl Surface {
@@ -223,17 +216,11 @@ impl Surface {
             state.clock.now(),
             &self.output,
             render::CursorMode::NotDefault,
-            #[cfg(not(feature = "debug"))]
-            None,
-            #[cfg(feature = "debug")]
-            Some(&mut self.fps),
         ) {
             Ok(RenderOutputResult { damage, states, .. }) => {
                 self.surface
                     .submit()
                     .with_context(|| "Failed to submit buffer for display")?;
-                #[cfg(feature = "debug")]
-                self.fps.displayed();
                 state.send_frames(&self.output);
                 state.update_primary_output(&self.output, &states);
                 state.send_dmabuf_feedback(&self.output, &states, |_| None);
