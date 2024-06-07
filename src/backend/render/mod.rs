@@ -1142,11 +1142,9 @@ where
     CosmicElement<R>: RenderElement<R>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
-        if let Some(rd) = fps.rd.as_mut() {
-            rd.start_frame_capture(
-                std::ptr::null(),
-            );
-        }
+{
+    if let Some(ref mut fps) = fps {
+        fps.start();
     }
 
     let mut elements: Vec<CosmicElement<R>> = workspace_elements(
@@ -1187,16 +1185,6 @@ where
 
     if let Some(fps) = fps.as_mut() {
         fps.render();
-    }
-
-    #[cfg(feature = "debug")]
-    if let Some(ref mut fps) = fps {
-        if let Some(rd) = fps.rd.as_mut() {
-            rd.end_frame_capture(
-                renderer.glow_renderer().egl_context().get_context_handle(),
-                std::ptr::null(),
-            );
-        }
     }
 
     res.map(|res| (res, elements))

@@ -153,10 +153,6 @@ impl State {
                         &TabletDescriptor::from(&device),
                     );
                 }
-                #[cfg(feature = "debug")]
-                {
-                    self.common.egui.state.handle_device_added(&device);
-                }
             }
             InputEvent::DeviceRemoved { device } => {
                 for seat in &mut self.common.shell.read().unwrap().seats.iter() {
@@ -172,10 +168,6 @@ impl State {
                         }
                         break;
                     }
-                }
-                #[cfg(feature = "debug")]
-                {
-                    self.common.egui.state.handle_device_removed(&device);
                 }
             }
             InputEvent::Keyboard { event, .. } => {
@@ -416,25 +408,6 @@ impl State {
                                                 loop_handle.remove(token);
                                             }
                                             return FilterResult::Intercept(None);
-                                        }
-                                    }
-
-                                    // Pass keys to debug interface, if it has focus
-                                    #[cfg(feature = "debug")]
-                                    {
-                                        if shell.seats.iter().position(|x| x == &seat).unwrap() == 0
-                                            && data.common.egui.active
-                                        {
-                                            if data.common.egui.state.wants_keyboard() {
-                                                data.common.egui.state.handle_keyboard(
-                                                    &handle,
-                                                    state == KeyState::Pressed,
-                                                    modifiers.clone(),
-                                                );
-                                                seat.supressed_keys()
-                                                    .add(&handle, None);
-                                                return FilterResult::Intercept(None);
-                                            }
                                         }
                                     }
 
@@ -695,13 +668,6 @@ impl State {
                             session.set_cursor_pos(Some(geometry.loc));
                         }
                     }
-                    #[cfg(feature = "debug")]
-                    if shell.seats().position(|x| x == &seat).unwrap() == 0 {
-                        if let Some(output) = shell.outputs().next() {
-                            let location = position.to_local(&output).to_i32_round().as_logical();
-                            self.common.egui.state.handle_pointer_motion(location);
-                        }
-                    }
                 }
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
@@ -768,13 +734,6 @@ impl State {
                             session.set_cursor_pos(Some(geometry.loc));
                         }
                     }
-                    #[cfg(feature = "debug")]
-                    if shell.seats.iter().position(|x| x == &seat).unwrap() == 0 {
-                        if let Some(output) = shell.outputs().next() {
-                            let location = position.to_local(&output).to_i32_round().as_logical();
-                            self.common.egui.state.handle_pointer_motion(location);
-                        }
-                    }
                 }
             }
             InputEvent::PointerButton { event, .. } => {
@@ -783,20 +742,6 @@ impl State {
                 let mut shell = self.common.shell.write().unwrap();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    #[cfg(feature = "debug")]
-                    if shell.seats.iter().position(|x| x == &seat).unwrap() == 0
-                        && self.common.egui.active
-                    {
-                        if self.common.egui.state.wants_pointer() {
-                            if let Some(button) = event.button() {
-                                self.common.egui.state.handle_pointer_button(
-                                    button,
-                                    event.state() == ButtonState::Pressed,
-                                );
-                            }
-                            return;
-                        }
-                    }
 
                     let serial = SERIAL_COUNTER.next_serial();
                     let button = event.button_code();
@@ -999,39 +944,6 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    #[cfg(feature = "debug")]
-                    if self
-                        .common
-                        .shell
-                        .read()
-                        .unwrap()
-                        .seats
-                        .iter()
-                        .position(|x| x == &seat)
-                        .unwrap()
-                        == 0
-                        && self.common.egui.active
-                    {
-                        if self.common.egui.state.wants_pointer() {
-                            self.common.egui.state.handle_pointer_axis(
-                                event
-                                    .amount_v120(Axis::Horizontal)
-                                    .or_else(|| {
-                                        event.amount(Axis::Horizontal).map(|x| x * 3.0 * 120.0)
-                                    })
-                                    .unwrap_or(0.0)
-                                    / 120.0,
-                                event
-                                    .amount_v120(Axis::Vertical)
-                                    .or_else(|| {
-                                        event.amount(Axis::Vertical).map(|x| x * 3.0 * 120.0)
-                                    })
-                                    .unwrap_or(0.0)
-                                    / 120.0,
-                            );
-                            return;
-                        }
-                    }
 
                     let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
                     if let Some(horizontal_amount) = event.amount(Axis::Horizontal) {
