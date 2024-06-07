@@ -111,7 +111,7 @@ impl MoveGrabState {
             Some(
                 CosmicMappedRenderElement::from(IndicatorShader::focus_element(
                     renderer,
-                    Key::Window(Usage::MoveGrabIndicator, self.window.clone()),
+                    Key::Window(Usage::MoveGrabIndicator, self.window.key()),
                     Rectangle::from_loc_and_size(
                         render_location,
                         self.window
@@ -151,7 +151,7 @@ impl MoveGrabState {
                 vec![
                     CosmicMappedRenderElement::from(IndicatorShader::element(
                         renderer,
-                        Key::Window(Usage::SnappingIndicator, self.window.clone()),
+                        Key::Window(Usage::SnappingIndicator, self.window.key()),
                         overlay_geometry,
                         3,
                         theme.radius_s()[0] as u8, // TODO: Fix once shaders support 4 corner radii customization
@@ -166,7 +166,7 @@ impl MoveGrabState {
                     .into(),
                     CosmicMappedRenderElement::from(BackdropShader::element(
                         renderer,
-                        Key::Window(Usage::SnappingIndicator, self.window.clone()),
+                        Key::Window(Usage::SnappingIndicator, self.window.key()),
                         t.overlay_geometry(non_exclusive_geometry, gaps),
                         theme.radius_s()[0], // TODO: Fix once shaders support 4 corner radii customization
                         0.4,

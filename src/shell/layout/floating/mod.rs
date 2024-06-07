@@ -1375,7 +1375,7 @@ impl FloatingLayout {
                 if indicator_thickness > 0 {
                     let element = IndicatorShader::focus_element(
                         renderer,
-                        Key::Window(Usage::FocusIndicator, elem.clone()),
+                        Key::Window(Usage::FocusIndicator, elem.key()),
                         geometry,
                         indicator_thickness,
                         output_scale,

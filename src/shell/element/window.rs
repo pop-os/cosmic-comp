@@ -62,7 +62,7 @@ use super::{
 };
 
 #[derive(Clone, PartialEq, Eq, Hash)]
-pub struct CosmicWindow(IcedElement<CosmicWindowInternal>);
+pub struct CosmicWindow(pub(super) IcedElement<CosmicWindowInternal>);
 
 impl fmt::Debug for CosmicWindow {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

@@ -4549,7 +4549,7 @@ where
                             elements.push(
                                 IndicatorShader::element(
                                     *renderer,
-                                    Key::Window(Usage::PotentialGroupIndicator, mapped.clone()),
+                                    Key::Window(Usage::PotentialGroupIndicator, mapped.key()),
                                     geo,
                                     4,
                                     8,
@@ -4589,7 +4589,7 @@ where
                             elements.push(
                                 BackdropShader::element(
                                     *renderer,
-                                    Key::Window(Usage::OverviewBackdrop, mapped.clone()),
+                                    Key::Window(Usage::OverviewBackdrop, mapped.key()),
                                     geo,
                                     8.,
                                     alpha
@@ -4800,7 +4800,7 @@ where
                     window_elements.push(CosmicMappedRenderElement::FocusIndicator(
                         IndicatorShader::focus_element(
                             renderer,
-                            Key::Window(Usage::FocusIndicator, mapped.clone().into()),
+                            Key::Window(Usage::FocusIndicator, mapped.clone().key()),
                             geo,
                             indicator_thickness,
                             output_scale,
@@ -5133,7 +5133,7 @@ where
                             renderer,
                             match data {
                                 Data::Mapped { mapped, .. } => {
-                                    Key::Window(Usage::FocusIndicator, mapped.clone().into())
+                                    Key::Window(Usage::FocusIndicator, mapped.clone().key())
                                 }
                                 Data::Group { alive, .. } => Key::Group(Arc::downgrade(alive)),
                                 _ => unreachable!(),
@@ -5250,7 +5250,7 @@ where
                                     .stack_ref()
                                     .map(|stack| &stack.active() == stack_window)
                                     .unwrap_or(false),
-                                _ => unreachable!(),
+                                _ => unreachable!(), // TODO: We could swap with a group
                             })
                             .unwrap_or(false)
                     })
@@ -5262,7 +5262,7 @@ where
                         0,
                         CosmicMappedRenderElement::Overlay(BackdropShader::element(
                             renderer,
-                            Key::Window(Usage::Overlay, mapped.clone()),
+                            Key::Window(Usage::Overlay, mapped.key()),
                             geo,
                             0.0,
                             0.3,

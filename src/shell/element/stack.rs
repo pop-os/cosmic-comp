@@ -77,7 +77,7 @@ use self::{
 static SCROLLABLE_ID: Lazy<Id> = Lazy::new(|| Id::new("scrollable"));
 
 #[derive(Clone, PartialEq, Eq, Hash)]
-pub struct CosmicStack(IcedElement<CosmicStackInternal>);
+pub struct CosmicStack(pub(super) IcedElement<CosmicStackInternal>);
 
 impl fmt::Debug for CosmicStack {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
