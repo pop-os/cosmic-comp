@@ -172,7 +172,8 @@ impl CompositorHandler for State {
                 .user_data()
                 .get::<SeatMoveGrabState>()
                 .unwrap()
-                .borrow()
+                .lock()
+                .unwrap()
                 .as_ref()
                 .and_then(|state| {
                     state

@@ -24,7 +24,7 @@ use smithay::{
     },
     wayland::compositor::{get_role, with_states},
 };
-use std::{cell::RefCell, collections::HashMap, io::Read, sync::Mutex, time::Duration};
+use std::{collections::HashMap, io::Read, sync::Mutex, time::Duration};
 use tracing::warn;
 use xcursor::{
     parser::{parse_xcursor, Image},
@@ -221,16 +221,17 @@ where
     )
 }
 
-pub struct CursorState {
-    current_cursor: RefCell<CursorShape>,
+pub type CursorState = Mutex<CursorStateInner>;
+pub struct CursorStateInner {
+    current_cursor: CursorShape,
     pub cursors: HashMap<CursorShape, Cursor>,
-    current_image: RefCell<Option<Image>>,
-    image_cache: RefCell<Vec<(Image, MemoryRenderBuffer)>>,
+    current_image: Option<Image>,
+    //image_cache: Vec<(Image, MemoryRenderBuffer)>,
 }
 
-impl CursorState {
-    pub fn set_shape(&self, shape: CursorShape) {
-        *self.current_cursor.borrow_mut() = shape;
+impl CursorStateInner {
+    pub fn set_shape(&mut self, shape: CursorShape) {
+        self.current_cursor = shape;
     }
 }
 
@@ -245,11 +246,11 @@ pub fn load_cursor_theme() -> (CursorTheme, u32) {
     (CursorTheme::load(&name), size)
 }
 
-impl Default for CursorState {
-    fn default() -> CursorState {
+impl Default for CursorStateInner {
+    fn default() -> CursorStateInner {
         let (theme, size) = load_cursor_theme();
-        CursorState {
-            current_cursor: RefCell::new(CursorShape::Default),
+        CursorStateInner {
+            current_cursor: CursorShape::Default,
             cursors: {
                 let mut map = HashMap::new();
                 map.insert(
@@ -302,8 +303,7 @@ impl Default for CursorState {
                 );
                 map
             },
-            current_image: RefCell::new(None),
-            image_cache: RefCell::new(Vec::new()),
+            current_image: None,
         }
     }
 }
@@ -325,9 +325,9 @@ where
     // reset the cursor if the surface is no longer alive
     let cursor_status = seat
         .user_data()
-        .get::<RefCell<CursorImageStatus>>()
-        .map(|cell| {
-            let mut cursor_status = cell.borrow_mut();
+        .get::<Mutex<CursorImageStatus>>()
+        .map(|lock| {
+            let mut cursor_status = lock.lock().unwrap();
             if let CursorImageStatus::Surface(ref surface) = *cursor_status {
                 if !surface.alive() {
                     *cursor_status = CursorImageStatus::default_named();
@@ -344,26 +344,24 @@ where
         let integer_scale = scale.x.max(scale.y).ceil() as u32;
 
         let seat_userdata = seat.user_data();
-        let state = seat_userdata.get::<CursorState>().unwrap();
-        let frame = state
-            .cursors
-            .get(&*state.current_cursor.borrow())
-            .unwrap()
-            .get_image(
-                integer_scale,
-                Into::<Duration>::into(time).as_millis() as u32,
-            );
+        let mut state = seat_userdata.get::<CursorState>().unwrap().lock().unwrap();
+        let frame = state.cursors.get(&state.current_cursor).unwrap().get_image(
+            integer_scale,
+            Into::<Duration>::into(time).as_millis() as u32,
+        );
 
-        let mut pointer_images = state.image_cache.borrow_mut();
+        /*
+        let mut pointer_images = &mut state.image_cache;
 
         let maybe_image =
             pointer_images
                 .iter()
                 .find_map(|(image, texture)| if image == &frame { Some(texture) } else { None });
-        let pointer_image = match maybe_image {
+        */
+        let pointer_image = /*match maybe_image {
             Some(image) => image,
             None => {
-                let buffer = MemoryRenderBuffer::from_slice(
+                let buffer =*/ MemoryRenderBuffer::from_slice(
                     &frame.pixels_rgba,
                     Fourcc::Argb8888,
                     (frame.width as i32, frame.height as i32),
@@ -371,20 +369,21 @@ where
                     Transform::Normal,
                     None,
                 );
+        /*
                 pointer_images.push((frame.clone(), buffer));
                 pointer_images.last().map(|(_, i)| i).unwrap()
             }
-        };
+        };*/
 
         let hotspot = Point::<i32, BufferCoords>::from((frame.xhot as i32, frame.yhot as i32));
-        *state.current_image.borrow_mut() = Some(frame);
+        state.current_image = Some(frame);
 
         return vec![(
             CursorRenderElement::Static(
                 MemoryRenderBufferRenderElement::from_buffer(
                     renderer,
                     location.to_physical(scale),
-                    pointer_image,
+                    &pointer_image,
                     None,
                     None,
                     None,

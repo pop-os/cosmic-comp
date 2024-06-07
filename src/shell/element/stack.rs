@@ -1197,13 +1197,15 @@ impl PointerTarget<State> for CosmicStack {
             };
             let _old_focus = p.swap_focus(Some(next));
 
-            let cursor_state = seat.user_data().get::<CursorState>().unwrap();
-            cursor_state.set_shape(next.cursor_shape());
-            let cursor_status = seat
+            let mut cursor_state = seat
                 .user_data()
-                .get::<RefCell<CursorImageStatus>>()
+                .get::<CursorState>()
+                .unwrap()
+                .lock()
                 .unwrap();
-            *cursor_status.borrow_mut() = CursorImageStatus::default_named();
+            cursor_state.set_shape(next.cursor_shape());
+            let cursor_status = seat.user_data().get::<Mutex<CursorImageStatus>>().unwrap();
+            *cursor_status.lock().unwrap() = CursorImageStatus::default_named();
         });
 
         event.location -= self.0.with_program(|p| {
@@ -1225,13 +1227,15 @@ impl PointerTarget<State> for CosmicStack {
             };
             let _previous = p.swap_focus(Some(next));
 
-            let cursor_state = seat.user_data().get::<CursorState>().unwrap();
-            cursor_state.set_shape(next.cursor_shape());
-            let cursor_status = seat
+            let mut cursor_state = seat
                 .user_data()
-                .get::<RefCell<CursorImageStatus>>()
+                .get::<CursorState>()
+                .unwrap()
+                .lock()
                 .unwrap();
-            *cursor_status.borrow_mut() = CursorImageStatus::default_named();
+            cursor_state.set_shape(next.cursor_shape());
+            let cursor_status = seat.user_data().get::<Mutex<CursorImageStatus>>().unwrap();
+            *cursor_status.lock().unwrap() = CursorImageStatus::default_named();
         });
 
         let active_window_geo = self.0.with_program(|p| {
@@ -1322,7 +1326,12 @@ impl PointerTarget<State> for CosmicStack {
 
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
         self.0.with_program(|p| {
-            let cursor_state = seat.user_data().get::<CursorState>().unwrap();
+            let mut cursor_state = seat
+                .user_data()
+                .get::<CursorState>()
+                .unwrap()
+                .lock()
+                .unwrap();
             cursor_state.set_shape(CursorShape::Default);
             let _previous = p.swap_focus(None);
         });

@@ -50,10 +50,13 @@ impl PointerTarget<State> for ResizeForkTarget {
     fn enter(&self, seat: &Seat<State>, _data: &mut State, _event: &MotionEvent) {
         let user_data = seat.user_data();
         let cursor_state = user_data.get::<CursorState>().unwrap();
-        cursor_state.set_shape(match self.orientation {
-            Orientation::Horizontal => CursorShape::RowResize,
-            Orientation::Vertical => CursorShape::ColResize,
-        });
+        cursor_state
+            .lock()
+            .unwrap()
+            .set_shape(match self.orientation {
+                Orientation::Horizontal => CursorShape::RowResize,
+                Orientation::Vertical => CursorShape::ColResize,
+            });
     }
 
     fn leave(
@@ -65,7 +68,7 @@ impl PointerTarget<State> for ResizeForkTarget {
     ) {
         let user_data = seat.user_data();
         let cursor_state = user_data.get::<CursorState>().unwrap();
-        cursor_state.set_shape(CursorShape::Default)
+        cursor_state.lock().unwrap().set_shape(CursorShape::Default)
     }
 
     fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {

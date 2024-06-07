@@ -155,7 +155,7 @@ impl Drop for SeatId {
 
 #[repr(transparent)]
 struct SeatId(pub usize);
-struct ActiveOutput(pub RefCell<Output>);
+struct ActiveOutput(pub Mutex<Output>);
 
 pub fn create_seat(
     dh: &DisplayHandle,
@@ -166,15 +166,15 @@ pub fn create_seat(
 ) -> Seat<State> {
     let mut seat = seat_state.new_wl_seat(dh, name);
     let userdata = seat.user_data();
-    userdata.insert_if_missing(SeatId::default);
+    userdata.insert_if_missing_threadsafe(SeatId::default);
     userdata.insert_if_missing(Devices::default);
     userdata.insert_if_missing(SupressedKeys::default);
     userdata.insert_if_missing(ModifiersShortcutQueue::default);
-    userdata.insert_if_missing(SeatMoveGrabState::default);
-    userdata.insert_if_missing(SeatMenuGrabState::default);
-    userdata.insert_if_missing(CursorState::default);
-    userdata.insert_if_missing(|| ActiveOutput(RefCell::new(output.clone())));
-    userdata.insert_if_missing(|| RefCell::new(CursorImageStatus::default_named()));
+    userdata.insert_if_missing_threadsafe(SeatMoveGrabState::default);
+    userdata.insert_if_missing_threadsafe(SeatMenuGrabState::default);
+    userdata.insert_if_missing_threadsafe(CursorState::default);
+    userdata.insert_if_missing_threadsafe(|| ActiveOutput(Mutex::new(output.clone())));
+    userdata.insert_if_missing_threadsafe(|| Mutex::new(CursorImageStatus::default_named()));
 
     // A lot of clients bind keyboard and pointer unconditionally once on launch..
     // Initial clients might race the compositor on adding periheral and
@@ -232,7 +232,7 @@ impl SeatExt for Seat<State> {
     fn active_output(&self) -> Output {
         self.user_data()
             .get::<ActiveOutput>()
-            .map(|x| x.0.borrow().clone())
+            .map(|x| x.0.lock().unwrap().clone())
             .unwrap()
     }
 
@@ -242,7 +242,8 @@ impl SeatExt for Seat<State> {
             .get::<ActiveOutput>()
             .unwrap()
             .0
-            .borrow_mut() = output.clone();
+            .lock()
+            .unwrap() = output.clone();
     }
 
     fn devices(&self) -> &Devices {
@@ -266,9 +267,9 @@ impl SeatExt for Seat<State> {
 
         let cursor_status = self
             .user_data()
-            .get::<RefCell<CursorImageStatus>>()
-            .map(|cell| {
-                let mut cursor_status = cell.borrow_mut();
+            .get::<Mutex<CursorImageStatus>>()
+            .map(|lock| {
+                let mut cursor_status = lock.lock().unwrap();
                 if let CursorImageStatus::Surface(ref surface) = *cursor_status {
                     if !surface.alive() {
                         *cursor_status = CursorImageStatus::default_named();
@@ -298,9 +299,11 @@ impl SeatExt for Seat<State> {
             }
             CursorImageStatus::Named(CursorIcon::Default) => {
                 let seat_userdata = self.user_data();
-                seat_userdata.insert_if_missing(CursorState::default);
+                seat_userdata.insert_if_missing_threadsafe(CursorState::default);
                 let state = seat_userdata.get::<CursorState>().unwrap();
                 let frame = state
+                    .lock()
+                    .unwrap()
                     .cursors
                     .get(&CursorShape::Default)
                     .unwrap()

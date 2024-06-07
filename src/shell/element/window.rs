@@ -46,7 +46,6 @@ use smithay::{
 };
 use std::{
     borrow::Cow,
-    cell::RefCell,
     fmt,
     hash::Hash,
     sync::{
@@ -686,12 +685,9 @@ impl PointerTarget<State> for CosmicWindow {
                 assert_eq!(old_focus, None);
 
                 let cursor_state = seat.user_data().get::<CursorState>().unwrap();
-                cursor_state.set_shape(next.cursor_shape());
-                let cursor_status = seat
-                    .user_data()
-                    .get::<RefCell<CursorImageStatus>>()
-                    .unwrap();
-                *cursor_status.borrow_mut() = CursorImageStatus::default_named();
+                cursor_state.lock().unwrap().set_shape(next.cursor_shape());
+                let cursor_status = seat.user_data().get::<Mutex<CursorImageStatus>>().unwrap();
+                *cursor_status.lock().unwrap() = CursorImageStatus::default_named();
             }
         });
 
@@ -709,12 +705,9 @@ impl PointerTarget<State> for CosmicWindow {
                 let _previous = p.swap_focus(Some(next));
 
                 let cursor_state = seat.user_data().get::<CursorState>().unwrap();
-                cursor_state.set_shape(next.cursor_shape());
-                let cursor_status = seat
-                    .user_data()
-                    .get::<RefCell<CursorImageStatus>>()
-                    .unwrap();
-                *cursor_status.borrow_mut() = CursorImageStatus::default_named();
+                cursor_state.lock().unwrap().set_shape(next.cursor_shape());
+                let cursor_status = seat.user_data().get::<Mutex<CursorImageStatus>>().unwrap();
+                *cursor_status.lock().unwrap() = CursorImageStatus::default_named();
             }
         });
 
@@ -794,7 +787,7 @@ impl PointerTarget<State> for CosmicWindow {
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
         self.0.with_program(|p| {
             let cursor_state = seat.user_data().get::<CursorState>().unwrap();
-            cursor_state.set_shape(CursorShape::Default);
+            cursor_state.lock().unwrap().set_shape(CursorShape::Default);
             let _previous = p.swap_focus(None);
         });
         PointerTarget::leave(&self.0, seat, data, serial, time)

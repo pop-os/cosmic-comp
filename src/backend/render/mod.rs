@@ -58,6 +58,7 @@ use smithay::{
         },
     },
     desktop::{layer_map_for_output, PopupManager},
+    input::Seat,
     output::{Output, OutputNoMode},
     utils::{IsAlive, Logical, Monotonic, Point, Rectangle, Scale, Time, Transform},
     wayland::{
@@ -388,9 +389,9 @@ pub enum CursorMode {
 }
 
 #[profiling::function]
-pub fn cursor_elements<'frame, R>(
+pub fn cursor_elements<'a, 'frame, R>(
     renderer: &mut R,
-    shell: &Shell,
+    seats: impl Iterator<Item = &'a Seat<State>>,
     theme: &Theme,
     now: Time<Monotonic>,
     output: &Output,
@@ -405,7 +406,7 @@ where
     let scale = output.current_scale().fractional_scale();
     let mut elements = Vec::new();
 
-    for seat in shell.seats.iter() {
+    for seat in seats {
         let pointer = match seat.get_pointer() {
             Some(ptr) => ptr,
             None => continue,
@@ -416,7 +417,7 @@ where
             elements.extend(
                 cursor::draw_cursor(
                     renderer,
-                    seat,
+                    &seat,
                     location,
                     scale.into(),
                     now,
@@ -434,7 +435,7 @@ where
         }
 
         if !exclude_dnd_icon {
-            if let Some(wl_surface) = get_dnd_icon(seat) {
+            if let Some(wl_surface) = get_dnd_icon(&seat) {
                 elements.extend(
                     cursor::draw_dnd_icon(renderer, &wl_surface, location.to_i32_round(), scale)
                         .into_iter()
@@ -448,7 +449,8 @@ where
             .user_data()
             .get::<SeatMoveGrabState>()
             .unwrap()
-            .borrow()
+            .lock()
+            .unwrap()
             .as_ref()
             .map(|state| state.render::<CosmicElement<R>, R>(renderer, output, theme))
         {
@@ -459,7 +461,8 @@ where
             .user_data()
             .get::<SeatMenuGrabState>()
             .unwrap()
-            .borrow()
+            .lock()
+            .unwrap()
             .as_ref()
             .map(|state| state.render::<CosmicMappedRenderElement<R>, R>(renderer, output))
         {
@@ -492,9 +495,15 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
+    let seats = shell
+        .seats
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>();
+
     let mut elements = cursor_elements(
         renderer,
-        shell,
+        seats.iter(),
         theme,
         now,
         output,
@@ -556,13 +565,13 @@ where
         overview.0,
         overview.1.map(|indicator| (indicator, swap_tree)),
     );
-
     let last_active_seat = shell.seats.last_active();
     let move_active = last_active_seat
         .user_data()
         .get::<SeatMoveGrabState>()
         .unwrap()
-        .borrow()
+        .lock()
+        .unwrap()
         .is_some();
     let active_output = last_active_seat.active_output();
     let output_size = output.geometry().size;
