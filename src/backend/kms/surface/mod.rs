@@ -914,7 +914,8 @@ impl SurfaceThreadState {
                 self.output
                     .current_mode()
                     .is_some_and(|mode| mode != mirror_mode)
-            })
+            }) || mirrored_output.current_scale().fractional_scale()
+                != self.output.current_scale().fractional_scale()
         }) {
             let mirroring_state = {
                 let entry = self.mirroring_textures.entry(self.target_node);
