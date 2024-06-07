@@ -359,7 +359,7 @@ fn constraints_for_output(output: &Output, backend: &mut BackendData) -> Option<
         BackendData::Kms(ref mut kms) => {
             let node = kms
                 .target_node_for_output(&output)
-                .unwrap_or(kms.primary_node);
+                .unwrap_or(kms.primary_node.expect("No Software Rendering"));
             _kms_renderer = Some(kms.api.single_renderer(&node).unwrap());
             _kms_renderer.as_mut().unwrap().as_mut()
         }
@@ -388,7 +388,7 @@ fn constraints_for_toplevel(
             })
             .flatten();
 
-            let node = dma_node.unwrap_or(kms.primary_node);
+            let node = dma_node.unwrap_or(kms.primary_node.expect("No Software Rendering"));
             _kms_renderer = Some(kms.api.single_renderer(&node).unwrap());
             _kms_renderer.as_mut().unwrap().as_mut()
         }

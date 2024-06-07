@@ -11,17 +11,15 @@ use std::{
 #[cfg(feature = "debug")]
 use crate::debug::fps_ui;
 use crate::{
-    backend::render::element::DamageElement,
-    config::Config,
+    backend::{kms::render::gles::GbmGlowBackend, render::element::DamageElement},
     shell::{
         element::CosmicMappedKey,
         focus::target::WindowGroup,
         grabs::{SeatMenuGrabState, SeatMoveGrabState},
         layout::tiling::ANIMATION_DURATION,
-        CosmicMapped, CosmicMappedRenderElement, OverviewMode, SeatExt, SessionLock, Trigger,
-        WorkspaceDelta, WorkspaceRenderElement,
+        CosmicMappedRenderElement, OverviewMode, SeatExt, SessionLock, Trigger, WorkspaceDelta,
+        WorkspaceRenderElement,
     },
-    state::Fps,
     utils::prelude::*,
     wayland::{
         handlers::{
@@ -34,6 +32,7 @@ use crate::{
 
 use cosmic::Theme;
 use cosmic_comp_config::workspace::WorkspaceLayout;
+use element::FromGlesError;
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     backend::{
@@ -51,8 +50,7 @@ use smithay::{
                 element::PixelShaderElement, GlesError, GlesPixelProgram, GlesRenderer, Uniform,
                 UniformName, UniformType,
             },
-            glow::GlowRenderer,
-            multigpu::{gbm::GbmGlesBackend, Error as MultiError, MultiFrame, MultiRenderer},
+            multigpu::{Error as MultiError, MultiFrame, MultiRenderer},
             sync::SyncPoint,
             Bind, Blit, ExportMem, ImportAll, ImportMem, Offscreen, Renderer, TextureFilter,
         },
@@ -74,23 +72,11 @@ pub mod cursor;
 pub mod element;
 use self::element::{AsGlowRenderer, CosmicElement};
 
-pub type GlMultiRenderer<'a> = MultiRenderer<
-    'a,
-    'a,
-    GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
-    GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
->;
-pub type GlMultiFrame<'a, 'frame> = MultiFrame<
-    'a,
-    'a,
-    'frame,
-    GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
-    GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
->;
-pub type GlMultiError = MultiError<
-    GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
-    GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
->;
+pub type GlMultiRenderer<'a> =
+    MultiRenderer<'a, 'a, GbmGlowBackend<DrmDeviceFd>, GbmGlowBackend<DrmDeviceFd>>;
+pub type GlMultiFrame<'a, 'frame> =
+    MultiFrame<'a, 'a, 'frame, GbmGlowBackend<DrmDeviceFd>, GbmGlowBackend<DrmDeviceFd>>;
+pub type GlMultiError = MultiError<GbmGlowBackend<DrmDeviceFd>, GbmGlowBackend<DrmDeviceFd>>;
 
 pub static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
 pub static OUTLINE_SHADER: &str = include_str!("./shaders/rounded_outline.frag");
@@ -341,12 +327,9 @@ impl BackdropShader {
     }
 }
 
-pub fn init_shaders<R: AsGlowRenderer>(renderer: &mut R) -> Result<(), GlesError> {
-    let glow_renderer = renderer.glow_renderer_mut();
-    let gles_renderer: &mut GlesRenderer = glow_renderer.borrow_mut();
-
+pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
     {
-        let egl_context = gles_renderer.egl_context();
+        let egl_context = renderer.egl_context();
         if egl_context.user_data().get::<IndicatorShader>().is_some()
             && egl_context.user_data().get::<BackdropShader>().is_some()
         {
@@ -354,7 +337,7 @@ pub fn init_shaders<R: AsGlowRenderer>(renderer: &mut R) -> Result<(), GlesError
         }
     }
 
-    let outline_shader = gles_renderer.compile_custom_pixel_shader(
+    let outline_shader = renderer.compile_custom_pixel_shader(
         OUTLINE_SHADER,
         &[
             UniformName::new("color", UniformType::_3f),
@@ -362,7 +345,7 @@ pub fn init_shaders<R: AsGlowRenderer>(renderer: &mut R) -> Result<(), GlesError
             UniformName::new("radius", UniformType::_1f),
         ],
     )?;
-    let rectangle_shader = gles_renderer.compile_custom_pixel_shader(
+    let rectangle_shader = renderer.compile_custom_pixel_shader(
         RECTANGLE_SHADER,
         &[
             UniformName::new("color", UniformType::_3f),
@@ -370,7 +353,7 @@ pub fn init_shaders<R: AsGlowRenderer>(renderer: &mut R) -> Result<(), GlesError
         ],
     )?;
 
-    let egl_context = gles_renderer.egl_context();
+    let egl_context = renderer.egl_context();
     egl_context
         .user_data()
         .insert_if_missing(|| IndicatorShader(outline_shader));
@@ -852,7 +835,7 @@ pub fn split_layer_elements<R>(
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: Clone + 'static,
-    <R as Renderer>::Error: From<GlesError>,
+    <R as Renderer>::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
@@ -919,7 +902,7 @@ pub fn background_layer_elements<R>(
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: Clone + 'static,
-    <R as Renderer>::Error: From<GlesError>,
+    <R as Renderer>::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {

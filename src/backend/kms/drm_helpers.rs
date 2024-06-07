@@ -14,12 +14,13 @@ use std::{collections::HashMap, ops::Range};
 pub fn display_configuration(
     device: &mut impl ControlDevice,
     supports_atomic: bool,
-) -> Result<HashMap<connector::Handle, crtc::Handle>> {
+) -> Result<HashMap<connector::Handle, Option<crtc::Handle>>> {
     let res_handles = device.resource_handles()?;
     let connectors = res_handles.connectors();
 
     let mut map = HashMap::new();
     let mut cleanup = Vec::new();
+
     // We expect the previous running drm master (likely the login mananger)
     // to leave the drm device in a sensible state.
     // That means, to reduce flickering, we try to keep an established mapping.
@@ -31,7 +32,7 @@ pub fn display_configuration(
             if let Some(crtc) = device.get_encoder(enc)?.crtc() {
                 // If is is connected we found a mapping
                 if conn.state() == ConnectorState::Connected {
-                    map.insert(conn.handle(), crtc);
+                    map.insert(conn.handle(), Some(crtc));
                 // If not, the user just unplugged something,
                 // or the drm master did not cleanup?
                 // Well, I guess we cleanup after them.
@@ -41,6 +42,7 @@ pub fn display_configuration(
             }
         }
     }
+
     // But just in case we try to match all remaining connectors.
     for conn in connectors
         .iter()
@@ -56,11 +58,15 @@ pub fn display_configuration(
             .flat_map(|encoder_handle| device.get_encoder(*encoder_handle))
         {
             for crtc in res_handles.filter_crtcs(encoder_info.possible_crtcs()) {
-                if !map.values().any(|v| *v == crtc) {
-                    map.insert(conn.handle(), crtc);
+                if !map.values().any(|v| *v == Some(crtc)) {
+                    map.insert(conn.handle(), Some(crtc));
                     break 'outer;
                 }
             }
+        }
+
+        if !map.contains_key(&conn.handle()) {
+            map.insert(conn.handle(), None);
         }
     }
 
@@ -119,9 +125,11 @@ pub fn display_configuration(
 
         device.atomic_commit(AtomicCommitFlags::ALLOW_MODESET, req)?;
     } else {
-        for crtc in cleanup {
+        for crtc in res_handles.crtcs() {
             #[allow(deprecated)]
-            let _ = device.set_cursor(crtc, Option::<&DumbBuffer>::None);
+            let _ = device.set_cursor(*crtc, Option::<&DumbBuffer>::None);
+        }
+        for crtc in cleanup {
             // null commit (necessary to trigger removal on the kernel side with the legacy api.)
             let _ = device.set_crtc(crtc, None, (0, 0), &[], None);
         }

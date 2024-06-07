@@ -16,7 +16,7 @@ pub fn init(evlh: &LoopHandle<'static, State>) -> Result<Vec<RegistrationToken>>
                     calloop::channel::Event::Msg(_) => {
                         let nodes = match &mut state.backend {
                             BackendData::Kms(kms) => {
-                                kms.devices.keys().cloned().collect::<Vec<_>>()
+                                kms.drm_devices.keys().cloned().collect::<Vec<_>>()
                             }
                             _ => Vec::new(),
                         };

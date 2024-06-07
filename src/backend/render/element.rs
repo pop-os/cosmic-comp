@@ -8,7 +8,7 @@ use smithay::{
             utils::{CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement},
             Element, Id, Kind, RenderElement, UnderlyingStorage,
         },
-        gles::GlesTexture,
+        gles::{GlesError, GlesTexture},
         glow::{GlowFrame, GlowRenderer},
         utils::{CommitCounter, DamageSet, OpaqueRegions},
         Frame, ImportAll, ImportMem, Renderer,
@@ -463,5 +463,15 @@ impl<R: Renderer> RenderElement<R> for DamageElement {
         _opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), <R as Renderer>::Error> {
         Ok(())
+    }
+}
+
+pub trait FromGlesError {
+    fn from_gles_error(err: GlesError) -> Self;
+}
+
+impl FromGlesError for GlesError {
+    fn from_gles_error(err: GlesError) -> Self {
+        err
     }
 }

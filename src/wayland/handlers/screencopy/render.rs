@@ -9,7 +9,7 @@ use smithay::{
                 utils::{Relocate, RelocateRenderElement},
                 AsRenderElements, RenderElement,
             },
-            gles::{GlesError, GlesRenderbuffer},
+            gles::GlesRenderbuffer,
             sync::SyncPoint,
             utils::with_renderer_surface_state,
             Bind, Blit, BufferType, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
@@ -35,7 +35,7 @@ use tracing::warn;
 use crate::{
     backend::render::{
         cursor,
-        element::{AsGlowRenderer, CosmicElement, DamageElement},
+        element::{AsGlowRenderer, CosmicElement, DamageElement, FromGlesError},
         render_workspace, CursorMode, CLEAR_COLOR,
     },
     shell::{CosmicMappedRenderElement, CosmicSurface, WorkspaceRenderElement},
@@ -325,7 +325,7 @@ pub fn render_workspace_to_buffer(
         BackendData::Kms(kms) => {
             let render_node = kms
                 .target_node_for_output(&output)
-                .unwrap_or(kms.primary_node);
+                .unwrap_or(kms.primary_node.expect("No Software Rendering"));
             let target_node = get_dmabuf(&buffer)
                 .ok()
                 .and_then(|dma| dma.node())
@@ -609,7 +609,7 @@ pub fn render_window_to_buffer(
                         })
                         .flatten()
                 })
-                .unwrap_or(kms.primary_node);
+                .unwrap_or(kms.primary_node.expect("No Software Rendering"));
 
             let mut multirenderer = match kms.api.single_renderer(&node) {
                 Ok(renderer) => renderer,
@@ -800,7 +800,10 @@ pub fn render_cursor_to_buffer(
     let common = &mut state.common;
     let result = match &mut state.backend {
         BackendData::Kms(kms) => {
-            let mut multirenderer = match kms.api.single_renderer(&kms.primary_node) {
+            let mut multirenderer = match kms
+                .api
+                .single_renderer(&kms.primary_node.expect("No Software Rendering"))
+            {
                 Ok(renderer) => renderer,
                 Err(err) => {
                     warn!(?err, "Couldn't use node for screencopy");
