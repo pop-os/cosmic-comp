@@ -398,7 +398,7 @@ pub fn cursor_elements<'frame, R>(
 ) -> Vec<CosmicElement<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: Clone + 'static,
+    <R as Renderer>::TextureId: Send + Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     let scale = output.current_scale().fractional_scale();
@@ -486,8 +486,8 @@ pub fn workspace_elements<R>(
 ) -> Result<Vec<CosmicElement<R>>, RenderError<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: Clone + 'static,
-    <R as Renderer>::Error: From<GlesError>,
+    <R as Renderer>::TextureId: Send + Clone + 'static,
+    <R as Renderer>::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
@@ -972,8 +972,8 @@ where
         + Offscreen<OffTarget>
         + Blit<Target>
         + AsGlowRenderer,
-    <R as Renderer>::TextureId: Clone + 'static,
-    <R as Renderer>::Error: From<GlesError>,
+    <R as Renderer>::TextureId: Send + Clone + 'static,
+    <R as Renderer>::Error: FromGlesError,
     CosmicElement<R>: RenderElement<R>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
@@ -1128,18 +1128,13 @@ where
         + Bind<Target>
         + Offscreen<OffTarget>
         + AsGlowRenderer,
-    <R as Renderer>::TextureId: Clone + 'static,
-    <R as Renderer>::Error: From<GlesError>,
+    <R as Renderer>::TextureId: Send + Clone + 'static,
+    <R as Renderer>::Error: FromGlesError,
     CosmicElement<R>: RenderElement<R>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
-{
-    if let Some(ref mut fps) = fps {
-        fps.start();
-        #[cfg(feature = "debug")]
         if let Some(rd) = fps.rd.as_mut() {
             rd.start_frame_capture(
-                renderer.glow_renderer().egl_context().get_context_handle(),
                 std::ptr::null(),
             );
         }

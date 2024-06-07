@@ -319,7 +319,7 @@ pub fn draw_cursor<R>(
 ) -> Vec<(CursorRenderElement<R>, Point<i32, BufferCoords>)>
 where
     R: Renderer + ImportMem + ImportAll,
-    <R as Renderer>::TextureId: Clone + 'static,
+    <R as Renderer>::TextureId: Send + Clone + 'static,
 {
     // draw the cursor as relevant
     // reset the cursor if the surface is no longer alive

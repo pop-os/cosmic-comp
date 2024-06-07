@@ -238,8 +238,8 @@ pub fn render_workspace_to_buffer(
             + Offscreen<GlesRenderbuffer>
             + Blit<Dmabuf>
             + AsGlowRenderer,
-        <R as Renderer>::TextureId: Clone + 'static,
-        <R as Renderer>::Error: From<GlesError>,
+        <R as Renderer>::TextureId: Send + Clone + 'static,
+        <R as Renderer>::Error: FromGlesError,
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         WorkspaceRenderElement<R>: RenderElement<R>,
@@ -505,8 +505,8 @@ pub fn render_window_to_buffer(
             + Offscreen<GlesRenderbuffer>
             + Blit<Dmabuf>
             + AsGlowRenderer,
-        <R as Renderer>::TextureId: Clone + 'static,
-        <R as Renderer>::Error: From<GlesError>,
+        <R as Renderer>::TextureId: Send + Clone + 'static,
+        <R as Renderer>::Error: FromGlesError,
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
@@ -764,8 +764,8 @@ pub fn render_cursor_to_buffer(
             + Offscreen<GlesRenderbuffer>
             + Blit<Dmabuf>
             + AsGlowRenderer,
-        <R as Renderer>::TextureId: Clone + 'static,
-        <R as Renderer>::Error: From<GlesError>,
+        <R as Renderer>::TextureId: Send + Clone + 'static,
+        <R as Renderer>::Error: FromGlesError,
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {

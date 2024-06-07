@@ -1907,9 +1907,9 @@ impl Shell {
 
         let wants_focus = {
             with_states(layer_surface.wl_surface(), |states| {
-                let state = states.cached_state.current::<LayerSurfaceCachedState>();
-                matches!(state.layer, Layer::Top | Layer::Overlay)
-                    && state.keyboard_interactivity != KeyboardInteractivity::None
+                let mut state = states.cached_state.get::<LayerSurfaceCachedState>();
+                matches!(state.current().layer, Layer::Top | Layer::Overlay)
+                    && state.current().keyboard_interactivity != KeyboardInteractivity::None
             })
         };
 

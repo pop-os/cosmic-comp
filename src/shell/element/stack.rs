@@ -550,7 +550,7 @@ impl CosmicStack {
     ) -> (Vec<C>, Vec<C>)
     where
         R: Renderer + ImportAll + ImportMem,
-        <R as Renderer>::TextureId: Clone + 'static,
+        <R as Renderer>::TextureId: Send + Clone + 'static,
         C: From<CosmicStackRenderElement<R>>,
     {
         let offset = self
