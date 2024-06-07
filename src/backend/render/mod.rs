@@ -477,9 +477,7 @@ where
 pub fn workspace_elements<R>(
     _gpu: Option<&DrmNode>,
     renderer: &mut R,
-    shell: &Shell,
-    config: &Config,
-    theme: &Theme,
+    shell: &Arc<RwLock<Shell>>,
     now: Time<Monotonic>,
     output: &Output,
     previous: Option<(WorkspaceHandle, usize, WorkspaceDelta)>,
@@ -495,7 +493,10 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
+    let theme = shell.read().unwrap().theme().clone();
     let seats = shell
+        .read()
+        .unwrap()
         .seats
         .iter()
         .cloned()
@@ -504,7 +505,7 @@ where
     let mut elements = cursor_elements(
         renderer,
         seats.iter(),
-        theme,
+        &theme,
         now,
         output,
         cursor_mode,
@@ -534,6 +535,8 @@ where
             elements.push(fps_overlay.into());
         }
     }
+
+    let shell = shell.read().unwrap();
 
     // If session locked, only show session lock surfaces
     if let Some(session_lock) = &shell.session_lock {
@@ -606,7 +609,7 @@ where
         Vec::new()
     };
 
-    let active_hint = if config.cosmic_conf.active_hint {
+    let active_hint = if shell.active_hint {
         theme.active_hint as u8
     } else {
         0
@@ -695,7 +698,7 @@ where
 
     let offset = match previous.as_ref() {
         Some((previous, previous_idx, start)) => {
-            let layout = config.cosmic_conf.workspaces.workspace_layout;
+            let layout = shell.workspaces.layout;
 
             let workspace = shell
                 .workspaces
@@ -964,9 +967,7 @@ pub fn render_output<'d, R, Target, OffTarget>(
     target: Target,
     damage_tracker: &'d mut OutputDamageTracker,
     age: usize,
-    shell: &Shell,
-    config: &Config,
-    theme: &Theme,
+    shell: &Arc<RwLock<Shell>>,
     now: Time<Monotonic>,
     output: &Output,
     cursor_mode: CursorMode,
@@ -989,12 +990,14 @@ where
     WorkspaceRenderElement<R>: RenderElement<R>,
     Target: Clone,
 {
-    let (previous_workspace, workspace) = shell.workspaces.active(output);
-    let (previous_idx, idx) = shell.workspaces.active_num(output);
+    let shell_ref = shell.read().unwrap();
+    let (previous_workspace, workspace) = shell_ref.workspaces.active(output);
+    let (previous_idx, idx) = shell_ref.workspaces.active_num(output);
     let previous_workspace = previous_workspace
         .zip(previous_idx)
         .map(|((w, start), idx)| (w.handle, idx, start));
     let workspace = (workspace.handle, idx);
+    std::mem::drop(shell_ref);
 
     let result = render_workspace(
         gpu,
@@ -1004,8 +1007,6 @@ where
         age,
         None,
         shell,
-        config,
-        theme,
         now,
         output,
         previous_workspace,
@@ -1118,9 +1119,7 @@ pub fn render_workspace<'d, R, Target, OffTarget>(
     damage_tracker: &'d mut OutputDamageTracker,
     age: usize,
     additional_damage: Option<Vec<Rectangle<i32, Logical>>>,
-    shell: &Shell,
-    config: &Config,
-    theme: &Theme,
+    shell: &Arc<RwLock<Shell>>,
     now: Time<Monotonic>,
     output: &Output,
     previous: Option<(WorkspaceHandle, usize, WorkspaceDelta)>,
@@ -1154,8 +1153,6 @@ where
         gpu,
         renderer,
         shell,
-        config,
-        theme,
         now,
         output,
         previous,
