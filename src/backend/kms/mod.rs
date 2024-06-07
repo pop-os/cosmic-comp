@@ -561,17 +561,6 @@ impl KmsState {
             // reconfigure existing
             for (crtc, surface) in device.surfaces.iter_mut() {
                 let output_config = surface.output.config();
-                let mirrored_output = if let OutputState::Mirroring(conn) = &output_config.enabled {
-                    Some(
-                        outputs
-                            .iter()
-                            .find(|output| &output.name() == conn)
-                            .cloned()
-                            .ok_or(anyhow::anyhow!("Unable to find mirroring output"))?,
-                    )
-                } else {
-                    None
-                };
 
                 let drm = &mut device.drm;
                 let conn = surface.connector;
@@ -631,10 +620,6 @@ impl KmsState {
                         surface.set_mode(*mode);
                         // TODO: .context("Failed to apply new mode")?;
                     }
-
-                    if mirrored_output != surface.output.mirroring() {
-                        surface.set_mirroring(mirrored_output.clone());
-                    }
                 }
             }
 
@@ -654,10 +639,35 @@ impl KmsState {
                     if output.mirroring().is_none() {
                         w += output.config().mode_size().w;
                     }
+                    all_outputs.push(output);
                 }
             }
 
             all_outputs.extend(outputs);
+        }
+
+        // we need to handle mirroring, after all outputs have been enabled
+        for device in self.drm_devices.values_mut() {
+            for surface in device.surfaces.values_mut() {
+                let mirrored_output =
+                    if let OutputState::Mirroring(conn) = &surface.output.config().enabled {
+                        Some(
+                            all_outputs
+                                .iter()
+                                .find(|output| &output.name() == conn)
+                                .cloned()
+                                .ok_or(anyhow::anyhow!("Unable to find mirroring output"))?,
+                        )
+                    } else {
+                        None
+                    };
+
+                if !test_only {
+                    if mirrored_output != surface.output.mirroring() {
+                        surface.set_mirroring(mirrored_output.clone());
+                    }
+                }
+            }
         }
 
         Ok(all_outputs)
