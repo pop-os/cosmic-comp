@@ -84,10 +84,15 @@ impl WinitState {
                     .with_context(|| "Failed to submit buffer for display")?;
                 #[cfg(feature = "debug")]
                 self.fps.displayed();
-                state.send_frames(&self.output, &states, |_| None);
+                state.send_frames(&self.output);
+                state.update_primary_output(&self.output, &states);
+                state.send_dmabuf_feedback(&self.output, &states, |_| None);
                 if damage.is_some() {
-                    let mut output_presentation_feedback =
-                        state.take_presentation_feedback(&self.output, &states);
+                    let mut output_presentation_feedback = state
+                        .shell
+                        .read()
+                        .unwrap()
+                        .take_presentation_feedback(&self.output, &states);
                     output_presentation_feedback.presented(
                         state.clock.now(),
                         self.output
