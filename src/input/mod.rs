@@ -213,6 +213,8 @@ impl State {
                     let pointer = seat.get_pointer().unwrap();
                     let is_grabbed = keyboard.is_grabbed() || pointer.is_grabbed();
                     let current_focus = keyboard.current_focus();
+                    let shell_ref = self.common.shell.clone();
+                    let mut shell = shell_ref.write().unwrap();
                     if let Some((action, pattern)) = keyboard
                             .input(
                                 self,
@@ -222,7 +224,6 @@ impl State {
                                 time,
                                 |data, modifiers, handle| {
                                     // Leave move overview mode, if any modifier was released
-                                    let mut shell = data.common.shell.write().unwrap();
                                     if let OverviewMode::Started(Trigger::KeyboardMove(action_modifiers), _) =
                                         shell.overview_mode().0
                                     {
@@ -466,6 +467,7 @@ impl State {
                                     }
 
                                     // keys are passed through to apps
+                                    std::mem::drop(shell);
                                     FilterResult::Forward
                                 },
                             )
