@@ -1181,11 +1181,13 @@ impl SurfaceThreadState {
                                 }
                             };
 
-                            self.frame_callback_seq.fetch_add(1, Ordering::SeqCst);
+                            if self.mirroring.is_none() {
+                                self.frame_callback_seq.fetch_add(1, Ordering::SeqCst);
 
-                            let states = frame_result.states;
-                            self.send_frame_callbacks();
-                            self.send_dmabuf_feedback(states);
+                                let states = frame_result.states;
+                                self.send_frame_callbacks();
+                                self.send_dmabuf_feedback(states);
+                            }
                         } else {
                             tracing::debug!("Stopped rendering");
                             self.queue_estimated_vblank(estimated_presentation);
