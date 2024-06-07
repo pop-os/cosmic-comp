@@ -106,7 +106,7 @@ use std::{
     collections::{HashSet, VecDeque},
     ffi::OsString,
     process::Child,
-    sync::{Arc, Once, RwLock},
+    sync::{Arc, Condvar, Mutex, Once, RwLock},
     time::{Duration, Instant},
 };
 
@@ -179,6 +179,7 @@ pub struct Common {
     pub shell: Arc<RwLock<Shell>>,
 
     pub clock: Clock<Monotonic>,
+    pub startup_done: Arc<(Mutex<bool>, Condvar)>,
     pub should_stop: bool,
     pub local_offset: time::UtcOffset,
     pub gesture_state: Option<GestureState>,
@@ -262,30 +263,26 @@ impl BackendData {
         }
     }
 
-    pub fn apply_config_for_output(
+    pub fn apply_config_for_outputs(
         &mut self,
-        output: &Output,
         test_only: bool,
-        shell: &mut Shell,
-        loop_handle: &LoopHandle<'_, State>,
+        loop_handle: &LoopHandle<'static, State>,
+        shell: Arc<RwLock<Shell>>,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
         xdg_activation_state: &XdgActivationState,
+        startup_done: Arc<(Mutex<bool>, Condvar)>,
     ) -> Result<(), anyhow::Error> {
         let result = match self {
-            BackendData::Kms(ref mut state) => state.apply_config_for_output(
-                output,
-                shell,
-                test_only,
-                loop_handle,
-                workspace_state,
-                xdg_activation_state,
-            ),
-            BackendData::Winit(ref mut state) => state.apply_config_for_output(output, test_only),
-            BackendData::X11(ref mut state) => state.apply_config_for_output(output, test_only),
+            BackendData::Kms(ref mut state) => {
+                state.apply_config_for_outputs(test_only, loop_handle, shell.clone(), startup_done)
+            }
+            BackendData::Winit(ref mut state) => state.apply_config_for_outputs(test_only),
+            BackendData::X11(ref mut state) => state.apply_config_for_outputs(test_only),
             _ => unreachable!("No backend set when applying output config"),
-        };
+        }?;
 
-        if result.is_ok() {
+        let mut shell = shell.write().unwrap();
+        for output in result {
             // apply to Output
             let final_config = output
                 .user_data()
@@ -318,10 +315,29 @@ impl BackendData {
                 _ => None,
             });
 
-            layer_map_for_output(output).arrange();
+            match final_config.enabled {
+                OutputState::Enabled => {
+                    shell
+                        .workspaces
+                        .add_output(&output, workspace_state, xdg_activation_state)
+                }
+                _ => {
+                    let shell = &mut *shell;
+                    shell.workspaces.remove_output(
+                        &output,
+                        shell.seats.iter(),
+                        workspace_state,
+                        xdg_activation_state,
+                    )
+                }
+            }
+
+            layer_map_for_output(&output).arrange();
+
+            self.schedule_render(loop_handle, &output);
         }
 
-        result
+        Ok(())
     }
 
     pub fn schedule_render(&mut self, loop_handle: &LoopHandle<'_, State>, output: &Output) {
@@ -494,6 +510,7 @@ impl State {
                 local_offset,
 
                 clock,
+                startup_done: Arc::new((Mutex::new(false), Condvar::new())),
                 should_stop: false,
                 gesture_state: None,
 

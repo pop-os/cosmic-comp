@@ -23,7 +23,13 @@ pub use smithay::{
     },
     utils::{Logical, Physical, Point, Size, Transform},
 };
-use std::{cell::RefCell, collections::HashMap, fs::OpenOptions, path::PathBuf};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    fs::OpenOptions,
+    path::PathBuf,
+    sync::{Arc, Condvar, Mutex, RwLock},
+};
 use tracing::{debug, error, info, warn};
 
 mod input_config;
@@ -312,10 +318,11 @@ impl Config {
         &mut self,
         output_state: &mut OutputConfigurationState<State>,
         backend: &mut BackendData,
-        shell: &mut Shell,
-        loop_handle: &LoopHandle<'_, State>,
+        shell: &Arc<RwLock<Shell>>,
+        loop_handle: &LoopHandle<'static, State>,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
         xdg_activation_state: &XdgActivationState,
+        startup_done: Arc<(Mutex<bool>, Condvar)>,
     ) {
         let outputs = output_state.outputs().collect::<Vec<_>>();
         let mut infos = outputs
@@ -325,7 +332,6 @@ impl Config {
             .collect::<Vec<_>>();
         infos.sort();
         if let Some(configs) = self.dynamic_conf.outputs().config.get(&infos).cloned() {
-            let mut reset = false;
             let known_good_configs = outputs
                 .iter()
                 .map(|output| {
@@ -338,6 +344,7 @@ impl Config {
                 })
                 .collect::<Vec<_>>();
 
+            let mut found_outputs = Vec::new();
             for (name, output_config) in infos.iter().map(|o| &o.connector).zip(configs.into_iter())
             {
                 let output = outputs.iter().find(|o| &o.name() == name).unwrap().clone();
@@ -347,31 +354,19 @@ impl Config {
                     .get::<RefCell<OutputConfig>>()
                     .unwrap()
                     .borrow_mut() = output_config;
-                if let Err(err) = backend.apply_config_for_output(
-                    &output,
-                    false,
-                    shell,
-                    loop_handle,
-                    workspace_state,
-                    xdg_activation_state,
-                ) {
-                    warn!(
-                        ?err,
-                        "Failed to set new config for output {}.",
-                        output.name(),
-                    );
-                    reset = true;
-                    break;
-                } else {
-                    if enabled == OutputState::Enabled {
-                        output_state.enable_head(&output);
-                    } else {
-                        output_state.disable_head(&output);
-                    }
-                }
+                found_outputs.push((output.clone(), enabled));
             }
 
-            if reset {
+            if let Err(err) = backend.apply_config_for_outputs(
+                false,
+                loop_handle,
+                shell.clone(),
+                workspace_state,
+                xdg_activation_state,
+                startup_done.clone(),
+            ) {
+                warn!(?err, "Failed to set new config.");
+                found_outputs.clear();
                 for (output, output_config) in outputs
                     .clone()
                     .into_iter()
@@ -383,16 +378,20 @@ impl Config {
                         .get::<RefCell<OutputConfig>>()
                         .unwrap()
                         .borrow_mut() = output_config;
-                    if let Err(err) = backend.apply_config_for_output(
-                        &output,
-                        false,
-                        shell,
-                        loop_handle,
-                        workspace_state,
-                        xdg_activation_state,
-                    ) {
-                        error!(?err, "Failed to reset config for output {}.", output.name());
-                    } else {
+                    found_outputs.push((output.clone(), enabled));
+                }
+
+                if let Err(err) = backend.apply_config_for_outputs(
+                    false,
+                    loop_handle,
+                    shell.clone(),
+                    workspace_state,
+                    xdg_activation_state,
+                    startup_done,
+                ) {
+                    error!(?err, "Failed to reset config.");
+                } else {
+                    for (output, enabled) in found_outputs {
                         if enabled == OutputState::Enabled {
                             output_state.enable_head(&output);
                         } else {
@@ -400,26 +399,30 @@ impl Config {
                         }
                     }
                 }
+            } else {
+                for (output, enabled) in found_outputs {
+                    if enabled == OutputState::Enabled {
+                        output_state.enable_head(&output);
+                    } else {
+                        output_state.disable_head(&output);
+                    }
+                }
             }
 
             output_state.update();
             self.write_outputs(output_state.outputs());
         } else {
-            for output in outputs {
-                if let Err(err) = backend.apply_config_for_output(
-                    &output,
-                    false,
-                    shell,
-                    loop_handle,
-                    workspace_state,
-                    xdg_activation_state,
-                ) {
-                    warn!(
-                        ?err,
-                        "Failed to set new config for output {}.",
-                        output.name(),
-                    );
-                } else {
+            if let Err(err) = backend.apply_config_for_outputs(
+                false,
+                loop_handle,
+                shell.clone(),
+                workspace_state,
+                xdg_activation_state,
+                startup_done,
+            ) {
+                warn!(?err, "Failed to set new config.",);
+            } else {
+                for output in outputs {
                     if output
                         .user_data()
                         .get::<RefCell<OutputConfig>>()
