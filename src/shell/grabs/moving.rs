@@ -44,11 +44,15 @@ use smithay::{
     output::Output,
     utils::{IsAlive, Logical, Point, Rectangle, Scale, Serial, SERIAL_COUNTER},
 };
-use std::{cell::RefCell, collections::HashSet, sync::atomic::Ordering, time::Instant};
+use std::{
+    collections::HashSet,
+    sync::{atomic::Ordering, Mutex},
+    time::Instant,
+};
 
 use super::{GrabStartData, ReleaseMode};
 
-pub type SeatMoveGrabState = RefCell<Option<MoveGrabState>>;
+pub type SeatMoveGrabState = Mutex<Option<MoveGrabState>>;
 
 const RESCALE_ANIMATION_DURATION: f64 = 150.0;
 
@@ -363,7 +367,7 @@ impl MoveGrab {
             .seat
             .user_data()
             .get::<SeatMoveGrabState>()
-            .map(|s| s.borrow_mut());
+            .map(|s| s.lock().unwrap());
         if let Some(grab_state) = borrow.as_mut().and_then(|s| s.as_mut()) {
             grab_state.location = location;
             grab_state.cursor_output = self.cursor_output.clone();
@@ -698,11 +702,12 @@ impl MoveGrab {
             .user_data()
             .get::<SeatMoveGrabState>()
             .unwrap()
-            .borrow_mut() = Some(grab_state);
+            .lock()
+            .unwrap() = Some(grab_state);
 
         {
             let cursor_state = seat.user_data().get::<CursorState>().unwrap();
-            cursor_state.set_shape(CursorShape::Grab);
+            cursor_state.lock().unwrap().set_shape(CursorShape::Grab);
         }
 
         MoveGrab {
@@ -743,7 +748,7 @@ impl Drop for MoveGrab {
             let position: Option<(CosmicMapped, Point<i32, Global>)> = if let Some(grab_state) =
                 seat.user_data()
                     .get::<SeatMoveGrabState>()
-                    .and_then(|s| s.borrow_mut().take())
+                    .and_then(|s| s.lock().unwrap().take())
             {
                 if grab_state.window.alive() {
                     let window_location =
@@ -842,7 +847,7 @@ impl Drop for MoveGrab {
 
             {
                 let cursor_state = seat.user_data().get::<CursorState>().unwrap();
-                cursor_state.set_shape(CursorShape::Default);
+                cursor_state.lock().unwrap().set_shape(CursorShape::Default);
             }
 
             if let Some((mapped, position)) = position {

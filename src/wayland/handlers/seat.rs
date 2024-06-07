@@ -9,7 +9,7 @@ use smithay::{
     delegate_seat,
     input::{keyboard::LedState, pointer::CursorImageStatus, SeatHandler, SeatState},
 };
-use std::cell::RefCell;
+use std::sync::Mutex;
 
 impl SeatHandler for State {
     type KeyboardFocus = KeyboardFocusTarget;
@@ -27,9 +27,10 @@ impl SeatHandler for State {
     ) {
         *seat
             .user_data()
-            .get::<RefCell<CursorImageStatus>>()
+            .get::<Mutex<CursorImageStatus>>()
             .unwrap()
-            .borrow_mut() = image;
+            .lock()
+            .unwrap() = image;
     }
 
     fn focus_changed(

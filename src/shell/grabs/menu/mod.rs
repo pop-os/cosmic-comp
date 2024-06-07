@@ -1,9 +1,6 @@
-use std::{
-    cell::RefCell,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
 };
 
 use calloop::LoopHandle;
@@ -57,7 +54,7 @@ pub use self::default::*;
 pub struct MenuGrabState {
     elements: Arc<Mutex<Vec<Element>>>,
 }
-pub type SeatMenuGrabState = RefCell<Option<MenuGrabState>>;
+pub type SeatMenuGrabState = Mutex<Option<MenuGrabState>>;
 
 impl MenuGrabState {
     pub fn render<I, R>(&self, renderer: &mut R, output: &Output) -> Vec<I>
@@ -228,7 +225,8 @@ impl Program for ContextMenu {
                             .user_data()
                             .get::<SeatMenuGrabState>()
                             .unwrap()
-                            .borrow_mut();
+                            .lock()
+                            .unwrap();
 
                         if let Some(grab_state) = &*grab_state {
                             let mut elements = grab_state.elements.lock().unwrap();
@@ -320,7 +318,8 @@ impl Program for ContextMenu {
                             .user_data()
                             .get::<SeatMenuGrabState>()
                             .unwrap()
-                            .borrow_mut();
+                            .lock()
+                            .unwrap();
 
                         if let Some(grab_state) = &*grab_state {
                             let mut elements = grab_state.elements.lock().unwrap();
@@ -713,7 +712,8 @@ impl MenuGrab {
             .user_data()
             .get::<SeatMenuGrabState>()
             .unwrap()
-            .borrow_mut() = Some(grab_state);
+            .lock()
+            .unwrap() = Some(grab_state);
 
         MenuGrab {
             elements,
@@ -729,7 +729,8 @@ impl Drop for MenuGrab {
             .user_data()
             .get::<SeatMenuGrabState>()
             .unwrap()
-            .borrow_mut()
+            .lock()
+            .unwrap()
             .take();
     }
 }

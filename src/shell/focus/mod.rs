@@ -18,7 +18,7 @@ use smithay::{
         shell::wlr_layer::{KeyboardInteractivity, Layer},
     },
 };
-use std::{borrow::Cow, cell::RefCell};
+use std::{borrow::Cow, sync::Mutex};
 use tracing::{debug, trace};
 
 use self::target::{KeyboardFocusTarget, WindowGroup};
@@ -77,27 +77,28 @@ impl<'a> FocusStackMut<'a> {
     }
 }
 
-pub struct ActiveFocus(RefCell<Option<KeyboardFocusTarget>>);
+pub struct ActiveFocus(Mutex<Option<KeyboardFocusTarget>>);
 
 impl ActiveFocus {
     fn set(seat: &Seat<State>, target: Option<KeyboardFocusTarget>) {
         if !seat
             .user_data()
-            .insert_if_missing(|| ActiveFocus(RefCell::new(target.clone())))
+            .insert_if_missing_threadsafe(|| ActiveFocus(Mutex::new(target.clone())))
         {
             *seat
                 .user_data()
                 .get::<ActiveFocus>()
                 .unwrap()
                 .0
-                .borrow_mut() = target;
+                .lock()
+                .unwrap() = target;
         }
     }
 
     fn get(seat: &Seat<State>) -> Option<KeyboardFocusTarget> {
         seat.user_data()
             .get::<ActiveFocus>()
-            .and_then(|a| a.0.borrow().clone())
+            .and_then(|a| a.0.lock().unwrap().clone())
     }
 }
 
