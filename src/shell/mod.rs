@@ -13,9 +13,14 @@ use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::{
 };
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
-    backend::input::TouchSlot,
+    backend::{input::TouchSlot, renderer::element::RenderElementStates},
     desktop::{
-        layer_map_for_output, space::SpaceElement, utils::surface_primary_scanout_output,
+        layer_map_for_output,
+        space::SpaceElement,
+        utils::{
+            surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
+            take_presentation_feedback_surface_tree, OutputPresentationFeedback,
+        },
         LayerSurface, PopupKind, WindowSurface, WindowSurfaceType,
     },
     input::{
@@ -3155,6 +3160,54 @@ impl Shell {
         self.refresh(xdg_activation_state, workspace_state);
         self.workspaces
             .set_theme(theme.clone(), xdg_activation_state);
+    }
+
+    pub fn take_presentation_feedback(
+        &self,
+        output: &Output,
+        render_element_states: &RenderElementStates,
+    ) -> OutputPresentationFeedback {
+        let mut output_presentation_feedback = OutputPresentationFeedback::new(output);
+
+        let active = self.active_space(output);
+        active.mapped().for_each(|mapped| {
+            mapped.active_window().take_presentation_feedback(
+                &mut output_presentation_feedback,
+                surface_primary_scanout_output,
+                |surface, _| {
+                    surface_presentation_feedback_flags_from_states(surface, render_element_states)
+                },
+            );
+        });
+
+        self.override_redirect_windows.iter().for_each(|or| {
+            if let Some(wl_surface) = or.wl_surface() {
+                take_presentation_feedback_surface_tree(
+                    &wl_surface,
+                    &mut output_presentation_feedback,
+                    surface_primary_scanout_output,
+                    |surface, _| {
+                        surface_presentation_feedback_flags_from_states(
+                            surface,
+                            render_element_states,
+                        )
+                    },
+                )
+            }
+        });
+
+        let map = smithay::desktop::layer_map_for_output(output);
+        for layer_surface in map.layers() {
+            layer_surface.take_presentation_feedback(
+                &mut output_presentation_feedback,
+                surface_primary_scanout_output,
+                |surface, _| {
+                    surface_presentation_feedback_flags_from_states(surface, render_element_states)
+                },
+            );
+        }
+
+        output_presentation_feedback
     }
 }
 

@@ -43,9 +43,8 @@ use smithay::{
         layer_map_for_output,
         utils::{
             send_dmabuf_feedback_surface_tree, send_frames_surface_tree,
-            surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
-            take_presentation_feedback_surface_tree, update_surface_primary_scanout_output,
-            with_surfaces_surface_tree, OutputPresentationFeedback,
+            surface_primary_scanout_output, update_surface_primary_scanout_output,
+            with_surfaces_surface_tree,
         },
         PopupManager,
     },
@@ -578,31 +577,146 @@ impl State {
 }
 
 impl Common {
-    pub fn send_frames(
+    pub fn update_primary_output(
+        &self,
+        output: &Output,
+        render_element_states: &RenderElementStates,
+    ) {
+        let shell = self.shell.read().unwrap();
+        // TODO: also set preferred scale
+
+        // grabs
+        for seat in shell
+            .seats
+            .iter()
+            .filter(|seat| &seat.active_output() == output)
+        {
+            if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {
+                if let Some(grab_state) = move_grab.lock().unwrap().as_ref() {
+                    for (window, _) in grab_state.element().windows() {
+                        window.with_surfaces(|surface, states| {
+                            let primary_scanout_output = update_surface_primary_scanout_output(
+                                surface,
+                                output,
+                                states,
+                                render_element_states,
+                                default_primary_scanout_output_compare,
+                            );
+                            if let Some(output) = primary_scanout_output {
+                                with_fractional_scale(states, |fraction_scale| {
+                                    fraction_scale.set_preferred_scale(
+                                        output.current_scale().fractional_scale(),
+                                    );
+                                });
+                            }
+                        });
+                    }
+                }
+            }
+        }
+
+        // sticky window
+        shell
+            .workspaces
+            .sets
+            .get(output)
+            .unwrap()
+            .sticky_layer
+            .mapped()
+            .for_each(|mapped| {
+                for (window, _) in mapped.windows() {
+                    window.with_surfaces(|surface, states| {
+                        let primary_scanout_output = update_surface_primary_scanout_output(
+                            surface,
+                            output,
+                            states,
+                            render_element_states,
+                            default_primary_scanout_output_compare,
+                        );
+                        if let Some(output) = primary_scanout_output {
+                            with_fractional_scale(states, |fraction_scale| {
+                                fraction_scale
+                                    .set_preferred_scale(output.current_scale().fractional_scale());
+                            });
+                        }
+                    });
+                }
+            });
+
+        // normal windows
+        let active = shell.active_space(output);
+        active.mapped().for_each(|mapped| {
+            for (window, _) in mapped.windows() {
+                window.with_surfaces(|surface, states| {
+                    let primary_scanout_output = update_surface_primary_scanout_output(
+                        surface,
+                        output,
+                        states,
+                        render_element_states,
+                        default_primary_scanout_output_compare,
+                    );
+                    if let Some(output) = primary_scanout_output {
+                        with_fractional_scale(states, |fraction_scale| {
+                            fraction_scale
+                                .set_preferred_scale(output.current_scale().fractional_scale());
+                        });
+                    }
+                });
+            }
+        });
+
+        // OR windows
+        shell.override_redirect_windows.iter().for_each(|or| {
+            if let Some(wl_surface) = or.wl_surface() {
+                with_surfaces_surface_tree(&wl_surface, |surface, states| {
+                    let primary_scanout_output = update_surface_primary_scanout_output(
+                        surface,
+                        output,
+                        states,
+                        render_element_states,
+                        default_primary_scanout_output_compare,
+                    );
+                    if let Some(output) = primary_scanout_output {
+                        with_fractional_scale(states, |fraction_scale| {
+                            fraction_scale
+                                .set_preferred_scale(output.current_scale().fractional_scale());
+                        });
+                    }
+                });
+            }
+        });
+
+        // layer surfaces
+        let map = smithay::desktop::layer_map_for_output(output);
+        for layer_surface in map.layers() {
+            layer_surface.with_surfaces(|surface, states| {
+                let primary_scanout_output = update_surface_primary_scanout_output(
+                    surface,
+                    output,
+                    states,
+                    render_element_states,
+                    default_primary_scanout_output_compare,
+                );
+                if let Some(output) = primary_scanout_output {
+                    with_fractional_scale(states, |fraction_scale| {
+                        fraction_scale
+                            .set_preferred_scale(output.current_scale().fractional_scale());
+                    });
+                }
+            });
+        }
+    }
+
+    pub fn send_dmabuf_feedback(
         &self,
         output: &Output,
         render_element_states: &RenderElementStates,
         mut dmabuf_feedback: impl FnMut(DrmNode) -> Option<SurfaceDmabufFeedback>,
     ) {
-        let time = self.clock.now();
-        let throttle = Some(Duration::from_secs(1));
         let shell = self.shell.read().unwrap();
 
         if let Some(session_lock) = shell.session_lock.as_ref() {
             if let Some(lock_surface) = session_lock.surfaces.get(output) {
-                with_surfaces_surface_tree(lock_surface.wl_surface(), |_surface, states| {
-                    with_fractional_scale(states, |fraction_scale| {
-                        fraction_scale
-                            .set_preferred_scale(output.current_scale().fractional_scale());
-                    });
-                });
-                send_frames_surface_tree(
-                    lock_surface.wl_surface(),
-                    output,
-                    time,
-                    Some(Duration::ZERO),
-                    surface_primary_scanout_output,
-                );
                 if let Some(feedback) =
                     advertised_node_for_surface(lock_surface.wl_surface(), &self.display_handle)
                         .and_then(|source| dmabuf_feedback(source))
@@ -629,45 +743,37 @@ impl Common {
             .iter()
             .filter(|seat| &seat.active_output() == output)
         {
-            let cursor_status = seat
-                .user_data()
-                .get::<RefCell<CursorImageStatus>>()
-                .map(|cell| {
-                    let mut cursor_status = cell.borrow_mut();
-                    if let CursorImageStatus::Surface(ref surface) = *cursor_status {
-                        if !surface.alive() {
-                            *cursor_status = CursorImageStatus::default_named();
+            if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {
+                if let Some(grab_state) = move_grab.lock().unwrap().as_ref() {
+                    for (window, _) in grab_state.element().windows() {
+                        if let Some(feedback) = window
+                            .wl_surface()
+                            .and_then(|wl_surface| {
+                                advertised_node_for_surface(&wl_surface, &self.display_handle)
+                            })
+                            .and_then(|source| dmabuf_feedback(source))
+                        {
+                            window.send_dmabuf_feedback(
+                                output,
+                                &feedback,
+                                render_element_states,
+                                surface_primary_scanout_output,
+                            );
                         }
                     }
-                    cursor_status.clone()
-                })
-                .unwrap_or(CursorImageStatus::default_named());
-
-            if let CursorImageStatus::Surface(wl_surface) = cursor_status {
-                send_frames_surface_tree(&wl_surface, output, time, Some(Duration::ZERO), |_, _| {
-                    None
-                })
+                }
             }
+        }
 
-            if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {
-                if let Some(grab_state) = move_grab.borrow().as_ref() {
-                    let window = grab_state.window();
-                    window.with_surfaces(|surface, states| {
-                        let primary_scanout_output = update_surface_primary_scanout_output(
-                            surface,
-                            output,
-                            states,
-                            render_element_states,
-                            default_primary_scanout_output_compare,
-                        );
-                        if let Some(output) = primary_scanout_output {
-                            with_fractional_scale(states, |fraction_scale| {
-                                fraction_scale
-                                    .set_preferred_scale(output.current_scale().fractional_scale());
-                            });
-                        }
-                    });
-                    window.send_frame(output, time, throttle, surface_primary_scanout_output);
+        shell
+            .workspaces
+            .sets
+            .get(output)
+            .unwrap()
+            .sticky_layer
+            .mapped()
+            .for_each(|mapped| {
+                for (window, _) in mapped.windows() {
                     if let Some(feedback) = window
                         .wl_surface()
                         .and_then(|wl_surface| {
@@ -683,34 +789,11 @@ impl Common {
                         );
                     }
                 }
-            }
-        }
+            });
 
-        shell
-            .workspaces
-            .sets
-            .get(output)
-            .unwrap()
-            .sticky_layer
-            .mapped()
-            .for_each(|mapped| {
-                let window = mapped.active_window();
-                window.with_surfaces(|surface, states| {
-                    let primary_scanout_output = update_surface_primary_scanout_output(
-                        surface,
-                        output,
-                        states,
-                        render_element_states,
-                        |_current_output, _current_state, next_output, _next_state| next_output,
-                    );
-                    if let Some(output) = primary_scanout_output {
-                        with_fractional_scale(states, |fraction_scale| {
-                            fraction_scale
-                                .set_preferred_scale(output.current_scale().fractional_scale());
-                        });
-                    }
-                });
-                window.send_frame(output, time, throttle, surface_primary_scanout_output);
+        let active = shell.active_space(output);
+        active.mapped().for_each(|mapped| {
+            for (window, _) in mapped.windows() {
                 if let Some(feedback) = window
                     .wl_surface()
                     .and_then(|wl_surface| {
@@ -725,86 +808,11 @@ impl Common {
                         surface_primary_scanout_output,
                     );
                 }
-            });
-
-        let active = shell.active_space(output);
-        active.mapped().for_each(|mapped| {
-            let window = mapped.active_window();
-            window.with_surfaces(|surface, states| {
-                let primary_scanout_output = update_surface_primary_scanout_output(
-                    surface,
-                    output,
-                    states,
-                    render_element_states,
-                    |_current_output, _current_state, next_output, _next_state| next_output,
-                );
-                if let Some(output) = primary_scanout_output {
-                    with_fractional_scale(states, |fraction_scale| {
-                        fraction_scale
-                            .set_preferred_scale(output.current_scale().fractional_scale());
-                    });
-                }
-            });
-            window.send_frame(output, time, throttle, surface_primary_scanout_output);
-            if let Some(feedback) = window
-                .wl_surface()
-                .and_then(|wl_surface| {
-                    advertised_node_for_surface(&wl_surface, &self.display_handle)
-                })
-                .and_then(|source| dmabuf_feedback(source))
-            {
-                window.send_dmabuf_feedback(
-                    output,
-                    &feedback,
-                    render_element_states,
-                    surface_primary_scanout_output,
-                );
             }
         });
-        active.minimized_windows.iter().for_each(|m| {
-            let window = m.window.active_window();
-            window.send_frame(output, time, throttle, |_, _| None);
-        });
-
-        for space in shell
-            .workspaces
-            .spaces_for_output(output)
-            .filter(|w| w.handle != active.handle)
-        {
-            space.mapped().for_each(|mapped| {
-                let window = mapped.active_window();
-                window.send_frame(output, time, throttle, |_, _| None);
-            });
-            space.minimized_windows.iter().for_each(|m| {
-                let window = m.window.active_window();
-                window.send_frame(output, time, throttle, |_, _| None);
-            })
-        }
 
         shell.override_redirect_windows.iter().for_each(|or| {
             if let Some(wl_surface) = or.wl_surface() {
-                with_surfaces_surface_tree(&wl_surface, |surface, states| {
-                    let primary_scanout_output = update_surface_primary_scanout_output(
-                        surface,
-                        output,
-                        states,
-                        render_element_states,
-                        default_primary_scanout_output_compare,
-                    );
-                    if let Some(output) = primary_scanout_output {
-                        with_fractional_scale(states, |fraction_scale| {
-                            fraction_scale
-                                .set_preferred_scale(output.current_scale().fractional_scale());
-                        });
-                    }
-                });
-                send_frames_surface_tree(
-                    &wl_surface,
-                    output,
-                    time,
-                    throttle,
-                    surface_primary_scanout_output,
-                );
                 if let Some(feedback) =
                     advertised_node_for_surface(&wl_surface, &self.display_handle)
                         .and_then(|source| dmabuf_feedback(source))
@@ -828,22 +836,6 @@ impl Common {
 
         let map = smithay::desktop::layer_map_for_output(output);
         for layer_surface in map.layers() {
-            layer_surface.with_surfaces(|surface, states| {
-                let primary_scanout_output = update_surface_primary_scanout_output(
-                    surface,
-                    output,
-                    states,
-                    render_element_states,
-                    default_primary_scanout_output_compare,
-                );
-                if let Some(output) = primary_scanout_output {
-                    with_fractional_scale(states, |fraction_scale| {
-                        fraction_scale
-                            .set_preferred_scale(output.current_scale().fractional_scale());
-                    });
-                }
-            });
-            layer_surface.send_frame(output, time, throttle, surface_primary_scanout_output);
             if let Some(feedback) =
                 advertised_node_for_surface(layer_surface.wl_surface(), &self.display_handle)
                     .and_then(|source| dmabuf_feedback(source))
@@ -864,53 +856,118 @@ impl Common {
         }
     }
 
-    pub fn take_presentation_feedback(
-        &self,
-        output: &Output,
-        render_element_states: &RenderElementStates,
-    ) -> OutputPresentationFeedback {
-        let mut output_presentation_feedback = OutputPresentationFeedback::new(output);
+    pub fn send_frames(&self, output: &Output) {
+        let time = self.clock.now();
+        let throttle = Some(Duration::from_secs(1));
         let shell = self.shell.read().unwrap();
+
+        if let Some(session_lock) = shell.session_lock.as_ref() {
+            if let Some(lock_surface) = session_lock.surfaces.get(output) {
+                with_surfaces_surface_tree(lock_surface.wl_surface(), |_surface, states| {
+                    with_fractional_scale(states, |fraction_scale| {
+                        fraction_scale
+                            .set_preferred_scale(output.current_scale().fractional_scale());
+                    });
+                });
+                send_frames_surface_tree(lock_surface.wl_surface(), output, time, None, |_, _| {
+                    Some(output.clone())
+                });
+            }
+        }
+
+        for seat in shell
+            .seats
+            .iter()
+            .filter(|seat| &seat.active_output() == output)
+        {
+            let cursor_status = seat
+                .user_data()
+                .get::<Mutex<CursorImageStatus>>()
+                .map(|lock| {
+                    let mut cursor_status = lock.lock().unwrap();
+                    if let CursorImageStatus::Surface(ref surface) = *cursor_status {
+                        if !surface.alive() {
+                            *cursor_status = CursorImageStatus::default_named();
+                        }
+                    }
+                    cursor_status.clone()
+                })
+                .unwrap_or(CursorImageStatus::default_named());
+
+            if let CursorImageStatus::Surface(wl_surface) = cursor_status {
+                send_frames_surface_tree(&wl_surface, output, time, Some(Duration::ZERO), |_, _| {
+                    None
+                })
+            }
+
+            if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {
+                if let Some(grab_state) = move_grab.lock().unwrap().as_ref() {
+                    for (window, _) in grab_state.element().windows() {
+                        window.send_frame(output, time, throttle, surface_primary_scanout_output);
+                    }
+                }
+            }
+        }
+
+        shell
+            .workspaces
+            .sets
+            .get(output)
+            .unwrap()
+            .sticky_layer
+            .mapped()
+            .for_each(|mapped| {
+                for (window, _) in mapped.windows() {
+                    window.send_frame(output, time, throttle, surface_primary_scanout_output);
+                }
+            });
 
         let active = shell.active_space(output);
         active.mapped().for_each(|mapped| {
-            mapped.active_window().take_presentation_feedback(
-                &mut output_presentation_feedback,
-                surface_primary_scanout_output,
-                |surface, _| {
-                    surface_presentation_feedback_flags_from_states(surface, render_element_states)
-                },
-            );
+            for (window, _) in mapped.windows() {
+                window.send_frame(output, time, throttle, surface_primary_scanout_output);
+            }
         });
+
+        // other (throttled) windows
+        active.minimized_windows.iter().for_each(|m| {
+            for (window, _) in m.window.windows() {
+                window.send_frame(output, time, throttle, |_, _| None);
+            }
+        });
+        for space in shell
+            .workspaces
+            .spaces_for_output(output)
+            .filter(|w| w.handle != active.handle)
+        {
+            space.mapped().for_each(|mapped| {
+                for (window, _) in mapped.windows() {
+                    window.send_frame(output, time, throttle, |_, _| None);
+                }
+            });
+            space.minimized_windows.iter().for_each(|m| {
+                for (window, _) in m.window.windows() {
+                    window.send_frame(output, time, throttle, |_, _| None);
+                }
+            })
+        }
 
         shell.override_redirect_windows.iter().for_each(|or| {
             if let Some(wl_surface) = or.wl_surface() {
-                take_presentation_feedback_surface_tree(
+                send_frames_surface_tree(
                     &wl_surface,
-                    &mut output_presentation_feedback,
+                    output,
+                    time,
+                    throttle,
                     surface_primary_scanout_output,
-                    |surface, _| {
-                        surface_presentation_feedback_flags_from_states(
-                            surface,
-                            render_element_states,
-                        )
-                    },
-                )
+                );
             }
         });
 
         let map = smithay::desktop::layer_map_for_output(output);
         for layer_surface in map.layers() {
-            layer_surface.take_presentation_feedback(
-                &mut output_presentation_feedback,
-                surface_primary_scanout_output,
-                |surface, _| {
-                    surface_presentation_feedback_flags_from_states(surface, render_element_states)
-                },
-            );
+            layer_surface.send_frame(output, time, throttle, surface_primary_scanout_output);
         }
-
-        output_presentation_feedback
     }
 }
 
