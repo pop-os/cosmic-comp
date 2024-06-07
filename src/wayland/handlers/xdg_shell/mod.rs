@@ -413,7 +413,11 @@ impl XdgShellHandler for State {
     ) {
         let seat = Seat::from_resource(&seat).unwrap();
         location -= with_states(surface.wl_surface(), |states| {
-            states.cached_state.current::<SurfaceCachedState>().geometry
+            states
+                .cached_state
+                .get::<SurfaceCachedState>()
+                .current()
+                .geometry
         })
         .unwrap_or_default()
         .loc;

@@ -425,7 +425,8 @@ fn get_popup_toplevel_coords(popup: &PopupSurface) -> Point<i32, Logical> {
     offset += with_states(&parent, |states| {
         states
             .cached_state
-            .current::<SurfaceCachedState>()
+            .get::<SurfaceCachedState>()
+            .current()
             .geometry
             .map(|x| x.loc)
             .unwrap_or_else(|| (0, 0).into())

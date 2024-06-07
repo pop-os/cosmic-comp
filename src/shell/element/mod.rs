@@ -621,7 +621,7 @@ impl CosmicMapped {
     ) -> (Vec<C>, Vec<C>)
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-        <R as Renderer>::TextureId: Clone + 'static,
+        <R as Renderer>::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         C: From<CosmicMappedRenderElement<R>>,
     {

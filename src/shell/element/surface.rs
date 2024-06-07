@@ -407,7 +407,11 @@ impl CosmicSurface {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 Some(with_states(toplevel.wl_surface(), |states| {
-                    states.cached_state.current::<SurfaceCachedState>().min_size
+                    states
+                        .cached_state
+                        .get::<SurfaceCachedState>()
+                        .current()
+                        .min_size
                 }))
                 .filter(|size| !(size.w == 0 && size.h == 0))
             }
@@ -426,7 +430,11 @@ impl CosmicSurface {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 Some(with_states(toplevel.wl_surface(), |states| {
-                    states.cached_state.current::<SurfaceCachedState>().max_size
+                    states
+                        .cached_state
+                        .get::<SurfaceCachedState>()
+                        .current()
+                        .max_size
                 }))
                 .filter(|size| !(size.w == 0 && size.h == 0))
             }
