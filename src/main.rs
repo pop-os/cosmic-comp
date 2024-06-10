@@ -146,9 +146,7 @@ fn main() -> Result<()> {
             let shell = state.common.shell.read().unwrap();
             if shell.animations_going() {
                 for output in shell.outputs().cloned().collect::<Vec<_>>().into_iter() {
-                    state
-                        .backend
-                        .schedule_render(&state.common.event_loop_handle, &output);
+                    state.backend.schedule_render(&output);
                 }
             }
         }

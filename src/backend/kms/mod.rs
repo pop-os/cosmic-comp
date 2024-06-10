@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{
-    config::OutputState, shell::Shell, state::BackendData, utils::prelude::*,
-    wayland::handlers::output,
-};
+use crate::{config::OutputState, shell::Shell, state::BackendData, utils::prelude::*};
 
 use anyhow::{Context, Result};
 use calloop::LoopSignal;
 use render::gles::GbmGlowBackend;
-use smallvec::SmallVec;
 use smithay::{
     backend::{
         allocator::{
@@ -87,10 +83,9 @@ pub fn init_backend(
         .context("Failed to initialize udev connection")?;
 
     // handle session events
-    let handle = event_loop.handle();
     let loop_signal = event_loop.get_signal();
     let dispatcher = udev_dispatcher.clone();
-    let session_event_source = event_loop
+    event_loop
         .handle()
         .insert_source(notifier, move |event, &mut (), state| match event {
             SessionEvent::ActivateSession => {
@@ -226,7 +221,8 @@ fn init_udev(
         }
     });
 
-    let udev_event_source = evlh.register_dispatcher(dispatcher.clone()).unwrap();
+    evlh.register_dispatcher(dispatcher.clone())
+        .context("Failed to register udev event source")?;
 
     Ok(dispatcher)
 }
@@ -622,8 +618,9 @@ impl KmsState {
                             )?);
                         }
                         std::mem::drop(output_config);
-                        surface.set_mode(*mode);
-                        // TODO: .context("Failed to apply new mode")?;
+                        surface
+                            .set_mode(*mode)
+                            .context("Failed to apply new mode")?;
                     }
                 }
             }

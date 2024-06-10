@@ -649,7 +649,7 @@ impl Workspaces {
             return;
         }
 
-        if let Some(set) = self.sets.remove(output) {
+        if let Some(set) = self.sets.shift_remove(output) {
             {
                 let map = layer_map_for_output(output);
                 for surface in map.layers() {

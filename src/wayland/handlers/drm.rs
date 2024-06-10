@@ -9,6 +9,7 @@ use smithay::{
     reexports::wayland_server::{protocol::wl_buffer::WlBuffer, Resource},
     wayland::dmabuf::DmabufGlobal,
 };
+use tracing::warn;
 
 impl DrmHandler<Option<DrmNode>> for State {
     fn dmabuf_imported(
@@ -33,7 +34,9 @@ impl DrmHandler<Option<DrmNode>> for State {
                     device.active_buffers.insert(buffer.downgrade());
                 }
 
-                kms_state.refresh_used_devices();
+                if let Err(err) = kms_state.refresh_used_devices() {
+                    warn!(?err, "Failed to init devices.");
+                };
             }
         }
     }

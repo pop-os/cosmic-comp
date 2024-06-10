@@ -7,6 +7,7 @@ use smithay::{
     reexports::wayland_server::Resource,
     wayland::dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
 };
+use tracing::warn;
 
 impl DmabufHandler for State {
     fn dmabuf_state(&mut self) -> &mut DmabufState {
@@ -41,7 +42,9 @@ impl DmabufHandler for State {
                     {
                         device.active_buffers.insert(buffer.downgrade());
                     }
-                    kms_state.refresh_used_devices();
+                    if let Err(err) = kms_state.refresh_used_devices() {
+                        warn!(?err, "Failed to init devices.");
+                    };
                 }
             }
             Ok(None) => {

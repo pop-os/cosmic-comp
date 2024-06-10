@@ -98,11 +98,11 @@ use time::UtcOffset;
 
 use std::{
     cell::RefCell,
-    collections::{HashSet, VecDeque},
+    collections::HashSet,
     ffi::OsString,
     process::Child,
     sync::{Arc, Condvar, Mutex, Once, RwLock},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 #[derive(RustEmbed)]
@@ -326,13 +326,13 @@ impl BackendData {
 
             layer_map_for_output(&output).arrange();
 
-            self.schedule_render(loop_handle, &output);
+            self.schedule_render(&output);
         }
 
         Ok(())
     }
 
-    pub fn schedule_render(&mut self, loop_handle: &LoopHandle<'_, State>, output: &Output) {
+    pub fn schedule_render(&mut self, output: &Output) {
         match self {
             BackendData::Winit(_) => {} // We cannot do this on the winit backend.
             // Winit has a very strict render-loop and skipping frames breaks atleast the wayland winit-backend.
