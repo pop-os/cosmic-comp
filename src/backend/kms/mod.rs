@@ -36,6 +36,7 @@ use smithay::{
 use tracing::{error, info, trace, warn};
 
 use std::{
+    borrow::BorrowMut,
     collections::{HashMap, HashSet},
     path::Path,
     sync::{Arc, Condvar, Mutex, RwLock},
@@ -49,6 +50,8 @@ mod surface;
 
 use device::*;
 pub use surface::Timings;
+
+use super::render::init_shaders;
 
 #[derive(Debug)]
 pub struct KmsState {
@@ -386,6 +389,18 @@ impl KmsState {
             if device.in_use(self.primary_node.as_ref()) {
                 if device.egl.is_none() {
                     let egl = init_egl(&device.gbm).context("Failed to create EGL context")?;
+                    let mut renderer = unsafe {
+                        GlowRenderer::new(
+                            EGLContext::new_shared_with_priority(
+                                &egl.display,
+                                &egl.context,
+                                ContextPriority::High,
+                            )
+                            .context("Failed to create shared EGL context")?,
+                        )
+                        .context("Failed to create GL renderer")?
+                    };
+                    init_shaders(renderer.borrow_mut()).context("Failed to compile shaders")?;
                     self.api.as_mut().add_node(
                         device.render_node,
                         GbmAllocator::new(
@@ -393,17 +408,7 @@ impl KmsState {
                             // SCANOUT because stride bugs
                             GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
                         ),
-                        unsafe {
-                            GlowRenderer::new(
-                                EGLContext::new_shared_with_priority(
-                                    &egl.display,
-                                    &egl.context,
-                                    ContextPriority::High,
-                                )
-                                .context("Failed to create shared EGL context")?,
-                            )
-                            .context("Failed to create GL renderer")?
-                        },
+                        renderer,
                     );
                     device.egl = Some(egl);
                 }
