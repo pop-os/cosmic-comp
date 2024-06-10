@@ -260,8 +260,7 @@ impl ScreencopyHandler for State {
                 };
 
                 output.add_frame(session, frame);
-                self.backend
-                    .schedule_render(&self.common.event_loop_handle, &output);
+                self.backend.schedule_render(&output);
             }
             ImageSourceData::Workspace(handle) => {
                 render_workspace_to_buffer(self, session, frame, handle)

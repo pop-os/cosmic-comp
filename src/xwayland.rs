@@ -351,8 +351,7 @@ impl XwmHandler for State {
         }
 
         for output in outputs.into_iter() {
-            self.backend
-                .schedule_render(&self.common.event_loop_handle, &output);
+            self.backend.schedule_render(&output);
         }
     }
 

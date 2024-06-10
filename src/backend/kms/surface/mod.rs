@@ -17,6 +17,7 @@ use crate::{
 };
 
 use anyhow::{Context, Result};
+use calloop::channel::Channel;
 use smithay::{
     backend::{
         allocator::{
@@ -80,7 +81,6 @@ use std::{
         mpsc::{Receiver, SyncSender},
         Arc, Condvar, Mutex, RwLock,
     },
-    thread::JoinHandle,
     time::Duration,
 };
 
@@ -110,7 +110,6 @@ pub struct Surface {
 
     loop_handle: LoopHandle<'static, State>,
     thread_command: Sender<ThreadCommand>,
-    thread_handle: JoinHandle<()>,
     thread_token: RegistrationToken,
 }
 
@@ -234,8 +233,7 @@ pub enum ThreadCommand {
     UpdateMirroring(Option<Output>),
     VBlank(Option<DrmEventMetadata>),
     ScheduleRender,
-    // TODO: Error handling
-    SetMode(Mode),
+    SetMode(Mode, SyncSender<Result<()>>),
     End,
 }
 
@@ -262,220 +260,29 @@ impl Surface {
         let (tx, rx) = channel::<ThreadCommand>();
         let (tx2, rx2) = channel::<SurfaceCommand>();
         let active = Arc::new(AtomicBool::new(false));
-        let active_clone = active.clone();
 
+        let active_clone = active.clone();
         let frame_callback_seq_clone = frame_callback_seq.clone();
         let output_clone = output.clone();
-        let thread_handle = std::thread::spawn(move || {
-            profiling::register_thread!(format!("Surface Thread {}", output.name()));
 
-            let mut event_loop = EventLoop::try_new().unwrap();
-
-            let api = GpuManager::new(GbmGlowBackend::<DrmDeviceFd>::default())
-                .expect("Failed to initialize rendering");
-            /*
-            let software_api = GpuManager::new(GbmPixmanBackend::<DrmDeviceFd>::with_allocator_flags(
-                gbm_flags,
-            ))
-            .context("Failed to initialize software rendering");
-            */
-
-            #[cfg(feature = "debug")]
-            let egui = {
-                let state = smithay_egui::EguiState::new(
-                    smithay::utils::Rectangle::from_loc_and_size((0, 0), (400, 800)),
-                );
-                let mut visuals: egui::style::Visuals = Default::default();
-                visuals.window_shadow.extrusion = 0.0;
-                state.context().set_visuals(visuals);
-                state
-            };
-
-            let mut state = SurfaceThreadState {
-                api,
-                primary_node,
-                target_node,
-                active: active_clone,
-                compositor: None,
-
-                state: QueueState::Idle,
-                timings: Timings::new(None, false),
-                frame_callback_seq: frame_callback_seq_clone,
-                thread_sender: tx2,
-
-                output: output_clone,
-                mirroring: None,
-                mirroring_textures: HashMap::new(),
-
-                shell,
-                loop_handle: event_loop.handle(),
-                clock: Clock::new(),
-                #[cfg(feature = "debug")]
-                egui,
-            };
-
-            let signal = event_loop.get_signal();
-            event_loop
-                .handle()
-                .insert_source(rx, move |command, _, state| match command {
-                    Event::Msg(ThreadCommand::Suspend) => {
-                        state.active.store(false, Ordering::SeqCst);
-                        let _ = state.compositor.take();
-
-                        match std::mem::replace(&mut state.state, QueueState::Idle) {
-                            QueueState::Idle => {}
-                            QueueState::Queued(token)
-                            | QueueState::WaitingForEstimatedVBlank(token) => {
-                                state.loop_handle.remove(token);
-                            }
-                            QueueState::WaitingForVBlank { .. } => {
-                                state.timings.discard_current_frame()
-                            }
-                            QueueState::WaitingForEstimatedVBlankAndQueued {
-                                estimated_vblank,
-                                queued_render,
-                            } => {
-                                state.loop_handle.remove(estimated_vblank);
-                                state.loop_handle.remove(queued_render);
-                            }
-                        };
-                    }
-                    Event::Msg(ThreadCommand::Resume {
-                        surface,
-                        gbm,
-                        cursor_size,
-                        vrr,
-                        result,
-                    }) => {
-                        let driver = surface.get_driver().ok();
-                        let mut planes = surface.planes().clone();
-
-                        // QUIRK: Using an overlay plane on a nvidia card breaks the display controller (wtf...)
-                        if driver.is_some_and(|driver| {
-                            driver
-                                .name()
-                                .to_string_lossy()
-                                .to_lowercase()
-                                .contains("nvidia")
-                        }) {
-                            planes.overlay = vec![];
-                        }
-
-                        let render_formats = state
-                            .api
-                            .single_renderer(&state.target_node)
-                            .unwrap()
-                            .dmabuf_formats()
-                            .collect();
-
-                        state
-                            .timings
-                            .set_refresh_interval(Some(Duration::from_nanos(
-                                drm_helpers::calculate_refresh_rate(surface.pending_mode()) as u64,
-                            )));
-                        state.timings.set_vrr(vrr);
-
-                        match DrmCompositor::new(
-                            &state.output,
-                            surface,
-                            Some(planes),
-                            GbmAllocator::new(
-                                gbm.clone(),
-                                GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
-                            ),
-                            gbm.clone(),
-                            &[
-                                Fourcc::Abgr2101010,
-                                Fourcc::Argb2101010,
-                                Fourcc::Abgr8888,
-                                Fourcc::Argb8888,
-                            ],
-                            render_formats,
-                            cursor_size,
-                            Some(gbm),
-                        ) {
-                            Ok(compositor) => {
-                                state.active.store(true, Ordering::SeqCst);
-                                state.compositor = Some(compositor);
-                                let _ = result.send(Ok(()));
-                            }
-                            Err(err) => {
-                                state.active.store(false, Ordering::SeqCst);
-                                let _ = result.send(Err(err.into()));
-                            }
-                        }
-                    }
-                    Event::Msg(ThreadCommand::NodeAdded { node, gbm, egl }) => {
-                        //if let Some(egl) = egl {
-                        let mut renderer =
-                            unsafe { GlowRenderer::new(egl) }.expect("Failed to create renderer");
-                        init_shaders(renderer.borrow_mut());
-
-                        state.api.as_mut().add_node(node, gbm, renderer);
-                        /*
-                        } else {
-                            state.software_api.as_mut().add_node(node, gbm);
-                        }
-                        */
-
-                        #[cfg(feature = "debug")]
-                        {
-                            let renderer = state.api.single_renderer(node);
-                            state
-                                .egui
-                                .load_svg(renderer, String::from("intel"), INTEL_LOGO)
-                                .unwrap();
-                            state
-                                .egui
-                                .load_svg(renderer, String::from("amd"), AMD_LOGO)
-                                .unwrap();
-                            state
-                                .egui
-                                .load_svg(renderer, String::from("nvidia"), NVIDIA_LOGO)
-                                .unwrap();
-                        }
-                    }
-                    Event::Msg(ThreadCommand::NodeRemoved { node }) => {
-                        state.api.as_mut().remove_node(&node);
-                        //state.software_api.as_mut().remove_node(node);
-                    }
-                    Event::Msg(ThreadCommand::VBlank(metadata)) => {
-                        state.on_vblank(metadata);
-                    }
-                    Event::Msg(ThreadCommand::ScheduleRender) => {
-                        {
-                            // Wait for start up.
-                            let (lock, cvar) = &*startup_done;
-                            // As long as the value inside the `Mutex<bool>` is `false`, we wait.
-                            let _guard = cvar
-                                .wait_while(lock.lock().unwrap(), |startup_done| !*startup_done)
-                                .unwrap();
-                        }
-
-                        state.queue_redraw(false);
-                    }
-                    Event::Msg(ThreadCommand::UpdateMirroring(mirroring)) => {
-                        state.mirroring = mirroring;
-                        state.mirroring_textures.clear();
-                    }
-                    Event::Msg(ThreadCommand::SetMode(mode)) => {
-                        if let Some(compositor) = state.compositor.as_mut() {
-                            compositor.use_mode(mode);
-                        }
-                    }
-                    Event::Closed | Event::Msg(ThreadCommand::End) => {
-                        signal.stop();
-                        signal.wakeup();
-                    }
-                })
-                .unwrap();
-
-            if let Err(err) = event_loop.run(None, &mut state, |_| {
-                // TODO: if queued, but token invalid, schedule redraw timer again
-            }) {
-                error!("Surface thread crashed: {}", err);
-            }
-        });
+        std::thread::Builder::new()
+            .name(format!("surface-{}", output.name()))
+            .spawn(move || {
+                if let Err(err) = surface_thread(
+                    output_clone,
+                    primary_node,
+                    target_node,
+                    shell,
+                    active_clone,
+                    frame_callback_seq_clone,
+                    tx2,
+                    rx,
+                    startup_done,
+                ) {
+                    error!("Surface thread crashed: {}", err);
+                }
+            })
+            .context("Failed to spawn surface thread")?;
 
         let output_clone = output.clone();
         let thread_token = evlh
@@ -540,46 +347,54 @@ impl Surface {
             plane_formats: HashSet::new(),
             loop_handle: evlh.clone(),
             thread_command: tx,
-            thread_handle,
             thread_token,
         })
-    }
-
-    pub fn add_node(&mut self, node: DrmNode, gbm: GbmAllocator<DrmDeviceFd>, egl: EGLContext) {
-        self.known_nodes.insert(node);
-        self.thread_command
-            .send(ThreadCommand::NodeAdded { node, gbm, egl });
-    }
-
-    pub fn remove_node(&mut self, node: DrmNode) {
-        self.known_nodes.remove(&node);
-        self.thread_command
-            .send(ThreadCommand::NodeRemoved { node });
     }
 
     pub fn known_nodes(&self) -> &HashSet<DrmNode> {
         &self.known_nodes
     }
 
+    pub fn is_active(&self) -> bool {
+        self.active.load(Ordering::SeqCst)
+    }
+
+    pub fn add_node(&mut self, node: DrmNode, gbm: GbmAllocator<DrmDeviceFd>, egl: EGLContext) {
+        self.known_nodes.insert(node);
+        let _ = self
+            .thread_command
+            .send(ThreadCommand::NodeAdded { node, gbm, egl });
+    }
+
+    pub fn remove_node(&mut self, node: DrmNode) {
+        self.known_nodes.remove(&node);
+        let _ = self
+            .thread_command
+            .send(ThreadCommand::NodeRemoved { node });
+    }
+
     pub fn on_vblank(&self, metadata: Option<DrmEventMetadata>) {
-        self.thread_command.send(ThreadCommand::VBlank(metadata));
+        let _ = self.thread_command.send(ThreadCommand::VBlank(metadata));
     }
 
     pub fn schedule_render(&self) {
-        self.thread_command.send(ThreadCommand::ScheduleRender);
+        let _ = self.thread_command.send(ThreadCommand::ScheduleRender);
     }
 
     pub fn set_mirroring(&mut self, output: Option<Output>) {
-        self.thread_command
+        let _ = self
+            .thread_command
             .send(ThreadCommand::UpdateMirroring(output));
     }
 
-    pub fn set_mode(&mut self, mode: Mode) {
-        self.thread_command.send(ThreadCommand::SetMode(mode));
+    pub fn set_mode(&mut self, mode: Mode) -> Result<()> {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let _ = self.thread_command.send(ThreadCommand::SetMode(mode, tx));
+        rx.recv().context("Surface thread died")?
     }
 
     pub fn suspend(&mut self) {
-        self.thread_command.send(ThreadCommand::Suspend);
+        let _ = self.thread_command.send(ThreadCommand::Suspend);
     }
 
     pub fn resume(
@@ -615,10 +430,6 @@ impl Surface {
 
         rx.recv().context("Surface thread died")?
     }
-
-    pub fn is_active(&self) -> bool {
-        self.active.load(Ordering::SeqCst)
-    }
 }
 
 impl Drop for Surface {
@@ -628,7 +439,246 @@ impl Drop for Surface {
     }
 }
 
+fn surface_thread(
+    output: Output,
+    primary_node: DrmNode,
+    target_node: DrmNode,
+    shell: Arc<RwLock<Shell>>,
+    active: Arc<AtomicBool>,
+    frame_callback_seq: Arc<AtomicUsize>,
+    thread_sender: Sender<SurfaceCommand>,
+    thread_receiver: Channel<ThreadCommand>,
+    startup_done: Arc<(Mutex<bool>, Condvar)>,
+) -> Result<()> {
+    profiling::register_thread!(format!("Surface Thread {}", output.name()));
+
+    let mut event_loop = EventLoop::try_new().unwrap();
+
+    let api = GpuManager::new(GbmGlowBackend::<DrmDeviceFd>::default())
+        .context("Failed to initialize rendering api")?;
+    /*
+    let software_api = GpuManager::new(GbmPixmanBackend::<DrmDeviceFd>::with_allocator_flags(
+        gbm_flags,
+    ))
+    .context("Failed to initialize software rendering");
+    */
+
+    #[cfg(feature = "debug")]
+    let egui = {
+        let state = smithay_egui::EguiState::new(smithay::utils::Rectangle::from_loc_and_size(
+            (0, 0),
+            (400, 800),
+        ));
+        let mut visuals: egui::style::Visuals = Default::default();
+        visuals.window_shadow.extrusion = 0.0;
+        state.context().set_visuals(visuals);
+        state
+    };
+
+    let mut state = SurfaceThreadState {
+        api,
+        primary_node,
+        target_node,
+        active,
+        compositor: None,
+
+        state: QueueState::Idle,
+        timings: Timings::new(None, false),
+        frame_callback_seq,
+        thread_sender,
+
+        output,
+        mirroring: None,
+        mirroring_textures: HashMap::new(),
+
+        shell,
+        loop_handle: event_loop.handle(),
+        clock: Clock::new(),
+        #[cfg(feature = "debug")]
+        egui,
+    };
+
+    let signal = event_loop.get_signal();
+    event_loop
+        .handle()
+        .insert_source(thread_receiver, move |command, _, state| match command {
+            Event::Msg(ThreadCommand::Suspend) => state.suspend(),
+            Event::Msg(ThreadCommand::Resume {
+                surface,
+                gbm,
+                cursor_size,
+                vrr,
+                result,
+            }) => {
+                let _ = result.send(state.resume(surface, gbm, cursor_size, vrr));
+            }
+            Event::Msg(ThreadCommand::NodeAdded { node, gbm, egl }) => {
+                if let Err(err) = state.node_added(node, gbm, egl) {
+                    warn!(?err, ?node, "Failed to add node to surface-thread");
+                }
+            }
+            Event::Msg(ThreadCommand::NodeRemoved { node }) => {
+                state.node_removed(node);
+            }
+            Event::Msg(ThreadCommand::VBlank(metadata)) => {
+                state.on_vblank(metadata);
+            }
+            Event::Msg(ThreadCommand::ScheduleRender) => {
+                {
+                    // Wait for start up.
+                    let (lock, cvar) = &*startup_done;
+                    // As long as the value inside the `Mutex<bool>` is `false`, we wait.
+                    let _guard = cvar
+                        .wait_while(lock.lock().unwrap(), |startup_done| !*startup_done)
+                        .unwrap();
+                }
+
+                state.queue_redraw(false);
+            }
+            Event::Msg(ThreadCommand::UpdateMirroring(mirroring_output)) => {
+                state.update_mirroring(mirroring_output);
+            }
+            Event::Msg(ThreadCommand::SetMode(mode, result)) => {
+                if let Some(compositor) = state.compositor.as_mut() {
+                    let _ = result.send(compositor.use_mode(mode).map_err(Into::into));
+                }
+            }
+            Event::Closed | Event::Msg(ThreadCommand::End) => {
+                signal.stop();
+                signal.wakeup();
+            }
+        })
+        .map_err(|insert_error| insert_error.error)
+        .context("Failed to listen for events")?;
+
+    event_loop.run(None, &mut state, |_| {}).map_err(Into::into)
+}
+
 impl SurfaceThreadState {
+    fn suspend(&mut self) {
+        self.active.store(false, Ordering::SeqCst);
+        let _ = self.compositor.take();
+
+        match std::mem::replace(&mut self.state, QueueState::Idle) {
+            QueueState::Idle => {}
+            QueueState::Queued(token) | QueueState::WaitingForEstimatedVBlank(token) => {
+                self.loop_handle.remove(token);
+            }
+            QueueState::WaitingForVBlank { .. } => self.timings.discard_current_frame(),
+            QueueState::WaitingForEstimatedVBlankAndQueued {
+                estimated_vblank,
+                queued_render,
+            } => {
+                self.loop_handle.remove(estimated_vblank);
+                self.loop_handle.remove(queued_render);
+            }
+        };
+    }
+
+    fn resume(
+        &mut self,
+        surface: DrmSurface,
+        gbm: GbmDevice<DrmDeviceFd>,
+        cursor_size: Size<u32, BufferCoords>,
+        vrr: bool,
+    ) -> Result<()> {
+        let driver = surface.get_driver().ok();
+        let mut planes = surface.planes().clone();
+
+        // QUIRK: Using an overlay plane on a nvidia card breaks the display controller (wtf...)
+        if driver.is_some_and(|driver| {
+            driver
+                .name()
+                .to_string_lossy()
+                .to_lowercase()
+                .contains("nvidia")
+        }) {
+            planes.overlay = vec![];
+        }
+
+        let render_formats = self
+            .api
+            .single_renderer(&self.target_node)
+            .unwrap()
+            .dmabuf_formats()
+            .collect();
+
+        self.timings.set_refresh_interval(Some(Duration::from_nanos(
+            drm_helpers::calculate_refresh_rate(surface.pending_mode()) as u64,
+        )));
+        self.timings.set_vrr(vrr);
+
+        match DrmCompositor::new(
+            &self.output,
+            surface,
+            Some(planes),
+            GbmAllocator::new(
+                gbm.clone(),
+                GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
+            ),
+            gbm.clone(),
+            &[
+                Fourcc::Abgr2101010,
+                Fourcc::Argb2101010,
+                Fourcc::Abgr8888,
+                Fourcc::Argb8888,
+            ],
+            render_formats,
+            cursor_size,
+            Some(gbm),
+        ) {
+            Ok(compositor) => {
+                self.active.store(true, Ordering::SeqCst);
+                self.compositor = Some(compositor);
+                Ok(())
+            }
+            Err(err) => {
+                self.active.store(false, Ordering::SeqCst);
+                Err(err.into())
+            }
+        }
+    }
+
+    fn node_added(
+        &mut self,
+        node: DrmNode,
+        gbm: GbmAllocator<DrmDeviceFd>,
+        egl: EGLContext,
+    ) -> Result<()> {
+        //if let Some(egl) = egl {
+        let mut renderer =
+            unsafe { GlowRenderer::new(egl) }.context("Failed to create renderer")?;
+        init_shaders(renderer.borrow_mut()).context("Failed to initialize shaders")?;
+
+        self.api.as_mut().add_node(node, gbm, renderer);
+        /*
+        } else {
+            self.software_api.as_mut().add_node(node, gbm);
+        }
+        */
+
+        #[cfg(feature = "debug")]
+        {
+            let renderer = self.api.single_renderer(node);
+            self.egui
+                .load_svg(renderer, String::from("intel"), INTEL_LOGO)
+                .unwrap();
+            self.egui
+                .load_svg(renderer, String::from("amd"), AMD_LOGO)
+                .unwrap();
+            self.egui
+                .load_svg(renderer, String::from("nvidia"), NVIDIA_LOGO)
+                .unwrap();
+        }
+
+        Ok(())
+    }
+
+    fn node_removed(&mut self, node: DrmNode) {
+        self.api.as_mut().remove_node(&node);
+        //self.software_api.as_mut().remove_node(node);
+    }
+
     fn on_vblank(&mut self, metadata: Option<DrmEventMetadata>) {
         let Some(compositor) = self.compositor.as_mut() else {
             return;
@@ -1254,14 +1304,20 @@ impl SurfaceThreadState {
         self.state = QueueState::WaitingForEstimatedVBlank(token);
     }
 
+    fn update_mirroring(&mut self, mirroring_output: Option<Output>) {
+        self.mirroring = mirroring_output;
+        self.mirroring_textures.clear();
+    }
+
     fn send_frame_callbacks(&mut self) {
         if self.mirroring.is_none() {
-            self.thread_sender.send(SurfaceCommand::SendFrames);
+            let _ = self.thread_sender.send(SurfaceCommand::SendFrames);
         }
     }
 
     fn send_dmabuf_feedback(&mut self, states: RenderElementStates) {
-        self.thread_sender
+        let _ = self
+            .thread_sender
             .send(SurfaceCommand::RenderStates(states));
     }
 }

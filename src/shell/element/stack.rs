@@ -56,7 +56,6 @@ use smithay::{
 };
 use std::{
     borrow::Cow,
-    cell::RefCell,
     fmt,
     hash::Hash,
     sync::{

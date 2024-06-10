@@ -148,8 +148,7 @@ impl CompositorHandler for State {
 
         // schedule a new render
         if let Some(output) = shell.visible_output_for_surface(surface) {
-            self.backend
-                .schedule_render(&self.common.event_loop_handle, &output);
+            self.backend.schedule_render(&output);
         }
 
         if mapped {

@@ -253,7 +253,7 @@ impl State {
             self.backend.kms().drm_devices.insert(drm_node, device);
         }
 
-        self.backend.kms().refresh_used_devices();
+        self.backend.kms().refresh_used_devices()?;
 
         self.common
             .output_configuration_state
@@ -345,7 +345,7 @@ impl State {
             }
         }
 
-        self.backend.kms().refresh_used_devices();
+        self.backend.kms().refresh_used_devices()?;
 
         self.common
             .output_configuration_state
