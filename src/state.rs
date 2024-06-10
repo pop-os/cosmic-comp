@@ -60,7 +60,7 @@ use smithay::{
     utils::{Clock, IsAlive, Monotonic},
     wayland::{
         alpha_modifier::AlphaModifierState,
-        compositor::{CompositorClientState, CompositorState},
+        compositor::{CompositorClientState, CompositorState, SurfaceData},
         dmabuf::{DmabufFeedback, DmabufGlobal, DmabufState},
         fractional_scale::{with_fractional_scale, FractionalScaleManagerState},
         idle_inhibit::IdleInhibitManagerState,
@@ -231,6 +231,18 @@ pub enum BackendData {
 pub struct SurfaceDmabufFeedback {
     pub render_feedback: DmabufFeedback,
     pub scanout_feedback: DmabufFeedback,
+}
+
+#[derive(Debug)]
+struct SurfaceFrameThrottlingState {
+    last_sent_at: RefCell<Option<(Output, usize)>>,
+}
+impl Default for SurfaceFrameThrottlingState {
+    fn default() -> Self {
+        SurfaceFrameThrottlingState {
+            last_sent_at: RefCell::new(None),
+        }
+    }
 }
 
 impl BackendData {
@@ -836,9 +848,45 @@ impl Common {
         }
     }
 
-    pub fn send_frames(&self, output: &Output) {
+    pub fn send_frames(&self, output: &Output, sequence: Option<usize>) {
         let time = self.clock.now();
-        let throttle = Some(Duration::from_secs(1));
+        let should_send = |surface: &WlSurface, states: &SurfaceData| {
+            // Do the standard primary scanout output check. For pointer surfaces it deduplicates
+            // the frame callbacks across potentially multiple outputs, and for regular windows and
+            // layer-shell surfaces it avoids sending frame callbacks to invisible surfaces.
+            let current_primary_output = surface_primary_scanout_output(surface, states);
+            if current_primary_output.as_ref() != Some(output) {
+                return None;
+            }
+
+            let Some(sequence) = sequence else {
+                return Some(output.clone());
+            };
+
+            // Next, check the throttling status.
+            let frame_throttling_state = states
+                .data_map
+                .get_or_insert(SurfaceFrameThrottlingState::default);
+            let mut last_sent_at = frame_throttling_state.last_sent_at.borrow_mut();
+
+            let mut send = true;
+
+            // If we already sent a frame callback to this surface this output refresh
+            // cycle, don't send one again to prevent empty-damage commit busy loops.
+            if let Some((last_output, last_sequence)) = &*last_sent_at {
+                if last_output == output && *last_sequence == sequence {
+                    send = false;
+                }
+            }
+
+            if send {
+                *last_sent_at = Some((output.clone(), sequence));
+                Some(output.clone())
+            } else {
+                None
+            }
+        };
+        let throttle = Some(Duration::from_millis(995));
         let shell = self.shell.read().unwrap();
 
         if let Some(session_lock) = shell.session_lock.as_ref() {
@@ -849,9 +897,13 @@ impl Common {
                             .set_preferred_scale(output.current_scale().fractional_scale());
                     });
                 });
-                send_frames_surface_tree(lock_surface.wl_surface(), output, time, None, |_, _| {
-                    Some(output.clone())
-                });
+                send_frames_surface_tree(
+                    lock_surface.wl_surface(),
+                    output,
+                    time,
+                    None,
+                    should_send,
+                );
             }
         }
 
@@ -875,15 +927,19 @@ impl Common {
                 .unwrap_or(CursorImageStatus::default_named());
 
             if let CursorImageStatus::Surface(wl_surface) = cursor_status {
-                send_frames_surface_tree(&wl_surface, output, time, Some(Duration::ZERO), |_, _| {
-                    None
-                })
+                send_frames_surface_tree(
+                    &wl_surface,
+                    output,
+                    time,
+                    Some(Duration::ZERO),
+                    should_send,
+                )
             }
 
             if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {
                 if let Some(grab_state) = move_grab.lock().unwrap().as_ref() {
                     for (window, _) in grab_state.element().windows() {
-                        window.send_frame(output, time, throttle, surface_primary_scanout_output);
+                        window.send_frame(output, time, throttle, should_send);
                     }
                 }
             }
@@ -898,14 +954,14 @@ impl Common {
             .mapped()
             .for_each(|mapped| {
                 for (window, _) in mapped.windows() {
-                    window.send_frame(output, time, throttle, surface_primary_scanout_output);
+                    window.send_frame(output, time, throttle, should_send);
                 }
             });
 
         let active = shell.active_space(output);
         active.mapped().for_each(|mapped| {
             for (window, _) in mapped.windows() {
-                window.send_frame(output, time, throttle, surface_primary_scanout_output);
+                window.send_frame(output, time, throttle, should_send);
             }
         });
 
@@ -934,19 +990,13 @@ impl Common {
 
         shell.override_redirect_windows.iter().for_each(|or| {
             if let Some(wl_surface) = or.wl_surface() {
-                send_frames_surface_tree(
-                    &wl_surface,
-                    output,
-                    time,
-                    throttle,
-                    surface_primary_scanout_output,
-                );
+                send_frames_surface_tree(&wl_surface, output, time, throttle, should_send);
             }
         });
 
         let map = smithay::desktop::layer_map_for_output(output);
         for layer_surface in map.layers() {
-            layer_surface.send_frame(output, time, throttle, surface_primary_scanout_output);
+            layer_surface.send_frame(output, time, throttle, should_send);
         }
     }
 }

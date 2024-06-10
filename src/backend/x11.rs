@@ -221,7 +221,7 @@ impl Surface {
                 self.surface
                     .submit()
                     .with_context(|| "Failed to submit buffer for display")?;
-                state.send_frames(&self.output);
+                state.send_frames(&self.output, None);
                 state.update_primary_output(&self.output, &states);
                 state.send_dmabuf_feedback(&self.output, &states, |_| None);
                 if damage.is_some() {
