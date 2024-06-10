@@ -77,7 +77,7 @@ use std::{
     collections::{HashMap, HashSet},
     mem,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, SyncSender},
         Arc, Condvar, Mutex, RwLock,
     },
@@ -104,7 +104,6 @@ pub struct Surface {
     known_nodes: HashSet<DrmNode>,
 
     active: Arc<AtomicBool>,
-    frame_callback_seq: Arc<AtomicUsize>,
     feedback: HashMap<DrmNode, SurfaceDmabufFeedback>,
     plane_formats: HashSet<Format>,
 
@@ -123,7 +122,7 @@ pub struct SurfaceThreadState {
 
     state: QueueState,
     timings: Timings,
-    frame_callback_seq: Arc<AtomicUsize>,
+    frame_callback_seq: usize,
     thread_sender: Sender<SurfaceCommand>,
 
     output: Output,
@@ -239,7 +238,7 @@ pub enum ThreadCommand {
 
 #[derive(Debug)]
 pub enum SurfaceCommand {
-    SendFrames,
+    SendFrames(usize),
     RenderStates(RenderElementStates),
 }
 
@@ -255,14 +254,11 @@ impl Surface {
         shell: Arc<RwLock<Shell>>,
         startup_done: Arc<(Mutex<bool>, Condvar)>,
     ) -> Result<Self> {
-        let frame_callback_seq = Arc::new(AtomicUsize::new(0));
-
         let (tx, rx) = channel::<ThreadCommand>();
         let (tx2, rx2) = channel::<SurfaceCommand>();
         let active = Arc::new(AtomicBool::new(false));
 
         let active_clone = active.clone();
-        let frame_callback_seq_clone = frame_callback_seq.clone();
         let output_clone = output.clone();
 
         std::thread::Builder::new()
@@ -274,7 +270,6 @@ impl Surface {
                     target_node,
                     shell,
                     active_clone,
-                    frame_callback_seq_clone,
                     tx2,
                     rx,
                     startup_done,
@@ -287,8 +282,8 @@ impl Surface {
         let output_clone = output.clone();
         let thread_token = evlh
             .insert_source(rx2, move |command, _, state| match command {
-                Event::Msg(SurfaceCommand::SendFrames) => {
-                    state.common.send_frames(&output_clone);
+                Event::Msg(SurfaceCommand::SendFrames(sequence)) => {
+                    state.common.send_frames(&output_clone, Some(sequence));
                 }
                 Event::Msg(SurfaceCommand::RenderStates(states)) => {
                     state.common.update_primary_output(&output_clone, &states);
@@ -340,7 +335,6 @@ impl Surface {
             connector,
             crtc,
             output: output.clone(),
-            frame_callback_seq,
             known_nodes: HashSet::new(),
             active,
             feedback: HashMap::new(),
@@ -445,7 +439,6 @@ fn surface_thread(
     target_node: DrmNode,
     shell: Arc<RwLock<Shell>>,
     active: Arc<AtomicBool>,
-    frame_callback_seq: Arc<AtomicUsize>,
     thread_sender: Sender<SurfaceCommand>,
     thread_receiver: Channel<ThreadCommand>,
     startup_done: Arc<(Mutex<bool>, Condvar)>,
@@ -484,7 +477,7 @@ fn surface_thread(
 
         state: QueueState::Idle,
         timings: Timings::new(None, false),
-        frame_callback_seq,
+        frame_callback_seq: 0,
         thread_sender,
 
         output,
@@ -759,7 +752,7 @@ impl SurfaceThreadState {
             }
         }
 
-        self.frame_callback_seq.fetch_add(1, Ordering::SeqCst);
+        self.frame_callback_seq = self.frame_callback_seq.wrapping_add(1);
 
         if self.shell.read().unwrap().animations_going() {
             self.queue_redraw(false);
@@ -1232,7 +1225,7 @@ impl SurfaceThreadState {
                             };
 
                             if self.mirroring.is_none() {
-                                self.frame_callback_seq.fetch_add(1, Ordering::SeqCst);
+                                self.frame_callback_seq = self.frame_callback_seq.wrapping_add(1);
 
                                 let states = frame_result.states;
                                 self.send_frame_callbacks();
@@ -1311,7 +1304,9 @@ impl SurfaceThreadState {
 
     fn send_frame_callbacks(&mut self) {
         if self.mirroring.is_none() {
-            let _ = self.thread_sender.send(SurfaceCommand::SendFrames);
+            let _ = self
+                .thread_sender
+                .send(SurfaceCommand::SendFrames(self.frame_callback_seq));
         }
     }
 
