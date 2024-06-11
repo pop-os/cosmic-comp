@@ -79,7 +79,7 @@ use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, SyncSender},
-        Arc, Condvar, Mutex, RwLock,
+        Arc, RwLock,
     },
     time::Duration,
 };
@@ -252,7 +252,7 @@ impl Surface {
         target_node: DrmNode,
         evlh: &LoopHandle<'static, State>,
         shell: Arc<RwLock<Shell>>,
-        startup_done: Arc<(Mutex<bool>, Condvar)>,
+        startup_done: Arc<AtomicBool>,
     ) -> Result<Self> {
         let (tx, rx) = channel::<ThreadCommand>();
         let (tx2, rx2) = channel::<SurfaceCommand>();
@@ -441,7 +441,7 @@ fn surface_thread(
     active: Arc<AtomicBool>,
     thread_sender: Sender<SurfaceCommand>,
     thread_receiver: Channel<ThreadCommand>,
-    startup_done: Arc<(Mutex<bool>, Condvar)>,
+    startup_done: Arc<AtomicBool>,
 ) -> Result<()> {
     profiling::register_thread!(format!("Surface Thread {}", output.name()));
 
@@ -517,13 +517,8 @@ fn surface_thread(
                 state.on_vblank(metadata);
             }
             Event::Msg(ThreadCommand::ScheduleRender) => {
-                {
-                    // Wait for start up.
-                    let (lock, cvar) = &*startup_done;
-                    // As long as the value inside the `Mutex<bool>` is `false`, we wait.
-                    let _guard = cvar
-                        .wait_while(lock.lock().unwrap(), |startup_done| !*startup_done)
-                        .unwrap();
+                if !startup_done.load(Ordering::SeqCst) {
+                    return;
                 }
 
                 state.queue_redraw(false);
@@ -534,6 +529,8 @@ fn surface_thread(
             Event::Msg(ThreadCommand::SetMode(mode, result)) => {
                 if let Some(compositor) = state.compositor.as_mut() {
                     let _ = result.send(compositor.use_mode(mode).map_err(Into::into));
+                } else {
+                    let _ = result.send(Err(anyhow::anyhow!("Set mode with inactive surface")));
                 }
             }
             Event::Closed | Event::Msg(ThreadCommand::End) => {

@@ -32,7 +32,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     path::{Path, PathBuf},
-    sync::{Arc, Condvar, Mutex, RwLock},
+    sync::{atomic::AtomicBool, Arc, RwLock},
 };
 
 use super::{drm_helpers, socket::Socket, surface::Surface};
@@ -475,7 +475,7 @@ impl Device {
         position: (i32, i32),
         evlh: &LoopHandle<'static, State>,
         shell: Arc<RwLock<Shell>>,
-        startup_done: Arc<(Mutex<bool>, Condvar)>,
+        startup_done: Arc<AtomicBool>,
     ) -> Result<(Output, bool)> {
         let output = self
             .outputs
