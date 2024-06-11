@@ -35,7 +35,7 @@ use std::{
     borrow::BorrowMut,
     collections::{HashMap, HashSet},
     path::Path,
-    sync::{Arc, Condvar, Mutex, RwLock},
+    sync::{atomic::AtomicBool, Arc, RwLock},
 };
 
 mod device;
@@ -474,7 +474,7 @@ impl KmsState {
         test_only: bool,
         loop_handle: &LoopHandle<'static, State>,
         shell: Arc<RwLock<Shell>>,
-        startup_done: Arc<(Mutex<bool>, Condvar)>,
+        startup_done: Arc<AtomicBool>,
     ) -> Result<Vec<Output>, anyhow::Error> {
         if !self.session.is_active() {
             return Ok(Vec::new());

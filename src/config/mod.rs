@@ -28,7 +28,7 @@ use std::{
     collections::HashMap,
     fs::OpenOptions,
     path::PathBuf,
-    sync::{Arc, Condvar, Mutex, RwLock},
+    sync::{atomic::AtomicBool, Arc, RwLock},
 };
 use tracing::{debug, error, info, warn};
 
@@ -322,7 +322,7 @@ impl Config {
         loop_handle: &LoopHandle<'static, State>,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
         xdg_activation_state: &XdgActivationState,
-        startup_done: Arc<(Mutex<bool>, Condvar)>,
+        startup_done: Arc<AtomicBool>,
     ) {
         let outputs = output_state.outputs().collect::<Vec<_>>();
         let mut infos = outputs

@@ -101,7 +101,7 @@ use std::{
     collections::HashSet,
     ffi::OsString,
     process::Child,
-    sync::{Arc, Condvar, Mutex, Once, RwLock},
+    sync::{atomic::AtomicBool, Arc, Mutex, Once, RwLock},
     time::Duration,
 };
 
@@ -174,7 +174,7 @@ pub struct Common {
     pub shell: Arc<RwLock<Shell>>,
 
     pub clock: Clock<Monotonic>,
-    pub startup_done: Arc<(Mutex<bool>, Condvar)>,
+    pub startup_done: Arc<AtomicBool>,
     pub should_stop: bool,
     pub local_offset: time::UtcOffset,
     pub gesture_state: Option<GestureState>,
@@ -274,7 +274,7 @@ impl BackendData {
         shell: Arc<RwLock<Shell>>,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
         xdg_activation_state: &XdgActivationState,
-        startup_done: Arc<(Mutex<bool>, Condvar)>,
+        startup_done: Arc<AtomicBool>,
     ) -> Result<(), anyhow::Error> {
         let result = match self {
             BackendData::Kms(ref mut state) => {
@@ -510,7 +510,7 @@ impl State {
                 local_offset,
 
                 clock,
-                startup_done: Arc::new((Mutex::new(false), Condvar::new())),
+                startup_done: Arc::new(AtomicBool::new(false)),
                 should_stop: false,
                 gesture_state: None,
 

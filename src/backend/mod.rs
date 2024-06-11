@@ -68,10 +68,13 @@ pub fn init_backend_auto(
 
         {
             {
-                let (lock, cvar) = &*state.common.startup_done;
-                let mut startup = lock.lock().unwrap();
-                *startup = true;
-                cvar.notify_all();
+                state
+                    .common
+                    .startup_done
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                for output in state.common.shell.read().unwrap().outputs() {
+                    state.backend.schedule_render(&output);
+                }
             }
         }
     }
