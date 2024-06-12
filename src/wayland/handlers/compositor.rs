@@ -141,6 +141,9 @@ impl CompositorHandler for State {
         // and refresh smithays internal state
         self.common.on_commit(surface);
 
+        // handle initial configure events and map windows if necessary
+        let mapped = self.send_initial_configure_and_map(surface);
+
         let mut shell = self.common.shell.write().unwrap();
 
         // schedule a new render
@@ -149,52 +152,9 @@ impl CompositorHandler for State {
                 .schedule_render(&self.common.event_loop_handle, &output);
         }
 
-        // handle initial configure events and map windows if necessary
-        if let Some((window, _, _)) = shell
-            .pending_windows
-            .iter()
-            .find(|(window, _, _)| window.wl_surface().as_deref() == Some(surface))
-            .cloned()
-        {
-            if let Some(toplevel) = window.0.toplevel() {
-                if toplevel_ensure_initial_configure(&toplevel)
-                    && with_renderer_surface_state(&surface, |state| state.buffer().is_some())
-                        .unwrap_or(false)
-                {
-                    window.on_commit();
-                    let res = shell.map_window(
-                        &window,
-                        &mut self.common.toplevel_info_state,
-                        &mut self.common.workspace_state,
-                        &self.common.event_loop_handle,
-                    );
-                    if let Some(target) = res {
-                        let seat = shell.seats.last_active().clone();
-                        std::mem::drop(shell);
-                        Shell::set_focus(self, Some(&target), &seat, None);
-                        return;
-                    }
-                }
-            }
+        if mapped {
+            return;
         }
-
-        if let Some((layer_surface, _, _)) = shell
-            .pending_layers
-            .iter()
-            .find(|(layer_surface, _, _)| layer_surface.wl_surface() == surface)
-            .cloned()
-        {
-            if !layer_surface_check_inital_configure(&layer_surface) {
-                // compute initial dimensions by mapping
-                if let Some(target) = shell.map_layer(&layer_surface) {
-                    let seat = shell.seats.last_active().clone();
-                    std::mem::drop(shell);
-                    Shell::set_focus(self, Some(&target), &seat, None);
-                }
-                layer_surface.layer_surface().send_configure();
-                return;
-            }
-        };
 
         if let Some(popup) = self.common.popups.find_popup(surface) {
             xdg_popup_ensure_initial_configure(&popup);
@@ -283,6 +243,60 @@ impl CompositorHandler for State {
                 shell.workspaces.recalculate();
             }
         }
+    }
+}
+
+impl State {
+    fn send_initial_configure_and_map(&mut self, surface: &WlSurface) -> bool {
+        let mut shell = self.common.shell.write().unwrap();
+
+        if let Some((window, _, _)) = shell
+            .pending_windows
+            .iter()
+            .find(|(window, _, _)| window.wl_surface().as_deref() == Some(surface))
+            .cloned()
+        {
+            if let Some(toplevel) = window.0.toplevel() {
+                if toplevel_ensure_initial_configure(&toplevel)
+                    && with_renderer_surface_state(&surface, |state| state.buffer().is_some())
+                        .unwrap_or(false)
+                {
+                    window.on_commit();
+                    let res = shell.map_window(
+                        &window,
+                        &mut self.common.toplevel_info_state,
+                        &mut self.common.workspace_state,
+                        &self.common.event_loop_handle,
+                    );
+                    if let Some(target) = res {
+                        let seat = shell.seats.last_active().clone();
+                        std::mem::drop(shell);
+                        Shell::set_focus(self, Some(&target), &seat, None);
+                        return true;
+                    }
+                }
+            }
+        }
+
+        if let Some((layer_surface, _, _)) = shell
+            .pending_layers
+            .iter()
+            .find(|(layer_surface, _, _)| layer_surface.wl_surface() == surface)
+            .cloned()
+        {
+            if !layer_surface_check_inital_configure(&layer_surface) {
+                // compute initial dimensions by mapping
+                if let Some(target) = shell.map_layer(&layer_surface) {
+                    let seat = shell.seats.last_active().clone();
+                    std::mem::drop(shell);
+                    Shell::set_focus(self, Some(&target), &seat, None);
+                }
+                layer_surface.layer_surface().send_configure();
+                return true;
+            }
+        };
+
+        false
     }
 }
 
