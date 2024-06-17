@@ -10,17 +10,17 @@ use smithay::{
         ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
     },
 };
-use std::cell::RefCell;
+use std::sync::Mutex;
 
 pub struct DnDIcon {
-    surface: RefCell<Option<WlSurface>>,
+    surface: Mutex<Option<WlSurface>>,
 }
 
 pub fn get_dnd_icon(seat: &Seat<State>) -> Option<WlSurface> {
     let userdata = seat.user_data();
     userdata
         .get::<DnDIcon>()
-        .and_then(|x| x.surface.borrow().clone())
+        .and_then(|x| x.surface.lock().unwrap().clone())
         .filter(IsAlive::alive)
 }
 
@@ -32,17 +32,18 @@ impl ClientDndGrabHandler for State {
         seat: Seat<Self>,
     ) {
         let user_data = seat.user_data();
-        user_data.insert_if_missing(|| DnDIcon {
-            surface: RefCell::new(None),
+        user_data.insert_if_missing_threadsafe(|| DnDIcon {
+            surface: Mutex::new(None),
         });
-        *user_data.get::<DnDIcon>().unwrap().surface.borrow_mut() = icon;
+        *user_data.get::<DnDIcon>().unwrap().surface.lock().unwrap() = icon;
     }
     fn dropped(&mut self, seat: Seat<Self>) {
         seat.user_data()
             .get::<DnDIcon>()
             .unwrap()
             .surface
-            .borrow_mut()
+            .lock()
+            .unwrap()
             .take();
     }
 }
