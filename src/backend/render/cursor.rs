@@ -226,7 +226,7 @@ pub struct CursorStateInner {
     current_cursor: CursorShape,
     pub cursors: HashMap<CursorShape, Cursor>,
     current_image: Option<Image>,
-    //image_cache: Vec<(Image, MemoryRenderBuffer)>,
+    image_cache: Vec<(Image, MemoryRenderBuffer)>,
 }
 
 impl CursorStateInner {
@@ -304,6 +304,7 @@ impl Default for CursorStateInner {
                 map
             },
             current_image: None,
+            image_cache: Vec::new(),
         }
     }
 }
@@ -344,24 +345,22 @@ where
         let integer_scale = scale.x.max(scale.y).ceil() as u32;
 
         let seat_userdata = seat.user_data();
-        let mut state = seat_userdata.get::<CursorState>().unwrap().lock().unwrap();
+        let mut state_ref = seat_userdata.get::<CursorState>().unwrap().lock().unwrap();
+        let state = &mut *state_ref;
         let frame = state.cursors.get(&state.current_cursor).unwrap().get_image(
             integer_scale,
             Into::<Duration>::into(time).as_millis() as u32,
         );
 
-        /*
-        let mut pointer_images = &mut state.image_cache;
-
+        let pointer_images = &mut state.image_cache;
         let maybe_image =
             pointer_images
                 .iter()
                 .find_map(|(image, texture)| if image == &frame { Some(texture) } else { None });
-        */
-        let pointer_image = /*match maybe_image {
+        let pointer_image = match maybe_image {
             Some(image) => image,
             None => {
-                let buffer =*/ MemoryRenderBuffer::from_slice(
+                let buffer = MemoryRenderBuffer::from_slice(
                     &frame.pixels_rgba,
                     Fourcc::Argb8888,
                     (frame.width as i32, frame.height as i32),
@@ -369,11 +368,10 @@ where
                     Transform::Normal,
                     None,
                 );
-        /*
                 pointer_images.push((frame.clone(), buffer));
                 pointer_images.last().map(|(_, i)| i).unwrap()
             }
-        };*/
+        };
 
         let hotspot = Point::<i32, BufferCoords>::from((frame.xhot as i32, frame.yhot as i32));
         state.current_image = Some(frame);
