@@ -381,7 +381,7 @@ impl KmsState {
     pub fn refresh_used_devices(&mut self) -> Result<()> {
         let mut used_devices = HashSet::new();
 
-        for (node, device) in self.drm_devices.iter_mut() {
+        for device in self.drm_devices.values_mut() {
             if device.in_use(self.primary_node.as_ref()) {
                 if device.egl.is_none() {
                     let egl = init_egl(&device.gbm).context("Failed to create EGL context")?;
@@ -408,23 +408,32 @@ impl KmsState {
                     );
                     device.egl = Some(egl);
                 }
-                used_devices.insert(*node);
+                used_devices.insert(device.render_node);
             } else {
-                if device.egl.is_none() {
+                if device.egl.is_some() {
                     let _ = device.egl.take();
                     self.api.as_mut().remove_node(&device.render_node);
                 }
             }
         }
 
+        // trigger re-evaluation... urgh
+        if let Some(primary_node) = self.primary_node.as_ref() {
+            let _ = self.api.single_renderer(primary_node);
+        }
+
         // I hate this. I want partial borrows of hashmap values
-        let all_devices = self.drm_devices.keys().copied().collect::<Vec<_>>();
+        let all_devices = self
+            .drm_devices
+            .values()
+            .map(|d| d.render_node)
+            .collect::<Vec<_>>();
         for node in all_devices {
             let (mut device, mut others) = self
                 .drm_devices
-                .iter_mut()
-                .partition::<Vec<_>, _>(|(n, _)| **n == node);
-            let device = &mut device[0].1;
+                .values_mut()
+                .partition::<Vec<_>, _>(|d| d.render_node == node);
+            let device = &mut device[0];
 
             for surface in device.surfaces.values_mut() {
                 let known_nodes = surface.known_nodes().clone();
@@ -442,8 +451,7 @@ impl KmsState {
                     } else {
                         let device = others
                             .iter_mut()
-                            .find(|(n, _)| *n == new_device)
-                            .map(|(_, d)| d)
+                            .find(|d| d.render_node == *new_device)
                             .unwrap();
                         (
                             device.render_node,
