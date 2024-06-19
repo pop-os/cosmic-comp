@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use crate::{
     backend::kms::Timings,
-    shell::focus::target::{KeyboardFocusTarget, PointerFocusTarget},
-    state::{Common, Fps},
+    shell::focus::target::{KeyboardFocusTarget, PointerFocusTarget, PointerFocusToplevel},
+    State,
 };
 use egui::{load::SizedTexture, Color32, Vec2};
 use smithay::{
@@ -18,10 +18,11 @@ use smithay::{
         },
     },
     desktop::WindowSurface,
-    input::keyboard::xkb,
+    input::{keyboard::xkb, Seat},
     reexports::wayland_server::Resource,
-    utils::{Logical, Rectangle},
+    utils::{Logical, Rectangle, Time},
 };
+use smithay_egui::EguiState;
 
 pub const ELEMENTS_COLOR: Color32 = Color32::from_rgb(70, 198, 115);
 pub const RENDER_COLOR: Color32 = Color32::from_rgb(29, 114, 58);
@@ -41,18 +42,20 @@ pub fn fps_ui<'a>(
     use egui_plot::{Bar, BarChart, Legend, Plot};
 
     let (max, min, avg, avg_fps) = (
-        timings.max_frametime().as_secs_f64(),
-        timings.min_frametime().as_secs_f64(),
-        timings.avg_frametime().as_secs_f64(),
+        timings.max_rendertime().as_secs_f64(),
+        timings.min_rendertime().as_secs_f64(),
+        timings.avg_rendertime().as_secs_f64(),
         timings.avg_fps(),
-    );
-    let (max_disp, min_disp) = (
-        timings.max_time_to_display().as_secs_f64(),
-        timings.min_time_to_display().as_secs_f64(),
     );
 
     let amount = avg_fps.round() as usize * 2;
-    let ((bars_elements, bars_render), (bars_screencopy, bars_displayed)): (
+    let (max_disp, min_disp, avg_disp) = (
+        timings.min_frametime(amount).as_secs_f64(),
+        timings.max_frametime(amount).as_secs_f64(),
+        timings.avg_frametime(amount).as_secs_f64(),
+    );
+
+    let ((bars_elements, bars_render), (bars_submitted, bars_displayed)): (
         (Vec<Bar>, Vec<Bar>),
         (Vec<Bar>, Vec<Bar>),
     ) = timings
@@ -65,19 +68,17 @@ pub fn fps_ui<'a>(
         .map(|(i, frame)| {
             let elements_val = frame.render_duration_elements.as_secs_f64();
             let render_val = frame.render_duration_draw.as_secs_f64();
-            let submitted_val = frame
-                .presentation_submitted
-                .as_ref()
-                .map(|val| val.as_secs_f64())
-                .unwrap_or(0.0);
-            let displayed_val = frame.duration_displayed.as_secs_f64();
+            let submitted_val =
+                Time::elapsed(&frame.render_start, frame.presentation_submitted).as_secs_f64();
+            let displayed_val =
+                Time::elapsed(&frame.render_start, frame.presentation_presented).as_secs_f64();
 
             let transformed_elements =
                 ((elements_val - min_disp) / (max_disp - min_disp) * 255.0).round() as u8;
             let transformed_render =
                 ((render_val - min_disp) / (max_disp - min_disp) * 255.0).round() as u8;
-            let transformed_screencopy =
-                ((screencopy_val - min_disp) / (max_disp - min_disp) * 255.0).round() as u8;
+            let transformed_submitted =
+                ((submitted_val - min_disp) / (max_disp - min_disp) * 255.0).round() as u8;
             let transformed_displayed =
                 ((displayed_val - min_disp) / (max_disp - min_disp) * 255.0).round() as u8;
             (
@@ -86,7 +87,7 @@ pub fn fps_ui<'a>(
                     Bar::new(i as f64, transformed_render as f64).fill(RENDER_COLOR),
                 ),
                 (
-                    Bar::new(i as f64, transformed_screencopy as f64).fill(SCREENCOPY_COLOR),
+                    Bar::new(i as f64, transformed_submitted as f64).fill(SUBMITTED_COLOR),
                     Bar::new(i as f64, transformed_displayed as f64).fill(DISPLAY_COLOR),
                 ),
             )
@@ -134,7 +135,7 @@ pub fn fps_ui<'a>(
                     }
 
                     if !debug_active {
-                        ui.label("Press Super+Escape for debug overlay");
+                        ui.label("Press Super+Ctrl+Escape for debug overlay");
                     } else {
                         ui.set_max_width(300.0);
                         ui.separator();
@@ -158,19 +159,24 @@ pub fn fps_ui<'a>(
                             });
                         }
                         ui.label(egui::RichText::new(format!("FPS: {:>7.3}", avg_fps)).heading());
-                        ui.label("Frame Times:");
+                        ui.label("Render Times:");
                         ui.label(egui::RichText::new(format!("avg: {:>7.6}", avg)).code());
                         ui.label(egui::RichText::new(format!("min: {:>7.6}", min)).code());
                         ui.label(egui::RichText::new(format!("max: {:>7.6}", max)).code());
+                        ui.label("Frame Times:");
+                        ui.label(egui::RichText::new(format!("avg: {:>7.6}", avg_disp)).code());
+                        ui.label(egui::RichText::new(format!("min: {:>7.6}", min_disp)).code());
+                        ui.label(egui::RichText::new(format!("max: {:>7.6}", max_disp)).code());
+
                         let elements_chart = BarChart::new(bars_elements).vertical();
                         let render_chart = BarChart::new(bars_render)
                             .stack_on(&[&elements_chart])
                             .vertical();
-                        let screencopy_chart = BarChart::new(bars_screencopy)
+                        let submitted_chart = BarChart::new(bars_submitted)
                             .stack_on(&[&elements_chart, &render_chart])
                             .vertical();
                         let display_chart = BarChart::new(bars_displayed)
-                            .stack_on(&[&elements_chart, &render_chart, &screencopy_chart])
+                            .stack_on(&[&elements_chart, &render_chart, &submitted_chart])
                             .vertical();
 
                         Plot::new("FPS")
@@ -184,7 +190,7 @@ pub fn fps_ui<'a>(
                             .show(ui, |plot_ui| {
                                 plot_ui.bar_chart(elements_chart);
                                 plot_ui.bar_chart(render_chart);
-                                plot_ui.bar_chart(screencopy_chart);
+                                plot_ui.bar_chart(submitted_chart);
                                 plot_ui.bar_chart(display_chart);
                             });
 
@@ -280,38 +286,39 @@ fn format_pointer_focus(focus: Option<PointerFocusTarget>) -> String {
     use PointerFocusTarget::*;
 
     match focus {
-        Some(Element(x)) => match x {
-            x if x.is_stack() => format!(
-                "Stacked Window {} ({})",
-                match x.active_window().0.underlying_surface() {
-                    WindowSurface::Wayland(t) => t.wl_surface().id().protocol_id(),
-                    WindowSurface::X11(x) => x.window_id(),
-                },
-                x.active_window().title()
-            ),
-            x if x.is_window() => format!(
-                "Window {} ({})",
-                match x.active_window().0.underlying_surface() {
-                    WindowSurface::Wayland(t) => t.wl_surface().id().protocol_id(),
-                    WindowSurface::X11(x) => x.window_id(),
-                },
-                x.active_window().title()
-            ),
-            _ => unreachable!(),
+        Some(WlSurface { surface, toplevel }) => match toplevel {
+            Some(PointerFocusToplevel::Surface(window)) => {
+                format!(
+                    "Window {} ({})",
+                    match window.0.underlying_surface() {
+                        WindowSurface::Wayland(_) => surface.id().protocol_id(),
+                        WindowSurface::X11(x) => x.window_id(),
+                    },
+                    window.title()
+                )
+            }
+            Some(PointerFocusToplevel::Popup(_)) => {
+                format!("Popup {}", surface.id().protocol_id())
+            }
+            _ => format!("Surface {}", surface.id().protocol_id()),
         },
-        Some(Fullscreen(x)) => format!(
-            "Fullscreen {} ({})",
-            match x.0.underlying_surface() {
+        Some(StackUI(stack)) => format!(
+            "Stack SSD {} ({})",
+            match stack.active().0.underlying_surface() {
                 WindowSurface::Wayland(t) => t.wl_surface().id().protocol_id(),
                 WindowSurface::X11(x) => x.window_id(),
             },
-            x.title()
+            stack.active().title()
         ),
-        Some(LayerSurface(x)) => format!("LayerSurface {}", x.wl_surface().id().protocol_id()),
-        Some(Popup(x)) => format!("Popup {}", x.wl_surface().id().protocol_id()),
-        Some(OverrideRedirect(x)) => format!("Override Redirect {}", x.window_id()),
-        Some(PointerFocusTarget::ResizeFork(x)) => format!("Resize Fork {:?}", x.node),
-        Some(LockSurface(x)) => format!("LockSurface {}", x.wl_surface().id().protocol_id()),
+        Some(WindowUI(window)) => format!(
+            "Window SSD {} ({})",
+            match window.surface().0.underlying_surface() {
+                WindowSurface::Wayland(t) => t.wl_surface().id().protocol_id(),
+                WindowSurface::X11(x) => x.window_id(),
+            },
+            window.surface().title()
+        ),
+        Some(ResizeFork(_)) => String::from("Resize UI"),
         None => format!("None"),
     }
 }

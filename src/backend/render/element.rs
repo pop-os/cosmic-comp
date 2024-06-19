@@ -16,9 +16,6 @@ use smithay::{
     utils::{Buffer as BufferCoords, Logical, Physical, Point, Rectangle, Scale},
 };
 
-#[cfg(feature = "debug")]
-use smithay::backend::renderer::{element::texture::TextureRenderElement, gles::GlesTexture};
-
 use super::{cursor::CursorRenderElement, GlMultiError, GlMultiFrame, GlMultiRenderer};
 
 pub enum CosmicElement<R>

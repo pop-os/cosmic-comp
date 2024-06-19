@@ -508,7 +508,7 @@ where
         let output_geo = output.geometry();
         let scale = output.current_scale().fractional_scale();
 
-        if let Some((state, timings)) = _fps.as_mut() {
+        if let Some((state, timings)) = _fps {
             let debug_active = shell.read().unwrap().debug_active;
             let fps_overlay = fps_ui(
                 _gpu,
@@ -523,7 +523,7 @@ where
                 ),
                 scale,
             )
-            .map_err(<R as Renderer>::Error::from)
+            .map_err(FromGlesError::from_gles_error)
             .map_err(RenderError::Rendering)?;
             elements.push(fps_overlay.into());
         }

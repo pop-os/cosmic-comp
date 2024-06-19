@@ -218,7 +218,7 @@ pub struct Shell {
     resize_indicator: Option<ResizeIndicator>,
 
     #[cfg(feature = "debug")]
-    debug_active: bool,
+    pub debug_active: bool,
 }
 
 #[derive(Debug)]

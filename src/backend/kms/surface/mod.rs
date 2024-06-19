@@ -90,11 +90,14 @@ pub use self::timings::Timings;
 use super::{drm_helpers, render::gles::GbmGlowBackend};
 
 #[cfg(feature = "debug")]
-static INTEL_LOGO: &'static [u8] = include_bytes!("../resources/icons/intel.svg");
+use smithay_egui::EguiState;
+
 #[cfg(feature = "debug")]
-static AMD_LOGO: &'static [u8] = include_bytes!("../resources/icons/amd.svg");
+static INTEL_LOGO: &'static [u8] = include_bytes!("../../../../resources/icons/intel.svg");
 #[cfg(feature = "debug")]
-static NVIDIA_LOGO: &'static [u8] = include_bytes!("../resources/icons/nvidia.svg");
+static AMD_LOGO: &'static [u8] = include_bytes!("../../../../resources/icons/amd.svg");
+#[cfg(feature = "debug")]
+static NVIDIA_LOGO: &'static [u8] = include_bytes!("../../../../resources/icons/nvidia.svg");
 
 #[derive(Debug)]
 pub struct Surface {
@@ -640,26 +643,25 @@ impl SurfaceThreadState {
             unsafe { GlowRenderer::new(egl) }.context("Failed to create renderer")?;
         init_shaders(renderer.borrow_mut()).context("Failed to initialize shaders")?;
 
+        #[cfg(feature = "debug")]
+        {
+            self.egui
+                .load_svg(&mut renderer, String::from("intel"), INTEL_LOGO)
+                .unwrap();
+            self.egui
+                .load_svg(&mut renderer, String::from("amd"), AMD_LOGO)
+                .unwrap();
+            self.egui
+                .load_svg(&mut renderer, String::from("nvidia"), NVIDIA_LOGO)
+                .unwrap();
+        }
+
         self.api.as_mut().add_node(node, gbm, renderer);
         /*
         } else {
             self.software_api.as_mut().add_node(node, gbm);
         }
         */
-
-        #[cfg(feature = "debug")]
-        {
-            let renderer = self.api.single_renderer(node);
-            self.egui
-                .load_svg(renderer, String::from("intel"), INTEL_LOGO)
-                .unwrap();
-            self.egui
-                .load_svg(renderer, String::from("amd"), AMD_LOGO)
-                .unwrap();
-            self.egui
-                .load_svg(renderer, String::from("nvidia"), NVIDIA_LOGO)
-                .unwrap();
-        }
 
         Ok(())
     }
@@ -840,13 +842,6 @@ impl SurfaceThreadState {
         };
 
         self.timings.start_render(&self.clock);
-        #[cfg(feature = "debug")]
-        if let Some(rd) = self.timings.rd.as_mut() {
-            rd.start_frame_capture(
-                renderer.glow_renderer().egl_context().get_context_handle(),
-                std::ptr::null(),
-            );
-        }
 
         let mut elements = {
             let shell = self.shell.read().unwrap();
