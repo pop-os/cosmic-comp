@@ -1034,8 +1034,9 @@ impl FloatingLayout {
                         ));
                     }
 
-                    // to we go maximized?
+                    // do we go maximized?
                     (Direction::Up, Some(TiledCorners::Bottom))
+                    | (Direction::Up, None)
                     | (Direction::Down, Some(TiledCorners::Top))
                     | (Direction::Left, Some(TiledCorners::Right))
                     | (Direction::Right, Some(TiledCorners::Left)) => {
@@ -1071,7 +1072,6 @@ impl FloatingLayout {
                     (Direction::Left, Some(TiledCorners::BottomRight))
                     | (Direction::Right, Some(TiledCorners::BottomLeft)) => TiledCorners::Bottom,
                     // else we have a simple case
-                    (Direction::Up, _) => TiledCorners::Top,
                     (Direction::Right, _) => TiledCorners::Right,
                     (Direction::Down, _) => TiledCorners::Bottom,
                     (Direction::Left, _) => TiledCorners::Left,
