@@ -1199,6 +1199,11 @@ impl SurfaceThreadState {
                             }
                         }
 
+                        if self.mirroring.is_none() {
+                            let states = frame_result.states;
+                            self.send_dmabuf_feedback(states);
+                        }
+
                         if x.is_ok() {
                             let new_state = QueueState::WaitingForVBlank {
                                 redraw_needed: false,
@@ -1218,13 +1223,9 @@ impl SurfaceThreadState {
 
                             if self.mirroring.is_none() {
                                 self.frame_callback_seq = self.frame_callback_seq.wrapping_add(1);
-
-                                let states = frame_result.states;
                                 self.send_frame_callbacks();
-                                self.send_dmabuf_feedback(states);
                             }
                         } else {
-                            tracing::debug!("Stopped rendering");
                             self.queue_estimated_vblank(estimated_presentation);
                         }
                     }

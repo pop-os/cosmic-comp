@@ -608,14 +608,8 @@ impl Common {
         }
 
         // sticky window
-        shell
-            .workspaces
-            .sets
-            .get(output)
-            .unwrap()
-            .sticky_layer
-            .mapped()
-            .for_each(|mapped| {
+        for set in shell.workspaces.sets.values() {
+            set.sticky_layer.mapped().for_each(|mapped| {
                 for (window, _) in mapped.windows() {
                     window.with_surfaces(|surface, states| {
                         let primary_scanout_output = update_surface_primary_scanout_output(
@@ -634,28 +628,49 @@ impl Common {
                     });
                 }
             });
+        }
 
         // normal windows
-        let active = shell.active_space(output);
-        active.mapped().for_each(|mapped| {
-            for (window, _) in mapped.windows() {
-                window.with_surfaces(|surface, states| {
-                    let primary_scanout_output = update_surface_primary_scanout_output(
-                        surface,
-                        output,
-                        states,
-                        render_element_states,
-                        default_primary_scanout_output_compare,
-                    );
-                    if let Some(output) = primary_scanout_output {
-                        with_fractional_scale(states, |fraction_scale| {
-                            fraction_scale
-                                .set_preferred_scale(output.current_scale().fractional_scale());
-                        });
-                    }
-                });
-            }
-        });
+        for space in shell.workspaces.spaces() {
+            space.mapped().for_each(|mapped| {
+                for (window, _) in mapped.windows() {
+                    window.with_surfaces(|surface, states| {
+                        let primary_scanout_output = update_surface_primary_scanout_output(
+                            surface,
+                            output,
+                            states,
+                            render_element_states,
+                            default_primary_scanout_output_compare,
+                        );
+                        if let Some(output) = primary_scanout_output {
+                            with_fractional_scale(states, |fraction_scale| {
+                                fraction_scale
+                                    .set_preferred_scale(output.current_scale().fractional_scale());
+                            });
+                        }
+                    });
+                }
+            });
+            space.minimized_windows.iter().for_each(|m| {
+                for (window, _) in m.window.windows() {
+                    window.with_surfaces(|surface, states| {
+                        let primary_scanout_output = update_surface_primary_scanout_output(
+                            surface,
+                            output,
+                            states,
+                            render_element_states,
+                            default_primary_scanout_output_compare,
+                        );
+                        if let Some(output) = primary_scanout_output {
+                            with_fractional_scale(states, |fraction_scale| {
+                                fraction_scale
+                                    .set_preferred_scale(output.current_scale().fractional_scale());
+                            });
+                        }
+                    });
+                }
+            })
+        }
 
         // OR windows
         shell.override_redirect_windows.iter().for_each(|or| {
@@ -679,23 +694,25 @@ impl Common {
         });
 
         // layer surfaces
-        let map = smithay::desktop::layer_map_for_output(output);
-        for layer_surface in map.layers() {
-            layer_surface.with_surfaces(|surface, states| {
-                let primary_scanout_output = update_surface_primary_scanout_output(
-                    surface,
-                    output,
-                    states,
-                    render_element_states,
-                    default_primary_scanout_output_compare,
-                );
-                if let Some(output) = primary_scanout_output {
-                    with_fractional_scale(states, |fraction_scale| {
-                        fraction_scale
-                            .set_preferred_scale(output.current_scale().fractional_scale());
-                    });
-                }
-            });
+        for o in shell.outputs() {
+            let map = smithay::desktop::layer_map_for_output(o);
+            for layer_surface in map.layers() {
+                layer_surface.with_surfaces(|surface, states| {
+                    let primary_scanout_output = update_surface_primary_scanout_output(
+                        surface,
+                        output,
+                        states,
+                        render_element_states,
+                        default_primary_scanout_output_compare,
+                    );
+                    if let Some(output) = primary_scanout_output {
+                        with_fractional_scale(states, |fraction_scale| {
+                            fraction_scale
+                                .set_preferred_scale(output.current_scale().fractional_scale());
+                        });
+                    }
+                });
+            }
         }
     }
 
