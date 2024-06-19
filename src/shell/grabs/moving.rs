@@ -445,7 +445,7 @@ impl PointerGrab<State> for MoveGrab {
         &mut self,
         state: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &MotionEvent,
     ) {
         self.update_location(state, event.location);
@@ -461,7 +461,7 @@ impl PointerGrab<State> for MoveGrab {
         &mut self,
         state: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &RelativeMotionEvent,
     ) {
         // While the grab is active, no client has pointer focus
@@ -589,7 +589,7 @@ impl TouchGrab<State> for MoveGrab {
         &mut self,
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
-        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &touch::DownEvent,
         seq: Serial,
     ) {
@@ -614,7 +614,7 @@ impl TouchGrab<State> for MoveGrab {
         &mut self,
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
-        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &touch::MotionEvent,
         seq: Serial,
     ) {
@@ -858,7 +858,7 @@ impl Drop for MoveGrab {
                             state,
                             Some((
                                 target,
-                                position.as_logical() - window.geometry().loc + offset,
+                                position.as_logical().to_f64() - window.geometry().loc.to_f64() + offset,
                             )),
                             &MotionEvent {
                                 location: pointer.current_location(),

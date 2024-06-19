@@ -475,7 +475,7 @@ impl Workspace {
         &mut self,
         location: Point<f64, Global>,
         overview: OverviewMode,
-    ) -> Option<(PointerFocusTarget, Point<i32, Global>)> {
+    ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
         let location = location.to_local(&self.output);
         self.floating_layer
             .surface_under(location)
@@ -1360,14 +1360,23 @@ impl RenderElement<GlowRenderer> for WorkspaceRenderElement<GlowRenderer> {
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, smithay::utils::Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), GlesError> {
         match self {
-            WorkspaceRenderElement::OverrideRedirect(elem) => elem.draw(frame, src, dst, damage),
-            WorkspaceRenderElement::Fullscreen(elem) => elem.draw(frame, src, dst, damage),
-            WorkspaceRenderElement::FullscreenPopup(elem) => elem.draw(frame, src, dst, damage),
-            WorkspaceRenderElement::Window(elem) => elem.draw(frame, src, dst, damage),
+            WorkspaceRenderElement::OverrideRedirect(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
+            }
+            WorkspaceRenderElement::Fullscreen(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
+            }
+            WorkspaceRenderElement::FullscreenPopup(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
+            }
+            WorkspaceRenderElement::Window(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
+            }
             WorkspaceRenderElement::Backdrop(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage)
+                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage, opaque_regions)
             }
         }
     }
@@ -1393,16 +1402,30 @@ impl<'a> RenderElement<GlMultiRenderer<'a>> for WorkspaceRenderElement<GlMultiRe
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, smithay::utils::Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), GlMultiError> {
         match self {
-            WorkspaceRenderElement::OverrideRedirect(elem) => elem.draw(frame, src, dst, damage),
-            WorkspaceRenderElement::Fullscreen(elem) => elem.draw(frame, src, dst, damage),
-            WorkspaceRenderElement::FullscreenPopup(elem) => elem.draw(frame, src, dst, damage),
-            WorkspaceRenderElement::Window(elem) => elem.draw(frame, src, dst, damage),
-            WorkspaceRenderElement::Backdrop(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame.glow_frame_mut(), src, dst, damage)
-                    .map_err(GlMultiError::Render)
+            WorkspaceRenderElement::OverrideRedirect(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
             }
+            WorkspaceRenderElement::Fullscreen(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
+            }
+            WorkspaceRenderElement::FullscreenPopup(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
+            }
+            WorkspaceRenderElement::Window(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
+            }
+            WorkspaceRenderElement::Backdrop(elem) => RenderElement::<GlowRenderer>::draw(
+                elem,
+                frame.glow_frame_mut(),
+                src,
+                dst,
+                damage,
+                opaque_regions,
+            )
+            .map_err(GlMultiError::Render),
         }
     }
 

@@ -420,7 +420,7 @@ impl CosmicStack {
     pub fn focus_under(
         &self,
         mut relative_pos: Point<f64, Logical>,
-    ) -> Option<(PointerFocusTarget, Point<i32, Logical>)> {
+    ) -> Option<(PointerFocusTarget, Point<f64, Logical>)> {
         self.0.with_program(|p| {
             let mut stack_ui = None;
             let geo = p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry();
@@ -435,14 +435,14 @@ impl CosmicStack {
             {
                 stack_ui = Some((
                     PointerFocusTarget::StackUI(self.clone()),
-                    Point::from((0, 0)),
+                    Point::from((0., 0.)),
                 ));
             }
 
             if point_i32.y - geo.loc.y < TAB_HEIGHT {
                 stack_ui = Some((
                     PointerFocusTarget::StackUI(self.clone()),
-                    Point::from((0, 0)),
+                    Point::from((0., 0.)),
                 ));
             }
 
@@ -458,7 +458,7 @@ impl CosmicStack {
                             surface,
                             toplevel: Some(active_window.clone().into()),
                         },
-                        surface_offset + Point::from((0, TAB_HEIGHT)),
+                        surface_offset.to_f64() + Point::from((0., TAB_HEIGHT as f64)),
                     )
                 })
                 .or(stack_ui)

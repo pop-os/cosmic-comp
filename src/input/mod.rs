@@ -528,7 +528,7 @@ impl State {
                             Some(constraint) if constraint.is_active() => {
                                 // Constraint does not apply if not within region
                                 if !constraint.region().map_or(true, |x| {
-                                    x.contains(ptr.current_location().to_i32_round() - *surface_loc)
+                                    x.contains((ptr.current_location() - *surface_loc).to_i32_round())
                                 }) {
                                     return;
                                 }
@@ -621,7 +621,7 @@ impl State {
                             }
                             if let Some(region) = confine_region {
                                 if !region
-                                    .contains(position.as_logical().to_i32_round() - *surface_loc)
+                                    .contains((position.as_logical() - *surface_loc).to_i32_round())
                                 {
                                     ptr.frame(self);
                                     return;
@@ -653,7 +653,7 @@ impl State {
                                     PointerConstraint::Confined(confined) => confined.region(),
                                 };
                                 let point =
-                                    ptr.current_location().to_i32_round() - surface_location;
+                                    (ptr.current_location() - surface_location).to_i32_round();
                                 if region.map_or(true, |region| region.contains(point)) {
                                     constraint.activate();
                                 }
@@ -2501,7 +2501,7 @@ impl State {
         global_pos: Point<f64, Global>,
         output: &Output,
         shell: &mut Shell,
-    ) -> Option<(PointerFocusTarget, Point<i32, Global>)> {
+    ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
         let session_lock = shell.session_lock.as_ref();
         let relative_pos = global_pos.to_local(output);
         let output_geo = output.geometry();
@@ -2513,7 +2513,7 @@ impl State {
                         surface: surface.wl_surface().clone(),
                         toplevel: None,
                     },
-                    output_geo.loc,
+                    output_geo.loc.to_f64(),
                 )
             });
         }
@@ -2531,7 +2531,7 @@ impl State {
                             surface: wl_surface,
                             toplevel: None,
                         },
-                        output_geo.loc + layer_loc.as_global() + surface_loc.as_global(),
+                        (output_geo.loc + layer_loc.as_global() + surface_loc.as_global()).to_f64(),
                     ));
                 }
             }
@@ -2545,7 +2545,7 @@ impl State {
                 })
                 .and_then(|or| {
                     or.wl_surface()
-                        .map(|surface| (surface, X11Surface::geometry(or).loc.as_global()))
+                        .map(|surface| (surface, X11Surface::geometry(or).loc.as_global().to_f64()))
                 })
             {
                 return Some((
@@ -2557,7 +2557,7 @@ impl State {
                 ));
             }
             PointerFocusTarget::under_surface(window, relative_pos.as_logical())
-                .map(|(target, surface_loc)| (target, output_geo.loc + surface_loc.as_global()))
+                .map(|(target, surface_loc)| (target, (output_geo.loc + surface_loc.as_global()).to_f64()))
         } else {
             {
                 let layers = layer_map_for_output(output);
@@ -2575,7 +2575,8 @@ impl State {
                                 surface: wl_surface,
                                 toplevel: None,
                             },
-                            output_geo.loc + layer_loc.as_global() + surface_loc.as_global(),
+                            (output_geo.loc + layer_loc.as_global() + surface_loc.as_global())
+                                .to_f64(),
                         ));
                     }
                 }
@@ -2590,7 +2591,7 @@ impl State {
                 })
                 .and_then(|or| {
                     or.wl_surface()
-                        .map(|surface| (surface, X11Surface::geometry(or).loc.as_global()))
+                        .map(|surface| (surface, X11Surface::geometry(or).loc.as_global().to_f64()))
                 })
             {
                 return Some((
@@ -2620,7 +2621,8 @@ impl State {
                                 surface: wl_surface,
                                 toplevel: None,
                             },
-                            output_geo.loc + layer_loc.as_global() + surface_loc.as_global(),
+                            (output_geo.loc + layer_loc.as_global() + surface_loc.as_global())
+                                .to_f64(),
                         ));
                     }
                 }

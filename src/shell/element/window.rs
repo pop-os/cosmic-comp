@@ -247,9 +247,9 @@ impl CosmicWindow {
     pub fn focus_under(
         &self,
         mut relative_pos: Point<f64, Logical>,
-    ) -> Option<(PointerFocusTarget, Point<i32, Logical>)> {
+    ) -> Option<(PointerFocusTarget, Point<f64, Logical>)> {
         self.0.with_program(|p| {
-            let mut offset = Point::from((0, 0));
+            let mut offset = Point::from((0., 0.));
             let mut window_ui = None;
             if p.has_ssd(false) {
                 let geo = p.window.geometry();
@@ -264,19 +264,19 @@ impl CosmicWindow {
                 {
                     window_ui = Some((
                         PointerFocusTarget::WindowUI(self.clone()),
-                        Point::from((0, 0)),
+                        Point::from((0., 0.)),
                     ));
                 }
 
                 if point_i32.y - geo.loc.y < SSD_HEIGHT {
                     window_ui = Some((
                         PointerFocusTarget::WindowUI(self.clone()),
-                        Point::from((0, 0)),
+                        Point::from((0., 0.)),
                     ));
                 }
 
                 relative_pos.y -= SSD_HEIGHT as f64;
-                offset.y += SSD_HEIGHT;
+                offset.y += SSD_HEIGHT as f64;
             }
 
             p.window
@@ -288,7 +288,7 @@ impl CosmicWindow {
                             surface,
                             toplevel: Some(p.window.clone().into()),
                         },
-                        offset + surface_offset,
+                        (offset + surface_offset.to_f64()),
                     )
                 })
                 .or(window_ui)

@@ -3101,7 +3101,7 @@ impl TilingLayout {
         &mut self,
         location_f64: Point<f64, Local>,
         overview: OverviewMode,
-    ) -> Option<(PointerFocusTarget, Point<i32, Local>)> {
+    ) -> Option<(PointerFocusTarget, Point<f64, Local>)> {
         let gaps = self.gaps();
         let last_overview_hover = &mut self.last_overview_hover;
         let placeholder_id = &self.placeholder_id;
@@ -3132,7 +3132,8 @@ impl TilingLayout {
                 ) {
                     return Some((
                         target,
-                        geo.loc - mapped.geometry().loc.as_local() + surface_offset.as_local(),
+                        geo.loc.to_f64() - mapped.geometry().loc.as_local().to_f64()
+                            + surface_offset.as_local(),
                     ));
                 }
             }
@@ -3179,7 +3180,8 @@ impl TilingLayout {
                         .map(|(surface, surface_offset)| {
                             (
                                 surface,
-                                last_geometry.loc - mapped.geometry().loc.as_local()
+                                last_geometry.loc.to_f64()
+                                    - mapped.geometry().loc.as_local().to_f64()
                                     + surface_offset.as_local(),
                             )
                         })
@@ -3211,7 +3213,7 @@ impl TilingLayout {
                             orientation,
                         }
                         .into(),
-                        last_geometry.loc
+                        (last_geometry.loc
                             + tree
                                 .children(&id)
                                 .unwrap()
@@ -3221,7 +3223,8 @@ impl TilingLayout {
                                     let geo = node.data().geometry();
                                     geo.loc + geo.size
                                 })
-                                .unwrap(),
+                                .unwrap())
+                        .to_f64(),
                     ))
                 }
                 _ => None,

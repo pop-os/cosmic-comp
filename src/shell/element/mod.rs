@@ -260,7 +260,7 @@ impl CosmicMapped {
     pub fn focus_under(
         &self,
         relative_pos: Point<f64, Logical>,
-    ) -> Option<(PointerFocusTarget, Point<i32, Logical>)> {
+    ) -> Option<(PointerFocusTarget, Point<f64, Logical>)> {
         match &self.element {
             CosmicMappedInternal::Stack(stack) => stack.focus_under(relative_pos),
             CosmicMappedInternal::Window(window) => window.focus_under(relative_pos),
@@ -1219,31 +1219,48 @@ impl RenderElement<GlowRenderer> for CosmicMappedRenderElement<GlowRenderer> {
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), <GlowRenderer as Renderer>::Error> {
         match self {
-            CosmicMappedRenderElement::Stack(elem) => elem.draw(frame, src, dst, damage),
-            CosmicMappedRenderElement::Window(elem) => elem.draw(frame, src, dst, damage),
-            CosmicMappedRenderElement::TiledStack(elem) => elem.draw(frame, src, dst, damage),
-            CosmicMappedRenderElement::TiledWindow(elem) => elem.draw(frame, src, dst, damage),
-            CosmicMappedRenderElement::TiledOverlay(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage)
+            CosmicMappedRenderElement::Stack(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
             }
-            CosmicMappedRenderElement::MovingStack(elem) => elem.draw(frame, src, dst, damage),
-            CosmicMappedRenderElement::MovingWindow(elem) => elem.draw(frame, src, dst, damage),
-            CosmicMappedRenderElement::GrabbedStack(elem) => elem.draw(frame, src, dst, damage),
-            CosmicMappedRenderElement::GrabbedWindow(elem) => elem.draw(frame, src, dst, damage),
+            CosmicMappedRenderElement::Window(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
+            }
+            CosmicMappedRenderElement::TiledStack(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
+            }
+            CosmicMappedRenderElement::TiledWindow(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
+            }
+            CosmicMappedRenderElement::TiledOverlay(elem) => {
+                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage, opaque_regions)
+            }
+            CosmicMappedRenderElement::MovingStack(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
+            }
+            CosmicMappedRenderElement::MovingWindow(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
+            }
+            CosmicMappedRenderElement::GrabbedStack(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
+            }
+            CosmicMappedRenderElement::GrabbedWindow(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
+            }
             CosmicMappedRenderElement::FocusIndicator(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage)
+                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage, opaque_regions)
             }
             CosmicMappedRenderElement::Overlay(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage)
+                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage, opaque_regions)
             }
             CosmicMappedRenderElement::StackHoverIndicator(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage)
+                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage, opaque_regions)
             }
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage)
+                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage, opaque_regions)
             }
         }
     }
@@ -1277,36 +1294,75 @@ impl<'a> RenderElement<GlMultiRenderer<'a>> for CosmicMappedRenderElement<GlMult
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), GlMultiError> {
         match self {
-            CosmicMappedRenderElement::Stack(elem) => elem.draw(frame, src, dst, damage),
-            CosmicMappedRenderElement::Window(elem) => elem.draw(frame, src, dst, damage),
-            CosmicMappedRenderElement::TiledStack(elem) => elem.draw(frame, src, dst, damage),
-            CosmicMappedRenderElement::TiledWindow(elem) => elem.draw(frame, src, dst, damage),
-            CosmicMappedRenderElement::TiledOverlay(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame.glow_frame_mut(), src, dst, damage)
-                    .map_err(|err| GlMultiError::Render(err))
+            CosmicMappedRenderElement::Stack(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
             }
-            CosmicMappedRenderElement::MovingStack(elem) => elem.draw(frame, src, dst, damage),
-            CosmicMappedRenderElement::MovingWindow(elem) => elem.draw(frame, src, dst, damage),
-            CosmicMappedRenderElement::GrabbedStack(elem) => elem.draw(frame, src, dst, damage),
-            CosmicMappedRenderElement::GrabbedWindow(elem) => elem.draw(frame, src, dst, damage),
-            CosmicMappedRenderElement::FocusIndicator(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame.glow_frame_mut(), src, dst, damage)
-                    .map_err(|err| GlMultiError::Render(err))
+            CosmicMappedRenderElement::Window(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
             }
-            CosmicMappedRenderElement::Overlay(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame.glow_frame_mut(), src, dst, damage)
-                    .map_err(|err| GlMultiError::Render(err))
+            CosmicMappedRenderElement::TiledStack(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
             }
+            CosmicMappedRenderElement::TiledWindow(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
+            }
+            CosmicMappedRenderElement::TiledOverlay(elem) => RenderElement::<GlowRenderer>::draw(
+                elem,
+                frame.glow_frame_mut(),
+                src,
+                dst,
+                damage,
+                opaque_regions,
+            )
+            .map_err(|err| GlMultiError::Render(err)),
+            CosmicMappedRenderElement::MovingStack(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
+            }
+            CosmicMappedRenderElement::MovingWindow(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
+            }
+            CosmicMappedRenderElement::GrabbedStack(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
+            }
+            CosmicMappedRenderElement::GrabbedWindow(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions)
+            }
+            CosmicMappedRenderElement::FocusIndicator(elem) => RenderElement::<GlowRenderer>::draw(
+                elem,
+                frame.glow_frame_mut(),
+                src,
+                dst,
+                damage,
+                opaque_regions,
+            )
+            .map_err(|err| GlMultiError::Render(err)),
+            CosmicMappedRenderElement::Overlay(elem) => RenderElement::<GlowRenderer>::draw(
+                elem,
+                frame.glow_frame_mut(),
+                src,
+                dst,
+                damage,
+                opaque_regions,
+            )
+            .map_err(|err| GlMultiError::Render(err)),
             CosmicMappedRenderElement::StackHoverIndicator(elem) => {
-                elem.draw(frame, src, dst, damage)
+                elem.draw(frame, src, dst, damage, opaque_regions)
             }
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => {
                 let glow_frame = frame.glow_frame_mut();
-                RenderElement::<GlowRenderer>::draw(elem, glow_frame, src, dst, damage)
-                    .map_err(|err| GlMultiError::Render(err))
+                RenderElement::<GlowRenderer>::draw(
+                    elem,
+                    glow_frame,
+                    src,
+                    dst,
+                    damage,
+                    opaque_regions,
+                )
+                .map_err(|err| GlMultiError::Render(err))
             }
         }
     }
