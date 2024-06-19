@@ -1003,6 +1003,11 @@ impl FloatingLayout {
                     current_geometry
                 };
 
+                enum NewState {
+                    Corner(TiledCorners),
+                    Maximized,
+                }
+
                 let new_state = match (direction, &*tiled_state) {
                     // figure out if we are moving between workspaces/outputs
                     (
@@ -1034,12 +1039,94 @@ impl FloatingLayout {
                         ));
                     }
 
+                    (Direction::Up, None) => {
+                        if element.is_maximized(true) {
+                            NewState::Corner(TiledCorners::Top)
+                        } else {
+                            NewState::Maximized
+                        }
+                    }
                     // do we go maximized?
                     (Direction::Up, Some(TiledCorners::Bottom))
-                    | (Direction::Up, None)
                     | (Direction::Down, Some(TiledCorners::Top))
                     | (Direction::Left, Some(TiledCorners::Right))
-                    | (Direction::Right, Some(TiledCorners::Left)) => {
+                    | (Direction::Right, Some(TiledCorners::Left)) => NewState::Maximized,
+
+                    // figure out if we need to quater tile
+                    (Direction::Up, Some(TiledCorners::Left))
+                    | (Direction::Left, Some(TiledCorners::Top)) => {
+                        NewState::Corner(TiledCorners::TopLeft)
+                    }
+                    (Direction::Right, Some(TiledCorners::Top))
+                    | (Direction::Up, Some(TiledCorners::Right)) => {
+                        NewState::Corner(TiledCorners::TopRight)
+                    }
+                    (Direction::Down, Some(TiledCorners::Left))
+                    | (Direction::Left, Some(TiledCorners::Bottom)) => {
+                        NewState::Corner(TiledCorners::BottomLeft)
+                    }
+                    (Direction::Right, Some(TiledCorners::Bottom))
+                    | (Direction::Down, Some(TiledCorners::Right)) => {
+                        NewState::Corner(TiledCorners::BottomRight)
+                    }
+                    // figure out if we need to extend a quater tile
+                    (Direction::Up, Some(TiledCorners::BottomLeft))
+                    | (Direction::Down, Some(TiledCorners::TopLeft)) => {
+                        NewState::Corner(TiledCorners::Left)
+                    }
+                    (Direction::Up, Some(TiledCorners::BottomRight))
+                    | (Direction::Down, Some(TiledCorners::TopRight)) => {
+                        NewState::Corner(TiledCorners::Right)
+                    }
+                    (Direction::Left, Some(TiledCorners::TopRight))
+                    | (Direction::Right, Some(TiledCorners::TopLeft)) => {
+                        NewState::Corner(TiledCorners::Top)
+                    }
+                    (Direction::Left, Some(TiledCorners::BottomRight))
+                    | (Direction::Right, Some(TiledCorners::BottomLeft)) => {
+                        NewState::Corner(TiledCorners::Bottom)
+                    }
+                    // else we have a simple case
+                    (Direction::Up, _) => NewState::Corner(TiledCorners::Top),
+                    (Direction::Right, _) => NewState::Corner(TiledCorners::Right),
+                    (Direction::Down, _) => NewState::Corner(TiledCorners::Bottom),
+                    (Direction::Left, _) => NewState::Corner(TiledCorners::Left),
+                };
+
+                match new_state {
+                    NewState::Corner(new_state) => {
+                        let new_geo = new_state.relative_geometry(output_geometry, self.gaps());
+                        let (new_pos, new_size) = (new_geo.loc, new_geo.size);
+                        element.set_tiled(true); // TODO: More fine grained?
+                        element.set_maximized(false);
+
+                        if tiled_state.is_none() {
+                            let last_geometry = element
+                                .maximized_state
+                                .lock()
+                                .unwrap()
+                                .take()
+                                .map(|state| state.original_geometry)
+                                .or_else(|| {
+                                    self.space.element_geometry(element).map(RectExt::as_local)
+                                });
+
+                            *element.last_geometry.lock().unwrap() = last_geometry;
+                        }
+
+                        *tiled_state = Some(new_state);
+                        std::mem::drop(tiled_state);
+
+                        element.moved_since_mapped.store(true, Ordering::SeqCst);
+                        let element = element.clone();
+                        self.map_internal(
+                            element,
+                            Some(new_pos),
+                            Some(new_size.as_logical()),
+                            Some(start_rectangle),
+                        );
+                    }
+                    NewState::Maximized => {
                         std::mem::drop(tiled_state);
 
                         let mut maximized_state = element.maximized_state.lock().unwrap();
@@ -1050,62 +1137,8 @@ impl FloatingLayout {
                         std::mem::drop(maximized_state);
 
                         self.map_maximized(element.clone(), start_rectangle, true);
-                        return MoveResult::Done;
                     }
-
-                    // figure out if we need to quater tile
-                    (Direction::Up, Some(TiledCorners::Left))
-                    | (Direction::Left, Some(TiledCorners::Top)) => TiledCorners::TopLeft,
-                    (Direction::Right, Some(TiledCorners::Top))
-                    | (Direction::Up, Some(TiledCorners::Right)) => TiledCorners::TopRight,
-                    (Direction::Down, Some(TiledCorners::Left))
-                    | (Direction::Left, Some(TiledCorners::Bottom)) => TiledCorners::BottomLeft,
-                    (Direction::Right, Some(TiledCorners::Bottom))
-                    | (Direction::Down, Some(TiledCorners::Right)) => TiledCorners::BottomRight,
-                    // figure out if we need to extend a quater tile
-                    (Direction::Up, Some(TiledCorners::BottomLeft))
-                    | (Direction::Down, Some(TiledCorners::TopLeft)) => TiledCorners::Left,
-                    (Direction::Up, Some(TiledCorners::BottomRight))
-                    | (Direction::Down, Some(TiledCorners::TopRight)) => TiledCorners::Right,
-                    (Direction::Left, Some(TiledCorners::TopRight))
-                    | (Direction::Right, Some(TiledCorners::TopLeft)) => TiledCorners::Top,
-                    (Direction::Left, Some(TiledCorners::BottomRight))
-                    | (Direction::Right, Some(TiledCorners::BottomLeft)) => TiledCorners::Bottom,
-                    // else we have a simple case
-                    (Direction::Up, _) => TiledCorners::Top,
-                    (Direction::Right, _) => TiledCorners::Right,
-                    (Direction::Down, _) => TiledCorners::Bottom,
-                    (Direction::Left, _) => TiledCorners::Left,
-                };
-
-                let new_geo = new_state.relative_geometry(output_geometry, self.gaps());
-                let (new_pos, new_size) = (new_geo.loc, new_geo.size);
-                element.set_tiled(true); // TODO: More fine grained?
-                element.set_maximized(false);
-
-                if tiled_state.is_none() {
-                    let last_geometry = element
-                        .maximized_state
-                        .lock()
-                        .unwrap()
-                        .take()
-                        .map(|state| state.original_geometry)
-                        .or_else(|| self.space.element_geometry(element).map(RectExt::as_local));
-
-                    *element.last_geometry.lock().unwrap() = last_geometry;
                 }
-
-                *tiled_state = Some(new_state);
-                std::mem::drop(tiled_state);
-
-                element.moved_since_mapped.store(true, Ordering::SeqCst);
-                let element = element.clone();
-                self.map_internal(
-                    element,
-                    Some(new_pos),
-                    Some(new_size.as_logical()),
-                    Some(start_rectangle),
-                );
 
                 MoveResult::Done
             }
