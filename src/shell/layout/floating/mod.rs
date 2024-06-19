@@ -730,7 +730,7 @@ impl FloatingLayout {
     pub fn surface_under(
         &mut self,
         location: Point<f64, Local>,
-    ) -> Option<(PointerFocusTarget, Point<i32, Local>)> {
+    ) -> Option<(PointerFocusTarget, Point<f64, Local>)> {
         let res = self
             .space
             .element_under(location.as_logical())
@@ -753,7 +753,7 @@ impl FloatingLayout {
             element
                 .focus_under(point.as_logical())
                 .map(|(surface, surface_offset)| {
-                    (surface, space_offset + surface_offset.as_local())
+                    (surface, space_offset.to_f64() + surface_offset.as_local())
                 })
         })
     }

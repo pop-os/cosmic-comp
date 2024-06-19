@@ -137,7 +137,7 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
         &mut self,
         data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &MotionEvent,
     ) {
         // While the grab is active, no client has pointer focus
@@ -152,7 +152,7 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
         &mut self,
         state: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &RelativeMotionEvent,
     ) {
         // While the grab is active, no client has pointer focus
@@ -282,7 +282,7 @@ impl TouchGrab<State> for ResizeSurfaceGrab {
         &mut self,
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
-        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &DownEvent,
         seq: Serial,
     ) {
@@ -307,7 +307,7 @@ impl TouchGrab<State> for ResizeSurfaceGrab {
         &mut self,
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
-        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &TouchMotionEvent,
         seq: Serial,
     ) {

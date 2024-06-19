@@ -189,21 +189,22 @@ impl RenderElement<GlowRenderer> for CosmicElement<GlowRenderer> {
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), <GlowRenderer as Renderer>::Error> {
         match self {
-            CosmicElement::Workspace(elem) => elem.draw(frame, src, dst, damage),
-            CosmicElement::Cursor(elem) => elem.draw(frame, src, dst, damage),
-            CosmicElement::Dnd(elem) => elem.draw(frame, src, dst, damage),
-            CosmicElement::MoveGrab(elem) => elem.draw(frame, src, dst, damage),
+            CosmicElement::Workspace(elem) => elem.draw(frame, src, dst, damage, opaque_regions),
+            CosmicElement::Cursor(elem) => elem.draw(frame, src, dst, damage, opaque_regions),
+            CosmicElement::Dnd(elem) => elem.draw(frame, src, dst, damage, opaque_regions),
+            CosmicElement::MoveGrab(elem) => elem.draw(frame, src, dst, damage, opaque_regions),
             CosmicElement::AdditionalDamage(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage)
+                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage, opaque_regions)
             }
             CosmicElement::Mirror(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage)
+                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage, opaque_regions)
             }
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage)
+                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage, opaque_regions)
             }
         }
     }
@@ -229,20 +230,33 @@ impl<'a> RenderElement<GlMultiRenderer<'a>> for CosmicElement<GlMultiRenderer<'a
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), GlMultiError> {
         match self {
-            CosmicElement::Workspace(elem) => elem.draw(frame, src, dst, damage),
-            CosmicElement::Cursor(elem) => elem.draw(frame, src, dst, damage),
-            CosmicElement::Dnd(elem) => elem.draw(frame, src, dst, damage),
-            CosmicElement::MoveGrab(elem) => elem.draw(frame, src, dst, damage),
-            CosmicElement::AdditionalDamage(elem) => {
-                RenderElement::<GlMultiRenderer<'a>>::draw(elem, frame, src, dst, damage)
-            }
+            CosmicElement::Workspace(elem) => elem.draw(frame, src, dst, damage, opaque_regions),
+            CosmicElement::Cursor(elem) => elem.draw(frame, src, dst, damage, opaque_regions),
+            CosmicElement::Dnd(elem) => elem.draw(frame, src, dst, damage, opaque_regions),
+            CosmicElement::MoveGrab(elem) => elem.draw(frame, src, dst, damage, opaque_regions),
+            CosmicElement::AdditionalDamage(elem) => RenderElement::<GlMultiRenderer<'a>>::draw(
+                elem,
+                frame,
+                src,
+                dst,
+                damage,
+                opaque_regions,
+            ),
             CosmicElement::Mirror(elem) => {
                 let elem = {
                     let glow_frame = frame.glow_frame_mut();
-                    RenderElement::<GlowRenderer>::draw(elem, glow_frame, src, dst, damage)
-                        .map_err(|err| GlMultiError::Render(err))
+                    RenderElement::<GlowRenderer>::draw(
+                        elem,
+                        glow_frame,
+                        src,
+                        dst,
+                        damage,
+                        opaque_regions,
+                    )
+                    .map_err(|err| GlMultiError::Render(err))
                 };
                 elem
             }
@@ -250,8 +264,15 @@ impl<'a> RenderElement<GlMultiRenderer<'a>> for CosmicElement<GlMultiRenderer<'a
             CosmicElement::Egui(elem) => {
                 let elem = {
                     let glow_frame = frame.glow_frame_mut();
-                    RenderElement::<GlowRenderer>::draw(elem, glow_frame, src, dst, damage)
-                        .map_err(|err| GlMultiError::Render(err))
+                    RenderElement::<GlowRenderer>::draw(
+                        elem,
+                        glow_frame,
+                        src,
+                        dst,
+                        damage,
+                        opaque_regions,
+                    )
+                    .map_err(|err| GlMultiError::Render(err))
                 };
                 elem
             }
@@ -439,6 +460,7 @@ impl<R: Renderer> RenderElement<R> for DamageElement {
         _src: Rectangle<f64, BufferCoords>,
         _dst: Rectangle<i32, Physical>,
         _damage: &[Rectangle<i32, Physical>],
+        _opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), <R as Renderer>::Error> {
         Ok(())
     }

@@ -2001,7 +2001,7 @@ impl Shell {
         &mut self,
         location: Point<f64, Global>,
         output: &Output,
-    ) -> Option<(PointerFocusTarget, Point<i32, Global>)> {
+    ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
         let overview = self.overview_mode.clone();
         self.workspaces.sets.get_mut(output).and_then(|set| {
             set.sticky_layer
@@ -2659,7 +2659,7 @@ impl Shell {
         edge: ResizeEdge,
     ) -> Option<(
         (
-            Option<(PointerFocusTarget, Point<i32, Logical>)>,
+            Option<(PointerFocusTarget, Point<f64, Logical>)>,
             Point<i32, Global>,
         ),
         (ResizeGrab, Focus),
@@ -2715,7 +2715,7 @@ impl Shell {
         let element_offset = (new_loc - geometry.loc).as_logical();
         let focus = mapped
             .focus_under(element_offset.to_f64())
-            .map(|(target, surface_offset)| (target, (surface_offset + element_offset)));
+            .map(|(target, surface_offset)| (target, (surface_offset + element_offset.to_f64())));
         start_data.set_location(new_loc.as_logical().to_f64());
         start_data.set_focus(focus.clone());
 
@@ -3185,7 +3185,7 @@ pub fn check_grab_preconditions(
         } else {
             GrabStartData::Pointer(pointer.grab_start_data().unwrap_or_else(|| {
                 PointerGrabStartData {
-                    focus: pointer.current_focus().map(|f| (f, Point::from((0, 0)))),
+                    focus: pointer.current_focus().map(|f| (f, Point::from((0., 0.)))),
                     button: 0x110,
                     location: pointer.current_location(),
                 }

@@ -31,14 +31,14 @@ pub enum GrabStartData {
 }
 
 impl GrabStartData {
-    pub fn focus(&self) -> Option<&(PointerFocusTarget, Point<i32, Logical>)> {
+    pub fn focus(&self) -> Option<&(PointerFocusTarget, Point<f64, Logical>)> {
         match self {
             Self::Touch(touch) => touch.focus.as_ref(),
             Self::Pointer(pointer) => pointer.focus.as_ref(),
         }
     }
 
-    pub fn set_focus(&mut self, focus: Option<(PointerFocusTarget, Point<i32, Logical>)>) {
+    pub fn set_focus(&mut self, focus: Option<(PointerFocusTarget, Point<f64, Logical>)>) {
         match self {
             Self::Touch(touch) => touch.focus = focus,
             Self::Pointer(pointer) => pointer.focus = focus,
@@ -167,7 +167,7 @@ impl PointerGrab<State> for ResizeGrab {
         &mut self,
         data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &MotionEvent,
     ) {
         match self {
@@ -180,7 +180,7 @@ impl PointerGrab<State> for ResizeGrab {
         &mut self,
         data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &RelativeMotionEvent,
     ) {
         match self {
@@ -336,7 +336,7 @@ impl TouchGrab<State> for ResizeGrab {
         &mut self,
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
-        focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &DownEvent,
         seq: Serial,
     ) {
@@ -363,7 +363,7 @@ impl TouchGrab<State> for ResizeGrab {
         &mut self,
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
-        focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &TouchMotionEvent,
         seq: Serial,
     ) {
