@@ -1072,6 +1072,7 @@ impl FloatingLayout {
                     (Direction::Left, Some(TiledCorners::BottomRight))
                     | (Direction::Right, Some(TiledCorners::BottomLeft)) => TiledCorners::Bottom,
                     // else we have a simple case
+                    (Direction::Up, _) => TiledCorners::Top,
                     (Direction::Right, _) => TiledCorners::Right,
                     (Direction::Down, _) => TiledCorners::Bottom,
                     (Direction::Left, _) => TiledCorners::Left,
