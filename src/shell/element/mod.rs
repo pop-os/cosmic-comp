@@ -67,6 +67,8 @@ use egui_plot::{Corner, Legend, Plot, PlotPoints, Polygon};
 #[cfg(feature = "debug")]
 use smithay::backend::renderer::{element::texture::TextureRenderElement, gles::GlesTexture};
 #[cfg(feature = "debug")]
+use smithay::desktop::WindowSurface;
+#[cfg(feature = "debug")]
 use tracing::debug;
 
 use super::{

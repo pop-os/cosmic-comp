@@ -148,23 +148,25 @@ impl Timings {
             .unwrap_or(Duration::ZERO)
     }
 
-    /*
-    pub fn max_time_to_display(&self) -> Duration {
+    pub fn max_frametime(&self, window: usize) -> Duration {
         self.previous_frames
             .iter()
-            .map(|f| f.time_to_display())
+            .rev()
+            .take(window)
+            .map(|f| f.frame_time())
             .max()
             .unwrap_or(Duration::ZERO)
     }
 
-    pub fn min_time_to_display(&self) -> Duration {
+    pub fn min_frametime(&self, window: usize) -> Duration {
         self.previous_frames
             .iter()
-            .map(|f| f.time_to_display())
+            .rev()
+            .take(window)
+            .map(|f| f.frame_time())
             .min()
             .unwrap_or(Duration::ZERO)
     }
-    */
 
     pub fn avg_rendertime(&self) -> Duration {
         if self.previous_frames.is_empty() {
@@ -178,7 +180,7 @@ impl Timings {
     }
 
     pub fn avg_frametime(&self, window: usize) -> Duration {
-        if self.previous_frames.is_empty() {
+        if self.previous_frames.is_empty() || window == 0 {
             return MIN_RENDER_TIME;
         }
 
