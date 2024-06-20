@@ -1038,7 +1038,8 @@ impl FloatingLayout {
                     (Direction::Up, Some(TiledCorners::Bottom))
                     | (Direction::Down, Some(TiledCorners::Top))
                     | (Direction::Left, Some(TiledCorners::Right))
-                    | (Direction::Right, Some(TiledCorners::Left)) => {
+                    | (Direction::Right, Some(TiledCorners::Left))
+                    | (Direction::Up, None) if !element.is_maximized(true) => {
                         std::mem::drop(tiled_state);
 
                         let mut maximized_state = element.maximized_state.lock().unwrap();
