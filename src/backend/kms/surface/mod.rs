@@ -765,6 +765,14 @@ impl SurfaceThreadState {
             return;
         };
 
+        if let QueueState::WaitingForVBlank { .. } = &self.state {
+            // We're waiting for VBlank, request a redraw afterwards.
+            self.state = QueueState::WaitingForVBlank {
+                redraw_needed: true,
+            };
+            return;
+        }
+
         if !force {
             match &self.state {
                 QueueState::Idle | QueueState::WaitingForEstimatedVBlank(_) => {}
@@ -773,14 +781,7 @@ impl SurfaceThreadState {
                 QueueState::Queued(_) | QueueState::WaitingForEstimatedVBlankAndQueued { .. } => {
                     return;
                 }
-
-                // We're waiting for VBlank, request a redraw afterwards.
-                QueueState::WaitingForVBlank { .. } => {
-                    self.state = QueueState::WaitingForVBlank {
-                        redraw_needed: true,
-                    };
-                    return;
-                }
+                _ => unreachable!(),
             };
         }
 
@@ -812,6 +813,20 @@ impl SurfaceThreadState {
                 self.state = QueueState::Queued(token);
             }
             QueueState::WaitingForEstimatedVBlank(estimated_vblank) => {
+                self.state = QueueState::WaitingForEstimatedVBlankAndQueued {
+                    estimated_vblank: estimated_vblank.clone(),
+                    queued_render: token,
+                };
+            }
+            QueueState::Queued(old_token) if force => {
+                self.loop_handle.remove(*old_token);
+                self.state = QueueState::Queued(token);
+            }
+            QueueState::WaitingForEstimatedVBlankAndQueued {
+                estimated_vblank,
+                queued_render,
+            } if force => {
+                self.loop_handle.remove(*queued_render);
                 self.state = QueueState::WaitingForEstimatedVBlankAndQueued {
                     estimated_vblank: estimated_vblank.clone(),
                     queued_render: token,
