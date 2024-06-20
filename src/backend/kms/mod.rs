@@ -341,7 +341,15 @@ impl KmsState {
 
             let result = egl_display
                 .create_image_from_dmabuf(&dmabuf)
-                .map(|_| device.render_node)
+                .map(|image| {
+                    unsafe {
+                        smithay::backend::egl::ffi::egl::DestroyImageKHR(
+                            **egl_display.get_display_handle(),
+                            image,
+                        );
+                    };
+                    device.render_node
+                })
                 .map_err(Into::into);
 
             match result {
