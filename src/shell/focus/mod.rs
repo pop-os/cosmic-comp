@@ -266,7 +266,9 @@ impl Common {
             let mut shell = state.common.shell.write().unwrap();
             let output = seat.active_output();
             if !shell.outputs().any(|o| o == &output) {
-                seat.set_active_output(&shell.outputs().next().unwrap());
+                if let Some(other) = shell.outputs().next() {
+                    seat.set_active_output(other);
+                }
                 continue;
             }
             let last_known_focus = ActiveFocus::get(&seat);

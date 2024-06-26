@@ -1455,13 +1455,7 @@ impl Shell {
     }
 
     pub fn outputs(&self) -> impl DoubleEndedIterator<Item = &Output> {
-        self.workspaces.sets.keys().chain(
-            self.workspaces
-                .backup_set
-                .as_ref()
-                .into_iter()
-                .map(|set| &set.output),
-        )
+        self.workspaces.sets.keys()
     }
 
     pub fn next_output(&self, current_output: &Output, direction: Direction) -> Option<&Output> {
