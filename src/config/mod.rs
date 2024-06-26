@@ -136,7 +136,7 @@ pub struct OutputConfig {
     pub scale: f64,
     #[serde(with = "TransformDef")]
     pub transform: Transform,
-    pub position: (i32, i32),
+    pub position: (u32, u32),
     #[serde(default = "default_enabled")]
     pub enabled: OutputState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
