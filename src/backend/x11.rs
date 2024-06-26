@@ -273,9 +273,7 @@ fn try_vulkan_allocator(node: &DrmNode) -> Option<Allocator> {
 
     let Some(device) = devices
         .filter(|phd| {
-            phd.has_device_extension(
-                smithay::reexports::ash::extensions::ext::PhysicalDeviceDrm::name(),
-            )
+            phd.has_device_extension(smithay::reexports::ash::ext::physical_device_drm::NAME)
         })
         .find(|phd| {
             phd.primary_node().unwrap() == Some(*node) || phd.render_node().unwrap() == Some(*node)
@@ -480,7 +478,7 @@ where
                 "Could not determine path for gpu node: {}",
                 render_node
             ))?,
-        renderer.dmabuf_formats().collect(),
+        renderer.dmabuf_formats(),
         &dmabuf_global,
     );
 

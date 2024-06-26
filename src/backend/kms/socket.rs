@@ -3,7 +3,7 @@
 use anyhow::{anyhow, Context, Result};
 use smithay::{
     backend::{
-        allocator::Format,
+        allocator::format::FormatSet,
         drm::{DrmNode, NodeType},
     },
     reexports::{
@@ -32,9 +32,8 @@ impl State {
         &mut self,
         dh: &DisplayHandle,
         render_node: DrmNode,
-        formats: impl Iterator<Item = Format>,
+        formats: FormatSet,
     ) -> Result<Socket> {
-        let formats = formats.collect::<Vec<_>>();
         let socket_name = format!(
             "{}-{}",
             &self.common.socket.to_string_lossy(),

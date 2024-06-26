@@ -21,8 +21,9 @@ use calloop::channel::Channel;
 use smithay::{
     backend::{
         allocator::{
+            format::FormatSet,
             gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
-            Format, Fourcc,
+            Fourcc,
         },
         drm::{
             compositor::{BlitFrameResultError, DrmCompositor, FrameError, PrimaryPlaneElement},
@@ -108,7 +109,7 @@ pub struct Surface {
 
     active: Arc<AtomicBool>,
     feedback: HashMap<DrmNode, SurfaceDmabufFeedback>,
-    plane_formats: HashSet<Format>,
+    plane_formats: FormatSet,
 
     loop_handle: LoopHandle<'static, State>,
     thread_command: Sender<ThreadCommand>,
@@ -310,20 +311,18 @@ impl Surface {
                                             .api
                                             .single_renderer(&source_node)
                                             .unwrap()
-                                            .dmabuf_formats()
-                                            .collect::<HashSet<_>>();
+                                            .dmabuf_formats();
                                         let target_formats = kms
                                             .api
                                             .single_renderer(&target_node)
                                             .unwrap()
-                                            .dmabuf_formats()
-                                            .collect::<HashSet<_>>();
+                                            .dmabuf_formats();
                                         get_surface_dmabuf_feedback(
                                             source_node,
                                             target_node,
                                             render_formats,
                                             target_formats,
-                                            &surface.plane_formats,
+                                            surface.plane_formats.clone(),
                                         )
                                     })
                                     .clone(),
@@ -341,7 +340,7 @@ impl Surface {
             known_nodes: HashSet::new(),
             active,
             feedback: HashMap::new(),
-            plane_formats: HashSet::new(),
+            plane_formats: FormatSet::default(),
             loop_handle: evlh.clone(),
             thread_command: tx,
             thread_token,
@@ -407,7 +406,7 @@ impl Surface {
             .primary
             .formats
             .iter()
-            .cloned()
+            .copied()
             .chain(
                 surface
                     .planes()
@@ -415,7 +414,7 @@ impl Surface {
                     .iter()
                     .flat_map(|p| p.formats.iter().cloned()),
             )
-            .collect::<HashSet<_>>();
+            .collect::<FormatSet>();
 
         let _ = self.thread_command.send(ThreadCommand::Resume {
             surface,
@@ -593,8 +592,7 @@ impl SurfaceThreadState {
             .api
             .single_renderer(&self.target_node)
             .unwrap()
-            .dmabuf_formats()
-            .collect();
+            .dmabuf_formats();
 
         self.timings.set_refresh_interval(Some(Duration::from_nanos(
             drm_helpers::calculate_refresh_rate(surface.pending_mode()) as u64,
@@ -1368,14 +1366,14 @@ fn render_node_for_output(
 fn get_surface_dmabuf_feedback(
     render_node: DrmNode,
     target_node: DrmNode,
-    render_formats: HashSet<Format>,
-    target_formats: HashSet<Format>,
-    plane_formats: &HashSet<Format>,
+    render_formats: FormatSet,
+    target_formats: FormatSet,
+    plane_formats: FormatSet,
 ) -> SurfaceDmabufFeedback {
     let combined_formats = render_formats
         .intersection(&target_formats)
         .copied()
-        .collect::<HashSet<_>>();
+        .collect::<FormatSet>();
 
     // We limit the scan-out trache to formats we can also render from
     // so that there is always a fallback render path available in case
@@ -1383,7 +1381,7 @@ fn get_surface_dmabuf_feedback(
     let planes_formats = plane_formats
         .intersection(&combined_formats)
         .copied()
-        .collect::<Vec<_>>();
+        .collect::<FormatSet>();
 
     let builder = DmabufFeedbackBuilder::new(render_node.dev_id(), render_formats);
     /*

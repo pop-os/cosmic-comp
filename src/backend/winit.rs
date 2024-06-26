@@ -240,7 +240,7 @@ fn init_egl_client_side(
     let render_node = EGLDevice::device_for_display(renderer.renderer().egl_context().display())
         .and_then(|device| device.try_get_render_node());
 
-    let dmabuf_formats = renderer.renderer().dmabuf_formats().collect::<Vec<_>>();
+    let dmabuf_formats = renderer.renderer().dmabuf_formats();
 
     match render_node {
         Ok(Some(node)) => {

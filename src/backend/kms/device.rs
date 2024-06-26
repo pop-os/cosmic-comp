@@ -179,7 +179,7 @@ impl State {
             )
             .with_context(|| format!("Failed to add drm device to event loop: {}", dev))?;
 
-        let socket = match self.create_socket(dh, render_node, render_formats.clone().into_iter()) {
+        let socket = match self.create_socket(dh, render_node, render_formats.clone()) {
             Ok(socket) => Some(socket),
             Err(err) => {
                 warn!(

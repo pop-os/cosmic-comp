@@ -14,7 +14,7 @@ members = [
 anyhow = {version = "1.0.51", features = ["backtrace"]}
 bitflags = "2.4"
 bytemuck = "1.12"
-calloop = {version = "0.13.0", features = ["executor"]}
+calloop = {version = "0.14.0", features = ["executor"]}
 cosmic-comp-config = {path = "cosmic-comp-config"}
 cosmic-config = {git = "https://github.com/pop-os/libcosmic/", features = ["calloop", "macro"]}
 cosmic-protocols = {git = "https://github.com/pop-os/cosmic-protocols", branch = "main", default-features = false, features = ["server"]}
@@ -118,4 +118,4 @@ inherits = "release"
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = {git = "https://github.com/smithay//smithay", branch = "feature/thread-safe-rendering"} #rev = "74e8c4f"}
+smithay = {git = "https://github.com/smithay//smithay", rev = "69b379d"}

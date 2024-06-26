@@ -24,7 +24,8 @@ mod generated {
 use smithay::{
     backend::allocator::{
         dmabuf::{Dmabuf, DmabufFlags},
-        Format, Fourcc, Modifier,
+        format::FormatSet,
+        Fourcc, Modifier,
     },
     reexports::wayland_server::{
         backend::GlobalId, protocol::wl_buffer::WlBuffer, Client, DataInit, Dispatch,
@@ -223,7 +224,7 @@ impl<R: 'static> WlDrmState<R> {
         &mut self,
         display: &DisplayHandle,
         device_path: PathBuf,
-        formats: Vec<Format>,
+        formats: FormatSet,
         dmabuf_global: &DmabufGlobal,
     ) -> GlobalId
     where
@@ -242,7 +243,7 @@ impl<R: 'static> WlDrmState<R> {
         &mut self,
         display: &DisplayHandle,
         device_path: PathBuf,
-        formats: Vec<Format>,
+        formats: FormatSet,
         dmabuf_global: &DmabufGlobal,
         client_filter: F,
     ) -> GlobalId
