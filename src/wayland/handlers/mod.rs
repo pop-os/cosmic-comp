@@ -9,6 +9,7 @@ pub mod decoration;
 pub mod dmabuf;
 pub mod drm;
 pub mod drm_lease;
+pub mod drm_syncobj;
 pub mod foreign_toplevel_list;
 pub mod fractional_scale;
 pub mod idle_inhibit;
