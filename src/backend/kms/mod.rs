@@ -642,7 +642,7 @@ impl KmsState {
             }
 
             // add new ones
-            let mut w = shell.read().unwrap().global_space().size.w;
+            let mut w = shell.read().unwrap().global_space().size.w as u32;
             if !test_only {
                 for (conn, crtc) in new_pairings {
                     let (output, _) = device.connector_added(
@@ -655,7 +655,7 @@ impl KmsState {
                         startup_done.clone(),
                     )?;
                     if output.mirroring().is_none() {
-                        w += output.config().mode_size().w;
+                        w += output.config().mode_size().w as u32;
                     }
                     all_outputs.push(output);
                 }

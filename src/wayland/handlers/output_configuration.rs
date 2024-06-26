@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use smithay::output::Output;
+use smithay::{output::Output, utils::Point};
 use tracing::{error, warn};
 
 use crate::{
@@ -31,13 +31,54 @@ impl State {
     fn output_configuration(
         &mut self,
         test_only: bool,
-        conf: Vec<(Output, OutputConfiguration)>,
+        mut conf: Vec<(Output, OutputConfiguration)>,
     ) -> bool {
         if conf
             .iter()
             .all(|(_, conf)| matches!(conf, OutputConfiguration::Disabled))
         {
             return false; // we don't allow the user to accidentally disable all their outputs
+        }
+
+        // sanitize negative positions
+        {
+            let (offset_x, offset_y) = conf.iter().fold((0, 0), |mut offset, (_, conf)| {
+                if let OutputConfiguration::Enabled {
+                    position: Some(position),
+                    ..
+                } = conf
+                {
+                    if position.x.is_negative() {
+                        offset.0 = offset.0.max(position.x.abs());
+                    }
+                    if position.y.is_negative() {
+                        offset.1 = offset.1.max(position.y.abs());
+                    }
+                }
+                offset
+            });
+
+            if offset_x > 0 || offset_y > 0 {
+                for (output, conf) in conf.iter_mut() {
+                    if let OutputConfiguration::Enabled {
+                        ref mut position, ..
+                    } = conf
+                    {
+                        let current_config = output
+                            .user_data()
+                            .get::<RefCell<OutputConfig>>()
+                            .unwrap()
+                            .borrow();
+
+                        *position = Some(
+                            position.unwrap_or(Point::from((
+                                current_config.position.0 as i32,
+                                current_config.position.1 as i32,
+                            ))) + Point::from((offset_x, offset_y)),
+                        );
+                    }
+                }
+            }
         }
 
         let mut backups = Vec::new();
@@ -76,7 +117,7 @@ impl State {
                         current_config.transform = *transform;
                     }
                     if let Some(position) = position {
-                        current_config.position = (*position).into();
+                        current_config.position = (position.x as u32, position.y as u32);
                     }
                     if let Some(vrr) = adaptive_sync {
                         current_config.vrr = *vrr;

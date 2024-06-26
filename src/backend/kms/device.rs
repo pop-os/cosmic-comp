@@ -22,7 +22,7 @@ use smithay::{
         rustix::fs::OFlags,
         wayland_server::{protocol::wl_buffer::WlBuffer, DisplayHandle, Weak},
     },
-    utils::{DevPath, DeviceFd, Transform},
+    utils::{DevPath, DeviceFd, Point, Transform},
     wayland::drm_lease::{DrmLease, DrmLeaseState},
 };
 use tracing::{error, info, warn};
@@ -222,7 +222,7 @@ impl State {
 
         let connectors = device.enumerate_surfaces()?.added; // There are no removed outputs on newly added devices
         let mut wl_outputs = Vec::new();
-        let mut w = self.common.shell.read().unwrap().global_space().size.w;
+        let mut w = self.common.shell.read().unwrap().global_space().size.w as u32;
 
         {
             for (conn, maybe_crtc) in connectors {
@@ -237,7 +237,7 @@ impl State {
                 ) {
                     Ok((output, should_expose)) => {
                         if should_expose {
-                            w += output.config().mode_size().w;
+                            w += output.config().mode_size().w as u32;
                             wl_outputs.push(output.clone());
                         }
                         device.outputs.insert(conn, output);
@@ -286,7 +286,7 @@ impl State {
             if let Some(device) = backend.drm_devices.get_mut(&drm_node) {
                 let changes = device.enumerate_surfaces()?;
 
-                let mut w = self.common.shell.read().unwrap().global_space().size.w;
+                let mut w = self.common.shell.read().unwrap().global_space().size.w as u32;
                 for conn in changes.removed {
                     // contains conns with updated crtcs, just drop the surface and re-create
                     if let Some(pos) = device
@@ -306,7 +306,11 @@ impl State {
                     {
                         let surface = device.surfaces.remove(&crtc).unwrap();
                         // TODO: move up later outputs?
-                        w -= surface.output.current_mode().map(|m| m.size.w).unwrap_or(0);
+                        w -= surface
+                            .output
+                            .current_mode()
+                            .map(|m| m.size.w as u32)
+                            .unwrap_or(0);
                     }
 
                     if !changes.added.iter().any(|(c, _)| c == &conn) {
@@ -331,7 +335,7 @@ impl State {
                     ) {
                         Ok((output, should_expose)) => {
                             if should_expose {
-                                w += output.config().mode_size().w;
+                                w += output.config().mode_size().w as u32;
                                 outputs_added.push(output.clone());
                             }
 
@@ -472,7 +476,7 @@ impl Device {
         primary_node: Option<&DrmNode>,
         conn: connector::Handle,
         maybe_crtc: Option<crtc::Handle>,
-        position: (i32, i32),
+        position: (u32, u32),
         evlh: &LoopHandle<'static, State>,
         shell: Arc<RwLock<Shell>>,
         startup_done: Arc<AtomicBool>,
@@ -608,7 +612,7 @@ fn populate_modes(
     drm: &mut DrmDevice,
     output: &Output,
     conn: connector::Handle,
-    position: (i32, i32),
+    position: (u32, u32),
 ) -> Result<()> {
     let conn_info = drm.get_connector(conn, false)?;
     let max_bpc = drm_helpers::get_max_bpc(drm, conn)?.map(|(_val, range)| range.end.min(16));
@@ -638,7 +642,7 @@ fn populate_modes(
         // TODO: Readout property for monitor rotation
         Some(Transform::Normal),
         None,
-        Some(position.into()),
+        Some(Point::from((position.0 as i32, position.1 as i32))),
     );
 
     let mut output_config = output

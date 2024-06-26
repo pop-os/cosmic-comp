@@ -57,7 +57,7 @@ use smithay::{
             Client, DisplayHandle, Resource,
         },
     },
-    utils::{Clock, IsAlive, Monotonic},
+    utils::{Clock, IsAlive, Monotonic, Point},
     wayland::{
         alpha_modifier::AlphaModifierState,
         compositor::{CompositorClientState, CompositorState, SurfaceData},
@@ -306,8 +306,11 @@ impl BackendData {
                 Some(final_config.transform.into()).filter(|x| *x != output.current_transform());
             let scale = Some(final_config.scale)
                 .filter(|x| *x != output.current_scale().fractional_scale());
-            let location =
-                Some(final_config.position.into()).filter(|x| *x != output.current_location());
+            let location = Some(Point::from((
+                final_config.position.0 as i32,
+                final_config.position.1 as i32,
+            )))
+            .filter(|x| *x != output.current_location());
             output.change_current_state(mode, transform, scale.map(Scale::Fractional), location);
 
             output.set_adaptive_sync(final_config.vrr);
