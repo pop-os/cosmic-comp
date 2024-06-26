@@ -114,16 +114,7 @@ fn main() -> Result<()> {
     // run the event loop
     event_loop.run(None, &mut state, |state| {
         // shall we shut down?
-        if state
-            .common
-            .shell
-            .read()
-            .unwrap()
-            .outputs()
-            .next()
-            .is_none()
-            || state.common.should_stop
-        {
+        if state.common.should_stop {
             info!("Shutting down");
             state.common.event_loop_signal.stop();
             state.common.event_loop_signal.wakeup();
