@@ -679,7 +679,7 @@ dependencies = [
 [[package]]
 name = "clipboard_macos"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-dnd-6#8a816d8f218e290041bb5ef6d3b695c38e0a53b7"
+source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-dnd-8#7c59b07b9172d8e0401f7e06609e1050575309c9"
 dependencies = [
  "objc",
  "objc-foundation",
@@ -689,7 +689,7 @@ dependencies = [
 [[package]]
 name = "clipboard_wayland"
 version = "0.2.2"
-source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-dnd-6#8a816d8f218e290041bb5ef6d3b695c38e0a53b7"
+source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-dnd-8#7c59b07b9172d8e0401f7e06609e1050575309c9"
 dependencies = [
  "dnd",
  "mime 0.1.0",
@@ -699,7 +699,7 @@ dependencies = [
 [[package]]
 name = "clipboard_x11"
 version = "0.4.2"
-source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-dnd-6#8a816d8f218e290041bb5ef6d3b695c38e0a53b7"
+source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-dnd-8#7c59b07b9172d8e0401f7e06609e1050575309c9"
 dependencies = [
  "thiserror",
  "x11rb",
@@ -929,10 +929,10 @@ dependencies = [
 [[package]]
 name = "cosmic-config"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/libcosmic/#9af083e0c50628366fe4587e16ff9946ea4746fa"
+source = "git+https://github.com/pop-os/libcosmic/#61760f8e4e33744a451e8e8fe09d581793c9c677"
 dependencies = [
  "atomicwrites",
- "calloop 0.13.0",
+ "calloop 0.14.0",
  "cosmic-config-derive",
  "dirs",
  "iced_futures",
@@ -948,7 +948,7 @@ dependencies = [
 [[package]]
 name = "cosmic-config-derive"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/libcosmic/#9af083e0c50628366fe4587e16ff9946ea4746fa"
+source = "git+https://github.com/pop-os/libcosmic/#61760f8e4e33744a451e8e8fe09d581793c9c677"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -969,20 +969,20 @@ dependencies = [
 
 [[package]]
 name = "cosmic-text"
-version = "0.11.2"
-source = "git+https://github.com/pop-os/cosmic-text.git#b0a70c70ffba883ac6ff022b535db195712f552f"
+version = "0.12.0"
+source = "git+https://github.com/pop-os/cosmic-text.git#a03ec6b75f0ea8fd6264d6cd05afcec3c2213f8f"
 dependencies = [
  "bitflags 2.5.0",
  "fontdb",
- "libm",
  "log",
  "rangemap",
+ "rayon",
  "rustc-hash",
- "rustybuzz",
+ "rustybuzz 0.14.1",
  "self_cell 1.0.4",
  "swash",
  "sys-locale",
- "ttf-parser 0.20.0",
+ "ttf-parser 0.21.1",
  "unicode-bidi",
  "unicode-linebreak",
  "unicode-script",
@@ -992,7 +992,7 @@ dependencies = [
 [[package]]
 name = "cosmic-theme"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/libcosmic/#9af083e0c50628366fe4587e16ff9946ea4746fa"
+source = "git+https://github.com/pop-os/libcosmic/#61760f8e4e33744a451e8e8fe09d581793c9c677"
 dependencies = [
  "almost",
  "cosmic-config",
@@ -1274,12 +1274,12 @@ dependencies = [
 [[package]]
 name = "dnd"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-dnd-6#8a816d8f218e290041bb5ef6d3b695c38e0a53b7"
+source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-dnd-8#7c59b07b9172d8e0401f7e06609e1050575309c9"
 dependencies = [
  "bitflags 2.5.0",
  "mime 0.1.0",
  "raw-window-handle",
- "smithay-client-toolkit 0.18.0",
+ "smithay-client-toolkit 0.19.1",
  "smithay-clipboard",
 ]
 
@@ -2391,7 +2391,7 @@ dependencies = [
 [[package]]
 name = "iced"
 version = "0.12.0"
-source = "git+https://github.com/pop-os/libcosmic/#9af083e0c50628366fe4587e16ff9946ea4746fa"
+source = "git+https://github.com/pop-os/libcosmic/#61760f8e4e33744a451e8e8fe09d581793c9c677"
 dependencies = [
  "dnd",
  "iced_core",
@@ -2407,7 +2407,7 @@ dependencies = [
 [[package]]
 name = "iced_core"
 version = "0.12.0"
-source = "git+https://github.com/pop-os/libcosmic/#9af083e0c50628366fe4587e16ff9946ea4746fa"
+source = "git+https://github.com/pop-os/libcosmic/#61760f8e4e33744a451e8e8fe09d581793c9c677"
 dependencies = [
  "bitflags 2.5.0",
  "dnd",
@@ -2427,7 +2427,7 @@ dependencies = [
 [[package]]
 name = "iced_futures"
 version = "0.12.0"
-source = "git+https://github.com/pop-os/libcosmic/#9af083e0c50628366fe4587e16ff9946ea4746fa"
+source = "git+https://github.com/pop-os/libcosmic/#61760f8e4e33744a451e8e8fe09d581793c9c677"
 dependencies = [
  "futures",
  "iced_core",
@@ -2439,7 +2439,7 @@ dependencies = [
 [[package]]
 name = "iced_graphics"
 version = "0.12.0"
-source = "git+https://github.com/pop-os/libcosmic/#9af083e0c50628366fe4587e16ff9946ea4746fa"
+source = "git+https://github.com/pop-os/libcosmic/#61760f8e4e33744a451e8e8fe09d581793c9c677"
 dependencies = [
  "bitflags 2.5.0",
  "bytemuck",
@@ -2463,7 +2463,7 @@ dependencies = [
 [[package]]
 name = "iced_renderer"
 version = "0.12.0"
-source = "git+https://github.com/pop-os/libcosmic/#9af083e0c50628366fe4587e16ff9946ea4746fa"
+source = "git+https://github.com/pop-os/libcosmic/#61760f8e4e33744a451e8e8fe09d581793c9c677"
 dependencies = [
  "iced_graphics",
  "iced_tiny_skia",
@@ -2475,7 +2475,7 @@ dependencies = [
 [[package]]
 name = "iced_runtime"
 version = "0.12.0"
-source = "git+https://github.com/pop-os/libcosmic/#9af083e0c50628366fe4587e16ff9946ea4746fa"
+source = "git+https://github.com/pop-os/libcosmic/#61760f8e4e33744a451e8e8fe09d581793c9c677"
 dependencies = [
  "dnd",
  "iced_core",
@@ -2487,7 +2487,7 @@ dependencies = [
 [[package]]
 name = "iced_style"
 version = "0.12.0"
-source = "git+https://github.com/pop-os/libcosmic/#9af083e0c50628366fe4587e16ff9946ea4746fa"
+source = "git+https://github.com/pop-os/libcosmic/#61760f8e4e33744a451e8e8fe09d581793c9c677"
 dependencies = [
  "iced_core",
  "once_cell",
@@ -2497,7 +2497,7 @@ dependencies = [
 [[package]]
 name = "iced_tiny_skia"
 version = "0.12.0"
-source = "git+https://github.com/pop-os/libcosmic/#9af083e0c50628366fe4587e16ff9946ea4746fa"
+source = "git+https://github.com/pop-os/libcosmic/#61760f8e4e33744a451e8e8fe09d581793c9c677"
 dependencies = [
  "bytemuck",
  "cosmic-text",
@@ -2514,7 +2514,7 @@ dependencies = [
 [[package]]
 name = "iced_wgpu"
 version = "0.12.0"
-source = "git+https://github.com/pop-os/libcosmic/#9af083e0c50628366fe4587e16ff9946ea4746fa"
+source = "git+https://github.com/pop-os/libcosmic/#61760f8e4e33744a451e8e8fe09d581793c9c677"
 dependencies = [
  "bitflags 2.5.0",
  "bytemuck",
@@ -2529,10 +2529,10 @@ dependencies = [
  "raw-window-handle",
  "resvg 0.37.0",
  "rustix 0.38.34",
- "smithay-client-toolkit 0.18.0",
+ "smithay-client-toolkit 0.19.1",
  "wayland-backend",
  "wayland-client",
- "wayland-protocols 0.31.2",
+ "wayland-protocols 0.32.1",
  "wayland-sys",
  "wgpu",
 ]
@@ -2540,7 +2540,7 @@ dependencies = [
 [[package]]
 name = "iced_widget"
 version = "0.12.0"
-source = "git+https://github.com/pop-os/libcosmic/#9af083e0c50628366fe4587e16ff9946ea4746fa"
+source = "git+https://github.com/pop-os/libcosmic/#61760f8e4e33744a451e8e8fe09d581793c9c677"
 dependencies = [
  "dnd",
  "iced_renderer",
@@ -2861,7 +2861,7 @@ checksum = "97b3888a4aecf77e811145cadf6eef5901f4782c53886191b2f693f24761847c"
 [[package]]
 name = "libcosmic"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/libcosmic/#9af083e0c50628366fe4587e16ff9946ea4746fa"
+source = "git+https://github.com/pop-os/libcosmic/#61760f8e4e33744a451e8e8fe09d581793c9c677"
 dependencies = [
  "apply",
  "chrono",
@@ -3203,7 +3203,7 @@ dependencies = [
 [[package]]
 name = "mime"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-dnd-6#8a816d8f218e290041bb5ef6d3b695c38e0a53b7"
+source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-dnd-8#7c59b07b9172d8e0401f7e06609e1050575309c9"
 dependencies = [
  "smithay-clipboard",
 ]
@@ -4537,11 +4537,27 @@ checksum = "f0ae5692c5beaad6a9e22830deeed7874eae8a4e3ba4076fb48e12c56856222c"
 dependencies = [
  "bitflags 2.5.0",
  "bytemuck",
- "libm",
  "smallvec",
  "ttf-parser 0.20.0",
- "unicode-bidi-mirroring",
- "unicode-ccc",
+ "unicode-bidi-mirroring 0.1.0",
+ "unicode-ccc 0.1.2",
+ "unicode-properties",
+ "unicode-script",
+]
+
+[[package]]
+name = "rustybuzz"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfb9cf8877777222e4a3bc7eb247e398b56baba500c38c1c46842431adc8b55c"
+dependencies = [
+ "bitflags 2.5.0",
+ "bytemuck",
+ "libm",
+ "smallvec",
+ "ttf-parser 0.21.1",
+ "unicode-bidi-mirroring 0.2.0",
+ "unicode-ccc 0.2.0",
  "unicode-properties",
  "unicode-script",
 ]
@@ -4727,6 +4743,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38b58827f4464d87d377d175e90bf58eb00fd8716ff0a62f80356b5e61555d0d"
 
 [[package]]
+name = "skrifa"
+version = "0.19.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ab45fb68b53576a43d4fc0e9ec8ea64e29a4d2cc7f44506964cb75f288222e9"
+dependencies = [
+ "bytemuck",
+ "read-fonts",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4804,33 +4830,6 @@ dependencies = [
 
 [[package]]
 name = "smithay-client-toolkit"
-version = "0.18.0"
-source = "git+https://github.com/smithay/client-toolkit?rev=3bed072#3bed072b966022f5f929d12f3aff089b1ace980b"
-dependencies = [
- "bitflags 2.5.0",
- "bytemuck",
- "calloop 0.13.0",
- "calloop-wayland-source 0.3.0",
- "cursor-icon",
- "libc",
- "log",
- "memmap2 0.9.4",
- "pkg-config",
- "rustix 0.38.34",
- "thiserror",
- "wayland-backend",
- "wayland-client",
- "wayland-csd-frame",
- "wayland-cursor",
- "wayland-protocols 0.31.2",
- "wayland-protocols-wlr 0.2.0",
- "wayland-scanner",
- "xkbcommon",
- "xkeysym",
-]
-
-[[package]]
-name = "smithay-client-toolkit"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "922fd3eeab3bd820d76537ce8f582b1cf951eceb5475c28500c7457d9d17f53a"
@@ -4855,13 +4854,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "smithay-client-toolkit"
+version = "0.19.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "837d3067369e24aeda699a5d9fc5aa14ca14a84dd70aeed7156bfa04a5605b32"
+dependencies = [
+ "bitflags 2.5.0",
+ "bytemuck",
+ "calloop 0.13.0",
+ "calloop-wayland-source 0.3.0",
+ "cursor-icon",
+ "libc",
+ "log",
+ "memmap2 0.9.4",
+ "pkg-config",
+ "rustix 0.38.34",
+ "thiserror",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-csd-frame",
+ "wayland-cursor",
+ "wayland-protocols 0.32.1",
+ "wayland-protocols-wlr 0.3.1",
+ "wayland-scanner",
+ "xkbcommon",
+ "xkeysym",
+]
+
+[[package]]
 name = "smithay-clipboard"
 version = "0.8.0"
-source = "git+https://github.com/pop-os/smithay-clipboard?tag=pop-dnd-4#ab422ddcc95a9a1717df094f9c8fe69e2fdb2a27"
+source = "git+https://github.com/pop-os/smithay-clipboard?tag=pop-dnd-5#d099e82a4c1e7d3e88dc34b7333de21928b1b22c"
 dependencies = [
  "libc",
  "raw-window-handle",
- "smithay-client-toolkit 0.18.0",
+ "smithay-client-toolkit 0.19.1",
  "wayland-backend",
 ]
 
@@ -5014,11 +5041,11 @@ dependencies = [
 
 [[package]]
 name = "swash"
-version = "0.1.16"
+version = "0.1.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "682a612b50baf09e8a039547ecf49e6c155690dcb751b1bcb19c93cdeb3d42d4"
+checksum = "4d7773d67fe3373048cf840bfcc54ec3207cfc1e95c526b287ef2eb5eff9faf6"
 dependencies = [
- "read-fonts",
+ "skrifa",
  "yazi",
  "zeno",
 ]
@@ -5494,10 +5521,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56d12260fb92d52f9008be7e4bca09f584780eb2266dc8fecc6a192bec561694"
 
 [[package]]
+name = "unicode-bidi-mirroring"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23cb788ffebc92c5948d0e997106233eeb1d8b9512f93f41651f52b6c5f5af86"
+
+[[package]]
 name = "unicode-ccc"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc2520efa644f8268dce4dcd3050eaa7fc044fca03961e9998ac7e2e92b77cf1"
+
+[[package]]
+name = "unicode-ccc"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1df77b101bcc4ea3d78dafc5ad7e4f58ceffe0b2b16bf446aeb50b6cb4157656"
 
 [[package]]
 name = "unicode-ident"
@@ -5629,7 +5668,7 @@ dependencies = [
  "fontdb",
  "kurbo 0.9.5",
  "log",
- "rustybuzz",
+ "rustybuzz 0.12.1",
  "unicode-bidi",
  "unicode-script",
  "unicode-vo",
@@ -5850,6 +5889,7 @@ checksum = "83d0f1056570486e26a3773ec633885124d79ae03827de05ba6c85f79904026c"
 dependencies = [
  "bitflags 2.5.0",
  "wayland-backend",
+ "wayland-client",
  "wayland-scanner",
  "wayland-server",
 ]
@@ -5901,6 +5941,7 @@ checksum = "a7dab47671043d9f5397035975fe1cac639e5bca5cc0b3c32d09f01612e34d24"
 dependencies = [
  "bitflags 2.5.0",
  "wayland-backend",
+ "wayland-client",
  "wayland-protocols 0.32.1",
  "wayland-scanner",
  "wayland-server",
@@ -6121,7 +6162,7 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 [[package]]
 name = "window_clipboard"
 version = "0.4.1"
-source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-dnd-6#8a816d8f218e290041bb5ef6d3b695c38e0a53b7"
+source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-dnd-8#7c59b07b9172d8e0401f7e06609e1050575309c9"
 dependencies = [
  "clipboard-win",
  "clipboard_macos",
