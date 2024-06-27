@@ -412,7 +412,7 @@ fn constraints_for_renderer(
     if (renderer as &dyn Borrow<GlesRenderer>)
         .borrow()
         .capabilities()
-        .contains(&Capability::ColorTransformations)
+        .contains(&Capability::_10Bit)
     {
         constraints
             .shm
