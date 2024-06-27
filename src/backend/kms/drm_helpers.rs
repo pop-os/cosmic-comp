@@ -316,6 +316,7 @@ fn get_manufacturer(vendor: &[char; 3]) -> &'static str {
     }
 }
 
+// Returns refresh rate in milliherz
 pub fn calculate_refresh_rate(mode: Mode) -> u32 {
     let htotal = mode.hsync().2 as u32;
     let vtotal = mode.vsync().2 as u32;

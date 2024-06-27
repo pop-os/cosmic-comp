@@ -594,9 +594,10 @@ impl SurfaceThreadState {
             .unwrap()
             .dmabuf_formats();
 
-        self.timings.set_refresh_interval(Some(Duration::from_nanos(
-            drm_helpers::calculate_refresh_rate(surface.pending_mode()) as u64,
-        )));
+        self.timings
+            .set_refresh_interval(Some(Duration::from_secs_f64(
+                1_000.0 / drm_helpers::calculate_refresh_rate(surface.pending_mode()) as f64,
+            )));
         self.timings.set_vrr(vrr);
 
         match DrmCompositor::new(

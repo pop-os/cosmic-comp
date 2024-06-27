@@ -3,7 +3,7 @@ use std::{collections::VecDeque, num::NonZeroU64, time::Duration};
 use smithay::utils::{Clock, Monotonic, Time};
 use tracing::error;
 
-const MIN_RENDER_TIME: Duration = Duration::from_millis(5);
+const FRAME_TIME_BUFFER: Duration = Duration::from_millis(1);
 const FRAME_TIME_WINDOW: usize = 3;
 
 pub struct Timings {
@@ -37,7 +37,7 @@ impl Frame {
     }
 
     fn frame_time(&self) -> Duration {
-        Time::elapsed(&self.render_start, self.presentation_submitted)
+        Time::elapsed(&self.render_start, self.presentation_presented)
     }
 }
 
@@ -179,18 +179,20 @@ impl Timings {
             / (self.previous_frames.len() as u32)
     }
 
-    pub fn avg_frametime(&self, window: usize) -> Duration {
-        if self.previous_frames.is_empty() || window == 0 {
-            return MIN_RENDER_TIME;
+    pub fn avg_frametime(&self, window: usize) -> Option<Duration> {
+        if self.previous_frames.len() < window || window == 0 {
+            return None;
         }
 
-        self.previous_frames
-            .iter()
-            .rev()
-            .take(window)
-            .map(|f| f.frame_time())
-            .sum::<Duration>()
-            / (window.min(self.previous_frames.len()) as u32)
+        Some(
+            self.previous_frames
+                .iter()
+                .rev()
+                .take(window)
+                .map(|f| f.frame_time())
+                .sum::<Duration>()
+                / (window.min(self.previous_frames.len()) as u32),
+        )
     }
 
     pub fn avg_fps(&self) -> f64 {
@@ -259,6 +261,10 @@ impl Timings {
             return Duration::ZERO;
         }
 
-        estimated_presentation_time.saturating_sub(self.avg_frametime(FRAME_TIME_WINDOW))
+        let Some(avg_frametime) = self.avg_frametime(FRAME_TIME_WINDOW) else {
+            return Duration::ZERO;
+        };
+
+        estimated_presentation_time.saturating_sub(avg_frametime + FRAME_TIME_BUFFER)
     }
 }

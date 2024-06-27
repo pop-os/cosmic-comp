@@ -50,8 +50,8 @@ pub fn fps_ui<'a>(
 
     let amount = avg_fps.round() as usize * 2;
     let (max_disp, min_disp, avg_disp) = (
-        timings.min_frametime(amount).as_secs_f64(),
         timings.max_frametime(amount).as_secs_f64(),
+        timings.min_frametime(amount).as_secs_f64(),
         timings.avg_frametime(amount).as_secs_f64(),
     );
 
