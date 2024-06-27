@@ -69,6 +69,18 @@ pub struct TapConfig {
     pub drag_lock: bool,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Default)]
+pub enum MouseFocusPolicy {
+    ///Adds no extra behaviour, The window is focused only when clicked
+    #[default]
+    ClickToFocus,
+    ///Output is focused when mouse is moved to it,
+    /// but windows still need to be clicked
+    OutputFocusFollowsMouse,
+    ///Windows focus follows mouse Lazily
+    FocusFollowsMouse,
+}
+
 mod ClickMethodDef {
     use input::ClickMethod as ClickMethodOrig;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};

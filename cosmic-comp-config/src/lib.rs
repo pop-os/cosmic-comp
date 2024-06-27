@@ -23,6 +23,7 @@ pub struct CosmicCompConfig {
     pub autotile_behavior: TileBehavior,
     /// Active hint enabled
     pub active_hint: bool,
+    pub mouse_focus_policy: input::MouseFocusPolicy,
 }
 
 impl Default for CosmicCompConfig {
@@ -36,6 +37,7 @@ impl Default for CosmicCompConfig {
             autotile: Default::default(),
             autotile_behavior: Default::default(),
             active_hint: true,
+            mouse_focus_policy: Default::default(),
         }
     }
 }
