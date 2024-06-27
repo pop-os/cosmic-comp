@@ -115,10 +115,15 @@ fn nearest_images(size: u32, images: &[Image]) -> impl Iterator<Item = &Image> {
 
 fn frame(mut millis: u32, size: u32, images: &[Image]) -> Image {
     let total = nearest_images(size, images).fold(0, |acc, image| acc + image.delay);
-    millis %= total;
+
+    if total == 0 {
+        millis = 0;
+    } else {
+        millis %= total;
+    }
 
     for img in nearest_images(size, images) {
-        if millis < img.delay {
+        if millis <= img.delay {
             return img.clone();
         }
         millis -= img.delay;
