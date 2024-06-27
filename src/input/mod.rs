@@ -26,7 +26,7 @@ use crate::{
     },
 };
 use calloop::{timer::Timer, RegistrationToken};
-use cosmic_comp_config::{workspace::WorkspaceLayout, TileBehavior};
+use cosmic_comp_config::{input::MouseFocusPolicy, workspace::WorkspaceLayout, TileBehavior};
 use cosmic_config::ConfigSet;
 use smithay::{
     backend::input::{
@@ -503,7 +503,9 @@ impl State {
                             Some(constraint) if constraint.is_active() => {
                                 // Constraint does not apply if not within region
                                 if !constraint.region().map_or(true, |x| {
-                                    x.contains((ptr.current_location() - *surface_loc).to_i32_round())
+                                    x.contains(
+                                        (ptr.current_location() - *surface_loc).to_i32_round(),
+                                    )
                                 }) {
                                     return;
                                 }
@@ -635,6 +637,10 @@ impl State {
                             }
                             _ => {}
                         });
+                    } else if self.common.config.cosmic_conf.mouse_focus_policy
+                        == MouseFocusPolicy::FocusFollowsMouse
+                    {
+                        todo!("refocus if pointer changes window");
                     }
 
                     let shell = self.common.shell.read().unwrap();
@@ -644,6 +650,15 @@ impl State {
                             session.set_cursor_pos(None);
                         }
                         seat.set_active_output(&output);
+                        //check if the mouse focus policy is one
+                        //which refocuses on output change
+                        if self.common.config.cosmic_conf.mouse_focus_policy
+                            != MouseFocusPolicy::ClickToFocus
+                        {
+                            //let mut shell = self.common.shell.write().unwrap();
+                            //get the window under the pointer
+                            todo!("refocus on output change");
+                        }
                     }
 
                     for session in cursor_sessions_for_output(&shell, &output) {
@@ -755,15 +770,18 @@ impl State {
                         if !seat.get_pointer().unwrap().is_grabbed() {
                             let output = seat.active_output();
 
-                            let pos = seat.get_pointer().unwrap().current_location().as_global();
-                            let relative_pos = pos.to_local(&output);
-                            let mut under: Option<KeyboardFocusTarget> = None;
+                            let global_position =
+                                seat.get_pointer().unwrap().current_location().as_global();
+                            let relative_pos = global_position.to_local(&output);
 
+                            let mut under: Option<KeyboardFocusTarget> = None;
+                            // if the lockscreen is active
                             if let Some(session_lock) = shell.session_lock.as_ref() {
                                 under = session_lock
                                     .surfaces
                                     .get(&output)
                                     .map(|lock| lock.clone().into());
+                                // if the output can receive keyboard focus
                             } else if let Some(window) =
                                 shell.active_space(&output).get_fullscreen()
                             {
@@ -818,7 +836,9 @@ impl State {
                                 if !done {
                                     // Don't check override redirect windows, because we don't set keyboard focus to them explicitly.
                                     // These cases are handled by the XwaylandKeyboardGrab.
-                                    if let Some(target) = shell.element_under(pos, &output) {
+                                    if let Some(target) =
+                                        shell.element_under(global_position, &output)
+                                    {
                                         if seat.get_keyboard().unwrap().modifier_state().logo {
                                             if let Some(surface) =
                                                 target.toplevel().map(Cow::into_owned)
@@ -2463,8 +2483,11 @@ impl State {
                     geo,
                 ));
             }
-            PointerFocusTarget::under_surface(window, relative_pos.as_logical())
-                .map(|(target, surface_loc)| (target, (output_geo.loc + surface_loc.as_global()).to_f64()))
+            PointerFocusTarget::under_surface(window, relative_pos.as_logical()).map(
+                |(target, surface_loc)| {
+                    (target, (output_geo.loc + surface_loc.as_global()).to_f64())
+                },
+            )
         } else {
             {
                 let layers = layer_map_for_output(output);
