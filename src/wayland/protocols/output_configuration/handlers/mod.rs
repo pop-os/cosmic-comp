@@ -2,5 +2,3 @@
 
 mod cosmic;
 mod wlr;
-
-pub use self::{cosmic::*, wlr::*};

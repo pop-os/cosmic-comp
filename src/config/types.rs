@@ -5,11 +5,8 @@ use super::{KeyModifier, KeyModifiers};
 use serde::{Deserialize, Serialize};
 use smithay::reexports::x11rb::NO_SYMBOL;
 pub use smithay::{
-    backend::input::KeyState,
-    input::keyboard::{keysyms as KeySyms, Keysym, XkbConfig as WlXkbConfig},
-    output::{Mode, Output},
-    reexports::input::{AccelProfile, ClickMethod, ScrollMethod, TapButtonMap},
-    utils::{Logical, Physical, Point, Size, Transform},
+    input::keyboard::{Keysym, XkbConfig as WlXkbConfig},
+    utils::Transform,
 };
 use tracing::warn;
 use xkbcommon::xkb;
