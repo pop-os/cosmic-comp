@@ -52,7 +52,10 @@ pub fn fps_ui<'a>(
     let (max_disp, min_disp, avg_disp) = (
         timings.max_frametime(amount).as_secs_f64(),
         timings.min_frametime(amount).as_secs_f64(),
-        timings.avg_frametime(amount).as_secs_f64(),
+        timings
+            .avg_frametime(amount)
+            .unwrap_or_default()
+            .as_secs_f64(),
     );
 
     let ((bars_elements, bars_render), (bars_submitted, bars_displayed)): (
