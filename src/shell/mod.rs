@@ -811,7 +811,7 @@ impl Workspaces {
 
     pub fn recalculate(&mut self) {
         for set in self.sets.values_mut() {
-            set.sticky_layer.refresh();
+            set.sticky_layer.recalculate();
             set.workspaces.iter_mut().for_each(|w| w.recalculate());
         }
     }

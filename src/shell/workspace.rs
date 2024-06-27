@@ -491,7 +491,7 @@ impl Workspace {
 
     pub fn recalculate(&mut self) {
         self.tiling_layer.recalculate();
-        self.floating_layer.refresh();
+        self.floating_layer.recalculate();
     }
 
     pub fn unmaximize_request(&mut self, elem: &CosmicMapped) -> Option<Size<i32, Logical>> {

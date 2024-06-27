@@ -316,7 +316,7 @@ impl FloatingLayout {
             }
         }
 
-        self.refresh();
+        self.recalculate();
     }
 
     pub fn map(
@@ -1151,6 +1151,41 @@ impl FloatingLayout {
         self.mapped().flat_map(|e| e.windows().map(|(w, _)| w))
     }
 
+    pub fn recalculate(&mut self) {
+        let output = self.space.outputs().next().unwrap().clone();
+        let geometry = layer_map_for_output(&output)
+            .non_exclusive_zone()
+            .as_local();
+
+        // update maximized elements
+        for mapped in self
+            .space
+            .elements()
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
+        {
+            mapped.set_bounds(geometry.size.as_logical());
+            let prev = self.space.element_geometry(&mapped).map(RectExt::as_local);
+
+            let position = if mapped.is_maximized(false) {
+                mapped.set_geometry(geometry.to_global(&output));
+                geometry.loc
+            } else {
+                prev.clone()
+                    .map(|rect| rect.loc.constrain(geometry))
+                    .unwrap_or(Point::from((0, 0)))
+            };
+
+            let is_activated = mapped.is_activated(false);
+            mapped.configure();
+            self.space
+                .map_element(mapped, position.as_logical(), is_activated);
+        }
+
+        self.refresh();
+    }
+
     #[profiling::function]
     pub fn refresh(&mut self) {
         self.space.refresh();
@@ -1170,29 +1205,6 @@ impl FloatingLayout {
             // TODO what about windows leaving to the top with no headerbar to drag? can that happen? (Probably if the user is moving outputs down)
             *element.last_geometry.lock().unwrap() = None;
             self.map_internal(element, None, None, None);
-        }
-
-        // update maximized elements
-        let update: Vec<_> = self
-            .space
-            .elements()
-            .filter(|e| e.is_maximized(true))
-            .map(|mapped| {
-                let output = self.space.outputs().next().unwrap().clone();
-                let layers = layer_map_for_output(&output);
-                let geometry = layers.non_exclusive_zone().as_local();
-
-                mapped.set_bounds(geometry.size.as_logical());
-                mapped.set_geometry(geometry.to_global(&output));
-                mapped.configure();
-
-                (mapped.clone(), geometry.loc, mapped.is_activated(true))
-            })
-            .collect();
-
-        for (mapped, position, is_activated) in update {
-            self.space
-                .map_element(mapped, position.as_logical(), is_activated);
         }
     }
 
