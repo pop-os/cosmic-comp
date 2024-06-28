@@ -1,4 +1,5 @@
 use calloop::LoopHandle;
+use grabs::SeatMoveGrabState;
 use indexmap::IndexMap;
 use std::{
     collections::HashMap,
@@ -1137,8 +1138,23 @@ impl Common {
     }
 
     pub fn on_commit(&mut self, surface: &WlSurface) {
-        if let Some(mapped) = self.shell.read().unwrap().element_for_surface(surface) {
-            mapped.on_commit(surface);
+        {
+            let shell = self.shell.read().unwrap();
+
+            for seat in shell.seats.iter() {
+                if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {
+                    if let Some(grab_state) = move_grab.lock().unwrap().as_ref() {
+                        let mapped = grab_state.element();
+                        if mapped.active_window().wl_surface().as_deref() == Some(surface) {
+                            mapped.on_commit(surface);
+                        }
+                    }
+                }
+            }
+
+            if let Some(mapped) = shell.element_for_surface(surface) {
+                mapped.on_commit(surface);
+            }
         }
         self.popups.commit(surface);
     }
