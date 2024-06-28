@@ -485,61 +485,41 @@ impl Program for CosmicWindowInternal {
     fn foreground(
         &self,
         pixels: &mut tiny_skia::PixmapMut<'_>,
-        damage: &[Rectangle<i32, BufferCoords>],
+        _damage: &[Rectangle<i32, BufferCoords>],
         scale: f32,
     ) {
-        if !self.window.is_activated(false) {
-            let mut mask = self.mask.lock().unwrap();
-            if self.window.is_maximized(false) {
-                mask.take();
-            } else if mask.is_none() {
-                let (w, h) = (pixels.width(), pixels.height());
-                let mut new_mask = tiny_skia::Mask::new(w, h).unwrap();
+        let mut mask = self.mask.lock().unwrap();
+        if self.window.is_maximized(false) {
+            mask.take();
+        } else if mask.is_none() {
+            let (w, h) = (pixels.width(), pixels.height());
+            let mut new_mask = tiny_skia::Mask::new(w, h).unwrap();
 
-                let mut pb = tiny_skia::PathBuilder::new();
-                let radius = 8. * scale;
-                let (w, h) = (w as f32, h as f32);
+            let mut pb = tiny_skia::PathBuilder::new();
+            let radius = 8. * scale;
+            let (w, h) = (w as f32, h as f32);
 
-                pb.move_to(0., h); // lower-left
+            pb.move_to(0., h); // lower-left
 
-                // upper-left rounded corner
-                pb.line_to(0., radius);
-                pb.quad_to(0., 0., radius, 0.);
+            // upper-left rounded corner
+            pb.line_to(0., radius);
+            pb.quad_to(0., 0., radius, 0.);
 
-                // upper-right rounded corner
-                pb.line_to(w - radius, 0.);
-                pb.quad_to(w, 0., w, radius);
+            // upper-right rounded corner
+            pb.line_to(w - radius, 0.);
+            pb.quad_to(w, 0., w, radius);
 
-                pb.line_to(w, h); // lower-right
+            pb.line_to(w, h); // lower-right
 
-                let path = pb.finish().unwrap();
-                new_mask.fill_path(
-                    &path,
-                    tiny_skia::FillRule::EvenOdd,
-                    true,
-                    Default::default(),
-                );
+            let path = pb.finish().unwrap();
+            new_mask.fill_path(
+                &path,
+                tiny_skia::FillRule::EvenOdd,
+                true,
+                Default::default(),
+            );
 
-                *mask = Some(new_mask);
-            }
-
-            let mut paint = tiny_skia::Paint::default();
-            paint.set_color_rgba8(0, 0, 0, 102);
-
-            for rect in damage {
-                pixels.fill_rect(
-                    tiny_skia::Rect::from_xywh(
-                        rect.loc.x as f32,
-                        rect.loc.y as f32,
-                        rect.size.w as f32,
-                        rect.size.h as f32,
-                    )
-                    .unwrap(),
-                    &paint,
-                    Default::default(),
-                    mask.as_ref(),
-                );
-            }
+            *mask = Some(new_mask);
         }
     }
 
@@ -550,6 +530,7 @@ impl Program for CosmicWindowInternal {
             .on_minimize(Message::Minimize)
             .on_maximize(Message::Maximize)
             .on_close(Message::Close)
+            .focused(self.window.is_activated(false))
             .density(Density::Compact)
             .apply(mouse_area)
             .on_right_press(Message::Menu)
