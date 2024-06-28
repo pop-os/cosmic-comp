@@ -776,7 +776,7 @@ where
                 (WorkspaceLayout::Vertical, true) => (0, output_size.h + offset.y),
                 (WorkspaceLayout::Vertical, false) => (0, -(output_size.h - offset.y)),
                 (WorkspaceLayout::Horizontal, true) => (output_size.w + offset.x, 0),
-                (WorkspaceLayout::Horizontal, false) => (-(output_size.w - offset.y), 0),
+                (WorkspaceLayout::Horizontal, false) => (-(output_size.w - offset.x), 0),
             })
         }
         None => (0, 0).into(),
