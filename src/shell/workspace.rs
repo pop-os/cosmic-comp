@@ -411,7 +411,7 @@ impl Workspace {
             let _ = self.unmaximize_request(mapped);
         }
 
-        let mut was_floating = self.floating_layer.unmap(&mapped);
+        let mut was_floating = self.floating_layer.unmap(&mapped).is_some();
         let mut was_tiling = self.tiling_layer.unmap(&mapped);
         if was_floating || was_tiling {
             assert!(was_floating != was_tiling);
@@ -567,7 +567,7 @@ impl Workspace {
         };
 
         if self.tiling_layer.mapped().any(|(m, _)| m == elem) {
-            let was_maximized = self.floating_layer.unmap(&elem);
+            let was_maximized = self.floating_layer.unmap(&elem).is_some();
             let tiling_state = self.tiling_layer.unmap_minimize(elem, to);
             Some(MinimizedWindow {
                 window: elem.clone(),
