@@ -102,6 +102,7 @@ const ANIMATION_DURATION: Duration = Duration::from_millis(200);
 const GESTURE_MAX_LENGTH: f64 = 150.0;
 const GESTURE_POSITION_THRESHOLD: f64 = 0.5;
 const GESTURE_VELOCITY_THRESHOLD: f64 = 0.02;
+const MOVE_GRAB_Y_OFFSET: f64 = 16.;
 
 #[derive(Debug, Clone)]
 pub enum Trigger {
@@ -2403,22 +2404,20 @@ impl Shell {
             let elem_geo = workspace.element_geometry(&old_mapped)?;
             let mut initial_window_location = elem_geo.loc.to_global(workspace.output());
 
-            if mapped.maximized_state.lock().unwrap().is_some() {
+            let mut new_size = if mapped.maximized_state.lock().unwrap().is_some() {
                 // If surface is maximized then unmaximize it
-                let new_size = workspace.unmaximize_request(&mapped);
-                let output = workspace.output();
-                let ratio = pos.to_local(&output).x / output.geometry().size.w as f64;
-
-                initial_window_location = new_size
-                    .map(|size| (pos.x - (size.w as f64 * ratio), pos.y).into())
-                    .unwrap_or_else(|| pos)
-                    .to_i32_round();
-            }
+                workspace.unmaximize_request(&mapped)
+            } else {
+                None
+            };
 
             let layer = if mapped == old_mapped {
                 let was_floating = workspace.floating_layer.unmap(&mapped);
                 let was_tiled = workspace.tiling_layer.unmap_as_placeholder(&mapped);
-                assert!(was_floating != was_tiled.is_some());
+                assert!(was_floating.is_some() != was_tiled.is_some());
+                if was_floating.is_some_and(|size| size != elem_geo.size.as_logical()) {
+                    new_size = was_floating;
+                }
                 was_tiled.is_some()
             } else {
                 workspace
@@ -2429,6 +2428,18 @@ impl Shell {
             .then_some(ManagedLayer::Tiling)
             .unwrap_or(ManagedLayer::Floating);
 
+            // if this changed the width, the window was tiled in floating mode
+            if let Some(new_size) = new_size {
+                let output = workspace.output();
+                let ratio = pos.to_local(&output).x / (elem_geo.loc.x + elem_geo.size.w) as f64;
+
+                initial_window_location = Point::from((
+                    pos.x - (new_size.w as f64 * ratio),
+                    pos.y - MOVE_GRAB_Y_OFFSET,
+                ))
+                .to_i32_round();
+            }
+
             (initial_window_location, layer, workspace.handle)
         } else if let Some(sticky_layer) = self
             .workspaces
@@ -2437,13 +2448,10 @@ impl Shell {
             .filter(|set| set.sticky_layer.mapped().any(|m| m == &old_mapped))
             .map(|set| &mut set.sticky_layer)
         {
-            let mut initial_window_location = sticky_layer
-                .element_geometry(&old_mapped)
-                .unwrap()
-                .loc
-                .to_global(&cursor_output);
+            let elem_geo = sticky_layer.element_geometry(&old_mapped).unwrap();
+            let mut initial_window_location = elem_geo.loc.to_global(&cursor_output);
 
-            if let Some(state) = mapped.maximized_state.lock().unwrap().take() {
+            let mut new_size = if let Some(state) = mapped.maximized_state.lock().unwrap().take() {
                 // If surface is maximized then unmaximize it
                 mapped.set_maximized(false);
                 let new_size = state.original_geometry.size.as_logical();
@@ -2454,14 +2462,27 @@ impl Shell {
                     None,
                 );
 
-                let ratio = pos.to_local(&cursor_output).x / cursor_output.geometry().size.w as f64;
-                initial_window_location =
-                    Point::<f64, _>::from((pos.x - (new_size.w as f64 * ratio), pos.y))
-                        .to_i32_round();
-            }
+                Some(new_size)
+            } else {
+                None
+            };
 
             if mapped == old_mapped {
-                sticky_layer.unmap(&mapped);
+                if let Some(size) = sticky_layer.unmap(&mapped) {
+                    if size != elem_geo.size.as_logical() {
+                        new_size = Some(size);
+                    }
+                }
+            }
+
+            if let Some(new_size) = new_size {
+                let ratio =
+                    pos.to_local(&cursor_output).x / (elem_geo.loc.x + elem_geo.size.w) as f64;
+                initial_window_location = Point::<f64, _>::from((
+                    pos.x - (new_size.w as f64 * ratio),
+                    pos.y - MOVE_GRAB_Y_OFFSET,
+                ))
+                .to_i32_round();
             }
 
             (

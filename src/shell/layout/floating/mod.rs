@@ -624,7 +624,9 @@ impl FloatingLayout {
         );
     }
 
-    pub fn unmap(&mut self, window: &CosmicMapped) -> bool {
+    pub fn unmap(&mut self, window: &CosmicMapped) -> Option<Size<i32, Logical>> {
+        let mut new_size = None;
+
         if let Some(_) = window.floating_tiled.lock().unwrap().take() {
             if let Some(last_size) = window.last_geometry.lock().unwrap().map(|geo| geo.size) {
                 if let Some(location) = self.space.element_location(window) {
@@ -635,6 +637,7 @@ impl FloatingLayout {
                             .to_global(self.space.outputs().next().unwrap()),
                     );
                     window.configure();
+                    new_size = Some(last_size.as_logical());
                 }
             }
         } else if !window.is_maximized(true) && !window.is_fullscreen(true) {
@@ -655,13 +658,16 @@ impl FloatingLayout {
 
         let was_unmaped = self.space.elements().any(|e| e == window);
         self.space.unmap_elem(&window);
+
         if was_unmaped {
             if let Some(pos) = self.spawn_order.iter().position(|w| w == window) {
                 self.spawn_order.truncate(pos);
             }
             window.moved_since_mapped.store(true, Ordering::SeqCst);
+            Some(new_size.unwrap_or_else(|| window.geometry().size))
+        } else {
+            None
         }
-        was_unmaped
     }
 
     pub fn unmap_minimize(
