@@ -366,36 +366,47 @@ impl XwmHandler for State {
         _reorder: Option<Reorder>,
     ) {
         // We only allow floating X11 windows to resize themselves. Nothing else
-        let mut current_geo = window.geometry();
         let shell = self.common.shell.read().unwrap();
 
         if let Some(mapped) = shell.element_for_surface(&window) {
-            let is_floating = shell
+            let current_geo = if let Some(workspace) = shell.space_for(mapped) {
+                workspace.is_floating(mapped).then_some(
+                    workspace
+                        .element_geometry(mapped)
+                        .unwrap()
+                        .to_global(workspace.output()),
+                )
+            } else if let Some((output, set)) = shell
                 .workspaces
                 .sets
-                .values()
-                .any(|set| set.sticky_layer.mapped().any(|m| m == mapped))
-                || shell
-                    .space_for(&mapped)
-                    .filter(|space| space.is_floating(mapped))
-                    .is_some();
-
-            if is_floating {
-                let ssd_height = if window.is_decorated() { 0 } else { SSD_HEIGHT };
-                mapped.set_geometry(
-                    Rectangle::from_loc_and_size(
-                        current_geo.loc,
-                        (
-                            w.map(|w| w as i32).unwrap_or(current_geo.size.w),
-                            h.map(|h| h as i32).unwrap_or(current_geo.size.h) + ssd_height,
-                        ),
-                    )
-                    .as_global(),
+                .iter()
+                .find(|(_, set)| set.sticky_layer.mapped().any(|m| m == mapped))
+            {
+                Some(
+                    set.sticky_layer
+                        .element_geometry(mapped)
+                        .unwrap()
+                        .to_global(&output),
                 )
+            } else {
+                None
+            };
+
+            if let Some(current_geo) = current_geo {
+                let ssd_height = if window.is_decorated() { 0 } else { SSD_HEIGHT };
+                mapped.set_geometry(Rectangle::from_loc_and_size(
+                    current_geo.loc,
+                    (
+                        w.map(|w| w as i32).unwrap_or(current_geo.size.w),
+                        h.map(|h| h as i32 + ssd_height)
+                            .unwrap_or(current_geo.size.h),
+                    ),
+                ))
             } else {
                 let _ = window.configure(None); // ack and force old state
             }
         } else {
+            let mut current_geo = window.geometry();
             if let Some(x) = x {
                 current_geo.loc.x = x;
             }
