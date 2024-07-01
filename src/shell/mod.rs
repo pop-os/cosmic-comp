@@ -1,4 +1,5 @@
 use calloop::LoopHandle;
+use grabs::SeatMoveGrabState;
 use indexmap::IndexMap;
 use std::{
     collections::HashMap,
@@ -14,6 +15,8 @@ use cosmic_comp_config::{
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::{
     State as WState, TilingState,
 };
+use cosmic_settings_config::shortcuts;
+use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection, ResizeDirection};
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     backend::{input::TouchSlot, renderer::element::RenderElementStates},
@@ -48,7 +51,7 @@ use smithay::{
 
 use crate::{
     backend::render::animations::spring::{Spring, SpringParams},
-    config::{Config, KeyModifiers, KeyPattern},
+    config::Config,
     utils::prelude::*,
     wayland::{
         handlers::{
@@ -77,16 +80,14 @@ mod workspace;
 pub use self::element::{CosmicMapped, CosmicMappedRenderElement, CosmicSurface};
 pub use self::seats::*;
 pub use self::workspace::*;
+
 use self::{
     element::{
         resize_indicator::{resize_indicator, ResizeIndicator},
         swap_indicator::{swap_indicator, SwapIndicator},
         CosmicWindow, MaximizedState,
     },
-    focus::{
-        target::{KeyboardFocusTarget, PointerFocusTarget},
-        FocusDirection,
-    },
+    focus::target::{KeyboardFocusTarget, PointerFocusTarget},
     grabs::{
         tab_items, window_items, GrabStartData, Item, MenuGrab, MoveGrab, ReleaseMode, ResizeEdge,
         ResizeGrab,
@@ -101,11 +102,12 @@ const ANIMATION_DURATION: Duration = Duration::from_millis(200);
 const GESTURE_MAX_LENGTH: f64 = 150.0;
 const GESTURE_POSITION_THRESHOLD: f64 = 0.5;
 const GESTURE_VELOCITY_THRESHOLD: f64 = 0.02;
+const MOVE_GRAB_Y_OFFSET: f64 = 16.;
 
 #[derive(Debug, Clone)]
 pub enum Trigger {
-    KeyboardSwap(KeyPattern, NodeDesc),
-    KeyboardMove(KeyModifiers),
+    KeyboardSwap(shortcuts::Binding, NodeDesc),
+    KeyboardMove(shortcuts::Modifiers),
     Pointer(u32),
     Touch(TouchSlot),
 }
@@ -139,16 +141,10 @@ impl OverviewMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, serde::Deserialize, PartialEq, Eq, Hash)]
-pub enum ResizeDirection {
-    Inwards,
-    Outwards,
-}
-
 #[derive(Debug, Clone)]
 pub enum ResizeMode {
     None,
-    Started(KeyPattern, Instant, ResizeDirection),
+    Started(shortcuts::Binding, Instant, ResizeDirection),
     Ended(Instant, ResizeDirection),
 }
 
@@ -1137,8 +1133,23 @@ impl Common {
     }
 
     pub fn on_commit(&mut self, surface: &WlSurface) {
-        if let Some(mapped) = self.shell.read().unwrap().element_for_surface(surface) {
-            mapped.on_commit(surface);
+        {
+            let shell = self.shell.read().unwrap();
+
+            for seat in shell.seats.iter() {
+                if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {
+                    if let Some(grab_state) = move_grab.lock().unwrap().as_ref() {
+                        let mapped = grab_state.element();
+                        if mapped.active_window().wl_surface().as_deref() == Some(surface) {
+                            mapped.on_commit(surface);
+                        }
+                    }
+                }
+            }
+
+            if let Some(mapped) = shell.element_for_surface(surface) {
+                mapped.on_commit(surface);
+            }
         }
         self.popups.commit(surface);
     }
@@ -1579,7 +1590,7 @@ impl Shell {
 
     pub fn set_resize_mode(
         &mut self,
-        enabled: Option<(KeyPattern, ResizeDirection)>,
+        enabled: Option<(shortcuts::Binding, ResizeDirection)>,
         config: &Config,
         evlh: LoopHandle<'static, crate::state::State>,
     ) {
@@ -2289,14 +2300,14 @@ impl Shell {
                     is_sticky,
                     tiling_enabled,
                     edge,
-                    &config.static_conf,
+                    config,
                 )) as Box<dyn Iterator<Item = Item>>
             } else {
                 let (tab, _) = mapped
                     .windows()
                     .find(|(s, _)| s.wl_surface().as_deref() == Some(surface))
                     .unwrap();
-                Box::new(tab_items(&mapped, &tab, is_tiled, &config.static_conf))
+                Box::new(tab_items(&mapped, &tab, is_tiled, config))
                     as Box<dyn Iterator<Item = Item>>
             },
             global_position,
@@ -2387,22 +2398,20 @@ impl Shell {
             let elem_geo = workspace.element_geometry(&old_mapped)?;
             let mut initial_window_location = elem_geo.loc.to_global(workspace.output());
 
-            if mapped.maximized_state.lock().unwrap().is_some() {
+            let mut new_size = if mapped.maximized_state.lock().unwrap().is_some() {
                 // If surface is maximized then unmaximize it
-                let new_size = workspace.unmaximize_request(&mapped);
-                let output = workspace.output();
-                let ratio = pos.to_local(&output).x / output.geometry().size.w as f64;
-
-                initial_window_location = new_size
-                    .map(|size| (pos.x - (size.w as f64 * ratio), pos.y).into())
-                    .unwrap_or_else(|| pos)
-                    .to_i32_round();
-            }
+                workspace.unmaximize_request(&mapped)
+            } else {
+                None
+            };
 
             let layer = if mapped == old_mapped {
                 let was_floating = workspace.floating_layer.unmap(&mapped);
                 let was_tiled = workspace.tiling_layer.unmap_as_placeholder(&mapped);
-                assert!(was_floating != was_tiled.is_some());
+                assert!(was_floating.is_some() != was_tiled.is_some());
+                if was_floating.is_some_and(|size| size != elem_geo.size.as_logical()) {
+                    new_size = was_floating;
+                }
                 was_tiled.is_some()
             } else {
                 workspace
@@ -2413,6 +2422,18 @@ impl Shell {
             .then_some(ManagedLayer::Tiling)
             .unwrap_or(ManagedLayer::Floating);
 
+            // if this changed the width, the window was tiled in floating mode
+            if let Some(new_size) = new_size {
+                let output = workspace.output();
+                let ratio = pos.to_local(&output).x / (elem_geo.loc.x + elem_geo.size.w) as f64;
+
+                initial_window_location = Point::from((
+                    pos.x - (new_size.w as f64 * ratio),
+                    pos.y - MOVE_GRAB_Y_OFFSET,
+                ))
+                .to_i32_round();
+            }
+
             (initial_window_location, layer, workspace.handle)
         } else if let Some(sticky_layer) = self
             .workspaces
@@ -2421,13 +2442,10 @@ impl Shell {
             .filter(|set| set.sticky_layer.mapped().any(|m| m == &old_mapped))
             .map(|set| &mut set.sticky_layer)
         {
-            let mut initial_window_location = sticky_layer
-                .element_geometry(&old_mapped)
-                .unwrap()
-                .loc
-                .to_global(&cursor_output);
+            let elem_geo = sticky_layer.element_geometry(&old_mapped).unwrap();
+            let mut initial_window_location = elem_geo.loc.to_global(&cursor_output);
 
-            if let Some(state) = mapped.maximized_state.lock().unwrap().take() {
+            let mut new_size = if let Some(state) = mapped.maximized_state.lock().unwrap().take() {
                 // If surface is maximized then unmaximize it
                 mapped.set_maximized(false);
                 let new_size = state.original_geometry.size.as_logical();
@@ -2438,14 +2456,27 @@ impl Shell {
                     None,
                 );
 
-                let ratio = pos.to_local(&cursor_output).x / cursor_output.geometry().size.w as f64;
-                initial_window_location =
-                    Point::<f64, _>::from((pos.x - (new_size.w as f64 * ratio), pos.y))
-                        .to_i32_round();
-            }
+                Some(new_size)
+            } else {
+                None
+            };
 
             if mapped == old_mapped {
-                sticky_layer.unmap(&mapped);
+                if let Some(size) = sticky_layer.unmap(&mapped) {
+                    if size != elem_geo.size.as_logical() {
+                        new_size = Some(size);
+                    }
+                }
+            }
+
+            if let Some(new_size) = new_size {
+                let ratio =
+                    pos.to_local(&cursor_output).x / (elem_geo.loc.x + elem_geo.size.w) as f64;
+                initial_window_location = Point::<f64, _>::from((
+                    pos.x - (new_size.w as f64 * ratio),
+                    pos.y - MOVE_GRAB_Y_OFFSET,
+                ))
+                .to_i32_round();
             }
 
             (

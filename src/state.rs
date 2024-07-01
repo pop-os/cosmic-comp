@@ -463,9 +463,11 @@ impl State {
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(&dh);
         let idle_inhibiting_surfaces = HashSet::new();
 
-        let data_control_state = config.static_conf.data_control_enabled.then(|| {
-            DataControlState::new::<Self, _>(dh, Some(&primary_selection_state), |_| true)
-        });
+        let data_control_state = std::env::var("COSMIC_DATA_CONTROL_ENABLED")
+            .is_ok_and(|value| value == "1")
+            .then(|| {
+                DataControlState::new::<Self, _>(dh, Some(&primary_selection_state), |_| true)
+            });
 
         let shell = Arc::new(RwLock::new(Shell::new(&config)));
 

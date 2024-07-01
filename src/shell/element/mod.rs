@@ -72,13 +72,14 @@ use smithay::desktop::WindowSurface;
 use tracing::debug;
 
 use super::{
-    focus::{target::PointerFocusTarget, FocusDirection},
+    focus::target::PointerFocusTarget,
     layout::{
         floating::{ResizeState, TiledCorners},
         tiling::NodeDesc,
     },
-    Direction, ManagedLayer, SeatExt,
+    ManagedLayer, SeatExt,
 };
+use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection};
 
 space_elements! {
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
