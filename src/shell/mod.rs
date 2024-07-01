@@ -55,8 +55,8 @@ use crate::{
     utils::prelude::*,
     wayland::{
         handlers::{
-            toplevel_management::minimize_rectangle, xdg_activation::ActivationContext,
-            xdg_shell::popup::get_popup_toplevel,
+            screencopy::WORKSPACE_OVERVIEW_NAMESPACE, toplevel_management::minimize_rectangle,
+            xdg_activation::ActivationContext, xdg_shell::popup::get_popup_toplevel,
         },
         protocols::{
             toplevel_info::{
@@ -416,13 +416,23 @@ impl WorkspaceSet {
             return Err(InvalidWorkspaceIndex);
         }
 
+        // Animate if workspaces overview isn't open
+        let layer_map = layer_map_for_output(&self.output);
+        let animate = !layer_map
+            .layers()
+            .any(|l| l.namespace() == WORKSPACE_OVERVIEW_NAMESPACE);
+
         if self.active != idx {
             let old_active = self.active;
             state.remove_workspace_state(&self.workspaces[old_active].handle, WState::Active);
             state.remove_workspace_state(&self.workspaces[old_active].handle, WState::Urgent);
             state.remove_workspace_state(&self.workspaces[idx].handle, WState::Urgent);
             state.add_workspace_state(&self.workspaces[idx].handle, WState::Active);
-            self.previously_active = Some((old_active, workspace_delta));
+            self.previously_active = if animate {
+                Some((old_active, workspace_delta))
+            } else {
+                None
+            };
             self.active = idx;
             Ok(true)
         } else {
