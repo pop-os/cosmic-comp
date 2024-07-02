@@ -46,9 +46,24 @@ impl DrmLeaseHandler for State {
                     .drm
                     .planes(crtc)
                     .map_err(LeaseRejected::with_cause)?;
-                builder.add_plane(planes.primary.handle);
-                if let Some(cursor) = planes.cursor {
-                    builder.add_plane(cursor.handle);
+                let (primary_plane, primary_plane_claim) = planes
+                    .primary
+                    .iter()
+                    .find_map(|plane| {
+                        backend
+                            .drm
+                            .claim_plane(plane.handle, *crtc)
+                            .map(|claim| (plane, claim))
+                    })
+                    .ok_or_else(LeaseRejected::default)?;
+                builder.add_plane(primary_plane.handle, primary_plane_claim);
+                if let Some((cursor, claim)) = planes.cursor.and_then(|plane| {
+                    backend
+                        .drm
+                        .claim_plane(plane.handle, *crtc)
+                        .map(|claim| (plane, claim))
+                }) {
+                    builder.add_plane(cursor.handle, claim);
                 }
             } else {
                 tracing::warn!(
