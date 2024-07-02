@@ -644,6 +644,8 @@ impl State {
                             }
                             _ => {}
                         });
+                    } else if self.common.config.cosmic_conf.focus_follows_cursor {
+                        todo!("refocus if pointer changes window");
                     }
 
                     let shell = self.common.shell.read().unwrap();
@@ -764,15 +766,18 @@ impl State {
                         if !seat.get_pointer().unwrap().is_grabbed() {
                             let output = seat.active_output();
 
-                            let pos = seat.get_pointer().unwrap().current_location().as_global();
-                            let relative_pos = pos.to_local(&output);
-                            let mut under: Option<KeyboardFocusTarget> = None;
+                            let global_position =
+                                seat.get_pointer().unwrap().current_location().as_global();
+                            let relative_pos = global_position.to_local(&output);
 
+                            let mut under: Option<KeyboardFocusTarget> = None;
+                            // if the lockscreen is active
                             if let Some(session_lock) = shell.session_lock.as_ref() {
                                 under = session_lock
                                     .surfaces
                                     .get(&output)
                                     .map(|lock| lock.clone().into());
+                                // if the output can receive keyboard focus
                             } else if let Some(window) =
                                 shell.active_space(&output).get_fullscreen()
                             {
@@ -827,7 +832,9 @@ impl State {
                                 if !done {
                                     // Don't check override redirect windows, because we don't set keyboard focus to them explicitly.
                                     // These cases are handled by the XwaylandKeyboardGrab.
-                                    if let Some(target) = shell.element_under(pos, &output) {
+                                    if let Some(target) =
+                                        shell.element_under(global_position, &output)
+                                    {
                                         if seat.get_keyboard().unwrap().modifier_state().logo {
                                             if let Some(surface) =
                                                 target.toplevel().map(Cow::into_owned)

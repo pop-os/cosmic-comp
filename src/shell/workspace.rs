@@ -784,6 +784,8 @@ impl Workspace {
         }
     }
 
+    /// Returns the content of the current display if it is alive and
+    /// not in the process of rendering an animation
     pub fn get_fullscreen(&self) -> Option<&CosmicSurface> {
         self.fullscreen
             .as_ref()
