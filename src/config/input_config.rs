@@ -80,6 +80,8 @@ pub fn for_device(device: &InputDevice) -> InputConfig {
             None
         },
         map_to_output: None,
+        focus_follows_cursor: None,
+        cursor_follows_focus: None,
     }
 }
 
