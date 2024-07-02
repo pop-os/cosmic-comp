@@ -402,8 +402,7 @@ impl Surface {
     ) -> Result<()> {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         self.plane_formats = surface
-            .planes()
-            .primary
+            .plane_info()
             .formats
             .iter()
             .copied()
