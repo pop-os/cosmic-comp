@@ -29,7 +29,7 @@ use crate::{
     },
 };
 use calloop::{timer::Timer, RegistrationToken};
-use cosmic_comp_config::{input::MouseFocusPolicy, workspace::WorkspaceLayout, TileBehavior};
+use cosmic_comp_config::{workspace::WorkspaceLayout, TileBehavior};
 use cosmic_config::ConfigSet;
 use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection, ResizeDirection};
@@ -644,9 +644,7 @@ impl State {
                             }
                             _ => {}
                         });
-                    } else if self.common.config.cosmic_conf.mouse_focus_policy
-                        == MouseFocusPolicy::FocusFollowsMouse
-                    {
+                    } else if self.common.config.cosmic_conf.focus_follows_cursor {
                         todo!("refocus if pointer changes window");
                     }
 
@@ -657,15 +655,6 @@ impl State {
                             session.set_cursor_pos(None);
                         }
                         seat.set_active_output(&output);
-                        //check if the mouse focus policy is one
-                        //which refocuses on output change
-                        if self.common.config.cosmic_conf.mouse_focus_policy
-                            != MouseFocusPolicy::ClickToFocus
-                        {
-                            //let mut shell = self.common.shell.write().unwrap();
-                            //get the window under the pointer
-                            todo!("refocus on output change");
-                        }
                     }
 
                     for session in cursor_sessions_for_output(&shell, &output) {
