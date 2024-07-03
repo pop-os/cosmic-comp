@@ -294,7 +294,11 @@ pub fn render_workspace_to_buffer(
             let size = buffer_dimensions(buffer).unwrap();
             let format =
                 with_buffer_contents(buffer, |_, _, data| shm_format_to_fourcc(data.format))
-                    .map_err(|_| DTError::OutputNoMode(OutputNoMode))? // eh, we have to do some error
+                    .map_err(|err| {
+                        DTError::Rendering(<R as Renderer>::Error::from_gles_error(
+                            GlesError::BufferAccessError(err),
+                        ))
+                    })?
                     .expect("We should be able to convert all hardcoded shm screencopy formats");
             let render_buffer =
                 Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, size)
@@ -574,7 +578,11 @@ pub fn render_window_to_buffer(
             let size = buffer_dimensions(buffer).unwrap();
             let format =
                 with_buffer_contents(buffer, |_, _, data| shm_format_to_fourcc(data.format))
-                    .map_err(|_| DTError::OutputNoMode(OutputNoMode))? // eh, we have to do some error
+                    .map_err(|err| {
+                        DTError::Rendering(<R as Renderer>::Error::from_gles_error(
+                            GlesError::BufferAccessError(err),
+                        ))
+                    })?
                     .expect("We should be able to convert all hardcoded shm screencopy formats");
             let render_buffer =
                 Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, size)
@@ -787,7 +795,11 @@ pub fn render_cursor_to_buffer(
             let size = buffer_dimensions(buffer).unwrap();
             let format =
                 with_buffer_contents(buffer, |_, _, data| shm_format_to_fourcc(data.format))
-                    .map_err(|_| DTError::OutputNoMode(OutputNoMode))? // eh, we have to do some error
+                    .map_err(|err| {
+                        DTError::Rendering(<R as Renderer>::Error::from_gles_error(
+                            GlesError::BufferAccessError(err),
+                        ))
+                    })?
                     .expect("We should be able to convert all hardcoded shm screencopy formats");
             let render_buffer =
                 Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, size)
