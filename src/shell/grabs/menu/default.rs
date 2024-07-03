@@ -18,7 +18,7 @@ use super::{Item, ResizeEdge};
 fn toggle_stacking(state: &mut State, mapped: &CosmicMapped) {
     let mut shell = state.common.shell.write().unwrap();
     let seat = shell.seats.last_active().clone();
-    if let Some(new_focus) = shell.toggle_stacking(mapped) {
+    if let Some(new_focus) = shell.toggle_stacking(&seat, mapped) {
         std::mem::drop(shell);
         Shell::set_focus(state, Some(&new_focus), &seat, None);
     }

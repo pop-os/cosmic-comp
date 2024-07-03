@@ -2108,7 +2108,11 @@ impl TilingLayout {
         }
     }
 
-    pub fn toggle_stacking(&mut self, mapped: &CosmicMapped) -> Option<KeyboardFocusTarget> {
+    pub fn toggle_stacking(
+        &mut self,
+        mapped: &CosmicMapped,
+        mut focus_stack: FocusStackMut,
+    ) -> Option<KeyboardFocusTarget> {
         let gaps = self.gaps();
 
         let Some(node_id) = mapped.tiling_node_id.lock().unwrap().clone() else {
@@ -2125,6 +2129,7 @@ impl TilingLayout {
             match tree.get_mut(&node_id).unwrap().data_mut() {
                 Data::Mapped { mapped, .. } => {
                     mapped.convert_to_stack((&self.output, mapped.bbox()), self.theme.clone());
+                    focus_stack.append(&mapped);
                     KeyboardFocusTarget::Element(mapped.clone())
                 }
                 _ => unreachable!(),
@@ -2133,6 +2138,9 @@ impl TilingLayout {
             // if we have a stack
             let mut surfaces = mapped.windows().map(|(s, _)| s);
             let first = surfaces.next().expect("Stack without a window?");
+            let focused = mapped.active_window();
+
+            let mut new_elements = Vec::new();
 
             let handle = match tree.get_mut(&node_id).unwrap().data_mut() {
                 Data::Mapped { mapped, .. } => {
@@ -2142,6 +2150,7 @@ impl TilingLayout {
                         (&self.output, mapped.bbox()),
                         self.theme.clone(),
                     );
+                    new_elements.push(mapped.clone());
                     handle
                 }
                 _ => unreachable!(),
@@ -2152,6 +2161,7 @@ impl TilingLayout {
             for other in surfaces {
                 other.try_force_undecorated(false);
                 other.set_tiled(false);
+                let focused = other == focused;
                 let window = CosmicMapped::from(CosmicWindow::new(
                     other,
                     handle.clone(),
@@ -2174,6 +2184,11 @@ impl TilingLayout {
                 );
 
                 let node = window.tiling_node_id.lock().unwrap().clone().unwrap();
+                if focused {
+                    new_elements.insert(0, window);
+                } else {
+                    new_elements.push(window);
+                }
                 current_node = node;
             }
 
@@ -2184,15 +2199,20 @@ impl TilingLayout {
                 node_id
             };
 
+            for elem in new_elements.iter().rev() {
+                focus_stack.append(elem);
+            }
+
             match tree.get(&node_id).unwrap().data() {
                 Data::Group { alive, .. } => KeyboardFocusTarget::Group(WindowGroup {
                     node: node_id.clone(),
                     alive: Arc::downgrade(alive),
-                    focus_stack: tree
-                        .children_ids(&node_id)
+                    focus_stack: vec![new_elements[0]
+                        .tiling_node_id
+                        .lock()
                         .unwrap()
-                        .cloned()
-                        .collect::<Vec<_>>(),
+                        .clone()
+                        .unwrap()],
                 }),
                 Data::Mapped { mapped, .. } => KeyboardFocusTarget::Element(mapped.clone()),
                 _ => unreachable!(),
@@ -2222,9 +2242,7 @@ impl TilingLayout {
         {
             match last_active_data {
                 FocusedNodeData::Window(mapped) => {
-                    let res = self.toggle_stacking(&mapped);
-                    focus_stack.append(&mapped);
-                    return res;
+                    return self.toggle_stacking(&mapped, focus_stack);
                 }
                 FocusedNodeData::Group(_, _) => {
                     let mut handle = None;

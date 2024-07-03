@@ -3076,19 +3076,29 @@ impl Shell {
     }
 
     #[must_use]
-    pub fn toggle_stacking(&mut self, window: &CosmicMapped) -> Option<KeyboardFocusTarget> {
+    pub fn toggle_stacking(
+        &mut self,
+        seat: &Seat<State>,
+        window: &CosmicMapped,
+    ) -> Option<KeyboardFocusTarget> {
         if let Some(set) = self
             .workspaces
             .sets
             .values_mut()
             .find(|set| set.sticky_layer.mapped().any(|m| m == window))
         {
-            set.sticky_layer.toggle_stacking(window)
+            let workspace = &mut set.workspaces[set.active];
+            set.sticky_layer
+                .toggle_stacking(window, workspace.focus_stack.get_mut(seat))
         } else if let Some(workspace) = self.space_for_mut(window) {
             if workspace.tiling_layer.mapped().any(|(m, _)| m == window) {
-                workspace.tiling_layer.toggle_stacking(window)
+                workspace
+                    .tiling_layer
+                    .toggle_stacking(window, workspace.focus_stack.get_mut(seat))
             } else if workspace.floating_layer.mapped().any(|w| w == window) {
-                workspace.floating_layer.toggle_stacking(window)
+                workspace
+                    .floating_layer
+                    .toggle_stacking(window, workspace.focus_stack.get_mut(seat))
             } else {
                 None
             }
