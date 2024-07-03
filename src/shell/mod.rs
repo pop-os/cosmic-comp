@@ -1330,6 +1330,15 @@ impl Shell {
         self.workspaces.active_mut(output)
     }
 
+    /// get the parent output of the window which has keyboard focus (for a given seat)
+    pub fn get_focused_output(&self, focus_target: &KeyboardFocusTarget) -> Option<&Output> {
+        if let Some(focused_surface) = focus_target.wl_surface() {
+            self.visible_output_for_surface(&focused_surface)
+        } else {
+            None
+        }
+    }
+
     pub fn refresh_active_space(
         &mut self,
         output: &Output,

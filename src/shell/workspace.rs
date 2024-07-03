@@ -177,6 +177,7 @@ impl IsAlive for FullscreenSurface {
     }
 }
 
+/// LIFO stack of focus targets
 #[derive(Debug, Default)]
 pub struct FocusStacks(HashMap<Seat<State>, IndexSet<CosmicMapped>>);
 

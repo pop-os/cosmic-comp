@@ -190,21 +190,22 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    let current_output = seat.active_output();
-                    let shortcuts_inhibited = self
+
+                    // unwrap shouldn't panic because this is a keyboard event
+                    let current_focus = seat.get_keyboard().unwrap().current_focus().unwrap();
+
+                    let focused_output = self
                         .common
                         .shell
                         .read()
                         .unwrap()
-                        .active_space(&current_output)
-                        .focus_stack
-                        .get(&seat)
-                        .last()
-                        .and_then(|window| {
-                            window.wl_surface().and_then(|surface| {
-                                seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
-                            })
-                        })
+                        .get_focused_output(&current_focus)
+                        .unwrap()
+                        .clone();
+
+                    let shortcuts_inhibited = current_focus
+                        .wl_surface()
+                        .and_then(|surface| seat.keyboard_shortcuts_inhibitor_for_surface(&surface))
                         .map(|inhibitor| inhibitor.is_active())
                         .unwrap_or(false);
 
@@ -253,7 +254,7 @@ impl State {
                                             shell.set_overview_mode(None, data.common.event_loop_handle.clone());
 
                                             if let Some(focus) = current_focus {
-                                                if let Some(new_descriptor) = shell.workspaces.active(&current_output).1.node_desc(focus) {
+                                                if let Some(new_descriptor) = shell.workspaces.active(&focused_output).1.node_desc(focus) {
                                                     let mut spaces = shell.workspaces.spaces_mut();
                                                     if old_descriptor.handle != new_descriptor.handle {
                                                         let (mut old_w, mut other_w) = spaces.partition::<Vec<_>, _>(|w| w.handle == old_descriptor.handle);
@@ -283,7 +284,7 @@ impl State {
                                                     }
                                                 }
                                             } else {
-                                                let new_workspace = shell.workspaces.active(&current_output).1.handle;
+                                                let new_workspace = shell.workspaces.active(&focused_output).1.handle;
                                                 if new_workspace != old_descriptor.handle {
                                                     let spaces = shell.workspaces.spaces_mut();
                                                     let (mut old_w, mut other_w) = spaces.partition::<Vec<_>, _>(|w| w.handle == old_descriptor.handle);
@@ -1673,11 +1674,9 @@ impl State {
             }
 
             Action::Close => {
-                let current_output = seat.active_output();
-                let shell = self.common.shell.read().unwrap();
-                let workspace = shell.active_space(&current_output);
-                if let Some(window) = workspace.focus_stack.get(seat).last() {
-                    window.send_close();
+                if let Some(focus_target) = seat.get_keyboard().unwrap().current_focus() {
+                    let shell = self.common.shell.read().unwrap();
+                    focus_target.maybe_close(shell)
                 }
             }
 
@@ -1752,130 +1751,170 @@ impl State {
             }
 
             x @ Action::MoveToWorkspace(_) | x @ Action::SendToWorkspace(_) => {
-                let current_output = seat.active_output();
-                let follow = matches!(x, Action::MoveToWorkspace(_));
-                let workspace = match x {
-                    Action::MoveToWorkspace(0) | Action::SendToWorkspace(0) => 9,
-                    Action::MoveToWorkspace(x) | Action::SendToWorkspace(x) => x - 1,
-                    _ => unreachable!(),
-                };
-                let res = self.common.shell.write().unwrap().move_current_window(
-                    seat,
-                    &current_output,
-                    (&current_output, Some(workspace as usize)),
-                    follow,
-                    None,
-                    &mut self.common.workspace_state.update(),
-                );
-                if let Ok(Some((target, _point))) = res {
-                    Shell::set_focus(self, Some(&target), seat, None);
+                if let Some(focused_output) =
+                    seat.get_keyboard().unwrap().current_focus().and_then(|f| {
+                        self.common
+                            .shell
+                            .read()
+                            .unwrap()
+                            .get_focused_output(&f)
+                            .cloned()
+                    })
+                {
+                    let follow = matches!(x, Action::MoveToWorkspace(_));
+                    let workspace = match x {
+                        Action::MoveToWorkspace(0) | Action::SendToWorkspace(0) => 9,
+                        Action::MoveToWorkspace(x) | Action::SendToWorkspace(x) => x - 1,
+                        _ => unreachable!(),
+                    };
+                    let res = self.common.shell.write().unwrap().move_current_window(
+                        seat,
+                        &focused_output,
+                        (&focused_output, Some(workspace as usize)),
+                        follow,
+                        None,
+                        &mut self.common.workspace_state.update(),
+                    );
+                    if let Ok(Some((target, _point))) = res {
+                        Shell::set_focus(self, Some(&target), seat, None);
+                    }
                 }
             }
 
             x @ Action::MoveToLastWorkspace | x @ Action::SendToLastWorkspace => {
-                let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
-                let workspace = shell.workspaces.len(&current_output).saturating_sub(1);
-                let res = shell.move_current_window(
-                    seat,
-                    &current_output,
-                    (&current_output, Some(workspace as usize)),
-                    matches!(x, Action::MoveToLastWorkspace),
-                    None,
-                    &mut self.common.workspace_state.update(),
-                );
-                if let Ok(Some((target, _point))) = res {
-                    std::mem::drop(shell);
-                    Shell::set_focus(self, Some(&target), seat, None);
+                if let Some(focused_output) =
+                    seat.get_keyboard().unwrap().current_focus().and_then(|f| {
+                        self.common
+                            .shell
+                            .read()
+                            .unwrap()
+                            .get_focused_output(&f)
+                            .cloned()
+                    })
+                {
+                    let mut shell = self.common.shell.write().unwrap();
+                    let workspace = shell.workspaces.len(&focused_output).saturating_sub(1);
+                    let res = shell.move_current_window(
+                        seat,
+                        &focused_output,
+                        (&focused_output, Some(workspace as usize)),
+                        matches!(x, Action::MoveToLastWorkspace),
+                        None,
+                        &mut self.common.workspace_state.update(),
+                    );
+                    if let Ok(Some((target, _point))) = res {
+                        std::mem::drop(shell);
+                        Shell::set_focus(self, Some(&target), seat, None);
+                    }
                 }
             }
 
             x @ Action::MoveToNextWorkspace | x @ Action::SendToNextWorkspace => {
-                let current_output = seat.active_output();
-                let res = {
-                    let mut shell = self.common.shell.write().unwrap();
-                    let workspace = shell
-                        .workspaces
-                        .active_num(&current_output)
-                        .1
-                        .saturating_add(1);
-                    shell.move_current_window(
-                        seat,
-                        &current_output,
-                        (&current_output, Some(workspace as usize)),
-                        matches!(x, Action::MoveToNextWorkspace),
-                        direction,
-                        &mut self.common.workspace_state.update(),
-                    )
-                };
+                if let Some(focused_output) =
+                    seat.get_keyboard().unwrap().current_focus().and_then(|f| {
+                        self.common
+                            .shell
+                            .read()
+                            .unwrap()
+                            .get_focused_output(&f)
+                            .cloned()
+                    })
+                {
+                    let res = {
+                        let mut shell = self.common.shell.write().unwrap();
+                        let workspace = shell
+                            .workspaces
+                            .active_num(&focused_output)
+                            .1
+                            .saturating_add(1);
+                        shell.move_current_window(
+                            seat,
+                            &focused_output,
+                            (&focused_output, Some(workspace as usize)),
+                            matches!(x, Action::MoveToNextWorkspace),
+                            direction,
+                            &mut self.common.workspace_state.update(),
+                        )
+                    };
 
-                match res {
-                    Ok(Some((target, _point))) => {
-                        Shell::set_focus(self, Some(&target), seat, None);
-                    }
-                    Err(_) if propagate => {
-                        if let Some(inferred) = pattern.inferred_direction() {
-                            self.handle_shortcut_action(
-                                if matches!(x, Action::MoveToNextWorkspace) {
-                                    Action::MoveToOutput(inferred)
-                                } else {
-                                    Action::SendToOutput(inferred)
-                                },
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                direction,
-                                false,
-                            )
+                    match res {
+                        Ok(Some((target, _point))) => {
+                            Shell::set_focus(self, Some(&target), seat, None);
                         }
+                        Err(_) if propagate => {
+                            if let Some(inferred) = pattern.inferred_direction() {
+                                self.handle_shortcut_action(
+                                    if matches!(x, Action::MoveToNextWorkspace) {
+                                        Action::MoveToOutput(inferred)
+                                    } else {
+                                        Action::SendToOutput(inferred)
+                                    },
+                                    seat,
+                                    serial,
+                                    time,
+                                    pattern,
+                                    direction,
+                                    false,
+                                )
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
 
             x @ Action::MoveToPreviousWorkspace | x @ Action::SendToPreviousWorkspace => {
-                let current_output = seat.active_output();
-                let res = {
-                    let mut shell = self.common.shell.write().unwrap();
-                    let workspace = shell
-                        .workspaces
-                        .active_num(&current_output)
-                        .1
-                        .saturating_sub(1);
-                    // TODO: Possibly move to prev output, if idx < 0
-                    shell.move_current_window(
-                        seat,
-                        &current_output,
-                        (&current_output, Some(workspace as usize)),
-                        matches!(x, Action::MoveToPreviousWorkspace),
-                        direction,
-                        &mut self.common.workspace_state.update(),
-                    )
-                };
+                if let Some(focused_output) =
+                    seat.get_keyboard().unwrap().current_focus().and_then(|f| {
+                        self.common
+                            .shell
+                            .read()
+                            .unwrap()
+                            .get_focused_output(&f)
+                            .cloned()
+                    })
+                {
+                    let res = {
+                        let mut shell = self.common.shell.write().unwrap();
+                        let workspace = shell
+                            .workspaces
+                            .active_num(&focused_output)
+                            .1
+                            .saturating_sub(1);
+                        // TODO: Possibly move to prev output, if idx < 0
+                        shell.move_current_window(
+                            seat,
+                            &focused_output,
+                            (&focused_output, Some(workspace as usize)),
+                            matches!(x, Action::MoveToPreviousWorkspace),
+                            direction,
+                            &mut self.common.workspace_state.update(),
+                        )
+                    };
 
-                match res {
-                    Ok(Some((target, _point))) => {
-                        Shell::set_focus(self, Some(&target), seat, None);
-                    }
-                    Err(_) if propagate => {
-                        if let Some(inferred) = pattern.inferred_direction() {
-                            self.handle_shortcut_action(
-                                if matches!(x, Action::MoveToPreviousWorkspace) {
-                                    Action::MoveToOutput(inferred)
-                                } else {
-                                    Action::SendToOutput(inferred)
-                                },
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                direction,
-                                false,
-                            )
+                    match res {
+                        Ok(Some((target, _point))) => {
+                            Shell::set_focus(self, Some(&target), seat, None);
                         }
+                        Err(_) if propagate => {
+                            if let Some(inferred) = pattern.inferred_direction() {
+                                self.handle_shortcut_action(
+                                    if matches!(x, Action::MoveToPreviousWorkspace) {
+                                        Action::MoveToOutput(inferred)
+                                    } else {
+                                        Action::SendToOutput(inferred)
+                                    },
+                                    seat,
+                                    serial,
+                                    time,
+                                    pattern,
+                                    direction,
+                                    false,
+                                )
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
 
@@ -2042,141 +2081,171 @@ impl State {
                     _ => unreachable!(),
                 };
 
-                let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
-                let next_output = shell.next_output(&current_output, direction).cloned();
+                if let Some(focused_output) =
+                    seat.get_keyboard().unwrap().current_focus().and_then(|f| {
+                        self.common
+                            .shell
+                            .read()
+                            .unwrap()
+                            .get_focused_output(&f)
+                            .cloned()
+                    })
+                {
+                    let mut shell = self.common.shell.write().unwrap();
+                    let next_output = shell.next_output(&focused_output, direction).cloned();
 
-                if let Some(next_output) = next_output {
-                    let res = shell.move_current_window(
-                        seat,
-                        &current_output,
-                        (&next_output, None),
-                        is_move_action,
-                        Some(direction),
-                        &mut self.common.workspace_state.update(),
-                    );
-                    if let Ok(Some((target, new_pos))) = res {
+                    if let Some(next_output) = next_output {
+                        let res = shell.move_current_window(
+                            seat,
+                            &focused_output,
+                            (&next_output, None),
+                            is_move_action,
+                            Some(direction),
+                            &mut self.common.workspace_state.update(),
+                        );
+                        if let Ok(Some((target, new_pos))) = res {
+                            std::mem::drop(shell);
+                            Shell::set_focus(self, Some(&target), seat, None);
+                            if let Some(ptr) = seat.get_pointer() {
+                                ptr.motion(
+                                    self,
+                                    None,
+                                    &MotionEvent {
+                                        location: new_pos.to_f64().as_logical(),
+                                        serial,
+                                        time,
+                                    },
+                                );
+                                ptr.frame(self);
+                            }
+                        }
+                    } else if propagate {
                         std::mem::drop(shell);
-                        Shell::set_focus(self, Some(&target), seat, None);
-                        if let Some(ptr) = seat.get_pointer() {
-                            ptr.motion(
-                                self,
-                                None,
-                                &MotionEvent {
-                                    location: new_pos.to_f64().as_logical(),
+                        match (
+                            direction,
+                            self.common.config.cosmic_conf.workspaces.workspace_layout,
+                        ) {
+                            (Direction::Left, WorkspaceLayout::Horizontal)
+                            | (Direction::Up, WorkspaceLayout::Vertical) => self
+                                .handle_shortcut_action(
+                                    Action::MoveToPreviousWorkspace,
+                                    seat,
                                     serial,
                                     time,
-                                },
-                            );
-                            ptr.frame(self);
-                        }
-                    }
-                } else if propagate {
-                    std::mem::drop(shell);
-                    match (
-                        direction,
-                        self.common.config.cosmic_conf.workspaces.workspace_layout,
-                    ) {
-                        (Direction::Left, WorkspaceLayout::Horizontal)
-                        | (Direction::Up, WorkspaceLayout::Vertical) => self
-                            .handle_shortcut_action(
-                                Action::MoveToPreviousWorkspace,
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                Some(direction),
-                                false,
-                            ),
-                        (Direction::Right, WorkspaceLayout::Horizontal)
-                        | (Direction::Down, WorkspaceLayout::Vertical) => self
-                            .handle_shortcut_action(
-                                Action::MoveToNextWorkspace,
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                Some(direction),
-                                false,
-                            ),
+                                    pattern,
+                                    Some(direction),
+                                    false,
+                                ),
+                            (Direction::Right, WorkspaceLayout::Horizontal)
+                            | (Direction::Down, WorkspaceLayout::Vertical) => self
+                                .handle_shortcut_action(
+                                    Action::MoveToNextWorkspace,
+                                    seat,
+                                    serial,
+                                    time,
+                                    pattern,
+                                    Some(direction),
+                                    false,
+                                ),
 
-                        _ => {}
+                            _ => {}
+                        }
                     }
                 }
             }
 
             x @ Action::MoveToNextOutput | x @ Action::SendToNextOutput => {
-                let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
+                if let Some(focused_output) =
+                    seat.get_keyboard().unwrap().current_focus().and_then(|f| {
+                        self.common
+                            .shell
+                            .read()
+                            .unwrap()
+                            .get_focused_output(&f)
+                            .cloned()
+                    })
+                {
+                    let mut shell = self.common.shell.write().unwrap();
 
-                let next_output = shell
-                    .outputs()
-                    .skip_while(|o| *o != &current_output)
-                    .skip(1)
-                    .next()
-                    .cloned();
-                if let Some(next_output) = next_output {
-                    let res = shell.move_current_window(
-                        seat,
-                        &current_output,
-                        (&next_output, None),
-                        matches!(x, Action::MoveToNextOutput),
-                        direction,
-                        &mut self.common.workspace_state.update(),
-                    );
-                    if let Ok(Some((target, new_pos))) = res {
-                        std::mem::drop(shell);
-                        Shell::set_focus(self, Some(&target), seat, None);
-                        if let Some(ptr) = seat.get_pointer() {
-                            ptr.motion(
-                                self,
-                                None,
-                                &MotionEvent {
-                                    location: new_pos.to_f64().as_logical(),
-                                    serial,
-                                    time,
-                                },
-                            );
-                            ptr.frame(self);
+                    let next_output = shell
+                        .outputs()
+                        .skip_while(|o| *o != &focused_output)
+                        .skip(1)
+                        .next()
+                        .cloned();
+                    if let Some(next_output) = next_output {
+                        let res = shell.move_current_window(
+                            seat,
+                            &focused_output,
+                            (&next_output, None),
+                            matches!(x, Action::MoveToNextOutput),
+                            direction,
+                            &mut self.common.workspace_state.update(),
+                        );
+                        if let Ok(Some((target, new_pos))) = res {
+                            std::mem::drop(shell);
+                            Shell::set_focus(self, Some(&target), seat, None);
+                            if let Some(ptr) = seat.get_pointer() {
+                                ptr.motion(
+                                    self,
+                                    None,
+                                    &MotionEvent {
+                                        location: new_pos.to_f64().as_logical(),
+                                        serial,
+                                        time,
+                                    },
+                                );
+                                ptr.frame(self);
+                            }
                         }
                     }
                 }
             }
 
             x @ Action::MoveToPreviousOutput | x @ Action::SendToPreviousOutput => {
-                let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
+                if let Some(focused_output) =
+                    seat.get_keyboard().unwrap().current_focus().and_then(|f| {
+                        self.common
+                            .shell
+                            .read()
+                            .unwrap()
+                            .get_focused_output(&f)
+                            .cloned()
+                    })
+                {
+                    let mut shell = self.common.shell.write().unwrap();
 
-                let prev_output = shell
-                    .outputs()
-                    .rev()
-                    .skip_while(|o| *o != &current_output)
-                    .skip(1)
-                    .next()
-                    .cloned();
-                if let Some(prev_output) = prev_output {
-                    let res = shell.move_current_window(
-                        seat,
-                        &current_output,
-                        (&prev_output, None),
-                        matches!(x, Action::MoveToPreviousOutput),
-                        direction,
-                        &mut self.common.workspace_state.update(),
-                    );
-                    if let Ok(Some((target, new_pos))) = res {
-                        std::mem::drop(shell);
-                        Shell::set_focus(self, Some(&target), seat, None);
-                        if let Some(ptr) = seat.get_pointer() {
-                            ptr.motion(
-                                self,
-                                None,
-                                &MotionEvent {
-                                    location: new_pos.to_f64().as_logical(),
-                                    serial,
-                                    time,
-                                },
-                            );
-                            ptr.frame(self);
+                    let prev_output = shell
+                        .outputs()
+                        .rev()
+                        .skip_while(|o| *o != &focused_output)
+                        .skip(1)
+                        .next()
+                        .cloned();
+                    if let Some(prev_output) = prev_output {
+                        let res = shell.move_current_window(
+                            seat,
+                            &focused_output,
+                            (&prev_output, None),
+                            matches!(x, Action::MoveToPreviousOutput),
+                            direction,
+                            &mut self.common.workspace_state.update(),
+                        );
+                        if let Ok(Some((target, new_pos))) = res {
+                            std::mem::drop(shell);
+                            Shell::set_focus(self, Some(&target), seat, None);
+                            if let Some(ptr) = seat.get_pointer() {
+                                ptr.motion(
+                                    self,
+                                    None,
+                                    &MotionEvent {
+                                        location: new_pos.to_f64().as_logical(),
+                                        serial,
+                                        time,
+                                    },
+                                );
+                                ptr.frame(self);
+                            }
                         }
                     }
                 }

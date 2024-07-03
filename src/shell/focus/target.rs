@@ -1,4 +1,8 @@
-use std::{borrow::Cow, sync::Weak, time::Duration};
+use std::{
+    borrow::Cow,
+    sync::{RwLockReadGuard, Weak},
+    time::Duration,
+};
 
 use crate::{
     shell::{
@@ -69,6 +73,43 @@ pub enum KeyboardFocusTarget {
     LayerSurface(LayerSurface),
     Popup(PopupKind),
     LockSurface(LockSurface),
+}
+
+impl KeyboardFocusTarget {
+    pub fn maybe_close(&self, shell: RwLockReadGuard<Shell>) {
+        match self {
+            KeyboardFocusTarget::Element(mapped) => {
+                mapped.send_close();
+            }
+            KeyboardFocusTarget::Fullscreen(surface) => {
+                shell.element_for_surface(surface).unwrap().send_close();
+            }
+            KeyboardFocusTarget::Popup(PopupKind::Xdg(popup)) => {
+                shell
+                    .element_for_surface(&popup.get_parent_surface().unwrap())
+                    .unwrap()
+                    .send_close();
+            }
+            KeyboardFocusTarget::Popup(PopupKind::InputMethod(popup)) => {
+                // I'm guessing on screen keyboard or things like completion engines or emoji pickers
+                // for some reason th
+                shell
+                    .element_for_surface(&popup.get_parent().unwrap().surface)
+                    .unwrap()
+                    .send_close();
+            }
+            KeyboardFocusTarget::Group(_group) => {
+                // I suppose if a group of windows is focused, a close action should apply to the group
+                todo!();
+                // shell
+                //     .element_for_surface(&group.wl_surface())
+                //     .unwrap()
+                //     .send_close();
+            }
+
+            _ => {}
+        }
+    }
 }
 
 // TODO: This should be TryFrom, but PopupGrab needs to be able to convert. Fix this in smithay

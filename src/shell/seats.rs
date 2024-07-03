@@ -27,6 +27,10 @@ use super::grabs::{SeatMenuGrabState, SeatMoveGrabState};
 
 crate::utils::id_gen!(next_seat_id, SEAT_ID, SEAT_IDS);
 
+// for more information on seats, see:
+// <https://wayland-book.com/print.html#seats-handling-input>
+/// Seats are an abstraction over a set of input devices grouped together, such as a keyboard, pointer and touch device.
+/// i.e. Those used by a user to operate the computer.
 #[derive(Debug)]
 pub struct Seats {
     seats: Vec<Seat<State>>,
@@ -229,6 +233,9 @@ impl SeatExt for Seat<State> {
         self.user_data().get::<SeatId>().unwrap().0
     }
 
+    //TODO: refer to function that should be used to get focused output/window. likely seat.get_keyboard().current_focus()
+    /// Returns the output that contains the cursor associated with a seat. Note that the window which has keyboard focus
+    /// may be on a different output.
     fn active_output(&self) -> Output {
         self.user_data()
             .get::<ActiveOutput>()
