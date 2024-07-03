@@ -453,6 +453,7 @@ fn update_focus_target(
             .focus_stack
             .get(&seat)
             .last()
+            .or_else(|| shell.active_space(&output).mapped().next())
             .cloned()
             .map(KeyboardFocusTarget::from)
     }
