@@ -5184,7 +5184,7 @@ where
                                                 .stack_ref()
                                                 .map(|stack| &stack.active() != stack_window)
                                                 .unwrap_or(false),
-                                            _ => unreachable!(),
+                                            _ => false,
                                         })
                                         .unwrap_or(false)
                                 })
@@ -5269,7 +5269,7 @@ where
                                     .stack_ref()
                                     .map(|stack| &stack.active() == stack_window)
                                     .unwrap_or(false),
-                                _ => unreachable!(), // TODO: We could swap with a group
+                                _ => false,
                             })
                             .unwrap_or(false)
                     })
