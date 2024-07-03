@@ -9,7 +9,7 @@ use smithay::{
                 utils::{Relocate, RelocateRenderElement},
                 AsRenderElements, RenderElement,
             },
-            gles::GlesRenderbuffer,
+            gles::{GlesError, GlesRenderbuffer},
             sync::SyncPoint,
             utils::with_renderer_surface_state,
             Bind, Blit, BufferType, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
@@ -63,6 +63,7 @@ pub fn submit_buffer<R>(
 ) -> Result<Option<(Frame, Vec<Rectangle<i32, BufferCoords>>)>, <R as Renderer>::Error>
 where
     R: ExportMem,
+    <R as Renderer>::Error: FromGlesError,
 {
     let Some(damage) = damage else {
         frame.success(
@@ -113,7 +114,8 @@ where
             }
             Ok(())
         })
-        .unwrap()
+        .map_err(|err| <R as Renderer>::Error::from_gles_error(GlesError::BufferAccessError(err)))
+        .and_then(|x| x)
         {
             frame.fail(FailureReason::Unknown);
             return Err(err);
@@ -141,6 +143,7 @@ pub fn render_session<F, R>(
 ) -> Result<Option<(Frame, Vec<Rectangle<i32, BufferCoords>>)>, DTError<R>>
 where
     R: ExportMem,
+    <R as Renderer>::Error: FromGlesError,
     F: for<'d> FnOnce(
         &WlBuffer,
         &mut R,
