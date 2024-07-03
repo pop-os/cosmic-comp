@@ -2224,7 +2224,7 @@ impl Shell {
     ) -> Option<(MenuGrab, Focus)> {
         let serial = serial.into();
         let Some(GrabStartData::Pointer(start_data)) =
-            check_grab_preconditions(&seat, surface, serial, ReleaseMode::NoMouseButtons)
+            check_grab_preconditions(&seat, surface, serial, true)
         else {
             return None;
         };
@@ -2331,7 +2331,12 @@ impl Shell {
     ) -> Option<(MoveGrab, Focus)> {
         let serial = serial.into();
 
-        let mut start_data = check_grab_preconditions(&seat, surface, serial, release)?;
+        let mut start_data = check_grab_preconditions(
+            &seat,
+            surface,
+            serial,
+            release == ReleaseMode::NoMouseButtons && !move_out_of_stack,
+        )?;
         let mut old_mapped = self.element_for_surface(surface).cloned()?;
         if old_mapped.is_minimized() {
             return None;
@@ -2730,7 +2735,7 @@ impl Shell {
             return None;
         }
 
-        let mut start_data = check_grab_preconditions(&seat, &surface, None, ReleaseMode::Click)?;
+        let mut start_data = check_grab_preconditions(&seat, &surface, None, false)?;
 
         let (floating_layer, geometry) = if let Some(set) = self
             .workspaces
@@ -2958,8 +2963,7 @@ impl Shell {
         edges: ResizeEdge,
     ) -> Option<(ResizeGrab, Focus)> {
         let serial = serial.into();
-        let start_data =
-            check_grab_preconditions(&seat, surface, serial, ReleaseMode::NoMouseButtons)?;
+        let start_data = check_grab_preconditions(&seat, surface, serial, true)?;
         let mapped = self.element_for_surface(surface).cloned()?;
         if mapped.is_fullscreen(true) || mapped.is_maximized(true) {
             return None;
@@ -3294,7 +3298,7 @@ pub fn check_grab_preconditions(
     seat: &Seat<State>,
     surface: &WlSurface,
     serial: Option<Serial>,
-    release: ReleaseMode,
+    client_initiated: bool,
 ) -> Option<GrabStartData> {
     use smithay::reexports::wayland_server::Resource;
 
@@ -3314,7 +3318,7 @@ pub fn check_grab_preconditions(
             }))
         };
 
-    if release == ReleaseMode::NoMouseButtons {
+    if client_initiated {
         // Check that this surface has a click or touch down grab.
         if !match serial {
             Some(serial) => pointer.has_grab(serial) || touch.has_grab(serial),
