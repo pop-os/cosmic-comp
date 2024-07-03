@@ -2555,6 +2555,20 @@ impl Shell {
                 .elements()
                 .chain(workspace.mapped())
                 .find(|e| *e == &elem),
+            KeyboardFocusTarget::Group { .. } => {
+                let focus_stack = workspace.focus_stack.get(seat);
+                let swap_desc = match overview {
+                    OverviewMode::Started(Trigger::KeyboardSwap(_, desc), _) => Some(desc),
+                    _ => None,
+                };
+
+                return workspace.tiling_layer.next_focus(
+                    direction,
+                    seat,
+                    focus_stack.iter(),
+                    swap_desc,
+                );
+            }
             _ => None,
         })
         .cloned() else {
