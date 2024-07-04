@@ -2535,18 +2535,18 @@ impl Shell {
     #[must_use]
     pub fn next_focus<'a>(&self, direction: FocusDirection, seat: &Seat<State>) -> FocusResult {
         let overview = self.overview_mode().0;
-        let output = seat.active_output();
-        let workspace = self.active_space(&output);
+        let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
+            return FocusResult::None;
+        };
+        let output = self.get_focused_output(&target).unwrap();
+
+        let workspace = self.active_space(output);
 
         if workspace.fullscreen.is_some() {
             return FocusResult::None;
         }
 
-        let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
-            return FocusResult::None;
-        };
-
-        let set = self.workspaces.sets.get(&output).unwrap();
+        let set = self.workspaces.sets.get(output).unwrap();
         let sticky_layer = &set.sticky_layer;
         let workspace = &set.workspaces[set.active];
 
@@ -2684,7 +2684,12 @@ impl Shell {
         direction: Direction,
         seat: &Seat<State>,
     ) -> MoveResult {
-        let output = seat.active_output();
+        let output = seat
+            .get_keyboard()
+            .unwrap()
+            .current_focus()
+            .and_then(|target| self.get_focused_output(&target).cloned())
+            .unwrap();
         let workspace = self.active_space(&output);
         let focus_stack = workspace.focus_stack.get(seat);
         let Some(last) = focus_stack.last().cloned() else {
@@ -3021,31 +3026,37 @@ impl Shell {
     }
 
     pub fn resize(&mut self, seat: &Seat<State>, direction: ResizeDirection, edge: ResizeEdge) {
-        let output = seat.active_output();
-        let (_, idx) = self.workspaces.active_num(&output);
-        let Some(focused) = seat.get_keyboard().unwrap().current_focus() else {
-            return;
-        };
-        let amount = (self
-            .resize_state
-            .take()
-            .map(|(_, _, _, amount, _, _)| amount)
-            .unwrap_or(10)
-            + 2)
-        .min(20);
-
-        if self
-            .workspaces
-            .sets
-            .get_mut(&output)
+        if let Some(output) = seat
+            .get_keyboard()
             .unwrap()
-            .sticky_layer
-            .resize(&focused, direction, edge, amount)
+            .current_focus()
+            .and_then(|target| self.get_focused_output(&target).cloned())
         {
-            self.resize_state = Some((focused, direction, edge, amount, idx, output));
-        } else if let Some(workspace) = self.workspaces.get_mut(idx, &output) {
-            if workspace.resize(&focused, direction, edge, amount) {
+            let (_, idx) = self.workspaces.active_num(&output);
+            let Some(focused) = seat.get_keyboard().unwrap().current_focus() else {
+                return;
+            };
+            let amount = (self
+                .resize_state
+                .take()
+                .map(|(_, _, _, amount, _, _)| amount)
+                .unwrap_or(10)
+                + 2)
+            .min(20);
+
+            if self
+                .workspaces
+                .sets
+                .get_mut(&output)
+                .unwrap()
+                .sticky_layer
+                .resize(&focused, direction, edge, amount)
+            {
                 self.resize_state = Some((focused, direction, edge, amount, idx, output));
+            } else if let Some(workspace) = self.workspaces.get_mut(idx, &output) {
+                if workspace.resize(&focused, direction, edge, amount) {
+                    self.resize_state = Some((focused, direction, edge, amount, idx, output));
+                }
             }
         }
     }
@@ -3122,21 +3133,30 @@ impl Shell {
 
     #[must_use]
     pub fn toggle_stacking_focused(&mut self, seat: &Seat<State>) -> Option<KeyboardFocusTarget> {
-        let set = self.workspaces.sets.get_mut(&seat.active_output()).unwrap();
-        let workspace = &mut set.workspaces[set.active];
-        let maybe_window = workspace.focus_stack.get(seat).iter().next().cloned();
-        if let Some(window) = maybe_window {
-            if set.sticky_layer.mapped().any(|m| m == &window) {
-                set.sticky_layer
-                    .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat))
-            } else if workspace.tiling_layer.mapped().any(|(m, _)| m == &window) {
-                workspace
-                    .tiling_layer
-                    .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat))
-            } else if workspace.floating_layer.mapped().any(|w| w == &window) {
-                workspace
-                    .floating_layer
-                    .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat))
+        if let Some(focused_output) = seat
+            .get_keyboard()
+            .unwrap()
+            .current_focus()
+            .and_then(|target| self.get_focused_output(&target).cloned())
+        {
+            let set = self.workspaces.sets.get_mut(&focused_output).unwrap();
+            let workspace = &mut set.workspaces[set.active];
+            let maybe_window = workspace.focus_stack.get(seat).iter().next().cloned();
+            if let Some(window) = maybe_window {
+                if set.sticky_layer.mapped().any(|m| m == &window) {
+                    set.sticky_layer
+                        .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat))
+                } else if workspace.tiling_layer.mapped().any(|(m, _)| m == &window) {
+                    workspace
+                        .tiling_layer
+                        .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat))
+                } else if workspace.floating_layer.mapped().any(|w| w == &window) {
+                    workspace
+                        .floating_layer
+                        .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat))
+                } else {
+                    None
+                }
             } else {
                 None
             }

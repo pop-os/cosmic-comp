@@ -225,7 +225,19 @@ impl XdgShellHandler for State {
     fn fullscreen_request(&mut self, surface: ToplevelSurface, output: Option<WlOutput>) {
         let mut shell = self.common.shell.write().unwrap();
         let seat = shell.seats.last_active().clone();
-        let active_output = seat.active_output();
+        let active_output = seat
+            .get_keyboard()
+            .unwrap()
+            .current_focus()
+            .and_then(|target| {
+                self.common
+                    .shell
+                    .read()
+                    .unwrap()
+                    .get_focused_output(&target)
+                    .cloned()
+            })
+            .unwrap();
         let output = output
             .as_ref()
             .and_then(Output::from_resource)
