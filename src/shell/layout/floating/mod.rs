@@ -882,7 +882,11 @@ impl FloatingLayout {
         true
     }
 
-    pub fn toggle_stacking(&mut self, mapped: &CosmicMapped) -> Option<KeyboardFocusTarget> {
+    pub fn toggle_stacking(
+        &mut self,
+        mapped: &CosmicMapped,
+        mut focus_stack: FocusStackMut,
+    ) -> Option<KeyboardFocusTarget> {
         if !self.space.elements().any(|m| m == mapped) {
             return None;
         }
@@ -902,20 +906,24 @@ impl FloatingLayout {
                 Some(geo.size),
                 None,
             );
+            focus_stack.append(&mapped);
             Some(KeyboardFocusTarget::Element(mapped))
         } else {
             // if we have a stack
             let mut surfaces = mapped.windows().map(|(s, _)| s).collect::<VecDeque<_>>();
             let first = surfaces.pop_front().expect("Stack without a window?");
+            let focused = mapped.active_window();
 
             self.space.unmap_elem(&mapped);
             let handle = mapped.loop_handle();
             mapped.convert_to_surface(first, (&output, mapped.bbox()), self.theme.clone());
+            let mut new_elements = vec![mapped.clone()];
 
             // map the rest
             for other in surfaces {
                 other.try_force_undecorated(false);
                 other.set_tiled(false);
+                let focused = other == focused;
                 let window = CosmicMapped::from(CosmicWindow::new(
                     other,
                     handle.clone(),
@@ -928,9 +936,18 @@ impl FloatingLayout {
                     window.set_bounds(layer_map.non_exclusive_zone().size);
                 }
 
+                if focused {
+                    new_elements.insert(0, window.clone());
+                } else {
+                    new_elements.push(window.clone());
+                }
                 self.map(window, None);
             }
             self.space.map_element(mapped.clone(), location, false);
+
+            for elem in new_elements.into_iter().rev() {
+                focus_stack.append(&elem);
+            }
 
             Some(KeyboardFocusTarget::Element(mapped))
         }
@@ -939,16 +956,14 @@ impl FloatingLayout {
     pub fn toggle_stacking_focused<'a>(
         &mut self,
         seat: &Seat<State>,
-        mut focus_stack: FocusStackMut,
+        focus_stack: FocusStackMut,
     ) -> Option<KeyboardFocusTarget> {
         let Some(KeyboardFocusTarget::Element(elem)) = seat.get_keyboard().unwrap().current_focus()
         else {
             return None;
         };
 
-        let res = self.toggle_stacking(&elem);
-        focus_stack.append(&elem);
-        res
+        self.toggle_stacking(&elem, focus_stack)
     }
 
     pub fn move_element<'a>(

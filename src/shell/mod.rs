@@ -2233,7 +2233,7 @@ impl Shell {
     ) -> Option<(MenuGrab, Focus)> {
         let serial = serial.into();
         let Some(GrabStartData::Pointer(start_data)) =
-            check_grab_preconditions(&seat, surface, serial, ReleaseMode::NoMouseButtons)
+            check_grab_preconditions(&seat, surface, serial, true)
         else {
             return None;
         };
@@ -2340,7 +2340,12 @@ impl Shell {
     ) -> Option<(MoveGrab, Focus)> {
         let serial = serial.into();
 
-        let mut start_data = check_grab_preconditions(&seat, surface, serial, release)?;
+        let mut start_data = check_grab_preconditions(
+            &seat,
+            surface,
+            serial,
+            release == ReleaseMode::NoMouseButtons && !move_out_of_stack,
+        )?;
         let mut old_mapped = self.element_for_surface(surface).cloned()?;
         if old_mapped.is_minimized() {
             return None;
@@ -2564,6 +2569,20 @@ impl Shell {
                 .elements()
                 .chain(workspace.mapped())
                 .find(|e| *e == &elem),
+            KeyboardFocusTarget::Group { .. } => {
+                let focus_stack = workspace.focus_stack.get(seat);
+                let swap_desc = match overview {
+                    OverviewMode::Started(Trigger::KeyboardSwap(_, desc), _) => Some(desc),
+                    _ => None,
+                };
+
+                return workspace.tiling_layer.next_focus(
+                    direction,
+                    seat,
+                    focus_stack.iter(),
+                    swap_desc,
+                );
+            }
             _ => None,
         })
         .cloned() else {
@@ -2725,7 +2744,7 @@ impl Shell {
             return None;
         }
 
-        let mut start_data = check_grab_preconditions(&seat, &surface, None, ReleaseMode::Click)?;
+        let mut start_data = check_grab_preconditions(&seat, &surface, None, false)?;
 
         let (floating_layer, geometry) = if let Some(set) = self
             .workspaces
@@ -2953,8 +2972,7 @@ impl Shell {
         edges: ResizeEdge,
     ) -> Option<(ResizeGrab, Focus)> {
         let serial = serial.into();
-        let start_data =
-            check_grab_preconditions(&seat, surface, serial, ReleaseMode::NoMouseButtons)?;
+        let start_data = check_grab_preconditions(&seat, surface, serial, true)?;
         let mapped = self.element_for_surface(surface).cloned()?;
         if mapped.is_fullscreen(true) || mapped.is_maximized(true) {
             return None;
@@ -3071,19 +3089,29 @@ impl Shell {
     }
 
     #[must_use]
-    pub fn toggle_stacking(&mut self, window: &CosmicMapped) -> Option<KeyboardFocusTarget> {
+    pub fn toggle_stacking(
+        &mut self,
+        seat: &Seat<State>,
+        window: &CosmicMapped,
+    ) -> Option<KeyboardFocusTarget> {
         if let Some(set) = self
             .workspaces
             .sets
             .values_mut()
             .find(|set| set.sticky_layer.mapped().any(|m| m == window))
         {
-            set.sticky_layer.toggle_stacking(window)
+            let workspace = &mut set.workspaces[set.active];
+            set.sticky_layer
+                .toggle_stacking(window, workspace.focus_stack.get_mut(seat))
         } else if let Some(workspace) = self.space_for_mut(window) {
             if workspace.tiling_layer.mapped().any(|(m, _)| m == window) {
-                workspace.tiling_layer.toggle_stacking(window)
+                workspace
+                    .tiling_layer
+                    .toggle_stacking(window, workspace.focus_stack.get_mut(seat))
             } else if workspace.floating_layer.mapped().any(|w| w == window) {
-                workspace.floating_layer.toggle_stacking(window)
+                workspace
+                    .floating_layer
+                    .toggle_stacking(window, workspace.focus_stack.get_mut(seat))
             } else {
                 None
             }
@@ -3279,7 +3307,7 @@ pub fn check_grab_preconditions(
     seat: &Seat<State>,
     surface: &WlSurface,
     serial: Option<Serial>,
-    release: ReleaseMode,
+    client_initiated: bool,
 ) -> Option<GrabStartData> {
     use smithay::reexports::wayland_server::Resource;
 
@@ -3299,7 +3327,7 @@ pub fn check_grab_preconditions(
             }))
         };
 
-    if release == ReleaseMode::NoMouseButtons {
+    if client_initiated {
         // Check that this surface has a click or touch down grab.
         if !match serial {
             Some(serial) => pointer.has_grab(serial) || touch.has_grab(serial),
