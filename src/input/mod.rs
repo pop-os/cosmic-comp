@@ -2252,58 +2252,88 @@ impl State {
             }
 
             Action::MigrateWorkspaceToNextOutput => {
-                let current_output = seat.active_output();
-                let (active, next_output) = {
-                    let shell = self.common.shell.read().unwrap();
-                    let output = shell
-                        .outputs()
-                        .skip_while(|o| *o != &current_output)
-                        .skip(1)
-                        .next()
-                        .cloned();
+                if let Some(focused_output) =
+                    seat.get_keyboard().unwrap().current_focus().and_then(|f| {
+                        self.common
+                            .shell
+                            .read()
+                            .unwrap()
+                            .get_focused_output(&f)
+                            .cloned()
+                    })
+                {
+                    let (active, next_output) = {
+                        let shell = self.common.shell.read().unwrap();
+                        let output = shell
+                            .outputs()
+                            .skip_while(|o| *o != &focused_output)
+                            .skip(1)
+                            .next()
+                            .cloned();
 
-                    (shell.active_space(&current_output).handle, output)
-                };
-                if let Some(next_output) = next_output {
-                    self.common
-                        .migrate_workspace(&current_output, &next_output, &active);
+                        (shell.active_space(&focused_output).handle, output)
+                    };
+                    if let Some(next_output) = next_output {
+                        self.common
+                            .migrate_workspace(&focused_output, &next_output, &active);
+                    }
                 }
             }
 
             Action::MigrateWorkspaceToPreviousOutput => {
-                let current_output = seat.active_output();
-                let (active, prev_output) = {
-                    let shell = self.common.shell.read().unwrap();
-                    let output = shell
-                        .outputs()
-                        .rev()
-                        .skip_while(|o| *o != &current_output)
-                        .skip(1)
-                        .next()
-                        .cloned();
+                if let Some(focused_output) =
+                    seat.get_keyboard().unwrap().current_focus().and_then(|f| {
+                        self.common
+                            .shell
+                            .read()
+                            .unwrap()
+                            .get_focused_output(&f)
+                            .cloned()
+                    })
+                {
+                    let (active, prev_output) = {
+                        let shell = self.common.shell.read().unwrap();
+                        let output = shell
+                            .outputs()
+                            .rev()
+                            .skip_while(|o| *o != &focused_output)
+                            .skip(1)
+                            .next()
+                            .cloned();
 
-                    (shell.active_space(&current_output).handle, output)
-                };
-                if let Some(prev_output) = prev_output {
-                    self.common
-                        .migrate_workspace(&current_output, &prev_output, &active);
+                        (shell.active_space(&focused_output).handle, output)
+                    };
+                    if let Some(prev_output) = prev_output {
+                        self.common
+                            .migrate_workspace(&focused_output, &prev_output, &active);
+                    }
                 }
             }
 
             Action::MigrateWorkspaceToOutput(direction) => {
-                let current_output = seat.active_output();
-                let (active, next_output) = {
-                    let shell = self.common.shell.read().unwrap();
+                if let Some(focused_output) =
+                    seat.get_keyboard().unwrap().current_focus().and_then(|f| {
+                        self.common
+                            .shell
+                            .read()
+                            .unwrap()
+                            .get_focused_output(&f)
+                            .cloned()
+                    })
+                {
+                    let (active, next_output) = {
+                        let shell = self.common.shell.read().unwrap();
 
-                    (
-                        shell.active_space(&current_output).handle,
-                        shell.next_output(&current_output, direction).cloned(),
-                    )
-                };
+                        (
+                            shell.active_space(&focused_output).handle,
+                            shell.next_output(&focused_output, direction).cloned(),
+                        )
+                    };
 
-                if let Some(next_output) = next_output {
-                    self.common
-                        .migrate_workspace(&current_output, &next_output, &active);
+                    if let Some(next_output) = next_output {
+                        self.common
+                            .migrate_workspace(&focused_output, &next_output, &active);
+                    }
                 }
             }
 
@@ -2376,48 +2406,78 @@ impl State {
             }
 
             Action::SwapWindow => {
-                let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
+                if let Some(focused_output) =
+                    seat.get_keyboard().unwrap().current_focus().and_then(|f| {
+                        self.common
+                            .shell
+                            .read()
+                            .unwrap()
+                            .get_focused_output(&f)
+                            .cloned()
+                    })
+                {
+                    let mut shell = self.common.shell.write().unwrap();
 
-                let workspace = shell.active_space_mut(&current_output);
-                if workspace.get_fullscreen().is_some() {
-                    return; // TODO, is this what we want? Maybe disengage fullscreen instead?
-                }
+                    let workspace = shell.active_space_mut(&focused_output);
+                    if workspace.get_fullscreen().is_some() {
+                        return; // TODO, is this what we want? Maybe disengage fullscreen instead?
+                    }
 
-                let keyboard_handle = seat.get_keyboard().unwrap();
-                if let Some(focus) = keyboard_handle.current_focus() {
-                    if let Some(descriptor) = workspace.node_desc(focus) {
-                        let grab = SwapWindowGrab::new(seat.clone(), descriptor.clone());
-                        drop(shell);
-                        keyboard_handle.set_grab(self, grab, serial);
-                        let mut shell = self.common.shell.write().unwrap();
-                        shell.set_overview_mode(
-                            Some(Trigger::KeyboardSwap(pattern, descriptor)),
-                            self.common.event_loop_handle.clone(),
-                        );
+                    let keyboard_handle = seat.get_keyboard().unwrap();
+                    if let Some(focus) = keyboard_handle.current_focus() {
+                        if let Some(descriptor) = workspace.node_desc(focus) {
+                            let grab = SwapWindowGrab::new(seat.clone(), descriptor.clone());
+                            drop(shell);
+                            keyboard_handle.set_grab(self, grab, serial);
+                            let mut shell = self.common.shell.write().unwrap();
+                            shell.set_overview_mode(
+                                Some(Trigger::KeyboardSwap(pattern, descriptor)),
+                                self.common.event_loop_handle.clone(),
+                            );
+                        }
                     }
                 }
             }
 
             Action::Minimize => {
-                let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
-                let workspace = shell.active_space_mut(&current_output);
-                let focus_stack = workspace.focus_stack.get(seat);
-                let focused_window = focus_stack.last().cloned();
-                if let Some(window) = focused_window {
-                    shell.minimize_request(&window);
+                if let Some(focused_output) =
+                    seat.get_keyboard().unwrap().current_focus().and_then(|f| {
+                        self.common
+                            .shell
+                            .read()
+                            .unwrap()
+                            .get_focused_output(&f)
+                            .cloned()
+                    })
+                {
+                    let mut shell = self.common.shell.write().unwrap();
+                    let workspace = shell.active_space_mut(&focused_output);
+                    let focus_stack = workspace.focus_stack.get(seat);
+                    let focused_window = focus_stack.last().cloned();
+                    if let Some(window) = focused_window {
+                        shell.minimize_request(&window);
+                    }
                 }
             }
 
             Action::Maximize => {
-                let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
-                let workspace = shell.active_space(&current_output);
-                let focus_stack = workspace.focus_stack.get(seat);
-                let focused_window = focus_stack.last().cloned();
-                if let Some(window) = focused_window {
-                    shell.maximize_toggle(&window, seat);
+                if let Some(focused_output) =
+                    seat.get_keyboard().unwrap().current_focus().and_then(|f| {
+                        self.common
+                            .shell
+                            .read()
+                            .unwrap()
+                            .get_focused_output(&f)
+                            .cloned()
+                    })
+                {
+                    let mut shell = self.common.shell.write().unwrap();
+                    let workspace = shell.active_space(&focused_output);
+                    let focus_stack = workspace.focus_stack.get(seat);
+                    let focused_window = focus_stack.last().cloned();
+                    if let Some(window) = focused_window {
+                        shell.maximize_toggle(&window, seat);
+                    }
                 }
             }
 
@@ -2426,7 +2486,8 @@ impl State {
                 &self.common.config,
                 self.common.event_loop_handle.clone(),
             ),
-
+            // NOTE: implementation currently assumes actions that apply to outputs should apply to the active output
+            // rather than the output that has keyboard focus
             Action::ToggleOrientation => {
                 let output = seat.active_output();
                 let mut shell = self.common.shell.write().unwrap();
