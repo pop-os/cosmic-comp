@@ -685,6 +685,24 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
             }
         }
     }
+    fn replace(
+        &self,
+        replaced: <State as smithay::input::SeatHandler>::KeyboardFocus,
+        seat: &Seat<State>,
+        data: &mut State,
+        keys: Vec<KeysymHandle<'_>>,
+        modifiers: ModifiersState,
+        serial: Serial,
+    ) {
+        if !replaced
+            .wl_surface()
+            .is_some_and(|s| Some(s) == self.wl_surface())
+        {
+            KeyboardTarget::leave(&replaced, seat, data, serial);
+            KeyboardTarget::enter(self, seat, data, keys, serial);
+            KeyboardTarget::modifiers(self, seat, data, modifiers, serial);
+        }
+    }
 }
 
 impl WaylandFocus for KeyboardFocusTarget {
