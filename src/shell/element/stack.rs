@@ -50,7 +50,7 @@ use smithay::{
         Seat,
     },
     output::Output,
-    reexports::wayland_server::protocol::wl_surface::WlSurface,
+    reexports::wayland_server::{protocol::wl_surface::WlSurface, Resource},
     render_elements,
     utils::{Buffer, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size},
     wayland::seat::WaylandFocus,
@@ -868,7 +868,6 @@ impl Program for CosmicStackInternal {
         };
         let active = self.active.load(Ordering::SeqCst);
         let group_focused = self.group_focused.load(Ordering::SeqCst);
-
         let elements = vec![
             cosmic_widget::icon::from_name("window-stack-symbolic")
                 .size(16)
@@ -895,12 +894,10 @@ impl Program for CosmicStackInternal {
             CosmicElement::new(
                 Tabs::new(
                     windows.iter().enumerate().map(|(i, w)| {
-                        let user_data = w.user_data();
-                        user_data.insert_if_missing(Id::unique);
                         Tab::new(
                             w.title(),
                             w.app_id(),
-                            user_data.get::<Id>().unwrap().clone(),
+                            Id::new(format!("{}", w.wl_surface().unwrap().as_ref().id())),
                         )
                         .on_press(Message::PotentialTabDragStart(i))
                         .on_right_click(Message::TabMenu(i))
