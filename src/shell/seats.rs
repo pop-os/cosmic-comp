@@ -159,7 +159,12 @@ impl Drop for SeatId {
 
 #[repr(transparent)]
 struct SeatId(pub usize);
+
+/// The output which contains the cursor associated with a seat.
 struct ActiveOutput(pub Mutex<Output>);
+
+/// The output which currently has keyboard focus
+struct FocusedOutput(pub Mutex<Option<Output>>);
 
 pub fn create_seat(
     dh: &DisplayHandle,
@@ -178,6 +183,7 @@ pub fn create_seat(
     userdata.insert_if_missing_threadsafe(SeatMenuGrabState::default);
     userdata.insert_if_missing_threadsafe(CursorState::default);
     userdata.insert_if_missing_threadsafe(|| ActiveOutput(Mutex::new(output.clone())));
+    userdata.insert_if_missing_threadsafe(|| FocusedOutput(Mutex::new(None)));
     userdata.insert_if_missing_threadsafe(|| Mutex::new(CursorImageStatus::default_named()));
 
     // A lot of clients bind keyboard and pointer unconditionally once on launch..
@@ -216,7 +222,13 @@ pub trait SeatExt {
     fn id(&self) -> usize;
 
     fn active_output(&self) -> Output;
+    fn focused_output(&self) -> Option<Output>;
+    fn focused_or_active_output(&self) -> Output {
+        self.focused_output()
+            .unwrap_or_else(|| self.active_output())
+    }
     fn set_active_output(&self, output: &Output);
+    fn set_focused_output(&self, output: Option<&Output>);
     fn devices(&self) -> &Devices;
     fn supressed_keys(&self) -> &SupressedKeys;
     fn modifiers_shortcut_queue(&self) -> &ModifiersShortcutQueue;
@@ -243,6 +255,21 @@ impl SeatExt for Seat<State> {
             .unwrap()
     }
 
+    /// Returns the output which currently has keyboard focus. If no window has keyboard focus (e.g. when there are no windows)
+    /// the focused output will be the same as the active output.
+    fn focused_output(&self) -> Option<Output> {
+        if self
+            .get_keyboard()
+            .is_some_and(|k| k.current_focus().is_some())
+        {
+            self.user_data()
+                .get::<FocusedOutput>()
+                .map(|x| x.0.lock().unwrap().clone())?
+        } else {
+            None
+        }
+    }
+
     fn set_active_output(&self, output: &Output) {
         *self
             .user_data()
@@ -251,6 +278,16 @@ impl SeatExt for Seat<State> {
             .0
             .lock()
             .unwrap() = output.clone();
+    }
+
+    fn set_focused_output(&self, output: Option<&Output>) {
+        *self
+            .user_data()
+            .get::<FocusedOutput>()
+            .unwrap()
+            .0
+            .lock()
+            .unwrap() = output.cloned();
     }
 
     fn devices(&self) -> &Devices {

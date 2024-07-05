@@ -879,6 +879,7 @@ impl Drop for MoveGrab {
                     Some(&KeyboardFocusTarget::from(mapped)),
                     &seat,
                     Some(serial),
+                    false,
                 )
             }
         });

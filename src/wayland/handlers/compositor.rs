@@ -271,7 +271,7 @@ impl State {
                     if let Some(target) = res {
                         let seat = shell.seats.last_active().clone();
                         std::mem::drop(shell);
-                        Shell::set_focus(self, Some(&target), &seat, None);
+                        Shell::set_focus(self, Some(&target), &seat, None, false);
                         return true;
                     }
                 }
@@ -289,7 +289,7 @@ impl State {
                 if let Some(target) = shell.map_layer(&layer_surface) {
                     let seat = shell.seats.last_active().clone();
                     std::mem::drop(shell);
-                    Shell::set_focus(self, Some(&target), &seat, None);
+                    Shell::set_focus(self, Some(&target), &seat, None, false);
                 }
                 layer_surface.layer_surface().send_configure();
                 return true;
