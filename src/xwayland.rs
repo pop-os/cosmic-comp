@@ -204,7 +204,15 @@ impl Common {
                                 )
                                 .flat_map(|(_, workspace)| {
                                     workspace.get_fullscreen().cloned().into_iter().chain(
-                                        workspace.mapped().flat_map(|mapped| {
+                                        workspace
+                                            .mapped()
+                                            .chain(
+                                                workspace
+                                                    .minimized_windows
+                                                    .iter()
+                                                    .map(|m| &m.window),
+                                            )
+                                            .flat_map(|mapped| {
                                             let active = mapped.active_window();
                                             std::iter::once(active.clone()).chain(
                                                 mapped
