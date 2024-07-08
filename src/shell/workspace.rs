@@ -788,7 +788,7 @@ impl Workspace {
         self.fullscreen
             .as_ref()
             .filter(|f| f.alive())
-            .filter(|f| f.ended_at.is_none() && f.start_at.is_none())
+            .filter(|f| f.ended_at.is_none())
             .map(|f| &f.surface)
     }
 
@@ -800,11 +800,9 @@ impl Workspace {
         amount: i32,
     ) -> bool {
         if let Some(toplevel) = focused.toplevel() {
-            if self
-                .fullscreen
-                .as_ref()
-                .is_some_and(|f| f.surface.wl_surface().as_deref() == Some(&toplevel))
-            {
+            if self.fullscreen.as_ref().is_some_and(|f| {
+                f.ended_at.is_none() && f.surface.wl_surface().as_deref() == Some(&toplevel)
+            }) {
                 return false;
             }
         }
@@ -934,7 +932,7 @@ impl Workspace {
     pub fn is_fullscreen(&self, mapped: &CosmicMapped) -> bool {
         self.fullscreen
             .as_ref()
-            .is_some_and(|f| f.surface == mapped.active_window())
+            .is_some_and(|f| f.ended_at.is_none() && f.surface == mapped.active_window())
             || self
                 .minimized_windows
                 .iter()
