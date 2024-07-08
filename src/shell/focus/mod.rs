@@ -197,6 +197,10 @@ impl Shell {
                 window.set_activated(focused_windows.contains(&window));
                 window.configure();
             }
+            for m in set.minimized_windows.iter() {
+                m.window.set_activated(false);
+                m.window.configure();
+            }
 
             let workspace = self.workspaces.active_mut(&output);
             for focused in focused_windows.iter() {
@@ -205,6 +209,10 @@ impl Shell {
             for window in workspace.mapped() {
                 window.set_activated(focused_windows.contains(&window));
                 window.configure();
+            }
+            for m in workspace.minimized_windows.iter() {
+                m.window.set_activated(false);
+                m.window.configure();
             }
         }
     }
