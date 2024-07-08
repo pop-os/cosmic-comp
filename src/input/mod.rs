@@ -597,7 +597,7 @@ impl State {
                                     (0, 0),
                                     WindowSurfaceType::ALL,
                                 )
-                                .is_some()
+                                .is_none()
                                 {
                                     ptr.frame(self);
                                     return;
