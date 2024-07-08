@@ -213,20 +213,20 @@ impl Common {
                                                     .map(|m| &m.window),
                                             )
                                             .flat_map(|mapped| {
-                                            let active = mapped.active_window();
-                                            std::iter::once(active.clone()).chain(
-                                                mapped
-                                                    .is_stack()
-                                                    .then(move || {
-                                                        mapped
-                                                            .windows()
-                                                            .map(|(s, _)| s)
-                                                            .filter(move |s| s != &active)
-                                                    })
-                                                    .into_iter()
-                                                    .flatten(),
-                                            )
-                                        }),
+                                                let active = mapped.active_window();
+                                                std::iter::once(active.clone()).chain(
+                                                    mapped
+                                                        .is_stack()
+                                                        .then(move || {
+                                                            mapped
+                                                                .windows()
+                                                                .map(|(s, _)| s)
+                                                                .filter(move |s| s != &active)
+                                                        })
+                                                        .into_iter()
+                                                        .flatten(),
+                                                )
+                                            }),
                                     )
                                 }),
                         )
@@ -376,14 +376,15 @@ impl XwmHandler for State {
         // We only allow floating X11 windows to resize themselves. Nothing else
         let shell = self.common.shell.read().unwrap();
 
-        if let Some(mapped) = shell.element_for_surface(&window) {
+        if let Some(mapped) = shell
+            .element_for_surface(&window)
+            .filter(|mapped| !mapped.is_minimized())
+        {
             let current_geo = if let Some(workspace) = shell.space_for(mapped) {
-                workspace.is_floating(mapped).then_some(
-                    workspace
-                        .element_geometry(mapped)
-                        .unwrap()
-                        .to_global(workspace.output()),
-                )
+                workspace
+                    .element_geometry(mapped)
+                    .filter(|_| workspace.is_floating(mapped))
+                    .map(|geo| geo.to_global(workspace.output()))
             } else if let Some((output, set)) = shell
                 .workspaces
                 .sets
