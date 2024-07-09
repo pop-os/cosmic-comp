@@ -1,6 +1,9 @@
 use super::{surface::RESIZE_BORDER, window::Focus, CosmicSurface};
 use crate::{
-    backend::render::cursor::{CursorShape, CursorState},
+    backend::render::{
+        cursor::{CursorShape, CursorState},
+        SplitRenderElements,
+    },
     shell::{
         focus::target::PointerFocusTarget,
         grabs::{ReleaseMode, ResizeEdge},
@@ -547,7 +550,7 @@ impl CosmicStack {
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
-    ) -> (Vec<C>, Vec<C>)
+    ) -> SplitRenderElements<C>
     where
         R: Renderer + ImportAll + ImportMem,
         <R as Renderer>::TextureId: Send + Clone + 'static,
@@ -564,30 +567,28 @@ impl CosmicStack {
         let stack_loc = location + offset;
         let window_loc = location + Point::from((0, (TAB_HEIGHT as f64 * scale.y) as i32));
 
-        let elements = AsRenderElements::<R>::render_elements::<CosmicStackRenderElement<R>>(
+        let w_elements = AsRenderElements::<R>::render_elements::<CosmicStackRenderElement<R>>(
             &self.0, renderer, stack_loc, scale, alpha,
         );
 
-        let (window_elements, popup_elements) = self.0.with_program(|p| {
-            let windows = p.windows.lock().unwrap();
-            let active = p.active.load(Ordering::SeqCst);
+        let mut elements = SplitRenderElements {
+            w_elements: w_elements.into_iter().map(C::from).collect(),
+            p_elements: Vec::new(),
+        };
 
-            let (window_elements, popup_elements) = windows[active]
-                .split_render_elements::<R, CosmicStackRenderElement<R>>(
+        elements.extend_map(
+            self.0.with_program(|p| {
+                let windows = p.windows.lock().unwrap();
+                let active = p.active.load(Ordering::SeqCst);
+
+                windows[active].split_render_elements::<R, CosmicStackRenderElement<R>>(
                     renderer, window_loc, scale, alpha,
-                );
+                )
+            }),
+            C::from,
+        );
 
-            (window_elements, popup_elements)
-        });
-
-        (
-            elements
-                .into_iter()
-                .map(C::from)
-                .chain(window_elements.into_iter().map(C::from))
-                .collect(),
-            popup_elements.into_iter().map(C::from).collect(),
-        )
+        elements
     }
 
     pub(crate) fn set_theme(&self, theme: cosmic::Theme) {

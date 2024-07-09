@@ -1,7 +1,7 @@
 use crate::{
     backend::render::{
         element::{AsGlowFrame, AsGlowRenderer},
-        BackdropShader, GlMultiError, GlMultiFrame, GlMultiRenderer,
+        BackdropShader, GlMultiError, GlMultiFrame, GlMultiRenderer, SplitRenderElements,
     },
     shell::{
         layout::{floating::FloatingLayout, tiling::TilingLayout},
@@ -1005,13 +1005,7 @@ impl Workspace {
         resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
         indicator_thickness: u8,
         theme: &CosmicTheme,
-    ) -> Result<
-        (
-            Vec<WorkspaceRenderElement<R>>,
-            Vec<WorkspaceRenderElement<R>>,
-        ),
-        OutputNotMapped,
-    >
+    ) -> Result<SplitRenderElements<WorkspaceRenderElement<R>>, OutputNotMapped>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         <R as Renderer>::TextureId: Send + Clone + 'static,
@@ -1020,8 +1014,7 @@ impl Workspace {
         CosmicStackRenderElement<R>: RenderElement<R>,
         WorkspaceRenderElement<R>: RenderElement<R>,
     {
-        let mut window_elements = Vec::new();
-        let mut popup_elements = Vec::new();
+        let mut elements = SplitRenderElements::default();
 
         let output_scale = self.output.current_scale().fractional_scale();
         let zone = {
@@ -1104,7 +1097,10 @@ impl Workspace {
                 y: target_geo.size.h as f64 / bbox.size.h as f64,
             };
 
-            let (w_elements, p_elements) = fullscreen
+            let SplitRenderElements {
+                w_elements,
+                p_elements,
+            } = fullscreen
                 .surface
                 .split_render_elements::<R, CosmicWindowRenderElement<R>>(
                     renderer,
@@ -1112,13 +1108,15 @@ impl Workspace {
                     output_scale.into(),
                     alpha,
                 );
-            window_elements.extend(
+            elements.w_elements.extend(
                 w_elements
                     .into_iter()
                     .map(|elem| RescaleRenderElement::from_element(elem, render_loc, scale))
                     .map(Into::into),
             );
-            popup_elements.extend(p_elements.into_iter().map(Into::into));
+            elements
+                .p_elements
+                .extend(p_elements.into_iter().map(Into::into))
         }
 
         if self
@@ -1150,16 +1148,17 @@ impl Workspace {
                 OverviewMode::None => 1.0,
             };
 
-            let (w_elements, p_elements) = self.floating_layer.render::<R>(
-                renderer,
-                focused.as_ref(),
-                resize_indicator.clone(),
-                indicator_thickness,
-                alpha,
-                theme,
+            elements.extend_map(
+                self.floating_layer.render::<R>(
+                    renderer,
+                    focused.as_ref(),
+                    resize_indicator.clone(),
+                    indicator_thickness,
+                    alpha,
+                    theme,
+                ),
+                WorkspaceRenderElement::from,
             );
-            popup_elements.extend(p_elements.into_iter().map(WorkspaceRenderElement::from));
-            window_elements.extend(w_elements.into_iter().map(WorkspaceRenderElement::from));
 
             let alpha = match &overview.0 {
                 OverviewMode::Started(_, start) => Some(
@@ -1175,20 +1174,21 @@ impl Workspace {
             };
 
             //tiling surfaces
-            let (w_elements, p_elements) = self.tiling_layer.render::<R>(
-                renderer,
-                draw_focus_indicator,
-                zone,
-                overview,
-                resize_indicator,
-                indicator_thickness,
-                theme,
-            )?;
-            popup_elements.extend(p_elements.into_iter().map(WorkspaceRenderElement::from));
-            window_elements.extend(w_elements.into_iter().map(WorkspaceRenderElement::from));
+            elements.extend_map(
+                self.tiling_layer.render::<R>(
+                    renderer,
+                    draw_focus_indicator,
+                    zone,
+                    overview,
+                    resize_indicator,
+                    indicator_thickness,
+                    theme,
+                )?,
+                WorkspaceRenderElement::from,
+            );
 
             if let Some(alpha) = alpha {
-                window_elements.push(
+                elements.w_elements.push(
                     Into::<CosmicMappedRenderElement<R>>::into(BackdropShader::element(
                         renderer,
                         self.backdrop_id.clone(),
@@ -1205,7 +1205,7 @@ impl Workspace {
             }
         }
 
-        Ok((window_elements, popup_elements))
+        Ok(elements)
     }
 }
 
