@@ -365,28 +365,21 @@ impl CosmicSurface {
     }
 
     pub fn is_minimized(&self) -> bool {
-        match self.0.underlying_surface() {
-            WindowSurface::Wayland(_) => self
-                .0
-                .user_data()
-                .get_or_insert_threadsafe(Minimized::default)
-                .0
-                .load(Ordering::SeqCst),
-            WindowSurface::X11(surface) => surface.is_minimized(),
-        }
+        self.0
+            .user_data()
+            .get_or_insert_threadsafe(Minimized::default)
+            .0
+            .load(Ordering::SeqCst)
     }
 
     pub fn set_minimized(&self, minimized: bool) {
-        match self.0.underlying_surface() {
-            WindowSurface::Wayland(_) => self
-                .0
-                .user_data()
-                .get_or_insert_threadsafe(Minimized::default)
-                .0
-                .store(minimized, Ordering::SeqCst),
-            WindowSurface::X11(surface) => {
-                let _ = surface.set_minimized(minimized);
-            }
+        self.0
+            .user_data()
+            .get_or_insert_threadsafe(Minimized::default)
+            .0
+            .store(minimized, Ordering::SeqCst);
+        if let WindowSurface::X11(surface) = self.0.underlying_surface() {
+            let _ = surface.set_mapped(!minimized);
         }
     }
 
@@ -399,7 +392,9 @@ impl CosmicSurface {
                     state.states.unset(ToplevelState::Suspended);
                 }
             }),
-            _ => {}
+            WindowSurface::X11(surface) => {
+                let _ = surface.set_minimized(suspended);
+            }
         }
     }
 
