@@ -4,7 +4,7 @@ use crate::{
     backend::render::{
         cursor::{CursorShape, CursorState},
         element::AsGlowRenderer,
-        BackdropShader, IndicatorShader, Key, Usage,
+        BackdropShader, IndicatorShader, Key, SplitRenderElements, Usage,
     },
     shell::{
         element::{
@@ -182,7 +182,10 @@ impl MoveGrabState {
             _ => vec![],
         };
 
-        let (window_elements, popup_elements) = self
+        let SplitRenderElements {
+            w_elements,
+            p_elements,
+        } = self
             .window
             .split_render_elements::<R, CosmicMappedRenderElement<R>>(
                 renderer,
@@ -202,9 +205,9 @@ impl MoveGrabState {
                     1.0,
                 )
             })
-            .chain(popup_elements)
+            .chain(p_elements)
             .chain(focus_element)
-            .chain(window_elements.into_iter().map(|elem| match elem {
+            .chain(w_elements.into_iter().map(|elem| match elem {
                 CosmicMappedRenderElement::Stack(stack) => {
                     CosmicMappedRenderElement::GrabbedStack(
                         RescaleRenderElement::from_element(

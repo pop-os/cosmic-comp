@@ -58,7 +58,7 @@ use smithay::{
     desktop::{layer_map_for_output, PopupManager},
     input::Seat,
     output::{Output, OutputNoMode},
-    utils::{IsAlive, Logical, Monotonic, Point, Rectangle, Scale, Time, Transform},
+    utils::{IsAlive, Logical, Monotonic, Physical, Point, Rectangle, Scale, Time, Transform},
     wayland::{
         dmabuf::get_dmabuf,
         shell::wlr_layer::Layer,
@@ -464,6 +464,60 @@ where
 #[cfg(not(feature = "debug"))]
 pub type EguiState = ();
 
+#[derive(Clone, Debug)]
+pub struct SplitRenderElements<E> {
+    pub w_elements: Vec<E>,
+    pub p_elements: Vec<E>,
+}
+
+impl<E> Default for SplitRenderElements<E> {
+    fn default() -> Self {
+        Self {
+            w_elements: Vec::new(),
+            p_elements: Vec::new(),
+        }
+    }
+}
+
+impl<E> SplitRenderElements<E> {
+    pub fn extend(&mut self, other: Self) {
+        self.w_elements.extend(other.w_elements);
+        self.p_elements.extend(other.p_elements);
+    }
+
+    pub fn extend_map<E2, F: FnMut(E2) -> E>(&mut self, other: SplitRenderElements<E2>, mut f: F) {
+        self.w_elements
+            .extend(other.w_elements.into_iter().map(&mut f));
+        self.p_elements
+            .extend(other.p_elements.into_iter().map(&mut f));
+    }
+
+    pub fn join(mut self) -> Vec<E> {
+        self.p_elements.extend(self.w_elements);
+        self.p_elements
+    }
+}
+
+impl<R> SplitRenderElements<CosmicElement<R>>
+where
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+{
+    fn extend_from_workspace_elements<E: Into<WorkspaceRenderElement<R>>>(
+        &mut self,
+        other: SplitRenderElements<E>,
+        offset: Point<i32, Physical>,
+    ) {
+        self.extend_map(other, |element| {
+            CosmicElement::Workspace(RelocateRenderElement::from_element(
+                element.into(),
+                offset,
+                Relocate::Relative,
+            ))
+        })
+    }
+}
+
 #[profiling::function]
 pub fn workspace_elements<R>(
     _gpu: Option<&DrmNode>,
@@ -484,6 +538,8 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
+    let mut elements = SplitRenderElements::default();
+
     let theme = shell.read().unwrap().theme().clone();
     let seats = shell
         .read()
@@ -493,7 +549,7 @@ where
         .cloned()
         .collect::<Vec<_>>();
 
-    let mut elements = cursor_elements(
+    elements.p_elements.extend(cursor_elements(
         renderer,
         seats.iter(),
         &theme,
@@ -501,7 +557,7 @@ where
         output,
         cursor_mode,
         exclude_workspace_overview,
-    );
+    ));
 
     #[cfg(feature = "debug")]
     {
@@ -525,7 +581,7 @@ where
             )
             .map_err(FromGlesError::from_gles_error)
             .map_err(RenderError::Rendering)?;
-            elements.push(fps_overlay.into());
+            elements.p_elements.push(fps_overlay.into());
         }
     }
 
@@ -533,12 +589,12 @@ where
 
     // If session locked, only show session lock surfaces
     if let Some(session_lock) = &shell.session_lock {
-        elements.extend(
+        elements.p_elements.extend(
             session_lock_elements(renderer, output, session_lock)
                 .into_iter()
                 .map(|x| WorkspaceRenderElement::from(x).into()),
         );
-        return Ok(elements);
+        return Ok(elements.join());
     }
 
     let theme = theme.cosmic();
@@ -586,20 +642,22 @@ where
         .as_ref()
         .filter(|f| !f.is_animating())
         .is_some();
-    let (overlay_elements, overlay_popups) =
+    let overlay_elements =
         split_layer_elements(renderer, output, Layer::Overlay, exclude_workspace_overview);
 
     // overlay is above everything
-    elements.extend(overlay_popups.into_iter().map(Into::into));
-    elements.extend(overlay_elements.into_iter().map(Into::into));
+    elements
+        .p_elements
+        .extend(overlay_elements.p_elements.into_iter().map(Into::into));
+    elements
+        .p_elements
+        .extend(overlay_elements.w_elements.into_iter().map(Into::into));
 
-    let mut window_elements = if !has_fullscreen {
-        let (top_elements, top_popups) =
-            split_layer_elements(renderer, output, Layer::Top, exclude_workspace_overview);
-        elements.extend(top_popups.into_iter().map(Into::into));
-        top_elements.into_iter().map(Into::into).collect()
-    } else {
-        Vec::new()
+    if !has_fullscreen {
+        elements.extend_from_workspace_elements(
+            split_layer_elements(renderer, output, Layer::Top, exclude_workspace_overview),
+            (0, 0).into(),
+        );
     };
 
     let active_hint = if shell.active_hint {
@@ -611,7 +669,7 @@ where
     // overlay redirect windows
     // they need to be over sticky windows, because they could be popups of sticky windows,
     // and we can't differenciate that.
-    elements.extend(
+    elements.p_elements.extend(
         shell
             .override_redirect_windows
             .iter()
@@ -632,13 +690,7 @@ where
                     1.0,
                 )
             })
-            .map(|p_element| {
-                CosmicElement::Workspace(RelocateRenderElement::from_element(
-                    p_element,
-                    (0, 0),
-                    Relocate::Relative,
-                ))
-            }),
+            .map(|p_element| p_element.into()),
     );
 
     // sticky windows
@@ -664,29 +716,17 @@ where
             .then_some(last_active_seat)
             .map(|seat| workspace.focus_stack.get(seat));
 
-        let (w_elements, p_elements) = set.sticky_layer.render(
-            renderer,
-            current_focus.as_ref().and_then(|stack| stack.last()),
-            resize_indicator.clone(),
-            active_hint,
-            alpha,
-            theme,
+        elements.extend_from_workspace_elements(
+            set.sticky_layer.render(
+                renderer,
+                current_focus.as_ref().and_then(|stack| stack.last()),
+                resize_indicator.clone(),
+                active_hint,
+                alpha,
+                theme,
+            ),
+            (0, 0).into(),
         );
-
-        elements.extend(p_elements.into_iter().map(|p_element| {
-            CosmicElement::Workspace(RelocateRenderElement::from_element(
-                WorkspaceRenderElement::Window(p_element),
-                (0, 0),
-                Relocate::Relative,
-            ))
-        }));
-        window_elements.extend(w_elements.into_iter().map(|w_element| {
-            CosmicElement::Workspace(RelocateRenderElement::from_element(
-                WorkspaceRenderElement::Window(w_element),
-                (0, 0),
-                Relocate::Relative,
-            ))
-        }));
     }
 
     let offset = match previous.as_ref() {
@@ -728,48 +768,25 @@ where
                 }
             });
 
-            let (w_elements, p_elements) = workspace
-                .render::<R>(
-                    renderer,
-                    (!move_active && is_active_space).then_some(last_active_seat),
-                    overview.clone(),
-                    resize_indicator.clone(),
-                    active_hint,
-                    theme,
-                )
-                .map_err(|_| OutputNoMode)?;
-            elements.extend(p_elements.into_iter().map(|p_element| {
-                CosmicElement::Workspace(RelocateRenderElement::from_element(
-                    p_element,
-                    offset.to_physical_precise_round(output_scale),
-                    Relocate::Relative,
-                ))
-            }));
-            window_elements.extend(w_elements.into_iter().map(|w_element| {
-                CosmicElement::Workspace(RelocateRenderElement::from_element(
-                    w_element,
-                    offset.to_physical_precise_round(output_scale),
-                    Relocate::Relative,
-                ))
-            }));
+            elements.extend_from_workspace_elements(
+                workspace
+                    .render::<R>(
+                        renderer,
+                        (!move_active && is_active_space).then_some(last_active_seat),
+                        overview.clone(),
+                        resize_indicator.clone(),
+                        active_hint,
+                        theme,
+                    )
+                    .map_err(|_| OutputNoMode)?,
+                offset.to_physical_precise_round(output_scale),
+            );
 
             if !has_fullscreen {
-                let (w_elements, p_elements) =
-                    background_layer_elements(renderer, output, exclude_workspace_overview);
-                elements.extend(p_elements.into_iter().map(|p_element| {
-                    CosmicElement::Workspace(RelocateRenderElement::from_element(
-                        p_element,
-                        offset.to_physical_precise_round(output_scale),
-                        Relocate::Relative,
-                    ))
-                }));
-                window_elements.extend(w_elements.into_iter().map(|w_element| {
-                    CosmicElement::Workspace(RelocateRenderElement::from_element(
-                        w_element,
-                        offset.to_physical_precise_round(output_scale),
-                        Relocate::Relative,
-                    ))
-                }));
+                elements.extend_from_workspace_elements(
+                    background_layer_elements(renderer, output, exclude_workspace_overview),
+                    offset.to_physical_precise_round(output_scale),
+                );
             }
 
             Point::<i32, Logical>::from(match (layout, *previous_idx < current.1) {
@@ -782,55 +799,28 @@ where
         None => (0, 0).into(),
     };
 
-    let (w_elements, p_elements) = workspace
-        .render::<R>(
-            renderer,
-            (!move_active && is_active_space).then_some(&last_active_seat),
-            overview,
-            resize_indicator,
-            active_hint,
-            theme,
-        )
-        .map_err(|_| OutputNoMode)?;
-    elements.extend(p_elements.into_iter().map(|p_element| {
-        CosmicElement::Workspace(RelocateRenderElement::from_element(
-            p_element,
-            offset.to_physical_precise_round(output_scale),
-            Relocate::Relative,
-        ))
-    }));
-    window_elements.extend(w_elements.into_iter().map(|w_element| {
-        CosmicElement::Workspace(RelocateRenderElement::from_element(
-            w_element,
-            offset.to_physical_precise_round(output_scale),
-            Relocate::Relative,
-        ))
-    }));
+    elements.extend_from_workspace_elements(
+        workspace
+            .render::<R>(
+                renderer,
+                (!move_active && is_active_space).then_some(&last_active_seat),
+                overview,
+                resize_indicator,
+                active_hint,
+                theme,
+            )
+            .map_err(|_| OutputNoMode)?,
+        offset.to_physical_precise_round(output_scale),
+    );
 
     if !has_fullscreen {
-        let (w_elements, p_elements) =
-            background_layer_elements(renderer, output, exclude_workspace_overview);
-
-        elements.extend(p_elements.into_iter().map(|p_element| {
-            CosmicElement::Workspace(RelocateRenderElement::from_element(
-                p_element,
-                offset.to_physical_precise_round(output_scale),
-                Relocate::Relative,
-            ))
-        }));
-
-        window_elements.extend(w_elements.into_iter().map(|w_element| {
-            CosmicElement::Workspace(RelocateRenderElement::from_element(
-                w_element,
-                offset.to_physical_precise_round(output_scale),
-                Relocate::Relative,
-            ))
-        }));
+        elements.extend_from_workspace_elements(
+            background_layer_elements(renderer, output, exclude_workspace_overview),
+            offset.to_physical_precise_round(output_scale),
+        );
     }
 
-    elements.extend(window_elements);
-
-    Ok(elements)
+    Ok(elements.join())
 }
 
 pub fn split_layer_elements<R>(
@@ -838,10 +828,7 @@ pub fn split_layer_elements<R>(
     output: &Output,
     layer: Layer,
     exclude_workspace_overview: bool,
-) -> (
-    Vec<WorkspaceRenderElement<R>>,
-    Vec<WorkspaceRenderElement<R>>,
-)
+) -> SplitRenderElements<WorkspaceRenderElement<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: Clone + 'static,
@@ -852,8 +839,7 @@ where
     let layer_map = layer_map_for_output(output);
     let output_scale = output.current_scale().fractional_scale();
 
-    let mut popup_elements = Vec::new();
-    let mut layer_elements = Vec::new();
+    let mut elements = SplitRenderElements::default();
 
     layer_map
         .layers_on(layer)
@@ -869,35 +855,39 @@ where
             let surface = surface.wl_surface();
             let scale = Scale::from(output_scale);
 
-            popup_elements.extend(PopupManager::popups_for_surface(surface).flat_map(
-                |(popup, popup_offset)| {
-                    let offset = (popup_offset - popup.geometry().loc)
-                        .to_f64()
-                        .to_physical(scale)
-                        .to_i32_round();
+            elements
+                .p_elements
+                .extend(PopupManager::popups_for_surface(surface).flat_map(
+                    |(popup, popup_offset)| {
+                        let offset = (popup_offset - popup.geometry().loc)
+                            .to_f64()
+                            .to_physical(scale)
+                            .to_i32_round();
 
-                    render_elements_from_surface_tree(
-                        renderer,
-                        popup.wl_surface(),
-                        location + offset,
-                        scale,
-                        1.0,
-                        Kind::Unspecified,
-                    )
-                },
-            ));
+                        render_elements_from_surface_tree(
+                            renderer,
+                            popup.wl_surface(),
+                            location + offset,
+                            scale,
+                            1.0,
+                            Kind::Unspecified,
+                        )
+                    },
+                ));
 
-            layer_elements.extend(render_elements_from_surface_tree(
-                renderer,
-                surface,
-                location,
-                scale,
-                1.0,
-                Kind::Unspecified,
-            ));
+            elements
+                .w_elements
+                .extend(render_elements_from_surface_tree(
+                    renderer,
+                    surface,
+                    location,
+                    scale,
+                    1.0,
+                    Kind::Unspecified,
+                ));
         });
 
-    (layer_elements, popup_elements)
+    elements
 }
 
 // bottom and background layer surfaces
@@ -905,10 +895,7 @@ pub fn background_layer_elements<R>(
     renderer: &mut R,
     output: &Output,
     exclude_workspace_overview: bool,
-) -> (
-    Vec<WorkspaceRenderElement<R>>,
-    Vec<WorkspaceRenderElement<R>>,
-)
+) -> SplitRenderElements<WorkspaceRenderElement<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: Clone + 'static,
@@ -916,17 +903,15 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
-    let (mut layer_elements, mut popup_elements) =
+    let mut elements =
         split_layer_elements(renderer, output, Layer::Bottom, exclude_workspace_overview);
-    let more = split_layer_elements(
+    elements.extend(split_layer_elements(
         renderer,
         output,
         Layer::Background,
         exclude_workspace_overview,
-    );
-    layer_elements.extend(more.0);
-    popup_elements.extend(more.1);
-    (layer_elements, popup_elements)
+    ));
+    elements
 }
 
 fn session_lock_elements<R>(
