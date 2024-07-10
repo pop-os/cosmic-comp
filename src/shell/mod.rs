@@ -2816,6 +2816,9 @@ impl Shell {
         if window.is_maximized(true) {
             self.unmaximize_request(window);
         } else {
+            if window.is_fullscreen(true) {
+                return;
+            }
             self.maximize_request(window, seat);
         }
     }
