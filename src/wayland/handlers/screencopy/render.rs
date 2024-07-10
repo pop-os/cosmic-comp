@@ -36,7 +36,7 @@ use crate::{
     backend::render::{
         cursor,
         element::{AsGlowRenderer, CosmicElement, DamageElement, FromGlesError},
-        render_workspace, CursorMode, CLEAR_COLOR,
+        render_workspace, CursorMode, ElementFilter, CLEAR_COLOR,
     },
     shell::{CosmicMappedRenderElement, CosmicSurface, WorkspaceRenderElement},
     state::{BackendData, Common, State},
@@ -287,7 +287,7 @@ pub fn render_workspace_to_buffer(
                 None,
                 handle,
                 cursor_mode,
-                true,
+                ElementFilter::ExcludeWorkspaceOverview,
             )
             .map(|res| res.0)
         } else {
@@ -316,7 +316,7 @@ pub fn render_workspace_to_buffer(
                 None,
                 handle,
                 cursor_mode,
-                true,
+                ElementFilter::ExcludeWorkspaceOverview,
             )
             .map(|res| res.0)
         }
