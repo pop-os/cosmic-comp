@@ -378,8 +378,11 @@ impl CosmicSurface {
             .get_or_insert_threadsafe(Minimized::default)
             .0
             .store(minimized, Ordering::SeqCst);
-        if let WindowSurface::X11(surface) = self.0.underlying_surface() {
-            let _ = surface.set_mapped(!minimized);
+        if !minimized {
+            if let WindowSurface::X11(surface) = self.0.underlying_surface() {
+                let _ = surface.set_mapped(false);
+                let _ = surface.set_mapped(true);
+            }
         }
     }
 
