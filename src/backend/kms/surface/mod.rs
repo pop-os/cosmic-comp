@@ -3,13 +3,15 @@
 use crate::{
     backend::render::{
         element::{CosmicElement, DamageElement},
-        init_shaders, workspace_elements, CursorMode, GlMultiRenderer, CLEAR_COLOR,
+        init_shaders, workspace_elements, CursorMode, ElementFilter, GlMultiRenderer, CLEAR_COLOR,
     },
     shell::Shell,
     state::SurfaceDmabufFeedback,
     utils::prelude::*,
     wayland::{
-        handlers::screencopy::{submit_buffer, FrameHolder, SessionData},
+        handlers::screencopy::{
+            submit_buffer, FrameHolder, SessionData, WORKSPACE_OVERVIEW_NAMESPACE,
+        },
         protocols::screencopy::{
             FailureReason, Frame as ScreencopyFrame, Session as ScreencopySession,
         },
@@ -46,7 +48,7 @@ use smithay::{
             Bind, ImportDma, Offscreen, Renderer, Texture,
         },
     },
-    desktop::utils::OutputPresentationFeedback,
+    desktop::{layer_map_for_output, utils::OutputPresentationFeedback},
     output::{Output, OutputNoMode},
     reexports::{
         calloop::{
@@ -869,6 +871,15 @@ impl SurfaceThreadState {
 
             std::mem::drop(shell);
 
+            let element_filter = if layer_map_for_output(output)
+                .layers()
+                .any(|s| s.namespace() == WORKSPACE_OVERVIEW_NAMESPACE)
+            {
+                ElementFilter::LayerShellOnly
+            } else {
+                ElementFilter::All
+            };
+
             workspace_elements(
                 Some(&render_node),
                 &mut renderer,
@@ -878,7 +889,7 @@ impl SurfaceThreadState {
                 previous_workspace,
                 workspace,
                 CursorMode::All,
-                false,
+                element_filter,
                 #[cfg(not(feature = "debug"))]
                 None,
                 #[cfg(feature = "debug")]

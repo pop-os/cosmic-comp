@@ -464,6 +464,13 @@ where
 #[cfg(not(feature = "debug"))]
 pub type EguiState = ();
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ElementFilter {
+    All,
+    ExcludeWorkspaceOverview,
+    LayerShellOnly,
+}
+
 #[derive(Clone, Debug)]
 pub struct SplitRenderElements<E> {
     pub w_elements: Vec<E>,
@@ -528,7 +535,7 @@ pub fn workspace_elements<R>(
     previous: Option<(WorkspaceHandle, usize, WorkspaceDelta)>,
     current: (WorkspaceHandle, usize),
     cursor_mode: CursorMode,
-    exclude_workspace_overview: bool,
+    element_filter: ElementFilter,
     _fps: Option<(&EguiState, &Timings)>,
 ) -> Result<Vec<CosmicElement<R>>, RenderError<R>>
 where
@@ -556,7 +563,7 @@ where
         now,
         output,
         cursor_mode,
-        exclude_workspace_overview,
+        element_filter == ElementFilter::ExcludeWorkspaceOverview,
     ));
 
     #[cfg(feature = "debug")]
@@ -642,8 +649,7 @@ where
         .as_ref()
         .filter(|f| !f.is_animating())
         .is_some();
-    let overlay_elements =
-        split_layer_elements(renderer, output, Layer::Overlay, exclude_workspace_overview);
+    let overlay_elements = split_layer_elements(renderer, output, Layer::Overlay, element_filter);
 
     // overlay is above everything
     elements
@@ -655,7 +661,7 @@ where
 
     if !has_fullscreen {
         elements.extend_from_workspace_elements(
-            split_layer_elements(renderer, output, Layer::Top, exclude_workspace_overview),
+            split_layer_elements(renderer, output, Layer::Top, element_filter),
             (0, 0).into(),
         );
     };
@@ -669,32 +675,34 @@ where
     // overlay redirect windows
     // they need to be over sticky windows, because they could be popups of sticky windows,
     // and we can't differenciate that.
-    elements.p_elements.extend(
-        shell
-            .override_redirect_windows
-            .iter()
-            .filter(|or| {
-                (*or)
-                    .geometry()
-                    .as_global()
-                    .intersection(workspace.output.geometry())
-                    .is_some()
-            })
-            .flat_map(|or| {
-                AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
-                    or,
-                    renderer,
-                    (or.geometry().loc - workspace.output.geometry().loc.as_logical())
-                        .to_physical_precise_round(output_scale),
-                    Scale::from(output_scale),
-                    1.0,
-                )
-            })
-            .map(|p_element| p_element.into()),
-    );
+    if element_filter != ElementFilter::LayerShellOnly {
+        elements.p_elements.extend(
+            shell
+                .override_redirect_windows
+                .iter()
+                .filter(|or| {
+                    (*or)
+                        .geometry()
+                        .as_global()
+                        .intersection(workspace.output.geometry())
+                        .is_some()
+                })
+                .flat_map(|or| {
+                    AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
+                        or,
+                        renderer,
+                        (or.geometry().loc - workspace.output.geometry().loc.as_logical())
+                            .to_physical_precise_round(output_scale),
+                        Scale::from(output_scale),
+                        1.0,
+                    )
+                })
+                .map(|p_element| p_element.into()),
+        );
+    }
 
     // sticky windows
-    if !has_fullscreen {
+    if !has_fullscreen && element_filter != ElementFilter::LayerShellOnly {
         let alpha = match &overview.0 {
             OverviewMode::Started(_, started) => {
                 (1.0 - (Instant::now().duration_since(*started).as_millis()
@@ -784,7 +792,7 @@ where
 
             if !has_fullscreen {
                 elements.extend_from_workspace_elements(
-                    background_layer_elements(renderer, output, exclude_workspace_overview),
+                    background_layer_elements(renderer, output, element_filter),
                     offset.to_physical_precise_round(output_scale),
                 );
             }
@@ -799,23 +807,25 @@ where
         None => (0, 0).into(),
     };
 
-    elements.extend_from_workspace_elements(
-        workspace
-            .render::<R>(
-                renderer,
-                (!move_active && is_active_space).then_some(&last_active_seat),
-                overview,
-                resize_indicator,
-                active_hint,
-                theme,
-            )
-            .map_err(|_| OutputNoMode)?,
-        offset.to_physical_precise_round(output_scale),
-    );
+    if element_filter != ElementFilter::LayerShellOnly {
+        elements.extend_from_workspace_elements(
+            workspace
+                .render::<R>(
+                    renderer,
+                    (!move_active && is_active_space).then_some(&last_active_seat),
+                    overview,
+                    resize_indicator,
+                    active_hint,
+                    theme,
+                )
+                .map_err(|_| OutputNoMode)?,
+            offset.to_physical_precise_round(output_scale),
+        );
+    }
 
     if !has_fullscreen {
         elements.extend_from_workspace_elements(
-            background_layer_elements(renderer, output, exclude_workspace_overview),
+            background_layer_elements(renderer, output, element_filter),
             offset.to_physical_precise_round(output_scale),
         );
     }
@@ -827,7 +837,7 @@ pub fn split_layer_elements<R>(
     renderer: &mut R,
     output: &Output,
     layer: Layer,
-    exclude_workspace_overview: bool,
+    element_filter: ElementFilter,
 ) -> SplitRenderElements<WorkspaceRenderElement<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
@@ -844,7 +854,10 @@ where
     layer_map
         .layers_on(layer)
         .rev()
-        .filter(|s| !(exclude_workspace_overview && s.namespace() == WORKSPACE_OVERVIEW_NAMESPACE))
+        .filter(|s| {
+            !(element_filter == ElementFilter::ExcludeWorkspaceOverview
+                && s.namespace() == WORKSPACE_OVERVIEW_NAMESPACE)
+        })
         .filter_map(|surface| {
             layer_map
                 .layer_geometry(surface)
@@ -894,7 +907,7 @@ where
 pub fn background_layer_elements<R>(
     renderer: &mut R,
     output: &Output,
-    exclude_workspace_overview: bool,
+    element_filter: ElementFilter,
 ) -> SplitRenderElements<WorkspaceRenderElement<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
@@ -903,13 +916,12 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
-    let mut elements =
-        split_layer_elements(renderer, output, Layer::Bottom, exclude_workspace_overview);
+    let mut elements = split_layer_elements(renderer, output, Layer::Bottom, element_filter);
     elements.extend(split_layer_elements(
         renderer,
         output,
         Layer::Background,
-        exclude_workspace_overview,
+        element_filter,
     ));
     elements
 }
@@ -989,7 +1001,7 @@ where
         previous_workspace,
         workspace,
         cursor_mode,
-        false,
+        ElementFilter::All,
     );
 
     match result {
@@ -1101,7 +1113,7 @@ pub fn render_workspace<'d, R, Target, OffTarget>(
     previous: Option<(WorkspaceHandle, usize, WorkspaceDelta)>,
     current: (WorkspaceHandle, usize),
     cursor_mode: CursorMode,
-    exclude_workspace_overview: bool,
+    element_filter: ElementFilter,
 ) -> Result<(RenderOutputResult<'d>, Vec<CosmicElement<R>>), RenderError<R>>
 where
     R: Renderer
@@ -1127,7 +1139,7 @@ where
         previous,
         current,
         cursor_mode,
-        exclude_workspace_overview,
+        element_filter,
         None,
     )?;
 
