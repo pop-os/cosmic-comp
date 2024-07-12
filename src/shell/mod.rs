@@ -52,11 +52,11 @@ use smithay::{
 use crate::{
     backend::render::animations::spring::{Spring, SpringParams},
     config::Config,
-    utils::prelude::*,
+    utils::{prelude::*, quirks::WORKSPACE_OVERVIEW_NAMESPACE},
     wayland::{
         handlers::{
-            screencopy::WORKSPACE_OVERVIEW_NAMESPACE, toplevel_management::minimize_rectangle,
-            xdg_activation::ActivationContext, xdg_shell::popup::get_popup_toplevel,
+            toplevel_management::minimize_rectangle, xdg_activation::ActivationContext,
+            xdg_shell::popup::get_popup_toplevel,
         },
         protocols::{
             toplevel_info::{

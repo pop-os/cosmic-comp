@@ -7,11 +7,9 @@ use crate::{
     },
     shell::Shell,
     state::SurfaceDmabufFeedback,
-    utils::prelude::*,
+    utils::{prelude::*, quirks::workspace_overview_is_open},
     wayland::{
-        handlers::screencopy::{
-            submit_buffer, FrameHolder, SessionData, WORKSPACE_OVERVIEW_NAMESPACE,
-        },
+        handlers::screencopy::{submit_buffer, FrameHolder, SessionData},
         protocols::screencopy::{
             FailureReason, Frame as ScreencopyFrame, Session as ScreencopySession,
         },
@@ -48,7 +46,7 @@ use smithay::{
             Bind, ImportDma, Offscreen, Renderer, Texture,
         },
     },
-    desktop::{layer_map_for_output, utils::OutputPresentationFeedback},
+    desktop::utils::OutputPresentationFeedback,
     output::{Output, OutputNoMode},
     reexports::{
         calloop::{
@@ -871,10 +869,7 @@ impl SurfaceThreadState {
 
             std::mem::drop(shell);
 
-            let element_filter = if layer_map_for_output(output)
-                .layers()
-                .any(|s| s.namespace() == WORKSPACE_OVERVIEW_NAMESPACE)
-            {
+            let element_filter = if workspace_overview_is_open(output) {
                 ElementFilter::LayerShellOnly
             } else {
                 ElementFilter::All

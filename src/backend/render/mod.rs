@@ -20,11 +20,11 @@ use crate::{
         CosmicMappedRenderElement, OverviewMode, SeatExt, SessionLock, Trigger, WorkspaceDelta,
         WorkspaceRenderElement,
     },
-    utils::prelude::*,
+    utils::{prelude::*, quirks::WORKSPACE_OVERVIEW_NAMESPACE},
     wayland::{
         handlers::{
             data_device::get_dnd_icon,
-            screencopy::{render_session, FrameHolder, SessionData, WORKSPACE_OVERVIEW_NAMESPACE},
+            screencopy::{render_session, FrameHolder, SessionData},
         },
         protocols::workspace::WorkspaceHandle,
     },
