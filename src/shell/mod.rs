@@ -819,13 +819,10 @@ impl Workspaces {
     ) {
         match self.mode {
             WorkspaceMode::Global => {
-                // this should never happen
-                let max = self
-                    .sets
-                    .values()
-                    .map(|set| set.workspaces.len())
-                    .max()
-                    .unwrap_or_default();
+                let Some(max) = self.sets.values().map(|set| set.workspaces.len()).max() else {
+                    return;
+                };
+
                 for set in self
                     .sets
                     .values_mut()
