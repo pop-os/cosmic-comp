@@ -18,7 +18,7 @@ use crate::{
         },
         FocusResult, InvalidWorkspaceIndex, MoveResult, SeatExt, Trigger, WorkspaceDelta,
     },
-    utils::prelude::*,
+    utils::{prelude::*, quirks::workspace_overview_is_open},
     wayland::{
         handlers::{screencopy::SessionHolder, xdg_activation::ActivationContext},
         protocols::{
@@ -999,7 +999,7 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    if event.fingers() >= 3 {
+                    if event.fingers() >= 3 && !workspace_overview_is_open(&seat.active_output()) {
                         self.common.gesture_state = Some(GestureState::new(event.fingers()));
                     } else {
                         let serial = SERIAL_COUNTER.next_serial();
