@@ -20,7 +20,10 @@ use crate::{
         CosmicMappedRenderElement, OverviewMode, SeatExt, SessionLock, Trigger, WorkspaceDelta,
         WorkspaceRenderElement,
     },
-    utils::{prelude::*, quirks::WORKSPACE_OVERVIEW_NAMESPACE},
+    utils::{
+        prelude::*,
+        quirks::{workspace_overview_is_open, WORKSPACE_OVERVIEW_NAMESPACE},
+    },
     wayland::{
         handlers::{
             data_device::get_dnd_icon,
@@ -988,6 +991,12 @@ where
     let workspace = (workspace.handle, idx);
     std::mem::drop(shell_ref);
 
+    let element_filter = if workspace_overview_is_open(output) {
+        ElementFilter::LayerShellOnly
+    } else {
+        ElementFilter::All
+    };
+
     let result = render_workspace(
         gpu,
         renderer,
@@ -1001,7 +1010,7 @@ where
         previous_workspace,
         workspace,
         cursor_mode,
-        ElementFilter::All,
+        element_filter,
     );
 
     match result {
