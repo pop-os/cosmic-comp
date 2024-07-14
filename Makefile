@@ -5,6 +5,7 @@ libdir = $(prefix)/lib
 sharedir = $(prefix)/share
 
 BINARY = cosmic-comp
+CARGO_TARGET_DIR ?= target
 TARGET = debug
 DEBUG ?= 0
 
@@ -46,7 +47,7 @@ ifeq ($(VENDOR),1)
 endif
 
 install:
-	install -Dm0755 "target/$(TARGET)/$(BINARY)" "$(TARGET_BIN)"
+	install -Dm0755 "$(CARGO_TARGET_DIR)/$(TARGET)/$(BINARY)" "$(TARGET_BIN)"
 	install -Dm0644 "data/keybindings.ron" "$(KEYBINDINGS_CONF)"
 
 install-bare-session: install
