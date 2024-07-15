@@ -545,7 +545,7 @@ where
     let overview = shell.overview_mode();
     let (resize_mode, resize_indicator) = shell.resize_mode();
     let resize_indicator = resize_indicator.map(|indicator| (resize_mode, indicator));
-    let swap_tree = if let OverviewMode::Started(Trigger::KeyboardSwap(_, desc), _) = &overview.0 {
+    let swap_tree = if let Some(Trigger::KeyboardSwap(_, desc)) = overview.0.active_trigger() {
         if current.0 != desc.handle {
             shell
                 .workspaces
@@ -657,6 +657,7 @@ where
                     * 0.4
                     + 0.6
             }
+            OverviewMode::Active(_) => 0.6,
             OverviewMode::None => 1.0,
         };
 

@@ -1146,6 +1146,7 @@ impl Workspace {
                         * 0.4
                         + 0.6
                 }
+                OverviewMode::Active(_) => 0.6,
                 OverviewMode::None => 1.0,
             };
 
@@ -1165,11 +1166,12 @@ impl Workspace {
                     (Instant::now().duration_since(*start).as_millis() as f64 / 100.0).min(1.0)
                         as f32,
                 ),
+                OverviewMode::Active(_) => Some(1.0),
                 OverviewMode::Ended(_, ended) => Some(
                     1.0 - (Instant::now().duration_since(*ended).as_millis() as f64 / 100.0)
                         .min(1.0) as f32,
                 ),
-                _ => None,
+                OverviewMode::None => None,
             };
 
             //tiling surfaces

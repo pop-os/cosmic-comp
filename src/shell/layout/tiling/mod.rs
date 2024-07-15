@@ -3137,7 +3137,10 @@ impl TilingLayout {
             }
         }
 
-        if !matches!(overview, OverviewMode::Started(_, _)) {
+        if !matches!(
+            overview,
+            OverviewMode::Started(_, _) | OverviewMode::Active(_)
+        ) {
             last_overview_hover.take();
         }
 
@@ -3249,8 +3252,8 @@ impl TilingLayout {
                 _ => None,
             }
         } else if matches!(
-            overview,
-            OverviewMode::Started(Trigger::Pointer(_) | Trigger::Touch(_), _)
+            overview.active_trigger(),
+            Some(Trigger::Pointer(_) | Trigger::Touch(_))
         ) {
             let non_exclusive_zone = layer_map_for_output(&self.output)
                 .non_exclusive_zone()
@@ -3889,12 +3892,12 @@ impl TilingLayout {
         let mut popup_elements = Vec::new();
 
         let is_overview = !matches!(overview.0, OverviewMode::None);
-        let is_mouse_tiling = (matches!(overview.0, OverviewMode::Started(Trigger::Pointer(_), _)))
+        let is_mouse_tiling = (matches!(overview.0.trigger(), Some(Trigger::Pointer(_))))
             .then(|| self.last_overview_hover.as_ref().map(|x| &x.1));
-        let swap_desc = match &overview.0 {
-            OverviewMode::Started(Trigger::KeyboardSwap(_, desc), _)
-            | OverviewMode::Ended(Some(Trigger::KeyboardSwap(_, desc)), _) => Some(desc.clone()),
-            _ => None,
+        let swap_desc = if let Some(Trigger::KeyboardSwap(_, desc)) = overview.0.trigger() {
+            Some(desc.clone())
+        } else {
+            None
         };
 
         // all gone windows and fade them out

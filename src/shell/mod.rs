@@ -116,6 +116,7 @@ pub enum Trigger {
 pub enum OverviewMode {
     None,
     Started(Trigger, Instant),
+    Active(Trigger),
     Ended(Option<Trigger>, Instant),
 }
 
@@ -127,6 +128,7 @@ impl OverviewMode {
                     / ANIMATION_DURATION.as_millis() as f32;
                 Some(ease(EaseInOutCubic, 0.0, 1.0, percentage))
             }
+            OverviewMode::Active(_) => Some(1.0),
             OverviewMode::Ended(_, end) => {
                 let percentage = Instant::now().duration_since(*end).as_millis() as f32
                     / ANIMATION_DURATION.as_millis() as f32;
@@ -139,12 +141,31 @@ impl OverviewMode {
             OverviewMode::None => None,
         }
     }
+
+    pub fn active_trigger(&self) -> Option<&Trigger> {
+        if let OverviewMode::Started(trigger, _) | OverviewMode::Active(trigger) = self {
+            Some(trigger)
+        } else {
+            None
+        }
+    }
+
+    pub fn trigger(&self) -> Option<&Trigger> {
+        self.active_trigger().or_else(|| {
+            if let OverviewMode::Ended(trigger, _) = self {
+                trigger.as_ref()
+            } else {
+                None
+            }
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum ResizeMode {
     None,
     Started(shortcuts::Binding, Instant, ResizeDirection),
+    Active(shortcuts::Binding, ResizeDirection),
     Ended(Instant, ResizeDirection),
 }
 
@@ -156,6 +177,7 @@ impl ResizeMode {
                     / ANIMATION_DURATION.as_millis() as f32;
                 Some(ease(EaseInOutCubic, 0.0, 1.0, percentage))
             }
+            ResizeMode::Active(_, _) => Some(1.0),
             ResizeMode::Ended(end, _) => {
                 let percentage = Instant::now().duration_since(*end).as_millis() as f32
                     / ANIMATION_DURATION.as_millis() as f32;
@@ -166,6 +188,22 @@ impl ResizeMode {
                 }
             }
             ResizeMode::None => None,
+        }
+    }
+
+    pub fn active_binding(&self) -> Option<&shortcuts::Binding> {
+        if let ResizeMode::Started(binding, _, _) | ResizeMode::Active(binding, _) = self {
+            Some(binding)
+        } else {
+            None
+        }
+    }
+
+    pub fn active_direction(&self) -> Option<ResizeDirection> {
+        if let ResizeMode::Started(_, _, direction) | ResizeMode::Active(_, direction) = self {
+            Some(*direction)
+        } else {
+            None
         }
     }
 }
@@ -1190,8 +1228,8 @@ impl Shell {
             WorkspaceMode::OutputBound => {
                 if let Some(set) = self.workspaces.sets.get_mut(output) {
                     if matches!(
-                        self.overview_mode,
-                        OverviewMode::Started(Trigger::Pointer(_) | Trigger::Touch(_), _)
+                        self.overview_mode.active_trigger(),
+                        Some(Trigger::Pointer(_) | Trigger::Touch(_))
                     ) {
                         set.workspaces[set.active].tiling_layer.cleanup_drag();
                     }
@@ -1240,8 +1278,8 @@ impl Shell {
             WorkspaceMode::OutputBound => {
                 if let Some(set) = self.workspaces.sets.get_mut(output) {
                     if matches!(
-                        self.overview_mode,
-                        OverviewMode::Started(Trigger::Pointer(_) | Trigger::Touch(_), _)
+                        self.overview_mode.active_trigger(),
+                        Some(Trigger::Pointer(_) | Trigger::Touch(_))
                     ) {
                         set.workspaces[set.active].tiling_layer.cleanup_drag();
                     }
@@ -1526,12 +1564,16 @@ impl Shell {
                 .as_ref()
                 .is_some_and(|(_, delta)| delta.is_animating())
                 || set.sticky_layer.animations_going()
-        }) || !matches!(self.overview_mode, OverviewMode::None)
-            || !matches!(self.resize_mode, ResizeMode::None)
-            || self
-                .workspaces
-                .spaces()
-                .any(|workspace| workspace.animations_going())
+        }) || !matches!(
+            self.overview_mode,
+            OverviewMode::None | OverviewMode::Active(_)
+        ) || !matches!(
+            self.resize_mode,
+            ResizeMode::None | ResizeMode::Active(_, _)
+        ) || self
+            .workspaces
+            .spaces()
+            .any(|workspace| workspace.animations_going())
     }
 
     pub fn update_animations(&mut self) -> HashMap<ClientId, Client> {
@@ -1551,14 +1593,20 @@ impl Shell {
         evlh: LoopHandle<'static, crate::state::State>,
     ) {
         if let Some(trigger) = enabled {
-            if !matches!(self.overview_mode, OverviewMode::Started(_, _)) {
+            if !matches!(
+                self.overview_mode,
+                OverviewMode::Started(_, _) | OverviewMode::Active(_)
+            ) {
                 if matches!(trigger, Trigger::KeyboardSwap(_, _)) {
                     self.swap_indicator = Some(swap_indicator(evlh, self.theme.clone()));
                 }
                 self.overview_mode = OverviewMode::Started(trigger, Instant::now());
             }
         } else {
-            if matches!(self.overview_mode, OverviewMode::Started(_, _)) {
+            if matches!(
+                self.overview_mode,
+                OverviewMode::Started(_, _) | OverviewMode::Active(_)
+            ) {
                 let (reverse_duration, trigger) =
                     if let OverviewMode::Started(trigger, start) = self.overview_mode.clone() {
                         (
@@ -1567,7 +1615,7 @@ impl Shell {
                             Some(trigger),
                         )
                     } else {
-                        (Duration::ZERO, None)
+                        (Duration::ZERO, self.overview_mode.active_trigger().cloned())
                     };
                 self.overview_mode =
                     OverviewMode::Ended(trigger, Instant::now() - reverse_duration);
@@ -1576,8 +1624,16 @@ impl Shell {
     }
 
     pub fn overview_mode(&self) -> (OverviewMode, Option<SwapIndicator>) {
-        if let OverviewMode::Ended(_, timestamp) = self.overview_mode {
-            if Instant::now().duration_since(timestamp) > ANIMATION_DURATION {
+        if let OverviewMode::Started(trigger, timestamp) = &self.overview_mode {
+            if Instant::now().duration_since(*timestamp) > ANIMATION_DURATION {
+                return (
+                    OverviewMode::Active(trigger.clone()),
+                    self.swap_indicator.clone(),
+                );
+            }
+        }
+        if let OverviewMode::Ended(_, timestamp) = &self.overview_mode {
+            if Instant::now().duration_since(*timestamp) > ANIMATION_DURATION {
                 return (OverviewMode::None, None);
             }
         }
@@ -1605,8 +1661,8 @@ impl Shell {
                 self.theme.clone(),
             ));
         } else {
-            if let ResizeMode::Started(_, _, direction) = &self.resize_mode {
-                self.resize_mode = ResizeMode::Ended(Instant::now(), *direction);
+            if let Some(direction) = self.resize_mode.active_direction() {
+                self.resize_mode = ResizeMode::Ended(Instant::now(), direction);
                 if let Some((_, direction, edge, _, _, _)) = self.resize_state.as_ref() {
                     self.finish_resize(*direction, *edge);
                 }
@@ -1615,6 +1671,14 @@ impl Shell {
     }
 
     pub fn resize_mode(&self) -> (ResizeMode, Option<ResizeIndicator>) {
+        if let ResizeMode::Started(binding, timestamp, direction) = &self.resize_mode {
+            if Instant::now().duration_since(*timestamp) > ANIMATION_DURATION {
+                return (
+                    ResizeMode::Active(binding.clone(), *direction),
+                    self.resize_indicator.clone(),
+                );
+            }
+        }
         if let ResizeMode::Ended(timestamp, _) = self.resize_mode {
             if Instant::now().duration_since(timestamp) > ANIMATION_DURATION {
                 return (ResizeMode::None, None);
@@ -1648,17 +1712,34 @@ impl Shell {
         xdg_activation_state: &XdgActivationState,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
     ) {
-        if let OverviewMode::Ended(_, timestamp) = self.overview_mode {
-            if Instant::now().duration_since(timestamp) > ANIMATION_DURATION {
+        match &self.overview_mode {
+            OverviewMode::Started(trigger, timestamp)
+                if Instant::now().duration_since(*timestamp) > ANIMATION_DURATION =>
+            {
+                self.overview_mode = OverviewMode::Active(trigger.clone());
+            }
+            OverviewMode::Ended(_, timestamp)
+                if Instant::now().duration_since(*timestamp) > ANIMATION_DURATION =>
+            {
                 self.overview_mode = OverviewMode::None;
                 self.swap_indicator = None;
             }
+            _ => {}
         }
-        if let ResizeMode::Ended(timestamp, _) = self.resize_mode {
-            if Instant::now().duration_since(timestamp) > ANIMATION_DURATION {
+
+        match &self.resize_mode {
+            ResizeMode::Started(binding, timestamp, direction)
+                if Instant::now().duration_since(*timestamp) > ANIMATION_DURATION =>
+            {
+                self.resize_mode = ResizeMode::Active(binding.clone(), *direction);
+            }
+            ResizeMode::Ended(timestamp, _)
+                if Instant::now().duration_since(*timestamp) > ANIMATION_DURATION =>
+            {
                 self.resize_mode = ResizeMode::None;
                 self.resize_indicator = None;
             }
+            _ => {}
         }
 
         self.workspaces
@@ -2559,8 +2640,8 @@ impl Shell {
                 .find(|e| *e == &elem),
             KeyboardFocusTarget::Group { .. } => {
                 let focus_stack = workspace.focus_stack.get(seat);
-                let swap_desc = match overview {
-                    OverviewMode::Started(Trigger::KeyboardSwap(_, desc), _) => Some(desc),
+                let swap_desc = match overview.active_trigger() {
+                    Some(Trigger::KeyboardSwap(_, desc)) => Some(desc.clone()),
                     _ => None,
                 };
 
@@ -2583,8 +2664,8 @@ impl Shell {
 
         if workspace.is_tiled(&focused) {
             let focus_stack = workspace.focus_stack.get(seat);
-            let swap_desc = match overview {
-                OverviewMode::Started(Trigger::KeyboardSwap(_, desc), _) => Some(desc),
+            let swap_desc = match overview.active_trigger() {
+                Some(Trigger::KeyboardSwap(_, desc)) => Some(desc.clone()),
                 _ => None,
             };
 
