@@ -2592,6 +2592,9 @@ impl Shell {
                 .refresh(xdg_activation_state);
         }
 
+        mapped.set_activate(true);
+        mapped.configure();
+
         let grab = MoveGrab::new(
             start_data,
             mapped,

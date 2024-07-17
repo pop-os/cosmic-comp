@@ -23,7 +23,7 @@ use tracing::{debug, trace};
 
 use self::target::{KeyboardFocusTarget, WindowGroup};
 
-use super::{layout::floating::FloatingLayout, SeatExt};
+use super::{grabs::SeatMoveGrabState, layout::floating::FloatingLayout, SeatExt};
 
 pub mod target;
 
@@ -388,6 +388,20 @@ fn focus_target_is_valid(
 
     match target {
         KeyboardFocusTarget::Element(mapped) => {
+            if seat
+                .user_data()
+                .get::<SeatMoveGrabState>()
+                .is_some_and(|state| {
+                    state
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .is_some_and(|state| state.element() == mapped)
+                })
+            {
+                return true;
+            }
+
             let is_sticky = shell
                 .workspaces
                 .sets
