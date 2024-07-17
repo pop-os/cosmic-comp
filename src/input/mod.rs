@@ -442,6 +442,10 @@ impl State {
                                         for (binding, action) in
                                             data.common.config.shortcuts.iter()
                                         {
+                                            if *action == shortcuts::Action::Disable {
+                                                continue;
+                                            }
+
                                             let modifiers_bypass = binding.key.is_none()
                                                 && state == KeyState::Released
                                                 && !cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
