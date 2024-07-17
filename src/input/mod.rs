@@ -102,16 +102,17 @@ impl SupressedKeys {
             .partition(|(key, _)| *key == keysym.raw_code());
         *keys = remaining;
 
-        let removed = removed
-            .into_iter()
-            .map(|(_, token)| token)
-            .flatten()
-            .collect::<Vec<_>>();
         if removed.is_empty() {
-            None
-        } else {
-            Some(removed)
+            return None;
         }
+
+        Some(
+            removed
+                .into_iter()
+                .map(|(_, token)| token)
+                .flatten()
+                .collect::<Vec<_>>(),
+        )
     }
 }
 
