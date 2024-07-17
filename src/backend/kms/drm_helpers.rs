@@ -203,7 +203,11 @@ pub fn edid_info(device: &impl ControlDevice, connector: connector::Handle) -> R
                         .iter()
                         .find(|x| matches!(x, MonitorDescriptor::MonitorName(_)))
                     {
-                        name.clone()
+                        let mut name = name.clone();
+                        if let Some(idx) = name.find('\0') {
+                            name.truncate(idx);
+                        }
+                        name
                     } else {
                         format!("{}", edid.product.product_code)
                     };
