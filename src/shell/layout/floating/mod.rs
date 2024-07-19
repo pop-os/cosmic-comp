@@ -24,7 +24,7 @@ use smithay::{
 };
 
 use crate::{
-    backend::render::{element::AsGlowRenderer, IndicatorShader, Key, Usage},
+    backend::render::{element::AsGlowRenderer, IndicatorShader, Key, SplitRenderElements, Usage},
     shell::{
         element::{
             resize_indicator::ResizeIndicator,
@@ -1270,10 +1270,7 @@ impl FloatingLayout {
         indicator_thickness: u8,
         alpha: f32,
         theme: &cosmic::theme::CosmicTheme,
-    ) -> (
-        Vec<CosmicMappedRenderElement<R>>,
-        Vec<CosmicMappedRenderElement<R>>,
-    )
+    ) -> SplitRenderElements<CosmicMappedRenderElement<R>>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         <R as Renderer>::TextureId: Send + Clone + 'static,
@@ -1288,8 +1285,7 @@ impl FloatingLayout {
         };
         let output_scale = output.current_scale().fractional_scale();
 
-        let mut window_elements = Vec::new();
-        let mut popup_elements = Vec::new();
+        let mut elements = SplitRenderElements::default();
 
         for elem in self
             .animations
@@ -1305,7 +1301,10 @@ impl FloatingLayout {
                 .unwrap_or_else(|| (self.space.element_geometry(elem).unwrap().as_local(), alpha));
 
             let render_location = geometry.loc - elem.geometry().loc.as_local();
-            let (mut w_elements, p_elements) = elem.split_render_elements(
+            let SplitRenderElements {
+                mut w_elements,
+                p_elements,
+            } = elem.split_render_elements(
                 renderer,
                 render_location
                     .as_logical()
@@ -1388,7 +1387,7 @@ impl FloatingLayout {
 
                     resize.resize(resize_geometry.size.as_logical());
                     resize.output_enter(output, Rectangle::default() /* unused */);
-                    window_elements.extend(
+                    elements.w_elements.extend(
                         resize
                             .render_elements::<CosmicWindowRenderElement<R>>(
                                 renderer,
@@ -1420,15 +1419,15 @@ impl FloatingLayout {
                             active_window_hint.blue,
                         ],
                     );
-                    window_elements.push(element.into());
+                    elements.w_elements.push(element.into());
                 }
             }
 
-            window_elements.extend(w_elements);
-            popup_elements.extend(p_elements);
+            elements.w_elements.extend(w_elements);
+            elements.p_elements.extend(p_elements);
         }
 
-        (window_elements, popup_elements)
+        elements
     }
 
     fn gaps(&self) -> (i32, i32) {

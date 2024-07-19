@@ -9,7 +9,7 @@ use smithay::{
                 utils::{Relocate, RelocateRenderElement},
                 AsRenderElements, RenderElement,
             },
-            gles::GlesRenderbuffer,
+            gles::{GlesError, GlesRenderbuffer},
             sync::SyncPoint,
             utils::with_renderer_surface_state,
             Bind, Blit, BufferType, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
@@ -36,7 +36,7 @@ use crate::{
     backend::render::{
         cursor,
         element::{AsGlowRenderer, CosmicElement, DamageElement, FromGlesError},
-        render_workspace, CursorMode, CLEAR_COLOR,
+        render_workspace, CursorMode, ElementFilter, CLEAR_COLOR,
     },
     shell::{CosmicMappedRenderElement, CosmicSurface, WorkspaceRenderElement},
     state::{BackendData, Common, State},
@@ -63,6 +63,7 @@ pub fn submit_buffer<R>(
 ) -> Result<Option<(Frame, Vec<Rectangle<i32, BufferCoords>>)>, <R as Renderer>::Error>
 where
     R: ExportMem,
+    <R as Renderer>::Error: FromGlesError,
 {
     let Some(damage) = damage else {
         frame.success(
@@ -113,7 +114,8 @@ where
             }
             Ok(())
         })
-        .unwrap()
+        .map_err(|err| <R as Renderer>::Error::from_gles_error(GlesError::BufferAccessError(err)))
+        .and_then(|x| x)
         {
             frame.fail(FailureReason::Unknown);
             return Err(err);
@@ -141,6 +143,7 @@ pub fn render_session<F, R>(
 ) -> Result<Option<(Frame, Vec<Rectangle<i32, BufferCoords>>)>, DTError<R>>
 where
     R: ExportMem,
+    <R as Renderer>::Error: FromGlesError,
     F: for<'d> FnOnce(
         &WlBuffer,
         &mut R,
@@ -284,14 +287,18 @@ pub fn render_workspace_to_buffer(
                 None,
                 handle,
                 cursor_mode,
-                true,
+                ElementFilter::ExcludeWorkspaceOverview,
             )
             .map(|res| res.0)
         } else {
             let size = buffer_dimensions(buffer).unwrap();
             let format =
                 with_buffer_contents(buffer, |_, _, data| shm_format_to_fourcc(data.format))
-                    .map_err(|_| DTError::OutputNoMode(OutputNoMode))? // eh, we have to do some error
+                    .map_err(|err| {
+                        DTError::Rendering(<R as Renderer>::Error::from_gles_error(
+                            GlesError::BufferAccessError(err),
+                        ))
+                    })?
                     .expect("We should be able to convert all hardcoded shm screencopy formats");
             let render_buffer =
                 Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, size)
@@ -309,7 +316,7 @@ pub fn render_workspace_to_buffer(
                 None,
                 handle,
                 cursor_mode,
-                true,
+                ElementFilter::ExcludeWorkspaceOverview,
             )
             .map(|res| res.0)
         }
@@ -571,7 +578,11 @@ pub fn render_window_to_buffer(
             let size = buffer_dimensions(buffer).unwrap();
             let format =
                 with_buffer_contents(buffer, |_, _, data| shm_format_to_fourcc(data.format))
-                    .map_err(|_| DTError::OutputNoMode(OutputNoMode))? // eh, we have to do some error
+                    .map_err(|err| {
+                        DTError::Rendering(<R as Renderer>::Error::from_gles_error(
+                            GlesError::BufferAccessError(err),
+                        ))
+                    })?
                     .expect("We should be able to convert all hardcoded shm screencopy formats");
             let render_buffer =
                 Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, size)
@@ -784,7 +795,11 @@ pub fn render_cursor_to_buffer(
             let size = buffer_dimensions(buffer).unwrap();
             let format =
                 with_buffer_contents(buffer, |_, _, data| shm_format_to_fourcc(data.format))
-                    .map_err(|_| DTError::OutputNoMode(OutputNoMode))? // eh, we have to do some error
+                    .map_err(|err| {
+                        DTError::Rendering(<R as Renderer>::Error::from_gles_error(
+                            GlesError::BufferAccessError(err),
+                        ))
+                    })?
                     .expect("We should be able to convert all hardcoded shm screencopy formats");
             let render_buffer =
                 Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, size)

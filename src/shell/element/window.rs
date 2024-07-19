@@ -1,5 +1,8 @@
 use crate::{
-    backend::render::cursor::{CursorShape, CursorState},
+    backend::render::{
+        cursor::{CursorShape, CursorState},
+        SplitRenderElements,
+    },
     shell::{
         focus::target::PointerFocusTarget,
         grabs::{ReleaseMode, ResizeEdge},
@@ -317,7 +320,7 @@ impl CosmicWindow {
         location: smithay::utils::Point<i32, smithay::utils::Physical>,
         scale: smithay::utils::Scale<f64>,
         alpha: f32,
-    ) -> (Vec<C>, Vec<C>)
+    ) -> SplitRenderElements<C>
     where
         R: Renderer + ImportAll + ImportMem,
         <R as Renderer>::TextureId: Send + Clone + 'static,
@@ -331,12 +334,17 @@ impl CosmicWindow {
             location
         };
 
-        let (mut window_elements, popup_elements) = self.0.with_program(|p| {
-            p.window
-                .split_render_elements::<R, CosmicWindowRenderElement<R>>(
-                    renderer, window_loc, scale, alpha,
-                )
-        });
+        let mut elements = SplitRenderElements::default();
+
+        elements.extend_map(
+            self.0.with_program(|p| {
+                p.window
+                    .split_render_elements::<R, CosmicWindowRenderElement<R>>(
+                        renderer, window_loc, scale, alpha,
+                    )
+            }),
+            C::from,
+        );
 
         if has_ssd {
             let ssd_loc = location
@@ -344,15 +352,16 @@ impl CosmicWindow {
                     .0
                     .with_program(|p| p.window.geometry().loc)
                     .to_physical_precise_round(scale);
-            window_elements.extend(AsRenderElements::<R>::render_elements::<
-                CosmicWindowRenderElement<R>,
-            >(&self.0, renderer, ssd_loc, scale, alpha))
+            elements.w_elements.extend(
+                AsRenderElements::<R>::render_elements::<CosmicWindowRenderElement<R>>(
+                    &self.0, renderer, ssd_loc, scale, alpha,
+                )
+                .into_iter()
+                .map(C::from),
+            )
         }
 
-        (
-            window_elements.into_iter().map(C::from).collect(),
-            popup_elements.into_iter().map(C::from).collect(),
-        )
+        elements
     }
 
     pub(crate) fn set_theme(&self, theme: cosmic::Theme) {

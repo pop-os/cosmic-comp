@@ -288,6 +288,10 @@ where
         self.elements.iter().map(Tree::new).collect()
     }
 
+    fn set_id(&mut self, id: Id) {
+        self.id = id;
+    }
+
     fn diff(&mut self, tree: &mut Tree) {
         tree.diff_children(&mut self.elements);
     }

@@ -3,11 +3,11 @@
 use crate::{
     backend::render::{
         element::{CosmicElement, DamageElement},
-        init_shaders, workspace_elements, CursorMode, GlMultiRenderer, CLEAR_COLOR,
+        init_shaders, workspace_elements, CursorMode, ElementFilter, GlMultiRenderer, CLEAR_COLOR,
     },
     shell::Shell,
     state::SurfaceDmabufFeedback,
-    utils::prelude::*,
+    utils::{prelude::*, quirks::workspace_overview_is_open},
     wayland::{
         handlers::screencopy::{submit_buffer, FrameHolder, SessionData},
         protocols::screencopy::{
@@ -869,6 +869,12 @@ impl SurfaceThreadState {
 
             std::mem::drop(shell);
 
+            let element_filter = if workspace_overview_is_open(output) {
+                ElementFilter::LayerShellOnly
+            } else {
+                ElementFilter::All
+            };
+
             workspace_elements(
                 Some(&render_node),
                 &mut renderer,
@@ -878,7 +884,7 @@ impl SurfaceThreadState {
                 previous_workspace,
                 workspace,
                 CursorMode::All,
-                false,
+                element_filter,
                 #[cfg(not(feature = "debug"))]
                 None,
                 #[cfg(feature = "debug")]

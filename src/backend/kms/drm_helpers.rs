@@ -9,7 +9,11 @@ use smithay::reexports::drm::control::{
     property, AtomicCommitFlags, Device as ControlDevice, Mode, ModeFlags, PlaneType,
     ResourceHandle,
 };
-use std::{collections::HashMap, ops::Range};
+use std::{
+    collections::HashMap,
+    ops::Range,
+    panic::{catch_unwind, AssertUnwindSafe},
+};
 
 pub fn display_configuration(
     device: &mut impl ControlDevice,
@@ -183,7 +187,11 @@ pub fn edid_info(device: &impl ControlDevice, connector: connector::Handle) -> R
             if let property::Value::Blob(edid_blob) = edid_info.value_type().convert_value(val) {
                 let blob = device.get_property_blob(edid_blob)?;
                 let mut reader = std::io::Cursor::new(blob);
-                if let Some(edid) = edid_parse(&mut reader).ok() {
+                if let Some(edid) =
+                    catch_unwind(AssertUnwindSafe(move || edid_parse(&mut reader).ok()))
+                        .ok()
+                        .flatten()
+                {
                     manufacturer = {
                         let id = edid.product.manufacturer_id;
                         let code = [id.0, id.1, id.2];
@@ -195,7 +203,11 @@ pub fn edid_info(device: &impl ControlDevice, connector: connector::Handle) -> R
                         .iter()
                         .find(|x| matches!(x, MonitorDescriptor::MonitorName(_)))
                     {
-                        name.clone()
+                        let mut name = name.clone();
+                        if let Some(idx) = name.find('\0') {
+                            name.truncate(idx);
+                        }
+                        name
                     } else {
                         format!("{}", edid.product.product_code)
                     };

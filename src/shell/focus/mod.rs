@@ -26,7 +26,7 @@ use tracing::{debug, trace};
 
 use self::target::{KeyboardFocusTarget, WindowGroup};
 
-use super::{layout::floating::FloatingLayout, SeatExt};
+use super::{grabs::SeatMoveGrabState, layout::floating::FloatingLayout, SeatExt};
 
 pub mod target;
 
@@ -199,6 +199,10 @@ impl Shell {
                 window.set_activated(focused_windows.contains(&window));
                 window.configure();
             }
+            for m in set.minimized_windows.iter() {
+                m.window.set_activated(false);
+                m.window.configure();
+            }
 
             let workspace = self.workspaces.active_mut(&output);
             for focused in focused_windows.iter() {
@@ -207,6 +211,10 @@ impl Shell {
             for window in workspace.mapped() {
                 window.set_activated(focused_windows.contains(&window));
                 window.configure();
+            }
+            for m in workspace.minimized_windows.iter() {
+                m.window.set_activated(false);
+                m.window.configure();
             }
         }
     }
@@ -448,6 +456,20 @@ fn focus_target_is_valid(
 
     match target {
         KeyboardFocusTarget::Element(mapped) => {
+            if seat
+                .user_data()
+                .get::<SeatMoveGrabState>()
+                .is_some_and(|state| {
+                    state
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .is_some_and(|state| state.element() == mapped)
+                })
+            {
+                return true;
+            }
+
             let is_sticky = shell
                 .workspaces
                 .sets
