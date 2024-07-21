@@ -42,6 +42,7 @@ use smithay::{
 };
 
 use crate::{
+    backend::render::SplitRenderElements,
     state::{State, SurfaceDmabufFeedback},
     utils::prelude::*,
     wayland::handlers::decoration::PreferredDecorationMode,
@@ -563,7 +564,7 @@ impl CosmicSurface {
         location: smithay::utils::Point<i32, smithay::utils::Physical>,
         scale: smithay::utils::Scale<f64>,
         alpha: f32,
-    ) -> (Vec<C>, Vec<C>)
+    ) -> SplitRenderElements<C>
     where
         R: Renderer + ImportAll,
         <R as Renderer>::TextureId: Clone + 'static,
@@ -573,7 +574,7 @@ impl CosmicSurface {
             WindowSurface::Wayland(toplevel) => {
                 let surface = toplevel.wl_surface();
 
-                let popup_render_elements = PopupManager::popups_for_surface(surface)
+                let p_elements = PopupManager::popups_for_surface(surface)
                     .flat_map(|(popup, popup_offset)| {
                         let offset = (self.0.geometry().loc + popup_offset - popup.geometry().loc)
                             .to_physical_precise_round(scale);
@@ -589,7 +590,7 @@ impl CosmicSurface {
                     })
                     .collect();
 
-                let window_render_elements = render_elements_from_surface_tree(
+                let w_elements = render_elements_from_surface_tree(
                     renderer,
                     surface,
                     location,
@@ -598,12 +599,15 @@ impl CosmicSurface {
                     element::Kind::Unspecified,
                 );
 
-                (window_render_elements, popup_render_elements)
+                SplitRenderElements {
+                    w_elements,
+                    p_elements,
+                }
             }
-            WindowSurface::X11(surface) => (
-                surface.render_elements(renderer, location, scale, alpha),
-                Vec::new(),
-            ),
+            WindowSurface::X11(surface) => SplitRenderElements {
+                w_elements: surface.render_elements(renderer, location, scale, alpha),
+                p_elements: Vec::new(),
+            },
         }
     }
 

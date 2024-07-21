@@ -14,7 +14,7 @@ use xkbcommon::xkb::Keysym;
 
 use crate::{
     config::key_bindings::cosmic_modifiers_from_smithay,
-    shell::{layout::tiling::NodeDesc, OverviewMode, Trigger},
+    shell::{layout::tiling::NodeDesc, Trigger},
     state::State,
 };
 
@@ -40,7 +40,7 @@ impl KeyboardGrab<State> for SwapWindowGrab {
         serial: Serial,
         time: u32,
     ) {
-        if !matches!(&data.common.shell.read().unwrap().overview_mode, OverviewMode::Started(Trigger::KeyboardSwap(_, d), _) if d == &self.desc)
+        if !matches!(&data.common.shell.read().unwrap().overview_mode.active_trigger(), Some(Trigger::KeyboardSwap(_, d)) if d == &self.desc)
         {
             handle.unset_grab(self, data, serial, false);
             return;

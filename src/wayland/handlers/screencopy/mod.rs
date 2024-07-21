@@ -39,8 +39,6 @@ pub use self::render::*;
 use self::user_data::*;
 pub use self::user_data::{FrameHolder, ScreencopySessions, SessionData, SessionHolder};
 
-pub const WORKSPACE_OVERVIEW_NAMESPACE: &str = "cosmic-workspace-overview";
-
 impl ScreencopyHandler for State {
     fn screencopy_state(&mut self) -> &mut ScreencopyState {
         &mut self.common.screencopy_state

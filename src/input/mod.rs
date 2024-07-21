@@ -16,10 +16,9 @@ use crate::{
             floating::ResizeGrabMarker,
             tiling::{SwapWindowGrab, TilingLayout},
         },
-        FocusResult, InvalidWorkspaceIndex, MoveResult, OverviewMode, ResizeMode, SeatExt, Trigger,
-        WorkspaceDelta,
+        FocusResult, InvalidWorkspaceIndex, MoveResult, SeatExt, Trigger, WorkspaceDelta,
     },
-    utils::prelude::*,
+    utils::{prelude::*, quirks::workspace_overview_is_open},
     wayland::{
         handlers::{screencopy::SessionHolder, xdg_activation::ActivationContext},
         protocols::{
@@ -103,16 +102,17 @@ impl SupressedKeys {
             .partition(|(key, _)| *key == keysym.raw_code());
         *keys = remaining;
 
-        let removed = removed
-            .into_iter()
-            .map(|(_, token)| token)
-            .flatten()
-            .collect::<Vec<_>>();
         if removed.is_empty() {
-            None
-        } else {
-            Some(removed)
+            return None;
         }
+
+        Some(
+            removed
+                .into_iter()
+                .map(|(_, token)| token)
+                .flatten()
+                .collect::<Vec<_>>(),
+        )
     }
 }
 
@@ -229,8 +229,8 @@ impl State {
                                 time,
                                 |data, modifiers, handle| {
                                     // Leave move overview mode, if any modifier was released
-                                    if let OverviewMode::Started(Trigger::KeyboardMove(action_modifiers), _) =
-                                        shell.overview_mode().0
+                                    if let Some(Trigger::KeyboardMove(action_modifiers)) =
+                                        shell.overview_mode().0.active_trigger()
                                     {
                                         if (action_modifiers.ctrl && !modifiers.ctrl)
                                             || (action_modifiers.alt && !modifiers.alt)
@@ -241,8 +241,8 @@ impl State {
                                         }
                                     }
                                     // Leave swap overview mode, if any key was released
-                                    if let OverviewMode::Started(Trigger::KeyboardSwap(action_pattern, old_descriptor), _) =
-                                        shell.overview_mode().0
+                                    if let Some(Trigger::KeyboardSwap(action_pattern, old_descriptor)) =
+                                        shell.overview_mode().0.active_trigger()
                                     {
                                         if (action_pattern.modifiers.ctrl && !modifiers.ctrl)
                                             || (action_pattern.modifiers.alt && !modifiers.alt)
@@ -290,7 +290,7 @@ impl State {
                                                     if let Some(old_workspace) = old_w.get_mut(0) {
                                                         if let Some(new_workspace) = other_w.iter_mut().find(|w| w.handle == new_workspace) {
                                                             if new_workspace.tiling_layer.windows().next().is_none() {
-                                                                if let Some(focus) = TilingLayout::move_tree(&mut old_workspace.tiling_layer, &mut new_workspace.tiling_layer, &new_workspace.handle, &seat, new_workspace.focus_stack.get(&seat).iter(), old_descriptor) {
+                                                                if let Some(focus) = TilingLayout::move_tree(&mut old_workspace.tiling_layer, &mut new_workspace.tiling_layer, &new_workspace.handle, &seat, new_workspace.focus_stack.get(&seat).iter(), old_descriptor.clone()) {
                                                                     let seat = seat.clone();
                                                                     data.common.event_loop_handle.insert_idle(move |state| {
                                                                         Shell::set_focus(state, Some(&focus), &seat, None);
@@ -306,8 +306,8 @@ impl State {
                                     }
 
                                     // Leave or update resize mode, if modifiers changed or initial key was released
-                                    if let (ResizeMode::Started(action_pattern, _, _), _) =
-                                        shell.resize_mode()
+                                    if let Some(action_pattern) =
+                                        shell.resize_mode().0.active_binding()
                                     {
                                         if action_pattern.key.is_some() && state == KeyState::Released
                                             && handle.raw_syms().contains(&action_pattern.key.unwrap())
@@ -336,8 +336,8 @@ impl State {
                                     }
 
                                     // Special case resizing with regards to arrow keys
-                                    if let (ResizeMode::Started(_, _, direction), _) =
-                                        shell.resize_mode()
+                                    if let Some(direction) =
+                                        shell.resize_mode().0.active_direction()
                                     {
                                         let resize_edge = match handle.modified_sym() {
                                             Keysym::Left | Keysym::h | Keysym::H => Some(ResizeEdge::LEFT),
@@ -442,6 +442,10 @@ impl State {
                                         for (binding, action) in
                                             data.common.config.shortcuts.iter()
                                         {
+                                            if *action == shortcuts::Action::Disable {
+                                                continue;
+                                            }
+
                                             let modifiers_bypass = binding.key.is_none()
                                                 && state == KeyState::Released
                                                 && !cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
@@ -913,10 +917,10 @@ impl State {
                             std::mem::drop(shell);
                         }
                     } else {
-                        if let OverviewMode::Started(Trigger::Pointer(action_button), _) =
-                            shell.overview_mode().0
+                        if let Some(Trigger::Pointer(action_button)) =
+                            shell.overview_mode().0.active_trigger()
                         {
-                            if action_button == button {
+                            if *action_button == button {
                                 shell
                                     .set_overview_mode(None, self.common.event_loop_handle.clone());
                             }
@@ -1000,7 +1004,7 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    if event.fingers() >= 3 {
+                    if event.fingers() >= 3 && !workspace_overview_is_open(&seat.active_output()) {
                         self.common.gesture_state = Some(GestureState::new(event.fingers()));
                     } else {
                         let serial = SERIAL_COUNTER.next_serial();
@@ -1341,8 +1345,8 @@ impl State {
             }
             InputEvent::TouchUp { event, .. } => {
                 let mut shell = self.common.shell.write().unwrap();
-                if let OverviewMode::Started(Trigger::Touch(slot), _) = shell.overview_mode().0 {
-                    if slot == event.slot() {
+                if let Some(Trigger::Touch(slot)) = shell.overview_mode().0.active_trigger() {
+                    if *slot == event.slot() {
                         shell.set_overview_mode(None, self.common.event_loop_handle.clone());
                     }
                 }

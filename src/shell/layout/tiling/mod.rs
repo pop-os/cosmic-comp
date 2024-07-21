@@ -2,8 +2,8 @@
 
 use crate::{
     backend::render::{
-        element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, Usage, ACTIVE_GROUP_COLOR,
-        GROUP_COLOR,
+        element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, SplitRenderElements, Usage,
+        ACTIVE_GROUP_COLOR, GROUP_COLOR,
     },
     shell::{
         element::{
@@ -3137,7 +3137,10 @@ impl TilingLayout {
             }
         }
 
-        if !matches!(overview, OverviewMode::Started(_, _)) {
+        if !matches!(
+            overview,
+            OverviewMode::Started(_, _) | OverviewMode::Active(_)
+        ) {
             last_overview_hover.take();
         }
 
@@ -3249,8 +3252,8 @@ impl TilingLayout {
                 _ => None,
             }
         } else if matches!(
-            overview,
-            OverviewMode::Started(Trigger::Pointer(_) | Trigger::Touch(_), _)
+            overview.active_trigger(),
+            Some(Trigger::Pointer(_) | Trigger::Touch(_))
         ) {
             let non_exclusive_zone = layer_map_for_output(&self.output)
                 .non_exclusive_zone()
@@ -3846,13 +3849,7 @@ impl TilingLayout {
         resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
         indicator_thickness: u8,
         theme: &cosmic::theme::CosmicTheme,
-    ) -> Result<
-        (
-            Vec<CosmicMappedRenderElement<R>>,
-            Vec<CosmicMappedRenderElement<R>>,
-        ),
-        OutputNotMapped,
-    >
+    ) -> Result<SplitRenderElements<CosmicMappedRenderElement<R>>, OutputNotMapped>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         <R as Renderer>::TextureId: Send + Clone + 'static,
@@ -3885,16 +3882,15 @@ impl TilingLayout {
         };
         let draw_groups = overview.0.alpha();
 
-        let mut window_elements = Vec::new();
-        let mut popup_elements = Vec::new();
+        let mut elements = SplitRenderElements::default();
 
         let is_overview = !matches!(overview.0, OverviewMode::None);
-        let is_mouse_tiling = (matches!(overview.0, OverviewMode::Started(Trigger::Pointer(_), _)))
+        let is_mouse_tiling = (matches!(overview.0.trigger(), Some(Trigger::Pointer(_))))
             .then(|| self.last_overview_hover.as_ref().map(|x| &x.1));
-        let swap_desc = match &overview.0 {
-            OverviewMode::Started(Trigger::KeyboardSwap(_, desc), _)
-            | OverviewMode::Ended(Some(Trigger::KeyboardSwap(_, desc)), _) => Some(desc.clone()),
-            _ => None,
+        let swap_desc = if let Some(Trigger::KeyboardSwap(_, desc)) = overview.0.trigger() {
+            Some(desc.clone())
+        } else {
+            None
         };
 
         // all gone windows and fade them out
@@ -3921,7 +3917,7 @@ impl TilingLayout {
             .unzip();
 
             // all old windows we want to fade out
-            let (w_elements, p_elements) = render_old_tree(
+            elements.extend(render_old_tree(
                 reference_tree,
                 target_tree,
                 renderer,
@@ -3931,9 +3927,7 @@ impl TilingLayout {
                 indicator_thickness,
                 swap_desc.is_some(),
                 theme,
-            );
-            window_elements.extend(w_elements);
-            popup_elements.extend(p_elements);
+            ));
 
             geometries
         } else {
@@ -3961,7 +3955,7 @@ impl TilingLayout {
         .unzip();
 
         // all alive windows
-        let (w_elements, p_elements) = render_new_tree(
+        elements.extend(render_new_tree(
             target_tree,
             reference_tree,
             renderer,
@@ -3989,16 +3983,14 @@ impl TilingLayout {
             &self.swapping_stack_surface_id,
             &self.placeholder_id,
             theme,
-        );
-        window_elements.extend(w_elements);
-        popup_elements.extend(p_elements);
+        ));
 
         // tiling hints
         if let Some(group_elements) = group_elements {
-            window_elements.extend(group_elements);
+            elements.w_elements.extend(group_elements);
         }
 
-        Ok((window_elements, popup_elements))
+        Ok(elements)
     }
 
     fn gaps(&self) -> (i32, i32) {
@@ -4694,10 +4686,7 @@ fn render_old_tree<R>(
     indicator_thickness: u8,
     is_swap_mode: bool,
     theme: &cosmic::theme::CosmicTheme,
-) -> (
-    Vec<CosmicMappedRenderElement<R>>,
-    Vec<CosmicMappedRenderElement<R>>,
-)
+) -> SplitRenderElements<CosmicMappedRenderElement<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: Send + Clone + 'static,
@@ -4706,8 +4695,7 @@ where
     CosmicStackRenderElement<R>: RenderElement<R>,
 {
     let window_hint = crate::theme::active_window_hint(theme);
-    let mut window_elements = Vec::new();
-    let mut popup_elements = Vec::new();
+    let mut elements = SplitRenderElements::default();
 
     if let Some(root) = reference_tree.root_node_id() {
         let geometries = geometries.unwrap_or_default();
@@ -4777,62 +4765,68 @@ where
                 };
 
                 let elem_geometry = mapped.geometry().to_physical_precise_round(output_scale);
-                let (w_elements, p_elements) = mapped
-                    .split_render_elements::<R, CosmicMappedRenderElement<R>>(
-                        renderer,
-                        geo.loc.as_logical().to_physical_precise_round(output_scale)
-                            - elem_geometry.loc,
-                        Scale::from(output_scale),
-                        alpha,
-                    );
+                let SplitRenderElements {
+                    w_elements,
+                    p_elements,
+                } = mapped.split_render_elements::<R, CosmicMappedRenderElement<R>>(
+                    renderer,
+                    geo.loc.as_logical().to_physical_precise_round(output_scale)
+                        - elem_geometry.loc,
+                    Scale::from(output_scale),
+                    alpha,
+                );
 
-                window_elements.extend(w_elements.into_iter().flat_map(|element| {
-                    match element {
-                        CosmicMappedRenderElement::Stack(elem) => constrain_render_elements(
-                            std::iter::once(elem),
-                            geo.loc.as_logical().to_physical_precise_round(output_scale)
-                                - elem_geometry.loc,
-                            geo.as_logical().to_physical_precise_round(output_scale),
-                            elem_geometry,
-                            ConstrainScaleBehavior::Stretch,
-                            ConstrainAlign::CENTER,
-                            output_scale,
-                        )
-                        .next()
-                        .map(CosmicMappedRenderElement::TiledStack),
-                        CosmicMappedRenderElement::Window(elem) => constrain_render_elements(
-                            std::iter::once(elem),
-                            geo.loc.as_logical().to_physical_precise_round(output_scale)
-                                - elem_geometry.loc,
-                            geo.as_logical().to_physical_precise_round(output_scale),
-                            elem_geometry,
-                            ConstrainScaleBehavior::Stretch,
-                            ConstrainAlign::CENTER,
-                            output_scale,
-                        )
-                        .next()
-                        .map(CosmicMappedRenderElement::TiledWindow),
-                        x => Some(x),
-                    }
-                }));
+                elements
+                    .w_elements
+                    .extend(w_elements.into_iter().flat_map(|element| {
+                        match element {
+                            CosmicMappedRenderElement::Stack(elem) => constrain_render_elements(
+                                std::iter::once(elem),
+                                geo.loc.as_logical().to_physical_precise_round(output_scale)
+                                    - elem_geometry.loc,
+                                geo.as_logical().to_physical_precise_round(output_scale),
+                                elem_geometry,
+                                ConstrainScaleBehavior::Stretch,
+                                ConstrainAlign::CENTER,
+                                output_scale,
+                            )
+                            .next()
+                            .map(CosmicMappedRenderElement::TiledStack),
+                            CosmicMappedRenderElement::Window(elem) => constrain_render_elements(
+                                std::iter::once(elem),
+                                geo.loc.as_logical().to_physical_precise_round(output_scale)
+                                    - elem_geometry.loc,
+                                geo.as_logical().to_physical_precise_round(output_scale),
+                                elem_geometry,
+                                ConstrainScaleBehavior::Stretch,
+                                ConstrainAlign::CENTER,
+                                output_scale,
+                            )
+                            .next()
+                            .map(CosmicMappedRenderElement::TiledWindow),
+                            x => Some(x),
+                        }
+                    }));
                 if minimize_geo.is_some() && indicator_thickness > 0 {
-                    window_elements.push(CosmicMappedRenderElement::FocusIndicator(
-                        IndicatorShader::focus_element(
-                            renderer,
-                            Key::Window(Usage::FocusIndicator, mapped.clone().key()),
-                            geo,
-                            indicator_thickness,
-                            output_scale,
-                            alpha,
-                            [window_hint.red, window_hint.green, window_hint.blue],
-                        ),
-                    ));
+                    elements
+                        .w_elements
+                        .push(CosmicMappedRenderElement::FocusIndicator(
+                            IndicatorShader::focus_element(
+                                renderer,
+                                Key::Window(Usage::FocusIndicator, mapped.clone().key()),
+                                geo,
+                                indicator_thickness,
+                                output_scale,
+                                alpha,
+                                [window_hint.red, window_hint.green, window_hint.blue],
+                            ),
+                        ));
                 }
-                popup_elements.extend(p_elements);
+                elements.p_elements.extend(p_elements);
             });
     }
 
-    (window_elements, popup_elements)
+    elements
 }
 
 fn render_new_tree<R>(
@@ -4854,10 +4848,7 @@ fn render_new_tree<R>(
     swapping_stack_surface_id: &Id,
     placeholder_id: &Id,
     theme: &cosmic::theme::CosmicTheme,
-) -> (
-    Vec<CosmicMappedRenderElement<R>>,
-    Vec<CosmicMappedRenderElement<R>>,
-)
+) -> SplitRenderElements<CosmicMappedRenderElement<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: Send + Clone + 'static,
@@ -5246,15 +5237,17 @@ where
 
             if let Data::Mapped { mapped, .. } = data {
                 let elem_geometry = mapped.geometry().to_physical_precise_round(output_scale);
-                let (mut w_elements, p_elements) = mapped
-                    .split_render_elements::<R, CosmicMappedRenderElement<R>>(
-                        renderer,
-                        //original_location,
-                        geo.loc.as_logical().to_physical_precise_round(output_scale)
-                            - elem_geometry.loc,
-                        Scale::from(output_scale),
-                        alpha,
-                    );
+                let SplitRenderElements {
+                    mut w_elements,
+                    p_elements,
+                } = mapped.split_render_elements::<R, CosmicMappedRenderElement<R>>(
+                    renderer,
+                    //original_location,
+                    geo.loc.as_logical().to_physical_precise_round(output_scale)
+                        - elem_geometry.loc,
+                    Scale::from(output_scale),
+                    alpha,
+                );
                 if swap_desc
                     .as_ref()
                     .filter(|swap_desc| swap_desc.node == node_id)
@@ -5373,7 +5366,10 @@ where
         .chain(group_backdrop.into_iter().map(Into::into))
         .collect();
 
-    (window_elements, popup_elements)
+    SplitRenderElements {
+        w_elements: window_elements,
+        p_elements: popup_elements,
+    }
 }
 
 fn scale_to_center<C>(
