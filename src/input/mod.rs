@@ -464,7 +464,10 @@ impl State {
                                                 ) || modifiers_bypass
                                             {
                                                 modifiers_queue.clear();
-                                                seat.supressed_keys().add(&handle, None);
+                                                // only suppress if the action is on Press
+                                                if !modifiers_bypass {
+                                                    seat.supressed_keys().add(&handle, None);
+                                                }
                                                 return FilterResult::Intercept(Some((
                                                     Action::Shortcut(action.clone()),
                                                     binding.clone(),
