@@ -538,7 +538,8 @@ impl Program for CosmicWindowInternal {
             .on_drag(Message::DragStart)
             .on_close(Message::Close)
             .focused(self.window.is_activated(false))
-            .density(Density::Compact);
+            .density(Density::Compact)
+            .on_double_click(Message::Maximize);
 
         if cosmic::config::show_minimize() {
             header = header.on_minimize(Message::Minimize);
