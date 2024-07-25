@@ -18,10 +18,11 @@
 //!
 //! …consequently `zbus-xmlgen` did not generate code for the above interfaces.
 
-use zbus::{blocking::Connection, dbus_proxy};
+use zbus::blocking::Connection;
 
-#[dbus_proxy(
+#[zbus::proxy(
     interface = "com.system76.PowerDaemon",
+    default_service = "com.system76.PowerDaemon",
     default_path = "/com/system76/PowerDaemon"
 )]
 trait PowerDaemon {
@@ -70,17 +71,17 @@ trait PowerDaemon {
     fn set_graphics_power(&self, power: bool) -> zbus::Result<()>;
 
     /// HotPlugDetect signal
-    #[dbus_proxy(signal)]
+    #[zbus(signal)]
     fn hot_plug_detect(&self, port: u64) -> zbus::Result<()>;
 
     /// PowerProfileSwitch signal
-    #[dbus_proxy(signal)]
+    #[zbus(signal)]
     fn power_profile_switch(&self, profile: &str) -> zbus::Result<()>;
 }
 
 pub fn init() -> anyhow::Result<PowerDaemonProxyBlocking<'static>> {
     let conn = Connection::system()?;
     let proxy = PowerDaemonProxyBlocking::new(&conn)?;
-    proxy.introspect()?;
+    proxy.0.introspect()?;
     Ok(proxy)
 }
