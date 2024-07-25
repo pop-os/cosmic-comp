@@ -24,7 +24,7 @@ egui = {version = "0.23.0", optional = true}
 egui_plot = {version = "0.23.0", optional = true}
 glow = "0.12.0"
 i18n-embed = {version = "0.14", features = ["fluent-system", "desktop-requester"]}
-i18n-embed-fl = "0.7"
+i18n-embed-fl = "0.8"
 iced_tiny_skia = {git = "https://github.com/pop-os/libcosmic/"}
 indexmap = "2.0"
 keyframe = "1.1.1"
@@ -55,7 +55,7 @@ xcursor = "0.3.3"
 xdg = "^2.1"
 xdg-user = "0.2.1"
 xkbcommon = "0.7"
-zbus = "3.15.0"
+zbus = "4.4.0"
 profiling = { version = "1.0" }
 rustix = { version = "0.38.32", features = ["process"] }
 smallvec = "1.13.2"
