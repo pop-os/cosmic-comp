@@ -444,7 +444,7 @@ fn surface_thread(
     thread_receiver: Channel<ThreadCommand>,
     startup_done: Arc<AtomicBool>,
 ) -> Result<()> {
-    profiling::register_thread!(format!("Surface Thread {}", output.name()));
+    profiling::register_thread!(&format!("Surface Thread {}", output.name()));
 
     let mut event_loop = EventLoop::try_new().unwrap();
 
