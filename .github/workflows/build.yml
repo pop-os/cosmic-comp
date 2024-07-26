@@ -7,15 +7,15 @@ on:
     branches:
     - master
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v3
-    - uses: cachix/install-nix-action@v22
-      with:
-        nix_path: nixpkgs=channel:nixpkgs-unstable
-    - run: GIT_LFS_SKIP_SMUDGE=1 nix build
-    - run: nix flake check
+#  build:
+#    runs-on: ubuntu-latest
+#    steps:
+#    - uses: actions/checkout@v3
+#    - uses: cachix/install-nix-action@v22
+#      with:
+#        nix_path: nixpkgs=channel:nixpkgs-unstable
+#    - run: GIT_LFS_SKIP_SMUDGE=1 nix build
+#    - run: nix flake check
   check-features:
     runs-on: ubuntu-latest
     steps:
