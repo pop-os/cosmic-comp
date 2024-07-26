@@ -38,6 +38,7 @@ pub mod key_bindings;
 pub use key_bindings::{Action, PrivateAction};
 mod types;
 pub use self::types::*;
+use cosmic::config::CosmicTk;
 use cosmic_comp_config::{
     input::InputConfig, workspace::WorkspaceConfig, CosmicCompConfig, TileBehavior, XkbConfig,
 };
@@ -162,8 +163,33 @@ impl Config {
                 c
             });
 
+        // Listen for updates to the toolkit config
+        if let Ok(tk_config) = cosmic_config::Config::new("com.system76.CosmicTk", 1) {
+            match cosmic_config::calloop::ConfigWatchSource::new(&tk_config) {
+                Ok(source) => {
+                    if let Err(err) =
+                        loop_handle.insert_source(source, |(config, _keys), (), _state| {
+                            if let Ok(config) = CosmicTk::get_entry(&config) {
+                                if cosmic::icon_theme::default() != config.icon_theme {
+                                    cosmic::icon_theme::set_default(config.icon_theme.clone());
+                                }
+
+                                cosmic::config::COSMIC_TK.with(move |tk| *tk.borrow_mut() = config);
+                            }
+                        })
+                    {
+                        warn!(?err, "Failed to watch com.system76.CosmicTk config");
+                    }
+                }
+                Err(err) => warn!(
+                    ?err,
+                    "failed to create config watch source for com.system76.CosmicTk"
+                ),
+            }
+        }
+
         // Source key bindings from com.system76.CosmicSettings.Shortcuts
-        let settings_context = shortcuts::context().unwrap();
+        let settings_context = shortcuts::context().expect("Failed to load shortcuts config");
         let system_actions = shortcuts::system_actions(&config);
         let mut shortcuts = shortcuts::shortcuts(&settings_context);
 
@@ -171,29 +197,40 @@ impl Config {
         key_bindings::add_default_bindings(&mut shortcuts, workspace.workspace_layout);
 
         // Listen for updates to the keybindings config.
-        let source = cosmic_config::calloop::ConfigWatchSource::new(&settings_context).expect(
-            "failed to create config watch source for com.system76.CosmicSettings.Shortcuts",
-        );
-        _ = loop_handle.insert_source(source, |(config, keys), (), state| {
-            for key in keys {
-                match key.as_str() {
-                    // Reload the keyboard shortcuts config.
-                    "custom" | "defaults" => {
-                        let mut shortcuts = shortcuts::shortcuts(&config);
-                        let layout =
-                            get_config::<WorkspaceConfig>(&config, "workspaces").workspace_layout;
-                        key_bindings::add_default_bindings(&mut shortcuts, layout);
-                        state.common.config.shortcuts = shortcuts;
-                    }
+        match cosmic_config::calloop::ConfigWatchSource::new(&settings_context) {
+            Ok(source) => {
+                if let Err(err) = loop_handle.insert_source(source, |(config, keys), (), state| {
+                    for key in keys {
+                        match key.as_str() {
+                            // Reload the keyboard shortcuts config.
+                            "custom" | "defaults" => {
+                                let mut shortcuts = shortcuts::shortcuts(&config);
+                                let layout = get_config::<WorkspaceConfig>(&config, "workspaces")
+                                    .workspace_layout;
+                                key_bindings::add_default_bindings(&mut shortcuts, layout);
+                                state.common.config.shortcuts = shortcuts;
+                            }
 
-                    "system_actions" => {
-                        state.common.config.system_actions = shortcuts::system_actions(&config);
-                    }
+                            "system_actions" => {
+                                state.common.config.system_actions =
+                                    shortcuts::system_actions(&config);
+                            }
 
-                    _ => (),
+                            _ => (),
+                        }
+                    }
+                }) {
+                    warn!(
+                        ?err,
+                        "Failed to watch com.system76.CosmicSettings.Shortcuts config"
+                    );
                 }
             }
-        });
+            Err(err) => warn!(
+                ?err,
+                "failed to create config watch source for com.system76.CosmicSettings.Shortcuts"
+            ),
+        };
 
         Config {
             dynamic_conf: Self::load_dynamic(xdg.as_ref()),
