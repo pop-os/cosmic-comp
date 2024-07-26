@@ -621,9 +621,9 @@ fn populate_modes(
         .iter()
         .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
         .copied()
-        .or(conn_info.modes().get(0))
+        .or(conn_info.modes().get(0).copied())
     else {
-        bail!("No mode found");
+        anyhow::bail!("No mode found");
     };
     let refresh_rate = drm_helpers::calculate_refresh_rate(mode);
     let output_mode = OutputMode {
