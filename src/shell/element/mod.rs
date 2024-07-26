@@ -830,7 +830,7 @@ impl CosmicMapped {
                 scale.x,
                 0.8,
             ) {
-                Ok(element) => vec![element.into()],
+                Ok(element) => vec![CosmicMappedRenderElement::from(element).into()],
                 Err(err) => {
                     debug!(?err, "Error rendering debug overlay.");
                     Vec::new()
