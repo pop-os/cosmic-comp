@@ -2,10 +2,10 @@ name: "Build"
 on:
   pull_request:
     branches:
-    - master_jammy
+    - master
   push:
     branches:
-    - master_jammy
+    - master
 jobs:
   build:
     runs-on: ubuntu-latest
