@@ -34,8 +34,8 @@ pub(super) fn primary_container_color(theme: &cosmic::cosmic_theme::Theme) -> Co
 
 /// The background color for the selected stack tab.
 pub(super) fn selected_state_color(theme: &cosmic::cosmic_theme::Theme) -> Color {
-    const SELECTED_STATE_DARK: Color = Color::from_rgba(0.302, 0.302, 0.302, 0.3);
-    const SELECTED_STATE_LIGHT: Color = Color::from_rgba(0.596, 0.596, 0.596, 0.2);
+    const SELECTED_STATE_DARK: Color = Color::from_rgba(0.195, 0.195, 0.195, 1.0);
+    const SELECTED_STATE_LIGHT: Color = Color::from_rgba(0.8344, 0.8344, 0.8344, 1.0);
 
     if theme.is_dark {
         SELECTED_STATE_DARK
@@ -231,7 +231,7 @@ impl<Message: TabMessage + 'static> Tab<Message> {
                 .padding([2, 4])
                 .center_y()
                 .into(),
-            tab_text(self.title)
+            tab_text(self.title, self.active)
                 .font(self.font)
                 .font_size(14.0)
                 .height(Length::Fill)

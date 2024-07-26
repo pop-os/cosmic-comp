@@ -14,8 +14,8 @@ use cosmic::{
 };
 
 /// Text in a stack tab with an overflow gradient.
-pub fn tab_text(text: String) -> TabText {
-    TabText::new(text)
+pub fn tab_text(text: String, selected: bool) -> TabText {
+    TabText::new(text, selected)
 }
 
 struct LocalState {
@@ -29,17 +29,19 @@ pub struct TabText {
     text: String,
     font: cosmic::font::Font,
     font_size: f32,
+    selected: bool,
     height: Length,
     width: Length,
 }
 
 impl TabText {
-    pub fn new(text: String) -> Self {
+    pub fn new(text: String, selected: bool) -> Self {
         TabText {
             width: Length::Shrink,
             height: Length::Shrink,
             font: cosmic::font::DEFAULT,
             font_size: 14.0,
+            selected,
             text,
         }
     }
@@ -146,7 +148,11 @@ impl<Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for TabText {
         });
 
         if state.overflowed {
-            let background = super::tab::primary_container_color(theme.cosmic());
+            let background = if self.selected {
+                super::tab::selected_state_color(theme.cosmic())
+            } else {
+                super::tab::primary_container_color(theme.cosmic())
+            };
             let transparent = Color {
                 a: 0.0,
                 ..background

@@ -119,8 +119,9 @@ pub trait Program {
         pixels: &mut tiny_skia::PixmapMut<'_>,
         damage: &[Rectangle<i32, BufferCoords>],
         scale: f32,
+        theme: &cosmic::Theme,
     ) {
-        let _ = (pixels, damage, scale);
+        let _ = (pixels, damage, scale, theme);
     }
 }
 
@@ -881,6 +882,7 @@ where
                 let state_ref = &internal_ref.state;
                 let mut clip_mask = tiny_skia::Mask::new(size.w as u32, size.h as u32).unwrap();
                 let overlay = internal_ref.debug.overlay();
+                let theme = &internal_ref.theme;
 
                 buffer
                     .render()
@@ -930,10 +932,12 @@ where
                                 })
                                 .collect::<Vec<_>>();
 
-                            state_ref
-                                .program()
-                                .0
-                                .foreground(&mut pixels, &damage, scale.x as f32);
+                            state_ref.program().0.foreground(
+                                &mut pixels,
+                                &damage,
+                                scale.x as f32,
+                                theme,
+                            );
 
                             Result::<_, ()>::Ok(damage)
                         })

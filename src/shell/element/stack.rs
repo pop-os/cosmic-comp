@@ -21,7 +21,7 @@ use cosmic::{
     iced_core::{border::Radius, Background, Border, Color, Length},
     iced_runtime::Command,
     iced_widget::scrollable::AbsoluteOffset,
-    theme, widget as cosmic_widget, Apply, Element as CosmicElement,
+    theme, widget as cosmic_widget, Apply, Element as CosmicElement, Theme,
 };
 use cosmic_settings_config::shortcuts;
 use once_cell::sync::Lazy;
@@ -969,6 +969,7 @@ impl Program for CosmicStackInternal {
         pixels: &mut tiny_skia::PixmapMut<'_>,
         damage: &[Rectangle<i32, Buffer>],
         scale: f32,
+        theme: &Theme,
     ) {
         if self.group_focused.load(Ordering::SeqCst) {
             let border = Rectangle::from_loc_and_size(
@@ -977,7 +978,7 @@ impl Program for CosmicStackInternal {
             );
 
             let mut paint = tiny_skia::Paint::default();
-            let (b, g, r, a) = theme::COSMIC_DARK.accent_color().into_components();
+            let (b, g, r, a) = theme.cosmic().accent_color().into_components();
             paint.set_color(tiny_skia::Color::from_rgba(r, g, b, a).unwrap());
 
             for rect in damage {

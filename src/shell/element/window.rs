@@ -14,7 +14,7 @@ use crate::{
     },
 };
 use calloop::LoopHandle;
-use cosmic::{config::Density, iced::Command, widget::mouse_area, Apply};
+use cosmic::{config::Density, iced::Command, widget::mouse_area, Apply, Theme};
 use smithay::{
     backend::{
         input::KeyState,
@@ -496,6 +496,7 @@ impl Program for CosmicWindowInternal {
         pixels: &mut tiny_skia::PixmapMut<'_>,
         _damage: &[Rectangle<i32, BufferCoords>],
         scale: f32,
+        _theme: &Theme,
     ) {
         let mut mask = self.mask.lock().unwrap();
         if self.window.is_maximized(false) {
