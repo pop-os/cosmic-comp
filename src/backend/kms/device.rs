@@ -616,12 +616,15 @@ fn populate_modes(
 ) -> Result<()> {
     let conn_info = drm.get_connector(conn, false)?;
     let max_bpc = drm_helpers::get_max_bpc(drm, conn)?.map(|(_val, range)| range.end.min(16));
-    let mode = conn_info
+    let Some(mode) = conn_info
         .modes()
         .iter()
         .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
         .copied()
-        .unwrap_or(conn_info.modes()[0]);
+        .or(conn_info.modes().get(0))
+    else {
+        bail!("No mode found");
+    };
     let refresh_rate = drm_helpers::calculate_refresh_rate(mode);
     let output_mode = OutputMode {
         size: (mode.size().0 as i32, mode.size().1 as i32).into(),
