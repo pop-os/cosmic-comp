@@ -886,9 +886,8 @@ impl State {
                                                     },
                                                 );
                                             }
-                                        } else {
-                                            under = Some(target);
                                         }
+                                        under = Some(target);
                                     } else {
                                         let layers = layer_map_for_output(&output);
                                         if let Some(layer) = layers
