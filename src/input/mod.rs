@@ -386,6 +386,8 @@ impl State {
                                             )));
                                         }
                                     }
+                                    
+                                    std::mem::drop(shell);
 
                                     // cancel grabs
                                     if is_grabbed
@@ -435,8 +437,7 @@ impl State {
                                     }
 
                                     // handle the rest of the global shortcuts
-                                    let mut intercepted = false;
-                                    let mut can_clear_modifiers_shortcut = true;
+                                    let mut clear_queue = true;
                                     if !shortcuts_inhibited {
                                         let modifiers_queue = seat.modifiers_shortcut_queue();
 
@@ -447,29 +448,33 @@ impl State {
                                                 continue;
                                             }
 
-                                            let modifiers_bypass = binding.key.is_none()
+                                            // is this a released (triggered) modifier-only binding?
+                                            if binding.key.is_none()
                                                 && state == KeyState::Released
                                                 && !cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
-                                                && modifiers_queue.take(binding);
-
-                                            if !modifiers_bypass && binding.key.is_none() && state == KeyState::Pressed && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers) {
-                                                modifiers_queue.set(binding.clone());
-                                                can_clear_modifiers_shortcut = false;
-                                                intercepted = true;
-                                            }
-
-                                            if (
-                                                    binding.key.is_some()
-                                                    && state == KeyState::Pressed
-                                                    && handle.raw_syms().contains(&binding.key.unwrap())
-                                                    && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
-                                                ) || modifiers_bypass
+                                                && modifiers_queue.take(binding)
                                             {
                                                 modifiers_queue.clear();
-                                                // only suppress if the action is on Press
-                                                if !modifiers_bypass {
-                                                    seat.supressed_keys().add(&handle, None);
-                                                }
+                                                return FilterResult::Intercept(Some((
+                                                    Action::Shortcut(action.clone()),
+                                                    binding.clone(),
+                                                )));
+                                            }
+
+                                            // could this potentially become a modifier-only binding?
+                                            if binding.key.is_none() && state == KeyState::Pressed && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers) {
+                                                modifiers_queue.set(binding.clone());
+                                                clear_queue = false;
+                                            }
+
+                                            // is this a normal binding?
+                                            if binding.key.is_some()
+                                                && state == KeyState::Pressed
+                                                && handle.raw_syms().contains(&binding.key.unwrap())
+                                                && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
+                                            {
+                                                modifiers_queue.clear();
+                                                seat.supressed_keys().add(&handle, None);
                                                 return FilterResult::Intercept(Some((
                                                     Action::Shortcut(action.clone()),
                                                     binding.clone(),
@@ -478,21 +483,20 @@ impl State {
                                         }
                                     }
 
-                                    if can_clear_modifiers_shortcut {
+                                    // no binding
+                                    if clear_queue {
                                         seat.modifiers_shortcut_queue().clear();
                                     }
-
                                     // keys are passed through to apps
-                                    std::mem::drop(shell);
-                                    if intercepted {
-                                        FilterResult::Intercept(None)
-                                    } else {
-                                        FilterResult::Forward
-                                    }
+                                    FilterResult::Forward
                                 },
                             )
                             .flatten()
                         {
+                            if pattern.key.is_none() && state == KeyState::Released {
+                                // we still want to send release-events and not have apps stuck on some modifiers.
+                                keyboard.input(self, keycode, state, serial, time, |_, _, _| FilterResult::<()>::Forward);
+                            }
                             self.handle_action(action, &seat, serial, time, pattern, None, true)
                         }
                 }
