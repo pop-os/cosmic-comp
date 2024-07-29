@@ -119,4 +119,5 @@ inherits = "release"
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = {git = "https://github.com/smithay//smithay", rev = "aa5ea75"}
+# smithay = {git = "https://github.com/smithay//smithay", rev = "aa5ea75"}
+smithay = {git = "https://github.com/cmeissl/smithay", branch = "feature/tracy_gpu_profiling" }
