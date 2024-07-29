@@ -5,6 +5,8 @@
 pub use input::{AccelProfile, ClickMethod, ScrollMethod, TapButtonMap};
 use serde::{Deserialize, Serialize};
 
+// Note: For the following values, None is used to represent the system default
+/// Configuration for input devices
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct InputConfig {
     pub state: DeviceState,
@@ -29,6 +31,10 @@ pub struct InputConfig {
     pub tap_config: Option<TapConfig>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub map_to_output: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub focus_follows_cursor: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub cursor_follows_focus: Option<bool>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]

@@ -161,6 +161,7 @@ impl Item {
     }
 }
 
+/// Menu that comes up when right-clicking an application header bar
 pub struct ContextMenu {
     items: Vec<Item>,
     selected: AtomicBool,
