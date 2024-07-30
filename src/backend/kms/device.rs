@@ -15,7 +15,7 @@ use smithay::{
         egl::{context::ContextPriority, EGLContext, EGLDevice, EGLDisplay},
         session::Session,
     },
-    output::{Mode as OutputMode, Output, PhysicalProperties, Subpixel},
+    output::{Mode as OutputMode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
         calloop::{LoopHandle, RegistrationToken},
         drm::control::{connector, crtc, Device as ControlDevice, ModeTypeFlags},
@@ -625,6 +625,32 @@ fn populate_modes(
     else {
         anyhow::bail!("No mode found");
     };
+    let scale = conn_info
+        .size()
+        // convert to inches
+        .map(|(w_mm, h_mm)| (w_mm as f64 / 25.4, h_mm as f64 / 25.4))
+        // guard against div by 0
+        .filter(|(w_mm, h_mm)| *w_mm != 0.0 && *h_mm != 0.0)
+        // calculate dpi
+        .map(|(w_in, h_in)| (mode.size().0 as f64 / w_in + mode.size().1 as f64 / h_in) / 2.0)
+        // to u32
+        .map(|dpi| dpi.round() as u32)
+        // round to next lower 25%
+        .map(|dpi| dpi.next_multiple_of(25).saturating_sub(25))
+        // limit max and min
+        .map(|dpi| {
+            dpi.max(100).min(match mode.size().1 {
+                x if x < 900 => 100,
+                x if x < 1080 => 125,
+                x if x < 1440 => 150,
+                x if x < 1600 => 175,
+                _ => 200,
+            })
+        })
+        // to scale
+        .map(|dpi| dpi as f64 / 96.0)
+        .unwrap_or(1.0);
+
     let refresh_rate = drm_helpers::calculate_refresh_rate(mode);
     let output_mode = OutputMode {
         size: (mode.size().0 as i32, mode.size().1 as i32).into(),
@@ -644,7 +670,7 @@ fn populate_modes(
         Some(output_mode),
         // TODO: Readout property for monitor rotation
         Some(Transform::Normal),
-        None,
+        Some(Scale::Fractional(scale)),
         Some(Point::from((position.0 as i32, position.1 as i32))),
     );
 
@@ -657,6 +683,7 @@ fn populate_modes(
         mode: ((output_mode.size.w, output_mode.size.h), Some(refresh_rate)),
         position,
         max_bpc,
+        scale,
         ..std::mem::take(&mut *output_config)
     };
 
