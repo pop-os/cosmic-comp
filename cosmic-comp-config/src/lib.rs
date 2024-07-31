@@ -30,7 +30,19 @@ impl Default for CosmicCompConfig {
         Self {
             workspaces: Default::default(),
             input_default: Default::default(),
-            input_touchpad: Default::default(),
+            // By default, enable tap-to-click and disable-while-typing.
+            input_touchpad: input::InputConfig {
+                state: input::DeviceState::Enabled,
+                click_method: Some(input::ClickMethod::Clickfinger),
+                disable_while_typing: Some(true),
+                tap_config: Some(input::TapConfig {
+                    enabled: true,
+                    button_map: Some(input::TapButtonMap::LeftRightMiddle),
+                    drag: true,
+                    drag_lock: false,
+                }),
+                ..Default::default()
+            },
             input_devices: Default::default(),
             xkb_config: Default::default(),
             autotile: Default::default(),
