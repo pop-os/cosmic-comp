@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::sync::Mutex;
+use std::{collections::HashSet, sync::Mutex};
 
 use smithay::{
     output::Output,
     reexports::wayland_server::{
         backend::{ClientId, GlobalId},
-        protocol::wl_surface::WlSurface,
+        protocol::{wl_output::WlOutput, wl_surface::WlSurface},
         Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, Weak,
     },
     utils::{user_data::UserDataMap, IsAlive, Logical, Rectangle},
@@ -59,6 +59,7 @@ pub(super) type ToplevelState = Mutex<ToplevelStateInner>;
 
 pub struct ToplevelHandleStateInner<W: Window> {
     outputs: Vec<Output>,
+    wl_outputs: HashSet<WlOutput>,
     workspaces: Vec<WorkspaceHandle>,
     title: String,
     app_id: String,
@@ -71,6 +72,7 @@ impl<W: Window> ToplevelHandleStateInner<W> {
     fn from_window(window: &W) -> ToplevelHandleState<W> {
         ToplevelHandleState::new(ToplevelHandleStateInner {
             outputs: Vec::new(),
+            wl_outputs: HashSet::new(),
             workspaces: Vec::new(),
             title: String::new(),
             app_id: String::new(),
@@ -399,27 +401,29 @@ fn send_toplevel_to_client<D, W: 'static>(
     }
 
     if let Ok(client) = dh.get_client(instance.id()) {
-        for new_output in state
-            .outputs
-            .iter()
-            .filter(|o| !handle_state.outputs.contains(o))
-        {
-            for wl_output in new_output.client_outputs(&client) {
-                instance.output_enter(&wl_output);
-            }
-            changed = true;
-        }
-        for old_output in handle_state
-            .outputs
-            .iter()
-            .filter(|o| !state.outputs.contains(o))
-        {
-            for wl_output in old_output.client_outputs(&client) {
-                instance.output_leave(&wl_output);
-            }
-            changed = true;
-        }
         handle_state.outputs = state.outputs.clone();
+
+        let handle_state = &mut *handle_state;
+        for output in &handle_state.outputs {
+            for wl_output in output.client_outputs(&client) {
+                if handle_state.wl_outputs.insert(wl_output.clone()) {
+                    instance.output_enter(&wl_output);
+                    changed = true;
+                }
+            }
+        }
+        handle_state.wl_outputs.retain(|wl_output| {
+            let retain = wl_output.is_alive()
+                && handle_state
+                    .outputs
+                    .iter()
+                    .any(|output| output.owns(wl_output));
+            if !retain {
+                instance.output_leave(&wl_output);
+                changed = true;
+            }
+            retain
+        });
     }
 
     for new_workspace in state
