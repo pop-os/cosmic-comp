@@ -50,7 +50,7 @@ use smithay::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
             GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
-            RelativeMotionEvent,
+            PointerGrab, RelativeMotionEvent,
         },
         touch::{DownEvent, MotionEvent as TouchMotionEvent, UpEvent},
         Seat,
@@ -386,7 +386,7 @@ impl State {
                                             )));
                                         }
                                     }
-                                    
+
                                     std::mem::drop(shell);
 
                                     // cancel grabs
@@ -850,35 +850,21 @@ impl State {
                                                 target.toplevel().map(Cow::into_owned)
                                             {
                                                 let seat_clone = seat.clone();
+                                                let button = PointerButtonEvent::button(&event);
                                                 self.common.event_loop_handle.insert_idle(
                                                     move |state| {
-                                                        let mut shell =
-                                                            state.common.shell.write().unwrap();
-                                                        let res = shell.move_request(
-                                                            &surface,
-                                                            &seat_clone,
-                                                            serial,
-                                                            ReleaseMode::NoMouseButtons,
-                                                            false,
-                                                            &state.common.config,
-                                                            &state.common.event_loop_handle,
-                                                            &state.common.xdg_activation_state,
-                                                        );
-                                                        if let Some((target, focus)) = res {
-                                                            seat_clone
-                                                                .modifiers_shortcut_queue()
-                                                                .clear();
+                                                        fn dispatch_grab<G: PointerGrab<State> + 'static>(
+                                                            grab: Option<(G, smithay::input::pointer::Focus)>,
+                                                            seat: Seat<State>,
+                                                            serial: Serial,
+                                                            state: &mut State)
+                                                        {
+                                                            if let Some((target, focus)) = grab {
+                                                                seat
+                                                                    .modifiers_shortcut_queue()
+                                                                    .clear();
 
-                                                            std::mem::drop(shell);
-                                                            if target.is_touch_grab() {
-                                                                seat_clone
-                                                                    .get_touch()
-                                                                    .unwrap()
-                                                                    .set_grab(
-                                                                        state, target, serial,
-                                                                    );
-                                                            } else {
-                                                                seat_clone
+                                                                seat
                                                                     .get_pointer()
                                                                     .unwrap()
                                                                     .set_grab(
@@ -886,6 +872,52 @@ impl State {
                                                                         focus,
                                                                     );
                                                             }
+                                                        }
+
+                                                        let mut shell =
+                                                            state.common.shell.write().unwrap();
+                                                        if let Some(button) = button {
+                                                            match button {
+                                                                smithay::backend::input::MouseButton::Left => {
+                                                                   let res = shell.move_request(
+                                                                        &surface,
+                                                                        &seat_clone,
+                                                                        serial,
+                                                                        ReleaseMode::NoMouseButtons,
+                                                                        false,
+                                                                        &state.common.config,
+                                                                        &state.common.event_loop_handle,
+                                                                        &state.common.xdg_activation_state,
+                                                                    );
+                                                                    drop(shell);
+                                                                    dispatch_grab(res, seat_clone, serial, state);
+                                                                },
+                                                                smithay::backend::input::MouseButton::Right => {
+                                                                    let Some(target_elem) = shell.element_for_surface(&surface) else { return };
+                                                                    let Some(geom) = shell
+                                                                        .space_for(target_elem)
+                                                                        .and_then(|f| f.element_geometry(target_elem)) else { return };
+                                                                    let geom = geom.to_f64();
+                                                                    let center = geom.loc + geom.size.downscale(2.0);
+                                                                    let offset = center.to_global(&output) - pos;
+                                                                    let edge = match (offset.x > 0.0, offset.y > 0.0) {
+                                                                        (true, true) => ResizeEdge::TOP_LEFT,
+                                                                        (false, true) => ResizeEdge::TOP_RIGHT,
+                                                                        (true, false) => ResizeEdge::BOTTOM_LEFT,
+                                                                        (false, false) => ResizeEdge::BOTTOM_RIGHT
+                                                                    };
+                                                                    let res = shell.resize_request(
+                                                                        &surface,
+                                                                        &seat_clone,
+                                                                        serial,
+                                                                        edge
+                                                                    );
+                                                                    drop(shell);
+                                                                    dispatch_grab(res, seat_clone, serial, state);
+                                                                },
+                                                                _ => {},
+                                                            }
+
                                                         }
                                                     },
                                                 );
