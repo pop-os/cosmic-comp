@@ -397,7 +397,7 @@ impl CosmicSurface {
                 }
             }),
             WindowSurface::X11(surface) => {
-                let _ = surface.set_minimized(suspended);
+                let _ = surface.set_suspended(suspended);
             }
         }
     }

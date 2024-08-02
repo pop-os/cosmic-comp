@@ -84,7 +84,7 @@ features = [
   "xwayland",
 ]
 git = "https://github.com/smithay/smithay.git"
-rev = "74ef59a3f"
+rev = "e7f0857"
 version = "0.3"
 
 [dependencies.smithay-egui]
@@ -119,4 +119,4 @@ inherits = "release"
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = {git = "https://github.com/smithay//smithay", rev = "c6aab18"}
+smithay = { git = "https://github.com/smithay//smithay", rev = "e7f0857" }
