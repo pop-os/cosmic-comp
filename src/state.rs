@@ -9,6 +9,7 @@ use crate::{
     wayland::protocols::{
         drm::WlDrmState,
         image_source::ImageSourceState,
+        keymap::KeymapState,
         output_configuration::OutputConfigurationState,
         screencopy::ScreencopyState,
         toplevel_info::ToplevelInfoState,
@@ -458,6 +459,7 @@ impl State {
         TextInputManagerState::new::<Self>(&dh);
         VirtualKeyboardManagerState::new::<State, _>(&dh, client_is_privileged);
         AlphaModifierState::new::<Self>(&dh);
+        KeymapState::new::<State, _>(&dh, client_is_privileged);
 
         let idle_notifier_state = IdleNotifierState::<Self>::new(&dh, handle.clone());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(&dh);

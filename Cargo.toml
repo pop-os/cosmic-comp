@@ -17,7 +17,8 @@ bytemuck = "1.12"
 calloop = {version = "0.14.0", features = ["executor"]}
 cosmic-comp-config = {path = "cosmic-comp-config"}
 cosmic-config = {git = "https://github.com/pop-os/libcosmic/", features = ["calloop", "macro"]}
-cosmic-protocols = {git = "https://github.com/pop-os/cosmic-protocols", branch = "main", default-features = false, features = ["server"]}
+# cosmic-protocols = {git = "https://github.com/pop-os/cosmic-protocols", branch = "main", default-features = false, features = ["server"]}
+cosmic-protocols = {git = "https://github.com/pop-os/cosmic-protocols", branch = "keymap", default-features = false, features = ["server"]}
 cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daemon" }
 edid-rs = {version = "0.1"}
 egui = {version = "0.23.0", optional = true}
@@ -119,4 +120,5 @@ inherits = "release"
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = {git = "https://github.com/smithay//smithay", rev = "c6aab18"}
+#smithay = {git = "https://github.com/smithay//smithay", rev = "c6aab18"}
+smithay = {git = "https://github.com/ids1024/smithay", branch = "from_resource"}

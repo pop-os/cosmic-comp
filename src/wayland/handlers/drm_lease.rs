@@ -57,7 +57,8 @@ impl DrmLeaseHandler for State {
                     })
                     .ok_or_else(LeaseRejected::default)?;
                 builder.add_plane(primary_plane.handle, primary_plane_claim);
-                if let Some((cursor, claim)) = planes.cursor.and_then(|plane| {
+                // XXX
+                if let Some((cursor, claim)) = planes.cursor.first().and_then(|plane| {
                     backend
                         .drm
                         .claim_plane(plane.handle, *crtc)
