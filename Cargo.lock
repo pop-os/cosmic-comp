@@ -885,7 +885,7 @@ dependencies = [
 [[package]]
 name = "cosmic-config"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/libcosmic/#9e344b15c31ede67e0f79508108aa117d366eefa"
+source = "git+https://github.com/pop-os/libcosmic/#1ad6877cb14167e115a0070f7bff6e4bf028398b"
 dependencies = [
  "atomicwrites",
  "calloop 0.14.0",
@@ -904,7 +904,7 @@ dependencies = [
 [[package]]
 name = "cosmic-config-derive"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/libcosmic/#9e344b15c31ede67e0f79508108aa117d366eefa"
+source = "git+https://github.com/pop-os/libcosmic/#1ad6877cb14167e115a0070f7bff6e4bf028398b"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -926,7 +926,7 @@ dependencies = [
 [[package]]
 name = "cosmic-settings-config"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-settings-daemon#54700dfee57d1569efb2179896e36d754c2bf270"
+source = "git+https://github.com/pop-os/cosmic-settings-daemon#362c77f9faaeb7f1b9e4aa79a7d5588001f04874"
 dependencies = [
  "cosmic-config",
  "serde",
@@ -2321,7 +2321,7 @@ dependencies = [
 [[package]]
 name = "iced_core"
 version = "0.12.0"
-source = "git+https://github.com/pop-os/libcosmic/#9e344b15c31ede67e0f79508108aa117d366eefa"
+source = "git+https://github.com/pop-os/libcosmic/#1ad6877cb14167e115a0070f7bff6e4bf028398b"
 dependencies = [
  "bitflags 2.6.0",
  "dnd",
@@ -2341,7 +2341,7 @@ dependencies = [
 [[package]]
 name = "iced_futures"
 version = "0.12.0"
-source = "git+https://github.com/pop-os/libcosmic/#9e344b15c31ede67e0f79508108aa117d366eefa"
+source = "git+https://github.com/pop-os/libcosmic/#1ad6877cb14167e115a0070f7bff6e4bf028398b"
 dependencies = [
  "futures",
  "iced_core",
