@@ -165,16 +165,27 @@ impl Config {
 
         // Listen for updates to the toolkit config
         if let Ok(tk_config) = cosmic_config::Config::new("com.system76.CosmicTk", 1) {
+            fn handle_new_toolkit_config(config: CosmicTk, state: &mut State) {
+                let mut workspace_guard = state.common.workspace_state.update();
+                state.common.shell.write().unwrap().update_toolkit(
+                    config,
+                    &state.common.xdg_activation_state,
+                    &mut workspace_guard,
+                );
+            }
+
+            if let Ok(config) = CosmicTk::get_entry(&tk_config) {
+                let _ = loop_handle.insert_idle(move |state| {
+                    handle_new_toolkit_config(config, state);
+                });
+            }
+
             match cosmic_config::calloop::ConfigWatchSource::new(&tk_config) {
                 Ok(source) => {
                     if let Err(err) =
-                        loop_handle.insert_source(source, |(config, _keys), (), _state| {
+                        loop_handle.insert_source(source, |(config, _keys), (), state| {
                             if let Ok(config) = CosmicTk::get_entry(&config) {
-                                if cosmic::icon_theme::default() != config.icon_theme {
-                                    cosmic::icon_theme::set_default(config.icon_theme.clone());
-                                }
-
-                                cosmic::config::COSMIC_TK.with(move |tk| *tk.borrow_mut() = config);
+                                handle_new_toolkit_config(config, state);
                             }
                         })
                     {

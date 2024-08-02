@@ -14,7 +14,12 @@ use crate::{
     },
 };
 use calloop::LoopHandle;
-use cosmic::{config::Density, iced::Command, widget::mouse_area, Apply, Theme};
+use cosmic::{
+    config::Density,
+    iced::{Color, Command},
+    widget::mouse_area,
+    Apply,
+};
 use smithay::{
     backend::{
         input::KeyState,
@@ -44,7 +49,7 @@ use smithay::{
     output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     render_elements,
-    utils::{Buffer as BufferCoords, IsAlive, Logical, Point, Rectangle, Serial, Size},
+    utils::{IsAlive, Logical, Point, Rectangle, Serial, Size},
     wayland::seat::WaylandFocus,
 };
 use std::{
@@ -77,7 +82,6 @@ impl fmt::Debug for CosmicWindow {
 #[derive(Clone)]
 pub struct CosmicWindowInternal {
     pub(super) window: CosmicSurface,
-    mask: Arc<Mutex<Option<tiny_skia::Mask>>>,
     activated: Arc<AtomicBool>,
     /// TODO: This needs to be per seat
     pointer_entered: Arc<AtomicU8>,
@@ -191,7 +195,6 @@ impl CosmicWindow {
         CosmicWindow(IcedElement::new(
             CosmicWindowInternal {
                 window,
-                mask: Arc::new(Mutex::new(None)),
                 activated: Arc::new(AtomicBool::new(false)),
                 pointer_entered: Arc::new(AtomicU8::new(0)),
                 last_seat: Arc::new(Mutex::new(None)),
@@ -225,7 +228,6 @@ impl CosmicWindow {
             );
             p.window
                 .set_geometry(Rectangle::from_loc_and_size(loc, size));
-            p.mask.lock().unwrap().take();
         });
     }
 
@@ -491,45 +493,11 @@ impl Program for CosmicWindowInternal {
         Command::none()
     }
 
-    fn foreground(
-        &self,
-        pixels: &mut tiny_skia::PixmapMut<'_>,
-        _damage: &[Rectangle<i32, BufferCoords>],
-        scale: f32,
-        _theme: &Theme,
-    ) {
-        let mut mask = self.mask.lock().unwrap();
+    fn background_color(&self, theme: &cosmic::Theme) -> Color {
         if self.window.is_maximized(false) {
-            mask.take();
-        } else if mask.is_none() {
-            let (w, h) = (pixels.width(), pixels.height());
-            let mut new_mask = tiny_skia::Mask::new(w, h).unwrap();
-
-            let mut pb = tiny_skia::PathBuilder::new();
-            let radius = 8. * scale;
-            let (w, h) = (w as f32, h as f32);
-
-            pb.move_to(0., h); // lower-left
-
-            // upper-left rounded corner
-            pb.line_to(0., radius);
-            pb.quad_to(0., 0., radius, 0.);
-
-            // upper-right rounded corner
-            pb.line_to(w - radius, 0.);
-            pb.quad_to(w, 0., w, radius);
-
-            pb.line_to(w, h); // lower-right
-
-            let path = pb.finish().unwrap();
-            new_mask.fill_path(
-                &path,
-                tiny_skia::FillRule::EvenOdd,
-                true,
-                Default::default(),
-            );
-
-            *mask = Some(new_mask);
+            theme.cosmic().background.base.into()
+        } else {
+            Color::TRANSPARENT
         }
     }
 

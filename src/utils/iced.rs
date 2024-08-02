@@ -110,7 +110,7 @@ pub trait Program {
     }
     fn view(&self) -> cosmic::Element<'_, Self::Message>;
 
-    fn background_color(&self) -> Color {
+    fn background_color(&self, _theme: &cosmic::Theme) -> Color {
         Color::TRANSPARENT
     }
 
@@ -892,7 +892,7 @@ where
                                 .expect("Failed to create pixel map");
 
                         renderer.with_primitives(|backend, primitives| {
-                            let background_color = state_ref.program().0.background_color();
+                            let background_color = state_ref.program().0.background_color(theme);
                             let bounds = IcedSize::new(size.w as u32, size.h as u32);
                             let viewport = Viewport::with_physical_size(bounds, scale.x);
 
