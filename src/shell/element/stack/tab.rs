@@ -132,7 +132,6 @@ impl From<TabBackgroundTheme> for theme::Container {
 
 pub trait TabMessage: Clone {
     fn activate(idx: usize) -> Self;
-    fn is_activate(&self) -> Option<usize>;
 
     fn scroll_further() -> Self;
     fn scroll_back() -> Self;

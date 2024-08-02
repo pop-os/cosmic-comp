@@ -657,13 +657,6 @@ impl TabMessage for Message {
         Message::Activate(idx)
     }
 
-    fn is_activate(&self) -> Option<usize> {
-        match self {
-            Message::Activate(idx) => Some(*idx),
-            _ => None,
-        }
-    }
-
     fn scroll_back() -> Self {
         Message::ScrollBack
     }
