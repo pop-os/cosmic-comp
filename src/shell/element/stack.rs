@@ -929,38 +929,39 @@ impl Program for CosmicStackInternal {
                 .into(),
         ];
 
+        let radius = if windows[active].is_maximized(false) {
+            Radius::from(0.0)
+        } else {
+            Radius::from([8.0, 8.0, 0.0, 0.0])
+        };
+        let group_focused = self.group_focused.load(Ordering::SeqCst);
+
         iced_widget::row(elements)
             .height(TAB_HEIGHT as u16)
             .width(Length::Fill) //width as u16)
             .apply(iced_widget::container)
             .center_y()
-            .style(if self.group_focused.load(Ordering::SeqCst) {
-                theme::Container::custom(|theme| iced_widget::container::Appearance {
-                    icon_color: Some(Color::from(theme.cosmic().background.on)),
-                    text_color: Some(Color::from(theme.cosmic().background.on)),
-                    background: Some(Background::Color(theme.cosmic().accent_color().into())),
-                    border: Border {
-                        radius: Radius::from([8.0, 8.0, 0.0, 0.0]),
-                        width: 0.0,
-                        color: Color::TRANSPARENT,
-                    },
-                    shadow: Default::default(),
-                })
-            } else {
-                theme::Container::custom(|theme| iced_widget::container::Appearance {
-                    icon_color: Some(Color::from(theme.cosmic().background.on)),
-                    text_color: Some(Color::from(theme.cosmic().background.on)),
-                    background: Some(Background::Color(tab::primary_container_color(
+            .style(theme::Container::custom(move |theme| {
+                let background = if group_focused {
+                    Some(Background::Color(theme.cosmic().accent_color().into()))
+                } else {
+                    Some(Background::Color(tab::primary_container_color(
                         theme.cosmic(),
-                    ))),
+                    )))
+                };
+
+                iced_widget::container::Appearance {
+                    icon_color: Some(Color::from(theme.cosmic().background.on)),
+                    text_color: Some(Color::from(theme.cosmic().background.on)),
+                    background,
                     border: Border {
-                        radius: Radius::from([8.0, 8.0, 0.0, 0.0]),
+                        radius,
                         width: 0.0,
                         color: Color::TRANSPARENT,
                     },
                     shadow: Default::default(),
-                })
-            })
+                }
+            }))
             .into()
     }
 
