@@ -1028,9 +1028,7 @@ impl Workspaces {
             s.sticky_layer.theme = theme.clone();
             s.sticky_layer.mapped().for_each(|m| {
                 m.update_theme(theme.clone());
-                m.force_redraw();
             });
-            s.sticky_layer.refresh();
 
             for w in &mut s.workspaces {
                 w.tiling_layer.theme = theme.clone();
@@ -1038,6 +1036,22 @@ impl Workspaces {
 
                 w.mapped().for_each(|m| {
                     m.update_theme(theme.clone());
+                });
+            }
+        }
+
+        self.force_redraw(xdg_activation_state);
+    }
+
+    pub fn force_redraw(&mut self, xdg_activation_state: &XdgActivationState) {
+        for (_, s) in &mut self.sets {
+            s.sticky_layer.mapped().for_each(|m| {
+                m.force_redraw();
+            });
+            s.sticky_layer.refresh();
+
+            for w in &mut s.workspaces {
+                w.mapped().for_each(|m| {
                     m.force_redraw();
                 });
 
@@ -3310,6 +3324,25 @@ impl Shell {
         let maybe_window = workspace.focus_stack.get(seat).iter().next().cloned();
         if let Some(mapped) = maybe_window {
             self.toggle_sticky(seat, &mapped);
+        }
+    }
+
+    pub fn update_toolkit(
+        &mut self,
+        toolkit: cosmic::config::CosmicTk,
+        xdg_activation_state: &XdgActivationState,
+        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+    ) {
+        if cosmic::icon_theme::default() != toolkit.icon_theme {
+            cosmic::icon_theme::set_default(toolkit.icon_theme.clone());
+        }
+
+        let mut container = cosmic::config::COSMIC_TK.lock().unwrap();
+        if &*container != &toolkit {
+            *container = toolkit;
+            drop(container);
+            self.refresh(xdg_activation_state, workspace_state);
+            self.workspaces.force_redraw(xdg_activation_state);
         }
     }
 
