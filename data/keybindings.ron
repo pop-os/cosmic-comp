@@ -87,7 +87,7 @@
     (modifiers: [], key: "XF86AudioMicMute"): System(MuteMic),
     (modifiers: [], key: "XF86MonBrightnessUp"): System(BrightnessUp),
     (modifiers: [], key: "XF86MonBrightnessDown"): System(BrightnessDown),
-    (modifiers: [], key: "XF86AudioPlayPause"): System(PlayPause),
+    (modifiers: [], key: "XF86AudioPlay"): System(PlayPause),
     (modifiers: [], key: "XF86AudioPrev"): System(PlayPrev),
     (modifiers: [], key: "XF86AudioNext"): System(PlayNext),
 }
