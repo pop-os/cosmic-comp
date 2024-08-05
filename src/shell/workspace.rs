@@ -1,7 +1,7 @@
 use crate::{
     backend::render::{
-        element::{AsGlowFrame, AsGlowRenderer},
-        BackdropShader, GlMultiError, GlMultiFrame, GlMultiRenderer, SplitRenderElements,
+        element::{AsGlowRenderer, FromGlesError},
+        BackdropShader, SplitRenderElements,
     },
     shell::{
         layout::{floating::FloatingLayout, tiling::TilingLayout},
@@ -29,8 +29,8 @@ use smithay::{
             surface::WaylandSurfaceRenderElement, texture::TextureRenderElement,
             utils::RescaleRenderElement, Element, Id, RenderElement,
         },
-        gles::{GlesError, GlesTexture},
-        glow::{GlowFrame, GlowRenderer},
+        gles::GlesTexture,
+        glow::GlowRenderer,
         utils::{DamageSet, OpaqueRegions},
         ImportAll, ImportMem, Renderer,
     },
@@ -1333,57 +1333,20 @@ where
     }
 }
 
-impl RenderElement<GlowRenderer> for WorkspaceRenderElement<GlowRenderer> {
+impl<R> RenderElement<R> for WorkspaceRenderElement<R>
+where
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    <R as Renderer>::TextureId: 'static,
+    <R as Renderer>::Error: FromGlesError,
+{
     fn draw<'frame>(
         &self,
-        frame: &mut GlowFrame<'frame>,
+        frame: &mut R::Frame<'frame>,
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, smithay::utils::Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
-    ) -> Result<(), GlesError> {
-        match self {
-            WorkspaceRenderElement::OverrideRedirect(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
-            }
-            WorkspaceRenderElement::Fullscreen(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
-            }
-            WorkspaceRenderElement::FullscreenPopup(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
-            }
-            WorkspaceRenderElement::Window(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
-            }
-            WorkspaceRenderElement::Backdrop(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage, opaque_regions)
-            }
-        }
-    }
-
-    fn underlying_storage(
-        &self,
-        renderer: &mut GlowRenderer,
-    ) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
-        match self {
-            WorkspaceRenderElement::OverrideRedirect(elem) => elem.underlying_storage(renderer),
-            WorkspaceRenderElement::Fullscreen(elem) => elem.underlying_storage(renderer),
-            WorkspaceRenderElement::FullscreenPopup(elem) => elem.underlying_storage(renderer),
-            WorkspaceRenderElement::Window(elem) => elem.underlying_storage(renderer),
-            WorkspaceRenderElement::Backdrop(elem) => elem.underlying_storage(renderer),
-        }
-    }
-}
-
-impl<'a> RenderElement<GlMultiRenderer<'a>> for WorkspaceRenderElement<GlMultiRenderer<'a>> {
-    fn draw<'frame>(
-        &self,
-        frame: &mut GlMultiFrame<'a, 'frame>,
-        src: Rectangle<f64, BufferCoords>,
-        dst: Rectangle<i32, Physical>,
-        damage: &[Rectangle<i32, smithay::utils::Physical>],
-        opaque_regions: &[Rectangle<i32, Physical>],
-    ) -> Result<(), GlMultiError> {
+    ) -> Result<(), R::Error> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => {
                 elem.draw(frame, src, dst, damage, opaque_regions)
@@ -1399,19 +1362,19 @@ impl<'a> RenderElement<GlMultiRenderer<'a>> for WorkspaceRenderElement<GlMultiRe
             }
             WorkspaceRenderElement::Backdrop(elem) => RenderElement::<GlowRenderer>::draw(
                 elem,
-                frame.glow_frame_mut(),
+                R::glow_frame_mut(frame),
                 src,
                 dst,
                 damage,
                 opaque_regions,
             )
-            .map_err(GlMultiError::Render),
+            .map_err(FromGlesError::from_gles_error),
         }
     }
 
     fn underlying_storage(
         &self,
-        renderer: &mut GlMultiRenderer<'a>,
+        renderer: &mut R,
     ) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.underlying_storage(renderer),

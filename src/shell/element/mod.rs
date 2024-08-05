@@ -1,7 +1,7 @@
 use crate::{
     backend::render::{
-        element::{AsGlowFrame, AsGlowRenderer},
-        GlMultiError, GlMultiFrame, GlMultiRenderer, SplitRenderElements,
+        element::{AsGlowRenderer, FromGlesError},
+        SplitRenderElements,
     },
     state::State,
     utils::{iced::IcedElementInternal, prelude::*},
@@ -1270,90 +1270,20 @@ where
     }
 }
 
-impl RenderElement<GlowRenderer> for CosmicMappedRenderElement<GlowRenderer> {
+impl<R> RenderElement<R> for CosmicMappedRenderElement<R>
+where
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    <R as Renderer>::TextureId: 'static,
+    <R as Renderer>::Error: FromGlesError,
+{
     fn draw<'frame>(
         &self,
-        frame: &mut <GlowRenderer as Renderer>::Frame<'frame>,
+        frame: &mut R::Frame<'frame>,
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
-    ) -> Result<(), <GlowRenderer as Renderer>::Error> {
-        match self {
-            CosmicMappedRenderElement::Stack(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
-            }
-            CosmicMappedRenderElement::Window(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
-            }
-            CosmicMappedRenderElement::TiledStack(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
-            }
-            CosmicMappedRenderElement::TiledWindow(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
-            }
-            CosmicMappedRenderElement::TiledOverlay(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage, opaque_regions)
-            }
-            CosmicMappedRenderElement::MovingStack(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
-            }
-            CosmicMappedRenderElement::MovingWindow(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
-            }
-            CosmicMappedRenderElement::GrabbedStack(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
-            }
-            CosmicMappedRenderElement::GrabbedWindow(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
-            }
-            CosmicMappedRenderElement::FocusIndicator(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage, opaque_regions)
-            }
-            CosmicMappedRenderElement::Overlay(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage, opaque_regions)
-            }
-            CosmicMappedRenderElement::StackHoverIndicator(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage, opaque_regions)
-            }
-            #[cfg(feature = "debug")]
-            CosmicMappedRenderElement::Egui(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage, opaque_regions)
-            }
-        }
-    }
-
-    fn underlying_storage(&self, renderer: &mut GlowRenderer) -> Option<UnderlyingStorage> {
-        match self {
-            CosmicMappedRenderElement::Stack(elem) => elem.underlying_storage(renderer),
-            CosmicMappedRenderElement::Window(elem) => elem.underlying_storage(renderer),
-            CosmicMappedRenderElement::TiledStack(elem) => elem.underlying_storage(renderer),
-            CosmicMappedRenderElement::TiledWindow(elem) => elem.underlying_storage(renderer),
-            CosmicMappedRenderElement::TiledOverlay(elem) => elem.underlying_storage(renderer),
-            CosmicMappedRenderElement::MovingStack(elem) => elem.underlying_storage(renderer),
-            CosmicMappedRenderElement::MovingWindow(elem) => elem.underlying_storage(renderer),
-            CosmicMappedRenderElement::GrabbedStack(elem) => elem.underlying_storage(renderer),
-            CosmicMappedRenderElement::GrabbedWindow(elem) => elem.underlying_storage(renderer),
-            CosmicMappedRenderElement::FocusIndicator(elem) => elem.underlying_storage(renderer),
-            CosmicMappedRenderElement::Overlay(elem) => elem.underlying_storage(renderer),
-            CosmicMappedRenderElement::StackHoverIndicator(elem) => {
-                elem.underlying_storage(renderer)
-            }
-            #[cfg(feature = "debug")]
-            CosmicMappedRenderElement::Egui(elem) => elem.underlying_storage(renderer),
-        }
-    }
-}
-
-impl<'a> RenderElement<GlMultiRenderer<'a>> for CosmicMappedRenderElement<GlMultiRenderer<'a>> {
-    fn draw<'frame>(
-        &self,
-        frame: &mut GlMultiFrame<'a, 'frame>,
-        src: Rectangle<f64, BufferCoords>,
-        dst: Rectangle<i32, Physical>,
-        damage: &[Rectangle<i32, Physical>],
-        opaque_regions: &[Rectangle<i32, Physical>],
-    ) -> Result<(), GlMultiError> {
+    ) -> Result<(), R::Error> {
         match self {
             CosmicMappedRenderElement::Stack(elem) => {
                 elem.draw(frame, src, dst, damage, opaque_regions)
@@ -1369,13 +1299,13 @@ impl<'a> RenderElement<GlMultiRenderer<'a>> for CosmicMappedRenderElement<GlMult
             }
             CosmicMappedRenderElement::TiledOverlay(elem) => RenderElement::<GlowRenderer>::draw(
                 elem,
-                frame.glow_frame_mut(),
+                R::glow_frame_mut(frame),
                 src,
                 dst,
                 damage,
                 opaque_regions,
             )
-            .map_err(|err| GlMultiError::Render(err)),
+            .map_err(FromGlesError::from_gles_error),
             CosmicMappedRenderElement::MovingStack(elem) => {
                 elem.draw(frame, src, dst, damage, opaque_regions)
             }
@@ -1390,28 +1320,28 @@ impl<'a> RenderElement<GlMultiRenderer<'a>> for CosmicMappedRenderElement<GlMult
             }
             CosmicMappedRenderElement::FocusIndicator(elem) => RenderElement::<GlowRenderer>::draw(
                 elem,
-                frame.glow_frame_mut(),
+                R::glow_frame_mut(frame),
                 src,
                 dst,
                 damage,
                 opaque_regions,
             )
-            .map_err(|err| GlMultiError::Render(err)),
+            .map_err(FromGlesError::from_gles_error),
             CosmicMappedRenderElement::Overlay(elem) => RenderElement::<GlowRenderer>::draw(
                 elem,
-                frame.glow_frame_mut(),
+                R::glow_frame_mut(frame),
                 src,
                 dst,
                 damage,
                 opaque_regions,
             )
-            .map_err(|err| GlMultiError::Render(err)),
+            .map_err(FromGlesError::from_gles_error),
             CosmicMappedRenderElement::StackHoverIndicator(elem) => {
                 elem.draw(frame, src, dst, damage, opaque_regions)
             }
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => {
-                let glow_frame = frame.glow_frame_mut();
+                let glow_frame = R::glow_frame_mut(frame);
                 RenderElement::<GlowRenderer>::draw(
                     elem,
                     glow_frame,
@@ -1420,12 +1350,12 @@ impl<'a> RenderElement<GlMultiRenderer<'a>> for CosmicMappedRenderElement<GlMult
                     damage,
                     opaque_regions,
                 )
-                .map_err(|err| GlMultiError::Render(err))
+                .map_err(FromGlesError::from_gles_error)
             }
         }
     }
 
-    fn underlying_storage(&self, renderer: &mut GlMultiRenderer<'a>) -> Option<UnderlyingStorage> {
+    fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage> {
         match self {
             CosmicMappedRenderElement::Stack(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::Window(elem) => elem.underlying_storage(renderer),
