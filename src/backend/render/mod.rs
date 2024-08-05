@@ -53,6 +53,7 @@ use smithay::{
                 element::PixelShaderElement, GlesError, GlesPixelProgram, GlesRenderer, Uniform,
                 UniformName, UniformType,
             },
+            glow::GlowRenderer,
             multigpu::{Error as MultiError, MultiFrame, MultiRenderer},
             sync::SyncPoint,
             Bind, Blit, ExportMem, ImportAll, ImportMem, Offscreen, Renderer, TextureFilter,
@@ -85,6 +86,29 @@ pub type GlMultiRenderer<'a> =
 pub type GlMultiFrame<'a, 'frame> =
     MultiFrame<'a, 'a, 'frame, GbmGlowBackend<DrmDeviceFd>, GbmGlowBackend<DrmDeviceFd>>;
 pub type GlMultiError = MultiError<GbmGlowBackend<DrmDeviceFd>, GbmGlowBackend<DrmDeviceFd>>;
+
+pub enum RendererRef<'a> {
+    Glow(&'a mut GlowRenderer),
+    GlMulti(GlMultiRenderer<'a>),
+}
+
+impl<'a> AsRef<GlowRenderer> for RendererRef<'a> {
+    fn as_ref(&self) -> &GlowRenderer {
+        match self {
+            Self::Glow(renderer) => renderer,
+            Self::GlMulti(renderer) => renderer.as_ref(),
+        }
+    }
+}
+
+impl<'a> AsMut<GlowRenderer> for RendererRef<'a> {
+    fn as_mut(&mut self) -> &mut GlowRenderer {
+        match self {
+            Self::Glow(renderer) => renderer,
+            Self::GlMulti(renderer) => renderer.as_mut(),
+        }
+    }
+}
 
 pub static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
 pub static OUTLINE_SHADER: &str = include_str!("./shaders/rounded_outline.frag");

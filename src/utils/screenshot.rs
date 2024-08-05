@@ -16,8 +16,9 @@ use smithay::{
 use tracing::warn;
 
 use crate::{
+    backend::render::RendererRef,
     shell::element::CosmicSurface,
-    state::{advertised_node_for_surface, BackendData, State},
+    state::{advertised_node_for_surface, State},
 };
 
 pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
@@ -96,27 +97,21 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
     }
 
     if let Some(wl_surface) = surface.wl_surface() {
-        let res = match &mut state.backend {
-            BackendData::Kms(kms) => {
-                let node = advertised_node_for_surface(&wl_surface, &state.common.display_handle)
-                    .unwrap_or(kms.primary_node.expect("No Software Rendering"));
-                kms.api
-                    .single_renderer(&node)
-                    .with_context(|| "Failed to get renderer for screenshot")
-                    .and_then(|mut multirenderer| {
-                        render_window(&mut multirenderer, surface, &state.common.local_offset)
-                    })
-            }
-            BackendData::Winit(winit) => render_window(
-                winit.backend.renderer(),
-                surface,
-                &state.common.local_offset,
-            ),
-            BackendData::X11(x11) => {
-                render_window(&mut x11.renderer, surface, &state.common.local_offset)
-            }
-            BackendData::Unset => unreachable!(),
-        };
+        let res = state
+            .backend
+            .offscreen_renderer(|kms| {
+                advertised_node_for_surface(&wl_surface, &state.common.display_handle)
+                    .or(kms.primary_node)
+            })
+            .with_context(|| "Failed to get renderer for screenshot")
+            .and_then(|renderer| match renderer {
+                RendererRef::Glow(renderer) => {
+                    render_window(renderer, surface, &state.common.local_offset)
+                }
+                RendererRef::GlMulti(mut renderer) => {
+                    render_window(&mut renderer, surface, &state.common.local_offset)
+                }
+            });
         if let Err(err) = res {
             warn!(?err, "Failed to take screenshot")
         }

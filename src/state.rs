@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::{kms::KmsState, winit::WinitState, x11::X11State},
+    backend::{
+        kms::KmsState,
+        render::{GlMultiError, RendererRef},
+        winit::WinitState,
+        x11::X11State,
+    },
     config::{Config, OutputConfig, OutputState},
     input::gestures::GestureState,
     shell::{grabs::SeatMoveGrabState, CosmicSurface, SeatExt, Shell},
@@ -26,7 +31,7 @@ use once_cell::sync::Lazy;
 use rust_embed::RustEmbed;
 use smithay::{
     backend::{
-        allocator::dmabuf::Dmabuf,
+        allocator::{dmabuf::Dmabuf, Fourcc},
         drm::DrmNode,
         renderer::{
             element::{
@@ -379,6 +384,50 @@ impl BackendData {
             _ => unreachable!("No backend set when importing dmabuf"),
         };
         Ok(None)
+    }
+
+    /// Get an offscreen renderer for screen capture / screenshot rendering
+    ///
+    /// `kms_node_cb` callback use used to determine nodes to render with when using kms backend.
+    /// Panics if this returns `None`.
+    pub fn offscreen_renderer<N: Into<KmsNodes>, F: FnOnce(&mut KmsState) -> Option<N>>(
+        &mut self,
+        kms_node_cb: F,
+    ) -> Result<RendererRef, GlMultiError> {
+        match self {
+            BackendData::Kms(kms) => {
+                let KmsNodes {
+                    render_node,
+                    target_node,
+                    copy_format,
+                } = kms_node_cb(kms).expect("No Software Rendering").into();
+                Ok(RendererRef::GlMulti(kms.api.renderer(
+                    &render_node,
+                    &target_node,
+                    copy_format,
+                )?))
+            }
+            BackendData::Winit(winit) => Ok(RendererRef::Glow(winit.backend.renderer())),
+            BackendData::X11(x11) => Ok(RendererRef::Glow(&mut x11.renderer)),
+            _ => unreachable!("No backend set when getting offscreen renderer"),
+        }
+    }
+}
+
+pub struct KmsNodes {
+    pub render_node: DrmNode,
+    pub target_node: DrmNode,
+    pub copy_format: Fourcc,
+}
+
+impl From<DrmNode> for KmsNodes {
+    fn from(node: DrmNode) -> Self {
+        KmsNodes {
+            render_node: node,
+            target_node: node,
+            // Ignored if render == target
+            copy_format: Fourcc::Abgr8888,
+        }
     }
 }
 
