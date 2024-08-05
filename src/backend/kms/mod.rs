@@ -12,7 +12,7 @@ use smithay::{
             gbm::{GbmAllocator, GbmBufferFlags},
         },
         drm::{DrmDeviceFd, DrmNode, NodeType},
-        egl::{context::ContextPriority, EGLContext},
+        egl::{context::ContextPriority, EGLContext, EGLDevice, EGLDisplay},
         input::InputEvent,
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{glow::GlowRenderer, multigpu::GpuManager},
@@ -54,6 +54,8 @@ pub struct KmsState {
     pub drm_devices: HashMap<DrmNode, Device>,
     pub input_devices: HashMap<String, input::Device>,
     pub primary_node: Option<DrmNode>,
+    // Mesa llvmpipe renderer, if supported and there are no render nodes
+    pub software_renderer: Option<GlowRenderer>,
     pub api: GpuManager<GbmGlowBackend<DrmDeviceFd>>,
 
     session: LibSeatSession,
@@ -77,6 +79,18 @@ pub fn init_backend(
     if let Some(primary) = primary.as_ref() {
         info!("Using {} as primary gpu for rendering.", primary);
     }
+
+    let software_renderer = if primary.is_none() {
+        match software_renderer() {
+            Ok(renderer) => Some(renderer),
+            Err(err) => {
+                error!(?err, "Failed to initialize software EGL renderer.");
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     // watch for gpu events
     let udev_dispatcher = init_udev(session.seat(), &event_loop.handle())
@@ -107,6 +121,7 @@ pub fn init_backend(
         drm_devices: HashMap::new(),
         input_devices: HashMap::new(),
         primary_node: primary,
+        software_renderer,
         api: GpuManager::new(GbmGlowBackend::new()).context("Failed to initialize gpu backend")?,
 
         session,
@@ -191,6 +206,22 @@ fn determine_primary_gpu(seat: String) -> Option<DrmNode> {
                 None
             })
     }
+}
+
+/// Create `GlowRenderer` for `EGL_MESA_device_software` device, if present
+fn software_renderer() -> anyhow::Result<GlowRenderer> {
+    let mut devices = EGLDevice::enumerate()?;
+    let device = devices
+        .find(|device| {
+            device
+                .extensions()
+                .iter()
+                .any(|ext| ext == "EGL_MESA_device_software")
+        })
+        .ok_or_else(|| anyhow::anyhow!("no EGL device found with `EGL_MESA_device_software`"))?;
+    let display = unsafe { EGLDisplay::new(device)? };
+    let context = EGLContext::new(&display)?;
+    unsafe { Ok(GlowRenderer::new(context)?) }
 }
 
 fn init_udev(
