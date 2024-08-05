@@ -389,23 +389,28 @@ impl BackendData {
     /// Get an offscreen renderer for screen capture / screenshot rendering
     ///
     /// `kms_node_cb` callback use used to determine nodes to render with when using kms backend.
-    /// Panics if this returns `None`.
+    /// If this returns `None`, it will attempt to use llvmpipe, then panic if no renderer is
+    /// found.
     pub fn offscreen_renderer<N: Into<KmsNodes>, F: FnOnce(&mut KmsState) -> Option<N>>(
         &mut self,
         kms_node_cb: F,
     ) -> Result<RendererRef, GlMultiError> {
         match self {
             BackendData::Kms(kms) => {
-                let KmsNodes {
-                    render_node,
-                    target_node,
-                    copy_format,
-                } = kms_node_cb(kms).expect("No Software Rendering").into();
-                Ok(RendererRef::GlMulti(kms.api.renderer(
-                    &render_node,
-                    &target_node,
-                    copy_format,
-                )?))
+                if let Some(nodes) = kms_node_cb(kms) {
+                    let nodes = nodes.into();
+                    Ok(RendererRef::GlMulti(kms.api.renderer(
+                        &nodes.render_node,
+                        &nodes.target_node,
+                        nodes.copy_format,
+                    )?))
+                } else {
+                    Ok(RendererRef::Glow(
+                        kms.software_renderer
+                            .as_mut()
+                            .expect("No Software Rendering"),
+                    ))
+                }
             }
             BackendData::Winit(winit) => Ok(RendererRef::Glow(winit.backend.renderer())),
             BackendData::X11(x11) => Ok(RendererRef::Glow(&mut x11.renderer)),
