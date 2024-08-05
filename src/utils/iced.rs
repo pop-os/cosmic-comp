@@ -16,7 +16,7 @@ use cosmic::{
         window::{Event as WindowEvent, Id},
         Command, Limits, Point as IcedPoint, Rectangle as IcedRectangle, Size as IcedSize,
     },
-    iced_core::{clipboard::Null as NullClipboard, renderer::Style, Color, Font, Length, Pixels},
+    iced_core::{clipboard::Null as NullClipboard, renderer::Style, Color, Length, Pixels},
     iced_renderer::graphics::Renderer as IcedGraphicsRenderer,
     iced_runtime::{
         command::Action,
@@ -180,7 +180,7 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
         }
         let mut renderer = cosmic::Renderer::TinySkia(IcedGraphicsRenderer::new(
             Backend::new(),
-            Font::default(),
+            cosmic::font::DEFAULT,
             Pixels(16.0),
         ));
         let mut debug = Debug::new();
@@ -246,7 +246,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         let size = size.into();
         let mut renderer = cosmic::Renderer::TinySkia(IcedGraphicsRenderer::new(
             Backend::new(),
-            Font::default(),
+            cosmic::font::DEFAULT,
             Pixels(16.0),
         ));
         let mut debug = Debug::new();
