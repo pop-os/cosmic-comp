@@ -36,10 +36,10 @@ use crate::{
     backend::render::{
         cursor,
         element::{AsGlowRenderer, CosmicElement, DamageElement, FromGlesError},
-        render_workspace, CursorMode, ElementFilter, CLEAR_COLOR,
+        render_workspace, CursorMode, ElementFilter, RendererRef, CLEAR_COLOR,
     },
     shell::{CosmicMappedRenderElement, CosmicSurface, WorkspaceRenderElement},
-    state::{BackendData, Common, State},
+    state::{Common, KmsNodes, State},
     utils::prelude::SeatExt,
     wayland::{
         handlers::screencopy::{
@@ -326,39 +326,39 @@ pub fn render_workspace_to_buffer(
     let transform = output.current_transform();
     let common = &mut state.common;
 
-    let result = match &mut state.backend {
-        BackendData::Kms(kms) => {
-            let render_node = kms
-                .target_node_for_output(&output)
-                .unwrap_or(kms.primary_node.expect("No Software Rendering"));
-            let target_node = get_dmabuf(&buffer)
-                .ok()
-                .and_then(|dma| dma.node())
-                .unwrap_or(render_node);
+    let renderer = match state.backend.offscreen_renderer(|kms| {
+        let render_node = kms.target_node_for_output(&output).or(kms.primary_node)?;
+        let target_node = get_dmabuf(&buffer)
+            .ok()
+            .and_then(|dma| dma.node())
+            .unwrap_or(render_node);
 
-            let buffer_format = match buffer_type(&buffer) {
-                Some(BufferType::Dma) => Some(get_dmabuf(&buffer).unwrap().format().code),
-                Some(BufferType::Shm) => {
-                    with_buffer_contents(&buffer, |_, _, data| shm_format_to_fourcc(data.format))
-                        .unwrap()
-                }
-                _ => None,
-            };
-            let mut multirenderer = match kms.api.renderer(
-                &render_node,
-                &target_node,
-                buffer_format.unwrap_or(Fourcc::Abgr8888),
-            ) {
-                Ok(renderer) => renderer,
-                Err(err) => {
-                    warn!(?err, "Couldn't use nodes for screencopy");
-                    frame.fail(FailureReason::Unknown);
-                    return;
-                }
-            };
+        let buffer_format = match buffer_type(&buffer) {
+            Some(BufferType::Dma) => Some(get_dmabuf(&buffer).unwrap().format().code),
+            Some(BufferType::Shm) => {
+                with_buffer_contents(&buffer, |_, _, data| shm_format_to_fourcc(data.format))
+                    .unwrap()
+            }
+            _ => None,
+        };
 
+        Some(KmsNodes {
+            render_node,
+            target_node,
+            copy_format: buffer_format.unwrap_or(Fourcc::Abgr8888),
+        })
+    }) {
+        Ok(renderer) => renderer,
+        Err(err) => {
+            warn!(?err, "Couldn't use node for screencopy");
+            frame.fail(FailureReason::Unknown);
+            return;
+        }
+    };
+    let result = match renderer {
+        RendererRef::Glow(renderer) => {
             match render_session::<_, _>(
-                &mut multirenderer,
+                renderer,
                 session.user_data().get::<SessionData>().unwrap(),
                 frame,
                 transform,
@@ -383,57 +383,33 @@ pub fn render_workspace_to_buffer(
                 }
             }
         }
-        BackendData::Winit(winit) => match render_session::<_, _>(
-            winit.backend.renderer(),
-            session.user_data().get::<SessionData>().unwrap(),
-            frame,
-            transform,
-            |buffer, renderer, dt, age, additional_damage| {
-                render_fn(
-                    buffer,
-                    renderer,
-                    dt,
-                    age,
-                    additional_damage,
-                    draw_cursor,
-                    common,
-                    &output,
-                    (handle, idx),
-                )
-            },
-        ) {
-            Ok(frame) => frame,
-            Err(err) => {
-                tracing::warn!(?err, "Failed to render to screencopy buffer");
-                None
+        RendererRef::GlMulti(mut renderer) => {
+            match render_session::<_, _>(
+                &mut renderer,
+                session.user_data().get::<SessionData>().unwrap(),
+                frame,
+                transform,
+                |buffer, renderer, dt, age, additional_damage| {
+                    render_fn(
+                        buffer,
+                        renderer,
+                        dt,
+                        age,
+                        additional_damage,
+                        draw_cursor,
+                        common,
+                        &output,
+                        (handle, idx),
+                    )
+                },
+            ) {
+                Ok(frame) => frame,
+                Err(err) => {
+                    tracing::warn!(?err, "Failed to render to screencopy buffer");
+                    None
+                }
             }
-        },
-        BackendData::X11(x11) => match render_session::<_, _>(
-            &mut x11.renderer,
-            session.user_data().get::<SessionData>().unwrap(),
-            frame,
-            transform,
-            |buffer, renderer, dt, age, additional_damage| {
-                render_fn(
-                    buffer,
-                    renderer,
-                    dt,
-                    age,
-                    additional_damage,
-                    draw_cursor,
-                    common,
-                    &output,
-                    (handle, idx),
-                )
-            },
-        ) {
-            Ok(frame) => frame,
-            Err(err) => {
-                tracing::warn!(?err, "Failed to render to screencopy buffer");
-                None
-            }
-        },
-        _ => unreachable!(),
+        }
     };
 
     if let Some((frame, damage)) = result {
@@ -601,61 +577,34 @@ pub fn render_window_to_buffer(
     let common = &mut state.common;
     let draw_cursor = session.draw_cursor();
 
-    let result = match &mut state.backend {
-        BackendData::Kms(kms) => {
-            let node = get_dmabuf(&buffer)
-                .ok()
-                .and_then(|dmabuf| dmabuf.node())
-                .or_else(|| {
-                    toplevel
-                        .wl_surface()
-                        .and_then(|wl_surface| {
-                            with_renderer_surface_state(&wl_surface, |state| {
-                                let buffer = state.buffer()?;
-                                let dmabuf = get_dmabuf(&*buffer).ok()?;
-                                dmabuf.node()
-                            })
+    let renderer = match state.backend.offscreen_renderer(|kms| {
+        get_dmabuf(&buffer)
+            .ok()
+            .and_then(|dmabuf| dmabuf.node())
+            .or_else(|| {
+                toplevel
+                    .wl_surface()
+                    .and_then(|wl_surface| {
+                        with_renderer_surface_state(&wl_surface, |state| {
+                            let buffer = state.buffer()?;
+                            let dmabuf = get_dmabuf(&*buffer).ok()?;
+                            dmabuf.node()
                         })
-                        .flatten()
-                })
-                .unwrap_or(kms.primary_node.expect("No Software Rendering"));
-
-            let mut multirenderer = match kms.api.single_renderer(&node) {
-                Ok(renderer) => renderer,
-                Err(err) => {
-                    warn!(?err, "Couldn't use node for screencopy");
-                    frame.fail(FailureReason::Unknown);
-                    return;
-                }
-            };
-            match render_session::<_, _>(
-                &mut multirenderer,
-                session.user_data().get::<SessionData>().unwrap(),
-                frame,
-                Transform::Normal,
-                |buffer, renderer, dt, age, additional_damage| {
-                    render_fn(
-                        buffer,
-                        renderer,
-                        dt,
-                        age,
-                        additional_damage,
-                        draw_cursor,
-                        common,
-                        toplevel,
-                        geometry,
-                    )
-                },
-            ) {
-                Ok(frame) => frame,
-                Err(err) => {
-                    tracing::warn!(?err, "Failed to render to screencopy buffer");
-                    None
-                }
-            }
+                    })
+                    .flatten()
+            })
+            .or(kms.primary_node)
+    }) {
+        Ok(renderer) => renderer,
+        Err(err) => {
+            warn!(?err, "Couldn't use node for screencopy");
+            frame.fail(FailureReason::Unknown);
+            return;
         }
-        BackendData::Winit(winit) => match render_session::<_, _>(
-            winit.backend.renderer(),
+    };
+    let result = match renderer {
+        RendererRef::Glow(renderer) => match render_session::<_, _>(
+            renderer,
             session.user_data().get::<SessionData>().unwrap(),
             frame,
             Transform::Normal,
@@ -679,8 +628,8 @@ pub fn render_window_to_buffer(
                 None
             }
         },
-        BackendData::X11(x11) => match render_session::<_, _>(
-            &mut x11.renderer,
+        RendererRef::GlMulti(mut renderer) => match render_session::<_, _>(
+            &mut renderer,
             session.user_data().get::<SessionData>().unwrap(),
             frame,
             Transform::Normal,
@@ -704,7 +653,6 @@ pub fn render_window_to_buffer(
                 None
             }
         },
-        _ => unreachable!(),
     };
 
     if let Some((frame, damage)) = result {
@@ -811,21 +759,18 @@ pub fn render_cursor_to_buffer(
     }
 
     let common = &mut state.common;
-    let result = match &mut state.backend {
-        BackendData::Kms(kms) => {
-            let mut multirenderer = match kms
-                .api
-                .single_renderer(&kms.primary_node.expect("No Software Rendering"))
-            {
-                Ok(renderer) => renderer,
-                Err(err) => {
-                    warn!(?err, "Couldn't use node for screencopy");
-                    frame.fail(FailureReason::Unknown);
-                    return;
-                }
-            };
+    let renderer = match state.backend.offscreen_renderer(|kms| kms.primary_node) {
+        Ok(renderer) => renderer,
+        Err(err) => {
+            warn!(?err, "Couldn't use node for screencopy");
+            frame.fail(FailureReason::Unknown);
+            return;
+        }
+    };
+    let result = match renderer {
+        RendererRef::Glow(renderer) => {
             match render_session::<_, _>(
-                &mut multirenderer,
+                renderer,
                 session.user_data().get::<SessionData>().unwrap(),
                 frame,
                 Transform::Normal,
@@ -840,37 +785,23 @@ pub fn render_cursor_to_buffer(
                 }
             }
         }
-        BackendData::Winit(winit) => match render_session::<_, _>(
-            winit.backend.renderer(),
-            session.user_data().get::<SessionData>().unwrap(),
-            frame,
-            Transform::Normal,
-            |buffer, renderer, dt, age, additional_damage| {
-                render_fn(buffer, renderer, dt, age, additional_damage, common, seat)
-            },
-        ) {
-            Ok(frame) => frame,
-            Err(err) => {
-                tracing::warn!(?err, "Failed to render to screencopy buffer");
-                None
+        RendererRef::GlMulti(mut renderer) => {
+            match render_session::<_, _>(
+                &mut renderer,
+                session.user_data().get::<SessionData>().unwrap(),
+                frame,
+                Transform::Normal,
+                |buffer, renderer, dt, age, additional_damage| {
+                    render_fn(buffer, renderer, dt, age, additional_damage, common, seat)
+                },
+            ) {
+                Ok(frame) => frame,
+                Err(err) => {
+                    tracing::warn!(?err, "Failed to render to screencopy buffer");
+                    None
+                }
             }
-        },
-        BackendData::X11(x11) => match render_session::<_, _>(
-            &mut x11.renderer,
-            session.user_data().get::<SessionData>().unwrap(),
-            frame,
-            Transform::Normal,
-            |buffer, renderer, dt, age, additional_damage| {
-                render_fn(buffer, renderer, dt, age, additional_damage, common, seat)
-            },
-        ) {
-            Ok(frame) => frame,
-            Err(err) => {
-                tracing::warn!(?err, "Failed to render to screencopy buffer");
-                None
-            }
-        },
-        _ => unreachable!(),
+        }
     };
 
     if let Some((frame, damage)) = result {

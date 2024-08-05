@@ -351,21 +351,10 @@ fn constraints_for_output(output: &Output, backend: &mut BackendData) -> Option<
         }
     };
 
-    let mut _kms_renderer = None;
-    let renderer = match backend {
-        BackendData::Kms(ref mut kms) => {
-            let node = kms
-                .target_node_for_output(&output)
-                .unwrap_or(kms.primary_node.expect("No Software Rendering"));
-            _kms_renderer = Some(kms.api.single_renderer(&node).unwrap());
-            _kms_renderer.as_mut().unwrap().as_mut()
-        }
-        BackendData::Winit(ref mut winit) => winit.backend.renderer(),
-        BackendData::X11(ref mut x11) => &mut x11.renderer,
-        _ => unreachable!(),
-    };
-
-    Some(constraints_for_renderer(mode, renderer))
+    let mut renderer = backend
+        .offscreen_renderer(|kms| kms.target_node_for_output(&output).or(kms.primary_node))
+        .unwrap();
+    Some(constraints_for_renderer(mode, renderer.as_mut()))
 }
 
 fn constraints_for_toplevel(
@@ -375,9 +364,8 @@ fn constraints_for_toplevel(
     let size = surface.geometry().size.to_buffer(1, Transform::Normal);
     let wl_surface = surface.wl_surface()?;
 
-    let mut _kms_renderer = None;
-    let renderer = match backend {
-        BackendData::Kms(ref mut kms) => {
+    let mut renderer = backend
+        .offscreen_renderer(|kms| {
             let dma_node = with_renderer_surface_state(&wl_surface, |state| {
                 let buffer = state.buffer()?;
                 let dmabuf = get_dmabuf(&*buffer).ok()?;
@@ -385,16 +373,11 @@ fn constraints_for_toplevel(
             })
             .flatten();
 
-            let node = dma_node.unwrap_or(kms.primary_node.expect("No Software Rendering"));
-            _kms_renderer = Some(kms.api.single_renderer(&node).unwrap());
-            _kms_renderer.as_mut().unwrap().as_mut()
-        }
-        BackendData::Winit(ref mut winit) => winit.backend.renderer(),
-        BackendData::X11(ref mut x11) => &mut x11.renderer,
-        _ => unreachable!(),
-    };
+            dma_node.or(kms.primary_node)
+        })
+        .unwrap();
 
-    Some(constraints_for_renderer(size, renderer))
+    Some(constraints_for_renderer(size, renderer.as_mut()))
 }
 
 fn constraints_for_renderer(
