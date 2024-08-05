@@ -634,33 +634,57 @@ impl Common {
         render_element_states: &RenderElementStates,
     ) {
         let shell = self.shell.read().unwrap();
-        // TODO: also set preferred scale
+        let processor = |surface: &WlSurface, states: &SurfaceData| {
+            let primary_scanout_output = update_surface_primary_scanout_output(
+                surface,
+                output,
+                states,
+                render_element_states,
+                default_primary_scanout_output_compare,
+            );
+            if let Some(output) = primary_scanout_output {
+                with_fractional_scale(states, |fraction_scale| {
+                    fraction_scale.set_preferred_scale(output.current_scale().fractional_scale());
+                });
+            }
+        };
 
-        // grabs
+        // lock surface
+        if let Some(session_lock) = shell.session_lock.as_ref() {
+            if let Some(lock_surface) = session_lock.surfaces.get(output) {
+                with_surfaces_surface_tree(lock_surface.wl_surface(), processor)
+            }
+        }
+
         for seat in shell
             .seats
             .iter()
             .filter(|seat| &seat.active_output() == output)
         {
+            let cursor_status = seat
+                .user_data()
+                .get::<Mutex<CursorImageStatus>>()
+                .map(|lock| {
+                    let mut cursor_status = lock.lock().unwrap();
+                    if let CursorImageStatus::Surface(ref surface) = *cursor_status {
+                        if !surface.alive() {
+                            *cursor_status = CursorImageStatus::default_named();
+                        }
+                    }
+                    cursor_status.clone()
+                })
+                .unwrap_or(CursorImageStatus::default_named());
+
+            // cursor ...
+            if let CursorImageStatus::Surface(wl_surface) = cursor_status {
+                with_surfaces_surface_tree(&wl_surface, processor);
+            }
+
+            // grabs
             if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {
                 if let Some(grab_state) = move_grab.lock().unwrap().as_ref() {
                     for (window, _) in grab_state.element().windows() {
-                        window.with_surfaces(|surface, states| {
-                            let primary_scanout_output = update_surface_primary_scanout_output(
-                                surface,
-                                output,
-                                states,
-                                render_element_states,
-                                default_primary_scanout_output_compare,
-                            );
-                            if let Some(output) = primary_scanout_output {
-                                with_fractional_scale(states, |fraction_scale| {
-                                    fraction_scale.set_preferred_scale(
-                                        output.current_scale().fractional_scale(),
-                                    );
-                                });
-                            }
-                        });
+                        window.with_surfaces(processor);
                     }
                 }
             }
@@ -670,21 +694,7 @@ impl Common {
         for set in shell.workspaces.sets.values() {
             set.sticky_layer.mapped().for_each(|mapped| {
                 for (window, _) in mapped.windows() {
-                    window.with_surfaces(|surface, states| {
-                        let primary_scanout_output = update_surface_primary_scanout_output(
-                            surface,
-                            output,
-                            states,
-                            render_element_states,
-                            default_primary_scanout_output_compare,
-                        );
-                        if let Some(output) = primary_scanout_output {
-                            with_fractional_scale(states, |fraction_scale| {
-                                fraction_scale
-                                    .set_preferred_scale(output.current_scale().fractional_scale());
-                            });
-                        }
-                    });
+                    window.with_surfaces(processor);
                 }
             });
         }
@@ -693,40 +703,12 @@ impl Common {
         for space in shell.workspaces.spaces() {
             space.mapped().for_each(|mapped| {
                 for (window, _) in mapped.windows() {
-                    window.with_surfaces(|surface, states| {
-                        let primary_scanout_output = update_surface_primary_scanout_output(
-                            surface,
-                            output,
-                            states,
-                            render_element_states,
-                            default_primary_scanout_output_compare,
-                        );
-                        if let Some(output) = primary_scanout_output {
-                            with_fractional_scale(states, |fraction_scale| {
-                                fraction_scale
-                                    .set_preferred_scale(output.current_scale().fractional_scale());
-                            });
-                        }
-                    });
+                    window.with_surfaces(processor);
                 }
             });
             space.minimized_windows.iter().for_each(|m| {
                 for (window, _) in m.window.windows() {
-                    window.with_surfaces(|surface, states| {
-                        let primary_scanout_output = update_surface_primary_scanout_output(
-                            surface,
-                            output,
-                            states,
-                            render_element_states,
-                            default_primary_scanout_output_compare,
-                        );
-                        if let Some(output) = primary_scanout_output {
-                            with_fractional_scale(states, |fraction_scale| {
-                                fraction_scale
-                                    .set_preferred_scale(output.current_scale().fractional_scale());
-                            });
-                        }
-                    });
+                    window.with_surfaces(processor);
                 }
             })
         }
@@ -734,21 +716,7 @@ impl Common {
         // OR windows
         shell.override_redirect_windows.iter().for_each(|or| {
             if let Some(wl_surface) = or.wl_surface() {
-                with_surfaces_surface_tree(&wl_surface, |surface, states| {
-                    let primary_scanout_output = update_surface_primary_scanout_output(
-                        surface,
-                        output,
-                        states,
-                        render_element_states,
-                        default_primary_scanout_output_compare,
-                    );
-                    if let Some(output) = primary_scanout_output {
-                        with_fractional_scale(states, |fraction_scale| {
-                            fraction_scale
-                                .set_preferred_scale(output.current_scale().fractional_scale());
-                        });
-                    }
-                });
+                with_surfaces_surface_tree(&wl_surface, processor);
             }
         });
 
@@ -756,21 +724,7 @@ impl Common {
         for o in shell.outputs() {
             let map = smithay::desktop::layer_map_for_output(o);
             for layer_surface in map.layers() {
-                layer_surface.with_surfaces(|surface, states| {
-                    let primary_scanout_output = update_surface_primary_scanout_output(
-                        surface,
-                        output,
-                        states,
-                        render_element_states,
-                        default_primary_scanout_output_compare,
-                    );
-                    if let Some(output) = primary_scanout_output {
-                        with_fractional_scale(states, |fraction_scale| {
-                            fraction_scale
-                                .set_preferred_scale(output.current_scale().fractional_scale());
-                        });
-                    }
-                });
+                layer_surface.with_surfaces(processor);
             }
         }
     }
@@ -967,12 +921,6 @@ impl Common {
 
         if let Some(session_lock) = shell.session_lock.as_ref() {
             if let Some(lock_surface) = session_lock.surfaces.get(output) {
-                with_surfaces_surface_tree(lock_surface.wl_surface(), |_surface, states| {
-                    with_fractional_scale(states, |fraction_scale| {
-                        fraction_scale
-                            .set_preferred_scale(output.current_scale().fractional_scale());
-                    });
-                });
                 send_frames_surface_tree(
                     lock_surface.wl_surface(),
                     output,
