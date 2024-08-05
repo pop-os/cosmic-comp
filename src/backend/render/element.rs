@@ -11,12 +11,12 @@ use smithay::{
         gles::{GlesError, GlesTexture},
         glow::{GlowFrame, GlowRenderer},
         utils::{CommitCounter, DamageSet, OpaqueRegions},
-        Frame, ImportAll, ImportMem, Renderer,
+        ImportAll, ImportMem, Renderer,
     },
     utils::{Buffer as BufferCoords, Logical, Physical, Point, Rectangle, Scale},
 };
 
-use super::{cursor::CursorRenderElement, GlMultiError, GlMultiFrame, GlMultiRenderer};
+use super::{cursor::CursorRenderElement, GlMultiRenderer};
 
 pub enum CosmicElement<R>
 where
@@ -179,72 +179,32 @@ where
     }
 }
 
-impl RenderElement<GlowRenderer> for CosmicElement<GlowRenderer> {
+impl<R> RenderElement<R> for CosmicElement<R>
+where
+    R: AsGlowRenderer + Renderer + ImportAll + ImportMem,
+    <R as Renderer>::TextureId: 'static,
+    <R as Renderer>::Error: FromGlesError,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+{
     fn draw<'frame>(
         &self,
-        frame: &mut <GlowRenderer as Renderer>::Frame<'frame>,
+        frame: &mut R::Frame<'frame>,
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
-    ) -> Result<(), <GlowRenderer as Renderer>::Error> {
+    ) -> Result<(), R::Error> {
         match self {
             CosmicElement::Workspace(elem) => elem.draw(frame, src, dst, damage, opaque_regions),
             CosmicElement::Cursor(elem) => elem.draw(frame, src, dst, damage, opaque_regions),
             CosmicElement::Dnd(elem) => elem.draw(frame, src, dst, damage, opaque_regions),
             CosmicElement::MoveGrab(elem) => elem.draw(frame, src, dst, damage, opaque_regions),
             CosmicElement::AdditionalDamage(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage, opaque_regions)
+                RenderElement::<R>::draw(elem, frame, src, dst, damage, opaque_regions)
             }
-            CosmicElement::Mirror(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage, opaque_regions)
-            }
-            #[cfg(feature = "debug")]
-            CosmicElement::Egui(elem) => {
-                RenderElement::<GlowRenderer>::draw(elem, frame, src, dst, damage, opaque_regions)
-            }
-        }
-    }
-
-    fn underlying_storage(&self, renderer: &mut GlowRenderer) -> Option<UnderlyingStorage> {
-        match self {
-            CosmicElement::Workspace(elem) => elem.underlying_storage(renderer),
-            CosmicElement::Cursor(elem) => elem.underlying_storage(renderer),
-            CosmicElement::Dnd(elem) => elem.underlying_storage(renderer),
-            CosmicElement::MoveGrab(elem) => elem.underlying_storage(renderer),
-            CosmicElement::AdditionalDamage(elem) => elem.underlying_storage(renderer),
-            CosmicElement::Mirror(elem) => elem.underlying_storage(renderer),
-            #[cfg(feature = "debug")]
-            CosmicElement::Egui(elem) => elem.underlying_storage(renderer),
-        }
-    }
-}
-
-impl<'a> RenderElement<GlMultiRenderer<'a>> for CosmicElement<GlMultiRenderer<'a>> {
-    fn draw<'frame>(
-        &self,
-        frame: &mut GlMultiFrame<'a, 'frame>,
-        src: Rectangle<f64, BufferCoords>,
-        dst: Rectangle<i32, Physical>,
-        damage: &[Rectangle<i32, Physical>],
-        opaque_regions: &[Rectangle<i32, Physical>],
-    ) -> Result<(), GlMultiError> {
-        match self {
-            CosmicElement::Workspace(elem) => elem.draw(frame, src, dst, damage, opaque_regions),
-            CosmicElement::Cursor(elem) => elem.draw(frame, src, dst, damage, opaque_regions),
-            CosmicElement::Dnd(elem) => elem.draw(frame, src, dst, damage, opaque_regions),
-            CosmicElement::MoveGrab(elem) => elem.draw(frame, src, dst, damage, opaque_regions),
-            CosmicElement::AdditionalDamage(elem) => RenderElement::<GlMultiRenderer<'a>>::draw(
-                elem,
-                frame,
-                src,
-                dst,
-                damage,
-                opaque_regions,
-            ),
             CosmicElement::Mirror(elem) => {
                 let elem = {
-                    let glow_frame = frame.glow_frame_mut();
+                    let glow_frame = R::glow_frame_mut(frame);
                     RenderElement::<GlowRenderer>::draw(
                         elem,
                         glow_frame,
@@ -253,14 +213,14 @@ impl<'a> RenderElement<GlMultiRenderer<'a>> for CosmicElement<GlMultiRenderer<'a
                         damage,
                         opaque_regions,
                     )
-                    .map_err(|err| GlMultiError::Render(err))
+                    .map_err(FromGlesError::from_gles_error)
                 };
                 elem
             }
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => {
                 let elem = {
-                    let glow_frame = frame.glow_frame_mut();
+                    let glow_frame = R::glow_frame_mut(frame);
                     RenderElement::<GlowRenderer>::draw(
                         elem,
                         glow_frame,
@@ -269,14 +229,14 @@ impl<'a> RenderElement<GlMultiRenderer<'a>> for CosmicElement<GlMultiRenderer<'a
                         damage,
                         opaque_regions,
                     )
-                    .map_err(|err| GlMultiError::Render(err))
+                    .map_err(FromGlesError::from_gles_error)
                 };
                 elem
             }
         }
     }
 
-    fn underlying_storage(&self, renderer: &mut GlMultiRenderer<'a>) -> Option<UnderlyingStorage> {
+    fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage> {
         match self {
             CosmicElement::Workspace(elem) => elem.underlying_storage(renderer),
             CosmicElement::Cursor(elem) => elem.underlying_storage(renderer),
@@ -361,6 +321,8 @@ where
 {
     fn glow_renderer(&self) -> &GlowRenderer;
     fn glow_renderer_mut(&mut self) -> &mut GlowRenderer;
+    fn glow_frame<'a, 'frame>(frame: &'a Self::Frame<'frame>) -> &'a GlowFrame<'frame>;
+    fn glow_frame_mut<'a, 'frame>(frame: &'a mut Self::Frame<'frame>) -> &'a mut GlowFrame<'frame>;
 }
 
 impl AsGlowRenderer for GlowRenderer {
@@ -369,6 +331,12 @@ impl AsGlowRenderer for GlowRenderer {
     }
     fn glow_renderer_mut(&mut self) -> &mut GlowRenderer {
         self
+    }
+    fn glow_frame<'a, 'frame>(frame: &'a Self::Frame<'frame>) -> &'a GlowFrame<'frame> {
+        frame
+    }
+    fn glow_frame_mut<'a, 'frame>(frame: &'a mut Self::Frame<'frame>) -> &'a mut GlowFrame<'frame> {
+        frame
     }
 }
 
@@ -379,31 +347,11 @@ impl<'a> AsGlowRenderer for GlMultiRenderer<'a> {
     fn glow_renderer_mut(&mut self) -> &mut GlowRenderer {
         self.as_mut()
     }
-}
-
-pub trait AsGlowFrame<'a>
-where
-    Self: Frame,
-{
-    fn glow_frame(&self) -> &GlowFrame<'a>;
-    fn glow_frame_mut(&mut self) -> &mut GlowFrame<'a>;
-}
-
-impl<'frame> AsGlowFrame<'frame> for GlowFrame<'frame> {
-    fn glow_frame(&self) -> &GlowFrame<'frame> {
-        self
+    fn glow_frame<'b, 'frame>(frame: &'b Self::Frame<'frame>) -> &'b GlowFrame<'frame> {
+        frame.as_ref()
     }
-    fn glow_frame_mut(&mut self) -> &mut GlowFrame<'frame> {
-        self
-    }
-}
-
-impl<'renderer, 'frame> AsGlowFrame<'frame> for GlMultiFrame<'renderer, 'frame> {
-    fn glow_frame(&self) -> &GlowFrame<'frame> {
-        self.as_ref()
-    }
-    fn glow_frame_mut(&mut self) -> &mut GlowFrame<'frame> {
-        self.as_mut()
+    fn glow_frame_mut<'b, 'frame>(frame: &'b mut Self::Frame<'frame>) -> &'b mut GlowFrame<'frame> {
+        frame.as_mut()
     }
 }
 
