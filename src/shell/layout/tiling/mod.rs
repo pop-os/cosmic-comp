@@ -689,7 +689,6 @@ impl TilingLayout {
                     .map(|child_id| (desc.node.clone(), child_id.clone()))
                     .collect::<Vec<_>>();
                 let node = Node::new(node.data().clone());
-                TilingLayout::unmap_internal(&mut this_tree, &desc.node);
 
                 let id = match other_tree.root_node_id() {
                     None => other_tree.insert(node, InsertBehavior::AsRoot).unwrap(),
@@ -786,6 +785,7 @@ impl TilingLayout {
                 let this_gaps = this.gaps();
                 let other_gaps = other.gaps();
 
+                TilingLayout::unmap_internal(&mut this_tree, &desc.node);
                 let blocker =
                     TilingLayout::update_positions(&this.output, &mut this_tree, this_gaps);
                 this.queue.push_tree(this_tree, ANIMATION_DURATION, blocker);
