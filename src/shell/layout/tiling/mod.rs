@@ -895,6 +895,12 @@ impl TilingLayout {
                     .into_iter()
                     .map(|child_id| (other_desc.node.clone(), child_id.clone()))
                     .collect::<Vec<_>>();
+                let mut other_children = other_node
+                    .children()
+                    .into_iter()
+                    .map(|child_id| (this_desc.node.clone(), child_id.clone()))
+                    .collect::<Vec<_>>();
+
                 while !this_children.is_empty() {
                     for (parent_id, child_id) in std::mem::take(&mut this_children) {
                         let new_children = this_tree
@@ -935,12 +941,6 @@ impl TilingLayout {
                     }
                 }
 
-                let other_node = other_tree.get_mut(&other_desc.node).ok()?;
-                let mut other_children = other_node
-                    .children()
-                    .into_iter()
-                    .map(|child_id| (this_desc.node.clone(), child_id.clone()))
-                    .collect::<Vec<_>>();
                 while !other_children.is_empty() {
                     for (parent_id, child_id) in std::mem::take(&mut other_children) {
                         let new_children = other_tree
