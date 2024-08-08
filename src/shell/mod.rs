@@ -2632,15 +2632,14 @@ impl Shell {
     pub fn next_focus<'a>(&self, direction: FocusDirection, seat: &Seat<State>) -> FocusResult {
         let overview = self.overview_mode().0;
         let output = seat.active_output();
-        let workspace = self.active_space(&output);
-
-        if workspace.fullscreen.is_some() {
-            return FocusResult::None;
-        }
 
         let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
             return FocusResult::None;
         };
+
+        if matches!(target, KeyboardFocusTarget::Fullscreen(_)) {
+            return FocusResult::None;
+        }
 
         let set = self.workspaces.sets.get(&output).unwrap();
         let sticky_layer = &set.sticky_layer;
