@@ -854,26 +854,7 @@ impl TilingLayout {
                 let this_node = this_tree.get_mut(&this_desc.node).ok()?;
                 let other_node = other_tree.get_mut(&other_desc.node).ok()?;
 
-                // swap data
-                let other_data = other_node.data().clone();
-                other_node.replace_data(this_node.replace_data(other_data));
-
                 if let Data::Mapped { mapped, .. } = this_node.data_mut() {
-                    if this.output != other_output {
-                        mapped.output_leave(&other_output);
-                        mapped.output_enter(&this.output, mapped.bbox());
-                        for (ref surface, _) in mapped.windows() {
-                            toplevel_leave_output(surface, &other_output);
-                            toplevel_enter_output(surface, &this.output);
-                        }
-                    }
-                    for (ref surface, _) in mapped.windows() {
-                        toplevel_leave_workspace(surface, &other_desc.handle);
-                        toplevel_enter_workspace(surface, &this_desc.handle);
-                    }
-                    *mapped.tiling_node_id.lock().unwrap() = Some(this_desc.node.clone());
-                }
-                if let Data::Mapped { mapped, .. } = other_node.data_mut() {
                     if this.output != other_output {
                         mapped.output_leave(&this.output);
                         mapped.output_enter(&other_output, mapped.bbox());
@@ -888,6 +869,25 @@ impl TilingLayout {
                     }
                     *mapped.tiling_node_id.lock().unwrap() = Some(other_desc.node.clone());
                 }
+                if let Data::Mapped { mapped, .. } = other_node.data_mut() {
+                    if this.output != other_output {
+                        mapped.output_leave(&other_output);
+                        mapped.output_enter(&this.output, mapped.bbox());
+                        for (ref surface, _) in mapped.windows() {
+                            toplevel_leave_output(surface, &other_output);
+                            toplevel_enter_output(surface, &this.output);
+                        }
+                    }
+                    for (ref surface, _) in mapped.windows() {
+                        toplevel_leave_workspace(surface, &other_desc.handle);
+                        toplevel_enter_workspace(surface, &this_desc.handle);
+                    }
+                    *mapped.tiling_node_id.lock().unwrap() = Some(this_desc.node.clone());
+                }
+
+                // swap data
+                let other_data = other_node.data().clone();
+                other_node.replace_data(this_node.replace_data(other_data));
 
                 // swap children
                 let mut this_children = this_node
