@@ -4703,7 +4703,7 @@ checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/smithay//smithay?rev=e7f0857#e7f08570bceab6107863267ae168d0afb018e8f5"
+source = "git+https://github.com/ids1024/smithay?branch=drm-syncobj#fc89befdbb3c5d2186d11f3dcdb82a97b23543a4"
 dependencies = [
  "appendlist",
  "ash 0.38.0+1.3.281",

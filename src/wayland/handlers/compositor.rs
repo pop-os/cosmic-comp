@@ -14,6 +14,7 @@ use smithay::{
             CompositorHandler, CompositorState, SurfaceAttributes,
         },
         dmabuf::get_dmabuf,
+        drm_syncobj::DrmSyncobjCachedState,
         seat::WaylandFocus,
         shell::{
             wlr_layer::LayerSurfaceAttributes,
@@ -100,7 +101,14 @@ impl CompositorHandler for State {
 
     fn new_surface(&mut self, surface: &WlSurface) {
         add_pre_commit_hook::<Self, _>(surface, move |state, _dh, surface| {
+            let mut acquire_point = None;
             let maybe_dmabuf = with_states(surface, |surface_data| {
+                acquire_point = surface_data
+                    .cached_state
+                    .get::<DrmSyncobjCachedState>()
+                    .pending()
+                    .acquire_point
+                    .clone();
                 surface_data
                     .cached_state
                     .get::<SurfaceAttributes>()
@@ -113,6 +121,25 @@ impl CompositorHandler for State {
                     })
             });
             if let Some(dmabuf) = maybe_dmabuf {
+                if let Some(acquire_point) = acquire_point {
+                    if let Ok((blocker, source)) = acquire_point.generate_blocker() {
+                        let client = surface.client().unwrap();
+                        let res = state.common.event_loop_handle.insert_source(
+                            source,
+                            move |_, _, state| {
+                                let dh = state.common.display_handle.clone();
+                                state
+                                    .client_compositor_state(&client)
+                                    .blocker_cleared(state, &dh);
+                                Ok(())
+                            },
+                        );
+                        if res.is_ok() {
+                            add_blocker(surface, blocker);
+                            return;
+                        }
+                    }
+                }
                 if let Ok((blocker, source)) = dmabuf.generate_blocker(Interest::READ) {
                     let client = surface.client().unwrap();
                     let res =
