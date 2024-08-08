@@ -2689,6 +2689,10 @@ impl Shell {
         }
 
         if workspace.is_tiled(&focused) {
+            if focused.is_maximized(false) {
+                return FocusResult::None;
+            }
+
             let focus_stack = workspace.focus_stack.get(seat);
             let swap_desc = match overview.active_trigger() {
                 Some(Trigger::KeyboardSwap(_, desc)) => Some(desc.clone()),
