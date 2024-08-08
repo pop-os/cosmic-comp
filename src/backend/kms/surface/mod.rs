@@ -673,8 +673,27 @@ impl SurfaceThreadState {
         let Some(compositor) = self.compositor.as_mut() else {
             return;
         };
+
+        // handle edge-cases right after resume
+        if !matches!(
+            self.state,
+            QueueState::WaitingForVBlank { .. } | QueueState::Idle
+        ) {
+            match mem::replace(&mut self.state, QueueState::Idle) {
+                QueueState::WaitingForVBlank { .. } | QueueState::Idle => unreachable!(),
+                QueueState::Queued(token) | QueueState::WaitingForEstimatedVBlank(token) => {
+                    self.loop_handle.remove(token);
+                }
+                QueueState::WaitingForEstimatedVBlankAndQueued {
+                    estimated_vblank,
+                    queued_render,
+                } => {
+                    self.loop_handle.remove(estimated_vblank);
+                    self.loop_handle.remove(queued_render);
+                }
+            }
+        }
         if matches!(self.state, QueueState::Idle) {
-            // can happen right after resume
             return;
         }
 
