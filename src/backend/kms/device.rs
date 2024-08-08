@@ -15,7 +15,7 @@ use smithay::{
         egl::{context::ContextPriority, EGLContext, EGLDevice, EGLDisplay},
         session::Session,
     },
-    output::{Mode as OutputMode, Output, PhysicalProperties, Subpixel},
+    output::{Mode as OutputMode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
         calloop::{LoopHandle, RegistrationToken},
         drm::control::{connector, crtc, Device as ControlDevice, ModeTypeFlags},
@@ -625,6 +625,11 @@ fn populate_modes(
     else {
         anyhow::bail!("No mode found");
     };
+    let scale = conn_info
+        .size()
+        .map(|size| calculate_scale(conn_info.interface(), size, mode.size()))
+        .unwrap_or(1.0);
+
     let refresh_rate = drm_helpers::calculate_refresh_rate(mode);
     let output_mode = OutputMode {
         size: (mode.size().0 as i32, mode.size().1 as i32).into(),
@@ -644,7 +649,7 @@ fn populate_modes(
         Some(output_mode),
         // TODO: Readout property for monitor rotation
         Some(Transform::Normal),
-        None,
+        Some(Scale::Fractional(scale)),
         Some(Point::from((position.0 as i32, position.1 as i32))),
     );
 
@@ -657,8 +662,81 @@ fn populate_modes(
         mode: ((output_mode.size.w, output_mode.size.h), Some(refresh_rate)),
         position,
         max_bpc,
+        scale,
         ..std::mem::take(&mut *output_config)
     };
 
     Ok(())
+}
+
+pub fn calculate_scale(
+    interface: connector::Interface,
+    monitor_size_mm: (u32, u32),
+    resolution: (u16, u16),
+) -> f64 {
+    let (w_mm, h_mm) = monitor_size_mm;
+    let (w_px, h_px) = resolution;
+    if w_mm == 0 || h_mm == 0 {
+        // possibly projector, but could just be some no-brand display
+        return 1.0;
+    }
+
+    let (w_in, h_in) = (w_mm as f64 / 25.4, h_mm as f64 / 25.4);
+    // due to edid's setting non-sensicle values,
+    // lets be really careful we don't devide by 0 (or non-normal values) when deriving values from size.
+    // (also the size should be positive, but the u16 arguments already force that.)
+    if !w_in.is_normal() || !h_in.is_normal() {
+        return 1.0;
+    }
+
+    let diag = (w_in.powf(2.) * h_in.powf(2.)).sqrt();
+    let dpi = (w_px as f64 / w_in + h_px as f64 / h_in) / 2.0;
+
+    match diag {
+        _diag if diag < 20. || interface == connector::Interface::EmbeddedDisplayPort => {
+            // likely laptop
+            scale_from_dpi(dpi, 144, w_px)
+        }
+        _diag
+            if diag >= 40. && h_in >= 19. // 16:10 has a height of 19.6, anything lower is most likely an ultrawide
+                && (interface == connector::Interface::HDMIA
+                    || interface == connector::Interface::HDMIB) =>
+        {
+            // likely TV
+            match w_px {
+                x if x <= 720 => 1.0,
+                _ => 2.0,
+            }
+        }
+        _ => {
+            // likely desktop
+            scale_from_dpi(dpi, 120, w_px)
+        }
+    }
+}
+
+pub fn scale_from_dpi(dpi: f64, step_size: u32, width_px: u16) -> f64 {
+    let scale = (dpi / step_size as f64) * 100.0;
+
+    // snap to 25%
+    let scale = (scale.round() as u32)
+        .next_multiple_of(25)
+        .saturating_sub(25) as f64
+        / 100.0;
+
+    // max values
+    let max = match width_px {
+        w if w <= 1080 => 1.0, // 125% is usually a worse experience than 100% atm
+        // for 1440p and weird variants we let the algorithm take over, but limit the max, this is inspired by what windows does
+        w if w <= 1440 => 1.5,
+        w if w <= 1600 => 1.75,
+        _ => 2.0, // never go higher than 200% by default though (Note for the future: Tablets? Phones?)
+    };
+
+    let min = match width_px {
+        w if w >= 2160 => 2.0, // 4k should default to 200%, as we prefer integer scales
+        _ => 1.0,              // never go lower than 100%
+    };
+
+    scale.min(max).max(min)
 }
