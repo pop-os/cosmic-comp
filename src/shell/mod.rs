@@ -55,8 +55,8 @@ use crate::{
     utils::{prelude::*, quirks::WORKSPACE_OVERVIEW_NAMESPACE},
     wayland::{
         handlers::{
-            toplevel_management::minimize_rectangle, xdg_activation::ActivationContext,
-            xdg_shell::popup::get_popup_toplevel,
+            screencopy::WORKSPACE_OVERVIEW_NAMESPACE, toplevel_management::minimize_rectangle,
+            xdg_activation::ActivationContext, xdg_shell::popup::get_popup_toplevel,
         },
         protocols::{
             toplevel_info::{
