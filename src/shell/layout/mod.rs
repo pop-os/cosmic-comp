@@ -47,6 +47,7 @@ lazy_static::lazy_static! {
         r"tilda",
         r"zoom",
         r"^.*?action=join.*$",
+        r"",
     ]).unwrap();
     static ref EXCEPTIONS_TITLE: RegexSet = RegexSet::new(&[
         r".*",
@@ -81,6 +82,7 @@ lazy_static::lazy_static! {
         r".*",
         r".*",
         r".*",
+        r"wl-clipboard",
     ]).unwrap();
 }
 
