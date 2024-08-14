@@ -676,9 +676,14 @@ pub fn calculate_scale(
 ) -> f64 {
     let (w_mm, h_mm) = monitor_size_mm;
     let (w_px, h_px) = resolution;
+    let shorter_res = w_px.min(h_px);
+    let fallback_scale = match shorter_res {
+        px if px <= 1600 => 1.0,
+        _ => 2.0,
+    };
     if w_mm == 0 || h_mm == 0 {
         // possibly projector, but could just be some no-brand display
-        return 1.0;
+        return fallback_scale;
     }
 
     let (w_in, h_in) = (w_mm as f64 / 25.4, h_mm as f64 / 25.4);
@@ -686,12 +691,11 @@ pub fn calculate_scale(
     // lets be really careful we don't devide by 0 (or non-normal values) when deriving values from size.
     // (also the size should be positive, but the u16 arguments already force that.)
     if !w_in.is_normal() || !h_in.is_normal() {
-        return 1.0;
+        return fallback_scale;
     }
 
     let diag = (w_in.powf(2.) * h_in.powf(2.)).sqrt();
     let dpi = (w_px as f64 / w_in + h_px as f64 / h_in) / 2.0;
-    let shorter_res = if w_mm < h_mm { w_px } else { h_px };
 
     match diag {
         _diag if diag < 20. || interface == connector::Interface::EmbeddedDisplayPort => {
@@ -819,7 +823,7 @@ mod test {
         for &iface in &[Interface::DisplayPort, Interface::HDMIA, Interface::HDMIB] {
             assert_eq!(scale(iface, 0.0, 1920, 1080), 100);
             assert_eq!(scale(iface, 0.0, 2560, 1440), 100);
-            assert_eq!(scale(iface, 0.0, 3840, 2160), 100);
+            assert_eq!(scale(iface, 0.0, 3840, 2160), 200);
         }
     }
 }
