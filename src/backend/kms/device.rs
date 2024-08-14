@@ -814,5 +814,12 @@ mod test {
                 assert_eq!(scale(iface, diag_in, 3840, 2160), 200);
             }
         }
+
+        // Zero sized displays (projectors, invalid EDID)
+        for &iface in &[Interface::DisplayPort, Interface::HDMIA, Interface::HDMIB] {
+            assert_eq!(scale(iface, 0.0, 1920, 1080), 100);
+            assert_eq!(scale(iface, 0.0, 2560, 1440), 100);
+            assert_eq!(scale(iface, 0.0, 3840, 2160), 100);
+        }
     }
 }
