@@ -8,83 +8,12 @@ use smithay::{
     xwayland::xwm::WmWindowType,
 };
 
+use crate::config::Config;
+
 use super::CosmicSurface;
 
 pub mod floating;
 pub mod tiling;
-
-lazy_static::lazy_static! {
-    static ref EXCEPTIONS_APPID: RegexSet = RegexSet::new(&[
-        r"Authy Desktop",
-        r"Com.github.amezin.ddterm",
-        r"Com.github.donadigo.eddy",
-        r".*",
-        r"Enpass",
-        r"Gjs",
-        r"Gnome-initial-setup",
-        r"Gnome-terminal",
-        r"Guake",
-        r"Io.elementary.sideload",
-        r"KotatogramDesktop",
-        r"Mozilla VPN",
-        r"update-manager",
-        r"Solaar",
-        r"Steam",
-        r"",
-        r"TelegramDesktop",
-        r"Zotero",
-        r"gjs",
-        r"gnome-screenshot",
-        r"ibus-.*",
-        r"jetbrains-toolbox",
-        r"jetbrains-webstorm",
-        r"jetbrains-webstorm",
-        r"jetbrains-webstorm",
-        r"krunner",
-        r"pritunl",
-        r"re.sonny.Junction",
-        r"system76-driver",
-        r"tilda",
-        r"zoom",
-        r"^.*?action=join.*$",
-        r"",
-    ]).unwrap();
-    static ref EXCEPTIONS_TITLE: RegexSet = RegexSet::new(&[
-        r".*",
-        r".*",
-        r".*",
-        r"Discord Updater",
-        r"Enpass Assistant",
-        r"Settings",
-        r".*",
-        r"Preferences – General",
-        r".*",
-        r".*",
-        r"Media viewer",
-        r".*",
-        r"Software Updater",
-        r".*",
-        r"^.*?(Guard|Login).*",
-        r"Steam",
-        r"Media viewer",
-        r"Quick Format Citation",
-        r".*",
-        r".*",
-        r".*",
-        r".*",
-        r"Customize WebStorm",
-        r"License Activation",
-        r"Welcome to WebStorm",
-        r".*",
-        r".*",
-        r".*",
-        r".*",
-        r".*",
-        r".*",
-        r".*",
-        r"wl-clipboard",
-    ]).unwrap();
-}
 
 pub fn is_dialog(window: &CosmicSurface) -> bool {
     // Check "window type"
@@ -126,10 +55,35 @@ pub fn is_dialog(window: &CosmicSurface) -> bool {
     false
 }
 
-pub fn has_floating_exception(window: &CosmicSurface) -> bool {
+#[derive(Debug, Clone)]
+pub struct TilingExceptions {
+    app_ids: RegexSet,
+    titles: RegexSet,
+}
+
+impl TilingExceptions {
+    pub fn new(config: &Config) -> Self {
+        let mut app_ids = Vec::new();
+        let mut titles = Vec::new();
+
+        for app in &config.cosmic_conf.tiling_exceptions {
+            for title in &app.titles {
+                app_ids.push(app.appid.clone());
+                titles.push(title.clone());
+            }
+        }
+
+        Self {
+            app_ids: RegexSet::new(app_ids).unwrap(),
+            titles: RegexSet::new(titles).unwrap(),
+        }
+    }
+}
+
+pub fn has_floating_exception(exceptions: &TilingExceptions, window: &CosmicSurface) -> bool {
     // else take a look at our exceptions
-    let appid_matches = EXCEPTIONS_APPID.matches(&window.app_id());
-    let title_matches = EXCEPTIONS_TITLE.matches(&window.title());
+    let appid_matches = exceptions.app_ids.matches(&window.app_id());
+    let title_matches = exceptions.titles.matches(&window.title());
     for idx in appid_matches.into_iter() {
         if title_matches.matched(idx) {
             return true;
