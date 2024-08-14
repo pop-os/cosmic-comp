@@ -47,6 +47,7 @@ use cosmic_comp_config::{
 pub struct Config {
     pub dynamic_conf: DynamicConfig,
     pub cosmic_helper: cosmic_config::Config,
+    /// cosmic-config comp configuration for `com.system76.CosmicComp`
     pub cosmic_conf: CosmicCompConfig,
     /// cosmic-config context for `com.system76.CosmicSettings.Shortcuts`
     pub settings_context: cosmic_config::Config,

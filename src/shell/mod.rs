@@ -1,6 +1,7 @@
 use calloop::LoopHandle;
 use grabs::SeatMoveGrabState;
 use indexmap::IndexMap;
+use layout::TilingExceptions;
 use std::{
     collections::HashMap,
     sync::atomic::Ordering,
@@ -250,6 +251,7 @@ pub struct Shell {
         Output,
     )>,
     resize_indicator: Option<ResizeIndicator>,
+    tiling_exceptions: TilingExceptions,
 
     #[cfg(feature = "debug")]
     pub debug_active: bool,
@@ -1235,6 +1237,7 @@ impl Shell {
             resize_mode: ResizeMode::None,
             resize_state: None,
             resize_indicator: None,
+            tiling_exceptions: layout::TilingExceptions::new(config),
 
             #[cfg(feature = "debug")]
             debug_active: false,
@@ -1934,7 +1937,7 @@ impl Shell {
             && (workspace_output != seat.active_output() || active_handle != workspace.handle);
         let workspace_handle = workspace.handle;
         let is_dialog = layout::is_dialog(&window);
-        let floating_exception = layout::has_floating_exception(&window);
+        let floating_exception = layout::has_floating_exception(&self.tiling_exceptions, &window);
 
         let maybe_focused = workspace.focus_stack.get(&seat).iter().next().cloned();
         if let Some(focused) = maybe_focused {
