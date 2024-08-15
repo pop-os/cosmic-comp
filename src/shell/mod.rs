@@ -7,6 +7,7 @@ use std::{
     sync::atomic::Ordering,
     time::{Duration, Instant},
 };
+use tracing::error;
 use wayland_backend::server::ClientId;
 
 use cosmic_comp_config::{
@@ -1220,6 +1221,11 @@ impl Shell {
     pub fn new(config: &Config) -> Self {
         let theme = cosmic::theme::system_preference();
 
+        let tiling_exceptions = layout::TilingExceptions::new(config).unwrap_or_else(|e| {
+            error!(?e, "Could not load tiling exceptions, using default");
+            layout::TilingExceptions::default()
+        });
+
         Shell {
             workspaces: Workspaces::new(config, theme.clone()),
             seats: Seats::new(),
@@ -1237,7 +1243,7 @@ impl Shell {
             resize_mode: ResizeMode::None,
             resize_state: None,
             resize_indicator: None,
-            tiling_exceptions: layout::TilingExceptions::new(config),
+            tiling_exceptions,
 
             #[cfg(feature = "debug")]
             debug_active: false,

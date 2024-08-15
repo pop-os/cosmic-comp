@@ -55,14 +55,14 @@ pub fn is_dialog(window: &CosmicSurface) -> bool {
     false
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TilingExceptions {
     app_ids: RegexSet,
     titles: RegexSet,
 }
 
 impl TilingExceptions {
-    pub fn new(config: &Config) -> Self {
+    pub fn new(config: &Config) -> Result<Self, regex::Error> {
         let mut app_ids = Vec::new();
         let mut titles = Vec::new();
 
@@ -73,10 +73,10 @@ impl TilingExceptions {
             }
         }
 
-        Self {
-            app_ids: RegexSet::new(app_ids).unwrap(),
-            titles: RegexSet::new(titles).unwrap(),
-        }
+        Ok(Self {
+            app_ids: RegexSet::new(app_ids)?,
+            titles: RegexSet::new(titles)?,
+        })
     }
 }
 
