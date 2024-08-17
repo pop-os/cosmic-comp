@@ -164,6 +164,8 @@ impl State {
     where
         <B as InputBackend>::Device: 'static,
     {
+        crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
+
         use smithay::backend::input::Event;
         match event {
             InputEvent::DeviceAdded { device } => {

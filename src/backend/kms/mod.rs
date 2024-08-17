@@ -43,6 +43,7 @@ mod drm_helpers;
 pub mod render;
 mod socket;
 mod surface;
+pub(crate) use surface::Surface;
 
 use device::*;
 pub use surface::Timings;
