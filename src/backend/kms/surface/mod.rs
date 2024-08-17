@@ -102,9 +102,9 @@ static NVIDIA_LOGO: &'static [u8] = include_bytes!("../../../../resources/icons/
 
 #[derive(Debug)]
 pub struct Surface {
-    pub(super) connector: connector::Handle,
+    pub(crate) connector: connector::Handle,
     pub(super) crtc: crtc::Handle,
-    pub(super) output: Output,
+    pub(crate) output: Output,
     known_nodes: HashSet<DrmNode>,
 
     active: Arc<AtomicBool>,
@@ -114,6 +114,8 @@ pub struct Surface {
     loop_handle: LoopHandle<'static, State>,
     thread_command: Sender<ThreadCommand>,
     thread_token: RegistrationToken,
+
+    dpms: bool,
 }
 
 pub struct SurfaceThreadState {
@@ -238,6 +240,7 @@ pub enum ThreadCommand {
     ScheduleRender,
     SetMode(Mode, SyncSender<Result<()>>),
     End,
+    DpmsOff,
 }
 
 #[derive(Debug)]
@@ -350,6 +353,7 @@ impl Surface {
             loop_handle: evlh.clone(),
             thread_command: tx,
             thread_token,
+            dpms: true,
         })
     }
 
@@ -380,7 +384,9 @@ impl Surface {
     }
 
     pub fn schedule_render(&self) {
-        let _ = self.thread_command.send(ThreadCommand::ScheduleRender);
+        if self.dpms {
+            let _ = self.thread_command.send(ThreadCommand::ScheduleRender);
+        }
     }
 
     pub fn set_mirroring(&mut self, output: Option<Output>) {
@@ -430,6 +436,21 @@ impl Surface {
         });
 
         rx.recv().context("Surface thread died")?
+    }
+
+    pub fn get_dpms(&mut self) -> bool {
+        self.dpms
+    }
+
+    pub fn set_dpms(&mut self, on: bool) {
+        if self.dpms != on {
+            self.dpms = on;
+            if on {
+                self.schedule_render();
+            } else {
+                let _ = self.thread_command.send(ThreadCommand::DpmsOff);
+            }
+        }
     }
 }
 
@@ -538,6 +559,30 @@ fn surface_thread(
                     let _ = result.send(compositor.use_mode(mode).map_err(Into::into));
                 } else {
                     let _ = result.send(Err(anyhow::anyhow!("Set mode with inactive surface")));
+                }
+            }
+            Event::Msg(ThreadCommand::DpmsOff) => {
+                if let Some(compositor) = state.compositor.as_mut() {
+                    if let Err(err) = compositor.clear() {
+                        error!("Failed to set DPMS off: {:?}", err);
+                    }
+                    match std::mem::replace(&mut state.state, QueueState::Idle) {
+                        QueueState::Idle => {}
+                        QueueState::Queued(token)
+                        | QueueState::WaitingForEstimatedVBlank(token) => {
+                            state.loop_handle.remove(token);
+                        }
+                        QueueState::WaitingForVBlank { .. } => {
+                            state.timings.discard_current_frame()
+                        }
+                        QueueState::WaitingForEstimatedVBlankAndQueued {
+                            estimated_vblank,
+                            queued_render,
+                        } => {
+                            state.loop_handle.remove(estimated_vblank);
+                            state.loop_handle.remove(queued_render);
+                        }
+                    };
                 }
             }
             Event::Closed | Event::Msg(ThreadCommand::End) => {
