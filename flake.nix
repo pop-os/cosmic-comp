@@ -48,14 +48,12 @@
             ];
 
             buildInputs = with pkgs; [
-              wayland
-              systemd # For libudev
-              seatd # For libseat
               libxkbcommon
               libinput
-              mesa # For libgbm
-              fontconfig
-              stdenv.cc.cc.lib
+              mesa
+              pixman
+              seatd
+              udev
             ];
 
             runtimeDependencies = with pkgs; [

@@ -9,7 +9,7 @@ use std::{
 use wayland_backend::server::ClientId;
 
 use cosmic_comp_config::{
-    workspace::{WorkspaceLayout, WorkspaceMode},
+    workspace::{RemoveEmpty, WorkspaceConfig, WorkspaceLayout, WorkspaceMode},
     TileBehavior,
 };
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::{
@@ -555,8 +555,8 @@ impl WorkspaceSet {
         self.workspaces.push(workspace);
     }
 
+    /// Ensures that the last workspace is empty by creating a new one if it's not.
     fn ensure_last_empty<'a>(&mut self, state: &mut WorkspaceUpdateGuard<State>) {
-        // add empty at the end, if necessary
         if self
             .workspaces
             .last()
@@ -565,29 +565,39 @@ impl WorkspaceSet {
         {
             self.add_empty_workspace(state);
         }
+    }
 
-        // remove empty workspaces in between, if they are not active
+    /// Removes empty non-active workspaces according to the provided [`RemoveEmpty`] setting.
+    ///
+    /// Leaves the last empty workspace intact.
+    fn remove_empty(&mut self, which: RemoveEmpty, state: &mut WorkspaceUpdateGuard<State>) {
         let len = self.workspaces.len();
-        let mut keep = vec![true; len];
-        for (i, workspace) in self.workspaces.iter().enumerate() {
-            if workspace.is_empty() && i != self.active && i != len - 1 {
-                state.remove_workspace(workspace.handle);
-                keep[i] = false;
+
+        for i in (0..len).rev() {
+            let is_empty = self.workspaces[i].is_empty() && i != self.active;
+            let is_last = i == len - 1;
+
+            match which {
+                _ if is_empty && is_last => continue,
+                RemoveEmpty::All if !is_empty => continue,
+                RemoveEmpty::Trailing if !is_empty => break,
+                _ => {}
+            }
+
+            let workspace = self.workspaces.remove(i);
+            state.remove_workspace(workspace.handle);
+
+            if i < self.active {
+                self.active -= 1;
             }
         }
 
-        let mut iter = keep.iter();
-        self.workspaces.retain(|_| *iter.next().unwrap());
-        self.active -= keep
-            .iter()
-            .take(self.active + 1)
-            .filter(|keep| !**keep)
-            .count();
+        if self.workspaces.len() == len {
+            return;
+        }
 
-        if keep.iter().any(|val| *val == false) {
-            for (i, workspace) in self.workspaces.iter().enumerate() {
-                workspace_set_idx(state, i as u8 + 1, self.idx, &workspace.handle);
-            }
+        for (i, workspace) in self.workspaces.iter().enumerate() {
+            workspace_set_idx(state, i as u8 + 1, self.idx, &workspace.handle);
         }
     }
 
@@ -608,6 +618,8 @@ pub struct Workspaces {
     autotile: bool,
     autotile_behavior: TileBehavior,
     theme: cosmic::Theme,
+
+    config: WorkspaceConfig,
 }
 
 impl Workspaces {
@@ -620,6 +632,7 @@ impl Workspaces {
             autotile: config.cosmic_conf.autotile,
             autotile_behavior: config.cosmic_conf.autotile_behavior,
             theme,
+            config: config.cosmic_conf.workspaces.clone(),
         }
     }
 
@@ -790,6 +803,7 @@ impl Workspaces {
         let old_mode = self.mode;
         self.mode = config.cosmic_conf.workspaces.workspace_mode;
         self.layout = config.cosmic_conf.workspaces.workspace_layout;
+        self.config = config.cosmic_conf.workspaces.clone();
 
         if self.sets.len() <= 1 {
             return;
@@ -880,8 +894,22 @@ impl Workspaces {
                         set.add_empty_workspace(workspace_state)
                     }
                 }
+            }
+            WorkspaceMode::OutputBound => {}
+        }
 
-                // add empty at the end, if necessary
+        self.ensure_last_empty(workspace_state);
+        self.remove_empty(workspace_state);
+
+        for set in self.sets.values_mut() {
+            set.refresh(xdg_activation_state)
+        }
+    }
+
+    /// Ensures that the last workspace is empty by creating a new one if it's not.
+    fn ensure_last_empty(&mut self, workspace_state: &mut WorkspaceUpdateGuard<'_, State>) {
+        match self.mode {
+            WorkspaceMode::Global => {
                 if self
                     .sets
                     .values()
@@ -892,43 +920,6 @@ impl Workspaces {
                         set.add_empty_workspace(workspace_state);
                     }
                 }
-
-                // remove empty workspaces in between, if they are not active
-                let len = self.sets[0].workspaces.len();
-                let mut active = self.sets[0].active;
-                let mut keep = vec![true; len];
-                for i in 0..len {
-                    let has_windows = self.sets.values().any(|s| !s.workspaces[i].is_empty());
-
-                    if !has_windows && i != active && i != len - 1 {
-                        for workspace in self.sets.values().map(|s| &s.workspaces[i]) {
-                            workspace_state.remove_workspace(workspace.handle);
-                        }
-                        keep[i] = false;
-                    }
-                }
-
-                self.sets.values_mut().for_each(|s| {
-                    let mut iter = keep.iter();
-                    s.workspaces.retain(|_| *iter.next().unwrap());
-                });
-                active -= keep.iter().take(active + 1).filter(|keep| !**keep).count();
-                self.sets.values_mut().for_each(|s| {
-                    s.active = active;
-                });
-
-                if keep.iter().any(|val| *val == false) {
-                    for set in self.sets.values_mut() {
-                        for (i, workspace) in set.workspaces.iter().enumerate() {
-                            workspace_set_idx(
-                                workspace_state,
-                                i as u8 + 1,
-                                set.idx,
-                                &workspace.handle,
-                            );
-                        }
-                    }
-                }
             }
             WorkspaceMode::OutputBound => {
                 for set in self.sets.values_mut() {
@@ -936,9 +927,59 @@ impl Workspaces {
                 }
             }
         }
+    }
 
-        for set in self.sets.values_mut() {
-            set.refresh(xdg_activation_state)
+    /// Removes empty non-active workspaces according to the [`RemoveEmpty`] config setting.
+    ///
+    /// Leaves the last empty workspace intact.
+    fn remove_empty(&mut self, workspace_state: &mut WorkspaceUpdateGuard<'_, State>) {
+        match self.mode {
+            WorkspaceMode::Global => {
+                if self.sets.is_empty() {
+                    return;
+                }
+
+                let len = self.sets[0].workspaces.len();
+                let mut active = self.sets[0].active;
+
+                for i in (0..len).rev() {
+                    let has_windows = self.sets.values().any(|s| !s.workspaces[i].is_empty());
+                    let is_empty = !has_windows && i != active;
+                    let is_last = i == len - 1;
+
+                    match self.config.remove_empty {
+                        _ if is_empty && is_last => continue,
+                        RemoveEmpty::All if !is_empty => continue,
+                        RemoveEmpty::Trailing if !is_empty => break,
+                        _ => {}
+                    }
+
+                    for workspace in self.sets.values_mut().map(|s| s.workspaces.remove(i)) {
+                        workspace_state.remove_workspace(workspace.handle);
+                    }
+
+                    if i < active {
+                        active -= 1;
+                    }
+                }
+
+                if self.sets[0].workspaces.len() == len {
+                    return;
+                }
+
+                for set in self.sets.values_mut() {
+                    set.active = active;
+
+                    for (i, workspace) in set.workspaces.iter().enumerate() {
+                        workspace_set_idx(workspace_state, i as u8 + 1, set.idx, &workspace.handle);
+                    }
+                }
+            }
+            WorkspaceMode::OutputBound => {
+                for set in self.sets.values_mut() {
+                    set.remove_empty(self.config.remove_empty, workspace_state);
+                }
+            }
         }
     }
 
