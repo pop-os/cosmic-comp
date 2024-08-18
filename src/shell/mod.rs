@@ -999,7 +999,7 @@ impl Workspaces {
         let set = self.sets.get(output).or(self.backup_set.as_ref()).unwrap();
         (
             set.previously_active
-                .map(|(idx, start)| (&set.workspaces[idx], start)),
+                .and_then(|(idx, start)| set.workspaces.get(idx).map(|w| (w, start))),
             &set.workspaces[set.active],
         )
     }
