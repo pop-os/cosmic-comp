@@ -406,6 +406,7 @@ impl Program for CosmicWindowInternal {
                                 &state.common.config,
                                 &state.common.event_loop_handle,
                                 &state.common.xdg_activation_state,
+                                false,
                             );
                             if let Some((grab, focus)) = res {
                                 if grab.is_touch_grab() {
@@ -718,6 +719,7 @@ impl PointerTarget<State> for CosmicWindow {
                             Focus::ResizeRight => ResizeEdge::RIGHT,
                             Focus::Header => unreachable!(),
                         },
+                        false,
                     );
 
                     if let Some((grab, focus)) = res {

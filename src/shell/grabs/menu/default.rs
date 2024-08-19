@@ -257,6 +257,7 @@ pub fn window_items(
                         &state.common.config,
                         &state.common.event_loop_handle,
                         &state.common.xdg_activation_state,
+                        false,
                     );
 
                     std::mem::drop(shell);

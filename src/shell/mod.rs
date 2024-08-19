@@ -2430,15 +2430,11 @@ impl Shell {
         config: &Config,
         evlh: &LoopHandle<'static, State>,
         xdg_activation_state: &XdgActivationState,
+        client_initiated: bool,
     ) -> Option<(MoveGrab, Focus)> {
         let serial = serial.into();
 
-        let mut start_data = check_grab_preconditions(
-            &seat,
-            surface,
-            serial,
-            release == ReleaseMode::NoMouseButtons && !move_out_of_stack,
-        )?;
+        let mut start_data = check_grab_preconditions(&seat, surface, serial, client_initiated)?;
         let mut old_mapped = self.element_for_surface(surface).cloned()?;
         if old_mapped.is_minimized() {
             return None;
@@ -3072,9 +3068,10 @@ impl Shell {
         seat: &Seat<State>,
         serial: impl Into<Option<Serial>>,
         edges: ResizeEdge,
+        client_initiated: bool,
     ) -> Option<(ResizeGrab, Focus)> {
         let serial = serial.into();
-        let start_data = check_grab_preconditions(&seat, surface, serial, true)?;
+        let start_data = check_grab_preconditions(&seat, surface, serial, client_initiated)?;
         let mapped = self.element_for_surface(surface).cloned()?;
         if mapped.is_fullscreen(true) || mapped.is_maximized(true) {
             return None;

@@ -888,6 +888,7 @@ impl State {
                                                                         &state.common.config,
                                                                         &state.common.event_loop_handle,
                                                                         &state.common.xdg_activation_state,
+                                                                        false
                                                                     );
                                                                     drop(shell);
                                                                     dispatch_grab(res, seat_clone, serial, state);
@@ -910,7 +911,8 @@ impl State {
                                                                         &surface,
                                                                         &seat_clone,
                                                                         serial,
-                                                                        edge
+                                                                        edge,
+                                                                        false
                                                                     );
                                                                     drop(shell);
                                                                     dispatch_grab(res, seat_clone, serial, state);
