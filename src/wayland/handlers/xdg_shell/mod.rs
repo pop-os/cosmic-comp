@@ -161,6 +161,7 @@ impl XdgShellHandler for State {
             &self.common.config,
             &self.common.event_loop_handle,
             &self.common.xdg_activation_state,
+            true,
         ) {
             std::mem::drop(shell);
             if grab.is_touch_grab() {
@@ -183,7 +184,7 @@ impl XdgShellHandler for State {
         let seat = Seat::from_resource(&seat).unwrap();
         let mut shell = self.common.shell.write().unwrap();
         if let Some((grab, focus)) =
-            shell.resize_request(surface.wl_surface(), &seat, serial, edges.into())
+            shell.resize_request(surface.wl_surface(), &seat, serial, edges.into(), true)
         {
             std::mem::drop(shell);
             if grab.is_touch_grab() {

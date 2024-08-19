@@ -481,7 +481,7 @@ impl XwmHandler for State {
             let mut shell = self.common.shell.write().unwrap();
             let seat = shell.seats.last_active().clone();
             if let Some((grab, focus)) =
-                shell.resize_request(&wl_surface, &seat, None, resize_edge.into())
+                shell.resize_request(&wl_surface, &seat, None, resize_edge.into(), true)
             {
                 std::mem::drop(shell);
                 if grab.is_touch_grab() {
@@ -513,6 +513,7 @@ impl XwmHandler for State {
                 &self.common.config,
                 &self.common.event_loop_handle,
                 &self.common.xdg_activation_state,
+                true,
             ) {
                 std::mem::drop(shell);
                 if grab.is_touch_grab() {
