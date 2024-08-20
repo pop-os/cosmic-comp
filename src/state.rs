@@ -89,6 +89,7 @@ use smithay::{
             xdg::{decoration::XdgDecorationState, XdgShellState},
         },
         shm::ShmState,
+        single_pixel_buffer::SinglePixelBufferState,
         tablet_manager::TabletManagerState,
         text_input::TextInputManagerState,
         viewporter::ViewporterState,
@@ -512,6 +513,7 @@ impl State {
         TextInputManagerState::new::<Self>(&dh);
         VirtualKeyboardManagerState::new::<State, _>(&dh, client_is_privileged);
         AlphaModifierState::new::<Self>(&dh);
+        SinglePixelBufferState::new::<Self>(&dh);
 
         let idle_notifier_state = IdleNotifierState::<Self>::new(&dh, handle.clone());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(&dh);
