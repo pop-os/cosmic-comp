@@ -99,9 +99,6 @@ default = ["systemd"]
 systemd = ["libsystemd"]
 profile-with-tracy = ["profiling/profile-with-tracy"]
 
-[profile.dev]
-lto = "thin"
-
 [profile.dev.package.tiny-skia]
 opt-level = 2
 
