@@ -91,7 +91,7 @@ version = "0.3"
 features = ["svg"]
 git = "https://github.com/Smithay/smithay-egui.git"
 optional = true
-rev = "cdc652e0"
+rev = "0d0b4ca0"
 
 [features]
 debug = ["egui", "egui_plot", "smithay-egui", "anyhow/backtrace"]
@@ -116,4 +116,4 @@ inherits = "release"
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/smithay//smithay", rev = "c484442" }
+smithay = { git = "https://github.com/smithay//smithay", rev = "e27fd27" }

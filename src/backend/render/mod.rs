@@ -56,7 +56,8 @@ use smithay::{
             glow::GlowRenderer,
             multigpu::{Error as MultiError, MultiFrame, MultiRenderer},
             sync::SyncPoint,
-            Bind, Blit, ExportMem, ImportAll, ImportMem, Offscreen, Renderer, TextureFilter,
+            Bind, Blit, Color32F, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
+            TextureFilter,
         },
     },
     desktop::{layer_map_for_output, PopupManager},
@@ -110,7 +111,7 @@ impl<'a> AsMut<GlowRenderer> for RendererRef<'a> {
     }
 }
 
-pub static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
+pub static CLEAR_COLOR: Color32F = Color32F::new(0.153, 0.161, 0.165, 1.0);
 pub static OUTLINE_SHADER: &str = include_str!("./shaders/rounded_outline.frag");
 pub static RECTANGLE_SHADER: &str = include_str!("./shaders/rounded_rectangle.frag");
 pub static GROUP_COLOR: [f32; 3] = [0.788, 0.788, 0.788];
