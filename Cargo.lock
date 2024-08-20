@@ -4703,7 +4703,7 @@ checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/smithay//smithay?rev=c484442#c4844428f8de024222a44cd906060f2af77f4ba1"
+source = "git+https://github.com/smithay//smithay?rev=e27fd27#e27fd27caba5238fac8a592f6dff32b430efb272"
 dependencies = [
  "appendlist",
  "ash 0.38.0+1.3.281",
@@ -4794,7 +4794,7 @@ dependencies = [
 [[package]]
 name = "smithay-egui"
 version = "0.1.0"
-source = "git+https://github.com/Smithay/smithay-egui.git?rev=cdc652e0#cdc652e0d4823b16a5bd9badd288e38512789dc5"
+source = "git+https://github.com/Smithay/smithay-egui.git?rev=0d0b4ca0#0d0b4ca01a851b97cd27bdc94cce1c1f52723ad5"
 dependencies = [
  "cgmath",
  "egui",
