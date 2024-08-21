@@ -7,7 +7,7 @@ use crate::{
 use indexmap::IndexSet;
 use smithay::{
     desktop::{layer_map_for_output, PopupUngrabStrategy},
-    input::Seat,
+    input::{pointer::MotionEvent, Seat},
     output::Output,
     reexports::wayland_server::Resource,
     utils::{IsAlive, Serial, SERIAL_COUNTER},
@@ -261,6 +261,8 @@ impl Common {
             .cloned()
             .collect::<Vec<_>>();
         for seat in &seats {
+            update_pointer_focus(state, &seat);
+
             let mut shell = state.common.shell.write().unwrap();
             let output = seat.active_output();
             if !shell.outputs().any(|o| o == &output) {
@@ -478,6 +480,30 @@ fn update_focus_target(
             .or_else(|| shell.active_space(&output).mapped().next())
             .cloned()
             .map(KeyboardFocusTarget::from)
+    }
+}
+
+fn update_pointer_focus(state: &mut State, seat: &Seat<State>) {
+    if let Some(pointer) = seat.get_pointer() {
+        let output = seat.active_output();
+        let position = pointer.current_location().as_global();
+
+        let mut shell = state.common.shell.write().unwrap();
+        let under = State::surface_under(position, &output, &mut shell)
+            .map(|(target, pos)| (target, pos.as_logical()));
+        drop(shell);
+
+        if pointer.current_focus().as_ref() != under.as_ref().map(|(target, _)| target) {
+            pointer.motion(
+                state,
+                under,
+                &MotionEvent {
+                    location: pointer.current_location(),
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time: 0,
+                },
+            );
+        }
     }
 }
 
