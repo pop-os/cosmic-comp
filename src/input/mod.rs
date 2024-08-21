@@ -1470,7 +1470,7 @@ impl State {
                         &MotionEvent {
                             location: position.as_logical(),
                             serial: SERIAL_COUNTER.next_serial(),
-                            time: 0,
+                            time: self.common.clock.now().as_millis(),
                         },
                     );
 
@@ -1539,7 +1539,7 @@ impl State {
                         &MotionEvent {
                             location: position.as_logical(),
                             serial: SERIAL_COUNTER.next_serial(),
-                            time: 0,
+                            time: self.common.clock.now().as_millis(),
                         },
                     );
 

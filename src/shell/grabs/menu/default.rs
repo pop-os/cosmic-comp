@@ -302,7 +302,7 @@ pub fn window_items(
                                     &MotionEvent {
                                         location: loc.as_logical().to_f64(),
                                         serial,
-                                        time: 0,
+                                        time: state.common.clock.now().as_millis(),
                                     },
                                 );
                                 pointer.frame(state);
@@ -332,7 +332,7 @@ pub fn window_items(
                                     &MotionEvent {
                                         location: loc.as_logical().to_f64(),
                                         serial,
-                                        time: 0,
+                                        time: state.common.clock.now().as_millis(),
                                     },
                                 );
                                 pointer.frame(state);
@@ -363,7 +363,7 @@ pub fn window_items(
                                     &MotionEvent {
                                         location: loc.as_logical().to_f64(),
                                         serial,
-                                        time: 0,
+                                        time: state.common.clock.now().as_millis(),
                                     },
                                 );
                                 pointer.frame(state);
@@ -394,7 +394,7 @@ pub fn window_items(
                                     &MotionEvent {
                                         location: loc.as_logical().to_f64(),
                                         serial,
-                                        time: 0,
+                                        time: state.common.clock.now().as_millis(),
                                     },
                                 );
                                 pointer.frame(state);

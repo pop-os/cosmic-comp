@@ -872,7 +872,7 @@ impl Drop for MoveGrab {
                             &MotionEvent {
                                 location: pointer.current_location(),
                                 serial,
-                                time: 0,
+                                time: state.common.clock.now().as_millis(),
                             },
                         );
                     }
