@@ -500,7 +500,7 @@ fn update_pointer_focus(state: &mut State, seat: &Seat<State>) {
                 &MotionEvent {
                     location: pointer.current_location(),
                     serial: SERIAL_COUNTER.next_serial(),
-                    time: 0,
+                    time: state.common.clock.now().as_millis(),
                 },
             );
         }
