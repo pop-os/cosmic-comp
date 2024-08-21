@@ -78,6 +78,7 @@ use std::{
     any::Any,
     borrow::Cow,
     cell::RefCell,
+    collections::HashSet,
     os::unix::process::CommandExt,
     thread,
     time::{Duration, Instant},
@@ -87,6 +88,8 @@ pub mod gestures;
 
 #[derive(Default)]
 pub struct SupressedKeys(RefCell<Vec<(Keycode, Option<RegistrationToken>)>>);
+#[derive(Default)]
+pub struct SupressedButtons(RefCell<HashSet<u32>>);
 #[derive(Default, Debug)]
 pub struct ModifiersShortcutQueue(RefCell<Option<shortcuts::Binding>>);
 
@@ -113,6 +116,16 @@ impl SupressedKeys {
                 .flatten()
                 .collect::<Vec<_>>(),
         )
+    }
+}
+
+impl SupressedButtons {
+    fn add(&self, button: u32) {
+        self.0.borrow_mut().insert(button);
+    }
+
+    fn remove(&self, button: u32) -> bool {
+        self.0.borrow_mut().remove(&button)
     }
 }
 
@@ -773,6 +786,7 @@ impl State {
 
                     let serial = SERIAL_COUNTER.next_serial();
                     let button = event.button_code();
+                    let mut pass_event = !seat.supressed_buttons().remove(button);
                     if event.state() == ButtonState::Pressed {
                         // change the keyboard focus unless the pointer is grabbed
                         // We test for any matching surface type here but always use the root
@@ -850,35 +864,45 @@ impl State {
                                                 target.toplevel().map(Cow::into_owned)
                                             {
                                                 let seat_clone = seat.clone();
-                                                let button = PointerButtonEvent::button(&event);
-                                                self.common.event_loop_handle.insert_idle(
-                                                    move |state| {
-                                                        fn dispatch_grab<G: PointerGrab<State> + 'static>(
-                                                            grab: Option<(G, smithay::input::pointer::Focus)>,
-                                                            seat: Seat<State>,
-                                                            serial: Serial,
-                                                            state: &mut State)
-                                                        {
-                                                            if let Some((target, focus)) = grab {
-                                                                seat
-                                                                    .modifiers_shortcut_queue()
-                                                                    .clear();
+                                                let mouse_button =
+                                                    PointerButtonEvent::button(&event);
 
-                                                                seat
-                                                                    .get_pointer()
-                                                                    .unwrap()
-                                                                    .set_grab(
-                                                                        state, target, serial,
-                                                                        focus,
-                                                                    );
-                                                            }
-                                                        }
+                                                let mut supress_button = || {
+                                                    // If the logo is held then the pointer event is
+                                                    // aimed at the compositor and shouldn't be passed
+                                                    // to the application.
+                                                    pass_event = false;
+                                                    seat.supressed_buttons().add(button);
+                                                };
 
-                                                        let mut shell =
-                                                            state.common.shell.write().unwrap();
-                                                        if let Some(button) = button {
-                                                            match button {
-                                                                smithay::backend::input::MouseButton::Left => {
+                                                fn dispatch_grab<
+                                                    G: PointerGrab<State> + 'static,
+                                                >(
+                                                    grab: Option<(
+                                                        G,
+                                                        smithay::input::pointer::Focus,
+                                                    )>,
+                                                    seat: Seat<State>,
+                                                    serial: Serial,
+                                                    state: &mut State,
+                                                ) {
+                                                    if let Some((target, focus)) = grab {
+                                                        seat.modifiers_shortcut_queue().clear();
+
+                                                        seat.get_pointer()
+                                                            .unwrap()
+                                                            .set_grab(state, target, serial, focus);
+                                                    }
+                                                }
+
+                                                if let Some(mouse_button) = mouse_button {
+                                                    match mouse_button {
+                                                        smithay::backend::input::MouseButton::Left => {
+                                                            supress_button();
+                                                            self.common.event_loop_handle.insert_idle(
+                                                                move |state| {
+                                                                    let mut shell =
+                                                                        state.common.shell.write().unwrap();
                                                                    let res = shell.move_request(
                                                                         &surface,
                                                                         &seat_clone,
@@ -888,12 +912,19 @@ impl State {
                                                                         &state.common.config,
                                                                         &state.common.event_loop_handle,
                                                                         &state.common.xdg_activation_state,
-                                                                        false
+                                                                        false,
                                                                     );
                                                                     drop(shell);
                                                                     dispatch_grab(res, seat_clone, serial, state);
-                                                                },
-                                                                smithay::backend::input::MouseButton::Right => {
+                                                                }
+                                                            );
+                                                        },
+                                                        smithay::backend::input::MouseButton::Right => {
+                                                            supress_button();
+                                                            self.common.event_loop_handle.insert_idle(
+                                                                move |state| {
+                                                                    let mut shell =
+                                                                        state.common.shell.write().unwrap();
                                                                     let Some(target_elem) = shell.element_for_surface(&surface) else { return };
                                                                     let Some(geom) = shell
                                                                         .space_for(target_elem)
@@ -912,17 +943,16 @@ impl State {
                                                                         &seat_clone,
                                                                         serial,
                                                                         edge,
-                                                                        false
+                                                                        false,
                                                                     );
                                                                     drop(shell);
                                                                     dispatch_grab(res, seat_clone, serial, state);
-                                                                },
-                                                                _ => {},
-                                                            }
-
-                                                        }
-                                                    },
-                                                );
+                                                                }
+                                                            );
+                                                        },
+                                                        _ => {},
+                                                    }
+                                                }
                                             }
                                         }
                                         under = Some(target);
@@ -971,20 +1001,25 @@ impl State {
                                     .set_overview_mode(None, self.common.event_loop_handle.clone());
                             }
                         }
+
                         std::mem::drop(shell);
                     };
 
                     let ptr = seat.get_pointer().unwrap();
-                    ptr.button(
-                        self,
-                        &ButtonEvent {
-                            button,
-                            state: event.state(),
-                            serial,
-                            time: event.time_msec(),
-                        },
-                    );
-                    ptr.frame(self);
+                    if pass_event {
+                        ptr.button(
+                            self,
+                            &ButtonEvent {
+                                button,
+                                state: event.state(),
+                                serial,
+                                time: event.time_msec(),
+                            },
+                        );
+                        ptr.frame(self);
+                    } else if event.state() == ButtonState::Released {
+                        ptr.unset_grab(self, serial, event.time_msec())
+                    }
                 }
             }
             InputEvent::PointerAxis { event, .. } => {
