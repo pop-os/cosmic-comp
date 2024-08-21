@@ -5,7 +5,7 @@ use std::{any::Any, cell::RefCell, collections::HashMap, sync::Mutex, time::Dura
 use crate::{
     backend::render::cursor::{CursorShape, CursorState},
     config::{xkb_config_to_wl, Config},
-    input::{ModifiersShortcutQueue, SupressedKeys},
+    input::{ModifiersShortcutQueue, SupressedButtons, SupressedKeys},
     state::State,
 };
 use smithay::{
@@ -169,6 +169,7 @@ pub fn create_seat(
     userdata.insert_if_missing_threadsafe(SeatId::default);
     userdata.insert_if_missing(Devices::default);
     userdata.insert_if_missing(SupressedKeys::default);
+    userdata.insert_if_missing(SupressedButtons::default);
     userdata.insert_if_missing(ModifiersShortcutQueue::default);
     userdata.insert_if_missing_threadsafe(SeatMoveGrabState::default);
     userdata.insert_if_missing_threadsafe(SeatMenuGrabState::default);
@@ -215,6 +216,7 @@ pub trait SeatExt {
     fn set_active_output(&self, output: &Output);
     fn devices(&self) -> &Devices;
     fn supressed_keys(&self) -> &SupressedKeys;
+    fn supressed_buttons(&self) -> &SupressedButtons;
     fn modifiers_shortcut_queue(&self) -> &ModifiersShortcutQueue;
 
     fn cursor_geometry(
@@ -252,6 +254,10 @@ impl SeatExt for Seat<State> {
 
     fn supressed_keys(&self) -> &SupressedKeys {
         self.user_data().get::<SupressedKeys>().unwrap()
+    }
+
+    fn supressed_buttons(&self) -> &SupressedButtons {
+        self.user_data().get::<SupressedButtons>().unwrap()
     }
 
     fn modifiers_shortcut_queue(&self) -> &ModifiersShortcutQueue {
