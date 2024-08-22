@@ -12,6 +12,7 @@ use crate::{
     shell::{grabs::SeatMoveGrabState, CosmicSurface, SeatExt, Shell},
     utils::prelude::OutputExt,
     wayland::protocols::{
+        atspi::AtspiState,
         drm::WlDrmState,
         image_source::ImageSourceState,
         output_configuration::OutputConfigurationState,
@@ -229,6 +230,9 @@ pub struct Common {
     pub xwayland_state: Option<XWaylandState>,
     pub xwayland_shell_state: XWaylandShellState,
     pub pointer_focus_state: Option<PointerFocusState>,
+
+    pub atspi_state: AtspiState,
+    pub atspi_ei: crate::wayland::handlers::atspi::AtspiEiState,
 }
 
 #[derive(Debug)]
@@ -559,6 +563,9 @@ impl State {
             tracing::warn!(?err, "Failed to initialize dbus handlers");
         }
 
+        // TODO: Restrict to only specific client?
+        let atspi_state = AtspiState::new::<State, _>(dh, client_is_privileged);
+
         State {
             common: Common {
                 config,
@@ -615,6 +622,9 @@ impl State {
                 xwayland_state: None,
                 xwayland_shell_state,
                 pointer_focus_state: None,
+
+                atspi_state,
+                atspi_ei: Default::default(),
             },
             backend: BackendData::Unset,
             ready: Once::new(),
