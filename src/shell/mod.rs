@@ -474,8 +474,15 @@ impl WorkspaceSet {
             self.active = idx;
             Ok(true)
         } else {
-            if let Some((p_idx, _)) = self.previously_active {
-                self.previously_active = Some((p_idx, workspace_delta));
+            // snap to workspace, when in between workspaces due to swipe gesture
+            if let Some((p_idx, p_delta)) = self.previously_active {
+                if matches!(p_delta, WorkspaceDelta::Gesture(..))
+                    && matches!(workspace_delta, WorkspaceDelta::GestureEnd(..))
+                {
+                    self.previously_active = Some((p_idx, workspace_delta));
+                } else {
+                    self.previously_active = None;
+                }
                 return Ok(true);
             }
             Ok(false)
