@@ -832,6 +832,7 @@ dependencies = [
  "profiling",
  "rand",
  "regex",
+ "reis",
  "ron",
  "rust-embed",
  "rustix",
@@ -897,7 +898,7 @@ dependencies = [
 [[package]]
 name = "cosmic-protocols"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-protocols?branch=main#91aeb55052a8e6e15a7ddd53e039a9350f16fa69"
+source = "git+https://github.com/pop-os/cosmic-protocols?branch=atspi-ei#7364208f09296decc64af524592d022637d8c95d"
 dependencies = [
  "bitflags 2.6.0",
  "wayland-backend",
@@ -1062,7 +1063,7 @@ version = "0.19.0"
 source = "git+https://github.com/gfx-rs/wgpu?rev=20fda69#20fda698341efbdc870b8027d6d49f5bf3f36109"
 dependencies = [
  "bitflags 2.6.0",
- "libloading 0.7.4",
+ "libloading 0.8.5",
  "winapi",
 ]
 
@@ -1197,7 +1198,7 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330c60081dcc4c72131f8eb70510f1ac07223e5d4163db481a04a0befcffa412"
 dependencies = [
- "libloading 0.7.4",
+ "libloading 0.8.5",
 ]
 
 [[package]]
@@ -2140,7 +2141,7 @@ dependencies = [
  "bitflags 2.6.0",
  "com",
  "libc",
- "libloading 0.7.4",
+ "libloading 0.8.5",
  "thiserror",
  "widestring",
  "winapi",
@@ -2805,7 +2806,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -4227,6 +4228,15 @@ name = "regex-syntax"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a66a03ae7c801facd77a29370b4faec201768915ac14a721ba36f20bc9c209b"
+
+[[package]]
+name = "reis"
+version = "0.3.0"
+source = "git+https://github.com/ids1024/reis#ab6460d66bfc65fbd41d9e231673d3d4a22a68e5"
+dependencies = [
+ "calloop 0.14.1",
+ "rustix",
+]
 
 [[package]]
 name = "renderdoc-sys"
@@ -5833,7 +5843,7 @@ dependencies = [
  "js-sys",
  "khronos-egl",
  "libc",
- "libloading 0.7.4",
+ "libloading 0.8.5",
  "log",
  "metal",
  "naga",

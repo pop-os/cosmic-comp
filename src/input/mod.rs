@@ -1450,6 +1450,13 @@ impl State {
                 .unwrap_or(false)
         });
 
+        self.common.atspi_ei.input(
+            modifiers,
+            &handle,
+            event.state(),
+            event.time() as u64 * 1000,
+        );
+
         // Leave move overview mode, if any modifier was released
         if let Some(Trigger::KeyboardMove(action_modifiers)) =
             shell.overview_mode().0.active_trigger()
@@ -1611,6 +1618,32 @@ impl State {
             )));
         }
 
+        if event.state() == KeyState::Released {
+            self.common
+                .atspi_ei
+                .active_virtual_mods
+                .remove(&event.key_code());
+        } else if event.state() == KeyState::Pressed
+            && self
+                .common
+                .atspi_ei
+                .virtual_mods
+                .contains(&event.key_code())
+        {
+            self.common
+                .atspi_ei
+                .active_virtual_mods
+                .insert(event.key_code());
+
+            tracing::error!(
+                "active virtual mods: {:?}",
+                self.common.atspi_ei.active_virtual_mods
+            );
+            seat.supressed_keys().add(&handle, None);
+
+            return FilterResult::Intercept(None);
+        }
+
         // Skip released events for initially surpressed keys
         if event.state() == KeyState::Released {
             if let Some(tokens) = seat.supressed_keys().filter(&handle) {
@@ -1632,6 +1665,16 @@ impl State {
                 error!(?err, "Failed switching virtual terminal.");
             }
             seat.supressed_keys().add(&handle, None);
+            return FilterResult::Intercept(None);
+        }
+
+        // TODO modifiers queue
+        if self.common.atspi_ei.has_keyboard_grab()
+            || self
+                .common
+                .atspi_ei
+                .has_key_grab(modifiers.serialized.layout_effective, event.key_code())
+        {
             return FilterResult::Intercept(None);
         }
 
