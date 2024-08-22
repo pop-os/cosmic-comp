@@ -833,6 +833,7 @@ dependencies = [
  "profiling",
  "rand",
  "regex",
+ "reis",
  "ron",
  "rust-embed",
  "rustix",
@@ -854,7 +855,7 @@ dependencies = [
  "xcursor",
  "xdg",
  "xdg-user",
- "xkbcommon 0.7.0",
+ "xkbcommon 0.8.0",
  "zbus",
 ]
 
@@ -898,7 +899,7 @@ dependencies = [
 [[package]]
 name = "cosmic-protocols"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-protocols?branch=main#91aeb55052a8e6e15a7ddd53e039a9350f16fa69"
+source = "git+https://github.com/pop-os/cosmic-protocols?branch=main#ec1616b90fa6b4568709cfe2c0627b1e8cc887e0"
 dependencies = [
  "bitflags 2.6.0",
  "wayland-backend",
@@ -4249,6 +4250,16 @@ name = "regex-syntax"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a66a03ae7c801facd77a29370b4faec201768915ac14a721ba36f20bc9c209b"
+
+[[package]]
+name = "reis"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "827073dbe443c57fd72ae05491c6b94213218627ac6ac169850673b0cb7034f1"
+dependencies = [
+ "calloop 0.14.1",
+ "rustix",
+]
 
 [[package]]
 name = "renderdoc-sys"

@@ -1464,6 +1464,13 @@ impl State {
                 .unwrap_or(false)
         });
 
+        self.common.atspi_ei.input(
+            modifiers,
+            &handle,
+            event.state(),
+            event.time() as u64 * 1000,
+        );
+
         // Leave move overview mode, if any modifier was released
         if let Some(Trigger::KeyboardMove(action_modifiers)) =
             shell.overview_mode().0.active_trigger()
@@ -1625,6 +1632,57 @@ impl State {
             )));
         }
 
+        if event.state() == KeyState::Released {
+            let removed = self
+                .common
+                .atspi_ei
+                .active_virtual_mods
+                .remove(&event.key_code());
+            // If `Caps_Lock` is a virtual modifier, and is in locked state, clear it
+            if removed && handle.modified_sym() == Keysym::Caps_Lock {
+                if (modifiers.serialized.locked & 2) != 0 {
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let time = self.common.clock.now().as_millis();
+                    keyboard.input(
+                        self,
+                        event.key_code(),
+                        KeyState::Pressed,
+                        serial,
+                        time,
+                        |_, _, _| FilterResult::<()>::Forward,
+                    );
+                    let serial = SERIAL_COUNTER.next_serial();
+                    keyboard.input(
+                        self,
+                        event.key_code(),
+                        KeyState::Released,
+                        serial,
+                        time,
+                        |_, _, _| FilterResult::<()>::Forward,
+                    );
+                }
+            }
+        } else if event.state() == KeyState::Pressed
+            && self
+                .common
+                .atspi_ei
+                .virtual_mods
+                .contains(&event.key_code())
+        {
+            self.common
+                .atspi_ei
+                .active_virtual_mods
+                .insert(event.key_code());
+
+            tracing::debug!(
+                "active virtual mods: {:?}",
+                self.common.atspi_ei.active_virtual_mods
+            );
+            seat.supressed_keys().add(&handle, None);
+
+            return FilterResult::Intercept(None);
+        }
+
         // Skip released events for initially surpressed keys
         if event.state() == KeyState::Released {
             if let Some(tokens) = seat.supressed_keys().filter(&handle) {
@@ -1646,6 +1704,15 @@ impl State {
                 error!(?err, "Failed switching virtual terminal.");
             }
             seat.supressed_keys().add(&handle, None);
+            return FilterResult::Intercept(None);
+        }
+
+        if self.common.atspi_ei.has_keyboard_grab()
+            || self
+                .common
+                .atspi_ei
+                .has_key_grab(modifiers.serialized.layout_effective, event.key_code())
+        {
             return FilterResult::Intercept(None);
         }
 
