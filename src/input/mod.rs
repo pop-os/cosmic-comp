@@ -1607,8 +1607,8 @@ impl State {
                     let tablet_seat = seat.tablet_seat();
 
                     let tablet = tablet_seat.get_tablet(&TabletDescriptor::from(&event.device()));
-                    let tool =
-                        tablet_seat.add_tool::<Self>(&self.common.display_handle, &event.tool());
+                    let dh = self.common.display_handle.clone();
+                    let tool = tablet_seat.add_tool::<Self>(self, &dh, &event.tool());
 
                     if let Some(tablet) = tablet {
                         match event.state() {
