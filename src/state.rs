@@ -223,6 +223,7 @@ pub struct Common {
     pub xdg_activation_state: XdgActivationState,
     pub xdg_foreign_state: XdgForeignState,
     pub workspace_state: WorkspaceState<State>,
+    pub xwayland_scale: Option<i32>,
     pub xwayland_state: Option<XWaylandState>,
     pub xwayland_shell_state: XWaylandShellState,
 }
@@ -353,6 +354,8 @@ impl BackendData {
 
             self.schedule_render(&output);
         }
+
+        loop_handle.insert_idle(|state| state.common.update_xwayland_scale());
 
         Ok(())
     }
@@ -615,6 +618,7 @@ impl State {
                 xdg_activation_state,
                 xdg_foreign_state,
                 workspace_state,
+                xwayland_scale: None,
                 xwayland_state: None,
                 xwayland_shell_state,
             },

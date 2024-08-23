@@ -23,6 +23,8 @@ pub struct CosmicCompConfig {
     pub autotile_behavior: TileBehavior,
     /// Active hint enabled
     pub active_hint: bool,
+    /// Let X11 applications scale themselves
+    pub descale_xwayland: bool,
 }
 
 impl Default for CosmicCompConfig {
@@ -48,6 +50,7 @@ impl Default for CosmicCompConfig {
             autotile: Default::default(),
             autotile_behavior: Default::default(),
             active_hint: true,
+            descale_xwayland: false,
         }
     }
 }

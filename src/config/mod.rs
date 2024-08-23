@@ -651,6 +651,13 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     state.common.update_config();
                 }
             }
+            "descale_xwayland" => {
+                let new = get_config::<bool>(&config, "descale_xwayland");
+                if new != state.common.config.cosmic_conf.descale_xwayland {
+                    state.common.config.cosmic_conf.descale_xwayland = new;
+                    state.common.update_xwayland_scale();
+                }
+            }
             _ => {}
         }
     }

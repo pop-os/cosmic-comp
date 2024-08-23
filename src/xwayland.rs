@@ -15,7 +15,7 @@ use crate::{
 use smithay::{
     backend::drm::DrmNode,
     desktop::space::SpaceElement,
-    reexports::x11rb::protocol::xproto::Window as X11Window,
+    reexports::{wayland_server::Client, x11rb::protocol::xproto::Window as X11Window},
     utils::{Logical, Point, Rectangle, Size, SERIAL_COUNTER},
     wayland::{
         selection::{
@@ -33,13 +33,14 @@ use smithay::{
     },
     xwayland::{
         xwm::{Reorder, X11Relatable, XwmId},
-        X11Surface, X11Wm, XWayland, XWaylandEvent, XwmHandler,
+        X11Surface, X11Wm, XWayland, XWaylandClientData, XWaylandEvent, XwmHandler,
     },
 };
 use tracing::{error, trace, warn};
 
 #[derive(Debug)]
 pub struct XWaylandState {
+    pub client: Client,
     pub xwm: Option<X11Wm>,
     pub display: u32,
 }
@@ -80,6 +81,7 @@ impl State {
                     display_number,
                 } => {
                     data.common.xwayland_state = Some(XWaylandState {
+                        client: client.clone(),
                         xwm: None,
                         display: display_number,
                     });
@@ -114,6 +116,8 @@ impl State {
                     let xwayland_state = data.common.xwayland_state.as_mut().unwrap();
                     xwayland_state.xwm = Some(wm);
                     data.notify_ready();
+
+                    data.common.update_xwayland_scale();
                 }
                 XWaylandEvent::Error => {
                     if let Some(mut xwayland_state) = data.common.xwayland_state.take() {
@@ -239,6 +243,72 @@ impl Common {
             // But this also means we need to match across all outputs and workspaces at once, to be sure nothing that shouldn't be on top of us is.
             if let Err(err) = xwm.update_stacking_order_upwards(order.iter().rev()) {
                 warn!(wm_id = ?xwm.id(), ?err, "Failed to update Xwm stacking order.");
+            }
+        }
+    }
+
+    pub fn update_xwayland_scale(&mut self) {
+        let new_scale = if self.config.cosmic_conf.descale_xwayland {
+            let shell = self.shell.read().unwrap();
+            shell
+                .outputs()
+                .map(|o| o.current_scale().integer_scale())
+                .max()
+                .unwrap_or(1) as i32
+        } else {
+            1
+        };
+
+        // compare with current scale
+        if Some(new_scale) != self.xwayland_scale {
+            if let Some(xwayland) = self.xwayland_state.as_mut() {
+                // backup geometries
+                let geometries = self
+                    .shell
+                    .read()
+                    .unwrap()
+                    .mapped()
+                    .flat_map(|m| m.windows().map(|(s, _)| s))
+                    .filter_map(|s| s.0.x11_surface().map(|x| (x.clone(), x.geometry())))
+                    .collect::<Vec<_>>();
+
+                // update xorg dpi
+                if let Some(xwm) = xwayland.xwm.as_mut() {
+                    let dpi = new_scale.abs() * 96 * 1024;
+                    if let Err(err) = xwm.set_xsettings(
+                        [
+                            ("Xft/DPI".into(), dpi.into()),
+                            ("Gdk/UnscaledDPI".into(), (dpi / new_scale).into()),
+                            ("Gdk/WindowScalingFactor".into(), new_scale.into()),
+                        ]
+                        .into_iter(),
+                    ) {
+                        warn!(wm_id = ?xwm.id(), ?err, "Failed to update XSETTINGS.");
+                    }
+                }
+
+                // update client scale
+                xwayland
+                    .client
+                    .get_data::<XWaylandClientData>()
+                    .unwrap()
+                    .compositor_state
+                    .set_client_scale(new_scale as u32);
+
+                // update wl/xdg_outputs
+                for output in self.shell.read().unwrap().outputs() {
+                    output.change_current_state(None, None, None, None);
+                }
+
+                // update geometries
+                for (surface, geometry) in geometries.iter() {
+                    if let Err(err) = surface.configure(*geometry) {
+                        warn!(?err, surface = ?surface.window_id(), "Failed to update geometry after scale change");
+                    }
+                }
+                self.update_x11_stacking_order();
+
+                self.xwayland_scale = Some(new_scale);
             }
         }
     }

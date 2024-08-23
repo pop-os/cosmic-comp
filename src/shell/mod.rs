@@ -3422,6 +3422,18 @@ impl Shell {
 
         output_presentation_feedback
     }
+
+    pub fn mapped(&self) -> impl Iterator<Item = &CosmicMapped> {
+        self.workspaces.iter().flat_map(|(_, set)| {
+            set.sticky_layer
+                .mapped()
+                .chain(set.minimized_windows.iter().map(|m| &m.window))
+                .chain(set.workspaces.iter().flat_map(|w| {
+                    w.mapped()
+                        .chain(w.minimized_windows.iter().map(|m| &m.window))
+                }))
+        })
+    }
 }
 
 fn workspace_set_idx(
