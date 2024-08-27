@@ -219,7 +219,7 @@ pub fn render_workspace_to_buffer(
         buffer: &WlBuffer,
         renderer: &mut R,
         dt: &'d mut OutputDamageTracker,
-        age: usize,
+        mut age: usize,
         additional_damage: Vec<Rectangle<i32, BufferCoords>>,
         draw_cursor: bool,
         common: &mut Common,
@@ -303,6 +303,7 @@ pub fn render_workspace_to_buffer(
             let render_buffer =
                 Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, size)
                     .map_err(DTError::Rendering)?;
+            age = 0;
             render_workspace::<_, _, GlesRenderbuffer>(
                 None,
                 renderer,
@@ -457,7 +458,7 @@ pub fn render_window_to_buffer(
         buffer: &WlBuffer,
         renderer: &mut R,
         dt: &'d mut OutputDamageTracker,
-        age: usize,
+        mut age: usize,
         additional_damage: Vec<Rectangle<i32, BufferCoords>>,
         draw_cursor: bool,
         common: &mut Common,
@@ -563,6 +564,7 @@ pub fn render_window_to_buffer(
             let render_buffer =
                 Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, size)
                     .map_err(DTError::Rendering)?;
+            age = 0;
             renderer.bind(render_buffer).map_err(DTError::Rendering)?;
         }
 
@@ -694,7 +696,7 @@ pub fn render_cursor_to_buffer(
         buffer: &WlBuffer,
         renderer: &mut R,
         dt: &'d mut OutputDamageTracker,
-        age: usize,
+        mut age: usize,
         additional_damage: Vec<Rectangle<i32, BufferCoords>>,
         common: &mut Common,
         seat: &Seat<State>,
@@ -752,6 +754,7 @@ pub fn render_cursor_to_buffer(
             let render_buffer =
                 Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, size)
                     .map_err(DTError::Rendering)?;
+            age = 0;
             renderer.bind(render_buffer).map_err(DTError::Rendering)?;
         }
 
