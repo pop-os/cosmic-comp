@@ -41,6 +41,7 @@ use smithay::{
     utils::{IsAlive, Logical, Point, Rectangle, Serial, Size},
     wayland::{
         compositor::with_states,
+        foreign_toplevel_list::ForeignToplevelListState,
         seat::WaylandFocus,
         session_lock::LockSurface,
         shell::wlr_layer::{KeyboardInteractivity, Layer, LayerSurfaceCachedState},
@@ -55,7 +56,11 @@ use crate::{
     utils::{prelude::*, quirks::WORKSPACE_OVERVIEW_NAMESPACE},
     wayland::{
         handlers::{
-            toplevel_management::minimize_rectangle, xdg_activation::ActivationContext,
+            foreign_toplevel_list::{
+                new_foreign_toplevel, refresh_foreign_toplevels, remove_foreign_toplevel,
+            },
+            toplevel_management::minimize_rectangle,
+            xdg_activation::ActivationContext,
             xdg_shell::popup::get_popup_toplevel,
         },
         protocols::{
@@ -1184,6 +1189,7 @@ impl Common {
         );
         self.popups.cleanup();
         self.toplevel_info_state.refresh(&self.workspace_state);
+        refresh_foreign_toplevels(&self.shell.read().unwrap());
         self.refresh_idle_inhibit();
     }
 
@@ -1851,6 +1857,7 @@ impl Shell {
         &mut self,
         window: &CosmicSurface,
         toplevel_info: &mut ToplevelInfoState<State, CosmicSurface>,
+        foreign_toplevel_list: &mut ForeignToplevelListState,
         workspace_state: &mut WorkspaceState<State>,
         evlh: &LoopHandle<'static, State>,
     ) -> Option<KeyboardFocusTarget> {
@@ -1933,6 +1940,7 @@ impl Shell {
         toplevel_info.new_toplevel(&window, workspace_state);
         toplevel_enter_output(&window, &output);
         toplevel_enter_workspace(&window, &workspace.handle);
+        new_foreign_toplevel(&window, foreign_toplevel_list);
 
         let mut workspace_state = workspace_state.update();
 
@@ -2064,6 +2072,7 @@ impl Shell {
         surface: &S,
         seat: &Seat<State>,
         toplevel_info: &mut ToplevelInfoState<State, CosmicSurface>,
+        foreign_toplevel_list: &mut ForeignToplevelListState,
     ) where
         CosmicSurface: PartialEq<S>,
     {
@@ -2113,6 +2122,7 @@ impl Shell {
 
             if let Some(surface) = surface {
                 toplevel_info.remove_toplevel(&surface);
+                remove_foreign_toplevel(&surface, foreign_toplevel_list);
                 self.pending_windows.push((surface, seat.clone(), None));
                 return;
             }

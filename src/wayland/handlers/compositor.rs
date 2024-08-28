@@ -265,6 +265,7 @@ impl State {
                     let res = shell.map_window(
                         &window,
                         &mut self.common.toplevel_info_state,
+                        &mut self.common.foreign_toplevel_list,
                         &mut self.common.workspace_state,
                         &self.common.event_loop_handle,
                     );

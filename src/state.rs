@@ -67,6 +67,7 @@ use smithay::{
         alpha_modifier::AlphaModifierState,
         compositor::{CompositorClientState, CompositorState, SurfaceData},
         dmabuf::{DmabufFeedback, DmabufGlobal, DmabufState},
+        foreign_toplevel_list::ForeignToplevelListState,
         fractional_scale::{with_fractional_scale, FractionalScaleManagerState},
         idle_inhibit::IdleInhibitManagerState,
         idle_notify::IdleNotifierState,
@@ -192,6 +193,7 @@ pub struct Common {
     pub compositor_state: CompositorState,
     pub data_device_state: DataDeviceState,
     pub dmabuf_state: DmabufState,
+    pub foreign_toplevel_list: ForeignToplevelListState,
     pub fractional_scale_state: FractionalScaleManagerState,
     pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
     pub output_state: OutputManagerState,
@@ -486,6 +488,8 @@ impl State {
         let compositor_state = CompositorState::new::<Self>(dh);
         let data_device_state = DataDeviceState::new::<Self>(dh);
         let dmabuf_state = DmabufState::new();
+        let foreign_toplevel_list =
+            ForeignToplevelListState::new_with_filter::<State>(dh, client_is_privileged);
         let fractional_scale_state = FractionalScaleManagerState::new::<State>(dh);
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<Self>(dh);
         let output_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
@@ -581,6 +585,7 @@ impl State {
                 compositor_state,
                 data_device_state,
                 dmabuf_state,
+                foreign_toplevel_list,
                 fractional_scale_state,
                 idle_notifier_state,
                 idle_inhibit_manager_state,
