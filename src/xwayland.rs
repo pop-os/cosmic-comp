@@ -313,6 +313,7 @@ impl XwmHandler for State {
             let res = shell.map_window(
                 &window,
                 &mut self.common.toplevel_info_state,
+                &mut self.common.foreign_toplevel_list,
                 &mut self.common.workspace_state,
                 &self.common.event_loop_handle,
             );
@@ -342,7 +343,12 @@ impl XwmHandler for State {
             shell.override_redirect_windows.retain(|or| or != &window);
         } else {
             let seat = shell.seats.last_active().clone();
-            shell.unmap_surface(&window, &seat, &mut self.common.toplevel_info_state);
+            shell.unmap_surface(
+                &window,
+                &seat,
+                &mut self.common.toplevel_info_state,
+                &mut self.common.foreign_toplevel_list,
+            );
         }
 
         let outputs = if let Some(wl_surface) = window.wl_surface() {
