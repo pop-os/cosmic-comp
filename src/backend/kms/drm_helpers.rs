@@ -69,9 +69,7 @@ pub fn display_configuration(
             }
         }
 
-        if !map.contains_key(&conn.handle()) {
-            map.insert(conn.handle(), None);
-        }
+        map.entry(conn.handle()).or_insert(None);
     }
 
     // And then cleanup
