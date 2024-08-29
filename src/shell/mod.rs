@@ -316,6 +316,7 @@ pub struct WorkspaceSet {
     pub group: WorkspaceGroupHandle,
     idx: usize,
     tiling_enabled: bool,
+    smart_gaps: bool,
     output: Output,
     theme: cosmic::Theme,
     pub sticky_layer: FloatingLayout,
@@ -329,6 +330,7 @@ fn create_workspace(
     group_handle: &WorkspaceGroupHandle,
     active: bool,
     tiling: bool,
+    smart_gaps: bool,
     theme: cosmic::Theme,
 ) -> Workspace {
     let workspace_handle = state
@@ -348,7 +350,13 @@ fn create_workspace(
         &workspace_handle,
         [WorkspaceCapabilities::Activate].into_iter(),
     );
-    Workspace::new(workspace_handle, output.clone(), tiling, theme.clone())
+    Workspace::new(
+        workspace_handle,
+        output.clone(),
+        tiling,
+        smart_gaps,
+        theme.clone(),
+    )
 }
 
 fn move_workspace_to_group(
@@ -418,6 +426,7 @@ impl WorkspaceSet {
         output: &Output,
         idx: usize,
         tiling_enabled: bool,
+        smart_gaps: bool,
         theme: cosmic::Theme,
     ) -> WorkspaceSet {
         let group_handle = state.create_workspace_group();
@@ -428,6 +437,7 @@ impl WorkspaceSet {
                 &group_handle,
                 true,
                 tiling_enabled,
+                smart_gaps,
                 theme.clone(),
             );
             workspace_set_idx(state, 1, idx, &workspace.handle);
@@ -445,6 +455,7 @@ impl WorkspaceSet {
             group: group_handle,
             idx,
             tiling_enabled,
+            smart_gaps,
             theme,
             sticky_layer,
             minimized_windows: Vec::new(),
@@ -559,6 +570,7 @@ impl WorkspaceSet {
             &self.group,
             false,
             self.tiling_enabled,
+            self.smart_gaps,
             self.theme.clone(),
         );
         workspace_set_idx(
@@ -623,6 +635,7 @@ pub struct Workspaces {
     mode: WorkspaceMode,
     autotile: bool,
     autotile_behavior: TileBehavior,
+    smart_gaps: bool,
     theme: cosmic::Theme,
 }
 
@@ -635,6 +648,7 @@ impl Workspaces {
             mode: config.cosmic_conf.workspaces.workspace_mode,
             autotile: config.cosmic_conf.autotile,
             autotile_behavior: config.cosmic_conf.autotile_behavior,
+            smart_gaps: config.cosmic_conf.smart_gaps,
             theme,
         }
     }
@@ -662,6 +676,7 @@ impl Workspaces {
                     &output,
                     self.sets.len(),
                     self.autotile,
+                    self.smart_gaps,
                     self.theme.clone(),
                 )
             });
@@ -851,6 +866,7 @@ impl Workspaces {
                                     &set.group,
                                     false,
                                     config.cosmic_conf.autotile,
+                                    config.cosmic_conf.smart_gaps,
                                     self.theme.clone(),
                                 ),
                             );

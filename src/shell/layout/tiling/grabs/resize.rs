@@ -224,6 +224,7 @@ impl ResizeForkGrab {
             let mut shell = data.common.shell.write().unwrap();
             let tiling_layer = &mut shell.active_space_mut(&output).tiling_layer;
             let gaps = tiling_layer.gaps();
+            let is_smart_gaps = data.common.config.cosmic_conf.smart_gaps;
 
             let tree = &mut tiling_layer.queue.trees.back_mut().unwrap().0;
             match &mut self.old_tree {
@@ -317,7 +318,7 @@ impl ResizeForkGrab {
                 }
 
                 self.last_loc = location.as_global();
-                let blocker = TilingLayout::update_positions(&output, tree, gaps);
+                let blocker = TilingLayout::update_positions(&output, tree, gaps, is_smart_gaps);
                 tiling_layer.pending_blockers.extend(blocker);
             } else {
                 return true;
