@@ -1432,7 +1432,7 @@ impl TilingLayout {
                     group.remove_window(position);
                 } else {
                     trace!("Removing Group");
-                    let other_child = tree.children_ids(&id).unwrap().cloned().next().unwrap();
+                    let other_child = tree.children_ids(&id).unwrap().next().cloned().unwrap();
                     let fork_pos = parent_parent_id.as_ref().and_then(|parent_id| {
                         tree.children_ids(parent_id).unwrap().position(|i| i == &id)
                     });
@@ -2984,8 +2984,8 @@ impl TilingLayout {
                     let child_id = tree
                         .children_ids(&node_id)
                         .unwrap()
-                        .cloned()
                         .next()
+                        .cloned()
                         .unwrap();
                     tree.remove_node(node_id, RemoveBehavior::LiftChildren)
                         .unwrap();
