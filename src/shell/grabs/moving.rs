@@ -419,7 +419,7 @@ impl MoveGrab {
             // Check for overlapping with zones
             if grab_state.previous == ManagedLayer::Floating {
                 let output_geometry = current_output.geometry().to_local(&current_output);
-                grab_state.snapping_zone = vec![
+                grab_state.snapping_zone = [
                     SnappingZone::Maximize,
                     SnappingZone::Top,
                     SnappingZone::TopLeft,
