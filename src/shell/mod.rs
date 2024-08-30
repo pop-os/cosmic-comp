@@ -524,7 +524,7 @@ impl WorkspaceSet {
         self.output = new_output.clone();
     }
 
-    fn refresh<'a>(&mut self, xdg_activation_state: &XdgActivationState) {
+    fn refresh(&mut self, xdg_activation_state: &XdgActivationState) {
         if let Some((_, start)) = self.previously_active {
             match start {
                 WorkspaceDelta::Shortcut(st) => {
@@ -567,7 +567,7 @@ impl WorkspaceSet {
         self.workspaces.push(workspace);
     }
 
-    fn ensure_last_empty<'a>(&mut self, state: &mut WorkspaceUpdateGuard<State>) {
+    fn ensure_last_empty(&mut self, state: &mut WorkspaceUpdateGuard<State>) {
         // add empty at the end, if necessary
         if self
             .workspaces
@@ -2642,7 +2642,7 @@ impl Shell {
     }
 
     #[must_use]
-    pub fn next_focus<'a>(&self, direction: FocusDirection, seat: &Seat<State>) -> FocusResult {
+    pub fn next_focus(&self, direction: FocusDirection, seat: &Seat<State>) -> FocusResult {
         let overview = self.overview_mode().0;
         let output = seat.active_output();
 
@@ -2791,11 +2791,7 @@ impl Shell {
     }
 
     #[must_use]
-    pub fn move_current_element<'a>(
-        &mut self,
-        direction: Direction,
-        seat: &Seat<State>,
-    ) -> MoveResult {
+    pub fn move_current_element(&mut self, direction: Direction, seat: &Seat<State>) -> MoveResult {
         let output = seat.active_output();
         let workspace = self.active_space(&output);
         let focus_stack = workspace.focus_stack.get(seat);
@@ -3261,7 +3257,7 @@ impl Shell {
         }
     }
 
-    pub fn toggle_sticky<'a>(&mut self, seat: &Seat<State>, mapped: &CosmicMapped) {
+    pub fn toggle_sticky(&mut self, seat: &Seat<State>, mapped: &CosmicMapped) {
         // clean from focus-stacks
         for workspace in self.workspaces.spaces_mut() {
             for seat in self.seats.iter() {
@@ -3335,7 +3331,7 @@ impl Shell {
         self.append_focus_stack(&mapped, seat);
     }
 
-    pub fn toggle_sticky_current<'a>(&mut self, seat: &Seat<State>) {
+    pub fn toggle_sticky_current(&mut self, seat: &Seat<State>) {
         let set = self.workspaces.sets.get_mut(&seat.active_output()).unwrap();
         let workspace = &mut set.workspaces[set.active];
         let maybe_window = workspace.focus_stack.get(seat).iter().next().cloned();
@@ -3428,8 +3424,8 @@ impl Shell {
     }
 }
 
-fn workspace_set_idx<'a>(
-    state: &mut WorkspaceUpdateGuard<'a, State>,
+fn workspace_set_idx(
+    state: &mut WorkspaceUpdateGuard<'_, State>,
     idx: u8,
     output_pos: usize,
     handle: &WorkspaceHandle,

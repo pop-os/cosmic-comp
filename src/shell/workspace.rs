@@ -1339,9 +1339,9 @@ where
     <R as Renderer>::TextureId: 'static,
     <R as Renderer>::Error: FromGlesError,
 {
-    fn draw<'frame>(
+    fn draw(
         &self,
-        frame: &mut R::Frame<'frame>,
+        frame: &mut R::Frame<'_>,
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, smithay::utils::Physical>],

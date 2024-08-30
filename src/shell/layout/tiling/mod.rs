@@ -534,7 +534,7 @@ impl TilingLayout {
         self.map_internal(window, focus_stack, None, Some(from));
     }
 
-    fn map_to_tree<'a>(
+    fn map_to_tree(
         mut tree: &mut Tree<Data>,
         window: impl Into<CosmicMapped>,
         output: &Output,
@@ -1467,11 +1467,7 @@ impl TilingLayout {
         }
     }
 
-    pub fn move_current_node<'a>(
-        &mut self,
-        direction: Direction,
-        seat: &Seat<State>,
-    ) -> MoveResult {
+    pub fn move_current_node(&mut self, direction: Direction, seat: &Seat<State>) -> MoveResult {
         let gaps = self.gaps();
 
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
@@ -2059,11 +2055,7 @@ impl TilingLayout {
         FocusResult::None
     }
 
-    pub fn update_orientation<'a>(
-        &mut self,
-        new_orientation: Option<Orientation>,
-        seat: &Seat<State>,
-    ) {
+    pub fn update_orientation(&mut self, new_orientation: Option<Orientation>, seat: &Seat<State>) {
         let gaps = self.gaps();
 
         let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
@@ -2225,7 +2217,7 @@ impl TilingLayout {
         Some(result)
     }
 
-    pub fn toggle_stacking_focused<'a>(
+    pub fn toggle_stacking_focused(
         &mut self,
         seat: &Seat<State>,
         mut focus_stack: FocusStackMut,

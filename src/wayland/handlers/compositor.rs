@@ -79,7 +79,7 @@ fn layer_surface_check_inital_configure(surface: &LayerSurface) -> bool {
     initial_configure_sent
 }
 
-pub fn client_compositor_state<'a>(client: &'a Client) -> &'a CompositorClientState {
+pub fn client_compositor_state(client: &Client) -> &CompositorClientState {
     if let Some(state) = client.get_data::<XWaylandClientData>() {
         return &state.compositor_state;
     }
