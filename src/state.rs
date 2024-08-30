@@ -96,6 +96,7 @@ use smithay::{
         viewporter::ViewporterState,
         virtual_keyboard::VirtualKeyboardManagerState,
         xdg_activation::XdgActivationState,
+        xdg_foreign::XdgForeignState,
         xwayland_keyboard_grab::XWaylandKeyboardGrabState,
         xwayland_shell::XWaylandShellState,
     },
@@ -220,6 +221,7 @@ pub struct Common {
     pub toplevel_info_state: ToplevelInfoState<State, CosmicSurface>,
     pub toplevel_management_state: ToplevelManagementState,
     pub xdg_activation_state: XdgActivationState,
+    pub xdg_foreign_state: XdgForeignState,
     pub workspace_state: WorkspaceState<State>,
     pub xwayland_state: Option<XWaylandState>,
     pub xwayland_shell_state: XWaylandShellState,
@@ -543,6 +545,7 @@ impl State {
             ],
         );
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
+        let xdg_foreign_state = XdgForeignState::new::<State>(dh);
         let toplevel_info_state = ToplevelInfoState::new(dh, client_is_privileged);
         let toplevel_management_state = ToplevelManagementState::new::<State, _>(
             dh,
@@ -610,6 +613,7 @@ impl State {
                 toplevel_info_state,
                 toplevel_management_state,
                 xdg_activation_state,
+                xdg_foreign_state,
                 workspace_state,
                 xwayland_state: None,
                 xwayland_shell_state,
