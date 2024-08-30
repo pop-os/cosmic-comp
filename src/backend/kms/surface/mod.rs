@@ -1329,7 +1329,7 @@ impl SurfaceThreadState {
     }
 }
 
-fn source_node_for_surface<'a>(w: &WlSurface) -> Option<DrmNode> {
+fn source_node_for_surface(w: &WlSurface) -> Option<DrmNode> {
     with_renderer_surface_state(w, |state| {
         state
             .buffer()

@@ -186,9 +186,9 @@ where
     <R as Renderer>::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
-    fn draw<'frame>(
+    fn draw(
         &self,
-        frame: &mut R::Frame<'frame>,
+        frame: &mut R::Frame<'_>,
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],

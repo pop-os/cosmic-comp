@@ -545,7 +545,7 @@ impl DynamicConfig {
         &self.outputs.1
     }
 
-    pub fn outputs_mut<'a>(&'a mut self) -> PersistenceGuard<'a, OutputsConfig> {
+    pub fn outputs_mut(&mut self) -> PersistenceGuard<'_, OutputsConfig> {
         PersistenceGuard(self.outputs.0.clone(), &mut self.outputs.1)
     }
 }

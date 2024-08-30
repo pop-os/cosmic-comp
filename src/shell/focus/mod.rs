@@ -166,7 +166,7 @@ impl Shell {
         }
     }
 
-    fn update_active<'a, 'b>(&mut self) {
+    fn update_active(&mut self) {
         // update activate status
         let focused_windows = self
             .seats
