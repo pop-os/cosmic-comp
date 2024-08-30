@@ -1120,6 +1120,12 @@ impl State {
                         );
                         // Decide on action if first update
                         if first_update {
+                            let mut natural_scroll = false;
+                            if let Some(scroll_config) = &self.common.config.cosmic_conf.input_touchpad.scroll_config {
+                                if let Some(natural) = scroll_config.natural_scroll {
+                                    natural_scroll = natural;
+                                }
+                            }
                             activate_action = match gesture_state.fingers {
                                 3 => None, // TODO: 3 finger gestures
                                 4 => {
@@ -1128,18 +1134,36 @@ impl State {
                                     {
                                         match gesture_state.direction {
                                             Some(Direction::Left) => {
-                                                Some(SwipeAction::NextWorkspace)
+                                                if natural_scroll {
+                                                    Some(SwipeAction::NextWorkspace)
+                                                } else {
+                                                    Some(SwipeAction::PrevWorkspace)
+                                                }
                                             }
                                             Some(Direction::Right) => {
-                                                Some(SwipeAction::PrevWorkspace)
+                                                if natural_scroll {
+                                                    Some(SwipeAction::PrevWorkspace)
+                                                } else {
+                                                    Some(SwipeAction::NextWorkspace)
+                                                }
                                             }
                                             _ => None, // TODO: Other actions
                                         }
                                     } else {
                                         match gesture_state.direction {
-                                            Some(Direction::Up) => Some(SwipeAction::NextWorkspace),
+                                            Some(Direction::Up) => {
+                                                if natural_scroll {
+                                                    Some(SwipeAction::NextWorkspace)
+                                                } else {
+                                                    Some(SwipeAction::PrevWorkspace)
+                                                }
+                                            },
                                             Some(Direction::Down) => {
-                                                Some(SwipeAction::PrevWorkspace)
+                                                if natural_scroll {
+                                                    Some(SwipeAction::PrevWorkspace)
+                                                } else {
+                                                    Some(SwipeAction::NextWorkspace)
+                                                }
                                             }
                                             _ => None, // TODO: Other actions
                                         }
