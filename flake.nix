@@ -24,7 +24,7 @@
         let
           pkgs = nixpkgs.legacyPackages.${system}.extend rust.overlays.default;
           rust-toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-          craneLib = crane.lib.${system}.overrideToolchain rust-toolchain;
+          craneLib = (crane.mkLib pkgs).overrideToolchain rust-toolchain;
           craneArgs = {
             pname = "cosmic-comp";
             version = self.rev or "dirty";
@@ -56,6 +56,7 @@
               mesa # For libgbm
               fontconfig
               stdenv.cc.cc.lib
+              pixman
             ];
 
             runtimeDependencies = with pkgs; [
@@ -79,7 +80,7 @@
             LD_LIBRARY_PATH = lib.makeLibraryPath (__concatMap (d: d.runtimeDependencies) (__attrValues self'.checks));
 
             # include build inputs
-            inputsFrom = [cosmic-comp];
+            inputsFrom = [ cosmic-comp ];
           };
         };
     };
