@@ -287,9 +287,15 @@ impl Surface {
         let thread_token = evlh
             .insert_source(rx2, move |command, _, state| match command {
                 Event::Msg(SurfaceCommand::SendFrames(sequence)) => {
+                    if output_clone.mirroring().is_some() {
+                        return;
+                    }
                     state.common.send_frames(&output_clone, Some(sequence));
                 }
                 Event::Msg(SurfaceCommand::RenderStates(states)) => {
+                    if output_clone.mirroring().is_some() {
+                        return;
+                    }
                     state.common.update_primary_output(&output_clone, &states);
                     let kms = state.backend.kms();
                     let surface = &mut kms
