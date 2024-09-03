@@ -112,9 +112,9 @@ impl WinitState {
             .get::<RefCell<OutputConfig>>()
             .unwrap()
             .borrow_mut();
-        if dbg!(config.mode.0) != dbg!((size.w as i32, size.h as i32)) {
+        if dbg!(config.mode.0) != dbg!((size.w, size.h)) {
             if !test_only {
-                config.mode = ((size.w as i32, size.h as i32), None);
+                config.mode = ((size.w, size.h), None);
             }
             Err(anyhow::anyhow!("Cannot set window size"))
         } else {
@@ -143,7 +143,7 @@ pub fn init_backend(
         model: name.clone(),
     };
     let mode = Mode {
-        size: (size.w as i32, size.h as i32).into(),
+        size: (size.w, size.h).into(),
         refresh: 60_000,
     };
     let output = Output::new(name, props);
@@ -157,7 +157,7 @@ pub fn init_backend(
     );
     output.user_data().insert_if_missing(|| {
         RefCell::new(OutputConfig {
-            mode: ((size.w as i32, size.h as i32), None),
+            mode: ((size.w, size.h), None),
             transform: Transform::Flipped180.into(),
             ..Default::default()
         })

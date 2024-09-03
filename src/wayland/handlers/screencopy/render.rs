@@ -80,10 +80,10 @@ where
     if matches!(buffer_type(&buffer), Some(BufferType::Shm)) {
         let buffer_size = buffer_dimensions(&buffer).unwrap();
         if let Err(err) = with_buffer_contents_mut(&buffer, |ptr, len, data| {
-            let offset = data.offset as i32;
-            let width = data.width as i32;
-            let height = data.height as i32;
-            let stride = data.stride as i32;
+            let offset = data.offset;
+            let width = data.width;
+            let height = data.height;
+            let stride = data.stride;
             let format = shm_format_to_fourcc(data.format)
                 .expect("We should be able to convert all hardcoded shm screencopy formats");
 

@@ -2628,7 +2628,7 @@ impl Shell {
             seat,
             initial_window_location,
             cursor_output,
-            active_hint as u8,
+            active_hint,
             layer,
             release,
             evlh.clone(),

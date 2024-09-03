@@ -55,7 +55,7 @@ impl ToplevelManagementHandler for State {
 
                 let res = shell.activate(
                     &output,
-                    idx as usize,
+                    idx,
                     WorkspaceDelta::new_shortcut(),
                     &mut self.common.workspace_state.update(),
                 );
