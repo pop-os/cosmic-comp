@@ -254,7 +254,7 @@ impl Common {
                 .outputs()
                 .map(|o| o.current_scale().integer_scale())
                 .max()
-                .unwrap_or(1) as i32
+                .unwrap_or(1)
         } else {
             1
         };

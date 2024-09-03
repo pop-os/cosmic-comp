@@ -1881,7 +1881,7 @@ impl State {
                 let res = shell.move_current_window(
                     seat,
                     &current_output,
-                    (&current_output, Some(workspace as usize)),
+                    (&current_output, Some(workspace)),
                     matches!(x, Action::MoveToLastWorkspace),
                     None,
                     &mut self.common.workspace_state.update(),
@@ -1904,7 +1904,7 @@ impl State {
                     shell.move_current_window(
                         seat,
                         &current_output,
-                        (&current_output, Some(workspace as usize)),
+                        (&current_output, Some(workspace)),
                         matches!(x, Action::MoveToNextWorkspace),
                         direction,
                         &mut self.common.workspace_state.update(),
@@ -1949,7 +1949,7 @@ impl State {
                     shell.move_current_window(
                         seat,
                         &current_output,
-                        (&current_output, Some(workspace as usize)),
+                        (&current_output, Some(workspace)),
                         matches!(x, Action::MoveToPreviousWorkspace),
                         direction,
                         &mut self.common.workspace_state.update(),
