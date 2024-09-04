@@ -926,7 +926,7 @@ dependencies = [
 [[package]]
 name = "cosmic-settings-config"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-settings-daemon#362c77f9faaeb7f1b9e4aa79a7d5588001f04874"
+source = "git+https://github.com/pop-os/cosmic-settings-daemon#1ed68808e85ce681da882446ec572d44c68a6866"
 dependencies = [
  "cosmic-config",
  "serde",
