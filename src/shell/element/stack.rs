@@ -759,6 +759,10 @@ impl TabMessage for Message {
     fn scrolled() -> Self {
         Message::Scrolled
     }
+    
+    fn close(idx: usize) -> Self {
+        Message::Close(idx)
+    }
 }
 
 impl Program for CosmicStackInternal {

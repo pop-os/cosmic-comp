@@ -128,6 +128,7 @@ impl From<TabBackgroundTheme> for theme::Container<'_> {
 
 pub trait TabMessage: Clone {
     fn activate(idx: usize) -> Self;
+    fn close(idx: usize) -> Self;
 
     fn scroll_further() -> Self;
     fn scroll_back() -> Self;
@@ -412,6 +413,15 @@ where
                 shell.publish(Message::activate(self.idx));
                 return event::Status::Captured;
             }
+
+            if matches!(
+                event,
+                event::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Middle))
+             ) {
+                shell.publish(Message::close(self.idx));
+                return event::Status::Captured;
+            }
+            
         }
 
         status
