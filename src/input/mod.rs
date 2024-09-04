@@ -793,17 +793,27 @@ impl State {
                         // (in case of a window the toplevel) surface for the focus.
                         // see: https://gitlab.freedesktop.org/wayland/wayland/-/issues/294
                         if !seat.get_pointer().unwrap().is_grabbed() {
+                            enum NewFocusTarget {
+                                Change(KeyboardFocusTarget),
+                                Remove,
+                                KeepOld,
+                            }
+                            use NewFocusTarget::*;
                             let output = seat.active_output();
 
                             let pos = seat.get_pointer().unwrap().current_location().as_global();
                             let relative_pos = pos.to_local(&output);
-                            let mut under: Option<KeyboardFocusTarget> = None;
+                            let under: NewFocusTarget;
 
                             if let Some(session_lock) = shell.session_lock.as_ref() {
-                                under = session_lock
+                                under = match session_lock
                                     .surfaces
                                     .get(&output)
-                                    .map(|lock| lock.clone().into());
+                                    .map(|lock| lock.clone().into())
+                                {
+                                    Some(target) => Change(target),
+                                    None => Remove,
+                                };
                             } else if let Some(window) =
                                 shell.active_space(&output).get_fullscreen()
                             {
@@ -820,12 +830,15 @@ impl State {
                                             )
                                             .is_some()
                                     {
-                                        under = Some(layer.clone().into());
+                                        under = Change(layer.clone().into());
+                                    } else {
+                                        under = Remove;
                                     }
                                 } else {
-                                    under = Some(window.clone().into());
+                                    under = Change(window.clone().into());
                                 }
                             } else {
+                                let target: NewFocusTarget;
                                 let done = {
                                     let layers = layer_map_for_output(&output);
                                     if let Some(layer) = layers
@@ -838,24 +851,32 @@ impl State {
                                         })
                                     {
                                         let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                                        if layer.can_receive_keyboard_focus()
-                                            && layer
+                                        if !layer.can_receive_keyboard_focus() {
+                                            target = KeepOld;
+                                            true
+                                        } else {
+                                            if layer
                                                 .surface_under(
                                                     relative_pos.as_logical() - layer_loc.to_f64(),
                                                     WindowSurfaceType::ALL,
                                                 )
                                                 .is_some()
-                                        {
-                                            under = Some(layer.clone().into());
-                                            true
-                                        } else {
-                                            false
+                                            {
+                                                target = Change(layer.clone().into());
+                                                true
+                                            } else {
+                                                target = Remove;
+                                                false
+                                            }
                                         }
                                     } else {
+                                        target = Remove;
                                         false
                                     }
                                 };
-                                if !done {
+                                under = if done {
+                                    target
+                                } else {
                                     // Don't check override redirect windows, because we don't set keyboard focus to them explicitly.
                                     // These cases are handled by the XwaylandKeyboardGrab.
                                     if let Some(target) = shell.element_under(pos, &output) {
@@ -955,7 +976,7 @@ impl State {
                                                 }
                                             }
                                         }
-                                        under = Some(target);
+                                        Change(target)
                                     } else {
                                         let layers = layer_map_for_output(&output);
                                         if let Some(layer) = layers
@@ -981,14 +1002,22 @@ impl State {
                                                     )
                                                     .is_some()
                                             {
-                                                under = Some(layer.clone().into());
+                                                Change(layer.clone().into())
+                                            } else {
+                                                Remove
                                             }
-                                        };
+                                        } else {
+                                            Remove
+                                        }
                                     }
-                                }
+                                };
                             }
                             std::mem::drop(shell);
-                            Shell::set_focus(self, under.as_ref(), &seat, Some(serial));
+                            match under {
+                                Change(new_focus) => { Shell::set_focus(self, Some(&new_focus), &seat, Some(serial)); },
+                                Remove => { Shell::set_focus(self, None, &seat, Some(serial)); },
+                                KeepOld => {},
+                            };
                         } else {
                             std::mem::drop(shell);
                         }
