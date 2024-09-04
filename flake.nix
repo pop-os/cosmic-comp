@@ -16,11 +16,29 @@
     nix-filter.url = "github:numtide/nix-filter";
   };
 
-  outputs = inputs@{ self, nixpkgs, parts, crane, rust, nix-filter, ... }:
+  outputs =
+    inputs@{
+      self,
+      nixpkgs,
+      parts,
+      crane,
+      rust,
+      nix-filter,
+      ...
+    }:
     parts.lib.mkFlake { inherit inputs; } {
-      systems = [ "aarch64-linux" "x86_64-linux" ];
+      systems = [
+        "aarch64-linux"
+        "x86_64-linux"
+      ];
 
-      perSystem = { self', lib, system, ... }:
+      perSystem =
+        {
+          self',
+          lib,
+          system,
+          ...
+        }:
         let
           pkgs = nixpkgs.legacyPackages.${system}.extend rust.overlays.default;
           rust-toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
@@ -77,7 +95,9 @@
           packages.default = cosmic-comp;
 
           devShells.default = craneLib.devShell {
-            LD_LIBRARY_PATH = lib.makeLibraryPath (__concatMap (d: d.runtimeDependencies) (__attrValues self'.checks));
+            LD_LIBRARY_PATH = lib.makeLibraryPath (
+              __concatMap (d: d.runtimeDependencies) (__attrValues self'.checks)
+            );
 
             # include build inputs
             inputsFrom = [ cosmic-comp ];
