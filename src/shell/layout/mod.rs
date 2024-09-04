@@ -61,7 +61,10 @@ pub struct TilingExceptions {
 }
 
 impl TilingExceptions {
-    pub fn new(exceptions_config: &Vec<ApplicationException>) -> Self {
+    pub fn new<'a, I>(exceptions_config: I) -> Self
+    where
+      I: Iterator<Item=&'a ApplicationException>
+    {
         let mut app_ids = Vec::new();
         let mut titles = Vec::new();
 

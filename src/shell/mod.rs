@@ -1220,7 +1220,7 @@ impl Shell {
     pub fn new(config: &Config) -> Self {
         let theme = cosmic::theme::system_preference();
 
-        let tiling_exceptions = layout::TilingExceptions::new(&config.tiling_exceptions);
+        let tiling_exceptions = layout::TilingExceptions::new(config.tiling_exceptions.iter());
 
         Shell {
             workspaces: Workspaces::new(config, theme.clone()),
@@ -3370,7 +3370,10 @@ impl Shell {
         &self.theme
     }
 
-    pub fn update_tiling_exceptions(&mut self, exceptions: &Vec<ApplicationException>) {
+    pub fn update_tiling_exceptions<'a, I>(&mut self, exceptions: I)
+    where
+      I: Iterator<Item=&'a ApplicationException>
+    {
         self.tiling_exceptions = layout::TilingExceptions::new(exceptions);
     }
 
