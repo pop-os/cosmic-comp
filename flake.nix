@@ -8,7 +8,6 @@
     parts.inputs.nixpkgs-lib.follows = "nixpkgs";
 
     crane.url = "github:ipetkov/crane";
-    crane.inputs.nixpkgs.follows = "nixpkgs";
 
     rust.url = "github:oxalica/rust-overlay";
     rust.inputs.nixpkgs.follows = "nixpkgs";
