@@ -264,7 +264,7 @@ impl Config {
                                     .shell
                                     .write()
                                     .unwrap()
-                                    .update_tiling_exceptions(&state.common.config.tiling_exceptions);
+                                    .update_tiling_exceptions(state.common.config.tiling_exceptions.iter());
                             }
                             _ => (),
                         }
