@@ -79,6 +79,15 @@
 
             runtimeDependencies = with pkgs; [
               libglvnd # For libEGL
+              wayland # winit->wayland-sys wants to dlopen libwayland-egl.so
+              # for running in X11
+              xorg.libX11
+              xorg.libXcursor
+              xorg.libxcb
+              xorg.libXi
+              libxkbcommon
+              # for vulkan backend
+              vulkan-loader
             ];
           };
 
