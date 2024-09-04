@@ -87,7 +87,7 @@ impl ToplevelManagementHandler for State {
                 }
 
                 mapped.focus_window(window);
-                Shell::set_focus(self, Some(&mapped.clone().into()), &seat, None);
+                Shell::set_focus(self, Some(&mapped.clone().into()), &seat, None, true);
                 return;
             }
         }
@@ -133,7 +133,7 @@ impl ToplevelManagementHandler for State {
             );
             if let Some((target, _)) = res {
                 std::mem::drop(shell);
-                Shell::set_focus(self, Some(&target), &seat, None);
+                Shell::set_focus(self, Some(&target), &seat, None, true);
             }
             return;
         }

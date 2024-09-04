@@ -658,6 +658,24 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     state.common.update_xwayland_scale();
                 }
             }
+            "focus_follows_cursor" => {
+                let new = get_config::<bool>(&config, "focus_follows_cursor");
+                if new != state.common.config.cosmic_conf.focus_follows_cursor {
+                    state.common.config.cosmic_conf.focus_follows_cursor = new;
+                }
+            }
+            "cursor_follows_focus" => {
+                let new = get_config::<bool>(&config, "cursor_follows_focus");
+                if new != state.common.config.cosmic_conf.cursor_follows_focus {
+                    state.common.config.cosmic_conf.cursor_follows_focus = new;
+                }
+            }
+            "focus_follows_cursor_delay" => {
+                let new = get_config::<u64>(&config, "focus_follows_cursor_delay");
+                if new != state.common.config.cosmic_conf.focus_follows_cursor_delay {
+                    state.common.config.cosmic_conf.focus_follows_cursor_delay = new;
+                }
+            }
             _ => {}
         }
     }

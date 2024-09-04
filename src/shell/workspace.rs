@@ -177,6 +177,7 @@ impl IsAlive for FullscreenSurface {
     }
 }
 
+/// LIFO stack of focus targets
 #[derive(Debug, Default)]
 pub struct FocusStacks(HashMap<Seat<State>, IndexSet<CosmicMapped>>);
 
@@ -444,7 +445,7 @@ impl Workspace {
             .find(|e| e.windows().any(|(w, _)| &w == surface))
     }
 
-    pub fn element_under(&mut self, location: Point<f64, Global>) -> Option<KeyboardFocusTarget> {
+    pub fn element_under(&self, location: Point<f64, Global>) -> Option<KeyboardFocusTarget> {
         let location = location.to_local(&self.output);
         self.floating_layer
             .element_under(location)
@@ -784,6 +785,8 @@ impl Workspace {
         }
     }
 
+    /// Returns the content of the current display if it is alive and
+    /// not in the process of rendering an animation
     pub fn get_fullscreen(&self) -> Option<&CosmicSurface> {
         self.fullscreen
             .as_ref()

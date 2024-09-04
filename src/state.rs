@@ -8,7 +8,7 @@ use crate::{
         x11::X11State,
     },
     config::{Config, OutputConfig, OutputState},
-    input::gestures::GestureState,
+    input::{gestures::GestureState, PointerFocusState},
     shell::{grabs::SeatMoveGrabState, CosmicSurface, SeatExt, Shell},
     utils::prelude::OutputExt,
     wayland::protocols::{
@@ -226,6 +226,7 @@ pub struct Common {
     pub xwayland_scale: Option<i32>,
     pub xwayland_state: Option<XWaylandState>,
     pub xwayland_shell_state: XWaylandShellState,
+    pub pointer_focus_state: Option<PointerFocusState>,
 }
 
 #[derive(Debug)]
@@ -621,6 +622,7 @@ impl State {
                 xwayland_scale: None,
                 xwayland_state: None,
                 xwayland_shell_state,
+                pointer_focus_state: None,
             },
             backend: BackendData::Unset,
             ready: Once::new(),

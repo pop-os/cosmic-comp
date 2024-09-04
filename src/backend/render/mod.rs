@@ -660,7 +660,7 @@ where
         .lock()
         .unwrap()
         .is_some();
-    let active_output = last_active_seat.active_output();
+    let focused_output = last_active_seat.focused_or_active_output();
     let output_size = output.geometry().size;
     let output_scale = output.current_scale().fractional_scale();
 
@@ -670,7 +670,7 @@ where
         .iter()
         .find(|w| w.handle == current.0)
         .ok_or(OutputNoMode)?;
-    let is_active_space = workspace.outputs().any(|o| o == &active_output);
+    let is_active_space = workspace.outputs().any(|o| o == &focused_output);
 
     let has_fullscreen = workspace
         .fullscreen
@@ -775,7 +775,7 @@ where
                 .space_for_handle(&previous)
                 .ok_or(OutputNoMode)?;
             let has_fullscreen = workspace.fullscreen.is_some();
-            let is_active_space = workspace.outputs().any(|o| o == &active_output);
+            let is_active_space = workspace.outputs().any(|o| o == &focused_output);
 
             let percentage = match start {
                 WorkspaceDelta::Shortcut(st) => ease(

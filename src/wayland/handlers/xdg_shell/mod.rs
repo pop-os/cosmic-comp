@@ -97,7 +97,13 @@ impl XdgShellHandler for State {
                         grab.ungrab(PopupUngrabStrategy::All);
                         return;
                     }
-                    Shell::set_focus(self, grab.current_grab().as_ref(), &seat, Some(serial));
+                    Shell::set_focus(
+                        self,
+                        grab.current_grab().as_ref(),
+                        &seat,
+                        Some(serial),
+                        false,
+                    );
                     keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
                 }
 
@@ -226,11 +232,13 @@ impl XdgShellHandler for State {
     fn fullscreen_request(&mut self, surface: ToplevelSurface, output: Option<WlOutput>) {
         let mut shell = self.common.shell.write().unwrap();
         let seat = shell.seats.last_active().clone();
-        let active_output = seat.active_output();
+        let Some(focused_output) = seat.focused_output() else {
+            return;
+        };
         let output = output
             .as_ref()
             .and_then(Output::from_resource)
-            .unwrap_or_else(|| active_output.clone());
+            .unwrap_or_else(|| focused_output.clone());
 
         if let Some(mapped) = shell.element_for_surface(surface.wl_surface()).cloned() {
             let from = minimize_rectangle(&output, &mapped.active_window());
