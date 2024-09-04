@@ -15,7 +15,6 @@ pub struct CosmicCompConfig {
     pub input_touchpad: input::InputConfig,
     pub input_devices: HashMap<String, input::InputConfig>,
     pub xkb_config: XkbConfig,
-    pub tiling_exceptions: Vec<ApplicationExceptions>,
     /// Autotiling enabled
     pub autotile: bool,
     /// Determines the behavior of the autotile variable
@@ -24,12 +23,6 @@ pub struct CosmicCompConfig {
     pub autotile_behavior: TileBehavior,
     /// Active hint enabled
     pub active_hint: bool,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-pub struct ApplicationExceptions {
-    pub appid: String,
-    pub titles: Vec<String>,
 }
 
 impl Default for CosmicCompConfig {
@@ -52,7 +45,6 @@ impl Default for CosmicCompConfig {
             },
             input_devices: Default::default(),
             xkb_config: Default::default(),
-            tiling_exceptions: Default::default(),
             autotile: Default::default(),
             autotile_behavior: Default::default(),
             active_hint: true,

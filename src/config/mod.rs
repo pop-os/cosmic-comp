@@ -8,7 +8,8 @@ use crate::{
     },
 };
 use cosmic_config::{ConfigGet, CosmicConfigEntry};
-use cosmic_settings_config::{shortcuts, Shortcuts};
+use cosmic_settings_config::{shortcuts, Shortcuts, window_rules};
+use cosmic_settings_config::window_rules::ApplicationException;
 use serde::{Deserialize, Serialize};
 use smithay::wayland::xdg_activation::XdgActivationState;
 pub use smithay::{
@@ -53,6 +54,8 @@ pub struct Config {
     pub settings_context: cosmic_config::Config,
     /// Key bindings from `com.system76.CosmicSettings.Shortcuts`
     pub shortcuts: Shortcuts,
+    // Tiling exceptions from `com.system76.CosmicSettings.WindowRules`
+    pub tiling_exceptions: Vec<ApplicationException>,
     /// System actions from `com.system76.CosmicSettings.Shortcuts`
     pub system_actions: BTreeMap<shortcuts::action::System, String>,
 }
@@ -205,6 +208,9 @@ impl Config {
         let system_actions = shortcuts::system_actions(&config);
         let mut shortcuts = shortcuts::shortcuts(&settings_context);
 
+        let tiling_context = window_rules::context().expect("Failed to load window rules config");
+        let tiling_exceptions = window_rules::tiling_exceptions(&tiling_context);
+
         // Add any missing default shortcuts recommended by the compositor.
         key_bindings::add_default_bindings(&mut shortcuts, workspace.workspace_layout);
 
@@ -251,6 +257,7 @@ impl Config {
             settings_context,
             shortcuts,
             system_actions,
+            tiling_exceptions,
         }
     }
 

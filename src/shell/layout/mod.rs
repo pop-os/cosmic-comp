@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use cosmic_settings_config::shortcuts::action::Orientation;
-use regex::RegexSet;
+use regex::{Regex, RegexSet};
 use smithay::{
     desktop::WindowSurface,
     wayland::{compositor::with_states, shell::xdg::XdgToplevelSurfaceData},
     xwayland::xwm::WmWindowType,
 };
+use tracing::warn;
 
 use crate::config::Config;
 
@@ -62,21 +63,28 @@ pub struct TilingExceptions {
 }
 
 impl TilingExceptions {
-    pub fn new(config: &Config) -> Result<Self, regex::Error> {
+    pub fn new(config: &Config) -> Self {
         let mut app_ids = Vec::new();
         let mut titles = Vec::new();
 
-        for app in &config.cosmic_conf.tiling_exceptions {
-            for title in &app.titles {
-                app_ids.push(app.appid.clone());
-                titles.push(title.clone());
+        for exception in &config.tiling_exceptions {
+            if let Err(e) = Regex::new(&exception.appid) {
+                warn!("Invalid regex for appid: {}, {}", exception.appid, e);
+                continue;
             }
+            if let Err(e) = Regex::new(&exception.title) {
+                warn!("Invalid regex for title: {}, {}", exception.appid, e);
+                continue;
+            }
+
+            app_ids.push(exception.appid.clone());
+            titles.push(exception.title.clone());
         }
 
-        Ok(Self {
-            app_ids: RegexSet::new(app_ids)?,
-            titles: RegexSet::new(titles)?,
-        })
+        Self {
+            app_ids: RegexSet::new(app_ids).unwrap(),
+            titles: RegexSet::new(titles).unwrap(),
+        }
     }
 }
 
