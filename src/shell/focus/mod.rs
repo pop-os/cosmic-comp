@@ -13,12 +13,12 @@ use smithay::{
     utils::{IsAlive, Serial, SERIAL_COUNTER},
     wayland::{
         seat::WaylandFocus,
-        selection::data_device::set_data_device_focus,
-        selection::primary_selection::set_primary_focus,
+        selection::{data_device::set_data_device_focus, primary_selection::set_primary_focus},
         shell::wlr_layer::{KeyboardInteractivity, Layer},
     },
 };
-use std::{borrow::Cow, sync::Mutex};
+use std::{borrow::Cow, mem, sync::Mutex};
+
 use tracing::{debug, trace};
 
 use self::target::{KeyboardFocusTarget, WindowGroup};
@@ -31,6 +31,7 @@ pub struct FocusStack<'a>(pub(super) Option<&'a IndexSet<CosmicMapped>>);
 pub struct FocusStackMut<'a>(pub(super) &'a mut IndexSet<CosmicMapped>);
 
 impl<'a> FocusStack<'a> {
+    /// returns the last unminimized window in the focus stack that is still alive
     pub fn last(&self) -> Option<&CosmicMapped> {
         self.0
             .as_ref()
@@ -93,11 +94,15 @@ impl ActiveFocus {
 }
 
 impl Shell {
+    /// Set the keyboard focus to the given target
+    /// Note: `update_cursor` is used to determine whether to update the pointer location if cursor_follows_focus is enabled
+    /// if the focus change was due to a pointer event, this should be set to false
     pub fn set_focus(
         state: &mut State,
         target: Option<&KeyboardFocusTarget>,
         seat: &Seat<State>,
         serial: Option<Serial>,
+        update_cursor: bool,
     ) {
         let element = match target {
             Some(KeyboardFocusTarget::Element(mapped)) => Some(mapped.clone()),
@@ -115,6 +120,7 @@ impl Shell {
             if mapped.is_minimized() {
                 return;
             }
+
             state
                 .common
                 .shell
@@ -123,15 +129,7 @@ impl Shell {
                 .append_focus_stack(&mapped, seat);
         }
 
-        // update keyboard focus
-        if let Some(keyboard) = seat.get_keyboard() {
-            ActiveFocus::set(seat, target.cloned());
-            keyboard.set_focus(
-                state,
-                target.cloned(),
-                serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
-            );
-        }
+        update_focus_state(seat, target, state, serial, update_cursor);
 
         state.common.shell.write().unwrap().update_active();
     }
@@ -144,7 +142,8 @@ impl Shell {
         // update FocusStack and notify layouts about new focus (if any window)
         let workspace = self.space_for_mut(&mapped);
         let workspace = if workspace.is_none() {
-            self.active_space_mut(&seat.active_output())
+            //should this be the active output or the focused output?
+            self.active_space_mut(&seat.focused_or_active_output())
         } else {
             workspace.unwrap()
         };
@@ -218,6 +217,77 @@ impl Shell {
     }
 }
 
+/// Internal, used to ensure that ActiveFocus, KeyboardFocusTarget, and FocusedOutput are all in sync
+fn update_focus_state(
+    seat: &Seat<State>,
+    target: Option<&KeyboardFocusTarget>,
+    state: &mut State,
+    serial: Option<Serial>,
+    should_update_cursor: bool,
+) {
+    // update keyboard focus
+    if let Some(keyboard) = seat.get_keyboard() {
+        if should_update_cursor && state.common.config.cosmic_conf.cursor_follows_focus {
+            if ActiveFocus::get(seat).as_ref() != target && target.is_some() {
+                //need to borrow mutably for surface under
+                let mut shell = state.common.shell.write().unwrap();
+                // get the top left corner of the target element
+                let geometry = shell.focused_geometry(target.unwrap());
+                //to avoid the nested mutable borrow of state
+                if geometry.is_some() {
+                    let top_left = geometry.unwrap().loc.to_f64();
+
+                    // create a pointer target from the target element
+                    let output = shell
+                        .outputs()
+                        .find(|output| output.geometry().to_f64().contains(top_left))
+                        .cloned()
+                        .unwrap_or(seat.active_output());
+
+                    let focus = shell
+                        .surface_under(top_left, &output)
+                        .map(|(focus, loc)| (focus, loc.as_logical()));
+                    //drop here to avoid multiple mutable borrows
+                    mem::drop(shell);
+                    seat.get_pointer().unwrap().motion(
+                        state,
+                        focus,
+                        &MotionEvent {
+                            location: top_left.as_logical(),
+                            serial: SERIAL_COUNTER.next_serial(),
+                            time: 0,
+                        },
+                    );
+                }
+            }
+        }
+
+        ActiveFocus::set(seat, target.cloned());
+        keyboard.set_focus(
+            state,
+            target.cloned(),
+            serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
+        );
+
+        //update the focused output or set it to the active output
+        if target.is_some() {
+            // Get focused output calls visible_output_for_surface internally
+            // what should happen if the target is some, but it's not visible?
+            // should this be an error?
+            seat.set_focused_output(
+                state
+                    .common
+                    .shell
+                    .read()
+                    .unwrap()
+                    .get_focused_output(target.unwrap()),
+            )
+        } else {
+            seat.set_focused_output(None);
+        };
+    }
+}
+
 fn raise_with_children(floating_layer: &mut FloatingLayout, focused: &CosmicMapped) {
     if floating_layer.mapped().any(|m| m == focused) {
         floating_layer.space.raise_element(focused, true);
@@ -264,13 +334,16 @@ impl Common {
             update_pointer_focus(state, &seat);
 
             let mut shell = state.common.shell.write().unwrap();
-            let output = seat.active_output();
+            let output = seat.focused_or_active_output();
+
+            // If the focused or active output is not in the list of outputs, switch to the first output
             if !shell.outputs().any(|o| o == &output) {
                 if let Some(other) = shell.outputs().next() {
                     seat.set_active_output(other);
                 }
                 continue;
             }
+
             let last_known_focus = ActiveFocus::get(&seat);
 
             if let Some(target) = last_known_focus {
@@ -291,15 +364,14 @@ impl Common {
                                 if let Some(new) = popup_grab.current_grab() {
                                     trace!("restore focus to previous popup grab");
                                     std::mem::drop(shell);
-
-                                    if let Some(keyboard) = seat.get_keyboard() {
-                                        keyboard.set_focus(
-                                            state,
-                                            Some(new.clone()),
-                                            SERIAL_COUNTER.next_serial(),
-                                        );
-                                    }
-                                    ActiveFocus::set(&seat, Some(new));
+                                    // TODO: verify whether cursor should be updated at end of popup grab
+                                    update_focus_state(
+                                        seat,
+                                        Some(&new),
+                                        state,
+                                        Some(SERIAL_COUNTER.next_serial()),
+                                        false,
+                                    );
                                     seat.user_data()
                                         .get_or_insert::<PopupGrabData, _>(PopupGrabData::default)
                                         .set(Some(popup_grab));
@@ -337,12 +409,10 @@ impl Common {
                 // update keyboard focus
                 let target = update_focus_target(&*shell, &seat, &output);
                 std::mem::drop(shell);
+                //I can probably feature gate this condition
+                debug!("Restoring focus to {:?}", target.as_ref());
 
-                if let Some(keyboard) = seat.get_keyboard() {
-                    debug!("Restoring focus to {:?}", target.as_ref());
-                    keyboard.set_focus(state, target.clone(), SERIAL_COUNTER.next_serial());
-                    ActiveFocus::set(&seat, target);
-                }
+                update_focus_state(seat, target.as_ref(), state, None, false);
             }
         }
 

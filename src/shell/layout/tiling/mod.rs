@@ -3088,10 +3088,7 @@ impl TilingLayout {
         None
     }
 
-    pub fn element_under(
-        &mut self,
-        location_f64: Point<f64, Local>,
-    ) -> Option<KeyboardFocusTarget> {
+    pub fn element_under(&self, location_f64: Point<f64, Local>) -> Option<KeyboardFocusTarget> {
         let location = location_f64.to_i32_round();
 
         for (mapped, geo) in self.mapped() {

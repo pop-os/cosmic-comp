@@ -156,7 +156,7 @@ impl XdgActivationHandler for State {
                             let target = element.into();
 
                             std::mem::drop(shell);
-                            Shell::set_focus(self, Some(&target), &seat, None);
+                            Shell::set_focus(self, Some(&target), &seat, None, false);
                         } else if let Some(w) = shell.space_for(&element).map(|w| w.handle.clone())
                         {
                             shell.append_focus_stack(&element, &seat);

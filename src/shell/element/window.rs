@@ -177,7 +177,7 @@ impl CosmicWindowInternal {
     pub fn current_focus(&self) -> Option<Focus> {
         unsafe { Focus::from_u8(self.pointer_entered.load(Ordering::SeqCst)) }
     }
-
+    /// returns if the window has any current or pending server-side decorations
     pub fn has_ssd(&self, pending: bool) -> bool {
         !self.window.is_decorated(pending)
     }

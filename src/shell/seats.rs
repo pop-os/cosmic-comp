@@ -27,6 +27,10 @@ use super::grabs::{SeatMenuGrabState, SeatMoveGrabState};
 
 crate::utils::id_gen!(next_seat_id, SEAT_ID, SEAT_IDS);
 
+// for more information on seats, see:
+// <https://wayland-book.com/print.html#seats-handling-input>
+/// Seats are an abstraction over a set of input devices grouped together, such as a keyboard, pointer and touch device.
+/// i.e. Those used by a user to operate the computer.
 #[derive(Debug)]
 pub struct Seats {
     seats: Vec<Seat<State>>,
@@ -155,7 +159,12 @@ impl Drop for SeatId {
 
 #[repr(transparent)]
 struct SeatId(pub usize);
+
+/// The output which contains the cursor associated with a seat.
 struct ActiveOutput(pub Mutex<Output>);
+
+/// The output which currently has keyboard focus
+struct FocusedOutput(pub Mutex<Option<Output>>);
 
 pub fn create_seat(
     dh: &DisplayHandle,
@@ -175,6 +184,7 @@ pub fn create_seat(
     userdata.insert_if_missing_threadsafe(SeatMenuGrabState::default);
     userdata.insert_if_missing_threadsafe(CursorState::default);
     userdata.insert_if_missing_threadsafe(|| ActiveOutput(Mutex::new(output.clone())));
+    userdata.insert_if_missing_threadsafe(|| FocusedOutput(Mutex::new(None)));
     userdata.insert_if_missing_threadsafe(|| Mutex::new(CursorImageStatus::default_named()));
 
     // A lot of clients bind keyboard and pointer unconditionally once on launch..
@@ -213,7 +223,13 @@ pub trait SeatExt {
     fn id(&self) -> usize;
 
     fn active_output(&self) -> Output;
+    fn focused_output(&self) -> Option<Output>;
+    fn focused_or_active_output(&self) -> Output {
+        self.focused_output()
+            .unwrap_or_else(|| self.active_output())
+    }
     fn set_active_output(&self, output: &Output);
+    fn set_focused_output(&self, output: Option<&Output>);
     fn devices(&self) -> &Devices;
     fn supressed_keys(&self) -> &SupressedKeys;
     fn supressed_buttons(&self) -> &SupressedButtons;
@@ -231,11 +247,29 @@ impl SeatExt for Seat<State> {
         self.user_data().get::<SeatId>().unwrap().0
     }
 
+    /// Returns the output that contains the cursor associated with a seat. Note that the window which has keyboard focus
+    /// may be on a different output. Currently, to get the focused output, first get the keyboard focus target and pass
+    /// it to get_focused_output in the shell.
     fn active_output(&self) -> Output {
         self.user_data()
             .get::<ActiveOutput>()
             .map(|x| x.0.lock().unwrap().clone())
             .unwrap()
+    }
+
+    /// Returns the output which currently has keyboard focus. If no window has keyboard focus (e.g. when there are no windows)
+    /// the focused output will be the same as the active output.
+    fn focused_output(&self) -> Option<Output> {
+        if self
+            .get_keyboard()
+            .is_some_and(|k| k.current_focus().is_some())
+        {
+            self.user_data()
+                .get::<FocusedOutput>()
+                .map(|x| x.0.lock().unwrap().clone())?
+        } else {
+            None
+        }
     }
 
     fn set_active_output(&self, output: &Output) {
@@ -246,6 +280,16 @@ impl SeatExt for Seat<State> {
             .0
             .lock()
             .unwrap() = output.clone();
+    }
+
+    fn set_focused_output(&self, output: Option<&Output>) {
+        *self
+            .user_data()
+            .get::<FocusedOutput>()
+            .unwrap()
+            .0
+            .lock()
+            .unwrap() = output.cloned();
     }
 
     fn devices(&self) -> &Devices {
