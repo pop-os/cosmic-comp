@@ -7,7 +7,6 @@ use std::{
     sync::atomic::Ordering,
     time::{Duration, Instant},
 };
-use tracing::error;
 use wayland_backend::server::ClientId;
 
 use crate::wayland::protocols::workspace::WorkspaceCapabilities;
@@ -1236,10 +1235,7 @@ impl Shell {
     pub fn new(config: &Config) -> Self {
         let theme = cosmic::theme::system_preference();
 
-        let tiling_exceptions = layout::TilingExceptions::new(config).unwrap_or_else(|e| {
-            error!(?e, "Could not load tiling exceptions, using default");
-            layout::TilingExceptions::default()
-        });
+        let tiling_exceptions = layout::TilingExceptions::new(config);
 
         Shell {
             workspaces: Workspaces::new(config, theme.clone()),

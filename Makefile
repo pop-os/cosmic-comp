@@ -24,7 +24,7 @@ endif
 TARGET_BIN="$(DESTDIR)$(bindir)/$(BINARY)"
 
 KEYBINDINGS_CONF="$(DESTDIR)$(sharedir)/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults"
-TILING_EXCEPTIONS_CONF="$(DESTDIR)$(sharedir)/cosmic/com.system76.CosmicComp/v1/tiling_exceptions"
+TILING_EXCEPTIONS_CONF="$(DESTDIR)$(sharedir)/cosmic/com.system76.CosmicSettings.WindowRules/v1/tiling_exception_defaults"
 
 all: extract-vendor
 	cargo build $(ARGS)
