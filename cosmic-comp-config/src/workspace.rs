@@ -2,34 +2,35 @@
 
 use serde::{Deserialize, Serialize};
 
-fn default_workspace_layout() -> WorkspaceLayout {
-    WorkspaceLayout::Vertical
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct WorkspaceConfig {
     pub workspace_mode: WorkspaceMode,
-    #[serde(default = "default_workspace_layout")]
+    #[serde(default)]
     pub workspace_layout: WorkspaceLayout,
+    pub workspace_thumbnail_placement: WorkspaceThumbnailPlacement,
 }
 
-impl Default for WorkspaceConfig {
-    fn default() -> Self {
-        Self {
-            workspace_mode: WorkspaceMode::OutputBound,
-            workspace_layout: WorkspaceLayout::Vertical,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum WorkspaceMode {
+    #[default]
     OutputBound,
     Global,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[repr(usize)]
+pub enum WorkspaceThumbnailPlacement {
+    Top = 0,
+    Bottom = 1,
+    #[default]
+    Left = 2,
+    Right = 3,
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum WorkspaceLayout {
+    #[default]
     Vertical,
     Horizontal,
 }
