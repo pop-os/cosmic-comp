@@ -65,7 +65,7 @@ use smithay::{
     },
     xwayland::X11Surface,
 };
-use tracing::{error, trace};
+use tracing::{error, trace, warn};
 use xkbcommon::xkb::{Keycode, Keysym};
 
 use std::{
@@ -483,7 +483,14 @@ impl State {
                                             // is this a normal binding?
                                             if binding.key.is_some()
                                                 && state == KeyState::Pressed
-                                                && handle.raw_syms().contains(&binding.key.unwrap())
+                                                && (handle.raw_syms().contains(&binding.key.unwrap()) ||
+                                                    // fallback to the Latin or current layout symbol
+                                                    // if no binding is found for the current layout's key
+                                                    handle.raw_latin_sym_or_raw_current_sym()
+                                                    .unwrap_or_else(|| {
+                                                        warn!("No keysym found for keypress {:?}: passing NoSymbol", handle);
+                                                        Keysym::NoSymbol
+                                                    }) == binding.key.unwrap())
                                                 && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
                                             {
                                                 modifiers_queue.clear();
