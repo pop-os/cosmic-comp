@@ -16,7 +16,7 @@ use cosmic_comp_config::{
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::{
     State as WState, TilingState,
 };
-use cosmic_settings_config::shortcuts;
+use cosmic_settings_config::{shortcuts, window_rules::ApplicationException};
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection, ResizeDirection};
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
@@ -1220,7 +1220,7 @@ impl Shell {
     pub fn new(config: &Config) -> Self {
         let theme = cosmic::theme::system_preference();
 
-        let tiling_exceptions = layout::TilingExceptions::new(config);
+        let tiling_exceptions = layout::TilingExceptions::new(&config.tiling_exceptions);
 
         Shell {
             workspaces: Workspaces::new(config, theme.clone()),
@@ -3368,6 +3368,10 @@ impl Shell {
 
     pub fn theme(&self) -> &cosmic::Theme {
         &self.theme
+    }
+
+    pub fn update_tiling_exceptions(&mut self, exceptions: &Vec<ApplicationException>) {
+        self.tiling_exceptions = layout::TilingExceptions::new(exceptions);
     }
 
     pub fn take_presentation_feedback(

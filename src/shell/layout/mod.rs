@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use cosmic_settings_config::shortcuts::action::Orientation;
+use cosmic_settings_config::{shortcuts::action::Orientation, window_rules::ApplicationException};
 use regex::{Regex, RegexSet};
 use smithay::{
     desktop::WindowSurface,
@@ -8,8 +8,6 @@ use smithay::{
     xwayland::xwm::WmWindowType,
 };
 use tracing::warn;
-
-use crate::config::Config;
 
 use super::CosmicSurface;
 
@@ -63,11 +61,11 @@ pub struct TilingExceptions {
 }
 
 impl TilingExceptions {
-    pub fn new(config: &Config) -> Self {
+    pub fn new(exceptions_config: &Vec<ApplicationException>) -> Self {
         let mut app_ids = Vec::new();
         let mut titles = Vec::new();
 
-        for exception in &config.tiling_exceptions {
+        for exception in exceptions_config {
             if let Err(e) = Regex::new(&exception.appid) {
                 warn!("Invalid regex for appid: {}, {}", exception.appid, e);
                 continue;
