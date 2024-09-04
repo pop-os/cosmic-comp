@@ -8,8 +8,8 @@ use crate::{
     },
 };
 use cosmic_config::{ConfigGet, CosmicConfigEntry};
-use cosmic_settings_config::{shortcuts, Shortcuts, window_rules};
 use cosmic_settings_config::window_rules::ApplicationException;
+use cosmic_settings_config::{shortcuts, window_rules, Shortcuts};
 use serde::{Deserialize, Serialize};
 use smithay::wayland::xdg_activation::XdgActivationState;
 pub use smithay::{
@@ -208,9 +208,6 @@ impl Config {
         let system_actions = shortcuts::system_actions(&config);
         let mut shortcuts = shortcuts::shortcuts(&settings_context);
 
-        let tiling_context = window_rules::context().expect("Failed to load window rules config");
-        let tiling_exceptions = window_rules::tiling_exceptions(&tiling_context);
-
         // Add any missing default shortcuts recommended by the compositor.
         key_bindings::add_default_bindings(&mut shortcuts, workspace.workspace_layout);
 
@@ -247,6 +244,41 @@ impl Config {
             Err(err) => warn!(
                 ?err,
                 "failed to create config watch source for com.system76.CosmicSettings.Shortcuts"
+            ),
+        };
+
+        let window_rules_context =
+            window_rules::context().expect("Failed to load window rules config");
+        let tiling_exceptions = window_rules::tiling_exceptions(&window_rules_context);
+
+        match cosmic_config::calloop::ConfigWatchSource::new(&window_rules_context) {
+            Ok(source) => {
+                if let Err(err) = loop_handle.insert_source(source, |(config, keys), (), state| {
+                    for key in keys {
+                        match key.as_str() {
+                            "tiling_exception_defaults" | "tiling_exception_custom" => {
+                                let new_exceptions = window_rules::tiling_exceptions(&config);
+                                state.common.config.tiling_exceptions = new_exceptions;
+                                state
+                                    .common
+                                    .shell
+                                    .write()
+                                    .unwrap()
+                                    .update_tiling_exceptions(&state.common.config.tiling_exceptions);
+                            }
+                            _ => (),
+                        }
+                    }
+                }) {
+                    warn!(
+                        ?err,
+                        "Failed to watch com.system76.CosmicSettings.WindowRules config"
+                    );
+                }
+            }
+            Err(err) => warn!(
+                ?err,
+                "failed to create config watch source for com.system76.CosmicSettings.WindowRules"
             ),
         };
 
