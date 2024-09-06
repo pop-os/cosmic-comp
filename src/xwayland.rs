@@ -773,4 +773,9 @@ impl XwmHandler for State {
             }
         }
     }
+
+    fn disconnected(&mut self, _xwm: XwmId) {
+        let xwayland_state = self.common.xwayland_state.as_mut().unwrap();
+        xwayland_state.xwm = None;
+    }
 }
