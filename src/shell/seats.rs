@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{any::Any, cell::RefCell, collections::HashMap, sync::Mutex, time::Duration};
+use std::{any::Any, cell::RefCell, collections::HashMap, sync::Mutex};
 
 use crate::{
-    backend::render::cursor::{CursorShape, CursorState},
+    backend::render::cursor::CursorState,
     config::{xkb_config_to_wl, Config},
     input::{ModifiersShortcutQueue, SupressedButtons, SupressedKeys},
     state::State,
@@ -13,7 +13,7 @@ use smithay::{
     desktop::utils::bbox_from_surface_tree,
     input::{
         keyboard::{LedState, XkbConfig},
-        pointer::{CursorIcon, CursorImageAttributes, CursorImageStatus},
+        pointer::{CursorImageAttributes, CursorImageStatus},
         Seat, SeatState,
     },
     output::Output,
@@ -347,17 +347,15 @@ impl SeatExt for Seat<State> {
                 );
                 Some((buffer_geo, (hotspot.x, hotspot.y).into()))
             }
-            CursorImageStatus::Named(CursorIcon::Default) => {
+            CursorImageStatus::Named(cursor_icon) => {
                 let seat_userdata = self.user_data();
                 seat_userdata.insert_if_missing_threadsafe(CursorState::default);
                 let state = seat_userdata.get::<CursorState>().unwrap();
                 let frame = state
                     .lock()
                     .unwrap()
-                    .cursors
-                    .get(&CursorShape::Default)
-                    .unwrap()
-                    .get_image(1, Into::<Duration>::into(time).as_millis() as u32);
+                    .get_named_cursor(cursor_icon)
+                    .get_image(1, time.as_millis());
 
                 Some((
                     Rectangle::from_loc_and_size(
@@ -366,10 +364,6 @@ impl SeatExt for Seat<State> {
                     ),
                     (frame.xhot as i32, frame.yhot as i32).into(),
                 ))
-            }
-            CursorImageStatus::Named(_) => {
-                // TODO: Handle for `cursor_shape_v1` protocol
-                None
             }
             CursorImageStatus::Hidden => None,
         }

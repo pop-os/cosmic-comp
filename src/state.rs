@@ -66,6 +66,7 @@ use smithay::{
     wayland::{
         alpha_modifier::AlphaModifierState,
         compositor::{CompositorClientState, CompositorState, SurfaceData},
+        cursor_shape::CursorShapeManagerState,
         dmabuf::{DmabufFeedback, DmabufGlobal, DmabufState},
         foreign_toplevel_list::ForeignToplevelListState,
         fractional_scale::{with_fractional_scale, FractionalScaleManagerState},
@@ -210,6 +211,7 @@ pub struct Common {
     pub idle_inhibit_manager_state: IdleInhibitManagerState,
     pub idle_inhibiting_surfaces: HashSet<WlSurface>,
     pub shm_state: ShmState,
+    pub cursor_shape_manager_state: CursorShapeManagerState,
     pub wl_drm_state: WlDrmState<Option<DrmNode>>,
     pub viewporter_state: ViewporterState,
     pub kde_decoration_state: KdeDecorationState,
@@ -506,6 +508,7 @@ impl State {
         let screencopy_state = ScreencopyState::new::<Self, _>(dh, client_is_privileged);
         let shm_state =
             ShmState::new::<Self>(dh, vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888]);
+        let cursor_shape_manager_state = CursorShapeManagerState::new::<State>(dh);
         let seat_state = SeatState::<Self>::new();
         let viewporter_state = ViewporterState::new::<Self>(dh);
         let wl_drm_state = WlDrmState::<Option<DrmNode>>::default();
@@ -600,6 +603,7 @@ impl State {
                 image_source_state,
                 screencopy_state,
                 shm_state,
+                cursor_shape_manager_state,
                 seat_state,
                 session_lock_manager_state,
                 keyboard_shortcuts_inhibit_state,

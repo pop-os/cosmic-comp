@@ -1,9 +1,6 @@
 use super::{surface::RESIZE_BORDER, window::Focus, CosmicSurface};
 use crate::{
-    backend::render::{
-        cursor::{CursorShape, CursorState},
-        SplitRenderElements,
-    },
+    backend::render::{cursor::CursorState, SplitRenderElements},
     shell::{
         focus::target::PointerFocusTarget,
         grabs::{ReleaseMode, ResizeEdge},
@@ -1331,7 +1328,7 @@ impl PointerTarget<State> for CosmicStack {
                 .unwrap()
                 .lock()
                 .unwrap();
-            cursor_state.set_shape(CursorShape::Default);
+            cursor_state.unset_shape();
             let _previous = p.swap_focus(None);
         });
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::render::cursor::{CursorShape, CursorState},
+    backend::render::cursor::CursorState,
     shell::{
         focus::target::PointerFocusTarget,
         grabs::{GrabStartData, ReleaseMode},
@@ -14,7 +14,7 @@ use smithay::{
     backend::input::ButtonState,
     input::{
         pointer::{
-            AxisFrame, ButtonEvent, Focus, GestureHoldBeginEvent, GestureHoldEndEvent,
+            AxisFrame, ButtonEvent, CursorIcon, Focus, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
             GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
             GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab, PointerInnerHandle,
@@ -54,8 +54,8 @@ impl PointerTarget<State> for ResizeForkTarget {
             .lock()
             .unwrap()
             .set_shape(match self.orientation {
-                Orientation::Horizontal => CursorShape::RowResize,
-                Orientation::Vertical => CursorShape::ColResize,
+                Orientation::Horizontal => CursorIcon::RowResize,
+                Orientation::Vertical => CursorIcon::ColResize,
             });
     }
 
@@ -68,7 +68,7 @@ impl PointerTarget<State> for ResizeForkTarget {
     ) {
         let user_data = seat.user_data();
         let cursor_state = user_data.get::<CursorState>().unwrap();
-        cursor_state.lock().unwrap().set_shape(CursorShape::Default)
+        cursor_state.lock().unwrap().unset_shape();
     }
 
     fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {

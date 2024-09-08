@@ -1,7 +1,7 @@
 use std::{ffi::OsString, os::unix::io::OwnedFd, process::Stdio};
 
 use crate::{
-    backend::render::cursor::{load_cursor_theme, Cursor, CursorShape},
+    backend::render::cursor::{load_cursor_theme, Cursor},
     shell::{
         element::surface::SSD_HEIGHT, focus::target::KeyboardFocusTarget, grabs::ReleaseMode,
         CosmicSurface, Shell,
@@ -15,6 +15,7 @@ use crate::{
 use smithay::{
     backend::drm::DrmNode,
     desktop::space::SpaceElement,
+    input::pointer::CursorIcon,
     reexports::{wayland_server::Client, x11rb::protocol::xproto::Window as X11Window},
     utils::{Logical, Point, Rectangle, Size, SERIAL_COUNTER},
     wayland::{
@@ -99,7 +100,7 @@ impl State {
                     };
 
                     let (theme, size) = load_cursor_theme();
-                    let cursor = Cursor::load(&theme, CursorShape::Default, size);
+                    let cursor = Cursor::load(&theme, CursorIcon::Default, size);
                     let image = cursor.get_image(1, 0);
                     if let Err(err) = wm.set_cursor(
                         &image.pixels_rgba,
