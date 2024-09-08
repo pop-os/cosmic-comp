@@ -275,20 +275,20 @@ where
         })
         .unwrap_or(CursorImageStatus::default_named());
 
-    if let CursorImageStatus::Surface(ref wl_surface) = cursor_status {
-        return draw_surface_cursor(renderer, wl_surface, location.to_i32_round(), scale);
-    } else if let CursorImageStatus::Named(named_cursor) = cursor_status {
-        let integer_scale = scale.x.max(scale.y).ceil() as u32;
+    let seat_userdata = seat.user_data();
+    let mut state_ref = seat_userdata.get::<CursorState>().unwrap().lock().unwrap();
+    let state = &mut *state_ref;
 
-        let seat_userdata = seat.user_data();
-        let mut state_ref = seat_userdata.get::<CursorState>().unwrap().lock().unwrap();
-        let state = &mut *state_ref;
-
-        let current_cursor = state.current_cursor.unwrap_or(named_cursor);
+    let named_cursor = state.current_cursor.or(match cursor_status {
+        CursorImageStatus::Named(named_cursor) => Some(named_cursor),
+        _ => None,
+    });
+    if let Some(current_cursor) = named_cursor {
         if !draw_default && current_cursor == CursorIcon::Default {
             return Vec::new();
         }
 
+        let integer_scale = scale.x.max(scale.y).ceil() as u32;
         let frame = state
             .get_named_cursor(current_cursor)
             .get_image(integer_scale, time.as_millis());
@@ -332,6 +332,8 @@ where
             ),
             hotspot,
         )];
+    } else if let CursorImageStatus::Surface(ref wl_surface) = cursor_status {
+        return draw_surface_cursor(renderer, wl_surface, location.to_i32_round(), scale);
     } else {
         Vec::new()
     }
