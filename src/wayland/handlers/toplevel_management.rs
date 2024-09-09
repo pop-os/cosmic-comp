@@ -87,7 +87,7 @@ impl ToplevelManagementHandler for State {
                 }
 
                 mapped.focus_window(window);
-                Shell::set_focus(self, Some(&mapped.clone().into()), &seat, None, true);
+                Shell::set_focus(self, Some(&mapped.clone().into()), &seat, None, false);
                 return;
             }
         }
