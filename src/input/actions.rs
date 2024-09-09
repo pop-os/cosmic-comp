@@ -3,8 +3,8 @@
 use crate::{
     config::{Action, PrivateAction},
     shell::{
-        layout::tiling::SwapWindowGrab, FocusResult, InvalidWorkspaceIndex, MoveResult, SeatExt,
-        Trigger, WorkspaceDelta,
+        focus::target::KeyboardFocusTarget, layout::tiling::SwapWindowGrab, FocusResult,
+        InvalidWorkspaceIndex, MoveResult, SeatExt, Trigger, WorkspaceDelta,
     },
     utils::prelude::*,
     wayland::{
@@ -402,11 +402,30 @@ impl State {
                         WorkspaceDelta::new_shortcut(),
                         &mut self.common.workspace_state.update(),
                     );
-                    match res {
-                        Ok(Some(new_pos)) => {
-                            std::mem::drop(shell);
-                            seat.set_active_output(&next_output);
-                            if let Some(ptr) = seat.get_pointer() {
+                    seat.set_active_output(&next_output);
+
+                    if let Ok(Some(new_pos)) = res {
+                        let new_target = shell
+                            .workspaces
+                            .active(&next_output)
+                            .1
+                            .focus_stack
+                            .get(&seat)
+                            .last()
+                            .cloned()
+                            .map(KeyboardFocusTarget::from);
+                        std::mem::drop(shell);
+
+                        let move_cursor = if let Some(under) = new_target {
+                            let update_cursor = self.common.config.cosmic_conf.focus_follows_cursor;
+                            Shell::set_focus(self, Some(&under), seat, None, update_cursor);
+                            !update_cursor
+                        } else {
+                            true
+                        };
+
+                        if let Some(ptr) = seat.get_pointer() {
+                            if move_cursor {
                                 ptr.motion(
                                     self,
                                     None,
@@ -416,13 +435,9 @@ impl State {
                                         time,
                                     },
                                 );
-                                ptr.frame(self);
                             }
+                            ptr.frame(self);
                         }
-                        Ok(None) => {
-                            seat.set_active_output(&next_output);
-                        }
-                        _ => {}
                     }
                 } else if propagate {
                     std::mem::drop(shell);
@@ -474,11 +489,30 @@ impl State {
                         WorkspaceDelta::new_shortcut(),
                         &mut self.common.workspace_state.update(),
                     );
-                    match res {
-                        Ok(Some(new_pos)) => {
-                            std::mem::drop(shell);
-                            seat.set_active_output(&next_output);
-                            if let Some(ptr) = seat.get_pointer() {
+                    seat.set_active_output(&next_output);
+
+                    if let Ok(Some(new_pos)) = res {
+                        let new_target = shell
+                            .workspaces
+                            .active(&next_output)
+                            .1
+                            .focus_stack
+                            .get(&seat)
+                            .last()
+                            .cloned()
+                            .map(KeyboardFocusTarget::from);
+                        std::mem::drop(shell);
+
+                        let move_cursor = if let Some(under) = new_target {
+                            let update_cursor = self.common.config.cosmic_conf.focus_follows_cursor;
+                            Shell::set_focus(self, Some(&under), seat, None, update_cursor);
+                            !update_cursor
+                        } else {
+                            true
+                        };
+
+                        if let Some(ptr) = seat.get_pointer() {
+                            if move_cursor {
                                 ptr.motion(
                                     self,
                                     None,
@@ -488,13 +522,9 @@ impl State {
                                         time,
                                     },
                                 );
-                                ptr.frame(self);
                             }
+                            ptr.frame(self);
                         }
-                        Ok(None) => {
-                            seat.set_active_output(&next_output);
-                        }
-                        _ => {}
                     }
                 }
             }
@@ -518,11 +548,30 @@ impl State {
                         WorkspaceDelta::new_shortcut(),
                         &mut self.common.workspace_state.update(),
                     );
-                    match res {
-                        Ok(Some(new_pos)) => {
-                            std::mem::drop(shell);
-                            seat.set_active_output(&prev_output);
-                            if let Some(ptr) = seat.get_pointer() {
+                    seat.set_active_output(&prev_output);
+
+                    if let Ok(Some(new_pos)) = res {
+                        let new_target = shell
+                            .workspaces
+                            .active(&prev_output)
+                            .1
+                            .focus_stack
+                            .get(&seat)
+                            .last()
+                            .cloned()
+                            .map(KeyboardFocusTarget::from);
+                        std::mem::drop(shell);
+
+                        let move_cursor = if let Some(under) = new_target {
+                            let update_cursor = self.common.config.cosmic_conf.focus_follows_cursor;
+                            Shell::set_focus(self, Some(&under), seat, None, update_cursor);
+                            !update_cursor
+                        } else {
+                            true
+                        };
+
+                        if let Some(ptr) = seat.get_pointer() {
+                            if move_cursor {
                                 ptr.motion(
                                     self,
                                     None,
@@ -532,13 +581,9 @@ impl State {
                                         time,
                                     },
                                 );
-                                ptr.frame(self);
                             }
+                            ptr.frame(self);
                         }
-                        Ok(None) => {
-                            seat.set_active_output(&prev_output);
-                        }
-                        _ => {}
                     }
                 }
             }

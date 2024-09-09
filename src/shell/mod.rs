@@ -1424,10 +1424,8 @@ impl Shell {
         &self,
         global_position: Point<f64, Global>,
         seat: &Seat<State>,
-    ) -> (Option<KeyboardFocusTarget>, bool) {
+    ) -> Option<KeyboardFocusTarget> {
         let output = seat.active_output();
-        // if not done and super key pressed
-        let mut grab_conditions_met = false;
         let relative_pos = global_position.to_local(&output);
 
         let mut under: Option<KeyboardFocusTarget> = None;
@@ -1484,11 +1482,7 @@ impl Shell {
                 // Don't check override redirect windows, because we don't set keyboard focus to them explicitly.
                 // These cases are handled by the XwaylandKeyboardGrab.
                 if let Some(target) = self.element_under(global_position, &output) {
-                    if !seat.get_keyboard().unwrap().modifier_state().logo {
-                        under = Some(target);
-                    } else {
-                        grab_conditions_met = true;
-                    }
+                    under = Some(target);
                 } else {
                     let layers = layer_map_for_output(&output);
                     if let Some(layer) = layers
@@ -1512,7 +1506,8 @@ impl Shell {
                 }
             }
         }
-        (under, grab_conditions_met)
+
+        under
     }
 
     /// Coerce a keyboard focus target into a CosmicMapped element. This is useful when performing window specific
