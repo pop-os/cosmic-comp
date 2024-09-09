@@ -228,7 +228,7 @@ fn update_focus_state(
     // update keyboard focus
     if let Some(keyboard) = seat.get_keyboard() {
         if should_update_cursor && state.common.config.cosmic_conf.cursor_follows_focus {
-            if ActiveFocus::get(seat).as_ref() != target && target.is_some() {
+            if target.is_some() {
                 //need to borrow mutably for surface under
                 let mut shell = state.common.shell.write().unwrap();
                 // get the top left corner of the target element
