@@ -17,8 +17,8 @@ use cosmic_comp_config::{
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::{
     State as WState, TilingState,
 };
-use cosmic_settings_config::{shortcuts, window_rules::ApplicationException};
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection, ResizeDirection};
+use cosmic_settings_config::{shortcuts, window_rules::ApplicationException};
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     backend::{input::TouchSlot, renderer::element::RenderElementStates},
@@ -2825,9 +2825,8 @@ impl Shell {
         let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
             return FocusResult::None;
         };
-        let output = self.get_focused_output(&target).unwrap();
-
-        let workspace = self.active_space(output);
+        let output = seat.active_output();
+        let workspace = self.active_space(&output);
 
         if workspace.fullscreen.is_some() {
             return FocusResult::None;
@@ -2837,7 +2836,7 @@ impl Shell {
             return FocusResult::None;
         }
 
-        let set = self.workspaces.sets.get(output).unwrap();
+        let set = self.workspaces.sets.get(&output).unwrap();
         let sticky_layer = &set.sticky_layer;
         let workspace = &set.workspaces[set.active];
 
@@ -3574,7 +3573,7 @@ impl Shell {
 
     pub fn update_tiling_exceptions<'a, I>(&mut self, exceptions: I)
     where
-      I: Iterator<Item=&'a ApplicationException>
+        I: Iterator<Item = &'a ApplicationException>,
     {
         self.tiling_exceptions = layout::TilingExceptions::new(exceptions);
     }
