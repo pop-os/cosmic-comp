@@ -1423,21 +1423,20 @@ impl Shell {
     pub fn keyboard_target_from_position(
         &self,
         global_position: Point<f64, Global>,
-        seat: &Seat<State>,
+        output: &Output,
     ) -> Option<KeyboardFocusTarget> {
-        let output = seat.active_output();
-        let relative_pos = global_position.to_local(&output);
+        let relative_pos = global_position.to_local(output);
 
         let mut under: Option<KeyboardFocusTarget> = None;
         // if the lockscreen is active
         if let Some(session_lock) = self.session_lock.as_ref() {
             under = session_lock
                 .surfaces
-                .get(&output)
+                .get(output)
                 .map(|lock| lock.clone().into());
             // if the output can receive keyboard focus
-        } else if let Some(window) = self.active_space(&output).get_fullscreen() {
-            let layers = layer_map_for_output(&output);
+        } else if let Some(window) = self.active_space(output).get_fullscreen() {
+            let layers = layer_map_for_output(output);
             if let Some(layer) = layers.layer_under(WlrLayer::Overlay, relative_pos.as_logical()) {
                 let layer_loc = layers.layer_geometry(layer).unwrap().loc;
                 if layer.can_receive_keyboard_focus()
@@ -1455,7 +1454,7 @@ impl Shell {
             }
         } else {
             let done = {
-                let layers = layer_map_for_output(&output);
+                let layers = layer_map_for_output(output);
                 if let Some(layer) = layers
                     .layer_under(WlrLayer::Overlay, relative_pos.as_logical())
                     .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos.as_logical()))
@@ -1481,10 +1480,10 @@ impl Shell {
             if !done {
                 // Don't check override redirect windows, because we don't set keyboard focus to them explicitly.
                 // These cases are handled by the XwaylandKeyboardGrab.
-                if let Some(target) = self.element_under(global_position, &output) {
+                if let Some(target) = self.element_under(global_position, output) {
                     under = Some(target);
                 } else {
-                    let layers = layer_map_for_output(&output);
+                    let layers = layer_map_for_output(output);
                     if let Some(layer) = layers
                         .layer_under(WlrLayer::Bottom, relative_pos.as_logical())
                         .or_else(|| {

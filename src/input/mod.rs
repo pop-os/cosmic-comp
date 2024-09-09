@@ -604,9 +604,9 @@ impl State {
                     } else if self.common.config.cosmic_conf.focus_follows_cursor {
                         let shell = self.common.shell.read().unwrap();
                         let old_keyboard_target =
-                            shell.keyboard_target_from_position(original_position, &seat);
+                            shell.keyboard_target_from_position(original_position, &current_output);
                         let new_keyboard_target =
-                            shell.keyboard_target_from_position(position, &seat);
+                            shell.keyboard_target_from_position(position, &output);
 
                         if old_keyboard_target != new_keyboard_target
                             && new_keyboard_target.is_some()
@@ -904,7 +904,7 @@ impl State {
                         let global_position =
                             seat.get_pointer().unwrap().current_location().as_global();
                         let shell = self.common.shell.write().unwrap();
-                        let under = shell.keyboard_target_from_position(global_position, &seat);
+                        let under = shell.keyboard_target_from_position(global_position, &output);
                         // Don't check override redirect windows, because we don't set keyboard focus to them explicitly.
                         // These cases are handled by the XwaylandKeyboardGrab.
                         if let Some(target) = shell.element_under(global_position, &output) {
