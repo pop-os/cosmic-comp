@@ -1,8 +1,5 @@
 use crate::{
-    backend::render::{
-        cursor::{CursorShape, CursorState},
-        SplitRenderElements,
-    },
+    backend::render::{cursor::CursorState, SplitRenderElements},
     shell::{
         focus::target::PointerFocusTarget,
         grabs::{ReleaseMode, ResizeEdge},
@@ -35,10 +32,10 @@ use smithay::{
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{
-            AxisFrame, ButtonEvent, CursorImageStatus, GestureHoldBeginEvent, GestureHoldEndEvent,
-            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
-            PointerTarget, RelativeMotionEvent,
+            AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, GestureHoldBeginEvent,
+            GestureHoldEndEvent, GesturePinchBeginEvent, GesturePinchEndEvent,
+            GesturePinchUpdateEvent, GestureSwipeBeginEvent, GestureSwipeEndEvent,
+            GestureSwipeUpdateEvent, MotionEvent, PointerTarget, RelativeMotionEvent,
         },
         touch::{
             DownEvent, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchTarget,
@@ -146,17 +143,17 @@ impl Focus {
         }
     }
 
-    pub fn cursor_shape(&self) -> CursorShape {
+    pub fn cursor_shape(&self) -> CursorIcon {
         match self {
-            Focus::ResizeTopLeft => CursorShape::NorthWestResize,
-            Focus::ResizeTopRight => CursorShape::NorthEastResize,
-            Focus::ResizeTop => CursorShape::NorthResize,
-            Focus::ResizeBottomLeft => CursorShape::SouthWestResize,
-            Focus::ResizeBottomRight => CursorShape::SouthEastResize,
-            Focus::ResizeBottom => CursorShape::SouthResize,
-            Focus::ResizeLeft => CursorShape::WestResize,
-            Focus::ResizeRight => CursorShape::EastResize,
-            Focus::Header => CursorShape::Default,
+            Focus::ResizeTopLeft => CursorIcon::NwResize,
+            Focus::ResizeTopRight => CursorIcon::NeResize,
+            Focus::ResizeTop => CursorIcon::NResize,
+            Focus::ResizeBottomLeft => CursorIcon::SwResize,
+            Focus::ResizeBottomRight => CursorIcon::SeResize,
+            Focus::ResizeBottom => CursorIcon::SResize,
+            Focus::ResizeLeft => CursorIcon::WResize,
+            Focus::ResizeRight => CursorIcon::EResize,
+            Focus::Header => CursorIcon::Default,
         }
     }
 
@@ -754,7 +751,7 @@ impl PointerTarget<State> for CosmicWindow {
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
         self.0.with_program(|p| {
             let cursor_state = seat.user_data().get::<CursorState>().unwrap();
-            cursor_state.lock().unwrap().set_shape(CursorShape::Default);
+            cursor_state.lock().unwrap().unset_shape();
             let _previous = p.swap_focus(None);
         });
         PointerTarget::leave(&self.0, seat, data, serial, time)

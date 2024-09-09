@@ -6,7 +6,7 @@ use crate::{
     state::State,
 };
 use smithay::{
-    delegate_seat,
+    delegate_cursor_shape, delegate_seat,
     input::{keyboard::LedState, pointer::CursorImageStatus, SeatHandler, SeatState},
 };
 use std::sync::Mutex;
@@ -48,3 +48,4 @@ impl SeatHandler for State {
 }
 
 delegate_seat!(State);
+delegate_cursor_shape!(State);
