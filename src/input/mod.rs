@@ -1035,16 +1035,20 @@ impl State {
                 };
 
                 let ptr = seat.get_pointer().unwrap();
-                ptr.button(
-                    self,
-                    &ButtonEvent {
-                        button,
-                        state: event.state(),
-                        serial,
-                        time: event.time_msec(),
-                    },
-                );
-                ptr.frame(self);
+                if pass_event {
+                    ptr.button(
+                        self,
+                        &ButtonEvent {
+                            button,
+                            state: event.state(),
+                            serial,
+                            time: event.time_msec(),
+                        },
+                    );
+                    ptr.frame(self);
+                } else if event.state() == ButtonState::Released {
+                    ptr.unset_grab(self, serial, event.time_msec())
+                }
             }
             InputEvent::PointerAxis { event, .. } => {
                 let scroll_factor =
