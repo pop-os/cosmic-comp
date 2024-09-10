@@ -640,6 +640,7 @@ impl TilingLayout {
         seat: &Seat<State>,
         focus_stack: impl Iterator<Item = &'a CosmicMapped> + 'a,
         desc: NodeDesc,
+        direction: Option<Direction>,
     ) -> Option<KeyboardFocusTarget> {
         let this_handle = &desc.handle;
         let mut this_tree = this.queue.trees.back().unwrap().0.copy_clone();
@@ -678,7 +679,7 @@ impl TilingLayout {
                 }
 
                 mapped.set_tiled(true);
-                other.map(mapped.clone(), Some(focus_stack), None);
+                other.map(mapped.clone(), Some(focus_stack), direction);
                 return Some(KeyboardFocusTarget::Element(mapped));
             }
             None => {
@@ -702,7 +703,12 @@ impl TilingLayout {
                             })
                             .map(|(id, _)| id)
                             .unwrap_or(other_tree.root_node_id().unwrap().clone());
-                        let orientation = {
+                        let orientation = if let Some(direction) = direction {
+                            match direction {
+                                Direction::Left | Direction::Right => Orientation::Vertical,
+                                Direction::Up | Direction::Down => Orientation::Horizontal,
+                            }
+                        } else {
                             let window_size = other_tree
                                 .get(&focused_node)
                                 .unwrap()
@@ -717,6 +723,15 @@ impl TilingLayout {
                         };
                         let id = other_tree.insert(node, InsertBehavior::AsRoot).unwrap();
                         TilingLayout::new_group(&mut other_tree, &focused_node, &id, orientation)
+                            .unwrap();
+                        other_tree
+                            .make_nth_sibling(
+                                &id,
+                                match direction {
+                                    Some(Direction::Right) | Some(Direction::Down) => 0,
+                                    _ => 1,
+                                },
+                            )
                             .unwrap();
                         id
                     }
@@ -3759,6 +3774,14 @@ impl TilingLayout {
                     geo
                 })
             })
+        })
+    }
+
+    pub fn element_for_node(&self, node: &NodeId) -> Option<&CosmicMapped> {
+        let tree = &self.queue.trees.back().unwrap().0;
+        tree.get(node).ok().and_then(|node| match node.data() {
+            Data::Mapped { mapped, .. } => Some(mapped),
+            _ => None,
         })
     }
 

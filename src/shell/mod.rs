@@ -2518,23 +2518,79 @@ impl Shell {
             .ok_or(InvalidWorkspaceIndex)?;
 
         let from_workspace = self.workspaces.active_mut(from_output);
-        let maybe_window = from_workspace.focus_stack.get(seat).last().cloned();
-
-        let Some(mapped) = maybe_window else {
-            return Ok(None);
-        };
-
+        let last_focused_window = from_workspace.focus_stack.get(seat).last().cloned();
         let from = from_workspace.handle;
 
-        Ok(self.move_window(
-            Some(seat),
-            &mapped,
-            &from,
-            &to,
-            follow,
-            direction,
-            workspace_state,
-        ))
+        match seat.get_keyboard().unwrap().current_focus() {
+            Some(KeyboardFocusTarget::Group(WindowGroup {
+                node, focus_stack, ..
+            })) => {
+                let new_pos = if follow {
+                    seat.set_active_output(&to_output);
+                    self.workspaces
+                        .idx_for_handle(&to_output, &to)
+                        .and_then(|to_idx| {
+                            self.activate(
+                                &to_output,
+                                to_idx,
+                                WorkspaceDelta::new_shortcut(),
+                                workspace_state,
+                            )
+                            .unwrap()
+                        })
+                } else {
+                    None
+                };
+
+                let spaces = self.workspaces.spaces_mut();
+                let (mut from_w, mut other_w) = spaces.partition::<Vec<_>, _>(|w| w.handle == from);
+                if let Some(from_workspace) = from_w.get_mut(0) {
+                    if let Some(to_workspace) = other_w.iter_mut().find(|w| w.handle == to) {
+                        {
+                            let mut stack = to_workspace.focus_stack.get_mut(&seat);
+                            for elem in focus_stack.iter().flat_map(|node_id| {
+                                from_workspace.tiling_layer.element_for_node(node_id)
+                            }) {
+                                stack.append(elem);
+                            }
+                        }
+                        let res = TilingLayout::move_tree(
+                            &mut from_workspace.tiling_layer,
+                            &mut to_workspace.tiling_layer,
+                            &to,
+                            seat,
+                            to_workspace.focus_stack.get(&seat).iter(),
+                            NodeDesc {
+                                handle: from,
+                                node,
+                                stack_window: None,
+                            },
+                            direction,
+                        );
+                        from_workspace.refresh_focus_stack();
+                        to_workspace.refresh_focus_stack();
+                        return Ok(res.zip(new_pos));
+                    }
+                }
+
+                Ok(None)
+            }
+            _ => {
+                if let Some(mapped) = last_focused_window {
+                    Ok(self.move_window(
+                        Some(seat),
+                        &mapped,
+                        &from,
+                        &to,
+                        follow,
+                        direction,
+                        workspace_state,
+                    ))
+                } else {
+                    Ok(None)
+                }
+            }
+        }
     }
 
     pub fn update_reactive_popups(&self, mapped: &CosmicMapped) {

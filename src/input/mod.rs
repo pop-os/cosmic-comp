@@ -303,7 +303,7 @@ impl State {
                                                     if let Some(old_workspace) = old_w.get_mut(0) {
                                                         if let Some(new_workspace) = other_w.iter_mut().find(|w| w.handle == new_workspace) {
                                                             if new_workspace.tiling_layer.windows().next().is_none() {
-                                                                if let Some(focus) = TilingLayout::move_tree(&mut old_workspace.tiling_layer, &mut new_workspace.tiling_layer, &new_workspace.handle, &seat, new_workspace.focus_stack.get(&seat).iter(), old_descriptor.clone()) {
+                                                                if let Some(focus) = TilingLayout::move_tree(&mut old_workspace.tiling_layer, &mut new_workspace.tiling_layer, &new_workspace.handle, &seat, new_workspace.focus_stack.get(&seat).iter(), old_descriptor.clone(), None) {
                                                                     let seat = seat.clone();
                                                                     data.common.event_loop_handle.insert_idle(move |state| {
                                                                         Shell::set_focus(state, Some(&focus), &seat, None,true);
