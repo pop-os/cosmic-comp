@@ -86,6 +86,7 @@ pub struct NodeDesc {
     pub handle: WorkspaceHandle,
     pub node: NodeId,
     pub stack_window: Option<CosmicSurface>,
+    pub focus_stack: Vec<NodeId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -813,8 +814,9 @@ impl TilingLayout {
 
                 other.node_desc_to_focus(&NodeDesc {
                     handle: other_handle.clone(),
-                    node: id,
+                    node: id.clone(),
                     stack_window: None,
+                    focus_stack: Vec::new(), // node_desc_to_focus doesn't use this
                 })
             }
         }

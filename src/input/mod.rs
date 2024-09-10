@@ -272,6 +272,22 @@ impl State {
                                                         let (mut old_w, mut other_w) = spaces.partition::<Vec<_>, _>(|w| w.handle == old_descriptor.handle);
                                                         if let Some(old_workspace) = old_w.get_mut(0) {
                                                             if let Some(new_workspace) = other_w.iter_mut().find(|w| w.handle == new_descriptor.handle) {
+                                                                {
+                                                                    let mut stack = new_workspace.focus_stack.get_mut(&seat);
+                                                                    for elem in old_descriptor.focus_stack.iter().flat_map(|node_id| {
+                                                                        old_workspace.tiling_layer.element_for_node(node_id)
+                                                                    }) {
+                                                                        stack.append(elem);
+                                                                    }
+                                                                }
+                                                                {
+                                                                    let mut stack = old_workspace.focus_stack.get_mut(&seat);
+                                                                    for elem in new_descriptor.focus_stack.iter().flat_map(|node_id| {
+                                                                        new_workspace.tiling_layer.element_for_node(node_id)
+                                                                    }) {
+                                                                        stack.append(elem);
+                                                                    }
+                                                                }
                                                                 if let Some(focus) = TilingLayout::swap_trees(&mut old_workspace.tiling_layer, Some(&mut new_workspace.tiling_layer), &old_descriptor, &new_descriptor) {
                                                                     let seat = seat.clone();
                                                                     data.common.event_loop_handle.insert_idle(move |state| {
@@ -303,6 +319,14 @@ impl State {
                                                     if let Some(old_workspace) = old_w.get_mut(0) {
                                                         if let Some(new_workspace) = other_w.iter_mut().find(|w| w.handle == new_workspace) {
                                                             if new_workspace.tiling_layer.windows().next().is_none() {
+                                                                {
+                                                                    let mut stack = new_workspace.focus_stack.get_mut(&seat);
+                                                                    for elem in old_descriptor.focus_stack.iter().flat_map(|node_id| {
+                                                                        old_workspace.tiling_layer.element_for_node(node_id)
+                                                                    }) {
+                                                                        stack.append(elem);
+                                                                    }
+                                                                }
                                                                 if let Some(focus) = TilingLayout::move_tree(&mut old_workspace.tiling_layer, &mut new_workspace.tiling_layer, &new_workspace.handle, &seat, new_workspace.focus_stack.get(&seat).iter(), old_descriptor.clone(), None) {
                                                                     let seat = seat.clone();
                                                                     data.common.event_loop_handle.insert_idle(move |state| {

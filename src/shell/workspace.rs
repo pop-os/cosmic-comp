@@ -974,7 +974,7 @@ impl Workspace {
                             .clone()
                             .map(|node_id| NodeDesc {
                                 handle: self.handle.clone(),
-                                node: node_id,
+                                node: node_id.clone(),
                                 stack_window: if mapped
                                     .stack_ref()
                                     .map(|stack| !stack.whole_stack_focused())
@@ -984,16 +984,20 @@ impl Workspace {
                                 } else {
                                     None
                                 },
+                                focus_stack: vec![node_id],
                             })
                     } else {
                         None
                     }
                 })
             }
-            KeyboardFocusTarget::Group(WindowGroup { node, .. }) => Some(NodeDesc {
+            KeyboardFocusTarget::Group(WindowGroup {
+                node, focus_stack, ..
+            }) => Some(NodeDesc {
                 handle: self.handle.clone(),
                 node,
                 stack_window: None,
+                focus_stack,
             }),
             _ => None,
         }

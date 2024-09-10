@@ -2564,6 +2564,7 @@ impl Shell {
                                 handle: from,
                                 node,
                                 stack_window: None,
+                                focus_stack,
                             },
                             direction,
                         );
