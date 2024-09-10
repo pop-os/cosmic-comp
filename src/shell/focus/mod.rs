@@ -268,6 +268,7 @@ fn update_focus_state(
             target.cloned(),
             serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
         );
+        std::mem::drop(keyboard);
 
         //update the focused output or set it to the active output
         if target.is_some() {
@@ -280,7 +281,8 @@ fn update_focus_state(
                     .shell
                     .read()
                     .unwrap()
-                    .get_focused_output(target.unwrap()),
+                    .get_output_for_focus(seat)
+                    .as_ref(),
             )
         } else {
             seat.set_focused_output(None);

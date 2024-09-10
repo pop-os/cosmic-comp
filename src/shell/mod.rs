@@ -1,4 +1,5 @@
 use calloop::LoopHandle;
+use focus::target::WindowGroup;
 use grabs::SeatMoveGrabState;
 use indexmap::IndexMap;
 use layout::TilingExceptions;
@@ -1410,11 +1411,93 @@ impl Shell {
     }
 
     /// get the parent output of the window which has keyboard focus (for a given seat)
-    pub fn get_focused_output(&self, focus_target: &KeyboardFocusTarget) -> Option<&Output> {
-        if let Some(focused_surface) = focus_target.wl_surface() {
-            self.visible_output_for_surface(&focused_surface)
-        } else {
-            None
+    pub fn get_output_for_focus(&self, seat: &Seat<State>) -> Option<Output> {
+        let mut focus_target = seat.get_keyboard().unwrap().current_focus()?;
+
+        if let KeyboardFocusTarget::Popup(popup) = &focus_target {
+            let new_target = match popup {
+                PopupKind::Xdg(popup) => {
+                    if let Some(parent) = popup.get_parent_surface() {
+                        self.element_for_surface(&parent).cloned()
+                    } else {
+                        None
+                    }
+                }
+                PopupKind::InputMethod(popup) => {
+                    if let Some(parent) = popup.get_parent() {
+                        self.element_for_surface(&parent.surface).cloned()
+                    } else {
+                        None
+                    }
+                }
+            }?;
+
+            focus_target = KeyboardFocusTarget::Element(new_target);
+        };
+
+        match focus_target {
+            KeyboardFocusTarget::Element(elem) => {
+                if seat
+                    .user_data()
+                    .get::<SeatMoveGrabState>()
+                    .is_some_and(|state| {
+                        state
+                            .lock()
+                            .unwrap()
+                            .as_ref()
+                            .is_some_and(|state| state.element() == elem)
+                    })
+                {
+                    return Some(seat.active_output());
+                }
+
+                self.outputs()
+                    .find(|output| {
+                        let is_sticky = self
+                            .workspaces
+                            .sets
+                            .get(*output)
+                            .unwrap()
+                            .sticky_layer
+                            .mapped()
+                            .any(|m| m == &elem);
+
+                        let workspace = self.active_space(output);
+                        let is_mapped = workspace.mapped().any(|m| m == &elem);
+
+                        is_sticky || is_mapped
+                    })
+                    .cloned()
+            }
+            KeyboardFocusTarget::Fullscreen(elem) => self
+                .outputs()
+                .find(|output| {
+                    let workspace = self.active_space(&output);
+                    workspace.get_fullscreen() == Some(&elem)
+                })
+                .cloned(),
+            KeyboardFocusTarget::Group(WindowGroup { node, .. }) => self
+                .outputs()
+                .find(|output| {
+                    self.workspaces
+                        .active(&output)
+                        .1
+                        .tiling_layer
+                        .has_node(&node)
+                })
+                .cloned(),
+            KeyboardFocusTarget::LayerSurface(layer) => self
+                .outputs()
+                .find(|output| layer_map_for_output(output).layers().any(|l| l == &layer))
+                .cloned(),
+            KeyboardFocusTarget::LockSurface(surface) => self
+                .session_lock
+                .as_ref()?
+                .surfaces
+                .iter()
+                .find_map(|(output, s)| (s == &surface).then_some(output))
+                .cloned(),
+            KeyboardFocusTarget::Popup(_) => unreachable!(),
         }
     }
 
@@ -2977,12 +3060,9 @@ impl Shell {
         direction: Direction,
         seat: &Seat<State>,
     ) -> MoveResult {
-        let output = seat
-            .get_keyboard()
-            .unwrap()
-            .current_focus()
-            .and_then(|target| self.get_focused_output(&target).cloned())
-            .unwrap();
+        let Some(output) = seat.focused_output() else {
+            return MoveResult::None;
+        };
         let workspace = self.active_space(&output);
         let focus_stack = workspace.focus_stack.get(seat);
         let Some(last) = focus_stack.last().cloned() else {
