@@ -32,16 +32,16 @@ use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisSource, Device, DeviceCapability, GestureBeginEvent,
         GestureEndEvent, GesturePinchUpdateEvent as _, GestureSwipeUpdateEvent as _, InputBackend,
-        InputEvent, KeyState, PointerAxisEvent, ProximityState, TabletToolButtonEvent,
-        TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent, TabletToolTipState,
-        TouchEvent,
+        InputEvent, KeyState, KeyboardKeyEvent, PointerAxisEvent, ProximityState,
+        TabletToolButtonEvent, TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent,
+        TabletToolTipState, TouchEvent,
     },
     desktop::{
         layer_map_for_output, space::SpaceElement, utils::under_from_surface_tree,
         WindowSurfaceType,
     },
     input::{
-        keyboard::{FilterResult, KeysymHandle},
+        keyboard::{FilterResult, KeysymHandle, ModifiersState},
         pointer::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
@@ -196,8 +196,6 @@ impl State {
             InputEvent::Keyboard { event, .. } => {
                 use smithay::backend::input::KeyboardKeyEvent;
 
-                let loop_handle = self.common.event_loop_handle.clone();
-
                 let maybe_seat = self
                     .common
                     .shell
@@ -209,18 +207,6 @@ impl State {
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
 
-                    let current_focus = seat.get_keyboard().unwrap().current_focus();
-                    //this should fall back to active output since there may not be a focused output
-                    let focused_output = seat.focused_or_active_output();
-
-                    let shortcuts_inhibited = current_focus.is_some_and(|f| {
-                        f.wl_surface()
-                            .and_then(|surface| {
-                                seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
-                                    .map(|inhibitor| inhibitor.is_active())
-                            })
-                            .unwrap_or(false)
-                    });
                     let keycode = event.key_code();
                     let state = event.state();
                     trace!(?keycode, ?state, "key");
@@ -228,314 +214,35 @@ impl State {
                     let serial = SERIAL_COUNTER.next_serial();
                     let time = Event::time_msec(&event);
                     let keyboard = seat.get_keyboard().unwrap();
-                    let pointer = seat.get_pointer().unwrap();
-                    let is_grabbed = keyboard.is_grabbed() || pointer.is_grabbed();
-                    let current_focus = keyboard.current_focus();
-                    let shell_ref = self.common.shell.clone();
-                    let mut shell = shell_ref.write().unwrap();
                     if let Some((action, pattern)) = keyboard
-                            .input(
-                                self,
-                                keycode,
-                                state,
-                                serial,
-                                time,
-                                |data, modifiers, handle| {
-                                    // Leave move overview mode, if any modifier was released
-                                    if let Some(Trigger::KeyboardMove(action_modifiers)) =
-                                        shell.overview_mode().0.active_trigger()
-                                    {
-                                        if (action_modifiers.ctrl && !modifiers.ctrl)
-                                            || (action_modifiers.alt && !modifiers.alt)
-                                            || (action_modifiers.logo && !modifiers.logo)
-                                            || (action_modifiers.shift && !modifiers.shift)
-                                        {
-                                            shell.set_overview_mode(None, data.common.event_loop_handle.clone());
-                                        }
-                                    }
-                                    // Leave swap overview mode, if any key was released
-                                    if let Some(Trigger::KeyboardSwap(action_pattern, old_descriptor)) =
-                                        shell.overview_mode().0.active_trigger()
-                                    {
-                                        if (action_pattern.modifiers.ctrl && !modifiers.ctrl)
-                                            || (action_pattern.modifiers.alt && !modifiers.alt)
-                                            || (action_pattern.modifiers.logo && !modifiers.logo)
-                                            || (action_pattern.modifiers.shift && !modifiers.shift)
-                                            || (action_pattern.key.is_some() && handle.raw_syms().contains(&action_pattern.key.unwrap()) && state == KeyState::Released)
-                                        {
-                                            shell.set_overview_mode(None, data.common.event_loop_handle.clone());
-
-                                            if let Some(focus) = current_focus {
-                                                if let Some(new_descriptor) = shell.workspaces.active(&focused_output).1.node_desc(focus) {
-                                                    let mut spaces = shell.workspaces.spaces_mut();
-                                                    if old_descriptor.handle != new_descriptor.handle {
-                                                        let (mut old_w, mut other_w) = spaces.partition::<Vec<_>, _>(|w| w.handle == old_descriptor.handle);
-                                                        if let Some(old_workspace) = old_w.get_mut(0) {
-                                                            if let Some(new_workspace) = other_w.iter_mut().find(|w| w.handle == new_descriptor.handle) {
-                                                                {
-                                                                    let mut stack = new_workspace.focus_stack.get_mut(&seat);
-                                                                    for elem in old_descriptor.focus_stack.iter().flat_map(|node_id| {
-                                                                        old_workspace.tiling_layer.element_for_node(node_id)
-                                                                    }) {
-                                                                        stack.append(elem);
-                                                                    }
-                                                                }
-                                                                {
-                                                                    let mut stack = old_workspace.focus_stack.get_mut(&seat);
-                                                                    for elem in new_descriptor.focus_stack.iter().flat_map(|node_id| {
-                                                                        new_workspace.tiling_layer.element_for_node(node_id)
-                                                                    }) {
-                                                                        stack.append(elem);
-                                                                    }
-                                                                }
-                                                                if let Some(focus) = TilingLayout::swap_trees(&mut old_workspace.tiling_layer, Some(&mut new_workspace.tiling_layer), &old_descriptor, &new_descriptor) {
-                                                                    let seat = seat.clone();
-                                                                    data.common.event_loop_handle.insert_idle(move |state| {
-                                                                        Shell::set_focus(state, Some(&focus), &seat, None,true);
-                                                                    });
-                                                                }
-                                                                old_workspace.refresh_focus_stack();
-                                                                new_workspace.refresh_focus_stack();
-                                                            }
-                                                        }
-                                                    } else {
-                                                        if let Some(workspace) = spaces.find(|w| w.handle == new_descriptor.handle) {
-                                                            if let Some(focus) = TilingLayout::swap_trees(&mut workspace.tiling_layer, None, &old_descriptor, &new_descriptor) {
-                                                                std::mem::drop(spaces);
-                                                                let seat = seat.clone();
-                                                                data.common.event_loop_handle.insert_idle(move |state| {
-                                                                    Shell::set_focus(state, Some(&focus), &seat, None,true);
-                                                                });
-                                                            }
-                                                            workspace.refresh_focus_stack();
-                                                        }
-                                                    }
-                                                }
-                                            } else {
-                                                let new_workspace = shell.workspaces.active(&focused_output).1.handle;
-                                                if new_workspace != old_descriptor.handle {
-                                                    let spaces = shell.workspaces.spaces_mut();
-                                                    let (mut old_w, mut other_w) = spaces.partition::<Vec<_>, _>(|w| w.handle == old_descriptor.handle);
-                                                    if let Some(old_workspace) = old_w.get_mut(0) {
-                                                        if let Some(new_workspace) = other_w.iter_mut().find(|w| w.handle == new_workspace) {
-                                                            if new_workspace.tiling_layer.windows().next().is_none() {
-                                                                {
-                                                                    let mut stack = new_workspace.focus_stack.get_mut(&seat);
-                                                                    for elem in old_descriptor.focus_stack.iter().flat_map(|node_id| {
-                                                                        old_workspace.tiling_layer.element_for_node(node_id)
-                                                                    }) {
-                                                                        stack.append(elem);
-                                                                    }
-                                                                }
-                                                                if let Some(focus) = TilingLayout::move_tree(&mut old_workspace.tiling_layer, &mut new_workspace.tiling_layer, &new_workspace.handle, &seat, new_workspace.focus_stack.get(&seat).iter(), old_descriptor.clone(), None) {
-                                                                    let seat = seat.clone();
-                                                                    data.common.event_loop_handle.insert_idle(move |state| {
-                                                                        Shell::set_focus(state, Some(&focus), &seat, None,true);
-                                                                    });
-                                                                }
-                                                                old_workspace.refresh_focus_stack();
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    // Leave or update resize mode, if modifiers changed or initial key was released
-                                    if let Some(action_pattern) =
-                                        shell.resize_mode().0.active_binding()
-                                    {
-                                        if action_pattern.key.is_some() && state == KeyState::Released
-                                            && handle.raw_syms().contains(&action_pattern.key.unwrap())
-                                        {
-                                            shell.set_resize_mode(None, &data.common.config, data.common.event_loop_handle.clone());
-                                        } else if !cosmic_modifiers_eq_smithay(&action_pattern.modifiers, modifiers) {
-                                            let mut new_pattern = action_pattern.clone();
-                                            new_pattern.modifiers = cosmic_modifiers_from_smithay(modifiers.clone());
-                                            let enabled = data
-                                                .common
-                                                .config
-                                                .shortcuts
-                                                .iter()
-                                                .find_map(move |(binding, action)| {
-                                                    if binding == &new_pattern
-                                                        && matches!(action, shortcuts::Action::Resizing(_))
-                                                    {
-                                                        let shortcuts::Action::Resizing(direction) = action else { unreachable!() };
-                                                        Some((new_pattern.clone(), *direction))
-                                                    } else {
-                                                        None
-                                                    }
-                                                });
-                                            shell.set_resize_mode(enabled, &data.common.config, data.common.event_loop_handle.clone());
-                                        }
-                                    }
-
-                                    // Special case resizing with regards to arrow keys
-                                    if let Some(direction) =
-                                        shell.resize_mode().0.active_direction()
-                                    {
-                                        let resize_edge = match handle.modified_sym() {
-                                            Keysym::Left | Keysym::h | Keysym::H => Some(ResizeEdge::LEFT),
-                                            Keysym::Down | Keysym::j | Keysym::J => Some(ResizeEdge::BOTTOM),
-                                            Keysym::Up | Keysym::k | Keysym::K => Some(ResizeEdge::TOP),
-                                            Keysym::Right | Keysym::l | Keysym::L => Some(ResizeEdge::RIGHT),
-                                            _ => None,
-                                        };
-
-                                        if let Some(mut edge) = resize_edge {
-                                            if direction == ResizeDirection::Inwards {
-                                                edge.flip_direction();
-                                            }
-                                            let action = Action::Private(PrivateAction::Resizing(direction, edge.into(), cosmic_keystate_from_smithay(state)));
-                                            let key_pattern = shortcuts::Binding {
-                                                modifiers: cosmic_modifiers_from_smithay(modifiers.clone()),
-                                                key: Some(handle.modified_sym()),
-                                                description: None,
-                                            };
-
-                                            if state == KeyState::Released {
-                                                if let Some(tokens) = seat.supressed_keys().filter(&handle) {
-                                                    for token in tokens {
-                                                        loop_handle.remove(token);
-                                                    }
-                                                }
-                                            } else {
-                                                let token = if needs_key_repetition {
-                                                    let seat_clone = seat.clone();
-                                                    let action_clone = action.clone();
-                                                    let key_pattern_clone = key_pattern.clone();
-                                                    let start = Instant::now();
-                                                    loop_handle.insert_source(Timer::from_duration(Duration::from_millis(200)), move |current, _, state| {
-                                                        let duration = current.duration_since(start).as_millis();
-                                                        state.handle_action(action_clone.clone(), &seat_clone, serial, time.overflowing_add(duration as u32).0, key_pattern_clone.clone(), None, true);
-                                                        calloop::timer::TimeoutAction::ToDuration(Duration::from_millis(25))
-                                                    }).ok()
-                                                } else { None };
-
-                                                seat.supressed_keys()
-                                                        .add(&handle, token);
-                                            }
-                                            return FilterResult::Intercept(Some((
-                                                action,
-                                                key_pattern
-                                            )));
-                                        }
-                                    }
-
-                                    std::mem::drop(shell);
-
-                                    // cancel grabs
-                                    if is_grabbed
-                                        && handle.modified_sym() == Keysym::Escape
-                                        && state == KeyState::Pressed
-                                        && !modifiers.alt
-                                        && !modifiers.ctrl
-                                        && !modifiers.logo
-                                        && !modifiers.shift
-                                    {
-                                        seat.supressed_keys()
-                                                .add(&handle, None);
-                                        return FilterResult::Intercept(Some((
-                                            Action::Private(PrivateAction::Escape),
-                                            shortcuts::Binding {
-                                                modifiers: shortcuts::Modifiers::default(),
-                                                key: Some(Keysym::Escape),
-                                                description: None,
-                                            }
-                                        )));
-                                    }
-
-                                    // Skip released events for initially surpressed keys
-                                    if state == KeyState::Released {
-                                        if let Some(tokens) = seat.supressed_keys().filter(&handle) {
-                                            for token in tokens {
-                                                loop_handle.remove(token);
-                                            }
-                                            return FilterResult::Intercept(None);
-                                        }
-                                    }
-
-                                    // Handle VT switches
-                                    if state == KeyState::Pressed
-                                        && (Keysym::XF86_Switch_VT_1.raw() ..= Keysym::XF86_Switch_VT_12.raw())
-                                            .contains(&handle.modified_sym().raw())
-                                    {
-                                        if let Err(err) = data.backend.kms().switch_vt(
-                                            (handle.modified_sym().raw() - Keysym::XF86_Switch_VT_1.raw()
-                                                + 1)
-                                                as i32,
-                                        ) {
-                                            error!(?err, "Failed switching virtual terminal.");
-                                        }
-                                        seat.supressed_keys().add(&handle, None);
-                                        return FilterResult::Intercept(None);
-                                    }
-
-                                    // handle the rest of the global shortcuts
-                                    let mut clear_queue = true;
-                                    if !shortcuts_inhibited {
-                                        let modifiers_queue = seat.modifiers_shortcut_queue();
-
-                                        for (binding, action) in
-                                            data.common.config.shortcuts.iter()
-                                        {
-                                            if *action == shortcuts::Action::Disable {
-                                                continue;
-                                            }
-
-                                            // is this a released (triggered) modifier-only binding?
-                                            if binding.key.is_none()
-                                                && state == KeyState::Released
-                                                && !cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
-                                                && modifiers_queue.take(binding)
-                                            {
-                                                modifiers_queue.clear();
-                                                return FilterResult::Intercept(Some((
-                                                    Action::Shortcut(action.clone()),
-                                                    binding.clone(),
-                                                )));
-                                            }
-
-                                            // could this potentially become a modifier-only binding?
-                                            if binding.key.is_none() && state == KeyState::Pressed && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers) {
-                                                modifiers_queue.set(binding.clone());
-                                                clear_queue = false;
-                                            }
-
-                                            // is this a normal binding?
-                                            if binding.key.is_some()
-                                                && state == KeyState::Pressed
-                                                && handle.raw_syms().contains(&binding.key.unwrap())
-                                                && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
-                                            {
-                                                modifiers_queue.clear();
-                                                seat.supressed_keys().add(&handle, None);
-                                                return FilterResult::Intercept(Some((
-                                                    Action::Shortcut(action.clone()),
-                                                    binding.clone(),
-                                                )));
-                                            }
-                                        }
-                                    }
-
-                                    // no binding
-                                    if clear_queue {
-                                        seat.modifiers_shortcut_queue().clear();
-                                    }
-                                    // keys are passed through to apps
-                                    FilterResult::Forward
-                                },
-                            )
-                            .flatten()
-                        {
-                            if pattern.key.is_none() && state == KeyState::Released {
-                                // we still want to send release-events and not have apps stuck on some modifiers.
-                                keyboard.input(self, keycode, state, serial, time, |_, _, _| FilterResult::<()>::Forward);
-                            }
-                            self.handle_action(action, &seat, serial, time, pattern, None, true)
+                        .input(
+                            self,
+                            keycode,
+                            state,
+                            serial,
+                            time,
+                            |data, modifiers, handle| {
+                                Self::filter_keyboard_input(
+                                    data,
+                                    &event,
+                                    &seat,
+                                    modifiers,
+                                    handle,
+                                    serial,
+                                    needs_key_repetition,
+                                )
+                            },
+                        )
+                        .flatten()
+                    {
+                        if pattern.key.is_none() && state == KeyState::Released {
+                            // we still want to send release-events and not have apps stuck on some modifiers.
+                            keyboard.input(self, keycode, state, serial, time, |_, _, _| {
+                                FilterResult::<()>::Forward
+                            });
                         }
+                        self.handle_action(action, &seat, serial, time, pattern, None, true)
+                    }
                 }
             }
 
@@ -1719,6 +1426,395 @@ impl State {
             InputEvent::Special(_) => {}
             InputEvent::SwitchToggle { event: _ } => {}
         }
+    }
+
+    /// Determine is key event should be intercepted as a key binding, or forwarded to surface
+    pub fn filter_keyboard_input<B: InputBackend, E: KeyboardKeyEvent<B>>(
+        &mut self,
+        event: &E,
+        seat: &Seat<Self>,
+        modifiers: &ModifiersState,
+        handle: KeysymHandle<'_>,
+        serial: Serial,
+        needs_key_repetition: bool,
+    ) -> FilterResult<Option<(Action, shortcuts::Binding)>> {
+        let mut shell = self.common.shell.write().unwrap();
+
+        let keyboard = seat.get_keyboard().unwrap();
+        let pointer = seat.get_pointer().unwrap();
+        let is_grabbed = keyboard.is_grabbed() || pointer.is_grabbed();
+
+        let current_focus = keyboard.current_focus();
+        //this should fall back to active output since there may not be a focused output
+        let focused_output = seat.focused_or_active_output();
+
+        let shortcuts_inhibited = current_focus.as_ref().is_some_and(|f| {
+            f.wl_surface()
+                .and_then(|surface| {
+                    seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
+                        .map(|inhibitor| inhibitor.is_active())
+                })
+                .unwrap_or(false)
+        });
+
+        // Leave move overview mode, if any modifier was released
+        if let Some(Trigger::KeyboardMove(action_modifiers)) =
+            shell.overview_mode().0.active_trigger()
+        {
+            if (action_modifiers.ctrl && !modifiers.ctrl)
+                || (action_modifiers.alt && !modifiers.alt)
+                || (action_modifiers.logo && !modifiers.logo)
+                || (action_modifiers.shift && !modifiers.shift)
+            {
+                shell.set_overview_mode(None, self.common.event_loop_handle.clone());
+            }
+        }
+        // Leave swap overview mode, if any key was released
+        if let Some(Trigger::KeyboardSwap(action_pattern, old_descriptor)) =
+            shell.overview_mode().0.active_trigger()
+        {
+            if (action_pattern.modifiers.ctrl && !modifiers.ctrl)
+                || (action_pattern.modifiers.alt && !modifiers.alt)
+                || (action_pattern.modifiers.logo && !modifiers.logo)
+                || (action_pattern.modifiers.shift && !modifiers.shift)
+                || (action_pattern.key.is_some()
+                    && handle.raw_syms().contains(&action_pattern.key.unwrap())
+                    && event.state() == KeyState::Released)
+            {
+                shell.set_overview_mode(None, self.common.event_loop_handle.clone());
+
+                if let Some(focus) = current_focus {
+                    if let Some(new_descriptor) =
+                        shell.workspaces.active(&focused_output).1.node_desc(focus)
+                    {
+                        let mut spaces = shell.workspaces.spaces_mut();
+                        if old_descriptor.handle != new_descriptor.handle {
+                            let (mut old_w, mut other_w) = spaces
+                                .partition::<Vec<_>, _>(|w| w.handle == old_descriptor.handle);
+                            if let Some(old_workspace) = old_w.get_mut(0) {
+                                if let Some(new_workspace) = other_w
+                                    .iter_mut()
+                                    .find(|w| w.handle == new_descriptor.handle)
+                                {
+                                    {
+                                        let mut stack = new_workspace.focus_stack.get_mut(&seat);
+                                        for elem in
+                                            old_descriptor.focus_stack.iter().flat_map(|node_id| {
+                                                old_workspace.tiling_layer.element_for_node(node_id)
+                                            })
+                                        {
+                                            stack.append(elem);
+                                        }
+                                    }
+                                    {
+                                        let mut stack = old_workspace.focus_stack.get_mut(&seat);
+                                        for elem in
+                                            new_descriptor.focus_stack.iter().flat_map(|node_id| {
+                                                new_workspace.tiling_layer.element_for_node(node_id)
+                                            })
+                                        {
+                                            stack.append(elem);
+                                        }
+                                    }
+                                    if let Some(focus) = TilingLayout::swap_trees(
+                                        &mut old_workspace.tiling_layer,
+                                        Some(&mut new_workspace.tiling_layer),
+                                        &old_descriptor,
+                                        &new_descriptor,
+                                    ) {
+                                        let seat = seat.clone();
+                                        self.common.event_loop_handle.insert_idle(move |state| {
+                                            Shell::set_focus(
+                                                state,
+                                                Some(&focus),
+                                                &seat,
+                                                None,
+                                                true,
+                                            );
+                                        });
+                                    }
+                                    old_workspace.refresh_focus_stack();
+                                    new_workspace.refresh_focus_stack();
+                                }
+                            }
+                        } else {
+                            if let Some(workspace) =
+                                spaces.find(|w| w.handle == new_descriptor.handle)
+                            {
+                                if let Some(focus) = TilingLayout::swap_trees(
+                                    &mut workspace.tiling_layer,
+                                    None,
+                                    &old_descriptor,
+                                    &new_descriptor,
+                                ) {
+                                    std::mem::drop(spaces);
+                                    let seat = seat.clone();
+                                    self.common.event_loop_handle.insert_idle(move |state| {
+                                        Shell::set_focus(state, Some(&focus), &seat, None, true);
+                                    });
+                                }
+                                workspace.refresh_focus_stack();
+                            }
+                        }
+                    }
+                } else {
+                    let new_workspace = shell.workspaces.active(&focused_output).1.handle;
+                    if new_workspace != old_descriptor.handle {
+                        let spaces = shell.workspaces.spaces_mut();
+                        let (mut old_w, mut other_w) =
+                            spaces.partition::<Vec<_>, _>(|w| w.handle == old_descriptor.handle);
+                        if let Some(old_workspace) = old_w.get_mut(0) {
+                            if let Some(new_workspace) =
+                                other_w.iter_mut().find(|w| w.handle == new_workspace)
+                            {
+                                if new_workspace.tiling_layer.windows().next().is_none() {
+                                    {
+                                        let mut stack = new_workspace.focus_stack.get_mut(&seat);
+                                        for elem in
+                                            old_descriptor.focus_stack.iter().flat_map(|node_id| {
+                                                old_workspace.tiling_layer.element_for_node(node_id)
+                                            })
+                                        {
+                                            stack.append(elem);
+                                        }
+                                    }
+                                    if let Some(focus) = TilingLayout::move_tree(
+                                        &mut old_workspace.tiling_layer,
+                                        &mut new_workspace.tiling_layer,
+                                        &new_workspace.handle,
+                                        &seat,
+                                        new_workspace.focus_stack.get(&seat).iter(),
+                                        old_descriptor.clone(),
+                                        None,
+                                    ) {
+                                        let seat = seat.clone();
+                                        self.common.event_loop_handle.insert_idle(move |state| {
+                                            Shell::set_focus(
+                                                state,
+                                                Some(&focus),
+                                                &seat,
+                                                None,
+                                                true,
+                                            );
+                                        });
+                                    }
+                                    old_workspace.refresh_focus_stack();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Leave or update resize mode, if modifiers changed or initial key was released
+        if let Some(action_pattern) = shell.resize_mode().0.active_binding() {
+            if action_pattern.key.is_some()
+                && event.state() == KeyState::Released
+                && handle.raw_syms().contains(&action_pattern.key.unwrap())
+            {
+                shell.set_resize_mode(
+                    None,
+                    &self.common.config,
+                    self.common.event_loop_handle.clone(),
+                );
+            } else if !cosmic_modifiers_eq_smithay(&action_pattern.modifiers, modifiers) {
+                let mut new_pattern = action_pattern.clone();
+                new_pattern.modifiers = cosmic_modifiers_from_smithay(modifiers.clone());
+                let enabled =
+                    self.common
+                        .config
+                        .shortcuts
+                        .iter()
+                        .find_map(move |(binding, action)| {
+                            if binding == &new_pattern
+                                && matches!(action, shortcuts::Action::Resizing(_))
+                            {
+                                let shortcuts::Action::Resizing(direction) = action else {
+                                    unreachable!()
+                                };
+                                Some((new_pattern.clone(), *direction))
+                            } else {
+                                None
+                            }
+                        });
+                shell.set_resize_mode(
+                    enabled,
+                    &self.common.config,
+                    self.common.event_loop_handle.clone(),
+                );
+            }
+        }
+
+        // Special case resizing with regards to arrow keys
+        if let Some(direction) = shell.resize_mode().0.active_direction() {
+            let resize_edge = match handle.modified_sym() {
+                Keysym::Left | Keysym::h | Keysym::H => Some(ResizeEdge::LEFT),
+                Keysym::Down | Keysym::j | Keysym::J => Some(ResizeEdge::BOTTOM),
+                Keysym::Up | Keysym::k | Keysym::K => Some(ResizeEdge::TOP),
+                Keysym::Right | Keysym::l | Keysym::L => Some(ResizeEdge::RIGHT),
+                _ => None,
+            };
+
+            if let Some(mut edge) = resize_edge {
+                if direction == ResizeDirection::Inwards {
+                    edge.flip_direction();
+                }
+                let action = Action::Private(PrivateAction::Resizing(
+                    direction,
+                    edge.into(),
+                    cosmic_keystate_from_smithay(event.state()),
+                ));
+                let key_pattern = shortcuts::Binding {
+                    modifiers: cosmic_modifiers_from_smithay(modifiers.clone()),
+                    key: Some(handle.modified_sym()),
+                    description: None,
+                };
+
+                if event.state() == KeyState::Released {
+                    if let Some(tokens) = seat.supressed_keys().filter(&handle) {
+                        for token in tokens {
+                            self.common.event_loop_handle.remove(token);
+                        }
+                    }
+                } else {
+                    let token = if needs_key_repetition {
+                        let seat_clone = seat.clone();
+                        let action_clone = action.clone();
+                        let key_pattern_clone = key_pattern.clone();
+                        let start = Instant::now();
+                        let time = event.time_msec();
+                        self.common
+                            .event_loop_handle
+                            .insert_source(
+                                Timer::from_duration(Duration::from_millis(200)),
+                                move |current, _, state| {
+                                    let duration = current.duration_since(start).as_millis();
+                                    state.handle_action(
+                                        action_clone.clone(),
+                                        &seat_clone,
+                                        serial,
+                                        time.overflowing_add(duration as u32).0,
+                                        key_pattern_clone.clone(),
+                                        None,
+                                        true,
+                                    );
+                                    calloop::timer::TimeoutAction::ToDuration(
+                                        Duration::from_millis(25),
+                                    )
+                                },
+                            )
+                            .ok()
+                    } else {
+                        None
+                    };
+
+                    seat.supressed_keys().add(&handle, token);
+                }
+                return FilterResult::Intercept(Some((action, key_pattern)));
+            }
+        }
+
+        std::mem::drop(shell);
+
+        // cancel grabs
+        if is_grabbed
+            && handle.modified_sym() == Keysym::Escape
+            && event.state() == KeyState::Pressed
+            && !modifiers.alt
+            && !modifiers.ctrl
+            && !modifiers.logo
+            && !modifiers.shift
+        {
+            seat.supressed_keys().add(&handle, None);
+            return FilterResult::Intercept(Some((
+                Action::Private(PrivateAction::Escape),
+                shortcuts::Binding {
+                    modifiers: shortcuts::Modifiers::default(),
+                    key: Some(Keysym::Escape),
+                    description: None,
+                },
+            )));
+        }
+
+        // Skip released events for initially surpressed keys
+        if event.state() == KeyState::Released {
+            if let Some(tokens) = seat.supressed_keys().filter(&handle) {
+                for token in tokens {
+                    self.common.event_loop_handle.remove(token);
+                }
+                return FilterResult::Intercept(None);
+            }
+        }
+
+        // Handle VT switches
+        if event.state() == KeyState::Pressed
+            && (Keysym::XF86_Switch_VT_1.raw()..=Keysym::XF86_Switch_VT_12.raw())
+                .contains(&handle.modified_sym().raw())
+        {
+            if let Err(err) = self.backend.kms().switch_vt(
+                (handle.modified_sym().raw() - Keysym::XF86_Switch_VT_1.raw() + 1) as i32,
+            ) {
+                error!(?err, "Failed switching virtual terminal.");
+            }
+            seat.supressed_keys().add(&handle, None);
+            return FilterResult::Intercept(None);
+        }
+
+        // handle the rest of the global shortcuts
+        let mut clear_queue = true;
+        if !shortcuts_inhibited {
+            let modifiers_queue = seat.modifiers_shortcut_queue();
+
+            for (binding, action) in self.common.config.shortcuts.iter() {
+                if *action == shortcuts::Action::Disable {
+                    continue;
+                }
+
+                // is this a released (triggered) modifier-only binding?
+                if binding.key.is_none()
+                    && event.state() == KeyState::Released
+                    && !cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
+                    && modifiers_queue.take(binding)
+                {
+                    modifiers_queue.clear();
+                    return FilterResult::Intercept(Some((
+                        Action::Shortcut(action.clone()),
+                        binding.clone(),
+                    )));
+                }
+
+                // could this potentially become a modifier-only binding?
+                if binding.key.is_none()
+                    && event.state() == KeyState::Pressed
+                    && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
+                {
+                    modifiers_queue.set(binding.clone());
+                    clear_queue = false;
+                }
+
+                // is this a normal binding?
+                if binding.key.is_some()
+                    && event.state() == KeyState::Pressed
+                    && handle.raw_syms().contains(&binding.key.unwrap())
+                    && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
+                {
+                    modifiers_queue.clear();
+                    seat.supressed_keys().add(&handle, None);
+                    return FilterResult::Intercept(Some((
+                        Action::Shortcut(action.clone()),
+                        binding.clone(),
+                    )));
+                }
+            }
+        }
+
+        // no binding
+        if clear_queue {
+            seat.modifiers_shortcut_queue().clear();
+        }
+        // keys are passed through to apps
+        FilterResult::Forward
     }
 
     // TODO: Try to get rid of the *mutable* Shell references (needed for hovered_stack in floating_layout)
