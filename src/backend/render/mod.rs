@@ -451,11 +451,16 @@ where
         }
 
         if !exclude_dnd_icon {
-            if let Some(wl_surface) = get_dnd_icon(&seat) {
+            if let Some(dnd_icon) = get_dnd_icon(&seat) {
                 elements.extend(
-                    cursor::draw_dnd_icon(renderer, &wl_surface, location.to_i32_round(), scale)
-                        .into_iter()
-                        .map(CosmicElement::Dnd),
+                    cursor::draw_dnd_icon(
+                        renderer,
+                        &dnd_icon.surface,
+                        (location + dnd_icon.offset.to_f64()).to_i32_round(),
+                        scale,
+                    )
+                    .into_iter()
+                    .map(CosmicElement::Dnd),
                 );
             }
         }
