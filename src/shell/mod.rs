@@ -5,12 +5,12 @@ use indexmap::IndexMap;
 use layout::TilingExceptions;
 use std::{
     collections::HashMap,
-    sync::atomic::Ordering,
+    sync::{atomic::Ordering, Mutex},
     time::{Duration, Instant},
 };
 use wayland_backend::server::ClientId;
 
-use crate::wayland::protocols::workspace::WorkspaceCapabilities;
+use crate::wayland::{handlers::data_device, protocols::workspace::WorkspaceCapabilities};
 use cosmic_comp_config::{
     workspace::{WorkspaceLayout, WorkspaceMode},
     TileBehavior,
@@ -33,7 +33,9 @@ use smithay::{
         LayerSurface, PopupKind, WindowSurface, WindowSurfaceType,
     },
     input::{
-        pointer::{Focus, GrabStartData as PointerGrabStartData},
+        pointer::{
+            CursorImageStatus, CursorImageSurfaceData, Focus, GrabStartData as PointerGrabStartData,
+        },
         Seat,
     },
     output::Output,
@@ -43,7 +45,8 @@ use smithay::{
     },
     utils::{IsAlive, Logical, Point, Rectangle, Serial, Size},
     wayland::{
-        compositor::with_states,
+        compositor::{with_states, SurfaceAttributes},
+        foreign_toplevel_list::ForeignToplevelListState,
         seat::WaylandFocus,
         session_lock::LockSurface,
         shell::wlr_layer::{KeyboardInteractivity, Layer, LayerSurfaceCachedState},
@@ -1216,6 +1219,37 @@ impl Common {
                         }
                     }
                 }
+
+                data_device::on_commit(surface, seat);
+            }
+
+            let is_cursor_image = shell.seats.iter().any(|seat| {
+                seat.user_data()
+                .get::<Mutex<CursorImageStatus>>()
+                .map(|guard| {
+                    matches!(*guard.lock().unwrap(), CursorImageStatus::Surface(ref cursor_surface) if cursor_surface == surface)
+                })
+                .unwrap_or(false)
+            });
+
+            if is_cursor_image {
+                with_states(surface, |states| {
+                    let cursor_image_attributes = states.data_map.get::<CursorImageSurfaceData>();
+
+                    if let Some(mut cursor_image_attributes) =
+                        cursor_image_attributes.map(|attrs| attrs.lock().unwrap())
+                    {
+                        let buffer_delta = states
+                            .cached_state
+                            .get::<SurfaceAttributes>()
+                            .current()
+                            .buffer_delta
+                            .take();
+                        if let Some(buffer_delta) = buffer_delta {
+                            cursor_image_attributes.hotspot -= buffer_delta;
+                        }
+                    }
+                });
             }
 
             if let Some(mapped) = shell.element_for_surface(surface) {
