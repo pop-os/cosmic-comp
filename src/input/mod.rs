@@ -12,7 +12,10 @@ use crate::{
     shell::{
         focus::target::{KeyboardFocusTarget, PointerFocusTarget},
         grabs::{ReleaseMode, ResizeEdge},
-        layout::{floating::ResizeGrabMarker, tiling::TilingLayout},
+        layout::{
+            floating::ResizeGrabMarker,
+            tiling::{NodeDesc, TilingLayout},
+        },
         SeatExt, Trigger,
     },
     utils::{prelude::*, quirks::workspace_overview_is_open},
@@ -1483,127 +1486,13 @@ impl State {
             {
                 shell.set_overview_mode(None, self.common.event_loop_handle.clone());
 
-                if let Some(focus) = current_focus {
-                    if let Some(new_descriptor) =
-                        shell.workspaces.active(&focused_output).1.node_desc(focus)
-                    {
-                        let mut spaces = shell.workspaces.spaces_mut();
-                        if old_descriptor.handle != new_descriptor.handle {
-                            let (mut old_w, mut other_w) = spaces
-                                .partition::<Vec<_>, _>(|w| w.handle == old_descriptor.handle);
-                            if let Some(old_workspace) = old_w.get_mut(0) {
-                                if let Some(new_workspace) = other_w
-                                    .iter_mut()
-                                    .find(|w| w.handle == new_descriptor.handle)
-                                {
-                                    {
-                                        let mut stack = new_workspace.focus_stack.get_mut(&seat);
-                                        for elem in
-                                            old_descriptor.focus_stack.iter().flat_map(|node_id| {
-                                                old_workspace.tiling_layer.element_for_node(node_id)
-                                            })
-                                        {
-                                            stack.append(elem);
-                                        }
-                                    }
-                                    {
-                                        let mut stack = old_workspace.focus_stack.get_mut(&seat);
-                                        for elem in
-                                            new_descriptor.focus_stack.iter().flat_map(|node_id| {
-                                                new_workspace.tiling_layer.element_for_node(node_id)
-                                            })
-                                        {
-                                            stack.append(elem);
-                                        }
-                                    }
-                                    if let Some(focus) = TilingLayout::swap_trees(
-                                        &mut old_workspace.tiling_layer,
-                                        Some(&mut new_workspace.tiling_layer),
-                                        &old_descriptor,
-                                        &new_descriptor,
-                                    ) {
-                                        let seat = seat.clone();
-                                        self.common.event_loop_handle.insert_idle(move |state| {
-                                            Shell::set_focus(
-                                                state,
-                                                Some(&focus),
-                                                &seat,
-                                                None,
-                                                true,
-                                            );
-                                        });
-                                    }
-                                    old_workspace.refresh_focus_stack();
-                                    new_workspace.refresh_focus_stack();
-                                }
-                            }
-                        } else {
-                            if let Some(workspace) =
-                                spaces.find(|w| w.handle == new_descriptor.handle)
-                            {
-                                if let Some(focus) = TilingLayout::swap_trees(
-                                    &mut workspace.tiling_layer,
-                                    None,
-                                    &old_descriptor,
-                                    &new_descriptor,
-                                ) {
-                                    std::mem::drop(spaces);
-                                    let seat = seat.clone();
-                                    self.common.event_loop_handle.insert_idle(move |state| {
-                                        Shell::set_focus(state, Some(&focus), &seat, None, true);
-                                    });
-                                }
-                                workspace.refresh_focus_stack();
-                            }
-                        }
-                    }
-                } else {
-                    let new_workspace = shell.workspaces.active(&focused_output).1.handle;
-                    if new_workspace != old_descriptor.handle {
-                        let spaces = shell.workspaces.spaces_mut();
-                        let (mut old_w, mut other_w) =
-                            spaces.partition::<Vec<_>, _>(|w| w.handle == old_descriptor.handle);
-                        if let Some(old_workspace) = old_w.get_mut(0) {
-                            if let Some(new_workspace) =
-                                other_w.iter_mut().find(|w| w.handle == new_workspace)
-                            {
-                                if new_workspace.tiling_layer.windows().next().is_none() {
-                                    {
-                                        let mut stack = new_workspace.focus_stack.get_mut(&seat);
-                                        for elem in
-                                            old_descriptor.focus_stack.iter().flat_map(|node_id| {
-                                                old_workspace.tiling_layer.element_for_node(node_id)
-                                            })
-                                        {
-                                            stack.append(elem);
-                                        }
-                                    }
-                                    if let Some(focus) = TilingLayout::move_tree(
-                                        &mut old_workspace.tiling_layer,
-                                        &mut new_workspace.tiling_layer,
-                                        &new_workspace.handle,
-                                        &seat,
-                                        new_workspace.focus_stack.get(&seat).iter(),
-                                        old_descriptor.clone(),
-                                        None,
-                                    ) {
-                                        let seat = seat.clone();
-                                        self.common.event_loop_handle.insert_idle(move |state| {
-                                            Shell::set_focus(
-                                                state,
-                                                Some(&focus),
-                                                &seat,
-                                                None,
-                                                true,
-                                            );
-                                        });
-                                    }
-                                    old_workspace.refresh_focus_stack();
-                                }
-                            }
-                        }
-                    }
-                }
+                self.keyboard_swap(
+                    seat,
+                    &mut shell,
+                    old_descriptor,
+                    current_focus,
+                    &focused_output,
+                );
             }
         }
 
@@ -1815,6 +1704,117 @@ impl State {
         }
         // keys are passed through to apps
         FilterResult::Forward
+    }
+
+    fn keyboard_swap(
+        &self,
+        seat: &Seat<Self>,
+        shell: &mut Shell,
+        old_descriptor: &NodeDesc,
+        current_focus: Option<KeyboardFocusTarget>,
+        focused_output: &Output,
+    ) {
+        if let Some(focus) = current_focus {
+            if let Some(new_descriptor) =
+                shell.workspaces.active(&focused_output).1.node_desc(focus)
+            {
+                let mut spaces = shell.workspaces.spaces_mut();
+                if old_descriptor.handle != new_descriptor.handle {
+                    let (mut old_w, mut other_w) =
+                        spaces.partition::<Vec<_>, _>(|w| w.handle == old_descriptor.handle);
+                    if let Some(old_workspace) = old_w.get_mut(0) {
+                        if let Some(new_workspace) = other_w
+                            .iter_mut()
+                            .find(|w| w.handle == new_descriptor.handle)
+                        {
+                            {
+                                let mut stack = new_workspace.focus_stack.get_mut(&seat);
+                                for elem in old_descriptor.focus_stack.iter().flat_map(|node_id| {
+                                    old_workspace.tiling_layer.element_for_node(node_id)
+                                }) {
+                                    stack.append(elem);
+                                }
+                            }
+                            {
+                                let mut stack = old_workspace.focus_stack.get_mut(&seat);
+                                for elem in new_descriptor.focus_stack.iter().flat_map(|node_id| {
+                                    new_workspace.tiling_layer.element_for_node(node_id)
+                                }) {
+                                    stack.append(elem);
+                                }
+                            }
+                            if let Some(focus) = TilingLayout::swap_trees(
+                                &mut old_workspace.tiling_layer,
+                                Some(&mut new_workspace.tiling_layer),
+                                &old_descriptor,
+                                &new_descriptor,
+                            ) {
+                                let seat = seat.clone();
+                                self.common.event_loop_handle.insert_idle(move |state| {
+                                    Shell::set_focus(state, Some(&focus), &seat, None, true);
+                                });
+                            }
+                            old_workspace.refresh_focus_stack();
+                            new_workspace.refresh_focus_stack();
+                        }
+                    }
+                } else {
+                    if let Some(workspace) = spaces.find(|w| w.handle == new_descriptor.handle) {
+                        if let Some(focus) = TilingLayout::swap_trees(
+                            &mut workspace.tiling_layer,
+                            None,
+                            &old_descriptor,
+                            &new_descriptor,
+                        ) {
+                            std::mem::drop(spaces);
+                            let seat = seat.clone();
+                            self.common.event_loop_handle.insert_idle(move |state| {
+                                Shell::set_focus(state, Some(&focus), &seat, None, true);
+                            });
+                        }
+                        workspace.refresh_focus_stack();
+                    }
+                }
+            }
+        } else {
+            let new_workspace = shell.workspaces.active(&focused_output).1.handle;
+            if new_workspace != old_descriptor.handle {
+                let spaces = shell.workspaces.spaces_mut();
+                let (mut old_w, mut other_w) =
+                    spaces.partition::<Vec<_>, _>(|w| w.handle == old_descriptor.handle);
+                if let Some(old_workspace) = old_w.get_mut(0) {
+                    if let Some(new_workspace) =
+                        other_w.iter_mut().find(|w| w.handle == new_workspace)
+                    {
+                        if new_workspace.tiling_layer.windows().next().is_none() {
+                            {
+                                let mut stack = new_workspace.focus_stack.get_mut(&seat);
+                                for elem in old_descriptor.focus_stack.iter().flat_map(|node_id| {
+                                    old_workspace.tiling_layer.element_for_node(node_id)
+                                }) {
+                                    stack.append(elem);
+                                }
+                            }
+                            if let Some(focus) = TilingLayout::move_tree(
+                                &mut old_workspace.tiling_layer,
+                                &mut new_workspace.tiling_layer,
+                                &new_workspace.handle,
+                                &seat,
+                                new_workspace.focus_stack.get(&seat).iter(),
+                                old_descriptor.clone(),
+                                None,
+                            ) {
+                                let seat = seat.clone();
+                                self.common.event_loop_handle.insert_idle(move |state| {
+                                    Shell::set_focus(state, Some(&focus), &seat, None, true);
+                                });
+                            }
+                            old_workspace.refresh_focus_stack();
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // TODO: Try to get rid of the *mutable* Shell references (needed for hovered_stack in floating_layout)
