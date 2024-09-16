@@ -6,6 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use cosmic_comp_config::StackBehavior;
 use cosmic_settings_config::shortcuts::action::ResizeDirection;
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
@@ -886,6 +887,7 @@ impl FloatingLayout {
         &mut self,
         mapped: &CosmicMapped,
         mut focus_stack: FocusStackMut,
+        stack_behavior: &StackBehavior,
     ) -> Option<KeyboardFocusTarget> {
         if !self.space.elements().any(|m| m == mapped) {
             return None;
@@ -899,7 +901,7 @@ impl FloatingLayout {
         if mapped.is_window() {
             // if it is just a window
             self.space.unmap_elem(&mapped);
-            mapped.convert_to_stack((&output, mapped.bbox()), self.theme.clone());
+            mapped.convert_to_stack((&output, mapped.bbox()), self.theme.clone(), stack_behavior.clone());
             self.map_internal(
                 mapped.clone(),
                 Some(location.as_local()),
@@ -957,13 +959,14 @@ impl FloatingLayout {
         &mut self,
         seat: &Seat<State>,
         focus_stack: FocusStackMut,
+        stack_behavior: &StackBehavior,
     ) -> Option<KeyboardFocusTarget> {
         let Some(KeyboardFocusTarget::Element(elem)) = seat.get_keyboard().unwrap().current_focus()
         else {
             return None;
         };
 
-        self.toggle_stacking(&elem, focus_stack)
+        self.toggle_stacking(&elem, focus_stack, stack_behavior)
     }
 
     pub fn move_element(

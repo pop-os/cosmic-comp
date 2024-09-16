@@ -12,8 +12,7 @@ use wayland_backend::server::ClientId;
 
 use crate::wayland::{handlers::data_device, protocols::workspace::WorkspaceCapabilities};
 use cosmic_comp_config::{
-    workspace::{WorkspaceLayout, WorkspaceMode},
-    TileBehavior,
+    workspace::{WorkspaceLayout, WorkspaceMode}, StackBehavior, TileBehavior
 };
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::{
     State as WState, TilingState,
@@ -319,6 +318,7 @@ pub struct WorkspaceSet {
     pub sticky_layer: FloatingLayout,
     pub minimized_windows: Vec<MinimizedWindow>,
     pub workspaces: Vec<Workspace>,
+    stack_behavior: StackBehavior,
 }
 
 fn create_workspace(
@@ -328,6 +328,7 @@ fn create_workspace(
     active: bool,
     tiling: bool,
     theme: cosmic::Theme,
+    stack_behavior: StackBehavior,
 ) -> Workspace {
     let workspace_handle = state
         .create_workspace(
@@ -346,7 +347,7 @@ fn create_workspace(
         &workspace_handle,
         [WorkspaceCapabilities::Activate].into_iter(),
     );
-    Workspace::new(workspace_handle, output.clone(), tiling, theme.clone())
+    Workspace::new(workspace_handle, output.clone(), tiling, theme.clone(), stack_behavior)
 }
 
 fn move_workspace_to_group(
@@ -417,6 +418,7 @@ impl WorkspaceSet {
         idx: usize,
         tiling_enabled: bool,
         theme: cosmic::Theme,
+        stack_behavior: StackBehavior,
     ) -> WorkspaceSet {
         let group_handle = state.create_workspace_group();
         let workspaces = {
@@ -427,6 +429,7 @@ impl WorkspaceSet {
                 true,
                 tiling_enabled,
                 theme.clone(),
+                stack_behavior.clone()
             );
             workspace_set_idx(state, 1, idx, &workspace.handle);
             state.set_workspace_capabilities(
@@ -448,6 +451,7 @@ impl WorkspaceSet {
             minimized_windows: Vec::new(),
             workspaces,
             output: output.clone(),
+            stack_behavior,
         }
     }
 
@@ -558,6 +562,7 @@ impl WorkspaceSet {
             false,
             self.tiling_enabled,
             self.theme.clone(),
+            self.stack_behavior.clone(),
         );
         workspace_set_idx(
             state,
@@ -621,6 +626,7 @@ pub struct Workspaces {
     mode: WorkspaceMode,
     autotile: bool,
     autotile_behavior: TileBehavior,
+    stack_behavior: StackBehavior,
     theme: cosmic::Theme,
 }
 
@@ -633,6 +639,7 @@ impl Workspaces {
             mode: config.cosmic_conf.workspaces.workspace_mode,
             autotile: config.cosmic_conf.autotile,
             autotile_behavior: config.cosmic_conf.autotile_behavior,
+            stack_behavior: config.cosmic_conf.stack_behavior.clone(),
             theme,
         }
     }
@@ -661,6 +668,7 @@ impl Workspaces {
                     self.sets.len(),
                     self.autotile,
                     self.theme.clone(),
+                    self.stack_behavior.clone(),
                 )
             });
         workspace_state.add_group_output(&set.group, &output);
@@ -850,6 +858,7 @@ impl Workspaces {
                                     false,
                                     config.cosmic_conf.autotile,
                                     self.theme.clone(),
+                                    self.stack_behavior.clone()
                                 ),
                             );
                         }
@@ -3558,6 +3567,8 @@ impl Shell {
         seat: &Seat<State>,
         window: &CosmicMapped,
     ) -> Option<KeyboardFocusTarget> {
+        let behavior = self.workspaces.stack_behavior.clone();
+
         if let Some(set) = self
             .workspaces
             .sets
@@ -3566,16 +3577,16 @@ impl Shell {
         {
             let workspace = &mut set.workspaces[set.active];
             set.sticky_layer
-                .toggle_stacking(window, workspace.focus_stack.get_mut(seat))
+                .toggle_stacking(window, workspace.focus_stack.get_mut(seat), &behavior)
         } else if let Some(workspace) = self.space_for_mut(window) {
             if workspace.tiling_layer.mapped().any(|(m, _)| m == window) {
                 workspace
                     .tiling_layer
-                    .toggle_stacking(window, workspace.focus_stack.get_mut(seat))
+                    .toggle_stacking(window, workspace.focus_stack.get_mut(seat), &behavior)
             } else if workspace.floating_layer.mapped().any(|w| w == window) {
                 workspace
                     .floating_layer
-                    .toggle_stacking(window, workspace.focus_stack.get_mut(seat))
+                    .toggle_stacking(window, workspace.focus_stack.get_mut(seat), &behavior)
             } else {
                 None
             }
@@ -3595,15 +3606,15 @@ impl Shell {
         if let Some(window) = maybe_window {
             if set.sticky_layer.mapped().any(|m| m == &window) {
                 set.sticky_layer
-                    .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat))
+                    .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat), &self.workspaces.stack_behavior)
             } else if workspace.tiling_layer.mapped().any(|(m, _)| m == &window) {
                 workspace
                     .tiling_layer
-                    .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat))
+                    .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat), &self.workspaces.stack_behavior)
             } else if workspace.floating_layer.mapped().any(|w| w == &window) {
                 workspace
                     .floating_layer
-                    .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat))
+                    .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat), &self.workspaces.stack_behavior)
             } else {
                 None
             }
