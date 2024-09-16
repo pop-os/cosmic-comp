@@ -21,6 +21,8 @@ pub struct CosmicCompConfig {
     /// If set to Global, autotile applies to all windows in all workspaces
     /// If set to PerWorkspace, autotile only applies to new windows, and new workspaces
     pub autotile_behavior: TileBehavior,
+    /// Configure behavior of the stack layout.
+    pub stack_behavior: StackBehavior,
     /// Active hint enabled
     pub active_hint: bool,
     /// Enables changing keyboard focus to windows when the cursor passes into them
@@ -55,6 +57,7 @@ impl Default for CosmicCompConfig {
             xkb_config: Default::default(),
             autotile: Default::default(),
             autotile_behavior: Default::default(),
+            stack_behavior: StackBehavior::default(),
             active_hint: true,
             focus_follows_cursor: false,
             cursor_follows_focus: false,
@@ -104,4 +107,16 @@ fn default_repeat_rate() -> u32 {
 
 fn default_repeat_delay() -> u32 {
     600
+}
+
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct StackBehavior {
+    pub close_tab_on_middle_click: bool,
+}
+
+impl Default for StackBehavior {
+    fn default() -> Self {
+        Self { close_tab_on_middle_click: true }
+    }
 }
