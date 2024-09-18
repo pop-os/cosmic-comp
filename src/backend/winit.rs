@@ -320,7 +320,7 @@ impl State {
                 render_ping.ping();
             }
             WinitEvent::Redraw => render_ping.ping(),
-            WinitEvent::Input(event) => self.process_input_event(event, false),
+            WinitEvent::Input(event) => self.process_input_event(event),
             WinitEvent::CloseRequested => {
                 self.common.should_stop = true;
             }
