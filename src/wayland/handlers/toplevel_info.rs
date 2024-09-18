@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use smithay::utils::user_data::UserDataMap;
+use smithay::utils::{user_data::UserDataMap, Rectangle};
 
 use crate::{
-    shell::CosmicSurface,
+    shell::{element::surface::GlobalGeometry, CosmicSurface},
     state::State,
+    utils::prelude::Global,
     wayland::protocols::toplevel_info::{
         delegate_toplevel_info, ToplevelInfoHandler, ToplevelInfoState, Window,
     },
@@ -44,6 +45,20 @@ impl Window for CosmicSurface {
 
     fn is_minimized(&self) -> bool {
         CosmicSurface::is_minimized(self)
+    }
+
+    fn is_sticky(&self) -> bool {
+        CosmicSurface::is_sticky(&self)
+    }
+
+    fn global_geometry(&self) -> Option<Rectangle<i32, Global>> {
+        self.user_data()
+            .get_or_insert(GlobalGeometry::default)
+            .0
+            .lock()
+            .unwrap()
+            .clone()
+            .filter(|_| !self.is_minimized())
     }
 
     fn user_data(&self) -> &UserDataMap {

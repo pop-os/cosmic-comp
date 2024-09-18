@@ -228,6 +228,34 @@ impl ToplevelManagementHandler for State {
             }
         }
     }
+
+    fn set_sticky(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
+        if window.is_sticky() {
+            return;
+        }
+
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(mapped) = shell.element_for_surface(window).cloned() {
+            let seat = shell.seats.last_active().clone();
+            shell.toggle_sticky(&seat, &mapped);
+        }
+    }
+
+    fn unset_sticky(
+        &mut self,
+        _dh: &DisplayHandle,
+        window: &<Self as ToplevelInfoHandler>::Window,
+    ) {
+        if !window.is_sticky() {
+            return;
+        }
+
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(mapped) = shell.element_for_surface(window).cloned() {
+            let seat = shell.seats.last_active().clone();
+            shell.toggle_sticky(&seat, &mapped);
+        }
+    }
 }
 
 impl ManagementWindow for CosmicSurface {

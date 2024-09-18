@@ -387,7 +387,6 @@ impl XdgShellHandler for State {
                 surface.wl_surface(),
                 &seat,
                 &mut self.common.toplevel_info_state,
-                &mut self.common.foreign_toplevel_list,
             );
 
             let output = shell
