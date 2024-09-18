@@ -615,6 +615,16 @@ impl State {
                 };
                 self.common.idle_notifier_state.notify_activity(&seat);
 
+                let current_focus = seat.get_keyboard().unwrap().current_focus();
+                let shortcuts_inhibited = current_focus.is_some_and(|f| {
+                    f.wl_surface()
+                        .and_then(|surface| {
+                            seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
+                                .map(|inhibitor| inhibitor.is_active())
+                        })
+                        .unwrap_or(false)
+                });
+
                 let serial = SERIAL_COUNTER.next_serial();
                 let button = event.button_code();
                 let mut pass_event = !seat.supressed_buttons().remove(button);
@@ -633,7 +643,9 @@ impl State {
                         // Don't check override redirect windows, because we don't set keyboard focus to them explicitly.
                         // These cases are handled by the XwaylandKeyboardGrab.
                         if let Some(target) = shell.element_under(global_position, &output) {
-                            if seat.get_keyboard().unwrap().modifier_state().logo {
+                            if seat.get_keyboard().unwrap().modifier_state().logo
+                                && !shortcuts_inhibited
+                            {
                                 if let Some(surface) = target.toplevel().map(Cow::into_owned) {
                                     let seat_clone = seat.clone();
                                     let mouse_button = PointerButtonEvent::button(&event);
