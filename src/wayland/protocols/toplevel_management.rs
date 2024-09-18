@@ -61,6 +61,9 @@ where
     fn unmaximize(&mut self, dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {}
     fn minimize(&mut self, dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {}
     fn unminimize(&mut self, dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {}
+    fn set_sticky(&mut self, dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {}
+    fn unset_sticky(&mut self, dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
+    }
     fn move_to_workspace(
         &mut self,
         dh: &DisplayHandle,
@@ -113,7 +116,7 @@ impl ToplevelManagementState {
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
         let global = dh.create_global::<D, ZcosmicToplevelManagerV1, _>(
-            2,
+            3,
             ToplevelManagerGlobalData {
                 filter: Box::new(client_filter),
             },
@@ -215,6 +218,14 @@ where
             zcosmic_toplevel_manager_v1::Request::UnsetMinimized { toplevel } => {
                 let window = window_from_handle(toplevel).unwrap();
                 state.unminimize(dh, &window);
+            }
+            zcosmic_toplevel_manager_v1::Request::SetSticky { toplevel } => {
+                let window = window_from_handle(toplevel).unwrap();
+                state.set_sticky(dh, &window);
+            }
+            zcosmic_toplevel_manager_v1::Request::UnsetSticky { toplevel } => {
+                let window = window_from_handle(toplevel).unwrap();
+                state.unset_sticky(dh, &window);
             }
             zcosmic_toplevel_manager_v1::Request::SetRectangle {
                 toplevel,
