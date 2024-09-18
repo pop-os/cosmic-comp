@@ -391,7 +391,7 @@ impl State {
                                             let action = Action::Private(PrivateAction::Resizing(direction, edge.into(), cosmic_keystate_from_smithay(state)));
                                             let key_pattern = shortcuts::Binding {
                                                 modifiers: cosmic_modifiers_from_smithay(modifiers.clone()),
-                                                key: Some(Keysym::new(handle.raw_code().raw())),
+                                                key: Some(handle.modified_sym()),
                                                 description: None,
                                             };
 

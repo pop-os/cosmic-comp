@@ -10,7 +10,6 @@ use smithay::{
     },
     utils::Serial,
 };
-use xkbcommon::xkb::Keysym;
 
 use crate::{
     config::key_bindings::cosmic_modifiers_from_smithay,
@@ -81,7 +80,7 @@ impl KeyboardGrab<State> for SwapWindowGrab {
                 modifiers: modifiers
                     .map(cosmic_modifiers_from_smithay)
                     .unwrap_or_default(),
-                key: Some(Keysym::new(keycode)),
+                key: Some(handle.keysym_handle(keycode).modified_sym()),
                 description: None,
             },
             None,
