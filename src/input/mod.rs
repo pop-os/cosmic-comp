@@ -159,11 +159,8 @@ impl ModifiersShortcutQueue {
 }
 
 impl State {
-    pub fn process_input_event<B: InputBackend>(
-        &mut self,
-        event: InputEvent<B>,
-        needs_key_repetition: bool,
-    ) where
+    pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>)
+    where
         <B as InputBackend>::Device: 'static,
     {
         use smithay::backend::input::Event;
@@ -226,13 +223,7 @@ impl State {
                             time,
                             |data, modifiers, handle| {
                                 Self::filter_keyboard_input(
-                                    data,
-                                    &event,
-                                    &seat,
-                                    modifiers,
-                                    handle,
-                                    serial,
-                                    needs_key_repetition,
+                                    data, &event, &seat, modifiers, handle, serial,
                                 )
                             },
                         )
@@ -1439,7 +1430,6 @@ impl State {
         modifiers: &ModifiersState,
         handle: KeysymHandle<'_>,
         serial: Serial,
-        needs_key_repetition: bool,
     ) -> FilterResult<Option<(Action, shortcuts::Binding)>> {
         let mut shell = self.common.shell.write().unwrap();
 
@@ -1567,36 +1557,31 @@ impl State {
                         }
                     }
                 } else {
-                    let token = if needs_key_repetition {
-                        let seat_clone = seat.clone();
-                        let action_clone = action.clone();
-                        let key_pattern_clone = key_pattern.clone();
-                        let start = Instant::now();
-                        let time = event.time_msec();
-                        self.common
-                            .event_loop_handle
-                            .insert_source(
-                                Timer::from_duration(Duration::from_millis(200)),
-                                move |current, _, state| {
-                                    let duration = current.duration_since(start).as_millis();
-                                    state.handle_action(
-                                        action_clone.clone(),
-                                        &seat_clone,
-                                        serial,
-                                        time.overflowing_add(duration as u32).0,
-                                        key_pattern_clone.clone(),
-                                        None,
-                                        true,
-                                    );
-                                    calloop::timer::TimeoutAction::ToDuration(
-                                        Duration::from_millis(25),
-                                    )
-                                },
-                            )
-                            .ok()
-                    } else {
-                        None
-                    };
+                    let seat_clone = seat.clone();
+                    let action_clone = action.clone();
+                    let key_pattern_clone = key_pattern.clone();
+                    let start = Instant::now();
+                    let time = event.time_msec();
+                    let token = self
+                        .common
+                        .event_loop_handle
+                        .insert_source(
+                            Timer::from_duration(Duration::from_millis(200)),
+                            move |current, _, state| {
+                                let duration = current.duration_since(start).as_millis();
+                                state.handle_action(
+                                    action_clone.clone(),
+                                    &seat_clone,
+                                    serial,
+                                    time.overflowing_add(duration as u32).0,
+                                    key_pattern_clone.clone(),
+                                    None,
+                                    true,
+                                );
+                                calloop::timer::TimeoutAction::ToDuration(Duration::from_millis(25))
+                            },
+                        )
+                        .ok();
 
                     seat.supressed_keys().add(&handle, token);
                 }
