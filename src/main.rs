@@ -21,6 +21,7 @@ pub mod dbus;
 #[cfg(feature = "debug")]
 pub mod debug;
 pub mod input;
+pub mod libei;
 mod logger;
 pub mod session;
 pub mod shell;
@@ -106,6 +107,8 @@ fn main() -> Result<()> {
     );
     // init backend
     backend::init_backend_auto(&display, &mut event_loop, &mut state)?;
+
+    libei::listen_eis(&event_loop.handle());
 
     if let Err(err) = theme::watch_theme(event_loop.handle()) {
         warn!(?err, "Failed to watch theme");

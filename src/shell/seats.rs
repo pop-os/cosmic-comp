@@ -75,9 +75,13 @@ impl Seats {
 
     pub fn for_device<D: Device>(&self, device: &D) -> Option<&Seat<State>> {
         self.iter().find(|seat| {
+            // XXX
+            /*
             let userdata = seat.user_data();
             let devices = userdata.get::<Devices>().unwrap();
             devices.has_device(device)
+            */
+            true
         })
     }
 }

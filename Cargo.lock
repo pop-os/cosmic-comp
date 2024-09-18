@@ -4269,6 +4269,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a66a03ae7c801facd77a29370b4faec201768915ac14a721ba36f20bc9c209b"
 
 [[package]]
+name = "reis"
+version = "0.2.0"
+source = "git+https://github.com/ids1024/reis#4eb1295262fea55c39e46fc9aac411276656c831"
+dependencies = [
+ "calloop 0.14.1",
+ "rustix",
+]
+
+[[package]]
 name = "renderdoc-sys"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4703,7 +4712,7 @@ checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/smithay//smithay?rev=f364c73#f364c73cae953aebfa189075e9f118f9008e100b"
+source = "git+https://github.com/ids1024/smithay?branch=reis#4a20e037ca80fba5ea293843577aadb92b701eee"
 dependencies = [
  "appendlist",
  "ash 0.38.0+1.3.281",
@@ -4732,6 +4741,7 @@ dependencies = [
  "pkg-config",
  "profiling",
  "rand",
+ "reis",
  "rustix",
  "scan_fmt",
  "scopeguard",
