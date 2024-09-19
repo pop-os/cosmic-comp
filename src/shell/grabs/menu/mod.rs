@@ -424,7 +424,7 @@ impl Program for ContextMenu {
                     Row::with_children(components)
                         .spacing(8)
                         .width(mode)
-                        .apply(button)
+                        .apply(button::custom)
                         .width(width)
                         .padding([8, 24])
                         .on_press_maybe((!disabled).then_some(Message::ItemPressed(idx)))

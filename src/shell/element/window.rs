@@ -14,8 +14,6 @@ use calloop::LoopHandle;
 use cosmic::{
     config::Density,
     iced::{Color, Command},
-    widget::mouse_area,
-    Apply,
 };
 use smithay::{
     backend::{
@@ -506,7 +504,8 @@ impl Program for CosmicWindowInternal {
             .on_close(Message::Close)
             .focused(self.window.is_activated(false))
             .density(Density::Compact)
-            .on_double_click(Message::Maximize);
+            .on_double_click(Message::Maximize)
+            .on_right_click(Message::Menu);
 
         if cosmic::config::show_minimize() {
             header = header.on_minimize(Message::Minimize);
@@ -514,7 +513,6 @@ impl Program for CosmicWindowInternal {
         if cosmic::config::show_maximize() {
             header = header.on_maximize(Message::Maximize);
         }
-        let header = header.apply(mouse_area).on_right_press(Message::Menu);
 
         header.into()
     }
