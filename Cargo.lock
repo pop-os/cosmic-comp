@@ -847,6 +847,7 @@ dependencies = [
  "ordered-float",
  "png",
  "profiling",
+ "rand",
  "regex",
  "ron",
  "rust-embed",
