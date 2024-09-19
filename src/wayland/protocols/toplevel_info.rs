@@ -76,6 +76,10 @@ impl ToplevelStateInner {
             ..Default::default()
         })
     }
+
+    pub fn foreign_handle(&self) -> Option<&ForeignToplevelHandle> {
+        self.foreign_handle.as_ref()
+    }
 }
 
 pub struct ToplevelHandleStateInner<W: Window> {
@@ -393,6 +397,10 @@ where
 
     pub fn global_id(&self) -> GlobalId {
         self.global.clone()
+    }
+
+    pub fn registered_toplevels(&self) -> impl Iterator<Item = &W> {
+        self.toplevels.iter()
     }
 }
 

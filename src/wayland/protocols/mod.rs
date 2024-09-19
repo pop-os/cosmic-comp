@@ -3,6 +3,7 @@
 pub mod drm;
 pub mod image_source;
 pub mod output_configuration;
+pub mod overlap_notify;
 pub mod screencopy;
 pub mod toplevel_info;
 pub mod toplevel_management;
