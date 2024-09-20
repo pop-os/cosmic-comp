@@ -10,7 +10,7 @@ use crate::{
 use anyhow::{anyhow, Context, Result};
 use smithay::{
     backend::{
-        drm::NodeType,
+        drm::DrmNode,
         egl::EGLDevice,
         renderer::{
             damage::{OutputDamageTracker, RenderOutputResult},
@@ -40,6 +40,7 @@ use super::render::{init_shaders, CursorMode};
 pub struct WinitState {
     // The winit backend currently has no notion of multiple windows
     pub backend: WinitGraphicsBackend<GlowRenderer>,
+    pub node: Option<DrmNode>,
     output: Output,
     damage_tracker: OutputDamageTracker,
 }
@@ -132,7 +133,7 @@ pub fn init_backend(
         winit::init().map_err(|e| anyhow!("Failed to initilize winit backend: {e:?}"))?;
     init_shaders(backend.renderer().borrow_mut()).context("Failed to initialize renderer")?;
 
-    init_egl_client_side(dh, state, &mut backend)?;
+    let node = init_egl_client_side(dh, state, &mut backend)?;
 
     let name = format!("WINIT-0");
     let size = backend.window_size();
@@ -206,6 +207,7 @@ pub fn init_backend(
 
     state.backend = BackendData::Winit(WinitState {
         backend,
+        node,
         output: output.clone(),
         damage_tracker: OutputDamageTracker::from_output(&output),
     });
@@ -236,7 +238,7 @@ fn init_egl_client_side(
     dh: &DisplayHandle,
     state: &mut State,
     renderer: &mut WinitGraphicsBackend<GlowRenderer>,
-) -> Result<()> {
+) -> Result<Option<DrmNode>> {
     let render_node = EGLDevice::device_for_display(renderer.renderer().egl_context().display())
         .and_then(|device| device.try_get_render_node());
 
@@ -248,39 +250,33 @@ fn init_egl_client_side(
                 .build()
                 .unwrap();
 
-            let dmabuf_global = state
+            let render_node = render_node.unwrap().unwrap();
+            let _drm_global_id = state
+                .common
+                .wl_drm_state
+                .create_global::<State>(dh, render_node, dmabuf_formats)
+                .map_err(|_| anyhow!("Failed to determine gpu filesystem path: {}", render_node))?;
+            let _dmabuf_global = state
                 .common
                 .dmabuf_state
                 .create_global_with_default_feedback::<State>(dh, &feedback);
 
-            let render_node = render_node.unwrap().unwrap();
-            let _drm_global_id = state.common.wl_drm_state.create_global::<State>(
-                dh,
-                render_node
-                    .dev_path_with_type(NodeType::Render)
-                    .or_else(|| render_node.dev_path())
-                    .ok_or(anyhow!(
-                        "Could not determine path for gpu node: {}",
-                        render_node
-                    ))?,
-                dmabuf_formats,
-                &dmabuf_global,
-            );
-
             info!("EGL hardware-acceleration enabled.");
+
+            Ok(Some(render_node))
         }
         Ok(None) => {
-            warn!("Failed to query render node. Unable to initialize bind display to EGL.")
+            warn!("Failed to query render node. Unable to initialize bind display to EGL.");
+            Ok(None)
         }
         Err(err) => {
             warn!(
                 ?err,
                 "Failed to egl device for display. Unable to initialize bind display to EGL."
-            )
+            );
+            Ok(None)
         }
     }
-
-    Ok(())
 }
 
 impl State {

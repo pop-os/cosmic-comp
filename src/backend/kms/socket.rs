@@ -2,10 +2,7 @@
 
 use anyhow::{anyhow, Context, Result};
 use smithay::{
-    backend::{
-        allocator::format::FormatSet,
-        drm::{DrmNode, NodeType},
-    },
+    backend::{allocator::format::FormatSet, drm::DrmNode},
     reexports::{
         calloop::RegistrationToken,
         wayland_server::{backend::GlobalId, Client, DisplayHandle},
@@ -48,31 +45,19 @@ impl State {
         // initialize globals
         let filter = move |client: &Client| advertised_node_for_client(client) == Some(render_node);
 
-        let feedback = DmabufFeedbackBuilder::new(render_node.dev_id(), formats.clone())
+        let drm_global_id = self
+            .common
+            .wl_drm_state
+            .create_global_with_filter::<State, _>(dh, render_node, formats.clone(), filter)
+            .map_err(|_| anyhow!("Failed to determine gpu filesystem path: {}", render_node))?;
+
+        let feedback = DmabufFeedbackBuilder::new(render_node.dev_id(), formats)
             .build()
             .with_context(|| "Failed to create drm format shared memory table")?;
-
         let dmabuf_global = self
             .common
             .dmabuf_state
             .create_global_with_filter_and_default_feedback::<State, _>(dh, &feedback, filter);
-
-        let drm_global_id = self
-            .common
-            .wl_drm_state
-            .create_global_with_filter::<State, _>(
-                dh,
-                render_node
-                    .dev_path_with_type(NodeType::Render)
-                    .or_else(|| render_node.dev_path())
-                    .ok_or(anyhow!(
-                        "Could not determine path for gpu node: {}",
-                        render_node
-                    ))?,
-                formats,
-                &dmabuf_global,
-                filter,
-            );
 
         // add a special socket for the gpu
         let listener = ListeningSocketSource::with_name(&socket_name)

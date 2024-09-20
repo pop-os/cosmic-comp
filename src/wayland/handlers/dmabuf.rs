@@ -20,9 +20,10 @@ impl DmabufHandler for State {
         dmabuf: Dmabuf,
         import_notifier: ImportNotifier,
     ) {
+        let node = self.backend.node_for_dma_global(global);
         match self
             .backend
-            .dmabuf_imported(import_notifier.client(), global, dmabuf)
+            .dmabuf_imported(import_notifier.client(), &node, dmabuf)
         {
             Err(err) => {
                 tracing::debug!(?err, "dmabuf import failed");

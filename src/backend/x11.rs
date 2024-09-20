@@ -15,7 +15,7 @@ use smithay::{
             gbm::{GbmAllocator, GbmBufferFlags},
             vulkan::{ImageUsageFlags, VulkanAllocator},
         },
-        drm::{DrmDeviceFd, DrmNode, NodeType},
+        drm::{DrmDeviceFd, DrmNode},
         egl::{EGLContext, EGLDevice, EGLDisplay},
         input::{Event, InputEvent},
         renderer::{
@@ -54,6 +54,7 @@ pub struct X11State {
     allocator: Allocator,
     _egl: EGLDisplay,
     pub renderer: GlowRenderer,
+    pub node: DrmNode,
     surfaces: Vec<Surface>,
     handle: X11Handle,
 }
@@ -337,6 +338,7 @@ pub fn init_backend(
             .context("Failed to create allocator for x11")?,
         _egl: egl,
         renderer,
+        node: drm_node,
         surfaces: Vec::new(),
     });
 
@@ -461,26 +463,19 @@ fn init_egl_client_side<R>(
 where
     R: ImportDma,
 {
+    let _drm_global_id = state
+        .common
+        .wl_drm_state
+        .create_global::<State>(dh, render_node, renderer.dmabuf_formats())
+        .map_err(|_| anyhow!("Failed to determine gpu filesystem path: {}", render_node))?;
     let default_feedback =
         DmabufFeedbackBuilder::new(render_node.dev_id(), renderer.dmabuf_formats())
             .build()
             .unwrap();
-    let dmabuf_global = state
+    let _dmabuf_global = state
         .common
         .dmabuf_state
         .create_global_with_default_feedback::<State>(dh, &default_feedback);
-    let _drm_global_id = state.common.wl_drm_state.create_global::<State>(
-        dh,
-        render_node
-            .dev_path_with_type(NodeType::Render)
-            .or_else(|| render_node.dev_path())
-            .ok_or(anyhow!(
-                "Could not determine path for gpu node: {}",
-                render_node
-            ))?,
-        renderer.dmabuf_formats(),
-        &dmabuf_global,
-    );
 
     info!("EGL hardware-acceleration enabled.");
 

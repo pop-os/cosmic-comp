@@ -7,18 +7,17 @@ use crate::{
 use smithay::{
     backend::{allocator::dmabuf::Dmabuf, drm::DrmNode},
     reexports::wayland_server::{protocol::wl_buffer::WlBuffer, Resource},
-    wayland::dmabuf::DmabufGlobal,
 };
 use tracing::warn;
 
 impl DrmHandler<Option<DrmNode>> for State {
     fn dmabuf_imported(
         &mut self,
-        global: &DmabufGlobal,
+        node: &DrmNode,
         dmabuf: Dmabuf,
     ) -> Result<Option<DrmNode>, ImportError> {
         self.backend
-            .dmabuf_imported(None, global, dmabuf)
+            .dmabuf_imported(None, node, dmabuf)
             .map_err(|_| ImportError::Failed)
     }
 

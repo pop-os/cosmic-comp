@@ -374,16 +374,41 @@ impl BackendData {
         }
     }
 
+    pub fn node_for_dma_global(&self, global: &DmabufGlobal) -> DrmNode {
+        match self {
+            BackendData::Kms(ref state) => state
+                .drm_devices
+                .iter()
+                .find(|(_, device)| {
+                    device
+                        .socket
+                        .as_ref()
+                        .is_some_and(|s| &s.dmabuf_global == global)
+                })
+                .map(|(node, _)| *node)
+                .unwrap_or_else(|| {
+                    state
+                        .primary_node
+                        .expect("We don't have a DmabufGlobal without a primary_node")
+                }),
+            BackendData::Winit(ref state) => state
+                .node
+                .expect("We don't have a DmabufGlobal without a node"),
+            BackendData::X11(ref state) => state.node,
+            _ => unreachable!("No backend set when querying drm node?"),
+        }
+    }
+
     pub fn dmabuf_imported(
         &mut self,
         client: Option<Client>,
-        global: &DmabufGlobal,
+        global_node: &DrmNode,
         dmabuf: Dmabuf,
     ) -> Result<Option<DrmNode>, anyhow::Error> {
         match self {
             BackendData::Kms(ref mut state) => {
                 return state
-                    .dmabuf_imported(client, global, dmabuf)
+                    .dmabuf_imported(client, global_node, dmabuf)
                     .map(|node| Some(node))
             }
             BackendData::Winit(ref mut state) => {

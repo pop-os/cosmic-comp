@@ -22,19 +22,19 @@ mod generated {
 }
 
 use smithay::{
-    backend::allocator::{
-        dmabuf::{Dmabuf, DmabufFlags},
-        format::FormatSet,
-        Fourcc, Modifier,
+    backend::{
+        allocator::{
+            dmabuf::{Dmabuf, DmabufFlags},
+            format::FormatSet,
+            Fourcc, Modifier,
+        },
+        drm::{DrmNode, NodeType},
     },
     reexports::wayland_server::{
         backend::GlobalId, protocol::wl_buffer::WlBuffer, Client, DataInit, Dispatch,
         DisplayHandle, GlobalDispatch, New, Resource,
     },
-    wayland::{
-        buffer::BufferHandler,
-        dmabuf::{DmabufGlobal, DmabufHandler},
-    },
+    wayland::{buffer::BufferHandler, dmabuf::DmabufHandler},
 };
 use tracing::trace;
 
@@ -46,7 +46,7 @@ pub enum ImportError {
 }
 
 pub trait DrmHandler<R: 'static> {
-    fn dmabuf_imported(&mut self, global: &DmabufGlobal, dmabuf: Dmabuf) -> Result<R, ImportError>;
+    fn dmabuf_imported(&mut self, node: &DrmNode, dmabuf: Dmabuf) -> Result<R, ImportError>;
     fn buffer_created(&mut self, buffer: WlBuffer, result: R) {
         let _ = (buffer, result);
     }
@@ -60,12 +60,12 @@ pub struct DrmGlobalData {
     filter: Box<dyn for<'a> Fn(&'a Client) -> bool + Send + Sync>,
     formats: Arc<Vec<Fourcc>>,
     device_path: PathBuf,
-    dmabuf_global: DmabufGlobal,
+    node: DrmNode,
 }
 
 pub struct DrmInstanceData {
+    node: DrmNode,
     formats: Arc<Vec<Fourcc>>,
-    dmabuf_global: DmabufGlobal,
 }
 
 impl<D, R> GlobalDispatch<wl_drm::WlDrm, DrmGlobalData, D> for WlDrmState<R>
@@ -87,7 +87,7 @@ where
     ) {
         let data = DrmInstanceData {
             formats: global_data.formats.clone(),
-            dmabuf_global: global_data.dmabuf_global.clone(),
+            node: global_data.node,
         };
         let drm_instance = data_init.init(resource, data);
 
@@ -183,7 +183,7 @@ where
                 dma.add_plane(name, 0, offset0 as u32, stride0 as u32);
                 match dma.build() {
                     Some(dmabuf) => {
-                        match state.dmabuf_imported(&data.dmabuf_global, dmabuf.clone()) {
+                        match state.dmabuf_imported(&data.node, dmabuf.clone()) {
                             Ok(result) => {
                                 // import was successful
                                 let buffer = data_init.init(id, dmabuf);
@@ -219,14 +219,15 @@ where
     }
 }
 
+pub struct GpuPathError;
+
 impl<R: 'static> WlDrmState<R> {
     pub fn create_global<D>(
         &mut self,
         display: &DisplayHandle,
-        device_path: PathBuf,
+        node: DrmNode,
         formats: FormatSet,
-        dmabuf_global: &DmabufGlobal,
-    ) -> GlobalId
+    ) -> Result<GlobalId, GpuPathError>
     where
         D: GlobalDispatch<wl_drm::WlDrm, DrmGlobalData>
             + Dispatch<wl_drm::WlDrm, DrmInstanceData>
@@ -234,19 +235,16 @@ impl<R: 'static> WlDrmState<R> {
             + DmabufHandler
             + 'static,
     {
-        self.create_global_with_filter::<D, _>(display, device_path, formats, dmabuf_global, |_| {
-            true
-        })
+        self.create_global_with_filter::<D, _>(display, node, formats, |_| true)
     }
 
     pub fn create_global_with_filter<D, F>(
         &mut self,
         display: &DisplayHandle,
-        device_path: PathBuf,
+        node: DrmNode,
         formats: FormatSet,
-        dmabuf_global: &DmabufGlobal,
         client_filter: F,
-    ) -> GlobalId
+    ) -> Result<GlobalId, GpuPathError>
     where
         D: GlobalDispatch<wl_drm::WlDrm, DrmGlobalData>
             + Dispatch<wl_drm::WlDrm, DrmInstanceData>
@@ -255,6 +253,11 @@ impl<R: 'static> WlDrmState<R> {
             + 'static,
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
+        let device_path = node
+            .dev_path_with_type(NodeType::Render)
+            .or_else(|| node.dev_path())
+            .ok_or(GpuPathError)?;
+
         let formats = Arc::new(
             formats
                 .into_iter()
@@ -266,10 +269,10 @@ impl<R: 'static> WlDrmState<R> {
             filter: Box::new(client_filter),
             formats,
             device_path,
-            dmabuf_global: dmabuf_global.clone(),
+            node,
         };
 
-        display.create_global::<D, wl_drm::WlDrm, _>(2, data)
+        Ok(display.create_global::<D, wl_drm::WlDrm, _>(2, data))
     }
 }
 

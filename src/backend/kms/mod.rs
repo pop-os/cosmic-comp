@@ -27,7 +27,7 @@ use smithay::{
         wayland_server::{Client, DisplayHandle},
     },
     utils::{DevPath, Size},
-    wayland::{dmabuf::DmabufGlobal, relative_pointer::RelativePointerManagerState},
+    wayland::relative_pointer::RelativePointerManagerState,
 };
 use tracing::{error, info, trace, warn};
 
@@ -344,19 +344,13 @@ impl KmsState {
     pub fn dmabuf_imported(
         &mut self,
         _client: Option<Client>,
-        global: &DmabufGlobal,
+        global_node: &DrmNode,
         dmabuf: Dmabuf,
     ) -> Result<DrmNode> {
-        let (expected_node, other_nodes) =
-            self.drm_devices
-                .values_mut()
-                .partition::<Vec<_>, _>(|device| {
-                    device
-                        .socket
-                        .as_ref()
-                        .map(|s| &s.dmabuf_global == global)
-                        .unwrap_or(false)
-                });
+        let (expected_node, other_nodes) = self
+            .drm_devices
+            .values_mut()
+            .partition::<Vec<_>, _>(|device| device.render_node == *global_node);
 
         let mut last_err = anyhow::anyhow!("Dmabuf cannot be imported on any gpu");
         for device in expected_node.into_iter().chain(other_nodes.into_iter()) {
