@@ -15,6 +15,7 @@ use crate::{
         drm::WlDrmState,
         image_source::ImageSourceState,
         output_configuration::OutputConfigurationState,
+        output_power::OutputPowerState,
         screencopy::ScreencopyState,
         toplevel_info::ToplevelInfoState,
         toplevel_management::{ManagementCapabilities, ToplevelManagementState},
@@ -502,6 +503,7 @@ impl State {
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<Self>(dh);
         let output_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
         let output_configuration_state = OutputConfigurationState::new(dh, client_is_privileged);
+        OutputPowerState::new::<Self, _>(dh, client_is_privileged);
         let presentation_state = PresentationState::new::<Self>(dh, clock.id() as u32);
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
         let image_source_state = ImageSourceState::new::<Self, _>(dh, client_is_privileged);

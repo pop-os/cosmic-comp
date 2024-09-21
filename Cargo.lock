@@ -828,6 +828,7 @@ dependencies = [
  "cosmic-config",
  "cosmic-protocols",
  "cosmic-settings-config",
+ "drm-ffi 0.8.0",
  "edid-rs",
  "egui",
  "egui_plot",

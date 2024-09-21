@@ -59,6 +59,7 @@ zbus = "4.4.0"
 profiling = { version = "1.0" }
 rustix = { version = "0.38.32", features = ["process"] }
 smallvec = "1.13.2"
+drm-ffi = "0.8.0"
 
 [dependencies.id_tree]
 branch = "feature/copy_clone"

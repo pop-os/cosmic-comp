@@ -39,7 +39,7 @@ use std::{
 };
 
 mod device;
-mod drm_helpers;
+pub(crate) mod drm_helpers;
 pub mod render;
 mod socket;
 mod surface;

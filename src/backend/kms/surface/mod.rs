@@ -102,9 +102,9 @@ static NVIDIA_LOGO: &'static [u8] = include_bytes!("../../../../resources/icons/
 
 #[derive(Debug)]
 pub struct Surface {
-    pub(super) connector: connector::Handle,
+    pub(crate) connector: connector::Handle,
     pub(super) crtc: crtc::Handle,
-    pub(super) output: Output,
+    pub(crate) output: Output,
     known_nodes: HashSet<DrmNode>,
 
     active: Arc<AtomicBool>,

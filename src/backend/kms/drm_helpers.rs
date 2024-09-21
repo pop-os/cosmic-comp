@@ -419,3 +419,17 @@ pub fn set_max_bpc(dev: &impl ControlDevice, conn: connector::Handle, bpc: u32) 
         _ => unreachable!(),
     })
 }
+
+pub fn set_dpms(dev: &impl ControlDevice, conn: connector::Handle, on: bool) -> Result<()> {
+    dev.set_property(
+        conn,
+        get_prop(dev, conn, "DPMS")?,
+        property::Value::UnsignedRange(if on {
+            drm_ffi::DRM_MODE_DPMS_ON.into()
+        } else {
+            drm_ffi::DRM_MODE_DPMS_OFF.into()
+        })
+        .into(),
+    )?;
+    Ok(())
+}
