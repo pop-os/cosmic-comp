@@ -217,7 +217,9 @@ impl Default for QueueState {
 
 #[derive(Debug)]
 pub enum ThreadCommand {
-    Suspend,
+    Suspend {
+        result: SyncSender<Result<()>>,
+    },
     Resume {
         surface: DrmSurface,
         gbm: GbmDevice<DrmDeviceFd>,
@@ -395,8 +397,12 @@ impl Surface {
         rx.recv().context("Surface thread died")?
     }
 
-    pub fn suspend(&mut self) {
-        let _ = self.thread_command.send(ThreadCommand::Suspend);
+    pub fn suspend(&mut self) -> Result<()> {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let _ = self
+            .thread_command
+            .send(ThreadCommand::Suspend { result: tx });
+        rx.recv().context("Surface thread died")?
     }
 
     pub fn resume(
@@ -502,7 +508,9 @@ fn surface_thread(
     event_loop
         .handle()
         .insert_source(thread_receiver, move |command, _, state| match command {
-            Event::Msg(ThreadCommand::Suspend) => state.suspend(),
+            Event::Msg(ThreadCommand::Suspend { result }) => {
+                let _ = result.send(state.suspend());
+            }
             Event::Msg(ThreadCommand::Resume {
                 surface,
                 gbm,
@@ -552,7 +560,7 @@ fn surface_thread(
 }
 
 impl SurfaceThreadState {
-    fn suspend(&mut self) {
+    fn suspend(&mut self) -> Result<()> {
         self.active.store(false, Ordering::SeqCst);
         let _ = self.compositor.take();
 
@@ -570,6 +578,8 @@ impl SurfaceThreadState {
                 self.loop_handle.remove(queued_render);
             }
         };
+
+        Ok(())
     }
 
     fn resume(
@@ -679,8 +689,27 @@ impl SurfaceThreadState {
         let Some(compositor) = self.compositor.as_mut() else {
             return;
         };
+
+        // handle edge-cases right after resume
+        if !matches!(
+            self.state,
+            QueueState::WaitingForVBlank { .. } | QueueState::Idle
+        ) {
+            match mem::replace(&mut self.state, QueueState::Idle) {
+                QueueState::WaitingForVBlank { .. } | QueueState::Idle => unreachable!(),
+                QueueState::Queued(token) | QueueState::WaitingForEstimatedVBlank(token) => {
+                    self.loop_handle.remove(token);
+                }
+                QueueState::WaitingForEstimatedVBlankAndQueued {
+                    estimated_vblank,
+                    queued_render,
+                } => {
+                    self.loop_handle.remove(estimated_vblank);
+                    self.loop_handle.remove(queued_render);
+                }
+            }
+        }
         if matches!(self.state, QueueState::Idle) {
-            // can happen right after resume
             return;
         }
 
