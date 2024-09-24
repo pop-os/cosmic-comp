@@ -14,6 +14,7 @@
     (modifiers: [Super], key: "8"): Workspace(8),
     (modifiers: [Super], key: "9"): Workspace(9),
     (modifiers: [Super], key: "0"): LastWorkspace,
+    (modifiers: [Super], key: "p"): ToggleStickyVisibility,
     (modifiers: [Super, Shift], key: "1"): MoveToWorkspace(1),
     (modifiers: [Super, Shift], key: "2"): MoveToWorkspace(2),
     (modifiers: [Super, Shift], key: "3"): MoveToWorkspace(3),

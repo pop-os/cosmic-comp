@@ -623,6 +623,7 @@ pub struct Workspaces {
     autotile: bool,
     autotile_behavior: TileBehavior,
     theme: cosmic::Theme,
+    pub sticky_visible: bool,
 }
 
 impl Workspaces {
@@ -635,6 +636,7 @@ impl Workspaces {
             autotile: config.cosmic_conf.autotile,
             autotile_behavior: config.cosmic_conf.autotile_behavior,
             theme,
+            sticky_visible: true,
         }
     }
 
@@ -3355,6 +3357,56 @@ impl Shell {
             let from = minimize_rectangle(workspace.output(), &mapped.active_window());
 
             workspace.unminimize(window, from, seat);
+        }
+    }
+
+    pub fn minimize_sticky(&mut self) {
+        for set in self.workspaces.sets.values_mut() {
+            let sticky_windows: Vec<CosmicMapped> = set
+                .sticky_layer
+                .mapped()
+                .map(|mapped| mapped.clone())
+                .collect();
+            for sticky_window in sticky_windows {
+                let to = minimize_rectangle(&set.output, &sticky_window.active_window());
+                let (window, position) =
+                    set.sticky_layer.unmap_minimize(&sticky_window, to).unwrap();
+
+                set.minimized_windows.push(MinimizedWindow {
+                    window,
+                    previous_state: MinimizedState::Sticky { position },
+                    output_geo: set.output.geometry(),
+                    fullscreen: None,
+                });
+            }
+        }
+    }
+
+    pub fn unminimize_sticky(&mut self) {
+        for set in self.workspaces.sets.values_mut() {
+            // All windows in Workspaceset are minimized
+            let minimized_windows: Vec<MinimizedWindow> = set.minimized_windows.drain(..).collect();
+            for minimized_window in minimized_windows {
+                let from =
+                    minimize_rectangle(&set.output, &minimized_window.window.active_window());
+                if let MinimizedState::Sticky { mut position } = minimized_window.previous_state {
+                    let current_output_size = set.output.geometry().size.as_logical();
+                    if current_output_size != minimized_window.output_geo.size.as_logical() {
+                        position = Point::from((
+                            (position.x as f64 / minimized_window.output_geo.size.w as f64
+                                * current_output_size.w as f64)
+                                .floor() as i32,
+                            (position.y as f64 / minimized_window.output_geo.size.h as f64
+                                * current_output_size.h as f64)
+                                .floor() as i32,
+                        ))
+                    };
+                    set.sticky_layer
+                        .remap_minimized(minimized_window.window, from, position);
+                } else {
+                    unreachable!("None sticky window in WorkspaceSet minimized_windows");
+                }
+            }
         }
     }
 
