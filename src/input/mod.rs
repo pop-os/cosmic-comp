@@ -16,7 +16,7 @@ use crate::{
             floating::ResizeGrabMarker,
             tiling::{NodeDesc, TilingLayout},
         },
-        SeatExt, Trigger,
+        OverviewMode, SeatExt, Trigger,
     },
     utils::{prelude::*, quirks::workspace_overview_is_open},
     wayland::{
@@ -665,27 +665,36 @@ impl State {
                                         match mouse_button {
                                             smithay::backend::input::MouseButton::Left => {
                                                 supress_button();
-                                                self.common.event_loop_handle.insert_idle(
-                                                    move |state| {
-                                                        let mut shell =
-                                                            state.common.shell.write().unwrap();
-                                                        let res = shell.move_request(
-                                                            &surface,
-                                                            &seat_clone,
-                                                            serial,
-                                                            ReleaseMode::NoMouseButtons,
-                                                            false,
-                                                            &state.common.config,
-                                                            &state.common.event_loop_handle,
-                                                            &state.common.xdg_activation_state,
-                                                            false,
-                                                        );
-                                                        drop(shell);
-                                                        dispatch_grab(
-                                                            res, seat_clone, serial, state,
-                                                        );
-                                                    },
-                                                );
+                                                // Mouse click in KeyboardSwap Overview Mode
+                                                // crashes compositor. Workspace Overview Mode
+                                                // needs mouse click.
+                                                if !matches!(
+                                                    shell.overview_mode().0.trigger(),
+                                                    Some(&Trigger::KeyboardSwap(_, _))
+                                                ) {
+                                                    self.common.event_loop_handle.insert_idle(
+                                                        move |state| {
+                                                            let mut shell =
+                                                                state.common.shell.write().unwrap();
+
+                                                            let res = shell.move_request(
+                                                                &surface,
+                                                                &seat_clone,
+                                                                serial,
+                                                                ReleaseMode::NoMouseButtons,
+                                                                false,
+                                                                &state.common.config,
+                                                                &state.common.event_loop_handle,
+                                                                &state.common.xdg_activation_state,
+                                                                false,
+                                                            );
+                                                            drop(shell);
+                                                            dispatch_grab(
+                                                                res, seat_clone, serial, state,
+                                                            );
+                                                        },
+                                                    );
+                                                }
                                             }
                                             smithay::backend::input::MouseButton::Right => {
                                                 supress_button();
