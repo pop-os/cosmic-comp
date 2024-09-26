@@ -10,7 +10,7 @@ use smithay::{
     input::{pointer::MotionEvent, Seat},
     output::Output,
     reexports::wayland_server::Resource,
-    utils::{IsAlive, Serial, SERIAL_COUNTER},
+    utils::{IsAlive, Point, Serial, SERIAL_COUNTER},
     wayland::{
         seat::WaylandFocus,
         selection::{data_device::set_data_device_focus, primary_selection::set_primary_focus},
@@ -231,21 +231,22 @@ fn update_focus_state(
             if target.is_some() {
                 //need to borrow mutably for surface under
                 let mut shell = state.common.shell.write().unwrap();
-                // get the top left corner of the target element
+                // get geometry of the target element
                 let geometry = shell.focused_geometry(target.unwrap());
-                //to avoid the nested mutable borrow of state
-                if geometry.is_some() {
-                    let top_left = geometry.unwrap().loc.to_f64();
+                if let Some(geometry) = geometry {
+                    // get the center of the target element
+                    let window_center = Point::from((geometry.size.w / 2, geometry.size.h / 2));
+                    let new_pos = (geometry.loc + window_center).to_f64();
 
                     // create a pointer target from the target element
                     let output = shell
                         .outputs()
-                        .find(|output| output.geometry().to_f64().contains(top_left))
+                        .find(|output| output.geometry().to_f64().contains(new_pos))
                         .cloned()
                         .unwrap_or(seat.active_output());
 
                     let focus = shell
-                        .surface_under(top_left, &output)
+                        .surface_under(new_pos, &output)
                         .map(|(focus, loc)| (focus, loc.as_logical()));
                     //drop here to avoid multiple mutable borrows
                     mem::drop(shell);
@@ -253,7 +254,7 @@ fn update_focus_state(
                         state,
                         focus,
                         &MotionEvent {
-                            location: top_left.as_logical(),
+                            location: new_pos.as_logical(),
                             serial: SERIAL_COUNTER.next_serial(),
                             time: 0,
                         },
