@@ -685,7 +685,7 @@ impl CosmicMapped {
             let glow_renderer = renderer.glow_renderer_mut();
             match debug.render(
                 |ctx| {
-                    egui::Area::new("window")
+                    egui::Area::new("window".into())
                         .anchor(
                             egui::Align2::RIGHT_TOP,
                             [

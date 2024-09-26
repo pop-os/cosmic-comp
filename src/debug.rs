@@ -32,7 +32,7 @@ pub const DISPLAY_COLOR: Color32 = Color32::from_rgb(41, 184, 209);
 pub fn fps_ui<'a>(
     gpu: Option<&DrmNode>,
     debug_active: bool,
-    seats: impl Iterator<Item = &'a Seat<State>>,
+    seats: &[Seat<State>],
     renderer: &mut GlowRenderer,
     state: &EguiState,
     timings: &Timings,
@@ -126,7 +126,7 @@ pub fn fps_ui<'a>(
 
     state.render(
         |ctx| {
-            egui::Area::new("main")
+            egui::Area::new("main".into())
                 .anchor(egui::Align2::LEFT_TOP, (10.0, 10.0))
                 .show(ctx, |ui| {
                     ui.label(format!(
@@ -171,14 +171,14 @@ pub fn fps_ui<'a>(
                         ui.label(egui::RichText::new(format!("min: {:>7.6}", min_disp)).code());
                         ui.label(egui::RichText::new(format!("max: {:>7.6}", max_disp)).code());
 
-                        let elements_chart = BarChart::new(bars_elements).vertical();
-                        let render_chart = BarChart::new(bars_render)
+                        let elements_chart = BarChart::new(bars_elements.clone()).vertical();
+                        let render_chart = BarChart::new(bars_render.clone())
                             .stack_on(&[&elements_chart])
                             .vertical();
-                        let submitted_chart = BarChart::new(bars_submitted)
+                        let submitted_chart = BarChart::new(bars_submitted.clone())
                             .stack_on(&[&elements_chart, &render_chart])
                             .vertical();
-                        let display_chart = BarChart::new(bars_displayed)
+                        let display_chart = BarChart::new(bars_displayed.clone())
                             .stack_on(&[&elements_chart, &render_chart, &submitted_chart])
                             .vertical();
 

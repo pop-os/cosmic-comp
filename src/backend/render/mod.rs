@@ -609,7 +609,7 @@ where
             let fps_overlay = fps_ui(
                 _gpu,
                 debug_active,
-                seats.iter(),
+                &seats,
                 renderer.glow_renderer_mut(),
                 state,
                 timings,
