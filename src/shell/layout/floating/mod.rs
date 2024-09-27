@@ -24,7 +24,7 @@ use smithay::{
 };
 
 use crate::{
-    backend::render::{element::AsGlowRenderer, IndicatorShader, Key, SplitRenderElements, Usage},
+    backend::render::{element::AsGlowRenderer, IndicatorShader, Key, Usage},
     shell::{
         element::{
             resize_indicator::ResizeIndicator,
@@ -1260,6 +1260,52 @@ impl FloatingLayout {
         }
         self.refresh(); //fixup any out of bounds elements
     }
+    #[profiling::function]
+    pub fn render_popups<R>(
+        &self,
+        renderer: &mut R,
+        alpha: f32,
+    ) -> Vec<CosmicMappedRenderElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+        <R as Renderer>::TextureId: Send + Clone + 'static,
+        CosmicMappedRenderElement<R>: RenderElement<R>,
+        CosmicWindowRenderElement<R>: RenderElement<R>,
+        CosmicStackRenderElement<R>: RenderElement<R>,
+    {
+        let output = self.space.outputs().next().unwrap();
+        let output_scale = output.current_scale().fractional_scale();
+
+        let mut elements = Vec::default();
+
+        for elem in self
+            .animations
+            .iter()
+            .filter(|(_, anim)| matches!(anim, Animation::Minimize { .. }))
+            .map(|(elem, _)| elem)
+            .chain(self.space.elements().rev())
+        {
+            let (geometry, alpha) = self
+                .animations
+                .get(elem)
+                .map(|anim| (*anim.previous_geometry(), alpha * anim.alpha()))
+                .unwrap_or_else(|| (self.space.element_geometry(elem).unwrap().as_local(), alpha));
+
+            let render_location = geometry.loc - elem.geometry().loc.as_local();
+            elements.extend(
+                elem.popup_render_elements(
+                    renderer,
+                    render_location
+                        .as_logical()
+                        .to_physical_precise_round(output_scale),
+                    output_scale.into(),
+                    alpha,
+                ),
+            );
+        }
+
+        elements
+    }
 
     #[profiling::function]
     pub fn render<R>(
@@ -1270,7 +1316,7 @@ impl FloatingLayout {
         indicator_thickness: u8,
         alpha: f32,
         theme: &cosmic::theme::CosmicTheme,
-    ) -> SplitRenderElements<CosmicMappedRenderElement<R>>
+    ) -> Vec<CosmicMappedRenderElement<R>>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         <R as Renderer>::TextureId: Send + Clone + 'static,
@@ -1285,7 +1331,7 @@ impl FloatingLayout {
         };
         let output_scale = output.current_scale().fractional_scale();
 
-        let mut elements = SplitRenderElements::default();
+        let mut elements = Vec::default();
 
         for elem in self
             .animations
@@ -1301,10 +1347,7 @@ impl FloatingLayout {
                 .unwrap_or_else(|| (self.space.element_geometry(elem).unwrap().as_local(), alpha));
 
             let render_location = geometry.loc - elem.geometry().loc.as_local();
-            let SplitRenderElements {
-                mut w_elements,
-                p_elements,
-            } = elem.split_render_elements(
+            let mut window_elements = elem.render_elements(
                 renderer,
                 render_location
                     .as_logical()
@@ -1331,7 +1374,7 @@ impl FloatingLayout {
                     y: geometry.size.h as f64 / buffer_size.h as f64,
                 };
 
-                w_elements = w_elements
+                window_elements = window_elements
                     .into_iter()
                     .map(|element| match element {
                         CosmicMappedRenderElement::Stack(elem) => {
@@ -1387,7 +1430,7 @@ impl FloatingLayout {
 
                     resize.resize(resize_geometry.size.as_logical());
                     resize.output_enter(output, Rectangle::default() /* unused */);
-                    elements.w_elements.extend(
+                    window_elements.extend(
                         resize
                             .render_elements::<CosmicWindowRenderElement<R>>(
                                 renderer,
@@ -1419,12 +1462,11 @@ impl FloatingLayout {
                             active_window_hint.blue,
                         ],
                     );
-                    elements.w_elements.push(element.into());
+                    window_elements.push(element.into());
                 }
             }
 
-            elements.w_elements.extend(w_elements);
-            elements.p_elements.extend(p_elements);
+            elements.extend(window_elements);
         }
 
         elements
