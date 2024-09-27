@@ -21,10 +21,12 @@ use std::{borrow::Cow, mem, sync::Mutex};
 
 use tracing::{debug, trace};
 
+pub use self::order::{render_input_order, Stage};
 use self::target::{KeyboardFocusTarget, WindowGroup};
 
 use super::{grabs::SeatMoveGrabState, layout::floating::FloatingLayout, SeatExt};
 
+mod order;
 pub mod target;
 
 pub struct FocusStack<'a>(pub(super) Option<&'a IndexSet<CosmicMapped>>);
