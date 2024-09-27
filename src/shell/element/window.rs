@@ -1,5 +1,5 @@
 use crate::{
-    backend::render::{cursor::CursorState, SplitRenderElements},
+    backend::render::cursor::CursorState,
     shell::{
         focus::target::PointerFocusTarget,
         grabs::{ReleaseMode, ResizeEdge},
@@ -41,7 +41,7 @@ use smithay::{
     output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     render_elements,
-    utils::{IsAlive, Logical, Point, Rectangle, Serial, Size},
+    utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size},
     wayland::seat::WaylandFocus,
 };
 use std::{
@@ -308,13 +308,13 @@ impl CosmicWindow {
         self.0.loop_handle()
     }
 
-    pub fn split_render_elements<R, C>(
+    pub fn popup_render_elements<R, C>(
         &self,
         renderer: &mut R,
-        location: smithay::utils::Point<i32, smithay::utils::Physical>,
-        scale: smithay::utils::Scale<f64>,
+        location: Point<i32, Physical>,
+        scale: Scale<f64>,
         alpha: f32,
-    ) -> SplitRenderElements<C>
+    ) -> Vec<C>
     where
         R: Renderer + ImportAll + ImportMem,
         <R as Renderer>::TextureId: Send + Clone + 'static,
@@ -328,17 +328,44 @@ impl CosmicWindow {
             location
         };
 
-        let mut elements = SplitRenderElements::default();
+        self.0.with_program(|p| {
+            p.window
+                .popup_render_elements::<R, CosmicWindowRenderElement<R>>(
+                    renderer, window_loc, scale, alpha,
+                )
+                .into_iter()
+                .map(C::from)
+                .collect()
+        })
+    }
 
-        elements.extend_map(
-            self.0.with_program(|p| {
-                p.window
-                    .split_render_elements::<R, CosmicWindowRenderElement<R>>(
-                        renderer, window_loc, scale, alpha,
-                    )
-            }),
-            C::from,
-        );
+    pub fn render_elements<R, C>(
+        &self,
+        renderer: &mut R,
+        location: Point<i32, Physical>,
+        scale: Scale<f64>,
+        alpha: f32,
+    ) -> Vec<C>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        <R as Renderer>::TextureId: Send + Clone + 'static,
+        C: From<CosmicWindowRenderElement<R>>,
+    {
+        let has_ssd = self.0.with_program(|p| p.has_ssd(false));
+
+        let window_loc = if has_ssd {
+            location + Point::from((0, (SSD_HEIGHT as f64 * scale.y) as i32))
+        } else {
+            location
+        };
+
+        let mut elements = Vec::new();
+
+        elements.extend(self.0.with_program(|p| {
+            p.window.render_elements::<R, CosmicWindowRenderElement<R>>(
+                renderer, window_loc, scale, alpha,
+            )
+        }));
 
         if has_ssd {
             let ssd_loc = location
@@ -346,16 +373,12 @@ impl CosmicWindow {
                     .0
                     .with_program(|p| p.window.geometry().loc)
                     .to_physical_precise_round(scale);
-            elements.w_elements.extend(
-                AsRenderElements::<R>::render_elements::<CosmicWindowRenderElement<R>>(
-                    &self.0, renderer, ssd_loc, scale, alpha,
-                )
-                .into_iter()
-                .map(C::from),
-            )
+            elements.extend(AsRenderElements::<R>::render_elements::<
+                CosmicWindowRenderElement<R>,
+            >(&self.0, renderer, ssd_loc, scale, alpha))
         }
 
-        elements
+        elements.into_iter().map(C::from).collect()
     }
 
     pub(crate) fn set_theme(&self, theme: cosmic::Theme) {
