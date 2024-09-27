@@ -1,7 +1,7 @@
 use crate::{
     backend::render::{
         element::{AsGlowRenderer, FromGlesError},
-        BackdropShader, SplitRenderElements,
+        BackdropShader,
     },
     shell::{
         layout::{floating::FloatingLayout, tiling::TilingLayout},
@@ -921,10 +921,6 @@ impl Workspace {
             .chain(self.tiling_layer.mapped().map(|(w, _)| w))
     }
 
-    pub fn outputs(&self) -> impl Iterator<Item = &Output> {
-        self.floating_layer.space.outputs()
-    }
-
     pub fn is_empty(&self) -> bool {
         self.floating_layer.mapped().next().is_none()
             && self.tiling_layer.mapped().next().is_none()
@@ -1012,7 +1008,7 @@ impl Workspace {
         resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
         indicator_thickness: u8,
         theme: &CosmicTheme,
-    ) -> Result<SplitRenderElements<WorkspaceRenderElement<R>>, OutputNotMapped>
+    ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         <R as Renderer>::TextureId: Send + Clone + 'static,
@@ -1021,7 +1017,7 @@ impl Workspace {
         CosmicStackRenderElement<R>: RenderElement<R>,
         WorkspaceRenderElement<R>: RenderElement<R>,
     {
-        let mut elements = SplitRenderElements::default();
+        let mut elements = Vec::default();
 
         let output_scale = self.output.current_scale().fractional_scale();
         let zone = {
@@ -1104,26 +1100,19 @@ impl Workspace {
                 y: target_geo.size.h as f64 / bbox.size.h as f64,
             };
 
-            let SplitRenderElements {
-                w_elements,
-                p_elements,
-            } = fullscreen
-                .surface
-                .split_render_elements::<R, CosmicWindowRenderElement<R>>(
-                    renderer,
-                    render_loc,
-                    output_scale.into(),
-                    alpha,
-                );
-            elements.w_elements.extend(
-                w_elements
+            elements.extend(
+                fullscreen
+                    .surface
+                    .render_elements::<R, CosmicWindowRenderElement<R>>(
+                        renderer,
+                        render_loc,
+                        output_scale.into(),
+                        alpha,
+                    )
                     .into_iter()
                     .map(|elem| RescaleRenderElement::from_element(elem, render_loc, scale))
                     .map(Into::into),
             );
-            elements
-                .p_elements
-                .extend(p_elements.into_iter().map(Into::into))
         }
 
         if self
@@ -1155,16 +1144,18 @@ impl Workspace {
                 OverviewMode::None => 1.0,
             };
 
-            elements.extend_map(
-                self.floating_layer.render::<R>(
-                    renderer,
-                    focused.as_ref(),
-                    resize_indicator.clone(),
-                    indicator_thickness,
-                    alpha,
-                    theme,
-                ),
-                WorkspaceRenderElement::from,
+            elements.extend(
+                self.floating_layer
+                    .render::<R>(
+                        renderer,
+                        focused.as_ref(),
+                        resize_indicator.clone(),
+                        indicator_thickness,
+                        alpha,
+                        theme,
+                    )
+                    .into_iter()
+                    .map(WorkspaceRenderElement::from),
             );
 
             let alpha = match &overview.0 {
@@ -1181,21 +1172,23 @@ impl Workspace {
             };
 
             //tiling surfaces
-            elements.extend_map(
-                self.tiling_layer.render::<R>(
-                    renderer,
-                    draw_focus_indicator,
-                    zone,
-                    overview,
-                    resize_indicator,
-                    indicator_thickness,
-                    theme,
-                )?,
-                WorkspaceRenderElement::from,
+            elements.extend(
+                self.tiling_layer
+                    .render::<R>(
+                        renderer,
+                        draw_focus_indicator,
+                        zone,
+                        overview,
+                        resize_indicator,
+                        indicator_thickness,
+                        theme,
+                    )?
+                    .into_iter()
+                    .map(WorkspaceRenderElement::from),
             );
 
             if let Some(alpha) = alpha {
-                elements.w_elements.push(
+                elements.push(
                     Into::<CosmicMappedRenderElement<R>>::into(BackdropShader::element(
                         renderer,
                         self.backdrop_id.clone(),
@@ -1210,6 +1203,159 @@ impl Workspace {
                     .into(),
                 )
             }
+        }
+
+        Ok(elements)
+    }
+
+    #[profiling::function]
+    pub fn render_popups<'a, R>(
+        &self,
+        renderer: &mut R,
+        draw_focus_indicator: Option<&Seat<State>>,
+        overview: (OverviewMode, Option<(SwapIndicator, Option<&Tree<Data>>)>),
+        theme: &CosmicTheme,
+    ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
+    where
+        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+        <R as Renderer>::TextureId: Send + Clone + 'static,
+        CosmicMappedRenderElement<R>: RenderElement<R>,
+        CosmicWindowRenderElement<R>: RenderElement<R>,
+        CosmicStackRenderElement<R>: RenderElement<R>,
+        WorkspaceRenderElement<R>: RenderElement<R>,
+    {
+        let mut elements = Vec::default();
+
+        let output_scale = self.output.current_scale().fractional_scale();
+        let zone = {
+            let layer_map = layer_map_for_output(&self.output);
+            layer_map.non_exclusive_zone().as_local()
+        };
+
+        if let Some(fullscreen) = self.fullscreen.as_ref() {
+            // fullscreen window
+            let bbox = fullscreen.surface.bbox().as_local();
+            let element_geo = Rectangle::from_loc_and_size(
+                self.element_for_surface(&fullscreen.surface)
+                    .and_then(|elem| {
+                        self.floating_layer
+                            .element_geometry(elem)
+                            .or_else(|| self.tiling_layer.element_geometry(elem))
+                            .map(|mut geo| {
+                                geo.loc -= elem.geometry().loc.as_local();
+                                geo
+                            })
+                    })
+                    .unwrap_or(bbox)
+                    .loc,
+                fullscreen.original_geometry.size.as_local(),
+            );
+
+            let mut full_geo =
+                Rectangle::from_loc_and_size((0, 0), self.output.geometry().size.as_local());
+            if fullscreen.start_at.is_none() {
+                if bbox != full_geo {
+                    if bbox.size.w < full_geo.size.w {
+                        full_geo.loc.x += (full_geo.size.w - bbox.size.w) / 2;
+                        full_geo.size.w = bbox.size.w;
+                    }
+                    if bbox.size.h < full_geo.size.h {
+                        full_geo.loc.y += (full_geo.size.h - bbox.size.h) / 2;
+                        full_geo.size.h = bbox.size.h;
+                    }
+                }
+            }
+
+            let (target_geo, alpha) = match (fullscreen.start_at, fullscreen.ended_at) {
+                (Some(started), _) => {
+                    let duration = Instant::now().duration_since(started).as_secs_f64()
+                        / FULLSCREEN_ANIMATION_DURATION.as_secs_f64();
+                    (
+                        ease(
+                            EaseInOutCubic,
+                            EaseRectangle(element_geo),
+                            EaseRectangle(full_geo),
+                            duration,
+                        )
+                        .0,
+                        ease(EaseInOutCubic, 0.0, 1.0, duration),
+                    )
+                }
+                (_, Some(ended)) => {
+                    let duration = Instant::now().duration_since(ended).as_secs_f64()
+                        / FULLSCREEN_ANIMATION_DURATION.as_secs_f64();
+                    (
+                        ease(
+                            EaseInOutCubic,
+                            EaseRectangle(full_geo),
+                            EaseRectangle(element_geo),
+                            duration,
+                        )
+                        .0,
+                        ease(EaseInOutCubic, 1.0, 0.0, duration),
+                    )
+                }
+                (None, None) => (full_geo, 1.0),
+            };
+
+            let render_loc = target_geo
+                .loc
+                .as_logical()
+                .to_physical_precise_round(output_scale);
+
+            elements.extend(
+                fullscreen
+                    .surface
+                    .popup_render_elements::<R, CosmicWindowRenderElement<R>>(
+                        renderer,
+                        render_loc,
+                        output_scale.into(),
+                        alpha,
+                    )
+                    .into_iter()
+                    .map(Into::into),
+            );
+        }
+
+        if self
+            .fullscreen
+            .as_ref()
+            .map(|f| f.start_at.is_some() || f.ended_at.is_some())
+            .unwrap_or(true)
+        {
+            // floating surfaces
+            let alpha = match &overview.0 {
+                OverviewMode::Started(_, started) => {
+                    (1.0 - (Instant::now().duration_since(*started).as_millis()
+                        / ANIMATION_DURATION.as_millis()) as f32)
+                        .max(0.0)
+                        * 0.4
+                        + 0.6
+                }
+                OverviewMode::Ended(_, ended) => {
+                    ((Instant::now().duration_since(*ended).as_millis()
+                        / ANIMATION_DURATION.as_millis()) as f32)
+                        * 0.4
+                        + 0.6
+                }
+                OverviewMode::Active(_) => 0.6,
+                OverviewMode::None => 1.0,
+            };
+
+            elements.extend(
+                self.floating_layer
+                    .render_popups::<R>(renderer, alpha)
+                    .into_iter()
+                    .map(WorkspaceRenderElement::from),
+            );
+
+            //tiling surfaces
+            elements.extend(
+                self.tiling_layer
+                    .render_popups::<R>(renderer, draw_focus_indicator, zone, overview, theme)?
+                    .into_iter()
+                    .map(WorkspaceRenderElement::from),
+            );
         }
 
         Ok(elements)

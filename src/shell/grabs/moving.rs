@@ -2,8 +2,7 @@
 
 use crate::{
     backend::render::{
-        cursor::CursorState, element::AsGlowRenderer, BackdropShader, IndicatorShader, Key,
-        SplitRenderElements, Usage,
+        cursor::CursorState, element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, Usage,
     },
     shell::{
         element::{
@@ -181,12 +180,18 @@ impl MoveGrabState {
             _ => vec![],
         };
 
-        let SplitRenderElements {
-            w_elements,
-            p_elements,
-        } = self
+        let w_elements = self
             .window
-            .split_render_elements::<R, CosmicMappedRenderElement<R>>(
+            .render_elements::<R, CosmicMappedRenderElement<R>>(
+                renderer,
+                (render_location - self.window.geometry().loc)
+                    .to_physical_precise_round(output_scale),
+                output_scale,
+                alpha,
+            );
+        let p_elements = self
+            .window
+            .popup_render_elements::<R, CosmicMappedRenderElement<R>>(
                 renderer,
                 (render_location - self.window.geometry().loc)
                     .to_physical_precise_round(output_scale),

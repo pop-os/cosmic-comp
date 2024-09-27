@@ -1,6 +1,6 @@
 use super::{surface::RESIZE_BORDER, window::Focus, CosmicSurface};
 use crate::{
-    backend::render::{cursor::CursorState, SplitRenderElements},
+    backend::render::cursor::CursorState,
     shell::{
         focus::target::PointerFocusTarget,
         grabs::{ReleaseMode, ResizeEdge},
@@ -541,13 +541,40 @@ impl CosmicStack {
         self.0.loop_handle()
     }
 
-    pub fn split_render_elements<R, C>(
+    pub fn popup_render_elements<R, C>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
-    ) -> SplitRenderElements<C>
+    ) -> Vec<C>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        <R as Renderer>::TextureId: Send + Clone + 'static,
+        C: From<CosmicStackRenderElement<R>>,
+    {
+        let window_loc = location + Point::from((0, (TAB_HEIGHT as f64 * scale.y) as i32));
+        self.0.with_program(|p| {
+            let windows = p.windows.lock().unwrap();
+            let active = p.active.load(Ordering::SeqCst);
+
+            windows[active]
+                .popup_render_elements::<R, CosmicStackRenderElement<R>>(
+                    renderer, window_loc, scale, alpha,
+                )
+                .into_iter()
+                .map(C::from)
+                .collect()
+        })
+    }
+
+    pub fn render_elements<R, C>(
+        &self,
+        renderer: &mut R,
+        location: Point<i32, Physical>,
+        scale: Scale<f64>,
+        alpha: f32,
+    ) -> Vec<C>
     where
         R: Renderer + ImportAll + ImportMem,
         <R as Renderer>::TextureId: Send + Clone + 'static,
@@ -564,28 +591,20 @@ impl CosmicStack {
         let stack_loc = location + offset;
         let window_loc = location + Point::from((0, (TAB_HEIGHT as f64 * scale.y) as i32));
 
-        let w_elements = AsRenderElements::<R>::render_elements::<CosmicStackRenderElement<R>>(
+        let mut elements = AsRenderElements::<R>::render_elements::<CosmicStackRenderElement<R>>(
             &self.0, renderer, stack_loc, scale, alpha,
         );
 
-        let mut elements = SplitRenderElements {
-            w_elements: w_elements.into_iter().map(C::from).collect(),
-            p_elements: Vec::new(),
-        };
+        elements.extend(self.0.with_program(|p| {
+            let windows = p.windows.lock().unwrap();
+            let active = p.active.load(Ordering::SeqCst);
 
-        elements.extend_map(
-            self.0.with_program(|p| {
-                let windows = p.windows.lock().unwrap();
-                let active = p.active.load(Ordering::SeqCst);
+            windows[active].render_elements::<R, CosmicStackRenderElement<R>>(
+                renderer, window_loc, scale, alpha,
+            )
+        }));
 
-                windows[active].split_render_elements::<R, CosmicStackRenderElement<R>>(
-                    renderer, window_loc, scale, alpha,
-                )
-            }),
-            C::from,
-        );
-
-        elements
+        elements.into_iter().map(C::from).collect()
     }
 
     pub(crate) fn set_theme(&self, theme: cosmic::Theme) {
