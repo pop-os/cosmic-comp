@@ -3707,7 +3707,7 @@ impl Shell {
             cosmic::icon_theme::set_default(toolkit.icon_theme.clone());
         }
 
-        let mut container = cosmic::config::COSMIC_TK.lock().unwrap();
+        let mut container = cosmic::config::COSMIC_TK.write().unwrap();
         if &*container != &toolkit {
             *container = toolkit;
             drop(container);

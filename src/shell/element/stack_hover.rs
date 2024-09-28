@@ -39,10 +39,7 @@ impl Program for StackHoverInternal {
                 .icon()
                 .into(),
             horizontal_space(16).into(),
-            text(fl!("stack-windows"))
-                .font(cosmic::font::FONT)
-                .size(24)
-                .into(),
+            text::title3(fl!("stack-windows")).into(),
         ])
         .align_items(Alignment::Center)
         .apply(container)

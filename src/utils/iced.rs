@@ -180,7 +180,7 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
         }
         let mut renderer = cosmic::Renderer::TinySkia(IcedGraphicsRenderer::new(
             Backend::new(),
-            cosmic::font::DEFAULT,
+            cosmic::font::default(),
             Pixels(16.0),
         ));
         let mut debug = Debug::new();
@@ -246,7 +246,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         let size = size.into();
         let mut renderer = cosmic::Renderer::TinySkia(IcedGraphicsRenderer::new(
             Backend::new(),
-            cosmic::font::DEFAULT,
+            cosmic::font::default(),
             Pixels(16.0),
         ));
         let mut debug = Debug::new();

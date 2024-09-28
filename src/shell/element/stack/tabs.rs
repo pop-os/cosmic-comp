@@ -134,7 +134,7 @@ where
                     } else {
                         TabBackgroundTheme::ActiveDeactivated
                     })
-                    .font(cosmic::font::FONT_SEMIBOLD)
+                    .font(cosmic::font::semibold())
                     .active()
             } else if i.checked_sub(1) == Some(active) {
                 tab.rule_style(rule).non_active()
