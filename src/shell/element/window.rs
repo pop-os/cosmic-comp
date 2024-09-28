@@ -11,10 +11,7 @@ use crate::{
     },
 };
 use calloop::LoopHandle;
-use cosmic::{
-    config::Density,
-    iced::{Color, Command},
-};
+use cosmic::iced::{Color, Command};
 use smithay::{
     backend::{
         input::KeyState,
@@ -503,7 +500,6 @@ impl Program for CosmicWindowInternal {
             .on_drag(Message::DragStart)
             .on_close(Message::Close)
             .focused(self.window.is_activated(false))
-            .density(Density::Compact)
             .on_double_click(Message::Maximize)
             .on_right_click(Message::Menu);
 

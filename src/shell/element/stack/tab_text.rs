@@ -39,7 +39,7 @@ impl TabText {
         TabText {
             width: Length::Shrink,
             height: Length::Shrink,
-            font: cosmic::font::DEFAULT,
+            font: cosmic::font::default(),
             font_size: 14.0,
             selected,
             text,

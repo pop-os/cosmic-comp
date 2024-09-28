@@ -158,7 +158,7 @@ impl<Message: TabMessage + 'static> Tab<Message> {
             id,
             app_icon: from_name(app_id.into()).size(16).icon(),
             title: title.into(),
-            font: cosmic::font::FONT,
+            font: cosmic::font::default(),
             close_message: None,
             press_message: None,
             right_click_message: None,
