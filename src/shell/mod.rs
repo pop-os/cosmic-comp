@@ -1,13 +1,16 @@
 use calloop::LoopHandle;
+use focus::target::WindowGroup;
 use grabs::SeatMoveGrabState;
 use indexmap::IndexMap;
+use layout::TilingExceptions;
 use std::{
     collections::HashMap,
-    sync::atomic::Ordering,
+    sync::{atomic::Ordering, Mutex},
     time::{Duration, Instant},
 };
 use wayland_backend::server::ClientId;
 
+use crate::wayland::{handlers::data_device, protocols::workspace::WorkspaceCapabilities};
 use cosmic_comp_config::{
     workspace::{RemoveEmpty, WorkspaceConfig, WorkspaceLayout, WorkspaceMode},
     TileBehavior,
@@ -15,8 +18,8 @@ use cosmic_comp_config::{
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::{
     State as WState, TilingState,
 };
-use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection, ResizeDirection};
+use cosmic_settings_config::{shortcuts, window_rules::ApplicationException};
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     backend::{input::TouchSlot, renderer::element::RenderElementStates},
@@ -30,7 +33,9 @@ use smithay::{
         LayerSurface, PopupKind, WindowSurface, WindowSurfaceType,
     },
     input::{
-        pointer::{Focus, GrabStartData as PointerGrabStartData},
+        pointer::{
+            CursorImageStatus, CursorImageSurfaceData, Focus, GrabStartData as PointerGrabStartData,
+        },
         Seat,
     },
     output::Output,
@@ -40,7 +45,8 @@ use smithay::{
     },
     utils::{IsAlive, Logical, Point, Rectangle, Serial, Size},
     wayland::{
-        compositor::with_states,
+        compositor::{with_states, SurfaceAttributes},
+        foreign_toplevel_list::ForeignToplevelListState,
         seat::WaylandFocus,
         session_lock::LockSurface,
         shell::wlr_layer::{KeyboardInteractivity, Layer, LayerSurfaceCachedState},
@@ -48,6 +54,8 @@ use smithay::{
     },
     xwayland::X11Surface,
 };
+
+use smithay::wayland::shell::wlr_layer::Layer as WlrLayer;
 
 use crate::{
     backend::render::animations::spring::{Spring, SpringParams},
@@ -64,8 +72,7 @@ use crate::{
                 toplevel_leave_workspace, ToplevelInfoState,
             },
             workspace::{
-                WorkspaceCapabilities, WorkspaceGroupHandle, WorkspaceHandle, WorkspaceState,
-                WorkspaceUpdateGuard,
+                WorkspaceGroupHandle, WorkspaceHandle, WorkspaceState, WorkspaceUpdateGuard,
             },
         },
     },
@@ -250,6 +257,7 @@ pub struct Shell {
         Output,
     )>,
     resize_indicator: Option<ResizeIndicator>,
+    tiling_exceptions: TilingExceptions,
 
     #[cfg(feature = "debug")]
     pub debug_active: bool,
@@ -474,8 +482,15 @@ impl WorkspaceSet {
             self.active = idx;
             Ok(true)
         } else {
-            if let Some((p_idx, _)) = self.previously_active {
-                self.previously_active = Some((p_idx, workspace_delta));
+            // snap to workspace, when in between workspaces due to swipe gesture
+            if let Some((p_idx, p_delta)) = self.previously_active {
+                if matches!(p_delta, WorkspaceDelta::Gesture(..))
+                    && matches!(workspace_delta, WorkspaceDelta::GestureEnd(..))
+                {
+                    self.previously_active = Some((p_idx, workspace_delta));
+                } else {
+                    self.previously_active = None;
+                }
                 return Ok(true);
             }
             Ok(false)
@@ -512,7 +527,7 @@ impl WorkspaceSet {
         self.output = new_output.clone();
     }
 
-    fn refresh<'a>(&mut self, xdg_activation_state: &XdgActivationState) {
+    fn refresh(&mut self, xdg_activation_state: &XdgActivationState) {
         if let Some((_, start)) = self.previously_active {
             match start {
                 WorkspaceDelta::Shortcut(st) => {
@@ -1245,6 +1260,37 @@ impl Common {
                         }
                     }
                 }
+
+                data_device::on_commit(surface, seat);
+            }
+
+            let is_cursor_image = shell.seats.iter().any(|seat| {
+                seat.user_data()
+                .get::<Mutex<CursorImageStatus>>()
+                .map(|guard| {
+                    matches!(*guard.lock().unwrap(), CursorImageStatus::Surface(ref cursor_surface) if cursor_surface == surface)
+                })
+                .unwrap_or(false)
+            });
+
+            if is_cursor_image {
+                with_states(surface, |states| {
+                    let cursor_image_attributes = states.data_map.get::<CursorImageSurfaceData>();
+
+                    if let Some(mut cursor_image_attributes) =
+                        cursor_image_attributes.map(|attrs| attrs.lock().unwrap())
+                    {
+                        let buffer_delta = states
+                            .cached_state
+                            .get::<SurfaceAttributes>()
+                            .current()
+                            .buffer_delta
+                            .take();
+                        if let Some(buffer_delta) = buffer_delta {
+                            cursor_image_attributes.hotspot -= buffer_delta;
+                        }
+                    }
+                });
             }
 
             if let Some(mapped) = shell.element_for_surface(surface) {
@@ -1258,6 +1304,8 @@ impl Common {
 impl Shell {
     pub fn new(config: &Config) -> Self {
         let theme = cosmic::theme::system_preference();
+
+        let tiling_exceptions = layout::TilingExceptions::new(config.tiling_exceptions.iter());
 
         Shell {
             workspaces: Workspaces::new(config, theme.clone()),
@@ -1276,6 +1324,7 @@ impl Shell {
             resize_mode: ResizeMode::None,
             resize_state: None,
             resize_indicator: None,
+            tiling_exceptions,
 
             #[cfg(feature = "debug")]
             debug_active: false,
@@ -1428,6 +1477,224 @@ impl Shell {
 
     pub fn active_space_mut(&mut self, output: &Output) -> &mut Workspace {
         self.workspaces.active_mut(output)
+    }
+
+    /// get the parent output of the window which has keyboard focus (for a given seat)
+    pub fn get_output_for_focus(&self, seat: &Seat<State>) -> Option<Output> {
+        let mut focus_target = seat.get_keyboard().unwrap().current_focus()?;
+
+        if let KeyboardFocusTarget::Popup(popup) = &focus_target {
+            let new_target = match popup {
+                PopupKind::Xdg(popup) => {
+                    if let Some(parent) = popup.get_parent_surface() {
+                        self.element_for_surface(&parent).cloned()
+                    } else {
+                        None
+                    }
+                }
+                PopupKind::InputMethod(popup) => {
+                    if let Some(parent) = popup.get_parent() {
+                        self.element_for_surface(&parent.surface).cloned()
+                    } else {
+                        None
+                    }
+                }
+            }?;
+
+            focus_target = KeyboardFocusTarget::Element(new_target);
+        };
+
+        match focus_target {
+            KeyboardFocusTarget::Element(elem) => {
+                if seat
+                    .user_data()
+                    .get::<SeatMoveGrabState>()
+                    .is_some_and(|state| {
+                        state
+                            .lock()
+                            .unwrap()
+                            .as_ref()
+                            .is_some_and(|state| state.element() == elem)
+                    })
+                {
+                    return Some(seat.active_output());
+                }
+
+                self.outputs()
+                    .find(|output| {
+                        let is_sticky = self
+                            .workspaces
+                            .sets
+                            .get(*output)
+                            .unwrap()
+                            .sticky_layer
+                            .mapped()
+                            .any(|m| m == &elem);
+
+                        let workspace = self.active_space(output);
+                        let is_mapped = workspace.mapped().any(|m| m == &elem);
+
+                        is_sticky || is_mapped
+                    })
+                    .cloned()
+            }
+            KeyboardFocusTarget::Fullscreen(elem) => self
+                .outputs()
+                .find(|output| {
+                    let workspace = self.active_space(&output);
+                    workspace.get_fullscreen() == Some(&elem)
+                })
+                .cloned(),
+            KeyboardFocusTarget::Group(WindowGroup { node, .. }) => self
+                .outputs()
+                .find(|output| {
+                    self.workspaces
+                        .active(&output)
+                        .1
+                        .tiling_layer
+                        .has_node(&node)
+                })
+                .cloned(),
+            KeyboardFocusTarget::LayerSurface(layer) => self
+                .outputs()
+                .find(|output| layer_map_for_output(output).layers().any(|l| l == &layer))
+                .cloned(),
+            KeyboardFocusTarget::LockSurface(surface) => self
+                .session_lock
+                .as_ref()?
+                .surfaces
+                .iter()
+                .find_map(|(output, s)| (s == &surface).then_some(output))
+                .cloned(),
+            KeyboardFocusTarget::Popup(_) => unreachable!(),
+        }
+    }
+
+    /// Derives a keyboard focus target from a global position, and indicates whether the
+    /// the shell should start a move request event. Used during cursor related focus checks
+    pub fn keyboard_target_from_position(
+        &self,
+        global_position: Point<f64, Global>,
+        output: &Output,
+    ) -> Option<KeyboardFocusTarget> {
+        let relative_pos = global_position.to_local(output);
+
+        let mut under: Option<KeyboardFocusTarget> = None;
+        // if the lockscreen is active
+        if let Some(session_lock) = self.session_lock.as_ref() {
+            under = session_lock
+                .surfaces
+                .get(output)
+                .map(|lock| lock.clone().into());
+            // if the output can receive keyboard focus
+        } else if let Some(window) = self.active_space(output).get_fullscreen() {
+            let layers = layer_map_for_output(output);
+            if let Some(layer) = layers.layer_under(WlrLayer::Overlay, relative_pos.as_logical()) {
+                let layer_loc = layers.layer_geometry(layer).unwrap().loc;
+                if layer.can_receive_keyboard_focus()
+                    && layer
+                        .surface_under(
+                            relative_pos.as_logical() - layer_loc.to_f64(),
+                            WindowSurfaceType::ALL,
+                        )
+                        .is_some()
+                {
+                    under = Some(layer.clone().into());
+                }
+            } else {
+                under = Some(window.clone().into());
+            }
+        } else {
+            let done = {
+                let layers = layer_map_for_output(output);
+                if let Some(layer) = layers
+                    .layer_under(WlrLayer::Overlay, relative_pos.as_logical())
+                    .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos.as_logical()))
+                {
+                    let layer_loc = layers.layer_geometry(layer).unwrap().loc;
+                    if layer.can_receive_keyboard_focus()
+                        && layer
+                            .surface_under(
+                                relative_pos.as_logical() - layer_loc.to_f64(),
+                                WindowSurfaceType::ALL,
+                            )
+                            .is_some()
+                    {
+                        under = Some(layer.clone().into());
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            };
+            if !done {
+                // Don't check override redirect windows, because we don't set keyboard focus to them explicitly.
+                // These cases are handled by the XwaylandKeyboardGrab.
+                if let Some(target) = self.element_under(global_position, output) {
+                    under = Some(target);
+                } else {
+                    let layers = layer_map_for_output(output);
+                    if let Some(layer) = layers
+                        .layer_under(WlrLayer::Bottom, relative_pos.as_logical())
+                        .or_else(|| {
+                            layers.layer_under(WlrLayer::Background, relative_pos.as_logical())
+                        })
+                    {
+                        let layer_loc = layers.layer_geometry(layer).unwrap().loc;
+                        if layer.can_receive_keyboard_focus()
+                            && layer
+                                .surface_under(
+                                    relative_pos.as_logical() - layer_loc.to_f64(),
+                                    WindowSurfaceType::ALL,
+                                )
+                                .is_some()
+                        {
+                            under = Some(layer.clone().into());
+                        }
+                    };
+                }
+            }
+        }
+
+        under
+    }
+
+    /// Coerce a keyboard focus target into a CosmicMapped element. This is useful when performing window specific
+    /// actions, such as closing a window
+    pub fn focused_element(&self, focus_target: &KeyboardFocusTarget) -> Option<CosmicMapped> {
+        match focus_target {
+            KeyboardFocusTarget::Fullscreen(surface) => self.element_for_surface(surface).cloned(),
+            KeyboardFocusTarget::Element(window) => Some(window).cloned(),
+            KeyboardFocusTarget::Popup(PopupKind::Xdg(popup)) => {
+                if let Some(parent) = popup.get_parent_surface() {
+                    self.element_for_surface(&parent).cloned()
+                } else {
+                    None
+                }
+            }
+            KeyboardFocusTarget::Popup(PopupKind::InputMethod(popup)) => {
+                if let Some(parent) = popup.get_parent() {
+                    self.element_for_surface(&parent.surface).cloned()
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Close the focused keyboard focus target
+    pub fn close_focused(&self, focus_target: &KeyboardFocusTarget) {
+        if let KeyboardFocusTarget::Group(_group) = focus_target {
+            //TODO: decide if we want close actions to apply to groups
+            return;
+        } else {
+            if let Some(mapped) = self.focused_element(focus_target) {
+                mapped.send_close();
+            }
+        }
     }
 
     pub fn refresh_active_space(
@@ -1975,7 +2242,7 @@ impl Shell {
             && (workspace_output != seat.active_output() || active_handle != workspace.handle);
         let workspace_handle = workspace.handle;
         let is_dialog = layout::is_dialog(&window);
-        let floating_exception = layout::has_floating_exception(&window);
+        let floating_exception = layout::has_floating_exception(&self.tiling_exceptions, &window);
 
         let maybe_focused = workspace.focus_stack.get(&seat).iter().next().cloned();
         if let Some(focused) = maybe_focused {
@@ -2154,11 +2421,11 @@ impl Shell {
     }
 
     pub fn element_under(
-        &mut self,
+        &self,
         location: Point<f64, Global>,
         output: &Output,
     ) -> Option<KeyboardFocusTarget> {
-        self.workspaces.sets.get_mut(output).and_then(|set| {
+        self.workspaces.sets.get(output).and_then(|set| {
             set.sticky_layer
                 .space
                 .element_under(location.to_local(output).as_logical())
@@ -2316,23 +2583,80 @@ impl Shell {
             .ok_or(InvalidWorkspaceIndex)?;
 
         let from_workspace = self.workspaces.active_mut(from_output);
-        let maybe_window = from_workspace.focus_stack.get(seat).last().cloned();
-
-        let Some(mapped) = maybe_window else {
-            return Ok(None);
-        };
-
+        let last_focused_window = from_workspace.focus_stack.get(seat).last().cloned();
         let from = from_workspace.handle;
 
-        Ok(self.move_window(
-            Some(seat),
-            &mapped,
-            &from,
-            &to,
-            follow,
-            direction,
-            workspace_state,
-        ))
+        match seat.get_keyboard().unwrap().current_focus() {
+            Some(KeyboardFocusTarget::Group(WindowGroup {
+                node, focus_stack, ..
+            })) => {
+                let new_pos = if follow {
+                    seat.set_active_output(&to_output);
+                    self.workspaces
+                        .idx_for_handle(&to_output, &to)
+                        .and_then(|to_idx| {
+                            self.activate(
+                                &to_output,
+                                to_idx,
+                                WorkspaceDelta::new_shortcut(),
+                                workspace_state,
+                            )
+                            .unwrap()
+                        })
+                } else {
+                    None
+                };
+
+                let spaces = self.workspaces.spaces_mut();
+                let (mut from_w, mut other_w) = spaces.partition::<Vec<_>, _>(|w| w.handle == from);
+                if let Some(from_workspace) = from_w.get_mut(0) {
+                    if let Some(to_workspace) = other_w.iter_mut().find(|w| w.handle == to) {
+                        {
+                            let mut stack = to_workspace.focus_stack.get_mut(&seat);
+                            for elem in focus_stack.iter().flat_map(|node_id| {
+                                from_workspace.tiling_layer.element_for_node(node_id)
+                            }) {
+                                stack.append(elem);
+                            }
+                        }
+                        let res = TilingLayout::move_tree(
+                            &mut from_workspace.tiling_layer,
+                            &mut to_workspace.tiling_layer,
+                            &to,
+                            seat,
+                            to_workspace.focus_stack.get(&seat).iter(),
+                            NodeDesc {
+                                handle: from,
+                                node,
+                                stack_window: None,
+                                focus_stack,
+                            },
+                            direction,
+                        );
+                        from_workspace.refresh_focus_stack();
+                        to_workspace.refresh_focus_stack();
+                        return Ok(res.zip(new_pos));
+                    }
+                }
+
+                Ok(None)
+            }
+            _ => {
+                if let Some(mapped) = last_focused_window {
+                    Ok(self.move_window(
+                        Some(seat),
+                        &mapped,
+                        &from,
+                        &to,
+                        follow,
+                        direction,
+                        workspace_state,
+                    ))
+                } else {
+                    Ok(None)
+                }
+            }
+        }
     }
 
     pub fn update_reactive_popups(&self, mapped: &CosmicMapped) {
@@ -2471,15 +2795,11 @@ impl Shell {
         config: &Config,
         evlh: &LoopHandle<'static, State>,
         xdg_activation_state: &XdgActivationState,
+        client_initiated: bool,
     ) -> Option<(MoveGrab, Focus)> {
         let serial = serial.into();
 
-        let mut start_data = check_grab_preconditions(
-            &seat,
-            surface,
-            serial,
-            release == ReleaseMode::NoMouseButtons && !move_out_of_stack,
-        )?;
+        let mut start_data = check_grab_preconditions(&seat, surface, serial, client_initiated)?;
         let mut old_mapped = self.element_for_surface(surface).cloned()?;
         if old_mapped.is_minimized() {
             return None;
@@ -2656,7 +2976,7 @@ impl Shell {
             seat,
             initial_window_location,
             cursor_output,
-            active_hint as u8,
+            active_hint,
             layer,
             release,
             evlh.clone(),
@@ -2669,14 +2989,52 @@ impl Shell {
         Some((grab, Focus::Clear))
     }
 
-    #[must_use]
-    pub fn next_focus<'a>(&self, direction: FocusDirection, seat: &Seat<State>) -> FocusResult {
-        let overview = self.overview_mode().0;
-        let output = seat.active_output();
+    // Just to avoid a longer lived shell reference
+    /// Get the window geometry of a keyboard focus target
+    pub fn focused_geometry(&self, target: &KeyboardFocusTarget) -> Option<Rectangle<i32, Global>> {
+        if let Some(element) = self.focused_element(target) {
+            self.element_geometry(&element)
+        } else {
+            None
+        }
+    }
 
+    pub fn element_geometry(&self, mapped: &CosmicMapped) -> Option<Rectangle<i32, Global>> {
+        if let Some(set) = self
+            .workspaces
+            .sets
+            .values()
+            .find(|set| set.sticky_layer.mapped().any(|m| m == mapped))
+        {
+            let geometry = set
+                .sticky_layer
+                .element_geometry(mapped)
+                .unwrap()
+                .to_global(&set.output);
+            Some(geometry)
+        } else if let Some(workspace) = self.space_for(&mapped) {
+            let geometry = workspace
+                .element_geometry(&mapped)
+                .unwrap()
+                .to_global(workspace.output());
+            Some(geometry)
+        } else {
+            None
+        }
+    }
+
+    #[must_use]
+    pub fn next_focus(&self, direction: FocusDirection, seat: &Seat<State>) -> FocusResult {
+        let overview = self.overview_mode().0;
         let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
             return FocusResult::None;
         };
+        let output = seat.active_output();
+        let workspace = self.active_space(&output);
+
+        if workspace.fullscreen.is_some() {
+            return FocusResult::None;
+        }
 
         if matches!(target, KeyboardFocusTarget::Fullscreen(_)) {
             return FocusResult::None;
@@ -2824,7 +3182,9 @@ impl Shell {
         direction: Direction,
         seat: &Seat<State>,
     ) -> MoveResult {
-        let output = seat.active_output();
+        let Some(output) = seat.focused_output() else {
+            return MoveResult::None;
+        };
         let workspace = self.active_space(&output);
         let focus_stack = workspace.focus_stack.get(seat);
         let Some(last) = focus_stack.last().cloned() else {
@@ -3113,9 +3473,10 @@ impl Shell {
         seat: &Seat<State>,
         serial: impl Into<Option<Serial>>,
         edges: ResizeEdge,
+        client_initiated: bool,
     ) -> Option<(ResizeGrab, Focus)> {
         let serial = serial.into();
-        let start_data = check_grab_preconditions(&seat, surface, serial, true)?;
+        let start_data = check_grab_preconditions(&seat, surface, serial, client_initiated)?;
         let mapped = self.element_for_surface(surface).cloned()?;
         if mapped.is_fullscreen(true) || mapped.is_maximized(true) {
             return None;
@@ -3164,7 +3525,9 @@ impl Shell {
     }
 
     pub fn resize(&mut self, seat: &Seat<State>, direction: ResizeDirection, edge: ResizeEdge) {
-        let output = seat.active_output();
+        let Some(output) = seat.focused_output() else {
+            return;
+        };
         let (_, idx) = self.workspaces.active_num(&output);
         let Some(focused) = seat.get_keyboard().unwrap().current_focus() else {
             return;
@@ -3265,7 +3628,10 @@ impl Shell {
 
     #[must_use]
     pub fn toggle_stacking_focused(&mut self, seat: &Seat<State>) -> Option<KeyboardFocusTarget> {
-        let set = self.workspaces.sets.get_mut(&seat.active_output()).unwrap();
+        let Some(focused_output) = seat.focused_output() else {
+            return None;
+        };
+        let set = self.workspaces.sets.get_mut(&focused_output).unwrap();
         let workspace = &mut set.workspaces[set.active];
         let maybe_window = workspace.focus_stack.get(seat).iter().next().cloned();
         if let Some(window) = maybe_window {
@@ -3288,7 +3654,7 @@ impl Shell {
         }
     }
 
-    pub fn toggle_sticky<'a>(&mut self, seat: &Seat<State>, mapped: &CosmicMapped) {
+    pub fn toggle_sticky(&mut self, seat: &Seat<State>, mapped: &CosmicMapped) {
         // clean from focus-stacks
         for workspace in self.workspaces.spaces_mut() {
             for seat in self.seats.iter() {
@@ -3318,6 +3684,7 @@ impl Shell {
             let handle = workspace.handle;
 
             for (window, _) in mapped.windows() {
+                window.set_sticky(true);
                 toplevel_leave_workspace(&window, &handle);
             }
 
@@ -3339,6 +3706,7 @@ impl Shell {
             let workspace = &mut set.workspaces[set.active];
             for (window, _) in mapped.windows() {
                 toplevel_enter_workspace(&window, &workspace.handle);
+                window.set_sticky(false);
             }
 
             match mapped
@@ -3362,7 +3730,7 @@ impl Shell {
         self.append_focus_stack(&mapped, seat);
     }
 
-    pub fn toggle_sticky_current<'a>(&mut self, seat: &Seat<State>) {
+    pub fn toggle_sticky_current(&mut self, seat: &Seat<State>) {
         let set = self.workspaces.sets.get_mut(&seat.active_output()).unwrap();
         let workspace = &mut set.workspaces[set.active];
         let maybe_window = workspace.focus_stack.get(seat).iter().next().cloned();
@@ -3404,6 +3772,13 @@ impl Shell {
 
     pub fn theme(&self) -> &cosmic::Theme {
         &self.theme
+    }
+
+    pub fn update_tiling_exceptions<'a, I>(&mut self, exceptions: I)
+    where
+        I: Iterator<Item = &'a ApplicationException>,
+    {
+        self.tiling_exceptions = layout::TilingExceptions::new(exceptions);
     }
 
     pub fn take_presentation_feedback(
@@ -3453,10 +3828,22 @@ impl Shell {
 
         output_presentation_feedback
     }
+
+    pub fn mapped(&self) -> impl Iterator<Item = &CosmicMapped> {
+        self.workspaces.iter().flat_map(|(_, set)| {
+            set.sticky_layer
+                .mapped()
+                .chain(set.minimized_windows.iter().map(|m| &m.window))
+                .chain(set.workspaces.iter().flat_map(|w| {
+                    w.mapped()
+                        .chain(w.minimized_windows.iter().map(|m| &m.window))
+                }))
+        })
+    }
 }
 
-fn workspace_set_idx<'a>(
-    state: &mut WorkspaceUpdateGuard<'a, State>,
+fn workspace_set_idx(
+    state: &mut WorkspaceUpdateGuard<'_, State>,
     idx: u8,
     output_pos: usize,
     handle: &WorkspaceHandle,

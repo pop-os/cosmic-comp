@@ -5,6 +5,8 @@
 pub use input::{AccelProfile, ClickMethod, ScrollMethod, TapButtonMap};
 use serde::{Deserialize, Serialize};
 
+// Note: For the following values, None is used to represent the system default
+// Configuration for input devices
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct InputConfig {
     pub state: DeviceState,

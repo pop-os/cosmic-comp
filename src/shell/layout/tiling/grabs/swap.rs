@@ -1,6 +1,6 @@
 use cosmic_settings_config::shortcuts;
 use smithay::{
-    backend::input::KeyState,
+    backend::input::{KeyState, Keycode},
     input::{
         keyboard::{
             GrabStartData as KeyboardGrabStartData, KeyboardGrab, KeyboardInnerHandle,
@@ -10,7 +10,6 @@ use smithay::{
     },
     utils::Serial,
 };
-use xkbcommon::xkb::Keysym;
 
 use crate::{
     config::key_bindings::cosmic_modifiers_from_smithay,
@@ -34,7 +33,7 @@ impl KeyboardGrab<State> for SwapWindowGrab {
         &mut self,
         data: &mut State,
         handle: &mut KeyboardInnerHandle<'_, State>,
-        keycode: u32,
+        keycode: Keycode,
         state: KeyState,
         modifiers: Option<ModifiersState>,
         serial: Serial,
@@ -81,7 +80,7 @@ impl KeyboardGrab<State> for SwapWindowGrab {
                 modifiers: modifiers
                     .map(cosmic_modifiers_from_smithay)
                     .unwrap_or_default(),
-                key: Some(Keysym::new(keycode)),
+                key: Some(handle.keysym_handle(keycode).modified_sym()),
                 description: None,
             },
             None,

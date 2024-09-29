@@ -8,7 +8,7 @@ use crate::{
         x11::X11State,
     },
     config::{Config, OutputConfig, OutputState},
-    input::gestures::GestureState,
+    input::{gestures::GestureState, PointerFocusState},
     shell::{grabs::SeatMoveGrabState, CosmicSurface, SeatExt, Shell},
     utils::prelude::OutputExt,
     wayland::protocols::{
@@ -66,6 +66,7 @@ use smithay::{
     wayland::{
         alpha_modifier::AlphaModifierState,
         compositor::{CompositorClientState, CompositorState, SurfaceData},
+        cursor_shape::CursorShapeManagerState,
         dmabuf::{DmabufFeedback, DmabufGlobal, DmabufState},
         fractional_scale::{with_fractional_scale, FractionalScaleManagerState},
         idle_inhibit::IdleInhibitManagerState,
@@ -89,11 +90,13 @@ use smithay::{
             xdg::{decoration::XdgDecorationState, XdgShellState},
         },
         shm::ShmState,
+        single_pixel_buffer::SinglePixelBufferState,
         tablet_manager::TabletManagerState,
         text_input::TextInputManagerState,
         viewporter::ViewporterState,
         virtual_keyboard::VirtualKeyboardManagerState,
         xdg_activation::XdgActivationState,
+        xdg_foreign::XdgForeignState,
         xwayland_keyboard_grab::XWaylandKeyboardGrabState,
         xwayland_shell::XWaylandShellState,
     },
@@ -206,6 +209,7 @@ pub struct Common {
     pub idle_inhibit_manager_state: IdleInhibitManagerState,
     pub idle_inhibiting_surfaces: HashSet<WlSurface>,
     pub shm_state: ShmState,
+    pub cursor_shape_manager_state: CursorShapeManagerState,
     pub wl_drm_state: WlDrmState<Option<DrmNode>>,
     pub viewporter_state: ViewporterState,
     pub kde_decoration_state: KdeDecorationState,
@@ -217,9 +221,12 @@ pub struct Common {
     pub toplevel_info_state: ToplevelInfoState<State, CosmicSurface>,
     pub toplevel_management_state: ToplevelManagementState,
     pub xdg_activation_state: XdgActivationState,
+    pub xdg_foreign_state: XdgForeignState,
     pub workspace_state: WorkspaceState<State>,
+    pub xwayland_scale: Option<i32>,
     pub xwayland_state: Option<XWaylandState>,
     pub xwayland_shell_state: XWaylandShellState,
+    pub pointer_focus_state: Option<PointerFocusState>,
 }
 
 #[derive(Debug)]
@@ -348,6 +355,8 @@ impl BackendData {
 
             self.schedule_render(&output);
         }
+
+        loop_handle.insert_idle(|state| state.common.update_xwayland_scale());
 
         Ok(())
     }
@@ -495,6 +504,7 @@ impl State {
         let screencopy_state = ScreencopyState::new::<Self, _>(dh, client_is_privileged);
         let shm_state =
             ShmState::new::<Self>(dh, vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888]);
+        let cursor_shape_manager_state = CursorShapeManagerState::new::<State>(dh);
         let seat_state = SeatState::<Self>::new();
         let viewporter_state = ViewporterState::new::<Self>(dh);
         let wl_drm_state = WlDrmState::<Option<DrmNode>>::default();
@@ -512,6 +522,7 @@ impl State {
         TextInputManagerState::new::<Self>(&dh);
         VirtualKeyboardManagerState::new::<State, _>(&dh, client_is_privileged);
         AlphaModifierState::new::<Self>(&dh);
+        SinglePixelBufferState::new::<Self>(&dh);
 
         let idle_notifier_state = IdleNotifierState::<Self>::new(&dh, handle.clone());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(&dh);
@@ -537,6 +548,7 @@ impl State {
             ],
         );
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
+        let xdg_foreign_state = XdgForeignState::new::<State>(dh);
         let toplevel_info_state = ToplevelInfoState::new(dh, client_is_privileged);
         let toplevel_management_state = ToplevelManagementState::new::<State, _>(
             dh,
@@ -586,6 +598,7 @@ impl State {
                 image_source_state,
                 screencopy_state,
                 shm_state,
+                cursor_shape_manager_state,
                 seat_state,
                 session_lock_manager_state,
                 keyboard_shortcuts_inhibit_state,
@@ -603,9 +616,12 @@ impl State {
                 toplevel_info_state,
                 toplevel_management_state,
                 xdg_activation_state,
+                xdg_foreign_state,
                 workspace_state,
+                xwayland_scale: None,
                 xwayland_state: None,
                 xwayland_shell_state,
+                pointer_focus_state: None,
             },
             backend: BackendData::Unset,
             ready: Once::new(),

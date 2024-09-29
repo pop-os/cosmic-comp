@@ -515,7 +515,7 @@ impl State {
             _ => {}
         };
 
-        self.process_input_event(event, false);
+        self.process_input_event(event);
         // TODO actually figure out the output
         for output in self.common.shell.read().unwrap().outputs() {
             self.backend.x11().schedule_render(output);

@@ -1,6 +1,9 @@
 use std::{
     borrow::Cow,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
     time::Duration,
 };
 
@@ -84,6 +87,12 @@ impl PartialEq<X11Surface> for CosmicSurface {
 #[derive(Default)]
 struct Minimized(AtomicBool);
 
+#[derive(Default)]
+struct Sticky(AtomicBool);
+
+#[derive(Default)]
+pub struct GlobalGeometry(pub Mutex<Option<Rectangle<i32, Global>>>);
+
 pub const SSD_HEIGHT: i32 = 36;
 pub const RESIZE_BORDER: i32 = 10;
 
@@ -130,6 +139,13 @@ impl CosmicSurface {
     }
 
     pub fn set_geometry(&self, geo: Rectangle<i32, Global>) {
+        *self
+            .0
+            .user_data()
+            .get_or_insert_threadsafe(GlobalGeometry::default)
+            .0
+            .lock()
+            .unwrap() = Some(geo);
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 toplevel.with_pending_state(|state| state.size = Some(geo.size.as_logical()))
@@ -385,6 +401,22 @@ impl CosmicSurface {
                 let _ = surface.set_mapped(true);
             }
         }
+    }
+
+    pub fn is_sticky(&self) -> bool {
+        self.0
+            .user_data()
+            .get_or_insert_threadsafe(Sticky::default)
+            .0
+            .load(Ordering::SeqCst)
+    }
+
+    pub fn set_sticky(&self, sticky: bool) {
+        self.0
+            .user_data()
+            .get_or_insert_threadsafe(Sticky::default)
+            .0
+            .store(sticky, Ordering::SeqCst);
     }
 
     pub fn set_suspended(&self, suspended: bool) {

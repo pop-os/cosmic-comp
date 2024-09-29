@@ -177,6 +177,7 @@ impl IsAlive for FullscreenSurface {
     }
 }
 
+/// LIFO stack of focus targets
 #[derive(Debug, Default)]
 pub struct FocusStacks(HashMap<Seat<State>, IndexSet<CosmicMapped>>);
 
@@ -444,7 +445,7 @@ impl Workspace {
             .find(|e| e.windows().any(|(w, _)| &w == surface))
     }
 
-    pub fn element_under(&mut self, location: Point<f64, Global>) -> Option<KeyboardFocusTarget> {
+    pub fn element_under(&self, location: Point<f64, Global>) -> Option<KeyboardFocusTarget> {
         let location = location.to_local(&self.output);
         self.floating_layer
             .element_under(location)
@@ -784,6 +785,8 @@ impl Workspace {
         }
     }
 
+    /// Returns the content of the current display if it is alive and
+    /// not in the process of rendering an animation
     pub fn get_fullscreen(&self) -> Option<&CosmicSurface> {
         self.fullscreen
             .as_ref()
@@ -971,7 +974,7 @@ impl Workspace {
                             .clone()
                             .map(|node_id| NodeDesc {
                                 handle: self.handle.clone(),
-                                node: node_id,
+                                node: node_id.clone(),
                                 stack_window: if mapped
                                     .stack_ref()
                                     .map(|stack| !stack.whole_stack_focused())
@@ -981,16 +984,20 @@ impl Workspace {
                                 } else {
                                     None
                                 },
+                                focus_stack: vec![node_id],
                             })
                     } else {
                         None
                     }
                 })
             }
-            KeyboardFocusTarget::Group(WindowGroup { node, .. }) => Some(NodeDesc {
+            KeyboardFocusTarget::Group(WindowGroup {
+                node, focus_stack, ..
+            }) => Some(NodeDesc {
                 handle: self.handle.clone(),
                 node,
                 stack_window: None,
+                focus_stack,
             }),
             _ => None,
         }
@@ -1339,9 +1346,9 @@ where
     <R as Renderer>::TextureId: 'static,
     <R as Renderer>::Error: FromGlesError,
 {
-    fn draw<'frame>(
+    fn draw(
         &self,
-        frame: &mut R::Frame<'frame>,
+        frame: &mut R::Frame<'_>,
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, smithay::utils::Physical>],

@@ -3,10 +3,10 @@
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::ZcosmicWorkspaceHandleV1;
 use smithay::{
     desktop::{layer_map_for_output, WindowSurfaceType},
-    input::Seat,
+    input::{pointer::MotionEvent, Seat},
     output::Output,
     reexports::wayland_server::DisplayHandle,
-    utils::{Point, Rectangle, Size},
+    utils::{Point, Rectangle, Size, SERIAL_COUNTER},
 };
 
 use crate::{
@@ -53,16 +53,41 @@ impl ToplevelManagementHandler for State {
                     .unwrap()
                     .clone();
 
-                let _ = shell.activate(
+                let res = shell.activate(
                     &output,
-                    idx as usize,
+                    idx,
                     WorkspaceDelta::new_shortcut(),
                     &mut self.common.workspace_state.update(),
-                ); // TODO: Move pointer?
-                mapped.focus_window(window);
-
+                );
                 std::mem::drop(shell);
-                Shell::set_focus(self, Some(&mapped.clone().into()), &seat, None);
+
+                if seat.active_output() != *output {
+                    match res {
+                        Ok(Some(new_pos)) => {
+                            seat.set_active_output(&output);
+                            if let Some(ptr) = seat.get_pointer() {
+                                let serial = SERIAL_COUNTER.next_serial();
+                                ptr.motion(
+                                    self,
+                                    None,
+                                    &MotionEvent {
+                                        location: new_pos.to_f64().as_logical(),
+                                        serial,
+                                        time: self.common.clock.now().as_millis(),
+                                    },
+                                );
+                                ptr.frame(self);
+                            }
+                        }
+                        Ok(None) => {
+                            seat.set_active_output(&output);
+                        }
+                        _ => {}
+                    }
+                }
+
+                mapped.focus_window(window);
+                Shell::set_focus(self, Some(&mapped.clone().into()), &seat, None, false);
                 return;
             }
         }
@@ -108,7 +133,7 @@ impl ToplevelManagementHandler for State {
             );
             if let Some((target, _)) = res {
                 std::mem::drop(shell);
-                Shell::set_focus(self, Some(&target), &seat, None);
+                Shell::set_focus(self, Some(&target), &seat, None, true);
             }
             return;
         }
@@ -201,6 +226,34 @@ impl ToplevelManagementHandler for State {
             if mapped.is_stack() {
                 mapped.stack_ref_mut().unwrap().set_active(window);
             }
+        }
+    }
+
+    fn set_sticky(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
+        if window.is_sticky() {
+            return;
+        }
+
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(mapped) = shell.element_for_surface(window).cloned() {
+            let seat = shell.seats.last_active().clone();
+            shell.toggle_sticky(&seat, &mapped);
+        }
+    }
+
+    fn unset_sticky(
+        &mut self,
+        _dh: &DisplayHandle,
+        window: &<Self as ToplevelInfoHandler>::Window,
+    ) {
+        if !window.is_sticky() {
+            return;
+        }
+
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(mapped) = shell.element_for_surface(window).cloned() {
+            let seat = shell.seats.last_active().clone();
+            shell.toggle_sticky(&seat, &mapped);
         }
     }
 }

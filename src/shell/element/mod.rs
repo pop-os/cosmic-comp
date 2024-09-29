@@ -588,9 +588,9 @@ impl CosmicMapped {
         }
     }
 
-    pub fn convert_to_stack<'a>(
+    pub fn convert_to_stack(
         &mut self,
-        (output, overlap): (&'a Output, Rectangle<i32, Logical>),
+        (output, overlap): (&Output, Rectangle<i32, Logical>),
         theme: cosmic::Theme,
     ) {
         match &self.element {
@@ -614,10 +614,10 @@ impl CosmicMapped {
         }
     }
 
-    pub fn convert_to_surface<'a>(
+    pub fn convert_to_surface(
         &mut self,
         surface: CosmicSurface,
-        (output, overlap): (&'a Output, Rectangle<i32, Logical>),
+        (output, overlap): (&Output, Rectangle<i32, Logical>),
         theme: cosmic::Theme,
     ) {
         let handle = self.loop_handle();
@@ -1276,9 +1276,9 @@ where
     <R as Renderer>::TextureId: 'static,
     <R as Renderer>::Error: FromGlesError,
 {
-    fn draw<'frame>(
+    fn draw(
         &self,
-        frame: &mut R::Frame<'frame>,
+        frame: &mut R::Frame<'_>,
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],

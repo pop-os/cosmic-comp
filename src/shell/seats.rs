@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{any::Any, cell::RefCell, collections::HashMap, sync::Mutex, time::Duration};
+use std::{any::Any, cell::RefCell, collections::HashMap, sync::Mutex};
 
 use crate::{
-    backend::render::cursor::{CursorShape, CursorState},
+    backend::render::cursor::CursorState,
     config::{xkb_config_to_wl, Config},
-    input::{ModifiersShortcutQueue, SupressedKeys},
+    input::{ModifiersShortcutQueue, SupressedButtons, SupressedKeys},
     state::State,
 };
 use smithay::{
@@ -13,7 +13,7 @@ use smithay::{
     desktop::utils::bbox_from_surface_tree,
     input::{
         keyboard::{LedState, XkbConfig},
-        pointer::{CursorIcon, CursorImageAttributes, CursorImageStatus},
+        pointer::{CursorImageAttributes, CursorImageStatus},
         Seat, SeatState,
     },
     output::Output,
@@ -27,6 +27,10 @@ use super::grabs::{SeatMenuGrabState, SeatMoveGrabState};
 
 crate::utils::id_gen!(next_seat_id, SEAT_ID, SEAT_IDS);
 
+// for more information on seats, see:
+// <https://wayland-book.com/print.html#seats-handling-input>
+/// Seats are an abstraction over a set of input devices grouped together, such as a keyboard, pointer and touch device.
+/// i.e. Those used by a user to operate the computer.
 #[derive(Debug)]
 pub struct Seats {
     seats: Vec<Seat<State>>,
@@ -155,7 +159,12 @@ impl Drop for SeatId {
 
 #[repr(transparent)]
 struct SeatId(pub usize);
+
+/// The output which contains the cursor associated with a seat.
 struct ActiveOutput(pub Mutex<Output>);
+
+/// The output which currently has keyboard focus
+struct FocusedOutput(pub Mutex<Option<Output>>);
 
 pub fn create_seat(
     dh: &DisplayHandle,
@@ -169,11 +178,13 @@ pub fn create_seat(
     userdata.insert_if_missing_threadsafe(SeatId::default);
     userdata.insert_if_missing(Devices::default);
     userdata.insert_if_missing(SupressedKeys::default);
+    userdata.insert_if_missing(SupressedButtons::default);
     userdata.insert_if_missing(ModifiersShortcutQueue::default);
     userdata.insert_if_missing_threadsafe(SeatMoveGrabState::default);
     userdata.insert_if_missing_threadsafe(SeatMenuGrabState::default);
     userdata.insert_if_missing_threadsafe(CursorState::default);
     userdata.insert_if_missing_threadsafe(|| ActiveOutput(Mutex::new(output.clone())));
+    userdata.insert_if_missing_threadsafe(|| FocusedOutput(Mutex::new(None)));
     userdata.insert_if_missing_threadsafe(|| Mutex::new(CursorImageStatus::default_named()));
 
     // A lot of clients bind keyboard and pointer unconditionally once on launch..
@@ -212,9 +223,16 @@ pub trait SeatExt {
     fn id(&self) -> usize;
 
     fn active_output(&self) -> Output;
+    fn focused_output(&self) -> Option<Output>;
+    fn focused_or_active_output(&self) -> Output {
+        self.focused_output()
+            .unwrap_or_else(|| self.active_output())
+    }
     fn set_active_output(&self, output: &Output);
+    fn set_focused_output(&self, output: Option<&Output>);
     fn devices(&self) -> &Devices;
     fn supressed_keys(&self) -> &SupressedKeys;
+    fn supressed_buttons(&self) -> &SupressedButtons;
     fn modifiers_shortcut_queue(&self) -> &ModifiersShortcutQueue;
 
     fn cursor_geometry(
@@ -229,11 +247,29 @@ impl SeatExt for Seat<State> {
         self.user_data().get::<SeatId>().unwrap().0
     }
 
+    /// Returns the output that contains the cursor associated with a seat. Note that the window which has keyboard focus
+    /// may be on a different output. Currently, to get the focused output, first get the keyboard focus target and pass
+    /// it to get_focused_output in the shell.
     fn active_output(&self) -> Output {
         self.user_data()
             .get::<ActiveOutput>()
             .map(|x| x.0.lock().unwrap().clone())
             .unwrap()
+    }
+
+    /// Returns the output which currently has keyboard focus. If no window has keyboard focus (e.g. when there are no windows)
+    /// the focused output will be the same as the active output.
+    fn focused_output(&self) -> Option<Output> {
+        if self
+            .get_keyboard()
+            .is_some_and(|k| k.current_focus().is_some())
+        {
+            self.user_data()
+                .get::<FocusedOutput>()
+                .map(|x| x.0.lock().unwrap().clone())?
+        } else {
+            None
+        }
     }
 
     fn set_active_output(&self, output: &Output) {
@@ -246,12 +282,26 @@ impl SeatExt for Seat<State> {
             .unwrap() = output.clone();
     }
 
+    fn set_focused_output(&self, output: Option<&Output>) {
+        *self
+            .user_data()
+            .get::<FocusedOutput>()
+            .unwrap()
+            .0
+            .lock()
+            .unwrap() = output.cloned();
+    }
+
     fn devices(&self) -> &Devices {
         self.user_data().get::<Devices>().unwrap()
     }
 
     fn supressed_keys(&self) -> &SupressedKeys {
         self.user_data().get::<SupressedKeys>().unwrap()
+    }
+
+    fn supressed_buttons(&self) -> &SupressedButtons {
+        self.user_data().get::<SupressedButtons>().unwrap()
     }
 
     fn modifiers_shortcut_queue(&self) -> &ModifiersShortcutQueue {
@@ -297,17 +347,15 @@ impl SeatExt for Seat<State> {
                 );
                 Some((buffer_geo, (hotspot.x, hotspot.y).into()))
             }
-            CursorImageStatus::Named(CursorIcon::Default) => {
+            CursorImageStatus::Named(cursor_icon) => {
                 let seat_userdata = self.user_data();
                 seat_userdata.insert_if_missing_threadsafe(CursorState::default);
                 let state = seat_userdata.get::<CursorState>().unwrap();
                 let frame = state
                     .lock()
                     .unwrap()
-                    .cursors
-                    .get(&CursorShape::Default)
-                    .unwrap()
-                    .get_image(1, Into::<Duration>::into(time).as_millis() as u32);
+                    .get_named_cursor(cursor_icon)
+                    .get_image(1, time.as_millis());
 
                 Some((
                     Rectangle::from_loc_and_size(
@@ -316,10 +364,6 @@ impl SeatExt for Seat<State> {
                     ),
                     (frame.xhot as i32, frame.yhot as i32).into(),
                 ))
-            }
-            CursorImageStatus::Named(_) => {
-                // TODO: Handle for `cursor_shape_v1` protocol
-                None
             }
             CursorImageStatus::Hidden => None,
         }

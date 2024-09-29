@@ -20,7 +20,7 @@ fn toggle_stacking(state: &mut State, mapped: &CosmicMapped) {
     let seat = shell.seats.last_active().clone();
     if let Some(new_focus) = shell.toggle_stacking(&seat, mapped) {
         std::mem::drop(shell);
-        Shell::set_focus(state, Some(&new_focus), &seat, None);
+        Shell::set_focus(state, Some(&new_focus), &seat, None, false);
     }
 }
 
@@ -52,7 +52,7 @@ fn move_prev_workspace(state: &mut State, mapped: &CosmicMapped) {
         );
         if let Some((target, _)) = res {
             std::mem::drop(shell);
-            Shell::set_focus(state, Some(&target), &seat, None);
+            Shell::set_focus(state, Some(&target), &seat, None, true);
         }
     }
 }
@@ -85,7 +85,7 @@ fn move_next_workspace(state: &mut State, mapped: &CosmicMapped) {
         );
         if let Some((target, _point)) = res {
             std::mem::drop(shell);
-            Shell::set_focus(state, Some(&target), &seat, None)
+            Shell::set_focus(state, Some(&target), &seat, None, true)
         }
     }
 }
@@ -257,6 +257,7 @@ pub fn window_items(
                         &state.common.config,
                         &state.common.event_loop_handle,
                         &state.common.xdg_activation_state,
+                        false,
                     );
 
                     std::mem::drop(shell);
@@ -302,7 +303,7 @@ pub fn window_items(
                                     &MotionEvent {
                                         location: loc.as_logical().to_f64(),
                                         serial,
-                                        time: 0,
+                                        time: state.common.clock.now().as_millis(),
                                     },
                                 );
                                 pointer.frame(state);
@@ -332,7 +333,7 @@ pub fn window_items(
                                     &MotionEvent {
                                         location: loc.as_logical().to_f64(),
                                         serial,
-                                        time: 0,
+                                        time: state.common.clock.now().as_millis(),
                                     },
                                 );
                                 pointer.frame(state);
@@ -363,7 +364,7 @@ pub fn window_items(
                                     &MotionEvent {
                                         location: loc.as_logical().to_f64(),
                                         serial,
-                                        time: 0,
+                                        time: state.common.clock.now().as_millis(),
                                     },
                                 );
                                 pointer.frame(state);
@@ -394,7 +395,7 @@ pub fn window_items(
                                     &MotionEvent {
                                         location: loc.as_logical().to_f64(),
                                         serial,
-                                        time: 0,
+                                        time: state.common.clock.now().as_millis(),
                                     },
                                 );
                                 pointer.frame(state);

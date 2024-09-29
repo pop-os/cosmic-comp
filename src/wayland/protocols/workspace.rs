@@ -567,7 +567,7 @@ where
             .cloned()
     }
 
-    pub fn update<'a>(&'a mut self) -> WorkspaceUpdateGuard<'a, D> {
+    pub fn update(&mut self) -> WorkspaceUpdateGuard<'_, D> {
         WorkspaceUpdateGuard(self)
     }
 

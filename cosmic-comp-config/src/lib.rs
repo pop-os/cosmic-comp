@@ -23,6 +23,14 @@ pub struct CosmicCompConfig {
     pub autotile_behavior: TileBehavior,
     /// Active hint enabled
     pub active_hint: bool,
+    /// Enables changing keyboard focus to windows when the cursor passes into them
+    pub focus_follows_cursor: bool,
+    /// Enables warping the cursor to the focused window when focus changes due to keyboard input
+    pub cursor_follows_focus: bool,
+    /// The delay in milliseconds before focus follows mouse (if enabled)
+    pub focus_follows_cursor_delay: u64,
+    /// Let X11 applications scale themselves
+    pub descale_xwayland: bool,
 }
 
 impl Default for CosmicCompConfig {
@@ -48,6 +56,10 @@ impl Default for CosmicCompConfig {
             autotile: Default::default(),
             autotile_behavior: Default::default(),
             active_hint: true,
+            focus_follows_cursor: false,
+            cursor_follows_focus: false,
+            focus_follows_cursor_delay: 250,
+            descale_xwayland: false,
         }
     }
 }

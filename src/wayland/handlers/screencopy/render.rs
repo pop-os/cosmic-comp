@@ -80,10 +80,10 @@ where
     if matches!(buffer_type(&buffer), Some(BufferType::Shm)) {
         let buffer_size = buffer_dimensions(&buffer).unwrap();
         if let Err(err) = with_buffer_contents_mut(&buffer, |ptr, len, data| {
-            let offset = data.offset as i32;
-            let width = data.width as i32;
-            let height = data.height as i32;
-            let stride = data.stride as i32;
+            let offset = data.offset;
+            let width = data.width;
+            let height = data.height;
+            let stride = data.stride;
             let format = shm_format_to_fourcc(data.format)
                 .expect("We should be able to convert all hardcoded shm screencopy formats");
 
@@ -219,7 +219,7 @@ pub fn render_workspace_to_buffer(
         buffer: &WlBuffer,
         renderer: &mut R,
         dt: &'d mut OutputDamageTracker,
-        age: usize,
+        mut age: usize,
         additional_damage: Vec<Rectangle<i32, BufferCoords>>,
         draw_cursor: bool,
         common: &mut Common,
@@ -303,6 +303,7 @@ pub fn render_workspace_to_buffer(
             let render_buffer =
                 Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, size)
                     .map_err(DTError::Rendering)?;
+            age = 0;
             render_workspace::<_, _, GlesRenderbuffer>(
                 None,
                 renderer,
@@ -457,7 +458,7 @@ pub fn render_window_to_buffer(
         buffer: &WlBuffer,
         renderer: &mut R,
         dt: &'d mut OutputDamageTracker,
-        age: usize,
+        mut age: usize,
         additional_damage: Vec<Rectangle<i32, BufferCoords>>,
         draw_cursor: bool,
         common: &mut Common,
@@ -539,11 +540,16 @@ pub fn render_window_to_buffer(
                 );
             }
 
-            if let Some(wl_surface) = get_dnd_icon(&seat) {
+            if let Some(dnd_icon) = get_dnd_icon(&seat) {
                 elements.extend(
-                    cursor::draw_dnd_icon(renderer, &wl_surface, location.to_i32_round(), 1.0)
-                        .into_iter()
-                        .map(WindowCaptureElement::from),
+                    cursor::draw_dnd_icon(
+                        renderer,
+                        &dnd_icon.surface,
+                        (location + dnd_icon.offset.to_f64()).to_i32_round(),
+                        1.0,
+                    )
+                    .into_iter()
+                    .map(WindowCaptureElement::from),
                 );
             }
         }
@@ -563,6 +569,7 @@ pub fn render_window_to_buffer(
             let render_buffer =
                 Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, size)
                     .map_err(DTError::Rendering)?;
+            age = 0;
             renderer.bind(render_buffer).map_err(DTError::Rendering)?;
         }
 
@@ -694,7 +701,7 @@ pub fn render_cursor_to_buffer(
         buffer: &WlBuffer,
         renderer: &mut R,
         dt: &'d mut OutputDamageTracker,
-        age: usize,
+        mut age: usize,
         additional_damage: Vec<Rectangle<i32, BufferCoords>>,
         common: &mut Common,
         seat: &Seat<State>,
@@ -752,6 +759,7 @@ pub fn render_cursor_to_buffer(
             let render_buffer =
                 Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, size)
                     .map_err(DTError::Rendering)?;
+            age = 0;
             renderer.bind(render_buffer).map_err(DTError::Rendering)?;
         }
 

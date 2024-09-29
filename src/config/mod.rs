@@ -8,7 +8,8 @@ use crate::{
     },
 };
 use cosmic_config::{ConfigGet, CosmicConfigEntry};
-use cosmic_settings_config::{shortcuts, Shortcuts};
+use cosmic_settings_config::window_rules::ApplicationException;
+use cosmic_settings_config::{shortcuts, window_rules, Shortcuts};
 use serde::{Deserialize, Serialize};
 use smithay::wayland::xdg_activation::XdgActivationState;
 pub use smithay::{
@@ -47,11 +48,14 @@ use cosmic_comp_config::{
 pub struct Config {
     pub dynamic_conf: DynamicConfig,
     pub cosmic_helper: cosmic_config::Config,
+    /// cosmic-config comp configuration for `com.system76.CosmicComp`
     pub cosmic_conf: CosmicCompConfig,
     /// cosmic-config context for `com.system76.CosmicSettings.Shortcuts`
     pub settings_context: cosmic_config::Config,
     /// Key bindings from `com.system76.CosmicSettings.Shortcuts`
     pub shortcuts: Shortcuts,
+    // Tiling exceptions from `com.system76.CosmicSettings.WindowRules`
+    pub tiling_exceptions: Vec<ApplicationException>,
     /// System actions from `com.system76.CosmicSettings.Shortcuts`
     pub system_actions: BTreeMap<shortcuts::action::System, String>,
 }
@@ -243,6 +247,43 @@ impl Config {
             ),
         };
 
+        let window_rules_context =
+            window_rules::context().expect("Failed to load window rules config");
+        let tiling_exceptions = window_rules::tiling_exceptions(&window_rules_context);
+
+        match cosmic_config::calloop::ConfigWatchSource::new(&window_rules_context) {
+            Ok(source) => {
+                if let Err(err) = loop_handle.insert_source(source, |(config, keys), (), state| {
+                    for key in keys {
+                        match key.as_str() {
+                            "tiling_exception_defaults" | "tiling_exception_custom" => {
+                                let new_exceptions = window_rules::tiling_exceptions(&config);
+                                state.common.config.tiling_exceptions = new_exceptions;
+                                state
+                                    .common
+                                    .shell
+                                    .write()
+                                    .unwrap()
+                                    .update_tiling_exceptions(
+                                        state.common.config.tiling_exceptions.iter(),
+                                    );
+                            }
+                            _ => (),
+                        }
+                    }
+                }) {
+                    warn!(
+                        ?err,
+                        "Failed to watch com.system76.CosmicSettings.WindowRules config"
+                    );
+                }
+            }
+            Err(err) => warn!(
+                ?err,
+                "failed to create config watch source for com.system76.CosmicSettings.WindowRules"
+            ),
+        };
+
         Config {
             dynamic_conf: Self::load_dynamic(xdg.as_ref()),
             cosmic_conf: cosmic_comp_config,
@@ -250,6 +291,7 @@ impl Config {
             settings_context,
             shortcuts,
             system_actions,
+            tiling_exceptions,
         }
     }
 
@@ -545,7 +587,7 @@ impl DynamicConfig {
         &self.outputs.1
     }
 
-    pub fn outputs_mut<'a>(&'a mut self) -> PersistenceGuard<'a, OutputsConfig> {
+    pub fn outputs_mut(&mut self) -> PersistenceGuard<'_, OutputsConfig> {
         PersistenceGuard(self.outputs.0.clone(), &mut self.outputs.1)
     }
 }
@@ -649,6 +691,31 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 if new != state.common.config.cosmic_conf.active_hint {
                     state.common.config.cosmic_conf.active_hint = new;
                     state.common.update_config();
+                }
+            }
+            "descale_xwayland" => {
+                let new = get_config::<bool>(&config, "descale_xwayland");
+                if new != state.common.config.cosmic_conf.descale_xwayland {
+                    state.common.config.cosmic_conf.descale_xwayland = new;
+                    state.common.update_xwayland_scale();
+                }
+            }
+            "focus_follows_cursor" => {
+                let new = get_config::<bool>(&config, "focus_follows_cursor");
+                if new != state.common.config.cosmic_conf.focus_follows_cursor {
+                    state.common.config.cosmic_conf.focus_follows_cursor = new;
+                }
+            }
+            "cursor_follows_focus" => {
+                let new = get_config::<bool>(&config, "cursor_follows_focus");
+                if new != state.common.config.cosmic_conf.cursor_follows_focus {
+                    state.common.config.cosmic_conf.cursor_follows_focus = new;
+                }
+            }
+            "focus_follows_cursor_delay" => {
+                let new = get_config::<u64>(&config, "focus_follows_cursor_delay");
+                if new != state.common.config.cosmic_conf.focus_follows_cursor_delay {
+                    state.common.config.cosmic_conf.focus_follows_cursor_delay = new;
                 }
             }
             _ => {}

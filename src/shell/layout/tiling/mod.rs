@@ -86,6 +86,7 @@ pub struct NodeDesc {
     pub handle: WorkspaceHandle,
     pub node: NodeId,
     pub stack_window: Option<CosmicSurface>,
+    pub focus_stack: Vec<NodeId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -534,7 +535,7 @@ impl TilingLayout {
         self.map_internal(window, focus_stack, None, Some(from));
     }
 
-    fn map_to_tree<'a>(
+    fn map_to_tree(
         mut tree: &mut Tree<Data>,
         window: impl Into<CosmicMapped>,
         output: &Output,
@@ -640,6 +641,7 @@ impl TilingLayout {
         seat: &Seat<State>,
         focus_stack: impl Iterator<Item = &'a CosmicMapped> + 'a,
         desc: NodeDesc,
+        direction: Option<Direction>,
     ) -> Option<KeyboardFocusTarget> {
         let this_handle = &desc.handle;
         let mut this_tree = this.queue.trees.back().unwrap().0.copy_clone();
@@ -678,7 +680,7 @@ impl TilingLayout {
                 }
 
                 mapped.set_tiled(true);
-                other.map(mapped.clone(), Some(focus_stack), None);
+                other.map(mapped.clone(), Some(focus_stack), direction);
                 return Some(KeyboardFocusTarget::Element(mapped));
             }
             None => {
@@ -702,7 +704,12 @@ impl TilingLayout {
                             })
                             .map(|(id, _)| id)
                             .unwrap_or(other_tree.root_node_id().unwrap().clone());
-                        let orientation = {
+                        let orientation = if let Some(direction) = direction {
+                            match direction {
+                                Direction::Left | Direction::Right => Orientation::Vertical,
+                                Direction::Up | Direction::Down => Orientation::Horizontal,
+                            }
+                        } else {
                             let window_size = other_tree
                                 .get(&focused_node)
                                 .unwrap()
@@ -717,6 +724,15 @@ impl TilingLayout {
                         };
                         let id = other_tree.insert(node, InsertBehavior::AsRoot).unwrap();
                         TilingLayout::new_group(&mut other_tree, &focused_node, &id, orientation)
+                            .unwrap();
+                        other_tree
+                            .make_nth_sibling(
+                                &id,
+                                match direction {
+                                    Some(Direction::Right) | Some(Direction::Down) => 0,
+                                    _ => 1,
+                                },
+                            )
                             .unwrap();
                         id
                     }
@@ -798,8 +814,9 @@ impl TilingLayout {
 
                 other.node_desc_to_focus(&NodeDesc {
                     handle: other_handle.clone(),
-                    node: id,
+                    node: id.clone(),
                     stack_window: None,
+                    focus_stack: Vec::new(), // node_desc_to_focus doesn't use this
                 })
             }
         }
@@ -1432,7 +1449,7 @@ impl TilingLayout {
                     group.remove_window(position);
                 } else {
                     trace!("Removing Group");
-                    let other_child = tree.children_ids(&id).unwrap().cloned().next().unwrap();
+                    let other_child = tree.children_ids(&id).unwrap().next().cloned().unwrap();
                     let fork_pos = parent_parent_id.as_ref().and_then(|parent_id| {
                         tree.children_ids(parent_id).unwrap().position(|i| i == &id)
                     });
@@ -1467,11 +1484,7 @@ impl TilingLayout {
         }
     }
 
-    pub fn move_current_node<'a>(
-        &mut self,
-        direction: Direction,
-        seat: &Seat<State>,
-    ) -> MoveResult {
+    pub fn move_current_node(&mut self, direction: Direction, seat: &Seat<State>) -> MoveResult {
         let gaps = self.gaps();
 
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
@@ -2059,11 +2072,7 @@ impl TilingLayout {
         FocusResult::None
     }
 
-    pub fn update_orientation<'a>(
-        &mut self,
-        new_orientation: Option<Orientation>,
-        seat: &Seat<State>,
-    ) {
+    pub fn update_orientation(&mut self, new_orientation: Option<Orientation>, seat: &Seat<State>) {
         let gaps = self.gaps();
 
         let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
@@ -2225,7 +2234,7 @@ impl TilingLayout {
         Some(result)
     }
 
-    pub fn toggle_stacking_focused<'a>(
+    pub fn toggle_stacking_focused(
         &mut self,
         seat: &Seat<State>,
         mut focus_stack: FocusStackMut,
@@ -2984,8 +2993,8 @@ impl TilingLayout {
                     let child_id = tree
                         .children_ids(&node_id)
                         .unwrap()
-                        .cloned()
                         .next()
+                        .cloned()
                         .unwrap();
                     tree.remove_node(node_id, RemoveBehavior::LiftChildren)
                         .unwrap();
@@ -3096,10 +3105,7 @@ impl TilingLayout {
         None
     }
 
-    pub fn element_under(
-        &mut self,
-        location_f64: Point<f64, Local>,
-    ) -> Option<KeyboardFocusTarget> {
+    pub fn element_under(&self, location_f64: Point<f64, Local>) -> Option<KeyboardFocusTarget> {
         let location = location_f64.to_i32_round();
 
         for (mapped, geo) in self.mapped() {
@@ -3770,6 +3776,14 @@ impl TilingLayout {
                     geo
                 })
             })
+        })
+    }
+
+    pub fn element_for_node(&self, node: &NodeId) -> Option<&CosmicMapped> {
+        let tree = &self.queue.trees.back().unwrap().0;
+        tree.get(node).ok().and_then(|node| match node.data() {
+            Data::Mapped { mapped, .. } => Some(mapped),
+            _ => None,
         })
     }
 

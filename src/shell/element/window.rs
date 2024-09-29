@@ -1,8 +1,5 @@
 use crate::{
-    backend::render::{
-        cursor::{CursorShape, CursorState},
-        SplitRenderElements,
-    },
+    backend::render::{cursor::CursorState, SplitRenderElements},
     shell::{
         focus::target::PointerFocusTarget,
         grabs::{ReleaseMode, ResizeEdge},
@@ -17,8 +14,6 @@ use calloop::LoopHandle;
 use cosmic::{
     config::Density,
     iced::{Color, Command},
-    widget::mouse_area,
-    Apply,
 };
 use smithay::{
     backend::{
@@ -35,10 +30,10 @@ use smithay::{
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{
-            AxisFrame, ButtonEvent, CursorImageStatus, GestureHoldBeginEvent, GestureHoldEndEvent,
-            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
-            PointerTarget, RelativeMotionEvent,
+            AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, GestureHoldBeginEvent,
+            GestureHoldEndEvent, GesturePinchBeginEvent, GesturePinchEndEvent,
+            GesturePinchUpdateEvent, GestureSwipeBeginEvent, GestureSwipeEndEvent,
+            GestureSwipeUpdateEvent, MotionEvent, PointerTarget, RelativeMotionEvent,
         },
         touch::{
             DownEvent, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchTarget,
@@ -146,17 +141,17 @@ impl Focus {
         }
     }
 
-    pub fn cursor_shape(&self) -> CursorShape {
+    pub fn cursor_shape(&self) -> CursorIcon {
         match self {
-            Focus::ResizeTopLeft => CursorShape::NorthWestResize,
-            Focus::ResizeTopRight => CursorShape::NorthEastResize,
-            Focus::ResizeTop => CursorShape::NorthResize,
-            Focus::ResizeBottomLeft => CursorShape::SouthWestResize,
-            Focus::ResizeBottomRight => CursorShape::SouthEastResize,
-            Focus::ResizeBottom => CursorShape::SouthResize,
-            Focus::ResizeLeft => CursorShape::WestResize,
-            Focus::ResizeRight => CursorShape::EastResize,
-            Focus::Header => CursorShape::Default,
+            Focus::ResizeTopLeft => CursorIcon::NwResize,
+            Focus::ResizeTopRight => CursorIcon::NeResize,
+            Focus::ResizeTop => CursorIcon::NResize,
+            Focus::ResizeBottomLeft => CursorIcon::SwResize,
+            Focus::ResizeBottomRight => CursorIcon::SeResize,
+            Focus::ResizeBottom => CursorIcon::SResize,
+            Focus::ResizeLeft => CursorIcon::WResize,
+            Focus::ResizeRight => CursorIcon::EResize,
+            Focus::Header => CursorIcon::Default,
         }
     }
 
@@ -177,7 +172,7 @@ impl CosmicWindowInternal {
     pub fn current_focus(&self) -> Option<Focus> {
         unsafe { Focus::from_u8(self.pointer_entered.load(Ordering::SeqCst)) }
     }
-
+    /// returns if the window has any current or pending server-side decorations
     pub fn has_ssd(&self, pending: bool) -> bool {
         !self.window.is_decorated(pending)
     }
@@ -406,6 +401,7 @@ impl Program for CosmicWindowInternal {
                                 &state.common.config,
                                 &state.common.event_loop_handle,
                                 &state.common.xdg_activation_state,
+                                false,
                             );
                             if let Some((grab, focus)) = res {
                                 if grab.is_touch_grab() {
@@ -508,7 +504,8 @@ impl Program for CosmicWindowInternal {
             .on_close(Message::Close)
             .focused(self.window.is_activated(false))
             .density(Density::Compact)
-            .on_double_click(Message::Maximize);
+            .on_double_click(Message::Maximize)
+            .on_right_click(Message::Menu);
 
         if cosmic::config::show_minimize() {
             header = header.on_minimize(Message::Minimize);
@@ -516,7 +513,6 @@ impl Program for CosmicWindowInternal {
         if cosmic::config::show_maximize() {
             header = header.on_maximize(Message::Maximize);
         }
-        let header = header.apply(mouse_area).on_right_press(Message::Menu);
 
         header.into()
     }
@@ -718,6 +714,7 @@ impl PointerTarget<State> for CosmicWindow {
                             Focus::ResizeRight => ResizeEdge::RIGHT,
                             Focus::Header => unreachable!(),
                         },
+                        false,
                     );
 
                     if let Some((grab, focus)) = res {
@@ -752,7 +749,7 @@ impl PointerTarget<State> for CosmicWindow {
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
         self.0.with_program(|p| {
             let cursor_state = seat.user_data().get::<CursorState>().unwrap();
-            cursor_state.lock().unwrap().set_shape(CursorShape::Default);
+            cursor_state.lock().unwrap().unset_shape();
             let _previous = p.swap_focus(None);
         });
         PointerTarget::leave(&self.0, seat, data, serial, time)

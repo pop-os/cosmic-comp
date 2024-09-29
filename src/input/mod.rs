@@ -14,38 +14,37 @@ use crate::{
         grabs::{ReleaseMode, ResizeEdge},
         layout::{
             floating::ResizeGrabMarker,
-            tiling::{SwapWindowGrab, TilingLayout},
+            tiling::{NodeDesc, TilingLayout},
         },
-        FocusResult, InvalidWorkspaceIndex, MoveResult, SeatExt, Trigger, WorkspaceDelta,
+        SeatExt, Trigger,
     },
     utils::{prelude::*, quirks::workspace_overview_is_open},
     wayland::{
-        handlers::{screencopy::SessionHolder, xdg_activation::ActivationContext},
-        protocols::{
-            screencopy::{BufferConstraints, CursorSession},
-            workspace::WorkspaceUpdateGuard,
-        },
+        handlers::screencopy::SessionHolder,
+        protocols::screencopy::{BufferConstraints, CursorSession},
     },
 };
-use calloop::{timer::Timer, RegistrationToken};
-use cosmic_comp_config::{workspace::WorkspaceLayout, TileBehavior};
-use cosmic_config::ConfigSet;
+use calloop::{
+    timer::{TimeoutAction, Timer},
+    RegistrationToken,
+};
+use cosmic_comp_config::workspace::WorkspaceLayout;
 use cosmic_settings_config::shortcuts;
-use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection, ResizeDirection};
+use cosmic_settings_config::shortcuts::action::{Direction, ResizeDirection};
 use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisSource, Device, DeviceCapability, GestureBeginEvent,
         GestureEndEvent, GesturePinchUpdateEvent as _, GestureSwipeUpdateEvent as _, InputBackend,
-        InputEvent, KeyState, PointerAxisEvent, ProximityState, TabletToolButtonEvent,
-        TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent, TabletToolTipState,
-        TouchEvent,
+        InputEvent, KeyState, KeyboardKeyEvent, PointerAxisEvent, ProximityState,
+        TabletToolButtonEvent, TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent,
+        TabletToolTipState, TouchEvent,
     },
     desktop::{
         layer_map_for_output, space::SpaceElement, utils::under_from_surface_tree,
         WindowSurfaceType,
     },
     input::{
-        keyboard::{FilterResult, KeysymHandle},
+        keyboard::{FilterResult, KeysymHandle, ModifiersState},
         pointer::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
@@ -69,8 +68,6 @@ use smithay::{
     },
     xwayland::X11Surface,
 };
-#[cfg(not(feature = "debug"))]
-use tracing::info;
 use tracing::{error, trace};
 use xkbcommon::xkb::{Keycode, Keysym};
 
@@ -78,15 +75,28 @@ use std::{
     any::Any,
     borrow::Cow,
     cell::RefCell,
-    os::unix::process::CommandExt,
-    thread,
+    collections::HashSet,
     time::{Duration, Instant},
 };
 
+pub mod actions;
 pub mod gestures;
+
+/// Used for debouncing focus updates due to pointer motion, if after the focus change is
+/// triggered the event will cancel if the pointer moves to the original target
+#[derive(Debug)]
+pub struct PointerFocusState {
+    //the window under the cursor prior to it's movement
+    originally_focused_window: Option<KeyboardFocusTarget>,
+    //the window under the cursor after it's movement
+    scheduled_focused_window: Option<KeyboardFocusTarget>,
+    token: RegistrationToken,
+}
 
 #[derive(Default)]
 pub struct SupressedKeys(RefCell<Vec<(Keycode, Option<RegistrationToken>)>>);
+#[derive(Default)]
+pub struct SupressedButtons(RefCell<HashSet<u32>>);
 #[derive(Default, Debug)]
 pub struct ModifiersShortcutQueue(RefCell<Option<shortcuts::Binding>>);
 
@@ -116,6 +126,16 @@ impl SupressedKeys {
     }
 }
 
+impl SupressedButtons {
+    fn add(&self, button: u32) {
+        self.0.borrow_mut().insert(button);
+    }
+
+    fn remove(&self, button: u32) -> bool {
+        self.0.borrow_mut().remove(&button)
+    }
+}
+
 impl ModifiersShortcutQueue {
     pub fn set(&self, binding: shortcuts::Binding) {
         let mut set = self.0.borrow_mut();
@@ -139,11 +159,8 @@ impl ModifiersShortcutQueue {
 }
 
 impl State {
-    pub fn process_input_event<B: InputBackend>(
-        &mut self,
-        event: InputEvent<B>,
-        needs_key_repetition: bool,
-    ) where
+    pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>)
+    where
         <B as InputBackend>::Device: 'static,
     {
         use smithay::backend::input::Event;
@@ -175,10 +192,9 @@ impl State {
                     }
                 }
             }
+
             InputEvent::Keyboard { event, .. } => {
                 use smithay::backend::input::KeyboardKeyEvent;
-
-                let loop_handle = self.common.event_loop_handle.clone();
 
                 let maybe_seat = self
                     .common
@@ -190,23 +206,6 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    let current_output = seat.active_output();
-                    let shortcuts_inhibited = self
-                        .common
-                        .shell
-                        .read()
-                        .unwrap()
-                        .active_space(&current_output)
-                        .focus_stack
-                        .get(&seat)
-                        .last()
-                        .and_then(|window| {
-                            window.wl_surface().and_then(|surface| {
-                                seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
-                            })
-                        })
-                        .map(|inhibitor| inhibitor.is_active())
-                        .unwrap_or(false);
 
                     let keycode = event.key_code();
                     let state = event.state();
@@ -215,292 +214,32 @@ impl State {
                     let serial = SERIAL_COUNTER.next_serial();
                     let time = Event::time_msec(&event);
                     let keyboard = seat.get_keyboard().unwrap();
-                    let pointer = seat.get_pointer().unwrap();
-                    let is_grabbed = keyboard.is_grabbed() || pointer.is_grabbed();
-                    let current_focus = keyboard.current_focus();
-                    let shell_ref = self.common.shell.clone();
-                    let mut shell = shell_ref.write().unwrap();
                     if let Some((action, pattern)) = keyboard
-                            .input(
-                                self,
-                                keycode,
-                                state,
-                                serial,
-                                time,
-                                |data, modifiers, handle| {
-                                    // Leave move overview mode, if any modifier was released
-                                    if let Some(Trigger::KeyboardMove(action_modifiers)) =
-                                        shell.overview_mode().0.active_trigger()
-                                    {
-                                        if (action_modifiers.ctrl && !modifiers.ctrl)
-                                            || (action_modifiers.alt && !modifiers.alt)
-                                            || (action_modifiers.logo && !modifiers.logo)
-                                            || (action_modifiers.shift && !modifiers.shift)
-                                        {
-                                            shell.set_overview_mode(None, data.common.event_loop_handle.clone());
-                                        }
-                                    }
-                                    // Leave swap overview mode, if any key was released
-                                    if let Some(Trigger::KeyboardSwap(action_pattern, old_descriptor)) =
-                                        shell.overview_mode().0.active_trigger()
-                                    {
-                                        if (action_pattern.modifiers.ctrl && !modifiers.ctrl)
-                                            || (action_pattern.modifiers.alt && !modifiers.alt)
-                                            || (action_pattern.modifiers.logo && !modifiers.logo)
-                                            || (action_pattern.modifiers.shift && !modifiers.shift)
-                                            || (action_pattern.key.is_some() && handle.raw_syms().contains(&action_pattern.key.unwrap()) && state == KeyState::Released)
-                                        {
-                                            shell.set_overview_mode(None, data.common.event_loop_handle.clone());
-
-                                            if let Some(focus) = current_focus {
-                                                if let Some(new_descriptor) = shell.workspaces.active(&current_output).1.node_desc(focus) {
-                                                    let mut spaces = shell.workspaces.spaces_mut();
-                                                    if old_descriptor.handle != new_descriptor.handle {
-                                                        let (mut old_w, mut other_w) = spaces.partition::<Vec<_>, _>(|w| w.handle == old_descriptor.handle);
-                                                        if let Some(old_workspace) = old_w.get_mut(0) {
-                                                            if let Some(new_workspace) = other_w.iter_mut().find(|w| w.handle == new_descriptor.handle) {
-                                                                if let Some(focus) = TilingLayout::swap_trees(&mut old_workspace.tiling_layer, Some(&mut new_workspace.tiling_layer), &old_descriptor, &new_descriptor) {
-                                                                    let seat = seat.clone();
-                                                                    data.common.event_loop_handle.insert_idle(move |state| {
-                                                                        Shell::set_focus(state, Some(&focus), &seat, None);
-                                                                    });
-                                                                }
-                                                                old_workspace.refresh_focus_stack();
-                                                                new_workspace.refresh_focus_stack();
-                                                            }
-                                                        }
-                                                    } else {
-                                                        if let Some(workspace) = spaces.find(|w| w.handle == new_descriptor.handle) {
-                                                            if let Some(focus) = TilingLayout::swap_trees(&mut workspace.tiling_layer, None, &old_descriptor, &new_descriptor) {
-                                                                std::mem::drop(spaces);
-                                                                let seat = seat.clone();
-                                                                data.common.event_loop_handle.insert_idle(move |state| {
-                                                                    Shell::set_focus(state, Some(&focus), &seat, None);
-                                                                });
-                                                            }
-                                                            workspace.refresh_focus_stack();
-                                                        }
-                                                    }
-                                                }
-                                            } else {
-                                                let new_workspace = shell.workspaces.active(&current_output).1.handle;
-                                                if new_workspace != old_descriptor.handle {
-                                                    let spaces = shell.workspaces.spaces_mut();
-                                                    let (mut old_w, mut other_w) = spaces.partition::<Vec<_>, _>(|w| w.handle == old_descriptor.handle);
-                                                    if let Some(old_workspace) = old_w.get_mut(0) {
-                                                        if let Some(new_workspace) = other_w.iter_mut().find(|w| w.handle == new_workspace) {
-                                                            if new_workspace.tiling_layer.windows().next().is_none() {
-                                                                if let Some(focus) = TilingLayout::move_tree(&mut old_workspace.tiling_layer, &mut new_workspace.tiling_layer, &new_workspace.handle, &seat, new_workspace.focus_stack.get(&seat).iter(), old_descriptor.clone()) {
-                                                                    let seat = seat.clone();
-                                                                    data.common.event_loop_handle.insert_idle(move |state| {
-                                                                        Shell::set_focus(state, Some(&focus), &seat, None);
-                                                                    });
-                                                                }
-                                                                old_workspace.refresh_focus_stack();
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    // Leave or update resize mode, if modifiers changed or initial key was released
-                                    if let Some(action_pattern) =
-                                        shell.resize_mode().0.active_binding()
-                                    {
-                                        if action_pattern.key.is_some() && state == KeyState::Released
-                                            && handle.raw_syms().contains(&action_pattern.key.unwrap())
-                                        {
-                                            shell.set_resize_mode(None, &data.common.config, data.common.event_loop_handle.clone());
-                                        } else if !cosmic_modifiers_eq_smithay(&action_pattern.modifiers, modifiers) {
-                                            let mut new_pattern = action_pattern.clone();
-                                            new_pattern.modifiers = cosmic_modifiers_from_smithay(modifiers.clone());
-                                            let enabled = data
-                                                .common
-                                                .config
-                                                .shortcuts
-                                                .iter()
-                                                .find_map(move |(binding, action)| {
-                                                    if binding == &new_pattern
-                                                        && matches!(action, shortcuts::Action::Resizing(_))
-                                                    {
-                                                        let shortcuts::Action::Resizing(direction) = action else { unreachable!() };
-                                                        Some((new_pattern.clone(), *direction))
-                                                    } else {
-                                                        None
-                                                    }
-                                                });
-                                            shell.set_resize_mode(enabled, &data.common.config, data.common.event_loop_handle.clone());
-                                        }
-                                    }
-
-                                    // Special case resizing with regards to arrow keys
-                                    if let Some(direction) =
-                                        shell.resize_mode().0.active_direction()
-                                    {
-                                        let resize_edge = match handle.modified_sym() {
-                                            Keysym::Left | Keysym::h | Keysym::H => Some(ResizeEdge::LEFT),
-                                            Keysym::Down | Keysym::j | Keysym::J => Some(ResizeEdge::BOTTOM),
-                                            Keysym::Up | Keysym::k | Keysym::K => Some(ResizeEdge::TOP),
-                                            Keysym::Right | Keysym::l | Keysym::L => Some(ResizeEdge::RIGHT),
-                                            _ => None,
-                                        };
-
-                                        if let Some(mut edge) = resize_edge {
-                                            if direction == ResizeDirection::Inwards {
-                                                edge.flip_direction();
-                                            }
-                                            let action = Action::Private(PrivateAction::Resizing(direction, edge.into(), cosmic_keystate_from_smithay(state)));
-                                            let key_pattern = shortcuts::Binding {
-                                                modifiers: cosmic_modifiers_from_smithay(modifiers.clone()),
-                                                key: Some(Keysym::new(handle.raw_code().raw())),
-                                                description: None,
-                                            };
-
-                                            if state == KeyState::Released {
-                                                if let Some(tokens) = seat.supressed_keys().filter(&handle) {
-                                                    for token in tokens {
-                                                        loop_handle.remove(token);
-                                                    }
-                                                }
-                                            } else {
-                                                let token = if needs_key_repetition {
-                                                    let seat_clone = seat.clone();
-                                                    let action_clone = action.clone();
-                                                    let key_pattern_clone = key_pattern.clone();
-                                                    let start = Instant::now();
-                                                    loop_handle.insert_source(Timer::from_duration(Duration::from_millis(200)), move |current, _, state| {
-                                                        let duration = current.duration_since(start).as_millis();
-                                                        state.handle_action(action_clone.clone(), &seat_clone, serial, time.overflowing_add(duration as u32).0, key_pattern_clone.clone(), None, true);
-                                                        calloop::timer::TimeoutAction::ToDuration(Duration::from_millis(25))
-                                                    }).ok()
-                                                } else { None };
-
-                                                seat.supressed_keys()
-                                                        .add(&handle, token);
-                                            }
-                                            return FilterResult::Intercept(Some((
-                                                action,
-                                                key_pattern
-                                            )));
-                                        }
-                                    }
-
-                                    std::mem::drop(shell);
-
-                                    // cancel grabs
-                                    if is_grabbed
-                                        && handle.modified_sym() == Keysym::Escape
-                                        && state == KeyState::Pressed
-                                        && !modifiers.alt
-                                        && !modifiers.ctrl
-                                        && !modifiers.logo
-                                        && !modifiers.shift
-                                    {
-                                        seat.supressed_keys()
-                                                .add(&handle, None);
-                                        return FilterResult::Intercept(Some((
-                                            Action::Private(PrivateAction::Escape),
-                                            shortcuts::Binding {
-                                                modifiers: shortcuts::Modifiers::default(),
-                                                key: Some(Keysym::Escape),
-                                                description: None,
-                                            }
-                                        )));
-                                    }
-
-                                    // Skip released events for initially surpressed keys
-                                    if state == KeyState::Released {
-                                        if let Some(tokens) = seat.supressed_keys().filter(&handle) {
-                                            for token in tokens {
-                                                loop_handle.remove(token);
-                                            }
-                                            return FilterResult::Intercept(None);
-                                        }
-                                    }
-
-                                    // Handle VT switches
-                                    if state == KeyState::Pressed
-                                        && (Keysym::XF86_Switch_VT_1.raw() ..= Keysym::XF86_Switch_VT_12.raw())
-                                            .contains(&handle.modified_sym().raw())
-                                    {
-                                        if let Err(err) = data.backend.kms().switch_vt(
-                                            (handle.modified_sym().raw() - Keysym::XF86_Switch_VT_1.raw()
-                                                + 1)
-                                                as i32,
-                                        ) {
-                                            error!(?err, "Failed switching virtual terminal.");
-                                        }
-                                        seat.supressed_keys().add(&handle, None);
-                                        return FilterResult::Intercept(None);
-                                    }
-
-                                    // handle the rest of the global shortcuts
-                                    let mut clear_queue = true;
-                                    if !shortcuts_inhibited {
-                                        let modifiers_queue = seat.modifiers_shortcut_queue();
-
-                                        for (binding, action) in
-                                            data.common.config.shortcuts.iter()
-                                        {
-                                            if *action == shortcuts::Action::Disable {
-                                                continue;
-                                            }
-
-                                            // is this a released (triggered) modifier-only binding?
-                                            if binding.key.is_none()
-                                                && state == KeyState::Released
-                                                && !cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
-                                                && modifiers_queue.take(binding)
-                                            {
-                                                modifiers_queue.clear();
-                                                return FilterResult::Intercept(Some((
-                                                    Action::Shortcut(action.clone()),
-                                                    binding.clone(),
-                                                )));
-                                            }
-
-                                            // could this potentially become a modifier-only binding?
-                                            if binding.key.is_none() && state == KeyState::Pressed && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers) {
-                                                modifiers_queue.set(binding.clone());
-                                                clear_queue = false;
-                                            }
-
-                                            // is this a normal binding?
-                                            if binding.key.is_some()
-                                                && state == KeyState::Pressed
-                                                && handle.raw_syms().contains(&binding.key.unwrap())
-                                                && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
-                                            {
-                                                modifiers_queue.clear();
-                                                seat.supressed_keys().add(&handle, None);
-                                                return FilterResult::Intercept(Some((
-                                                    Action::Shortcut(action.clone()),
-                                                    binding.clone(),
-                                                )));
-                                            }
-                                        }
-                                    }
-
-                                    // no binding
-                                    if clear_queue {
-                                        seat.modifiers_shortcut_queue().clear();
-                                    }
-                                    // keys are passed through to apps
-                                    FilterResult::Forward
-                                },
-                            )
-                            .flatten()
-                        {
-                            if pattern.key.is_none() && state == KeyState::Released {
-                                // we still want to send release-events and not have apps stuck on some modifiers.
-                                keyboard.input(self, keycode, state, serial, time, |_, _, _| FilterResult::<()>::Forward);
-                            }
-                            self.handle_action(action, &seat, serial, time, pattern, None, true)
+                        .input(
+                            self,
+                            keycode,
+                            state,
+                            serial,
+                            time,
+                            |data, modifiers, handle| {
+                                Self::filter_keyboard_input(
+                                    data, &event, &seat, modifiers, handle, serial,
+                                )
+                            },
+                        )
+                        .flatten()
+                    {
+                        if pattern.key.is_none() && state == KeyState::Released {
+                            // we still want to send release-events and not have apps stuck on some modifiers.
+                            keyboard.input(self, keycode, state, serial, time, |_, _, _| {
+                                FilterResult::<()>::Forward
+                            });
                         }
+                        self.handle_action(action, &seat, serial, time, pattern, None, true)
+                    }
                 }
             }
+
             InputEvent::PointerMotion { event, .. } => {
                 use smithay::backend::input::PointerMotionEvent;
 
@@ -546,7 +285,7 @@ impl State {
                             _ => {}
                         });
                     }
-
+                    let original_position = position;
                     position += event.delta().as_global();
 
                     let output = shell
@@ -574,16 +313,111 @@ impl State {
                         return;
                     }
 
-                    if ptr.is_grabbed()
-                        && seat
+                    if ptr.is_grabbed() {
+                        if seat
                             .user_data()
                             .get::<ResizeGrabMarker>()
                             .map(|marker| marker.get())
                             .unwrap_or(false)
-                    {
-                        if output != current_output {
-                            ptr.frame(self);
-                            return;
+                        {
+                            if output != current_output {
+                                ptr.frame(self);
+                                return;
+                            }
+                        }
+                        //If the pointer isn't grabbed, we should check if the focused element should be updated
+                    } else if self.common.config.cosmic_conf.focus_follows_cursor {
+                        let shell = self.common.shell.read().unwrap();
+                        let old_keyboard_target =
+                            shell.keyboard_target_from_position(original_position, &current_output);
+                        let new_keyboard_target =
+                            shell.keyboard_target_from_position(position, &output);
+
+                        if old_keyboard_target != new_keyboard_target
+                            && new_keyboard_target.is_some()
+                        {
+                            let create_source = if self.common.pointer_focus_state.is_none() {
+                                true
+                            } else {
+                                let PointerFocusState {
+                                    originally_focused_window,
+                                    scheduled_focused_window,
+                                    token,
+                                } = self.common.pointer_focus_state.as_ref().unwrap();
+
+                                if &new_keyboard_target == originally_focused_window {
+                                    //if we moved to the original window, just cancel the event
+                                    self.common.event_loop_handle.remove(*token);
+                                    //clear the state
+                                    self.common.pointer_focus_state = None;
+                                    false
+                                } else if &new_keyboard_target != scheduled_focused_window {
+                                    //if we moved to a new window, update the scheduled focus
+                                    self.common.event_loop_handle.remove(*token);
+                                    true
+                                } else {
+                                    //the state doesn't need to be updated or cleared
+                                    false
+                                }
+                            };
+
+                            if create_source {
+                                // prevent popups from being unfocusable if there is a gap between them and their parent
+                                let delay = calloop::timer::Timer::from_duration(
+                                    //default to 250ms
+                                    std::time::Duration::from_millis(
+                                        self.common.config.cosmic_conf.focus_follows_cursor_delay,
+                                    ),
+                                );
+                                let seat = seat.clone();
+                                let token = self
+                                    .common
+                                    .event_loop_handle
+                                    .insert_source(delay, move |_, _, state| {
+                                        let target = state
+                                            .common
+                                            .pointer_focus_state
+                                            .as_ref()
+                                            .unwrap()
+                                            .scheduled_focused_window
+                                            .clone();
+                                        //clear it prior in case the user twitches in the microsecond it
+                                        //takes this function to run
+                                        state.common.pointer_focus_state = None;
+
+                                        Shell::set_focus(
+                                            state,
+                                            target.as_ref(),
+                                            &seat,
+                                            Some(SERIAL_COUNTER.next_serial()),
+                                            false,
+                                        );
+
+                                        TimeoutAction::Drop
+                                    })
+                                    .ok();
+                                if token.is_some() {
+                                    let originally_focused_window =
+                                        if self.common.pointer_focus_state.is_none() {
+                                            old_keyboard_target
+                                        } else {
+                                            // In this case, the pointer has moved to a new window (neither original, nor scheduled)
+                                            // so we should preserve the original window for the focus state
+                                            self.common
+                                                .pointer_focus_state
+                                                .as_ref()
+                                                .unwrap()
+                                                .originally_focused_window
+                                                .clone()
+                                        };
+
+                                    self.common.pointer_focus_state = Some(PointerFocusState {
+                                        originally_focused_window,
+                                        scheduled_focused_window: new_keyboard_target,
+                                        token: token.unwrap(),
+                                    });
+                                }
+                            }
                         }
                     }
 
@@ -767,212 +601,166 @@ impl State {
             InputEvent::PointerButton { event, .. } => {
                 use smithay::backend::input::{ButtonState, PointerButtonEvent};
 
-                let mut shell = self.common.shell.write().unwrap();
-                if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
-                    self.common.idle_notifier_state.notify_activity(&seat);
+                //
+                let Some(seat) = self
+                    .common
+                    .shell
+                    .read()
+                    .unwrap()
+                    .seats
+                    .for_device(&event.device())
+                    .cloned()
+                else {
+                    return;
+                };
+                self.common.idle_notifier_state.notify_activity(&seat);
 
-                    let serial = SERIAL_COUNTER.next_serial();
-                    let button = event.button_code();
-                    if event.state() == ButtonState::Pressed {
-                        // change the keyboard focus unless the pointer is grabbed
-                        // We test for any matching surface type here but always use the root
-                        // (in case of a window the toplevel) surface for the focus.
-                        // see: https://gitlab.freedesktop.org/wayland/wayland/-/issues/294
-                        if !seat.get_pointer().unwrap().is_grabbed() {
-                            let output = seat.active_output();
+                let serial = SERIAL_COUNTER.next_serial();
+                let button = event.button_code();
+                let mut pass_event = !seat.supressed_buttons().remove(button);
+                if event.state() == ButtonState::Pressed {
+                    // change the keyboard focus unless the pointer is grabbed
+                    // We test for any matching surface type here but always use the root
+                    // (in case of a window the toplevel) surface for the focus.
+                    // see: https://gitlab.freedesktop.org/wayland/wayland/-/issues/294
+                    if !seat.get_pointer().unwrap().is_grabbed() {
+                        let output = seat.active_output();
 
-                            let pos = seat.get_pointer().unwrap().current_location().as_global();
-                            let relative_pos = pos.to_local(&output);
-                            let mut under: Option<KeyboardFocusTarget> = None;
+                        let global_position =
+                            seat.get_pointer().unwrap().current_location().as_global();
+                        let shell = self.common.shell.write().unwrap();
+                        let under = shell.keyboard_target_from_position(global_position, &output);
+                        // Don't check override redirect windows, because we don't set keyboard focus to them explicitly.
+                        // These cases are handled by the XwaylandKeyboardGrab.
+                        if let Some(target) = shell.element_under(global_position, &output) {
+                            if seat.get_keyboard().unwrap().modifier_state().logo {
+                                if let Some(surface) = target.toplevel().map(Cow::into_owned) {
+                                    let seat_clone = seat.clone();
+                                    let mouse_button = PointerButtonEvent::button(&event);
 
-                            if let Some(session_lock) = shell.session_lock.as_ref() {
-                                under = session_lock
-                                    .surfaces
-                                    .get(&output)
-                                    .map(|lock| lock.clone().into());
-                            } else if let Some(window) =
-                                shell.active_space(&output).get_fullscreen()
-                            {
-                                let layers = layer_map_for_output(&output);
-                                if let Some(layer) =
-                                    layers.layer_under(WlrLayer::Overlay, relative_pos.as_logical())
-                                {
-                                    let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                                    if layer.can_receive_keyboard_focus()
-                                        && layer
-                                            .surface_under(
-                                                relative_pos.as_logical() - layer_loc.to_f64(),
-                                                WindowSurfaceType::ALL,
-                                            )
-                                            .is_some()
-                                    {
-                                        under = Some(layer.clone().into());
-                                    }
-                                } else {
-                                    under = Some(window.clone().into());
-                                }
-                            } else {
-                                let done = {
-                                    let layers = layer_map_for_output(&output);
-                                    if let Some(layer) = layers
-                                        .layer_under(WlrLayer::Overlay, relative_pos.as_logical())
-                                        .or_else(|| {
-                                            layers.layer_under(
-                                                WlrLayer::Top,
-                                                relative_pos.as_logical(),
-                                            )
-                                        })
-                                    {
-                                        let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                                        if layer.can_receive_keyboard_focus()
-                                            && layer
-                                                .surface_under(
-                                                    relative_pos.as_logical() - layer_loc.to_f64(),
-                                                    WindowSurfaceType::ALL,
-                                                )
-                                                .is_some()
-                                        {
-                                            under = Some(layer.clone().into());
-                                            true
-                                        } else {
-                                            false
+                                    let mut supress_button = || {
+                                        // If the logo is held then the pointer event is
+                                        // aimed at the compositor and shouldn't be passed
+                                        // to the application.
+                                        pass_event = false;
+                                        seat.supressed_buttons().add(button);
+                                    };
+
+                                    fn dispatch_grab<G: PointerGrab<State> + 'static>(
+                                        grab: Option<(G, smithay::input::pointer::Focus)>,
+                                        seat: Seat<State>,
+                                        serial: Serial,
+                                        state: &mut State,
+                                    ) {
+                                        if let Some((target, focus)) = grab {
+                                            seat.modifiers_shortcut_queue().clear();
+
+                                            seat.get_pointer()
+                                                .unwrap()
+                                                .set_grab(state, target, serial, focus);
                                         }
-                                    } else {
-                                        false
                                     }
-                                };
-                                if !done {
-                                    // Don't check override redirect windows, because we don't set keyboard focus to them explicitly.
-                                    // These cases are handled by the XwaylandKeyboardGrab.
-                                    if let Some(target) = shell.element_under(pos, &output) {
-                                        if seat.get_keyboard().unwrap().modifier_state().logo {
-                                            if let Some(surface) =
-                                                target.toplevel().map(Cow::into_owned)
-                                            {
-                                                let seat_clone = seat.clone();
-                                                let button = PointerButtonEvent::button(&event);
+
+                                    if let Some(mouse_button) = mouse_button {
+                                        match mouse_button {
+                                            smithay::backend::input::MouseButton::Left => {
+                                                supress_button();
                                                 self.common.event_loop_handle.insert_idle(
                                                     move |state| {
-                                                        fn dispatch_grab<G: PointerGrab<State> + 'static>(
-                                                            grab: Option<(G, smithay::input::pointer::Focus)>,
-                                                            seat: Seat<State>,
-                                                            serial: Serial,
-                                                            state: &mut State)
-                                                        {
-                                                            if let Some((target, focus)) = grab {
-                                                                seat
-                                                                    .modifiers_shortcut_queue()
-                                                                    .clear();
-
-                                                                seat
-                                                                    .get_pointer()
-                                                                    .unwrap()
-                                                                    .set_grab(
-                                                                        state, target, serial,
-                                                                        focus,
-                                                                    );
-                                                            }
-                                                        }
-
                                                         let mut shell =
                                                             state.common.shell.write().unwrap();
-                                                        if let Some(button) = button {
-                                                            match button {
-                                                                smithay::backend::input::MouseButton::Left => {
-                                                                   let res = shell.move_request(
-                                                                        &surface,
-                                                                        &seat_clone,
-                                                                        serial,
-                                                                        ReleaseMode::NoMouseButtons,
-                                                                        false,
-                                                                        &state.common.config,
-                                                                        &state.common.event_loop_handle,
-                                                                        &state.common.xdg_activation_state,
-                                                                    );
-                                                                    drop(shell);
-                                                                    dispatch_grab(res, seat_clone, serial, state);
-                                                                },
-                                                                smithay::backend::input::MouseButton::Right => {
-                                                                    let Some(target_elem) = shell.element_for_surface(&surface) else { return };
-                                                                    let Some(geom) = shell
-                                                                        .space_for(target_elem)
-                                                                        .and_then(|f| f.element_geometry(target_elem)) else { return };
-                                                                    let geom = geom.to_f64();
-                                                                    let center = geom.loc + geom.size.downscale(2.0);
-                                                                    let offset = center.to_global(&output) - pos;
-                                                                    let edge = match (offset.x > 0.0, offset.y > 0.0) {
-                                                                        (true, true) => ResizeEdge::TOP_LEFT,
-                                                                        (false, true) => ResizeEdge::TOP_RIGHT,
-                                                                        (true, false) => ResizeEdge::BOTTOM_LEFT,
-                                                                        (false, false) => ResizeEdge::BOTTOM_RIGHT
-                                                                    };
-                                                                    let res = shell.resize_request(
-                                                                        &surface,
-                                                                        &seat_clone,
-                                                                        serial,
-                                                                        edge
-                                                                    );
-                                                                    drop(shell);
-                                                                    dispatch_grab(res, seat_clone, serial, state);
-                                                                },
-                                                                _ => {},
-                                                            }
-
-                                                        }
+                                                        let res = shell.move_request(
+                                                            &surface,
+                                                            &seat_clone,
+                                                            serial,
+                                                            ReleaseMode::NoMouseButtons,
+                                                            false,
+                                                            &state.common.config,
+                                                            &state.common.event_loop_handle,
+                                                            &state.common.xdg_activation_state,
+                                                            false,
+                                                        );
+                                                        drop(shell);
+                                                        dispatch_grab(
+                                                            res, seat_clone, serial, state,
+                                                        );
                                                     },
                                                 );
                                             }
-                                        }
-                                        under = Some(target);
-                                    } else {
-                                        let layers = layer_map_for_output(&output);
-                                        if let Some(layer) = layers
-                                            .layer_under(
-                                                WlrLayer::Bottom,
-                                                relative_pos.as_logical(),
-                                            )
-                                            .or_else(|| {
-                                                layers.layer_under(
-                                                    WlrLayer::Background,
-                                                    relative_pos.as_logical(),
-                                                )
-                                            })
-                                        {
-                                            let layer_loc =
-                                                layers.layer_geometry(layer).unwrap().loc;
-                                            if layer.can_receive_keyboard_focus()
-                                                && layer
-                                                    .surface_under(
-                                                        relative_pos.as_logical()
-                                                            - layer_loc.to_f64(),
-                                                        WindowSurfaceType::ALL,
-                                                    )
-                                                    .is_some()
-                                            {
-                                                under = Some(layer.clone().into());
+                                            smithay::backend::input::MouseButton::Right => {
+                                                supress_button();
+                                                self.common.event_loop_handle.insert_idle(
+                                                    move |state| {
+                                                        let mut shell =
+                                                            state.common.shell.write().unwrap();
+                                                        let Some(target_elem) =
+                                                            shell.element_for_surface(&surface)
+                                                        else {
+                                                            return;
+                                                        };
+                                                        let Some(geom) =
+                                                            shell.space_for(target_elem).and_then(
+                                                                |f| f.element_geometry(target_elem),
+                                                            )
+                                                        else {
+                                                            return;
+                                                        };
+                                                        let geom = geom.to_f64();
+                                                        let center =
+                                                            geom.loc + geom.size.downscale(2.0);
+                                                        let offset = center.to_global(&output)
+                                                            - global_position;
+                                                        let edge = match (
+                                                            offset.x > 0.0,
+                                                            offset.y > 0.0,
+                                                        ) {
+                                                            (true, true) => ResizeEdge::TOP_LEFT,
+                                                            (false, true) => ResizeEdge::TOP_RIGHT,
+                                                            (true, false) => {
+                                                                ResizeEdge::BOTTOM_LEFT
+                                                            }
+                                                            (false, false) => {
+                                                                ResizeEdge::BOTTOM_RIGHT
+                                                            }
+                                                        };
+                                                        let res = shell.resize_request(
+                                                            &surface,
+                                                            &seat_clone,
+                                                            serial,
+                                                            edge,
+                                                            false,
+                                                        );
+                                                        drop(shell);
+                                                        dispatch_grab(
+                                                            res, seat_clone, serial, state,
+                                                        );
+                                                    },
+                                                );
                                             }
-                                        };
+                                            _ => {}
+                                        }
                                     }
                                 }
                             }
-                            std::mem::drop(shell);
-                            Shell::set_focus(self, under.as_ref(), &seat, Some(serial));
-                        } else {
-                            std::mem::drop(shell);
                         }
-                    } else {
-                        if let Some(Trigger::Pointer(action_button)) =
-                            shell.overview_mode().0.active_trigger()
-                        {
-                            if *action_button == button {
-                                shell
-                                    .set_overview_mode(None, self.common.event_loop_handle.clone());
-                            }
-                        }
-                        std::mem::drop(shell);
-                    };
 
-                    let ptr = seat.get_pointer().unwrap();
+                        std::mem::drop(shell);
+                        Shell::set_focus(self, under.as_ref(), &seat, Some(serial), false);
+                    }
+                } else {
+                    let mut shell = self.common.shell.write().unwrap();
+                    if let Some(Trigger::Pointer(action_button)) =
+                        shell.overview_mode().0.active_trigger()
+                    {
+                        if *action_button == button {
+                            shell.set_overview_mode(None, self.common.event_loop_handle.clone());
+                        }
+                    }
+                    std::mem::drop(shell);
+                };
+
+                let ptr = seat.get_pointer().unwrap();
+                if pass_event {
                     ptr.button(
                         self,
                         &ButtonEvent {
@@ -983,6 +771,8 @@ impl State {
                         },
                     );
                     ptr.frame(self);
+                } else if event.state() == ButtonState::Released {
+                    ptr.unset_grab(self, serial, event.time_msec())
                 }
             }
             InputEvent::PointerAxis { event, .. } => {
@@ -1037,6 +827,7 @@ impl State {
                     ptr.frame(self);
                 }
             }
+
             InputEvent::GestureSwipeBegin { event, .. } => {
                 let maybe_seat = self
                     .common
@@ -1083,6 +874,14 @@ impl State {
                         );
                         // Decide on action if first update
                         if first_update {
+                            let mut natural_scroll = false;
+                            if let Some(scroll_config) =
+                                &self.common.config.cosmic_conf.input_touchpad.scroll_config
+                            {
+                                if let Some(natural) = scroll_config.natural_scroll {
+                                    natural_scroll = natural;
+                                }
+                            }
                             activate_action = match gesture_state.fingers {
                                 3 => None, // TODO: 3 finger gestures
                                 4 => {
@@ -1091,18 +890,36 @@ impl State {
                                     {
                                         match gesture_state.direction {
                                             Some(Direction::Left) => {
-                                                Some(SwipeAction::NextWorkspace)
+                                                if natural_scroll {
+                                                    Some(SwipeAction::NextWorkspace)
+                                                } else {
+                                                    Some(SwipeAction::PrevWorkspace)
+                                                }
                                             }
                                             Some(Direction::Right) => {
-                                                Some(SwipeAction::PrevWorkspace)
+                                                if natural_scroll {
+                                                    Some(SwipeAction::PrevWorkspace)
+                                                } else {
+                                                    Some(SwipeAction::NextWorkspace)
+                                                }
                                             }
                                             _ => None, // TODO: Other actions
                                         }
                                     } else {
                                         match gesture_state.direction {
-                                            Some(Direction::Up) => Some(SwipeAction::NextWorkspace),
+                                            Some(Direction::Up) => {
+                                                if natural_scroll {
+                                                    Some(SwipeAction::NextWorkspace)
+                                                } else {
+                                                    Some(SwipeAction::PrevWorkspace)
+                                                }
+                                            }
                                             Some(Direction::Down) => {
-                                                Some(SwipeAction::PrevWorkspace)
+                                                if natural_scroll {
+                                                    Some(SwipeAction::PrevWorkspace)
+                                                } else {
+                                                    Some(SwipeAction::NextWorkspace)
+                                                }
                                             }
                                             _ => None, // TODO: Other actions
                                         }
@@ -1133,24 +950,9 @@ impl State {
                             },
                         );
                     }
-                    match activate_action {
-                        Some(SwipeAction::NextWorkspace) => {
-                            let _ = to_next_workspace(
-                                &mut *self.common.shell.write().unwrap(),
-                                &seat,
-                                true,
-                                &mut self.common.workspace_state.update(),
-                            );
-                        }
-                        Some(SwipeAction::PrevWorkspace) => {
-                            let _ = to_previous_workspace(
-                                &mut *self.common.shell.write().unwrap(),
-                                &seat,
-                                true,
-                                &mut self.common.workspace_state.update(),
-                            );
-                        }
-                        _ => {}
+
+                    if let Some(action) = activate_action {
+                        self.handle_swipe_action(action, &seat);
                     }
                 }
             }
@@ -1315,6 +1117,7 @@ impl State {
                     );
                 }
             }
+
             InputEvent::TouchDown { event, .. } => {
                 let mut shell = self.common.shell.write().unwrap();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
@@ -1441,6 +1244,7 @@ impl State {
                     touch.frame(self);
                 }
             }
+
             InputEvent::TabletToolAxis { event, .. } => {
                 let mut shell = self.common.shell.write().unwrap();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
@@ -1470,7 +1274,7 @@ impl State {
                         &MotionEvent {
                             location: position.as_logical(),
                             serial: SERIAL_COUNTER.next_serial(),
-                            time: 0,
+                            time: self.common.clock.now().as_millis(),
                         },
                     );
 
@@ -1539,15 +1343,15 @@ impl State {
                         &MotionEvent {
                             location: position.as_logical(),
                             serial: SERIAL_COUNTER.next_serial(),
-                            time: 0,
+                            time: self.common.clock.now().as_millis(),
                         },
                     );
 
                     let tablet_seat = seat.tablet_seat();
 
                     let tablet = tablet_seat.get_tablet(&TabletDescriptor::from(&event.device()));
-                    let tool =
-                        tablet_seat.add_tool::<Self>(&self.common.display_handle, &event.tool());
+                    let dh = self.common.display_handle.clone();
+                    let tool = tablet_seat.add_tool::<Self>(self, &dh, &event.tool());
 
                     if let Some(tablet) = tablet {
                         match event.state() {
@@ -1618,917 +1422,384 @@ impl State {
         }
     }
 
-    pub fn handle_action(
+    /// Determine is key event should be intercepted as a key binding, or forwarded to surface
+    pub fn filter_keyboard_input<B: InputBackend, E: KeyboardKeyEvent<B>>(
         &mut self,
-        action: Action,
-        seat: &Seat<State>,
+        event: &E,
+        seat: &Seat<Self>,
+        modifiers: &ModifiersState,
+        handle: KeysymHandle<'_>,
         serial: Serial,
-        time: u32,
-        pattern: shortcuts::Binding,
-        direction: Option<Direction>,
-        propagate: bool,
-    ) {
-        // TODO: Detect if started from login manager or tty, and only allow
-        // `Terminate` if it will return to login manager.
-        if self.common.shell.read().unwrap().session_lock.is_some()
-            && !matches!(
-                action,
-                Action::Shortcut(shortcuts::Action::Terminate)
-                    | Action::Shortcut(shortcuts::Action::Debug)
-            )
-        {
-            return;
-        }
-
-        match action {
-            Action::Shortcut(action) => self
-                .handle_shortcut_action(action, seat, serial, time, pattern, direction, propagate),
-
-            Action::Private(PrivateAction::Escape) => {
-                {
-                    let mut shell = self.common.shell.write().unwrap();
-                    shell.set_overview_mode(None, self.common.event_loop_handle.clone());
-                    shell.set_resize_mode(
-                        None,
-                        &self.common.config,
-                        self.common.event_loop_handle.clone(),
-                    );
-                }
-                let pointer = seat.get_pointer().unwrap();
-                let keyboard = seat.get_keyboard().unwrap();
-                if pointer.is_grabbed() {
-                    pointer.unset_grab(self, serial, time);
-                }
-                if keyboard.is_grabbed() {
-                    keyboard.unset_grab(self);
-                }
-            }
-
-            Action::Private(PrivateAction::Resizing(direction, edge, state)) => {
-                if state == shortcuts::State::Pressed {
-                    self.common
-                        .shell
-                        .write()
-                        .unwrap()
-                        .resize(seat, direction, edge.into());
-                } else {
-                    self.common
-                        .shell
-                        .write()
-                        .unwrap()
-                        .finish_resize(direction, edge.into());
-                }
-            }
-        }
-    }
-
-    pub fn handle_shortcut_action(
-        &mut self,
-        action: shortcuts::Action,
-        seat: &Seat<State>,
-        serial: Serial,
-        time: u32,
-        pattern: shortcuts::Binding,
-        direction: Option<Direction>,
-        propagate: bool,
-    ) {
-        use shortcuts::Action;
-
-        match action {
-            Action::Terminate => {
-                self.common.should_stop = true;
-            }
-
-            #[cfg(feature = "debug")]
-            Action::Debug => {
-                let mut shell = self.common.shell.write().unwrap();
-                shell.debug_active = !shell.debug_active;
-                for mapped in shell.workspaces.spaces().flat_map(|w| w.mapped()) {
-                    mapped.set_debug(shell.debug_active);
-                }
-            }
-
-            #[cfg(not(feature = "debug"))]
-            Action::Debug => {
-                info!("Debug overlay not included in this build.")
-            }
-
-            Action::Close => {
-                let current_output = seat.active_output();
-                let shell = self.common.shell.read().unwrap();
-                let workspace = shell.active_space(&current_output);
-                if let Some(window) = workspace.focus_stack.get(seat).last() {
-                    window.send_close();
-                }
-            }
-
-            Action::Workspace(key_num) => {
-                let current_output = seat.active_output();
-                let workspace = match key_num {
-                    0 => 9,
-                    x => x - 1,
-                };
-                let _ = self.common.shell.write().unwrap().activate(
-                    &current_output,
-                    workspace as usize,
-                    WorkspaceDelta::new_shortcut(),
-                    &mut self.common.workspace_state.update(),
-                );
-            }
-
-            Action::LastWorkspace => {
-                let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
-                let workspace = shell.workspaces.len(&current_output).saturating_sub(1);
-                let _ = shell.activate(
-                    &current_output,
-                    workspace,
-                    WorkspaceDelta::new_shortcut(),
-                    &mut self.common.workspace_state.update(),
-                );
-            }
-
-            Action::NextWorkspace => {
-                let next = to_next_workspace(
-                    &mut *self.common.shell.write().unwrap(),
-                    seat,
-                    false,
-                    &mut self.common.workspace_state.update(),
-                );
-                if next.is_err() && propagate {
-                    if let Some(inferred) = pattern.inferred_direction() {
-                        self.handle_shortcut_action(
-                            Action::SwitchOutput(inferred),
-                            seat,
-                            serial,
-                            time,
-                            pattern,
-                            direction,
-                            false,
-                        )
-                    };
-                }
-            }
-
-            Action::PreviousWorkspace => {
-                let previous = to_previous_workspace(
-                    &mut *self.common.shell.write().unwrap(),
-                    seat,
-                    false,
-                    &mut self.common.workspace_state.update(),
-                );
-                if previous.is_err() && propagate {
-                    if let Some(inferred) = pattern.inferred_direction() {
-                        self.handle_shortcut_action(
-                            Action::SwitchOutput(inferred),
-                            seat,
-                            serial,
-                            time,
-                            pattern,
-                            direction,
-                            false,
-                        )
-                    };
-                }
-            }
-
-            x @ Action::MoveToWorkspace(_) | x @ Action::SendToWorkspace(_) => {
-                let current_output = seat.active_output();
-                let follow = matches!(x, Action::MoveToWorkspace(_));
-                let workspace = match x {
-                    Action::MoveToWorkspace(0) | Action::SendToWorkspace(0) => 9,
-                    Action::MoveToWorkspace(x) | Action::SendToWorkspace(x) => x - 1,
-                    _ => unreachable!(),
-                };
-                let res = self.common.shell.write().unwrap().move_current_window(
-                    seat,
-                    &current_output,
-                    (&current_output, Some(workspace as usize)),
-                    follow,
-                    None,
-                    &mut self.common.workspace_state.update(),
-                );
-                if let Ok(Some((target, _point))) = res {
-                    Shell::set_focus(self, Some(&target), seat, None);
-                }
-            }
-
-            x @ Action::MoveToLastWorkspace | x @ Action::SendToLastWorkspace => {
-                let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
-                let workspace = shell.workspaces.len(&current_output).saturating_sub(1);
-                let res = shell.move_current_window(
-                    seat,
-                    &current_output,
-                    (&current_output, Some(workspace as usize)),
-                    matches!(x, Action::MoveToLastWorkspace),
-                    None,
-                    &mut self.common.workspace_state.update(),
-                );
-                if let Ok(Some((target, _point))) = res {
-                    std::mem::drop(shell);
-                    Shell::set_focus(self, Some(&target), seat, None);
-                }
-            }
-
-            x @ Action::MoveToNextWorkspace | x @ Action::SendToNextWorkspace => {
-                let current_output = seat.active_output();
-                let res = {
-                    let mut shell = self.common.shell.write().unwrap();
-                    let workspace = shell
-                        .workspaces
-                        .active_num(&current_output)
-                        .1
-                        .saturating_add(1);
-                    shell.move_current_window(
-                        seat,
-                        &current_output,
-                        (&current_output, Some(workspace as usize)),
-                        matches!(x, Action::MoveToNextWorkspace),
-                        direction,
-                        &mut self.common.workspace_state.update(),
-                    )
-                };
-
-                match res {
-                    Ok(Some((target, _point))) => {
-                        Shell::set_focus(self, Some(&target), seat, None);
-                    }
-                    Err(_) if propagate => {
-                        if let Some(inferred) = pattern.inferred_direction() {
-                            self.handle_shortcut_action(
-                                if matches!(x, Action::MoveToNextWorkspace) {
-                                    Action::MoveToOutput(inferred)
-                                } else {
-                                    Action::SendToOutput(inferred)
-                                },
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                direction,
-                                false,
-                            )
-                        }
-                    }
-                    _ => {}
-                }
-            }
-
-            x @ Action::MoveToPreviousWorkspace | x @ Action::SendToPreviousWorkspace => {
-                let current_output = seat.active_output();
-                let res = {
-                    let mut shell = self.common.shell.write().unwrap();
-                    let workspace = shell
-                        .workspaces
-                        .active_num(&current_output)
-                        .1
-                        .saturating_sub(1);
-                    // TODO: Possibly move to prev output, if idx < 0
-                    shell.move_current_window(
-                        seat,
-                        &current_output,
-                        (&current_output, Some(workspace as usize)),
-                        matches!(x, Action::MoveToPreviousWorkspace),
-                        direction,
-                        &mut self.common.workspace_state.update(),
-                    )
-                };
-
-                match res {
-                    Ok(Some((target, _point))) => {
-                        Shell::set_focus(self, Some(&target), seat, None);
-                    }
-                    Err(_) if propagate => {
-                        if let Some(inferred) = pattern.inferred_direction() {
-                            self.handle_shortcut_action(
-                                if matches!(x, Action::MoveToPreviousWorkspace) {
-                                    Action::MoveToOutput(inferred)
-                                } else {
-                                    Action::SendToOutput(inferred)
-                                },
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                direction,
-                                false,
-                            )
-                        }
-                    }
-                    _ => {}
-                }
-            }
-
-            Action::SwitchOutput(direction) => {
-                let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
-
-                let next_output = shell.next_output(&current_output, direction).cloned();
-
-                if let Some(next_output) = next_output {
-                    let idx = shell.workspaces.active_num(&next_output).1;
-                    let res = shell.activate(
-                        &next_output,
-                        idx,
-                        WorkspaceDelta::new_shortcut(),
-                        &mut self.common.workspace_state.update(),
-                    );
-                    match res {
-                        Ok(Some(new_pos)) => {
-                            std::mem::drop(shell);
-                            seat.set_active_output(&next_output);
-                            if let Some(ptr) = seat.get_pointer() {
-                                ptr.motion(
-                                    self,
-                                    None,
-                                    &MotionEvent {
-                                        location: new_pos.to_f64().as_logical(),
-                                        serial,
-                                        time,
-                                    },
-                                );
-                                ptr.frame(self);
-                            }
-                        }
-                        Ok(None) => {
-                            seat.set_active_output(&next_output);
-                        }
-                        _ => {}
-                    }
-                } else if propagate {
-                    std::mem::drop(shell);
-
-                    let action = match (
-                        direction,
-                        self.common.config.cosmic_conf.workspaces.workspace_layout,
-                    ) {
-                        (Direction::Left, WorkspaceLayout::Horizontal)
-                        | (Direction::Up, WorkspaceLayout::Vertical) => {
-                            Some(Action::PreviousWorkspace)
-                        }
-                        (Direction::Right, WorkspaceLayout::Horizontal)
-                        | (Direction::Down, WorkspaceLayout::Vertical) => {
-                            Some(Action::NextWorkspace)
-                        }
-                        _ => None,
-                    };
-
-                    if let Some(action) = action {
-                        self.handle_shortcut_action(
-                            action,
-                            seat,
-                            serial,
-                            time,
-                            pattern,
-                            Some(direction),
-                            false,
-                        )
-                    }
-                }
-            }
-
-            Action::NextOutput => {
-                let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
-
-                let next_output = shell
-                    .outputs()
-                    .skip_while(|o| *o != &current_output)
-                    .skip(1)
-                    .next()
-                    .cloned();
-                if let Some(next_output) = next_output {
-                    let idx = shell.workspaces.active_num(&next_output).1;
-                    let res = shell.activate(
-                        &next_output,
-                        idx,
-                        WorkspaceDelta::new_shortcut(),
-                        &mut self.common.workspace_state.update(),
-                    );
-                    match res {
-                        Ok(Some(new_pos)) => {
-                            std::mem::drop(shell);
-                            seat.set_active_output(&next_output);
-                            if let Some(ptr) = seat.get_pointer() {
-                                ptr.motion(
-                                    self,
-                                    None,
-                                    &MotionEvent {
-                                        location: new_pos.to_f64().as_logical(),
-                                        serial,
-                                        time,
-                                    },
-                                );
-                                ptr.frame(self);
-                            }
-                        }
-                        Ok(None) => {
-                            seat.set_active_output(&next_output);
-                        }
-                        _ => {}
-                    }
-                }
-            }
-
-            Action::PreviousOutput => {
-                let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
-
-                let prev_output = shell
-                    .outputs()
-                    .rev()
-                    .skip_while(|o| *o != &current_output)
-                    .skip(1)
-                    .next()
-                    .cloned();
-                if let Some(prev_output) = prev_output {
-                    let idx = shell.workspaces.active_num(&prev_output).1;
-                    let res = shell.activate(
-                        &prev_output,
-                        idx,
-                        WorkspaceDelta::new_shortcut(),
-                        &mut self.common.workspace_state.update(),
-                    );
-                    match res {
-                        Ok(Some(new_pos)) => {
-                            std::mem::drop(shell);
-                            seat.set_active_output(&prev_output);
-                            if let Some(ptr) = seat.get_pointer() {
-                                ptr.motion(
-                                    self,
-                                    None,
-                                    &MotionEvent {
-                                        location: new_pos.to_f64().as_logical(),
-                                        serial,
-                                        time,
-                                    },
-                                );
-                                ptr.frame(self);
-                            }
-                        }
-                        Ok(None) => {
-                            seat.set_active_output(&prev_output);
-                        }
-                        _ => {}
-                    }
-                }
-            }
-
-            action @ Action::MoveToOutput(_) | action @ Action::SendToOutput(_) => {
-                let is_move_action = matches!(action, Action::MoveToOutput(_));
-                let direction = match action {
-                    Action::MoveToOutput(dir) => dir,
-                    Action::SendToOutput(dir) => dir,
-                    _ => unreachable!(),
-                };
-
-                let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
-                let next_output = shell.next_output(&current_output, direction).cloned();
-
-                if let Some(next_output) = next_output {
-                    let res = shell.move_current_window(
-                        seat,
-                        &current_output,
-                        (&next_output, None),
-                        is_move_action,
-                        Some(direction),
-                        &mut self.common.workspace_state.update(),
-                    );
-                    if let Ok(Some((target, new_pos))) = res {
-                        std::mem::drop(shell);
-                        Shell::set_focus(self, Some(&target), seat, None);
-                        if let Some(ptr) = seat.get_pointer() {
-                            ptr.motion(
-                                self,
-                                None,
-                                &MotionEvent {
-                                    location: new_pos.to_f64().as_logical(),
-                                    serial,
-                                    time,
-                                },
-                            );
-                            ptr.frame(self);
-                        }
-                    }
-                } else if propagate {
-                    std::mem::drop(shell);
-                    match (
-                        direction,
-                        self.common.config.cosmic_conf.workspaces.workspace_layout,
-                    ) {
-                        (Direction::Left, WorkspaceLayout::Horizontal)
-                        | (Direction::Up, WorkspaceLayout::Vertical) => self
-                            .handle_shortcut_action(
-                                Action::MoveToPreviousWorkspace,
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                Some(direction),
-                                false,
-                            ),
-                        (Direction::Right, WorkspaceLayout::Horizontal)
-                        | (Direction::Down, WorkspaceLayout::Vertical) => self
-                            .handle_shortcut_action(
-                                Action::MoveToNextWorkspace,
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                Some(direction),
-                                false,
-                            ),
-
-                        _ => {}
-                    }
-                }
-            }
-
-            x @ Action::MoveToNextOutput | x @ Action::SendToNextOutput => {
-                let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
-
-                let next_output = shell
-                    .outputs()
-                    .skip_while(|o| *o != &current_output)
-                    .skip(1)
-                    .next()
-                    .cloned();
-                if let Some(next_output) = next_output {
-                    let res = shell.move_current_window(
-                        seat,
-                        &current_output,
-                        (&next_output, None),
-                        matches!(x, Action::MoveToNextOutput),
-                        direction,
-                        &mut self.common.workspace_state.update(),
-                    );
-                    if let Ok(Some((target, new_pos))) = res {
-                        std::mem::drop(shell);
-                        Shell::set_focus(self, Some(&target), seat, None);
-                        if let Some(ptr) = seat.get_pointer() {
-                            ptr.motion(
-                                self,
-                                None,
-                                &MotionEvent {
-                                    location: new_pos.to_f64().as_logical(),
-                                    serial,
-                                    time,
-                                },
-                            );
-                            ptr.frame(self);
-                        }
-                    }
-                }
-            }
-
-            x @ Action::MoveToPreviousOutput | x @ Action::SendToPreviousOutput => {
-                let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
-
-                let prev_output = shell
-                    .outputs()
-                    .rev()
-                    .skip_while(|o| *o != &current_output)
-                    .skip(1)
-                    .next()
-                    .cloned();
-                if let Some(prev_output) = prev_output {
-                    let res = shell.move_current_window(
-                        seat,
-                        &current_output,
-                        (&prev_output, None),
-                        matches!(x, Action::MoveToPreviousOutput),
-                        direction,
-                        &mut self.common.workspace_state.update(),
-                    );
-                    if let Ok(Some((target, new_pos))) = res {
-                        std::mem::drop(shell);
-                        Shell::set_focus(self, Some(&target), seat, None);
-                        if let Some(ptr) = seat.get_pointer() {
-                            ptr.motion(
-                                self,
-                                None,
-                                &MotionEvent {
-                                    location: new_pos.to_f64().as_logical(),
-                                    serial,
-                                    time,
-                                },
-                            );
-                            ptr.frame(self);
-                        }
-                    }
-                }
-            }
-
-            Action::MigrateWorkspaceToNextOutput => {
-                let current_output = seat.active_output();
-                let (active, next_output) = {
-                    let shell = self.common.shell.read().unwrap();
-                    let output = shell
-                        .outputs()
-                        .skip_while(|o| *o != &current_output)
-                        .skip(1)
-                        .next()
-                        .cloned();
-
-                    (shell.active_space(&current_output).handle, output)
-                };
-                if let Some(next_output) = next_output {
-                    self.common
-                        .migrate_workspace(&current_output, &next_output, &active);
-                }
-            }
-
-            Action::MigrateWorkspaceToPreviousOutput => {
-                let current_output = seat.active_output();
-                let (active, prev_output) = {
-                    let shell = self.common.shell.read().unwrap();
-                    let output = shell
-                        .outputs()
-                        .rev()
-                        .skip_while(|o| *o != &current_output)
-                        .skip(1)
-                        .next()
-                        .cloned();
-
-                    (shell.active_space(&current_output).handle, output)
-                };
-                if let Some(prev_output) = prev_output {
-                    self.common
-                        .migrate_workspace(&current_output, &prev_output, &active);
-                }
-            }
-
-            Action::MigrateWorkspaceToOutput(direction) => {
-                let current_output = seat.active_output();
-                let (active, next_output) = {
-                    let shell = self.common.shell.read().unwrap();
-
-                    (
-                        shell.active_space(&current_output).handle,
-                        shell.next_output(&current_output, direction).cloned(),
-                    )
-                };
-
-                if let Some(next_output) = next_output {
-                    self.common
-                        .migrate_workspace(&current_output, &next_output, &active);
-                }
-            }
-
-            Action::Focus(focus) => {
-                let result = self.common.shell.read().unwrap().next_focus(focus, seat);
-
-                match result {
-                    FocusResult::None => {
-                        let dir = match focus {
-                            FocusDirection::Down => Some(Direction::Down),
-                            FocusDirection::Up => Some(Direction::Up),
-                            FocusDirection::Left => Some(Direction::Left),
-                            FocusDirection::Right => Some(Direction::Right),
-                            _ => None,
-                        };
-
-                        if let Some(direction) = dir {
-                            self.handle_shortcut_action(
-                                Action::SwitchOutput(direction),
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                Some(direction),
-                                true,
-                            )
-                        }
-                    }
-                    FocusResult::Handled => {}
-                    FocusResult::Some(target) => {
-                        Shell::set_focus(self, Some(&target), seat, None);
-                    }
-                }
-            }
-
-            Action::Move(direction) => {
-                let res = self
-                    .common
-                    .shell
-                    .write()
-                    .unwrap()
-                    .move_current_element(direction, seat);
-                match res {
-                    MoveResult::MoveFurther(_move_further) => self.handle_shortcut_action(
-                        Action::MoveToOutput(direction),
-                        seat,
-                        serial,
-                        time,
-                        pattern,
-                        Some(direction),
-                        true,
-                    ),
-                    MoveResult::ShiftFocus(shift) => {
-                        Shell::set_focus(self, Some(&shift), seat, None);
-                    }
-                    _ => {
-                        let current_output = seat.active_output();
-                        let mut shell = self.common.shell.write().unwrap();
-                        let workspace = shell.active_space(&current_output);
-                        if let Some(focused_window) = workspace.focus_stack.get(seat).last() {
-                            if workspace.is_tiled(focused_window) {
-                                shell.set_overview_mode(
-                                    Some(Trigger::KeyboardMove(pattern.modifiers)),
-                                    self.common.event_loop_handle.clone(),
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-
-            Action::SwapWindow => {
-                let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
-
-                let workspace = shell.active_space_mut(&current_output);
-                if workspace.get_fullscreen().is_some() {
-                    return; // TODO, is this what we want? Maybe disengage fullscreen instead?
-                }
-
-                let keyboard_handle = seat.get_keyboard().unwrap();
-                if let Some(focus) = keyboard_handle.current_focus() {
-                    if let Some(descriptor) = workspace.node_desc(focus) {
-                        let grab = SwapWindowGrab::new(seat.clone(), descriptor.clone());
-                        drop(shell);
-                        keyboard_handle.set_grab(self, grab, serial);
-                        let mut shell = self.common.shell.write().unwrap();
-                        shell.set_overview_mode(
-                            Some(Trigger::KeyboardSwap(pattern, descriptor)),
-                            self.common.event_loop_handle.clone(),
-                        );
-                    }
-                }
-            }
-
-            Action::Minimize => {
-                let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
-                let workspace = shell.active_space_mut(&current_output);
-                let focus_stack = workspace.focus_stack.get(seat);
-                let focused_window = focus_stack.last().cloned();
-                if let Some(window) = focused_window {
-                    shell.minimize_request(&window);
-                }
-            }
-
-            Action::Maximize => {
-                let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
-                let workspace = shell.active_space(&current_output);
-                let focus_stack = workspace.focus_stack.get(seat);
-                let focused_window = focus_stack.last().cloned();
-                if let Some(window) = focused_window {
-                    shell.maximize_toggle(&window, seat);
-                }
-            }
-
-            Action::Resizing(direction) => self.common.shell.write().unwrap().set_resize_mode(
-                Some((pattern, direction)),
-                &self.common.config,
-                self.common.event_loop_handle.clone(),
-            ),
-
-            Action::ToggleOrientation => {
-                let output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
-                let workspace = shell.active_space_mut(&output);
-                workspace.tiling_layer.update_orientation(None, &seat);
-            }
-
-            Action::Orientation(orientation) => {
-                let output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
-                let workspace = shell.active_space_mut(&output);
-                workspace
-                    .tiling_layer
-                    .update_orientation(Some(orientation), &seat);
-            }
-
-            Action::ToggleStacking => {
-                let res = self
-                    .common
-                    .shell
-                    .write()
-                    .unwrap()
-                    .toggle_stacking_focused(seat);
-                if let Some(new_focus) = res {
-                    Shell::set_focus(self, Some(&new_focus), seat, Some(serial));
-                }
-            }
-
-            Action::ToggleTiling => {
-                if matches!(
-                    self.common.config.cosmic_conf.autotile_behavior,
-                    TileBehavior::Global
-                ) {
-                    let autotile = !self.common.config.cosmic_conf.autotile;
-                    self.common.config.cosmic_conf.autotile = autotile;
-
-                    {
-                        let mut shell = self.common.shell.write().unwrap();
-                        let shell_ref = &mut *shell;
-                        shell_ref.workspaces.update_autotile(
-                            self.common.config.cosmic_conf.autotile,
-                            &mut self.common.workspace_state.update(),
-                            shell_ref.seats.iter(),
-                        );
-                    }
-                    let config = self.common.config.cosmic_helper.clone();
-                    thread::spawn(move || {
-                        if let Err(err) = config.set("autotile", autotile) {
-                            error!(?err, "Failed to update autotile key");
-                        }
-                    });
-                } else {
-                    let output = seat.active_output();
-                    let mut shell = self.common.shell.write().unwrap();
-                    let workspace = shell.workspaces.active_mut(&output);
-                    let mut guard = self.common.workspace_state.update();
-                    workspace.toggle_tiling(seat, &mut guard);
-                }
-            }
-
-            Action::ToggleWindowFloating => {
-                let output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
-                let workspace = shell.active_space_mut(&output);
-                workspace.toggle_floating_window_focused(seat);
-            }
-
-            Action::ToggleSticky => {
-                self.common
-                    .shell
-                    .write()
-                    .unwrap()
-                    .toggle_sticky_current(seat);
-            }
-
-            // Gets the configured command for a given system action.
-            Action::System(system) => {
-                if let Some(command) = self.common.config.system_actions.get(&system) {
-                    self.spawn_command(command.clone());
-                }
-            }
-
-            Action::Spawn(command) => self.spawn_command(command),
-
-            // Do nothing
-            Action::Disable => (),
-        }
-    }
-
-    fn spawn_command(&mut self, command: String) {
+    ) -> FilterResult<Option<(Action, shortcuts::Binding)>> {
         let mut shell = self.common.shell.write().unwrap();
 
-        let (token, data) = self.common.xdg_activation_state.create_external_token(None);
-        let (token, data) = (token.clone(), data.clone());
+        let keyboard = seat.get_keyboard().unwrap();
+        let pointer = seat.get_pointer().unwrap();
+        let is_grabbed = keyboard.is_grabbed() || pointer.is_grabbed();
 
-        let output = shell.seats.last_active().active_output();
-        let workspace = shell.active_space_mut(&output);
-        workspace.pending_tokens.insert(token.clone());
-        let handle = workspace.handle;
-        std::mem::drop(shell);
-        data.user_data
-            .insert_if_missing(move || ActivationContext::Workspace(handle));
+        let current_focus = keyboard.current_focus();
+        //this should fall back to active output since there may not be a focused output
+        let focused_output = seat.focused_or_active_output();
 
-        let wayland_display = self.common.socket.clone();
-        let display = self
-            .common
-            .xwayland_state
-            .as_ref()
-            .map(|s| format!(":{}", s.display))
-            .unwrap_or_default();
-
-        let mut cmd = std::process::Command::new("/bin/sh");
-
-        cmd.arg("-c")
-            .arg(&command)
-            .env("WAYLAND_DISPLAY", &wayland_display)
-            .env("DISPLAY", &display)
-            .env("XDG_ACTIVATION_TOKEN", &*token)
-            .env("DESKTOP_STARTUP_ID", &*token)
-            .env_remove("COSMIC_SESSION_SOCK");
-        unsafe { cmd.pre_exec(|| Ok(crate::utils::rlimit::restore_nofile_limit())) };
-
-        std::thread::spawn(move || match cmd.spawn() {
-            Ok(mut child) => {
-                let _res = child.wait();
-            }
-            Err(err) => {
-                tracing::warn!(?err, "Failed to spawn \"{}\"", command);
-            }
+        let shortcuts_inhibited = current_focus.as_ref().is_some_and(|f| {
+            f.wl_surface()
+                .and_then(|surface| {
+                    seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
+                        .map(|inhibitor| inhibitor.is_active())
+                })
+                .unwrap_or(false)
         });
+
+        // Leave move overview mode, if any modifier was released
+        if let Some(Trigger::KeyboardMove(action_modifiers)) =
+            shell.overview_mode().0.active_trigger()
+        {
+            if (action_modifiers.ctrl && !modifiers.ctrl)
+                || (action_modifiers.alt && !modifiers.alt)
+                || (action_modifiers.logo && !modifiers.logo)
+                || (action_modifiers.shift && !modifiers.shift)
+            {
+                shell.set_overview_mode(None, self.common.event_loop_handle.clone());
+            }
+        }
+        // Leave swap overview mode, if any key was released
+        if let Some(Trigger::KeyboardSwap(action_pattern, old_descriptor)) =
+            shell.overview_mode().0.active_trigger()
+        {
+            if (action_pattern.modifiers.ctrl && !modifiers.ctrl)
+                || (action_pattern.modifiers.alt && !modifiers.alt)
+                || (action_pattern.modifiers.logo && !modifiers.logo)
+                || (action_pattern.modifiers.shift && !modifiers.shift)
+                || (action_pattern.key.is_some()
+                    && handle.raw_syms().contains(&action_pattern.key.unwrap())
+                    && event.state() == KeyState::Released)
+            {
+                shell.set_overview_mode(None, self.common.event_loop_handle.clone());
+
+                self.keyboard_swap(
+                    seat,
+                    &mut shell,
+                    old_descriptor,
+                    current_focus,
+                    &focused_output,
+                );
+            }
+        }
+
+        // Leave or update resize mode, if modifiers changed or initial key was released
+        if let Some(action_pattern) = shell.resize_mode().0.active_binding() {
+            if action_pattern.key.is_some()
+                && event.state() == KeyState::Released
+                && handle.raw_syms().contains(&action_pattern.key.unwrap())
+            {
+                shell.set_resize_mode(
+                    None,
+                    &self.common.config,
+                    self.common.event_loop_handle.clone(),
+                );
+            } else if !cosmic_modifiers_eq_smithay(&action_pattern.modifiers, modifiers) {
+                let mut new_pattern = action_pattern.clone();
+                new_pattern.modifiers = cosmic_modifiers_from_smithay(modifiers.clone());
+                let enabled =
+                    self.common
+                        .config
+                        .shortcuts
+                        .iter()
+                        .find_map(move |(binding, action)| {
+                            if binding == &new_pattern
+                                && matches!(action, shortcuts::Action::Resizing(_))
+                            {
+                                let shortcuts::Action::Resizing(direction) = action else {
+                                    unreachable!()
+                                };
+                                Some((new_pattern.clone(), *direction))
+                            } else {
+                                None
+                            }
+                        });
+                shell.set_resize_mode(
+                    enabled,
+                    &self.common.config,
+                    self.common.event_loop_handle.clone(),
+                );
+            }
+        }
+
+        // Special case resizing with regards to arrow keys
+        if let Some(direction) = shell.resize_mode().0.active_direction() {
+            let resize_edge = match handle.modified_sym() {
+                Keysym::Left | Keysym::h | Keysym::H => Some(ResizeEdge::LEFT),
+                Keysym::Down | Keysym::j | Keysym::J => Some(ResizeEdge::BOTTOM),
+                Keysym::Up | Keysym::k | Keysym::K => Some(ResizeEdge::TOP),
+                Keysym::Right | Keysym::l | Keysym::L => Some(ResizeEdge::RIGHT),
+                _ => None,
+            };
+
+            if let Some(mut edge) = resize_edge {
+                if direction == ResizeDirection::Inwards {
+                    edge.flip_direction();
+                }
+                let action = Action::Private(PrivateAction::Resizing(
+                    direction,
+                    edge.into(),
+                    cosmic_keystate_from_smithay(event.state()),
+                ));
+                let key_pattern = shortcuts::Binding {
+                    modifiers: cosmic_modifiers_from_smithay(modifiers.clone()),
+                    key: Some(handle.modified_sym()),
+                    description: None,
+                };
+
+                if event.state() == KeyState::Released {
+                    if let Some(tokens) = seat.supressed_keys().filter(&handle) {
+                        for token in tokens {
+                            self.common.event_loop_handle.remove(token);
+                        }
+                    }
+                } else {
+                    let seat_clone = seat.clone();
+                    let action_clone = action.clone();
+                    let key_pattern_clone = key_pattern.clone();
+                    let start = Instant::now();
+                    let time = event.time_msec();
+                    let token = self
+                        .common
+                        .event_loop_handle
+                        .insert_source(
+                            Timer::from_duration(Duration::from_millis(200)),
+                            move |current, _, state| {
+                                let duration = current.duration_since(start).as_millis();
+                                state.handle_action(
+                                    action_clone.clone(),
+                                    &seat_clone,
+                                    serial,
+                                    time.overflowing_add(duration as u32).0,
+                                    key_pattern_clone.clone(),
+                                    None,
+                                    true,
+                                );
+                                calloop::timer::TimeoutAction::ToDuration(Duration::from_millis(25))
+                            },
+                        )
+                        .ok();
+
+                    seat.supressed_keys().add(&handle, token);
+                }
+                return FilterResult::Intercept(Some((action, key_pattern)));
+            }
+        }
+
+        std::mem::drop(shell);
+
+        // cancel grabs
+        if is_grabbed
+            && handle.modified_sym() == Keysym::Escape
+            && event.state() == KeyState::Pressed
+            && !modifiers.alt
+            && !modifiers.ctrl
+            && !modifiers.logo
+            && !modifiers.shift
+        {
+            seat.supressed_keys().add(&handle, None);
+            return FilterResult::Intercept(Some((
+                Action::Private(PrivateAction::Escape),
+                shortcuts::Binding {
+                    modifiers: shortcuts::Modifiers::default(),
+                    key: Some(Keysym::Escape),
+                    description: None,
+                },
+            )));
+        }
+
+        // Skip released events for initially surpressed keys
+        if event.state() == KeyState::Released {
+            if let Some(tokens) = seat.supressed_keys().filter(&handle) {
+                for token in tokens {
+                    self.common.event_loop_handle.remove(token);
+                }
+                return FilterResult::Intercept(None);
+            }
+        }
+
+        // Handle VT switches
+        if event.state() == KeyState::Pressed
+            && (Keysym::XF86_Switch_VT_1.raw()..=Keysym::XF86_Switch_VT_12.raw())
+                .contains(&handle.modified_sym().raw())
+        {
+            if let Err(err) = self.backend.kms().switch_vt(
+                (handle.modified_sym().raw() - Keysym::XF86_Switch_VT_1.raw() + 1) as i32,
+            ) {
+                error!(?err, "Failed switching virtual terminal.");
+            }
+            seat.supressed_keys().add(&handle, None);
+            return FilterResult::Intercept(None);
+        }
+
+        // handle the rest of the global shortcuts
+        let mut clear_queue = true;
+        if !shortcuts_inhibited {
+            let modifiers_queue = seat.modifiers_shortcut_queue();
+
+            for (binding, action) in self.common.config.shortcuts.iter() {
+                if *action == shortcuts::Action::Disable {
+                    continue;
+                }
+
+                // is this a released (triggered) modifier-only binding?
+                if binding.key.is_none()
+                    && event.state() == KeyState::Released
+                    && !cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
+                    && modifiers_queue.take(binding)
+                {
+                    modifiers_queue.clear();
+                    return FilterResult::Intercept(Some((
+                        Action::Shortcut(action.clone()),
+                        binding.clone(),
+                    )));
+                }
+
+                // could this potentially become a modifier-only binding?
+                if binding.key.is_none()
+                    && event.state() == KeyState::Pressed
+                    && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
+                {
+                    modifiers_queue.set(binding.clone());
+                    clear_queue = false;
+                }
+
+                // is this a normal binding?
+                if binding.key.is_some()
+                    && event.state() == KeyState::Pressed
+                    && handle.raw_syms().contains(&binding.key.unwrap())
+                    && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
+                {
+                    modifiers_queue.clear();
+                    seat.supressed_keys().add(&handle, None);
+                    return FilterResult::Intercept(Some((
+                        Action::Shortcut(action.clone()),
+                        binding.clone(),
+                    )));
+                }
+            }
+        }
+
+        // no binding
+        if clear_queue {
+            seat.modifiers_shortcut_queue().clear();
+        }
+        // keys are passed through to apps
+        FilterResult::Forward
+    }
+
+    fn keyboard_swap(
+        &self,
+        seat: &Seat<Self>,
+        shell: &mut Shell,
+        old_descriptor: &NodeDesc,
+        current_focus: Option<KeyboardFocusTarget>,
+        focused_output: &Output,
+    ) {
+        if let Some(focus) = current_focus {
+            if let Some(new_descriptor) =
+                shell.workspaces.active(&focused_output).1.node_desc(focus)
+            {
+                let mut spaces = shell.workspaces.spaces_mut();
+                if old_descriptor.handle != new_descriptor.handle {
+                    let (mut old_w, mut other_w) =
+                        spaces.partition::<Vec<_>, _>(|w| w.handle == old_descriptor.handle);
+                    if let Some(old_workspace) = old_w.get_mut(0) {
+                        if let Some(new_workspace) = other_w
+                            .iter_mut()
+                            .find(|w| w.handle == new_descriptor.handle)
+                        {
+                            {
+                                let mut stack = new_workspace.focus_stack.get_mut(&seat);
+                                for elem in old_descriptor.focus_stack.iter().flat_map(|node_id| {
+                                    old_workspace.tiling_layer.element_for_node(node_id)
+                                }) {
+                                    stack.append(elem);
+                                }
+                            }
+                            {
+                                let mut stack = old_workspace.focus_stack.get_mut(&seat);
+                                for elem in new_descriptor.focus_stack.iter().flat_map(|node_id| {
+                                    new_workspace.tiling_layer.element_for_node(node_id)
+                                }) {
+                                    stack.append(elem);
+                                }
+                            }
+                            if let Some(focus) = TilingLayout::swap_trees(
+                                &mut old_workspace.tiling_layer,
+                                Some(&mut new_workspace.tiling_layer),
+                                &old_descriptor,
+                                &new_descriptor,
+                            ) {
+                                let seat = seat.clone();
+                                self.common.event_loop_handle.insert_idle(move |state| {
+                                    Shell::set_focus(state, Some(&focus), &seat, None, true);
+                                });
+                            }
+                            old_workspace.refresh_focus_stack();
+                            new_workspace.refresh_focus_stack();
+                        }
+                    }
+                } else {
+                    if let Some(workspace) = spaces.find(|w| w.handle == new_descriptor.handle) {
+                        if let Some(focus) = TilingLayout::swap_trees(
+                            &mut workspace.tiling_layer,
+                            None,
+                            &old_descriptor,
+                            &new_descriptor,
+                        ) {
+                            std::mem::drop(spaces);
+                            let seat = seat.clone();
+                            self.common.event_loop_handle.insert_idle(move |state| {
+                                Shell::set_focus(state, Some(&focus), &seat, None, true);
+                            });
+                        }
+                        workspace.refresh_focus_stack();
+                    }
+                }
+            }
+        } else {
+            let new_workspace = shell.workspaces.active(&focused_output).1.handle;
+            if new_workspace != old_descriptor.handle {
+                let spaces = shell.workspaces.spaces_mut();
+                let (mut old_w, mut other_w) =
+                    spaces.partition::<Vec<_>, _>(|w| w.handle == old_descriptor.handle);
+                if let Some(old_workspace) = old_w.get_mut(0) {
+                    if let Some(new_workspace) =
+                        other_w.iter_mut().find(|w| w.handle == new_workspace)
+                    {
+                        if new_workspace.tiling_layer.windows().next().is_none() {
+                            {
+                                let mut stack = new_workspace.focus_stack.get_mut(&seat);
+                                for elem in old_descriptor.focus_stack.iter().flat_map(|node_id| {
+                                    old_workspace.tiling_layer.element_for_node(node_id)
+                                }) {
+                                    stack.append(elem);
+                                }
+                            }
+                            if let Some(focus) = TilingLayout::move_tree(
+                                &mut old_workspace.tiling_layer,
+                                &mut new_workspace.tiling_layer,
+                                &new_workspace.handle,
+                                &seat,
+                                new_workspace.focus_stack.get(&seat).iter(),
+                                old_descriptor.clone(),
+                                None,
+                            ) {
+                                let seat = seat.clone();
+                                self.common.event_loop_handle.insert_idle(move |state| {
+                                    Shell::set_focus(state, Some(&focus), &seat, None, true);
+                                });
+                            }
+                            old_workspace.refresh_focus_stack();
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // TODO: Try to get rid of the *mutable* Shell references (needed for hovered_stack in floating_layout)
@@ -2668,56 +1939,6 @@ impl State {
             None
         }
     }
-}
-
-fn to_next_workspace(
-    shell: &mut Shell,
-    seat: &Seat<State>,
-    gesture: bool,
-    workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
-) -> Result<Option<Point<i32, Global>>, InvalidWorkspaceIndex> {
-    let current_output = seat.active_output();
-    let workspace = shell
-        .workspaces
-        .active_num(&current_output)
-        .1
-        .saturating_add(1);
-
-    shell.activate(
-        &current_output,
-        workspace,
-        if gesture {
-            WorkspaceDelta::new_gesture()
-        } else {
-            WorkspaceDelta::new_shortcut()
-        },
-        workspace_state,
-    )
-}
-
-fn to_previous_workspace(
-    shell: &mut Shell,
-    seat: &Seat<State>,
-    gesture: bool,
-    workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
-) -> Result<Option<Point<i32, Global>>, InvalidWorkspaceIndex> {
-    let current_output = seat.active_output();
-    let workspace = shell
-        .workspaces
-        .active_num(&current_output)
-        .1
-        .saturating_sub(1);
-
-    shell.activate(
-        &current_output,
-        workspace,
-        if gesture {
-            WorkspaceDelta::new_gesture()
-        } else {
-            WorkspaceDelta::new_shortcut()
-        },
-        workspace_state,
-    )
 }
 
 fn cursor_sessions_for_output(

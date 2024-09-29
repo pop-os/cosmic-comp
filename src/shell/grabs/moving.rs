@@ -2,9 +2,8 @@
 
 use crate::{
     backend::render::{
-        cursor::{CursorShape, CursorState},
-        element::AsGlowRenderer,
-        BackdropShader, IndicatorShader, Key, SplitRenderElements, Usage,
+        cursor::CursorState, element::AsGlowRenderer, BackdropShader, IndicatorShader, Key,
+        SplitRenderElements, Usage,
     },
     shell::{
         element::{
@@ -32,7 +31,7 @@ use smithay::{
     desktop::{layer_map_for_output, space::SpaceElement},
     input::{
         pointer::{
-            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
+            AxisFrame, ButtonEvent, CursorIcon, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
             GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
             GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab, PointerInnerHandle,
@@ -419,7 +418,7 @@ impl MoveGrab {
             // Check for overlapping with zones
             if grab_state.previous == ManagedLayer::Floating {
                 let output_geometry = current_output.geometry().to_local(&current_output);
-                grab_state.snapping_zone = vec![
+                grab_state.snapping_zone = [
                     SnappingZone::Maximize,
                     SnappingZone::Top,
                     SnappingZone::TopLeft,
@@ -710,7 +709,7 @@ impl MoveGrab {
 
         {
             let cursor_state = seat.user_data().get::<CursorState>().unwrap();
-            cursor_state.lock().unwrap().set_shape(CursorShape::Grab);
+            cursor_state.lock().unwrap().set_shape(CursorIcon::Grab);
         }
 
         MoveGrab {
@@ -850,7 +849,7 @@ impl Drop for MoveGrab {
 
             {
                 let cursor_state = seat.user_data().get::<CursorState>().unwrap();
-                cursor_state.lock().unwrap().set_shape(CursorShape::Default);
+                cursor_state.lock().unwrap().unset_shape();
             }
 
             if let Some((mapped, position)) = position {
@@ -872,7 +871,7 @@ impl Drop for MoveGrab {
                             &MotionEvent {
                                 location: pointer.current_location(),
                                 serial,
-                                time: 0,
+                                time: state.common.clock.now().as_millis(),
                             },
                         );
                     }
@@ -882,6 +881,7 @@ impl Drop for MoveGrab {
                     Some(&KeyboardFocusTarget::from(mapped)),
                     &seat,
                     Some(serial),
+                    false,
                 )
             }
         });

@@ -56,7 +56,8 @@ use smithay::{
             glow::GlowRenderer,
             multigpu::{Error as MultiError, MultiFrame, MultiRenderer},
             sync::SyncPoint,
-            Bind, Blit, ExportMem, ImportAll, ImportMem, Offscreen, Renderer, TextureFilter,
+            Bind, Blit, Color32F, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
+            TextureFilter,
         },
     },
     desktop::{layer_map_for_output, PopupManager},
@@ -110,7 +111,7 @@ impl<'a> AsMut<GlowRenderer> for RendererRef<'a> {
     }
 }
 
-pub static CLEAR_COLOR: [f32; 4] = [0.153, 0.161, 0.165, 1.0];
+pub static CLEAR_COLOR: Color32F = Color32F::new(0.153, 0.161, 0.165, 1.0);
 pub static OUTLINE_SHADER: &str = include_str!("./shaders/rounded_outline.frag");
 pub static RECTANGLE_SHADER: &str = include_str!("./shaders/rounded_rectangle.frag");
 pub static GROUP_COLOR: [f32; 3] = [0.788, 0.788, 0.788];
@@ -450,11 +451,16 @@ where
         }
 
         if !exclude_dnd_icon {
-            if let Some(wl_surface) = get_dnd_icon(&seat) {
+            if let Some(dnd_icon) = get_dnd_icon(&seat) {
                 elements.extend(
-                    cursor::draw_dnd_icon(renderer, &wl_surface, location.to_i32_round(), scale)
-                        .into_iter()
-                        .map(CosmicElement::Dnd),
+                    cursor::draw_dnd_icon(
+                        renderer,
+                        &dnd_icon.surface,
+                        (location + dnd_icon.offset.to_f64()).to_i32_round(),
+                        scale,
+                    )
+                    .into_iter()
+                    .map(CosmicElement::Dnd),
                 );
             }
         }
@@ -659,7 +665,7 @@ where
         .lock()
         .unwrap()
         .is_some();
-    let active_output = last_active_seat.active_output();
+    let focused_output = last_active_seat.focused_or_active_output();
     let output_size = output.geometry().size;
     let output_scale = output.current_scale().fractional_scale();
 
@@ -669,7 +675,7 @@ where
         .iter()
         .find(|w| w.handle == current.0)
         .ok_or(OutputNoMode)?;
-    let is_active_space = workspace.outputs().any(|o| o == &active_output);
+    let is_active_space = workspace.outputs().any(|o| o == &focused_output);
 
     let has_fullscreen = workspace
         .fullscreen
@@ -774,7 +780,7 @@ where
                 .space_for_handle(&previous)
                 .ok_or(OutputNoMode)?;
             let has_fullscreen = workspace.fullscreen.is_some();
-            let is_active_space = workspace.outputs().any(|o| o == &active_output);
+            let is_active_space = workspace.outputs().any(|o| o == &focused_output);
 
             let percentage = match start {
                 WorkspaceDelta::Shortcut(st) => ease(

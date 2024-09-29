@@ -1,9 +1,6 @@
 use super::{surface::RESIZE_BORDER, window::Focus, CosmicSurface};
 use crate::{
-    backend::render::{
-        cursor::{CursorShape, CursorState},
-        SplitRenderElements,
-    },
+    backend::render::{cursor::CursorState, SplitRenderElements},
     shell::{
         focus::target::PointerFocusTarget,
         grabs::{ReleaseMode, ResizeEdge},
@@ -622,6 +619,7 @@ impl CosmicStack {
                             &state.common.config,
                             &state.common.event_loop_handle,
                             &state.common.xdg_activation_state,
+                            false,
                         );
                         if let Some((grab, focus)) = res {
                             if grab.is_touch_grab() {
@@ -710,6 +708,7 @@ impl Program for CosmicStackInternal {
                                 &state.common.config,
                                 &state.common.event_loop_handle,
                                 &state.common.xdg_activation_state,
+                                false,
                             );
                             if let Some((grab, focus)) = res {
                                 if grab.is_touch_grab() {
@@ -1290,6 +1289,7 @@ impl PointerTarget<State> for CosmicStack {
                             Focus::ResizeRight => ResizeEdge::RIGHT,
                             Focus::Header => unreachable!(),
                         },
+                        false,
                     );
                     if let Some((grab, focus)) = res {
                         if grab.is_touch_grab() {
@@ -1328,7 +1328,7 @@ impl PointerTarget<State> for CosmicStack {
                 .unwrap()
                 .lock()
                 .unwrap();
-            cursor_state.set_shape(CursorShape::Default);
+            cursor_state.unset_shape();
             let _previous = p.swap_focus(None);
         });
 
@@ -1356,6 +1356,7 @@ impl PointerTarget<State> for CosmicStack {
                             &state.common.config,
                             &state.common.event_loop_handle,
                             &state.common.xdg_activation_state,
+                            false,
                         );
                         if let Some((grab, focus)) = res {
                             if grab.is_touch_grab() {

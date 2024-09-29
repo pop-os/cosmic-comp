@@ -765,26 +765,20 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
     fn output_enter(&self, output: &Output, _overlap: Rectangle<i32, Logical>) {
         let mut internal = self.0.lock().unwrap();
         let scale = output.current_scale().fractional_scale();
-        if !internal.buffers.contains_key(&OrderedFloat(scale)) {
-            let buffer_size = internal
-                .size
+
+        let internal_size = internal.size;
+        internal.buffers.entry(OrderedFloat(scale)).or_insert({
+            let buffer_size = internal_size
                 .to_f64()
                 .to_buffer(scale, Transform::Normal)
                 .to_i32_round();
-            internal.buffers.insert(
-                OrderedFloat(scale),
-                (
-                    MemoryRenderBuffer::new(
-                        Fourcc::Argb8888,
-                        buffer_size,
-                        1,
-                        Transform::Normal,
-                        None,
-                    ),
-                    None,
-                ),
-            );
-        }
+
+            (
+                MemoryRenderBuffer::new(Fourcc::Argb8888, buffer_size, 1, Transform::Normal, None),
+                None,
+            )
+        });
+
         internal.outputs.insert(output.clone());
     }
 

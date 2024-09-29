@@ -728,7 +728,7 @@ impl FloatingLayout {
         self.space.element_geometry(elem).map(RectExt::as_local)
     }
 
-    pub fn element_under(&mut self, location: Point<f64, Local>) -> Option<KeyboardFocusTarget> {
+    pub fn element_under(&self, location: Point<f64, Local>) -> Option<KeyboardFocusTarget> {
         self.space
             .element_under(location.as_logical())
             .map(|(mapped, _)| mapped.clone().into())
@@ -953,7 +953,7 @@ impl FloatingLayout {
         }
     }
 
-    pub fn toggle_stacking_focused<'a>(
+    pub fn toggle_stacking_focused(
         &mut self,
         seat: &Seat<State>,
         focus_stack: FocusStackMut,
@@ -966,7 +966,7 @@ impl FloatingLayout {
         self.toggle_stacking(&elem, focus_stack)
     }
 
-    pub fn move_element<'a>(
+    pub fn move_element(
         &mut self,
         direction: Direction,
         seat: &Seat<State>,
@@ -1133,7 +1133,7 @@ impl FloatingLayout {
         }
     }
 
-    pub fn move_current_element<'a>(
+    pub fn move_current_element(
         &mut self,
         direction: Direction,
         seat: &Seat<State>,

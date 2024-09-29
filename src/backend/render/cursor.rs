@@ -14,7 +14,7 @@ use smithay::{
         },
     },
     input::{
-        pointer::{CursorImageAttributes, CursorImageStatus},
+        pointer::{CursorIcon, CursorImageAttributes, CursorImageStatus},
         Seat,
     },
     reexports::wayland_server::protocol::wl_surface,
@@ -24,7 +24,7 @@ use smithay::{
     },
     wayland::compositor::{get_role, with_states},
 };
-use std::{collections::HashMap, io::Read, sync::Mutex, time::Duration};
+use std::{collections::HashMap, io::Read, sync::Mutex};
 use tracing::warn;
 use xcursor::{
     parser::{parse_xcursor, Image},
@@ -33,42 +33,6 @@ use xcursor::{
 
 static FALLBACK_CURSOR_DATA: &[u8] = include_bytes!("../../../resources/cursor.rgba");
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CursorShape {
-    Default,
-    ColResize,
-    RowResize,
-    Grab,
-    EastResize,
-    WestResize,
-    NorthResize,
-    SouthResize,
-    NorthEastResize,
-    NorthWestResize,
-    SouthEastResize,
-    SouthWestResize,
-}
-
-impl ToString for CursorShape {
-    fn to_string(&self) -> String {
-        match self {
-            CursorShape::Default => "default",
-            CursorShape::ColResize => "col-resize",
-            CursorShape::RowResize => "row-resize",
-            CursorShape::Grab => "grabbing",
-            CursorShape::EastResize => "e-resize",
-            CursorShape::WestResize => "w-resize",
-            CursorShape::NorthResize => "n-resize",
-            CursorShape::SouthResize => "s-resize",
-            CursorShape::NorthEastResize => "ne-resize",
-            CursorShape::NorthWestResize => "nw-resize",
-            CursorShape::SouthEastResize => "se-resize",
-            CursorShape::SouthWestResize => "sw-resize",
-        }
-        .to_string()
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Cursor {
     icons: Vec<Image>,
@@ -76,9 +40,10 @@ pub struct Cursor {
 }
 
 impl Cursor {
-    pub fn load(theme: &CursorTheme, shape: CursorShape, size: u32) -> Cursor {
-        let icons = load_icon(&theme, shape)
+    pub fn load(theme: &CursorTheme, shape: CursorIcon, size: u32) -> Cursor {
+        let icons = load_icon(theme, shape)
             .map_err(|err| warn!(?err, "Unable to load xcursor, using fallback cursor"))
+            .or_else(|_| load_icon(theme, CursorIcon::Default))
             .unwrap_or_else(|_| {
                 vec![Image {
                     size: 32,
@@ -105,7 +70,7 @@ fn nearest_images(size: u32, images: &[Image]) -> impl Iterator<Item = &Image> {
     // Follow the nominal size of the cursor to choose the nearest
     let nearest_image = images
         .iter()
-        .min_by_key(|image| (size as i32 - image.size as i32).abs())
+        .min_by_key(|image| u32::abs_diff(size, image.size))
         .unwrap();
 
     images.iter().filter(move |image| {
@@ -142,7 +107,7 @@ enum Error {
     Parse,
 }
 
-fn load_icon(theme: &CursorTheme, shape: CursorShape) -> Result<Vec<Image>, Error> {
+fn load_icon(theme: &CursorTheme, shape: CursorIcon) -> Result<Vec<Image>, Error> {
     let icon_path = theme
         .load_icon(&shape.to_string())
         .ok_or(Error::NoDefaultCursor)?;
@@ -228,15 +193,29 @@ where
 
 pub type CursorState = Mutex<CursorStateInner>;
 pub struct CursorStateInner {
-    current_cursor: CursorShape,
-    pub cursors: HashMap<CursorShape, Cursor>,
+    current_cursor: Option<CursorIcon>,
+
+    cursor_theme: CursorTheme,
+    cursor_size: u32,
+
+    cursors: HashMap<CursorIcon, Cursor>,
     current_image: Option<Image>,
     image_cache: Vec<(Image, MemoryRenderBuffer)>,
 }
 
 impl CursorStateInner {
-    pub fn set_shape(&mut self, shape: CursorShape) {
-        self.current_cursor = shape;
+    pub fn set_shape(&mut self, shape: CursorIcon) {
+        self.current_cursor = Some(shape);
+    }
+
+    pub fn unset_shape(&mut self) {
+        self.current_cursor = None;
+    }
+
+    pub fn get_named_cursor(&mut self, shape: CursorIcon) -> &Cursor {
+        self.cursors
+            .entry(shape)
+            .or_insert_with(|| Cursor::load(&self.cursor_theme, shape, self.cursor_size))
     }
 }
 
@@ -255,59 +234,12 @@ impl Default for CursorStateInner {
     fn default() -> CursorStateInner {
         let (theme, size) = load_cursor_theme();
         CursorStateInner {
-            current_cursor: CursorShape::Default,
-            cursors: {
-                let mut map = HashMap::new();
-                map.insert(
-                    CursorShape::Default,
-                    Cursor::load(&theme, CursorShape::Default, size),
-                );
-                map.insert(
-                    CursorShape::ColResize,
-                    Cursor::load(&theme, CursorShape::ColResize, size),
-                );
-                map.insert(
-                    CursorShape::RowResize,
-                    Cursor::load(&theme, CursorShape::RowResize, size),
-                );
-                map.insert(
-                    CursorShape::Grab,
-                    Cursor::load(&theme, CursorShape::Grab, size),
-                );
-                map.insert(
-                    CursorShape::NorthResize,
-                    Cursor::load(&theme, CursorShape::NorthResize, size),
-                );
-                map.insert(
-                    CursorShape::SouthResize,
-                    Cursor::load(&theme, CursorShape::SouthResize, size),
-                );
-                map.insert(
-                    CursorShape::EastResize,
-                    Cursor::load(&theme, CursorShape::EastResize, size),
-                );
-                map.insert(
-                    CursorShape::WestResize,
-                    Cursor::load(&theme, CursorShape::WestResize, size),
-                );
-                map.insert(
-                    CursorShape::NorthEastResize,
-                    Cursor::load(&theme, CursorShape::NorthEastResize, size),
-                );
-                map.insert(
-                    CursorShape::SouthEastResize,
-                    Cursor::load(&theme, CursorShape::SouthEastResize, size),
-                );
-                map.insert(
-                    CursorShape::NorthWestResize,
-                    Cursor::load(&theme, CursorShape::NorthWestResize, size),
-                );
-                map.insert(
-                    CursorShape::SouthWestResize,
-                    Cursor::load(&theme, CursorShape::SouthWestResize, size),
-                );
-                map
-            },
+            current_cursor: None,
+
+            cursor_size: size,
+            cursor_theme: theme,
+
+            cursors: HashMap::new(),
             current_image: None,
             image_cache: Vec::new(),
         }
@@ -343,19 +275,23 @@ where
         })
         .unwrap_or(CursorImageStatus::default_named());
 
-    if let CursorImageStatus::Surface(ref wl_surface) = cursor_status {
-        return draw_surface_cursor(renderer, wl_surface, location.to_i32_round(), scale);
-    // TODO: Handle other named cursors
-    } else if draw_default && CursorImageStatus::default_named() == cursor_status {
-        let integer_scale = scale.x.max(scale.y).ceil() as u32;
+    let seat_userdata = seat.user_data();
+    let mut state_ref = seat_userdata.get::<CursorState>().unwrap().lock().unwrap();
+    let state = &mut *state_ref;
 
-        let seat_userdata = seat.user_data();
-        let mut state_ref = seat_userdata.get::<CursorState>().unwrap().lock().unwrap();
-        let state = &mut *state_ref;
-        let frame = state.cursors.get(&state.current_cursor).unwrap().get_image(
-            integer_scale,
-            Into::<Duration>::into(time).as_millis() as u32,
-        );
+    let named_cursor = state.current_cursor.or(match cursor_status {
+        CursorImageStatus::Named(named_cursor) => Some(named_cursor),
+        _ => None,
+    });
+    if let Some(current_cursor) = named_cursor {
+        if !draw_default && current_cursor == CursorIcon::Default {
+            return Vec::new();
+        }
+
+        let integer_scale = scale.x.max(scale.y).ceil() as u32;
+        let frame = state
+            .get_named_cursor(current_cursor)
+            .get_image(integer_scale, time.as_millis());
 
         let pointer_images = &mut state.image_cache;
         let maybe_image =
@@ -396,6 +332,8 @@ where
             ),
             hotspot,
         )];
+    } else if let CursorImageStatus::Surface(ref wl_surface) = cursor_status {
+        return draw_surface_cursor(renderer, wl_surface, location.to_i32_round(), scale);
     } else {
         Vec::new()
     }
