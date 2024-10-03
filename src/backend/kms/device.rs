@@ -645,10 +645,10 @@ fn populate_modes(
         output.add_mode(mode);
     }
     output.set_preferred(output_mode);
+    let transform = drm_helpers::panel_orientation(drm, conn).unwrap_or(Transform::Normal);
     output.change_current_state(
         Some(output_mode),
-        // TODO: Readout property for monitor rotation
-        Some(Transform::Normal),
+        Some(transform),
         Some(Scale::Fractional(scale)),
         Some(Point::from((position.0 as i32, position.1 as i32))),
     );
@@ -663,6 +663,7 @@ fn populate_modes(
         position,
         max_bpc,
         scale,
+        transform,
         ..std::mem::take(&mut *output_config)
     };
 
