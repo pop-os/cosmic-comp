@@ -237,7 +237,7 @@ impl State {
                 ) {
                     Ok((output, should_expose)) => {
                         if should_expose {
-                            w += output.config().mode_size().w as u32;
+                            w += output.config().transformed_size().w as u32;
                             wl_outputs.push(output.clone());
                         }
                         device.outputs.insert(conn, output);
@@ -335,7 +335,7 @@ impl State {
                     ) {
                         Ok((output, should_expose)) => {
                             if should_expose {
-                                w += output.config().mode_size().w as u32;
+                                w += output.config().transformed_size().w as u32;
                                 outputs_added.push(output.clone());
                             }
 
