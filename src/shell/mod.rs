@@ -46,7 +46,6 @@ use smithay::{
     utils::{IsAlive, Logical, Point, Rectangle, Serial, Size},
     wayland::{
         compositor::{with_states, SurfaceAttributes},
-        foreign_toplevel_list::ForeignToplevelListState,
         seat::WaylandFocus,
         session_lock::LockSurface,
         shell::wlr_layer::{KeyboardInteractivity, Layer, LayerSurfaceCachedState},
