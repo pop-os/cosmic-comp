@@ -709,7 +709,7 @@ impl MoveGrab {
 
         {
             let cursor_state = seat.user_data().get::<CursorState>().unwrap();
-            cursor_state.lock().unwrap().set_shape(CursorIcon::Grab);
+            cursor_state.lock().unwrap().set_shape(CursorIcon::Grabbing);
         }
 
         MoveGrab {
