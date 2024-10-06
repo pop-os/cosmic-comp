@@ -12,7 +12,8 @@ use wayland_backend::server::ClientId;
 
 use crate::wayland::{handlers::data_device, protocols::workspace::WorkspaceCapabilities};
 use cosmic_comp_config::{
-    workspace::{WorkspaceLayout, WorkspaceMode}, StackBehavior, TileBehavior
+    workspace::{WorkspaceLayout, WorkspaceMode},
+    StackBehavior, TileBehavior,
 };
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::{
     State as WState, TilingState,
@@ -347,7 +348,13 @@ fn create_workspace(
         &workspace_handle,
         [WorkspaceCapabilities::Activate].into_iter(),
     );
-    Workspace::new(workspace_handle, output.clone(), tiling, theme.clone(), stack_behavior)
+    Workspace::new(
+        workspace_handle,
+        output.clone(),
+        tiling,
+        theme.clone(),
+        stack_behavior,
+    )
 }
 
 fn move_workspace_to_group(
@@ -429,7 +436,7 @@ impl WorkspaceSet {
                 true,
                 tiling_enabled,
                 theme.clone(),
-                stack_behavior.clone()
+                stack_behavior.clone(),
             );
             workspace_set_idx(state, 1, idx, &workspace.handle);
             state.set_workspace_capabilities(
@@ -858,7 +865,7 @@ impl Workspaces {
                                     false,
                                     config.cosmic_conf.autotile,
                                     self.theme.clone(),
-                                    self.stack_behavior.clone()
+                                    self.stack_behavior.clone(),
                                 ),
                             );
                         }
@@ -1126,6 +1133,34 @@ impl Workspaces {
     ) {
         self.autotile = autotile;
         self.apply_tile_change(guard, seats);
+    }
+
+    pub fn update_stack_behavior<'a>(
+        &mut self,
+        behavior: StackBehavior,
+        seats: impl Iterator<Item = &'a Seat<State>>,
+    ) {
+        let seats = seats.cloned().collect::<Vec<_>>();
+        self.stack_behavior = behavior.clone();
+        for (_, set) in &mut self.sets {
+            set.stack_behavior = behavior.clone();
+
+            for w in &mut set.workspaces {
+                w.tiling_layer.stack_behavior = behavior.clone();
+                for seat in &seats {
+                    let stack = w.focus_stack.get_mut(seat);
+                    *stack.0 = stack
+                        .0
+                        .clone()
+                        .into_iter()
+                        .map(|mut window| {
+                            window.update_stack_behavior(&behavior);
+                            window
+                        })
+                        .collect();
+                }
+            }
+        }
     }
 }
 
@@ -3580,13 +3615,17 @@ impl Shell {
                 .toggle_stacking(window, workspace.focus_stack.get_mut(seat), &behavior)
         } else if let Some(workspace) = self.space_for_mut(window) {
             if workspace.tiling_layer.mapped().any(|(m, _)| m == window) {
-                workspace
-                    .tiling_layer
-                    .toggle_stacking(window, workspace.focus_stack.get_mut(seat), &behavior)
+                workspace.tiling_layer.toggle_stacking(
+                    window,
+                    workspace.focus_stack.get_mut(seat),
+                    &behavior,
+                )
             } else if workspace.floating_layer.mapped().any(|w| w == window) {
-                workspace
-                    .floating_layer
-                    .toggle_stacking(window, workspace.focus_stack.get_mut(seat), &behavior)
+                workspace.floating_layer.toggle_stacking(
+                    window,
+                    workspace.focus_stack.get_mut(seat),
+                    &behavior,
+                )
             } else {
                 None
             }
@@ -3605,16 +3644,23 @@ impl Shell {
         let maybe_window = workspace.focus_stack.get(seat).iter().next().cloned();
         if let Some(window) = maybe_window {
             if set.sticky_layer.mapped().any(|m| m == &window) {
-                set.sticky_layer
-                    .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat), &self.workspaces.stack_behavior)
+                set.sticky_layer.toggle_stacking_focused(
+                    seat,
+                    workspace.focus_stack.get_mut(seat),
+                    &self.workspaces.stack_behavior,
+                )
             } else if workspace.tiling_layer.mapped().any(|(m, _)| m == &window) {
-                workspace
-                    .tiling_layer
-                    .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat), &self.workspaces.stack_behavior)
+                workspace.tiling_layer.toggle_stacking_focused(
+                    seat,
+                    workspace.focus_stack.get_mut(seat),
+                    &self.workspaces.stack_behavior,
+                )
             } else if workspace.floating_layer.mapped().any(|w| w == &window) {
-                workspace
-                    .floating_layer
-                    .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat), &self.workspaces.stack_behavior)
+                workspace.floating_layer.toggle_stacking_focused(
+                    seat,
+                    workspace.focus_stack.get_mut(seat),
+                    &self.workspaces.stack_behavior,
+                )
             } else {
                 None
             }
