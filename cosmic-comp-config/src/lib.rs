@@ -109,7 +109,6 @@ fn default_repeat_delay() -> u32 {
     600
 }
 
-
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct StackBehavior {
     pub close_tab_on_middle_click: bool,
@@ -117,6 +116,8 @@ pub struct StackBehavior {
 
 impl Default for StackBehavior {
     fn default() -> Self {
-        Self { close_tab_on_middle_click: true }
+        Self {
+            close_tab_on_middle_click: true,
+        }
     }
 }

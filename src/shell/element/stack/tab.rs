@@ -425,13 +425,12 @@ where
             if matches!(
                 event,
                 event::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Middle))
-             ) {
+            ) {
                 if let Some(message) = self.middle_click_message.clone() {
                     shell.publish(message);
                     return event::Status::Captured;
                 }
             }
-            
         }
 
         status

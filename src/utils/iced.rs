@@ -406,6 +406,10 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
         }
         Vec::new()
     }
+
+    pub fn program_mut(&mut self) -> &mut P {
+        &mut self.state.program_mut().0
+    }
 }
 
 impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedElement<P> {

@@ -41,7 +41,8 @@ mod types;
 pub use self::types::*;
 use cosmic::config::CosmicTk;
 use cosmic_comp_config::{
-    input::InputConfig, workspace::WorkspaceConfig, CosmicCompConfig, StackBehavior, TileBehavior, XkbConfig
+    input::InputConfig, workspace::WorkspaceConfig, CosmicCompConfig, StackBehavior, TileBehavior,
+    XkbConfig,
 };
 
 #[derive(Debug)]
@@ -709,8 +710,13 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
             "stack_behavior" => {
                 let new = get_config::<StackBehavior>(&config, "stack_behavior");
                 if new != state.common.config.cosmic_conf.stack_behavior {
-                    state.common.config.cosmic_conf.stack_behavior = new;
-                    state.common.update_config();
+                    state.common.config.cosmic_conf.stack_behavior = new.clone();
+
+                    let mut shell = state.common.shell.write().unwrap();
+                    let shell_ref = &mut *shell;
+                    shell_ref
+                        .workspaces
+                        .update_stack_behavior(new, shell_ref.seats.iter())
                 }
             }
             "active_hint" => {

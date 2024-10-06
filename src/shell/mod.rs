@@ -1138,6 +1138,34 @@ impl Workspaces {
         self.autotile = autotile;
         self.apply_tile_change(guard, seats);
     }
+
+    pub fn update_stack_behavior<'a>(
+        &mut self,
+        behavior: StackBehavior,
+        seats: impl Iterator<Item = &'a Seat<State>>,
+    ) {
+        let seats = seats.cloned().collect::<Vec<_>>();
+        self.stack_behavior = behavior.clone();
+        for (_, set) in &mut self.sets {
+            set.stack_behavior = behavior.clone();
+
+            for w in &mut set.workspaces {
+                w.tiling_layer.stack_behavior = behavior.clone();
+                for seat in &seats {
+                    let stack = w.focus_stack.get_mut(seat);
+                    *stack.0 = stack
+                        .0
+                        .clone()
+                        .into_iter()
+                        .map(|mut window| {
+                            window.update_stack_behavior(&behavior);
+                            window
+                        })
+                        .collect();
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug)]

@@ -1015,7 +1015,11 @@ impl FloatingLayout {
         if mapped.is_window() {
             // if it is just a window
             self.space.unmap_elem(&mapped);
-            mapped.convert_to_stack((&output, mapped.bbox()), self.theme.clone(), stack_behavior.clone());
+            mapped.convert_to_stack(
+                (&output, mapped.bbox()),
+                self.theme.clone(),
+                stack_behavior.clone(),
+            );
             self.map_internal(
                 mapped.clone(),
                 Some(location.as_local()),

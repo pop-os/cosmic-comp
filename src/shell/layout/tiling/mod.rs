@@ -136,7 +136,7 @@ pub struct TilingLayout {
     swapping_stack_surface_id: Id,
     last_overview_hover: Option<(Option<Instant>, TargetZone)>,
     pub theme: cosmic::Theme,
-    stack_behavior: StackBehavior,
+    pub stack_behavior: StackBehavior,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -344,7 +344,11 @@ pub struct MinimizedTilingState {
 }
 
 impl TilingLayout {
-    pub fn new(theme: cosmic::Theme, output: &Output, stack_behavior: StackBehavior) -> TilingLayout {
+    pub fn new(
+        theme: cosmic::Theme,
+        output: &Output,
+        stack_behavior: StackBehavior,
+    ) -> TilingLayout {
         TilingLayout {
             queue: TreeQueue {
                 trees: {
@@ -2124,7 +2128,7 @@ impl TilingLayout {
         &mut self,
         mapped: &CosmicMapped,
         mut focus_stack: FocusStackMut,
-        stack_behavior: &StackBehavior
+        stack_behavior: &StackBehavior,
     ) -> Option<KeyboardFocusTarget> {
         let gaps = self.gaps();
 
@@ -2141,7 +2145,11 @@ impl TilingLayout {
             // if it is just a window
             match tree.get_mut(&node_id).unwrap().data_mut() {
                 Data::Mapped { mapped, .. } => {
-                    mapped.convert_to_stack((&self.output, mapped.bbox()), self.theme.clone(), stack_behavior.clone());
+                    mapped.convert_to_stack(
+                        (&self.output, mapped.bbox()),
+                        self.theme.clone(),
+                        stack_behavior.clone(),
+                    );
                     focus_stack.append(&mapped);
                     KeyboardFocusTarget::Element(mapped.clone())
                 }
@@ -2279,7 +2287,12 @@ impl TilingLayout {
                         return None;
                     }
                     let handle = handle.unwrap();
-                    let stack = CosmicStack::new(surfaces.into_iter(), handle, self.theme.clone(), stack_behavior.clone());
+                    let stack = CosmicStack::new(
+                        surfaces.into_iter(),
+                        handle,
+                        self.theme.clone(),
+                        stack_behavior.clone(),
+                    );
 
                     for child in tree
                         .children_ids(&last_active)
@@ -2746,7 +2759,11 @@ impl TilingLayout {
             Some(TargetZone::WindowStack(window_id, _)) if tree.get(&window_id).is_ok() => {
                 match tree.get_mut(window_id).unwrap().data_mut() {
                     Data::Mapped { mapped, .. } => {
-                        mapped.convert_to_stack((&self.output, mapped.bbox()), self.theme.clone(), self.stack_behavior.clone());
+                        mapped.convert_to_stack(
+                            (&self.output, mapped.bbox()),
+                            self.theme.clone(),
+                            self.stack_behavior.clone(),
+                        );
                         let Some(stack) = mapped.stack_ref_mut() else {
                             unreachable!()
                         };

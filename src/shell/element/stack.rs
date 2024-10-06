@@ -119,6 +119,10 @@ impl CosmicStackInternal {
     pub fn current_focus(&self) -> Option<Focus> {
         unsafe { Focus::from_u8(self.pointer_entered.load(Ordering::SeqCst)) }
     }
+
+    pub fn update_behavior(&mut self, behavior: StackBehavior) {
+        self.behavior = behavior;
+    }
 }
 
 pub const TAB_HEIGHT: i32 = 24;
