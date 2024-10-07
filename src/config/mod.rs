@@ -139,6 +139,10 @@ impl OutputConfig {
         self.mode.1.unwrap_or(60_000)
     }
 
+    pub fn transformed_size(&self) -> Size<i32, Physical> {
+        self.transform.transform_size(self.mode_size())
+    }
+
     pub fn output_mode(&self) -> Mode {
         Mode {
             size: self.mode_size(),

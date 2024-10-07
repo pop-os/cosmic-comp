@@ -51,7 +51,7 @@ use smithay::{
         PopupManager,
     },
     input::{pointer::CursorImageStatus, SeatState},
-    output::{Mode as OutputMode, Output, Scale},
+    output::{Output, Scale},
     reexports::{
         calloop::{LoopHandle, LoopSignal},
         wayland_protocols::xdg::shell::server::xdg_toplevel::WmCapabilities,
@@ -306,11 +306,7 @@ impl BackendData {
                 .unwrap()
                 .borrow();
 
-            let mode = Some(OutputMode {
-                size: final_config.mode_size(),
-                refresh: final_config.mode_refresh() as i32,
-            })
-            .filter(|m| match output.current_mode() {
+            let mode = Some(final_config.output_mode()).filter(|m| match output.current_mode() {
                 None => true,
                 Some(c_m) => m.size != c_m.size || m.refresh != c_m.refresh,
             });
