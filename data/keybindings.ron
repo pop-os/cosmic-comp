@@ -80,6 +80,7 @@
     (modifiers: [Alt], key: "Tab"): System(WindowSwitcher),
     (modifiers: [Alt, Shift], key: "Tab"): System(WindowSwitcherReverse),
     (modifiers: [Super], key: "Tab"): System(WindowSwitcher),
+    (modifiers: [Super, Shift], key: "Tab"): System(WindowSwitcherReverse),
 
     (modifiers: [], key: "Print"): System(Screenshot),
     (modifiers: [], key: "XF86AudioRaiseVolume"): System(VolumeRaise),
