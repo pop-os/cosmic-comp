@@ -27,7 +27,11 @@ use smithay::{
         wayland_server::{Client, DisplayHandle},
     },
     utils::{DevPath, Size},
-    wayland::{dmabuf::DmabufGlobal, relative_pointer::RelativePointerManagerState},
+    wayland::{
+        dmabuf::DmabufGlobal,
+        drm_syncobj::{supports_syncobj_eventfd, DrmSyncobjState},
+        relative_pointer::RelativePointerManagerState,
+    },
 };
 use tracing::{error, info, trace, warn};
 
@@ -60,6 +64,8 @@ pub struct KmsState {
 
     session: LibSeatSession,
     libinput: Libinput,
+
+    pub syncobj_state: Option<DrmSyncobjState>,
 }
 
 pub fn init_backend(
@@ -126,6 +132,8 @@ pub fn init_backend(
 
         session,
         libinput: libinput_context,
+
+        syncobj_state: None,
     });
 
     // start x11
@@ -135,6 +143,23 @@ pub fn init_backend(
     for (dev, path) in udev_dispatcher.as_source_ref().device_list() {
         if let Err(err) = state.device_added(dev, path.into(), dh) {
             warn!("Failed to add device {}: {:?}", path.display(), err);
+        }
+    }
+
+    let kms = match &mut state.backend {
+        BackendData::Kms(kms) => kms,
+        _ => unreachable!(),
+    };
+    if let Some(primary_node) = kms
+        .primary_node
+        .and_then(|node| node.node_with_type(NodeType::Primary).and_then(|x| x.ok()))
+    {
+        if let Some(device) = kms.drm_devices.get(&primary_node) {
+            let import_device = device.drm.device_fd().clone();
+            if supports_syncobj_eventfd(&import_device) {
+                let syncobj_state = DrmSyncobjState::new::<State>(&dh, import_device);
+                kms.syncobj_state = Some(syncobj_state);
+            }
         }
     }
 
