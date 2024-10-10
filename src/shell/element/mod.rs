@@ -302,10 +302,11 @@ impl CosmicMapped {
     pub fn focus_under(
         &self,
         relative_pos: Point<f64, Logical>,
+        surface_type: WindowSurfaceType,
     ) -> Option<(PointerFocusTarget, Point<f64, Logical>)> {
         match &self.element {
-            CosmicMappedInternal::Stack(stack) => stack.focus_under(relative_pos),
-            CosmicMappedInternal::Window(window) => window.focus_under(relative_pos),
+            CosmicMappedInternal::Stack(stack) => stack.focus_under(relative_pos, surface_type),
+            CosmicMappedInternal::Window(window) => window.focus_under(relative_pos, surface_type),
             _ => unreachable!(),
         }
     }

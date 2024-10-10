@@ -728,16 +728,115 @@ impl FloatingLayout {
         self.space.element_geometry(elem).map(RectExt::as_local)
     }
 
-    pub fn element_under(&self, location: Point<f64, Local>) -> Option<KeyboardFocusTarget> {
+    pub fn popup_element_under(&self, location: Point<f64, Local>) -> Option<KeyboardFocusTarget> {
         self.space
-            .element_under(location.as_logical())
-            .map(|(mapped, _)| mapped.clone().into())
+            .elements()
+            .rev()
+            .map(|e| (e, self.space.element_location(e).unwrap() - e.geometry().loc))
+            .filter(|(e, render_location)| {
+                let mut bbox = e.bbox();
+                bbox.loc += *render_location;
+                bbox.to_f64().contains(location.as_logical())
+            })
+            .find_map(|(e, render_location)| {
+                let render_location = render_location
+                    .as_local()
+                    .to_f64();
+                let point = location - render_location;
+                if e.focus_under(point.as_logical(), WindowSurfaceType::POPUP | WindowSurfaceType::SUBSURFACE).is_some() {
+                    Some(e.clone().into())
+                } else {
+                    None
+                }
+            })
+    }
+    
+    pub fn toplevel_element_under(&self, location: Point<f64, Local>) -> Option<KeyboardFocusTarget> {
+        self.space
+            .elements()
+            .rev()
+            .map(|e| (e, self.space.element_location(e).unwrap() - e.geometry().loc))
+            .filter(|(e, render_location)| {
+                let mut bbox = e.bbox();
+                bbox.loc += *render_location;
+                bbox.to_f64().contains(location.as_logical())
+            })
+            .find_map(|(e, render_location)| {
+                let render_location = render_location
+                    .as_local()
+                    .to_f64();
+                let point = location - render_location;
+                if e.focus_under(point.as_logical(), WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE).is_some() {
+                    Some(e.clone().into())
+                } else {
+                    None
+                }
+            })
     }
 
-    pub fn surface_under(
-        &mut self,
+    pub fn popup_surface_under(
+        &self,
         location: Point<f64, Local>,
     ) -> Option<(PointerFocusTarget, Point<f64, Local>)> {
+        self.space
+            .elements()
+            .rev()
+            .map(|e| (e, self.space.element_location(e).unwrap() - e.geometry().loc))
+            .filter(|(e, render_location)| {
+                let mut bbox = e.bbox();
+                bbox.loc += *render_location;
+                bbox.to_f64().contains(location.as_logical())
+            })
+            .find_map(|(e, render_location)| {
+                let render_location = render_location
+                    .as_local()
+                    .to_f64();
+                let point = location - render_location;
+                e.focus_under(
+                    point.as_logical(),
+                    WindowSurfaceType::POPUP | WindowSurfaceType::SUBSURFACE,
+                )
+                .map(|(surface, surface_offset)| {
+                    (surface, render_location + surface_offset.as_local())
+                })
+            })
+    }
+
+    pub fn toplevel_surface_under(
+        &self,
+        location: Point<f64, Local>,
+    ) -> Option<(PointerFocusTarget, Point<f64, Local>)> {
+        self.space
+            .elements()
+            .rev()
+            .map(|e| (e, self.space.element_location(e).unwrap() - e.geometry().loc))
+            .filter(|(e, render_location)| {
+                let mut bbox = e.bbox();
+                bbox.loc += *render_location;
+                bbox.to_f64().contains(location.as_logical())
+            })
+            .find_map(|(e, render_location)| {
+                let render_location = render_location.as_local().to_f64();
+                let point = location - render_location;
+                e.focus_under(
+                    point.as_logical(),
+                    WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+                )
+                .map(|(surface, surface_offset)| {
+                    (
+                        surface,
+                        render_location + surface_offset.as_local(),
+                    )
+                })
+            })
+    }
+
+    pub fn update_pointer_position(&mut self, location: Option<Point<f64, Local>>) {
+        let Some(location) = location else {
+            self.hovered_stack.take();
+            return;
+        };
+
         let res = self
             .space
             .element_under(location.as_logical())
@@ -754,15 +853,6 @@ impl FloatingLayout {
         } else {
             self.hovered_stack.take();
         }
-
-        res.and_then(|(element, space_offset)| {
-            let point = location - space_offset.to_f64();
-            element
-                .focus_under(point.as_logical())
-                .map(|(surface, surface_offset)| {
-                    (surface, space_offset.to_f64() + surface_offset.as_local())
-                })
-        })
     }
 
     pub fn stacking_indicator(&self) -> Option<Rectangle<i32, Local>> {

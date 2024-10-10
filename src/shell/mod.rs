@@ -54,8 +54,6 @@ use smithay::{
     xwayland::X11Surface,
 };
 
-use smithay::wayland::shell::wlr_layer::Layer as WlrLayer;
-
 use crate::{
     backend::render::animations::spring::{Spring, SpringParams},
     config::Config,
@@ -1532,97 +1530,6 @@ impl Shell {
         }
     }
 
-    /// Derives a keyboard focus target from a global position, and indicates whether the
-    /// the shell should start a move request event. Used during cursor related focus checks
-    pub fn keyboard_target_from_position(
-        &self,
-        global_position: Point<f64, Global>,
-        output: &Output,
-    ) -> Option<KeyboardFocusTarget> {
-        let relative_pos = global_position.to_local(output);
-
-        let mut under: Option<KeyboardFocusTarget> = None;
-        // if the lockscreen is active
-        if let Some(session_lock) = self.session_lock.as_ref() {
-            under = session_lock
-                .surfaces
-                .get(output)
-                .map(|lock| lock.clone().into());
-            // if the output can receive keyboard focus
-        } else if let Some(window) = self.active_space(output).get_fullscreen() {
-            let layers = layer_map_for_output(output);
-            if let Some(layer) = layers.layer_under(WlrLayer::Overlay, relative_pos.as_logical()) {
-                let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                if layer.can_receive_keyboard_focus()
-                    && layer
-                        .surface_under(
-                            relative_pos.as_logical() - layer_loc.to_f64(),
-                            WindowSurfaceType::ALL,
-                        )
-                        .is_some()
-                {
-                    under = Some(layer.clone().into());
-                }
-            } else {
-                under = Some(window.clone().into());
-            }
-        } else {
-            let done = {
-                let layers = layer_map_for_output(output);
-                if let Some(layer) = layers
-                    .layer_under(WlrLayer::Overlay, relative_pos.as_logical())
-                    .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos.as_logical()))
-                {
-                    let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                    if layer.can_receive_keyboard_focus()
-                        && layer
-                            .surface_under(
-                                relative_pos.as_logical() - layer_loc.to_f64(),
-                                WindowSurfaceType::ALL,
-                            )
-                            .is_some()
-                    {
-                        under = Some(layer.clone().into());
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            };
-            if !done {
-                // Don't check override redirect windows, because we don't set keyboard focus to them explicitly.
-                // These cases are handled by the XwaylandKeyboardGrab.
-                if let Some(target) = self.element_under(global_position, output) {
-                    under = Some(target);
-                } else {
-                    let layers = layer_map_for_output(output);
-                    if let Some(layer) = layers
-                        .layer_under(WlrLayer::Bottom, relative_pos.as_logical())
-                        .or_else(|| {
-                            layers.layer_under(WlrLayer::Background, relative_pos.as_logical())
-                        })
-                    {
-                        let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                        if layer.can_receive_keyboard_focus()
-                            && layer
-                                .surface_under(
-                                    relative_pos.as_logical() - layer_loc.to_f64(),
-                                    WindowSurfaceType::ALL,
-                                )
-                                .is_some()
-                        {
-                            under = Some(layer.clone().into());
-                        }
-                    };
-                }
-            }
-        }
-
-        under
-    }
-
     /// Coerce a keyboard focus target into a CosmicMapped element. This is useful when performing window specific
     /// actions, such as closing a window
     pub fn focused_element(&self, focus_target: &KeyboardFocusTarget) -> Option<CosmicMapped> {
@@ -2053,6 +1960,26 @@ impl Shell {
         self.pending_windows.retain(|(s, _, _)| s.alive());
     }
 
+    pub fn update_pointer_position(&mut self, location: Point<f64, Local>, output: &Output) { 
+        for (o, set) in self.workspaces.sets.iter_mut() {
+            if o == output {
+                set.sticky_layer.update_pointer_position(Some(location));
+                for (i, workspace) in set.workspaces.iter_mut().enumerate() {
+                    if i == set.active {
+                        workspace.update_pointer_position(Some(location), self.overview_mode.clone());
+                    } else {
+                        workspace.update_pointer_position(None, self.overview_mode.clone());
+                    }
+                }
+            } else {
+                set.sticky_layer.update_pointer_position(None);
+                for workspace in &mut set.workspaces {
+                    workspace.update_pointer_position(None, self.overview_mode.clone());
+                }
+            }
+        }
+    }
+
     pub fn remap_unfullscreened_window(
         &mut self,
         mapped: CosmicMapped,
@@ -2380,33 +2307,6 @@ impl Shell {
                 return;
             }
         }
-    }
-
-    pub fn element_under(
-        &self,
-        location: Point<f64, Global>,
-        output: &Output,
-    ) -> Option<KeyboardFocusTarget> {
-        self.workspaces.sets.get(output).and_then(|set| {
-            set.sticky_layer
-                .space
-                .element_under(location.to_local(output).as_logical())
-                .map(|(mapped, _)| mapped.clone().into())
-                .or_else(|| set.workspaces[set.active].element_under(location))
-        })
-    }
-    pub fn surface_under(
-        &mut self,
-        location: Point<f64, Global>,
-        output: &Output,
-    ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
-        let overview = self.overview_mode.clone();
-        self.workspaces.sets.get_mut(output).and_then(|set| {
-            set.sticky_layer
-                .surface_under(location.to_local(output))
-                .map(|(target, offset)| (target, offset.to_global(output)))
-                .or_else(|| set.workspaces[set.active].surface_under(location, overview))
-        })
     }
 
     #[must_use]
@@ -2782,7 +2682,7 @@ impl Shell {
         let mapped = if move_out_of_stack {
             let new_mapped: CosmicMapped =
                 CosmicWindow::new(window.clone(), evlh.clone(), self.theme.clone()).into();
-            start_data.set_focus(new_mapped.focus_under((0., 0.).into()));
+            start_data.set_focus(new_mapped.focus_under((0., 0.).into(), WindowSurfaceType::ALL));
             new_mapped
         } else {
             old_mapped.clone()
@@ -3250,7 +3150,7 @@ impl Shell {
 
         let element_offset = (new_loc - geometry.loc).as_logical();
         let focus = mapped
-            .focus_under(element_offset.to_f64())
+            .focus_under(element_offset.to_f64(), WindowSurfaceType::ALL)
             .map(|(target, surface_offset)| (target, (surface_offset + element_offset.to_f64())));
         start_data.set_location(new_loc.as_logical().to_f64());
         start_data.set_focus(focus.clone());
