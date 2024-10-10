@@ -640,6 +640,7 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                         }
                     }
                 }
+                state.common.atspi_ei.update_keymap(value.clone());
                 state.common.config.cosmic_conf.xkb_config = value;
             }
             "input_default" => {
