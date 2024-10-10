@@ -420,48 +420,52 @@ impl CosmicStack {
     pub fn focus_under(
         &self,
         mut relative_pos: Point<f64, Logical>,
+        surface_type: WindowSurfaceType,
     ) -> Option<(PointerFocusTarget, Point<f64, Logical>)> {
         self.0.with_program(|p| {
             let mut stack_ui = None;
             let geo = p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry();
 
-            let point_i32 = relative_pos.to_i32_round::<i32>();
-            if (point_i32.x - geo.loc.x >= -RESIZE_BORDER && point_i32.x - geo.loc.x < 0)
-                || (point_i32.y - geo.loc.y >= -RESIZE_BORDER && point_i32.y - geo.loc.y < 0)
-                || (point_i32.x - geo.loc.x >= geo.size.w
-                    && point_i32.x - geo.loc.x < geo.size.w + RESIZE_BORDER)
-                || (point_i32.y - geo.loc.y >= geo.size.h
-                    && point_i32.y - geo.loc.y < geo.size.h + TAB_HEIGHT + RESIZE_BORDER)
-            {
-                stack_ui = Some((
-                    PointerFocusTarget::StackUI(self.clone()),
-                    Point::from((0., 0.)),
-                ));
-            }
+            if surface_type.contains(WindowSurfaceType::TOPLEVEL) {
+                let point_i32 = relative_pos.to_i32_round::<i32>();
+                if (point_i32.x - geo.loc.x >= -RESIZE_BORDER && point_i32.x - geo.loc.x < 0)
+                    || (point_i32.y - geo.loc.y >= -RESIZE_BORDER && point_i32.y - geo.loc.y < 0)
+                    || (point_i32.x - geo.loc.x >= geo.size.w
+                        && point_i32.x - geo.loc.x < geo.size.w + RESIZE_BORDER)
+                    || (point_i32.y - geo.loc.y >= geo.size.h
+                        && point_i32.y - geo.loc.y < geo.size.h + TAB_HEIGHT + RESIZE_BORDER)
+                {
+                    stack_ui = Some((
+                        PointerFocusTarget::StackUI(self.clone()),
+                        Point::from((0., 0.)),
+                    ));
+                }
 
-            if point_i32.y - geo.loc.y < TAB_HEIGHT {
-                stack_ui = Some((
-                    PointerFocusTarget::StackUI(self.clone()),
-                    Point::from((0., 0.)),
-                ));
+                if point_i32.y - geo.loc.y < TAB_HEIGHT {
+                    stack_ui = Some((
+                        PointerFocusTarget::StackUI(self.clone()),
+                        Point::from((0., 0.)),
+                    ));
+                }
             }
 
             relative_pos.y -= TAB_HEIGHT as f64;
 
             let active_window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
-            active_window
-                .0
-                .surface_under(relative_pos, WindowSurfaceType::ALL)
-                .map(|(surface, surface_offset)| {
-                    (
-                        PointerFocusTarget::WlSurface {
-                            surface,
-                            toplevel: Some(active_window.clone().into()),
-                        },
-                        surface_offset.to_f64() + Point::from((0., TAB_HEIGHT as f64)),
-                    )
-                })
-                .or(stack_ui)
+            stack_ui.or_else(|| {
+                active_window
+                    .0
+                    .surface_under(relative_pos, surface_type)
+                    .map(|(surface, surface_offset)| {
+                        (
+                            PointerFocusTarget::WlSurface {
+                                surface,
+                                toplevel: Some(active_window.clone().into()),
+                            },
+                            surface_offset.to_f64() + Point::from((0., TAB_HEIGHT as f64)),
+                        )
+                    })
+            })
         })
     }
 
@@ -1034,7 +1038,7 @@ impl SpaceElement for CosmicStack {
         })
     }
     fn is_in_input_region(&self, point: &Point<f64, Logical>) -> bool {
-        self.focus_under(*point).is_some()
+        self.focus_under(*point, WindowSurfaceType::ALL).is_some()
     }
     fn set_activate(&self, activated: bool) {
         SpaceElement::set_activate(&self.0, activated);

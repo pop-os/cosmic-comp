@@ -34,7 +34,7 @@ use smithay::{
         utils::{DamageSet, OpaqueRegions},
         ImportAll, ImportMem, Renderer,
     },
-    desktop::{layer_map_for_output, space::SpaceElement},
+    desktop::{layer_map_for_output, space::SpaceElement, WindowSurfaceType},
     input::Seat,
     output::Output,
     reexports::wayland_server::{Client, Resource},
@@ -434,6 +434,27 @@ impl Workspace {
         }
     }
 
+    fn fullscreen_geometry(&self) -> Option<Rectangle<i32, Local>> {
+        self.fullscreen.as_ref().map(|fullscreen| {
+            let bbox = fullscreen.surface.bbox().as_local();
+
+            let mut full_geo =
+                Rectangle::from_loc_and_size((0, 0), self.output.geometry().size.as_local());
+            if bbox != full_geo {
+                if bbox.size.w < full_geo.size.w {
+                    full_geo.loc.x += (full_geo.size.w - bbox.size.w) / 2;
+                    full_geo.size.w = bbox.size.w;
+                }
+                if bbox.size.h < full_geo.size.h {
+                    full_geo.loc.y += (full_geo.size.h - bbox.size.h) / 2;
+                    full_geo.size.h = bbox.size.h;
+                }
+            }
+
+            full_geo
+        })
+    }
+
     pub fn element_for_surface<S>(&self, surface: &S) -> Option<&CosmicMapped>
     where
         CosmicSurface: PartialEq<S>,
@@ -445,23 +466,149 @@ impl Workspace {
             .find(|e| e.windows().any(|(w, _)| &w == surface))
     }
 
-    pub fn element_under(&self, location: Point<f64, Global>) -> Option<KeyboardFocusTarget> {
+    pub fn popup_element_under(&self, location: Point<f64, Global>) -> Option<KeyboardFocusTarget> {
+        if !self.output.geometry().contains(location.to_i32_round()) {
+            return None;
+        }
         let location = location.to_local(&self.output);
+
+        if let Some(fullscreen) = self.fullscreen.as_ref() {
+            if !fullscreen.is_animating() {
+                let geometry = self.fullscreen_geometry().unwrap();
+                return fullscreen
+                    .surface
+                    .0
+                    .surface_under(
+                        (location + geometry.loc.to_f64()).as_logical(),
+                        WindowSurfaceType::POPUP | WindowSurfaceType::SUBSURFACE,
+                    )
+                    .is_some()
+                    .then(|| KeyboardFocusTarget::Fullscreen(fullscreen.surface.clone()));
+            }
+        }
+
         self.floating_layer
-            .element_under(location)
-            .or_else(|| self.tiling_layer.element_under(location))
+            .popup_element_under(location)
+            .or_else(|| self.tiling_layer.popup_element_under(location))
     }
 
-    pub fn surface_under(
-        &mut self,
+    pub fn toplevel_element_under(
+        &self,
+        location: Point<f64, Global>,
+    ) -> Option<KeyboardFocusTarget> {
+        if !self.output.geometry().contains(location.to_i32_round()) {
+            return None;
+        }
+        let location = location.to_local(&self.output);
+
+        if let Some(fullscreen) = self.fullscreen.as_ref() {
+            if !fullscreen.is_animating() {
+                let geometry = self.fullscreen_geometry().unwrap();
+                return fullscreen
+                    .surface
+                    .0
+                    .surface_under(
+                        (location + geometry.loc.to_f64()).as_logical(),
+                        WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+                    )
+                    .is_some()
+                    .then(|| KeyboardFocusTarget::Fullscreen(fullscreen.surface.clone()));
+            }
+        }
+
+        self.floating_layer
+            .toplevel_element_under(location)
+            .or_else(|| self.tiling_layer.toplevel_element_under(location))
+    }
+
+    pub fn popup_surface_under(
+        &self,
         location: Point<f64, Global>,
         overview: OverviewMode,
     ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
+        if !self.output.geometry().contains(location.to_i32_round()) {
+            return None;
+        }
         let location = location.to_local(&self.output);
+
+        if let Some(fullscreen) = self.fullscreen.as_ref() {
+            if !fullscreen.is_animating() {
+                let geometry = self.fullscreen_geometry().unwrap();
+                return fullscreen
+                    .surface
+                    .0
+                    .surface_under(
+                        (location + geometry.loc.to_f64()).as_logical(),
+                        WindowSurfaceType::POPUP | WindowSurfaceType::SUBSURFACE,
+                    )
+                    .map(|(surface, surface_offset)| {
+                        (
+                            PointerFocusTarget::WlSurface {
+                                surface,
+                                toplevel: Some(fullscreen.surface.clone().into()),
+                            },
+                            (geometry.loc + surface_offset.as_local())
+                                .to_global(&self.output)
+                                .to_f64(),
+                        )
+                    });
+            }
+        }
+
         self.floating_layer
-            .surface_under(location)
-            .or_else(|| self.tiling_layer.surface_under(location, overview))
+            .popup_surface_under(location)
+            .or_else(|| self.tiling_layer.popup_surface_under(location, overview))
             .map(|(m, p)| (m, p.to_global(&self.output)))
+    }
+
+    pub fn toplevel_surface_under(
+        &self,
+        location: Point<f64, Global>,
+        overview: OverviewMode,
+    ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
+        if !self.output.geometry().contains(location.to_i32_round()) {
+            return None;
+        }
+        let location = location.to_local(&self.output);
+
+        if let Some(fullscreen) = self.fullscreen.as_ref() {
+            if !fullscreen.is_animating() {
+                let geometry = self.fullscreen_geometry().unwrap();
+                return fullscreen
+                    .surface
+                    .0
+                    .surface_under(
+                        (location + geometry.loc.to_f64()).as_logical(),
+                        WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+                    )
+                    .map(|(surface, surface_offset)| {
+                        (
+                            PointerFocusTarget::WlSurface {
+                                surface,
+                                toplevel: Some(fullscreen.surface.clone().into()),
+                            },
+                            (geometry.loc + surface_offset.as_local())
+                                .to_global(&self.output)
+                                .to_f64(),
+                        )
+                    });
+            }
+        }
+
+        self.floating_layer
+            .toplevel_surface_under(location)
+            .or_else(|| self.tiling_layer.toplevel_surface_under(location, overview))
+            .map(|(m, p)| (m, p.to_global(&self.output)))
+    }
+
+    pub fn update_pointer_position(
+        &mut self,
+        location: Option<Point<f64, Local>>,
+        overview: OverviewMode,
+    ) {
+        self.floating_layer.update_pointer_position(location);
+        self.tiling_layer
+            .update_pointer_position(location, overview);
     }
 
     pub fn element_geometry(&self, elem: &CosmicMapped) -> Option<Rectangle<i32, Local>> {
