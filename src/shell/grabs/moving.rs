@@ -27,7 +27,7 @@ use smithay::{
             ImportAll, ImportMem, Renderer,
         },
     },
-    desktop::{layer_map_for_output, space::SpaceElement},
+    desktop::{layer_map_for_output, space::SpaceElement, WindowSurfaceType},
     input::{
         pointer::{
             AxisFrame, ButtonEvent, CursorIcon, GestureHoldBeginEvent, GestureHoldEndEvent,
@@ -864,7 +864,7 @@ impl Drop for MoveGrab {
                     let current_location = pointer.current_location();
 
                     if let Some((target, offset)) =
-                        mapped.focus_under(current_location - position.as_logical().to_f64())
+                        mapped.focus_under(current_location - position.as_logical().to_f64(), WindowSurfaceType::ALL)
                     {
                         pointer.motion(
                             state,

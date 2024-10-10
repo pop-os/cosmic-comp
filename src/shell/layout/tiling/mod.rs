@@ -56,7 +56,7 @@ use smithay::{
         glow::GlowRenderer,
         ImportAll, ImportMem, Renderer,
     },
-    desktop::{layer_map_for_output, space::SpaceElement, PopupKind},
+    desktop::{layer_map_for_output, space::SpaceElement, PopupKind, WindowSurfaceType},
     input::Seat,
     output::Output,
     reexports::wayland_server::Client,
@@ -3104,17 +3104,38 @@ impl TilingLayout {
 
         None
     }
-
-    pub fn element_under(&self, location_f64: Point<f64, Local>) -> Option<KeyboardFocusTarget> {
+    
+    pub fn popup_element_under(&self, location_f64: Point<f64, Local>) -> Option<KeyboardFocusTarget> {
         let location = location_f64.to_i32_round();
 
         for (mapped, geo) in self.mapped() {
             if !mapped.bbox().contains((location - geo.loc).as_logical()) {
                 continue;
             }
-            if mapped.is_in_input_region(
-                &((location_f64 - geo.loc.to_f64()).as_logical() + mapped.geometry().loc.to_f64()),
-            ) {
+
+            if mapped.focus_under(
+                (location_f64 - geo.loc.to_f64()).as_logical() + mapped.geometry().loc.to_f64(),
+                WindowSurfaceType::POPUP | WindowSurfaceType::SUBSURFACE,
+            ).is_some() {
+                return Some(mapped.clone().into());
+            }
+        }
+
+        None
+    }
+    
+    pub fn toplevel_element_under(&self, location_f64: Point<f64, Local>) -> Option<KeyboardFocusTarget> {
+        let location = location_f64.to_i32_round();
+
+        for (mapped, geo) in self.mapped() {
+            if !mapped.bbox().contains((location - geo.loc).as_logical()) {
+                continue;
+            }
+
+            if mapped.focus_under(
+                (location_f64 - geo.loc.to_f64()).as_logical() + mapped.geometry().loc.to_f64(),
+                WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+            ).is_some() {
                 return Some(mapped.clone().into());
             }
         }
@@ -3122,33 +3143,12 @@ impl TilingLayout {
         None
     }
 
-    pub fn surface_under(
-        &mut self,
+    pub fn popup_surface_under(
+        &self,
         location_f64: Point<f64, Local>,
         overview: OverviewMode,
     ) -> Option<(PointerFocusTarget, Point<f64, Local>)> {
-        let gaps = self.gaps();
-        let last_overview_hover = &mut self.last_overview_hover;
-        let placeholder_id = &self.placeholder_id;
-        let tree = &self.queue.trees.back().unwrap().0;
-        let root = tree.root_node_id()?;
         let location = location_f64.to_i32_round();
-
-        {
-            let output_geo =
-                Rectangle::from_loc_and_size((0, 0), self.output.geometry().size.as_logical())
-                    .as_local();
-            if !output_geo.contains(location) {
-                return None;
-            }
-        }
-
-        if !matches!(
-            overview,
-            OverviewMode::Started(_, _) | OverviewMode::Active(_)
-        ) {
-            last_overview_hover.take();
-        }
 
         if matches!(overview, OverviewMode::None) {
             for (mapped, geo) in self.mapped() {
@@ -3157,6 +3157,37 @@ impl TilingLayout {
                 }
                 if let Some((target, surface_offset)) = mapped.focus_under(
                     (location_f64 - geo.loc.to_f64()).as_logical() + mapped.geometry().loc.to_f64(),
+                    WindowSurfaceType::POPUP | WindowSurfaceType::SUBSURFACE,
+                ) {
+                    return Some((
+                        target,
+                        geo.loc.to_f64() - mapped.geometry().loc.as_local().to_f64()
+                            + surface_offset.as_local(),
+                    ));
+                }
+            }
+        }
+
+        None
+    }
+
+    pub fn toplevel_surface_under(
+        &self,
+        location_f64: Point<f64, Local>,
+        overview: OverviewMode,
+    ) -> Option<(PointerFocusTarget, Point<f64, Local>)> {
+        let tree = &self.queue.trees.back().unwrap().0;
+        let root = tree.root_node_id()?;
+        let location = location_f64.to_i32_round();
+
+        if matches!(overview, OverviewMode::None) {
+            for (mapped, geo) in self.mapped() {
+                if !mapped.bbox().contains((location - geo.loc).as_logical()) {
+                    continue;
+                }
+                if let Some((target, surface_offset)) = mapped.focus_under(
+                    (location_f64 - geo.loc.to_f64()).as_logical() + mapped.geometry().loc.to_f64(),
+                    WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
                 ) {
                     return Some((
                         target,
@@ -3204,7 +3235,10 @@ impl TilingLayout {
                         + mapped.geometry().loc.to_f64().as_local())
                     .as_logical();
                     mapped
-                        .focus_under(test_point)
+                        .focus_under(
+                            test_point,
+                            WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+                        )
                         .map(|(surface, surface_offset)| {
                             (
                                 surface,
@@ -3257,7 +3291,37 @@ impl TilingLayout {
                 }
                 _ => None,
             }
-        } else if matches!(
+        } else {
+            None
+        }
+    }
+
+    pub fn update_pointer_position(
+        &mut self,
+        location_f64: Option<Point<f64, Local>>,
+        overview: OverviewMode,
+    ) {
+        let gaps = self.gaps();
+        let last_overview_hover = &mut self.last_overview_hover;
+        let placeholder_id = &self.placeholder_id;
+        let tree = &self.queue.trees.back().unwrap().0;
+        let Some(root) = tree.root_node_id() else {
+            return;
+        };
+
+        if !matches!(
+            overview,
+            OverviewMode::Started(_, _) | OverviewMode::Active(_)
+        ) || location_f64.is_none()
+        {
+            last_overview_hover.take();
+            return;
+        }
+
+        let location_f64 = location_f64.unwrap();
+        let location = location_f64.to_i32_round();
+
+        if matches!(
             overview.active_trigger(),
             Some(Trigger::Pointer(_) | Trigger::Touch(_))
         ) {
@@ -3319,7 +3383,9 @@ impl TilingLayout {
             }
 
             if let Some(res_id) = result {
-                let mut last_geometry = *geometries.get(&res_id)?;
+                let Some(mut last_geometry) = geometries.get(&res_id).copied() else {
+                    return;
+                };
                 let node = tree.get(&res_id).unwrap();
                 let data = node.data().clone();
 
@@ -3716,10 +3782,6 @@ impl TilingLayout {
                     }
                 }
             }
-
-            None
-        } else {
-            None
         }
     }
 

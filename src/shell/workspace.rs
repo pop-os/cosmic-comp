@@ -444,24 +444,57 @@ impl Workspace {
             .chain(self.minimized_windows.iter().map(|w| &w.window))
             .find(|e| e.windows().any(|(w, _)| &w == surface))
     }
-
-    pub fn element_under(&self, location: Point<f64, Global>) -> Option<KeyboardFocusTarget> {
+    
+    pub fn popup_element_under(&self, location: Point<f64, Global>) -> Option<KeyboardFocusTarget> {
         let location = location.to_local(&self.output);
         self.floating_layer
-            .element_under(location)
-            .or_else(|| self.tiling_layer.element_under(location))
+            .popup_element_under(location)
+            .or_else(|| self.tiling_layer.popup_element_under(location))
     }
 
-    pub fn surface_under(
-        &mut self,
+    pub fn toplevel_element_under(&self, location: Point<f64, Global>) -> Option<KeyboardFocusTarget> {
+        let location = location.to_local(&self.output);
+        self.floating_layer
+            .toplevel_element_under(location)
+            .or_else(|| self.tiling_layer.toplevel_element_under(location))
+    }
+
+    pub fn popup_surface_under(
+        &self,
         location: Point<f64, Global>,
         overview: OverviewMode,
     ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
+        if !self.output.geometry().contains(location.to_i32_round()) {
+            return None;
+        }
+
         let location = location.to_local(&self.output);
         self.floating_layer
-            .surface_under(location)
-            .or_else(|| self.tiling_layer.surface_under(location, overview))
+            .popup_surface_under(location)
+            .or_else(|| self.tiling_layer.popup_surface_under(location, overview))
             .map(|(m, p)| (m, p.to_global(&self.output)))
+    }
+
+    pub fn toplevel_surface_under(
+        &self,
+        location: Point<f64, Global>,
+        overview: OverviewMode,
+    ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
+        if !self.output.geometry().contains(location.to_i32_round()) {
+            return None;
+        }
+
+        let location = location.to_local(&self.output);
+        self.floating_layer
+            .toplevel_surface_under(location)
+            .or_else(|| self.tiling_layer.toplevel_surface_under(location, overview))
+            .map(|(m, p)| (m, p.to_global(&self.output)))
+    }
+
+    pub fn update_pointer_position(&mut self, location: Option<Point<f64, Local>>, overview: OverviewMode) {
+        self.floating_layer.update_pointer_position(location);
+        self.tiling_layer
+            .update_pointer_position(location, overview);
     }
 
     pub fn element_geometry(&self, elem: &CosmicMapped) -> Option<Rectangle<i32, Local>> {

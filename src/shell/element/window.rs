@@ -243,11 +243,12 @@ impl CosmicWindow {
     pub fn focus_under(
         &self,
         mut relative_pos: Point<f64, Logical>,
+        surface_type: WindowSurfaceType,
     ) -> Option<(PointerFocusTarget, Point<f64, Logical>)> {
         self.0.with_program(|p| {
             let mut offset = Point::from((0., 0.));
             let mut window_ui = None;
-            if p.has_ssd(false) {
+            if p.has_ssd(false) && surface_type.contains(WindowSurfaceType::TOPLEVEL) {
                 let geo = p.window.geometry();
 
                 let point_i32 = relative_pos.to_i32_round::<i32>();
@@ -275,19 +276,19 @@ impl CosmicWindow {
                 offset.y += SSD_HEIGHT as f64;
             }
 
-            p.window
-                .0
-                .surface_under(relative_pos, WindowSurfaceType::ALL)
-                .map(|(surface, surface_offset)| {
-                    (
-                        PointerFocusTarget::WlSurface {
-                            surface,
-                            toplevel: Some(p.window.clone().into()),
-                        },
-                        (offset + surface_offset.to_f64()),
-                    )
-                })
-                .or(window_ui)
+            window_ui.or_else(|| {
+                p.window.0.surface_under(relative_pos, surface_type).map(
+                    |(surface, surface_offset)| {
+                        (
+                            PointerFocusTarget::WlSurface {
+                                surface,
+                                toplevel: Some(p.window.clone().into()),
+                            },
+                            (offset + surface_offset.to_f64()),
+                        )
+                    },
+                )
+            })
         })
     }
 
@@ -561,7 +562,7 @@ impl SpaceElement for CosmicWindow {
         })
     }
     fn is_in_input_region(&self, point: &Point<f64, Logical>) -> bool {
-        self.focus_under(*point).is_some()
+        self.focus_under(*point, WindowSurfaceType::ALL).is_some()
     }
     fn set_activate(&self, activated: bool) {
         if self
