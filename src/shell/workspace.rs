@@ -237,9 +237,10 @@ impl Workspace {
         handle: WorkspaceHandle,
         output: Output,
         tiling_enabled: bool,
+        smart_gaps: bool,
         theme: cosmic::Theme,
     ) -> Workspace {
-        let tiling_layer = TilingLayout::new(theme.clone(), &output);
+        let tiling_layer = TilingLayout::new(theme.clone(), &output, smart_gaps);
         let floating_layer = FloatingLayout::new(theme, &output);
         let output_name = output.name();
 
