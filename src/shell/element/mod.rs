@@ -1,8 +1,5 @@
 use crate::{
-    backend::render::{
-        element::{AsGlowRenderer, FromGlesError},
-        SplitRenderElements,
-    },
+    backend::render::element::{AsGlowRenderer, FromGlesError},
     state::State,
     utils::{iced::IcedElementInternal, prelude::*},
 };
@@ -305,10 +302,11 @@ impl CosmicMapped {
     pub fn focus_under(
         &self,
         relative_pos: Point<f64, Logical>,
+        surface_type: WindowSurfaceType,
     ) -> Option<(PointerFocusTarget, Point<f64, Logical>)> {
         match &self.element {
-            CosmicMappedInternal::Stack(stack) => stack.focus_under(relative_pos),
-            CosmicMappedInternal::Window(window) => window.focus_under(relative_pos),
+            CosmicMappedInternal::Stack(stack) => stack.focus_under(relative_pos, surface_type),
+            CosmicMappedInternal::Window(window) => window.focus_under(relative_pos, surface_type),
             _ => unreachable!(),
         }
     }
@@ -657,13 +655,42 @@ impl CosmicMapped {
         }
     }
 
-    pub fn split_render_elements<R, C>(
+    pub fn popup_render_elements<R, C>(
         &self,
         renderer: &mut R,
         location: smithay::utils::Point<i32, smithay::utils::Physical>,
         scale: smithay::utils::Scale<f64>,
         alpha: f32,
-    ) -> SplitRenderElements<C>
+    ) -> Vec<C>
+    where
+        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+        <R as Renderer>::TextureId: Send + Clone + 'static,
+        CosmicMappedRenderElement<R>: RenderElement<R>,
+        C: From<CosmicMappedRenderElement<R>>,
+    {
+        match &self.element {
+            CosmicMappedInternal::Stack(s) => s
+                .popup_render_elements::<R, CosmicMappedRenderElement<R>>(
+                    renderer, location, scale, alpha,
+                ),
+            CosmicMappedInternal::Window(w) => w
+                .popup_render_elements::<R, CosmicMappedRenderElement<R>>(
+                    renderer, location, scale, alpha,
+                ),
+            _ => unreachable!(),
+        }
+        .into_iter()
+        .map(C::from)
+        .collect()
+    }
+
+    pub fn render_elements<R, C>(
+        &self,
+        renderer: &mut R,
+        location: smithay::utils::Point<i32, smithay::utils::Physical>,
+        scale: smithay::utils::Scale<f64>,
+        alpha: f32,
+    ) -> Vec<C>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         <R as Renderer>::TextureId: Send + Clone + 'static,
@@ -671,7 +698,7 @@ impl CosmicMapped {
         C: From<CosmicMappedRenderElement<R>>,
     {
         #[cfg(feature = "debug")]
-        let debug_elements = if let Some(debug) = self.debug.lock().unwrap().as_mut() {
+        let mut elements = if let Some(debug) = self.debug.lock().unwrap().as_mut() {
             let window = self.active_window();
             let window_geo = window.geometry();
             let (min_size, max_size, size) =
@@ -840,30 +867,21 @@ impl CosmicMapped {
             Vec::new()
         };
         #[cfg(not(feature = "debug"))]
-        let debug_elements = Vec::new();
-
-        let mut elements = SplitRenderElements {
-            w_elements: debug_elements,
-            p_elements: Vec::new(),
-        };
+        let mut elements = Vec::new();
 
         #[cfg_attr(not(feature = "debug"), allow(unused_mut))]
-        elements.extend_map(
-            match &self.element {
-                CosmicMappedInternal::Stack(s) => s
-                    .split_render_elements::<R, CosmicMappedRenderElement<R>>(
-                        renderer, location, scale, alpha,
-                    ),
-                CosmicMappedInternal::Window(w) => w
-                    .split_render_elements::<R, CosmicMappedRenderElement<R>>(
-                        renderer, location, scale, alpha,
-                    ),
-                _ => unreachable!(),
-            },
-            C::from,
-        );
+        elements.extend(match &self.element {
+            CosmicMappedInternal::Stack(s) => s.render_elements::<R, CosmicMappedRenderElement<R>>(
+                renderer, location, scale, alpha,
+            ),
+            CosmicMappedInternal::Window(w) => w
+                .render_elements::<R, CosmicMappedRenderElement<R>>(
+                    renderer, location, scale, alpha,
+                ),
+            _ => unreachable!(),
+        });
 
-        elements
+        elements.into_iter().map(C::from).collect()
     }
 
     pub(crate) fn update_theme(&self, theme: cosmic::Theme) {
