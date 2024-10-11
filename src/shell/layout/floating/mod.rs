@@ -732,9 +732,14 @@ impl FloatingLayout {
         self.space
             .elements()
             .rev()
-            .filter(|e| e.bbox().to_f64().contains(location.as_logical()))
-            .find_map(|e| {
-                let render_location = (self.space.element_location(e)? - e.geometry().loc)
+            .map(|e| (e, self.space.element_location(e).unwrap() - e.geometry().loc))
+            .filter(|(e, render_location)| {
+                let mut bbox = e.bbox();
+                bbox.loc += *render_location;
+                bbox.to_f64().contains(location.as_logical())
+            })
+            .find_map(|(e, render_location)| {
+                let render_location = render_location
                     .as_local()
                     .to_f64();
                 let point = location - render_location;
@@ -750,9 +755,14 @@ impl FloatingLayout {
         self.space
             .elements()
             .rev()
-            .filter(|e| e.bbox().to_f64().contains(location.as_logical()))
-            .find_map(|e| {
-                let render_location = (self.space.element_location(e)? - e.geometry().loc)
+            .map(|e| (e, self.space.element_location(e).unwrap() - e.geometry().loc))
+            .filter(|(e, render_location)| {
+                let mut bbox = e.bbox();
+                bbox.loc += *render_location;
+                bbox.to_f64().contains(location.as_logical())
+            })
+            .find_map(|(e, render_location)| {
+                let render_location = render_location
                     .as_local()
                     .to_f64();
                 let point = location - render_location;
@@ -771,9 +781,14 @@ impl FloatingLayout {
         self.space
             .elements()
             .rev()
-            .filter(|e| e.bbox().to_f64().contains(location.as_logical()))
-            .find_map(|e| {
-                let render_location = (self.space.element_location(e)? - e.geometry().loc)
+            .map(|e| (e, self.space.element_location(e).unwrap() - e.geometry().loc))
+            .filter(|(e, render_location)| {
+                let mut bbox = e.bbox();
+                bbox.loc += *render_location;
+                bbox.to_f64().contains(location.as_logical())
+            })
+            .find_map(|(e, render_location)| {
+                let render_location = render_location
                     .as_local()
                     .to_f64();
                 let point = location - render_location;
@@ -794,11 +809,14 @@ impl FloatingLayout {
         self.space
             .elements()
             .rev()
-            .filter(|e| e.bbox().to_f64().contains(location.as_logical()))
-            .find_map(|e| {
-                let render_location = (self.space.element_location(e)? - e.geometry().loc)
-                    .as_local()
-                    .to_f64();
+            .map(|e| (e, self.space.element_location(e).unwrap() - e.geometry().loc))
+            .filter(|(e, render_location)| {
+                let mut bbox = e.bbox();
+                bbox.loc += *render_location;
+                bbox.to_f64().contains(location.as_logical())
+            })
+            .find_map(|(e, render_location)| {
+                let render_location = render_location.as_local().to_f64();
                 let point = location - render_location;
                 e.focus_under(
                     point.as_logical(),
@@ -807,7 +825,7 @@ impl FloatingLayout {
                 .map(|(surface, surface_offset)| {
                     (
                         surface,
-                        render_location.to_f64() + surface_offset.as_local(),
+                        render_location + surface_offset.as_local(),
                     )
                 })
             })
