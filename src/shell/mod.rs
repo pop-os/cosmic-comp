@@ -668,11 +668,11 @@ impl Workspaces {
         self.sets.insert(output.clone(), set);
         let mut moved_workspaces = Vec::new();
         for set in self.sets.values_mut() {
-            let (preferrs, doesnt) = set
+            let (prefers, doesnt) = set
                 .workspaces
                 .drain(..)
-                .partition(|w| w.preferrs_output(output));
-            moved_workspaces.extend(preferrs);
+                .partition(|w| w.prefers_output(output));
+            moved_workspaces.extend(prefers);
             set.workspaces = doesnt;
             if set.workspaces.is_empty() {
                 set.add_empty_workspace(workspace_state);
