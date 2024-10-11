@@ -929,15 +929,11 @@ where
     }
 
     if handle_state.capabilities != group.capabilities {
-        let caps: Vec<u8> = {
-            let mut caps = group.capabilities.clone();
-            let ratio = std::mem::size_of::<GroupCapabilities>() / std::mem::size_of::<u8>();
-            let ptr = caps.as_mut_ptr() as *mut u8;
-            let len = caps.len() * ratio;
-            let cap = caps.capacity() * ratio;
-            std::mem::forget(caps);
-            unsafe { Vec::from_raw_parts(ptr, len, cap) }
-        };
+        let caps = group
+            .capabilities
+            .iter()
+            .flat_map(|cap| (*cap as u32).to_ne_bytes())
+            .collect::<Vec<u8>>();
         instance.capabilities(caps);
         handle_state.capabilities = group.capabilities.clone();
         changed = true;
@@ -1005,44 +1001,31 @@ where
         changed = true;
     }
     if handle_state.coordinates != workspace.coordinates {
-        let coords: Vec<u8> = {
-            let mut coords = workspace.coordinates.clone();
-            let ratio = std::mem::size_of::<u32>() / std::mem::size_of::<u8>();
-            let ptr = coords.as_mut_ptr() as *mut u8;
-            let len = coords.len() * ratio;
-            let cap = coords.capacity() * ratio;
-            std::mem::forget(coords);
-            unsafe { Vec::from_raw_parts(ptr, len, cap) }
-        };
+        let coords = workspace
+            .coordinates
+            .iter()
+            .flat_map(|coord| coord.to_ne_bytes())
+            .collect::<Vec<u8>>();
         instance.coordinates(coords);
         handle_state.coordinates = workspace.coordinates.clone();
         changed = true;
     }
     if handle_state.capabilities != workspace.capabilities {
-        let caps: Vec<u8> = {
-            let mut caps = workspace.capabilities.clone();
-            let ratio = std::mem::size_of::<WorkspaceCapabilities>() / std::mem::size_of::<u8>();
-            let ptr = caps.as_mut_ptr() as *mut u8;
-            let len = caps.len() * ratio;
-            let cap = caps.capacity() * ratio;
-            std::mem::forget(caps);
-            unsafe { Vec::from_raw_parts(ptr, len, cap) }
-        };
+        let caps = workspace
+            .capabilities
+            .iter()
+            .flat_map(|cap| (*cap as u32).to_ne_bytes())
+            .collect::<Vec<u8>>();
         instance.capabilities(caps);
         handle_state.capabilities = workspace.capabilities.clone();
         changed = true;
     }
     if handle_state.states != workspace.states {
-        let states: Vec<u8> = {
-            let mut states = workspace.states.iter().cloned().collect::<Vec<_>>();
-            let ratio = std::mem::size_of::<zcosmic_workspace_handle_v1::State>()
-                / std::mem::size_of::<u8>();
-            let ptr = states.as_mut_ptr() as *mut u8;
-            let len = states.len() * ratio;
-            let cap = states.capacity() * ratio;
-            std::mem::forget(states);
-            unsafe { Vec::from_raw_parts(ptr, len, cap) }
-        };
+        let states = workspace
+            .states
+            .iter()
+            .flat_map(|state| (*state as u32).to_ne_bytes())
+            .collect::<Vec<u8>>();
         instance.state(states);
         handle_state.states = workspace.states.clone();
         changed = true;
