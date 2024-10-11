@@ -647,7 +647,7 @@ impl Workspaces {
             return;
         }
 
-        let set = self
+        let mut set = self
             .backup_set
             .take()
             .map(|mut set| {
@@ -665,43 +665,48 @@ impl Workspaces {
             });
         workspace_state.add_group_output(&set.group, &output);
 
-        self.sets.insert(output.clone(), set);
+        // Remove workspaces that prefer this output from other sets
         let mut moved_workspaces = Vec::new();
-        for set in self.sets.values_mut() {
-            let active_handle = set.workspaces[set.active].handle;
-            let (prefers, doesnt) = set
+        for other_set in self.sets.values_mut() {
+            let active_handle = other_set.workspaces[set.active].handle;
+            let (prefers, doesnt) = other_set
                 .workspaces
                 .drain(..)
                 .partition(|w| w.prefers_output(output));
             moved_workspaces.extend(prefers);
-            set.workspaces = doesnt;
-            if set.workspaces.is_empty() {
-                set.add_empty_workspace(workspace_state);
+            other_set.workspaces = doesnt;
+            if other_set.workspaces.is_empty() {
+                other_set.add_empty_workspace(workspace_state);
             }
-            for (i, workspace) in set.workspaces.iter_mut().enumerate() {
-                workspace_set_idx(workspace_state, i as u8 + 1, set.idx, &workspace.handle);
+            for (i, workspace) in other_set.workspaces.iter_mut().enumerate() {
+                workspace_set_idx(
+                    workspace_state,
+                    i as u8 + 1,
+                    other_set.idx,
+                    &workspace.handle,
+                );
             }
-            set.active = set
+            other_set.active = other_set
                 .workspaces
                 .iter()
                 .position(|w| w.handle == active_handle)
-                .unwrap_or(set.workspaces.len() - 1);
+                .unwrap_or(other_set.workspaces.len() - 1);
         }
-        {
-            let set = self.sets.get_mut(output).unwrap();
-            for workspace in &mut moved_workspaces {
-                move_workspace_to_group(workspace, &set.group, workspace_state);
-            }
-            set.workspaces.extend(moved_workspaces);
-            for (i, workspace) in set.workspaces.iter_mut().enumerate() {
-                workspace.set_output(output);
-                workspace.refresh(xdg_activation_state);
-                workspace_set_idx(workspace_state, i as u8 + 1, set.idx, &workspace.handle);
-                if i == set.active {
-                    workspace_state.add_workspace_state(&workspace.handle, WState::Active);
-                }
+
+        // Add `moved_workspaces` to set, and update output and index of workspaces
+        for workspace in &mut moved_workspaces {
+            move_workspace_to_group(workspace, &set.group, workspace_state);
+        }
+        set.workspaces.extend(moved_workspaces);
+        for (i, workspace) in set.workspaces.iter_mut().enumerate() {
+            workspace.set_output(output);
+            workspace.refresh(xdg_activation_state);
+            workspace_set_idx(workspace_state, i as u8 + 1, set.idx, &workspace.handle);
+            if i == set.active {
+                workspace_state.add_workspace_state(&workspace.handle, WState::Active);
             }
         }
+        self.sets.insert(output.clone(), set);
     }
 
     pub fn remove_output<'a>(
