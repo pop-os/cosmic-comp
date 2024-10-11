@@ -678,6 +678,9 @@ impl Workspaces {
             if set.workspaces.is_empty() {
                 set.add_empty_workspace(workspace_state);
             }
+            for (i, workspace) in set.workspaces.iter_mut().enumerate() {
+                workspace_set_idx(workspace_state, i as u8 + 1, set.idx, &workspace.handle);
+            }
             set.active = set
                 .workspaces
                 .iter()
