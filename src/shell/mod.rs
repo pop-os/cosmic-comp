@@ -668,6 +668,7 @@ impl Workspaces {
         self.sets.insert(output.clone(), set);
         let mut moved_workspaces = Vec::new();
         for set in self.sets.values_mut() {
+            let active_handle = set.workspaces[set.active].handle;
             let (prefers, doesnt) = set
                 .workspaces
                 .drain(..)
@@ -677,7 +678,11 @@ impl Workspaces {
             if set.workspaces.is_empty() {
                 set.add_empty_workspace(workspace_state);
             }
-            set.active = set.active.min(set.workspaces.len() - 1);
+            set.active = set
+                .workspaces
+                .iter()
+                .position(|w| w.handle == active_handle)
+                .unwrap_or(set.workspaces.len() - 1);
         }
         {
             let set = self.sets.get_mut(output).unwrap();
