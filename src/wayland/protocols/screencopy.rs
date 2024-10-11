@@ -139,14 +139,10 @@ impl Session {
             let node = Vec::from(dma.node.dev_id().to_ne_bytes());
             self.obj.dmabuf_device(node);
             for (fmt, modifiers) in &dma.formats {
-                let mut modifiers = modifiers.clone();
-                let modifiers: Vec<u8> = {
-                    let ptr = modifiers.as_mut_ptr() as *mut u8;
-                    let len = modifiers.len() * 4;
-                    let cap = modifiers.capacity() * 4;
-                    std::mem::forget(modifiers);
-                    unsafe { Vec::from_raw_parts(ptr, len, cap) }
-                };
+                let modifiers = modifiers
+                    .iter()
+                    .flat_map(|modifier| u64::from(*modifier).to_ne_bytes())
+                    .collect::<Vec<u8>>();
                 self.obj.dmabuf_format(*fmt as u32, modifiers);
             }
         }
@@ -249,14 +245,10 @@ impl CursorSession {
                 let node = Vec::from(dma.node.dev_id().to_ne_bytes());
                 session_obj.dmabuf_device(node);
                 for (fmt, modifiers) in &dma.formats {
-                    let mut modifiers = modifiers.clone();
-                    let modifiers: Vec<u8> = {
-                        let ptr = modifiers.as_mut_ptr() as *mut u8;
-                        let len = modifiers.len() * 4;
-                        let cap = modifiers.capacity() * 4;
-                        std::mem::forget(modifiers);
-                        unsafe { Vec::from_raw_parts(ptr, len, cap) }
-                    };
+                    let modifiers = modifiers
+                        .iter()
+                        .flat_map(|modifier| u64::from(*modifier).to_ne_bytes())
+                        .collect::<Vec<u8>>();
                     session_obj.dmabuf_format(*fmt as u32, modifiers);
                 }
             }
@@ -747,14 +739,10 @@ where
                         let node = Vec::from(dma.node.dev_id().to_ne_bytes());
                         session.dmabuf_device(node);
                         for (fmt, modifiers) in &dma.formats {
-                            let mut modifiers = modifiers.clone();
-                            let modifiers: Vec<u8> = {
-                                let ptr = modifiers.as_mut_ptr() as *mut u8;
-                                let len = modifiers.len() * 4;
-                                let cap = modifiers.capacity() * 4;
-                                std::mem::forget(modifiers);
-                                unsafe { Vec::from_raw_parts(ptr, len, cap) }
-                            };
+                            let modifiers = modifiers
+                                .iter()
+                                .flat_map(|modifier| u64::from(*modifier).to_ne_bytes())
+                                .collect::<Vec<u8>>();
                             session.dmabuf_format(*fmt as u32, modifiers);
                         }
                     }
