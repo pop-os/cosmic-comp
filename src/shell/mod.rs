@@ -419,22 +419,6 @@ impl WorkspaceSet {
         theme: cosmic::Theme,
     ) -> WorkspaceSet {
         let group_handle = state.create_workspace_group();
-        let workspaces = {
-            let workspace = create_workspace(
-                state,
-                output,
-                &group_handle,
-                true,
-                tiling_enabled,
-                theme.clone(),
-            );
-            workspace_set_idx(state, 1, idx, &workspace.handle);
-            state.set_workspace_capabilities(
-                &workspace.handle,
-                [WorkspaceCapabilities::Activate].into_iter(),
-            );
-            vec![workspace]
-        };
         let sticky_layer = FloatingLayout::new(theme.clone(), output);
 
         WorkspaceSet {
@@ -446,7 +430,7 @@ impl WorkspaceSet {
             theme,
             sticky_layer,
             minimized_windows: Vec::new(),
-            workspaces,
+            workspaces: Vec::new(),
             output: output.clone(),
         }
     }
@@ -698,6 +682,9 @@ impl Workspaces {
             move_workspace_to_group(workspace, &set.group, workspace_state);
         }
         set.workspaces.extend(moved_workspaces);
+        if set.workspaces.is_empty() {
+            set.add_empty_workspace(workspace_state);
+        }
         for (i, workspace) in set.workspaces.iter_mut().enumerate() {
             workspace.set_output(output);
             workspace.refresh(xdg_activation_state);
