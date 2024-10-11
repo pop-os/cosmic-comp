@@ -729,13 +729,17 @@ impl Workspaces {
                 let new_set = self.sets.get_mut(&new_output).unwrap();
                 let workspace_group = new_set.group;
                 for mut workspace in set.workspaces.into_iter() {
-                    // update workspace protocol state
-                    move_workspace_to_group(&mut workspace, &workspace_group, workspace_state);
+                    if workspace.is_empty() {
+                        workspace_state.remove_workspace(workspace.handle);
+                    } else {
+                        // update workspace protocol state
+                        move_workspace_to_group(&mut workspace, &workspace_group, workspace_state);
 
-                    // update mapping
-                    workspace.set_output(&new_output);
-                    workspace.refresh(xdg_activation_state);
-                    new_set.workspaces.push(workspace);
+                        // update mapping
+                        workspace.set_output(&new_output);
+                        workspace.refresh(xdg_activation_state);
+                        new_set.workspaces.push(workspace);
+                    }
                 }
 
                 for window in set.sticky_layer.mapped() {
