@@ -624,7 +624,10 @@ impl SurfaceThreadState {
             cursor_size,
             Some(gbm),
         ) {
-            Ok(compositor) => {
+            Ok(mut compositor) => {
+                if crate::utils::env::bool_var("COSMIC_DISABLE_DIRECT_SCANOUT").unwrap_or(false) {
+                    compositor.use_direct_scanout(false);
+                }
                 self.active.store(true, Ordering::SeqCst);
                 self.compositor = Some(compositor);
                 Ok(())
