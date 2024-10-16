@@ -374,7 +374,7 @@ impl Workspace {
         self.output = output.clone();
     }
 
-    pub fn preferrs_output(&self, output: &Output) -> bool {
+    pub fn prefers_output(&self, output: &Output) -> bool {
         self.output_stack.contains(&output.name())
     }
 

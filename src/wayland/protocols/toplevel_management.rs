@@ -151,15 +151,13 @@ where
         data_init: &mut DataInit<'_, D>,
     ) {
         let instance = data_init.init(resource, ());
-        let capabilities = {
-            let mut caps = state.toplevel_management_state().capabilities.clone();
-            let ratio = std::mem::size_of::<ManagementCapabilities>() / std::mem::size_of::<u8>();
-            let ptr = caps.as_mut_ptr() as *mut u8;
-            let len = caps.len() * ratio;
-            let cap = caps.capacity() * ratio;
-            std::mem::forget(caps);
-            unsafe { Vec::from_raw_parts(ptr, len, cap) }
-        };
+        let capabilities = state
+            .toplevel_management_state()
+            .capabilities
+            .iter()
+            .flat_map(|cap| (*cap as u32).to_ne_bytes())
+            .collect::<Vec<u8>>();
+
         instance.capabilities(capabilities);
         state.toplevel_management_state().instances.push(instance);
     }

@@ -509,14 +509,10 @@ where
         }
         handle_state.states = states.clone();
 
-        let states: Vec<u8> = {
-            let ratio = std::mem::size_of::<States>() / std::mem::size_of::<u8>();
-            let ptr = states.as_mut_ptr() as *mut u8;
-            let len = states.len() * ratio;
-            let cap = states.capacity() * ratio;
-            std::mem::forget(states);
-            unsafe { Vec::from_raw_parts(ptr, len, cap) }
-        };
+        let states = states
+            .iter()
+            .flat_map(|state| (*state as u32).to_ne_bytes())
+            .collect::<Vec<u8>>();
         instance.state(states);
         changed = true;
     }
