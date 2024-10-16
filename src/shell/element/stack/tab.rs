@@ -147,6 +147,7 @@ pub struct Tab<Message: TabMessage> {
     close_message: Option<Message>,
     press_message: Option<Message>,
     right_click_message: Option<Message>,
+    middle_click_message: Option<Message>,
     rule_theme: TabRuleTheme,
     background_theme: TabBackgroundTheme,
     active: bool,
@@ -162,6 +163,7 @@ impl<Message: TabMessage + 'static> Tab<Message> {
             close_message: None,
             press_message: None,
             right_click_message: None,
+            middle_click_message: None,
             rule_theme: TabRuleTheme::Default,
             background_theme: TabBackgroundTheme::Default,
             active: false,
@@ -175,6 +177,11 @@ impl<Message: TabMessage + 'static> Tab<Message> {
 
     pub fn on_right_click(mut self, message: Message) -> Self {
         self.right_click_message = Some(message);
+        self
+    }
+
+    pub fn on_middle_click(mut self, message: Message) -> Self {
+        self.middle_click_message = Some(message);
         self
     }
 
@@ -254,6 +261,7 @@ impl<Message: TabMessage + 'static> Tab<Message> {
             elements: items,
             press_message: self.press_message,
             right_click_message: self.right_click_message,
+            middle_click_message: self.middle_click_message,
         }
     }
 }
@@ -273,6 +281,7 @@ pub(super) struct TabInternal<'a, Message: TabMessage> {
     elements: Vec<cosmic::Element<'a, Message>>,
     press_message: Option<Message>,
     right_click_message: Option<Message>,
+    middle_click_message: Option<Message>,
 }
 
 impl<'a, Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for TabInternal<'a, Message>
@@ -417,6 +426,16 @@ where
             ) {
                 shell.publish(Message::activate(self.idx));
                 return event::Status::Captured;
+            }
+
+            if matches!(
+                event,
+                event::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Middle))
+            ) {
+                if let Some(message) = self.middle_click_message.clone() {
+                    shell.publish(message);
+                    return event::Status::Captured;
+                }
             }
         }
 

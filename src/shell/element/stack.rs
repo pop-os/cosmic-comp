@@ -20,6 +20,7 @@ use cosmic::{
     iced_widget::scrollable::AbsoluteOffset,
     theme, widget as cosmic_widget, Apply, Element as CosmicElement, Theme,
 };
+use cosmic_comp_config::StackBehavior;
 use cosmic_settings_config::shortcuts;
 use once_cell::sync::Lazy;
 use shortcuts::action::{Direction, FocusDirection};
@@ -102,6 +103,8 @@ pub struct CosmicStackInternal {
     last_seat: Arc<Mutex<Option<(Seat<State>, Serial)>>>,
     geometry: Arc<Mutex<Option<Rectangle<i32, Global>>>>,
     mask: Arc<Mutex<Option<tiny_skia::Mask>>>,
+
+    behavior: StackBehavior,
 }
 
 impl CosmicStackInternal {
@@ -112,6 +115,10 @@ impl CosmicStackInternal {
 
     pub fn current_focus(&self) -> Option<Focus> {
         unsafe { Focus::from_u8(self.pointer_entered.load(Ordering::SeqCst)) }
+    }
+
+    pub fn update_behavior(&mut self, behavior: StackBehavior) {
+        self.behavior = behavior;
     }
 }
 
@@ -129,6 +136,7 @@ impl CosmicStack {
         windows: impl Iterator<Item = I>,
         handle: LoopHandle<'static, crate::state::State>,
         theme: cosmic::Theme,
+        behavior: StackBehavior,
     ) -> CosmicStack {
         let windows = windows.map(Into::into).collect::<Vec<_>>();
         assert!(!windows.is_empty());
@@ -155,6 +163,7 @@ impl CosmicStack {
                 last_seat: Arc::new(Mutex::new(None)),
                 geometry: Arc::new(Mutex::new(None)),
                 mask: Arc::new(Mutex::new(None)),
+                behavior,
             },
             (width, TAB_HEIGHT),
             handle,
@@ -890,14 +899,20 @@ impl Program for CosmicStackInternal {
                     windows.iter().enumerate().map(|(i, w)| {
                         let user_data = w.user_data();
                         user_data.insert_if_missing(Id::unique);
-                        Tab::new(
+                        let mut tab = Tab::new(
                             w.title(),
                             w.app_id(),
                             user_data.get::<Id>().unwrap().clone(),
                         )
                         .on_press(Message::PotentialTabDragStart(i))
                         .on_right_click(Message::TabMenu(i))
-                        .on_close(Message::Close(i))
+                        .on_close(Message::Close(i));
+
+                        if self.behavior.close_tab_on_middle_click {
+                            tab = tab.on_middle_click(Message::Close(i));
+                        }
+
+                        tab
                     }),
                     active,
                     windows[active].is_activated(false),
