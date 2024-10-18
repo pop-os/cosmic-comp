@@ -46,7 +46,6 @@ use smithay::{
     utils::{IsAlive, Logical, Point, Rectangle, Serial, Size},
     wayland::{
         compositor::{with_states, SurfaceAttributes},
-        foreign_toplevel_list::ForeignToplevelListState,
         seat::WaylandFocus,
         session_lock::LockSurface,
         shell::wlr_layer::{KeyboardInteractivity, Layer, LayerSurfaceCachedState},
@@ -3749,7 +3748,7 @@ impl Shell {
             cosmic::icon_theme::set_default(toolkit.icon_theme.clone());
         }
 
-        let mut container = cosmic::config::COSMIC_TK.lock().unwrap();
+        let mut container = cosmic::config::COSMIC_TK.write().unwrap();
         if &*container != &toolkit {
             *container = toolkit;
             drop(container);

@@ -686,7 +686,7 @@ impl KmsState {
                         startup_done.clone(),
                     )?;
                     if output.mirroring().is_none() {
-                        w += output.config().mode_size().w as u32;
+                        w += output.config().transformed_size().w as u32;
                     }
                     all_outputs.push(output);
                 }

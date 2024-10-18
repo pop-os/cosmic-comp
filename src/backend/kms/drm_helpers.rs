@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use anyhow::{anyhow, Result};
-use smithay::reexports::drm::control::{
-    atomic::AtomicModeReq,
-    connector::{self, State as ConnectorState},
-    crtc,
-    dumbbuffer::DumbBuffer,
-    property, AtomicCommitFlags, Device as ControlDevice, Mode, ModeFlags, PlaneType,
-    ResourceHandle,
+use smithay::{
+    reexports::drm::control::{
+        atomic::AtomicModeReq,
+        connector::{self, State as ConnectorState},
+        crtc,
+        dumbbuffer::DumbBuffer,
+        property, AtomicCommitFlags, Device as ControlDevice, Mode, ModeFlags, PlaneType,
+        ResourceHandle,
+    },
+    utils::Transform,
 };
 use std::{
     collections::HashMap,
@@ -418,4 +421,22 @@ pub fn set_max_bpc(dev: &impl ControlDevice, conn: connector::Handle, bpc: u32) 
         property::Value::UnsignedRange(val) => val as u32,
         _ => unreachable!(),
     })
+}
+
+pub fn panel_orientation(dev: &impl ControlDevice, conn: connector::Handle) -> Result<Transform> {
+    let (val_type, val) = get_property_val(dev, conn, "panel orientation")?;
+    match val_type.convert_value(val) {
+        property::Value::Enum(Some(val)) => match val.value() {
+            // "Normal"
+            0 => Ok(Transform::Normal),
+            // "Upside Down"
+            1 => Ok(Transform::_180),
+            // "Left Side Up"
+            2 => Ok(Transform::_90),
+            // "Right Side Up"
+            3 => Ok(Transform::_270),
+            _ => Err(anyhow!("panel orientation has invalid value '{:?}'", val)),
+        },
+        _ => Err(anyhow!("panel orientation has wrong value type")),
+    }
 }

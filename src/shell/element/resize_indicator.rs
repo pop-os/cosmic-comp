@@ -86,10 +86,10 @@ impl Program for ResizeIndicatorInternal {
                 } else {
                     "go-down-symbolic"
                 })
-                .size(32)
+                .size(20)
                 .prefer_svg(true)
                 .apply(container)
-                .padding(2)
+                .padding(8)
                 .style(icon_container_style())
                 .width(Length::Shrink)
                 .apply(container)
@@ -106,10 +106,10 @@ impl Program for ResizeIndicatorInternal {
                     } else {
                         "go-next-symbolic"
                     })
-                    .size(32)
+                    .size(20)
                     .prefer_svg(true)
                     .apply(container)
-                    .padding(4)
+                    .padding(8)
                     .style(icon_container_style())
                     .width(Length::Shrink)
                     .apply(container)
@@ -120,23 +120,11 @@ impl Program for ResizeIndicatorInternal {
                     horizontal_space(36).into()
                 },
                 row(vec![
-                    text(&self.shortcut1)
-                        .font(cosmic::font::FONT_SEMIBOLD)
-                        .size(14)
-                        .into(),
-                    text(fl!("grow-window"))
-                        .font(cosmic::font::FONT)
-                        .size(14)
-                        .into(),
+                    text::heading(&self.shortcut1).into(),
+                    text::body(fl!("grow-window")).into(),
                     horizontal_space(40).into(),
-                    text(&self.shortcut2)
-                        .font(cosmic::font::FONT_SEMIBOLD)
-                        .size(14)
-                        .into(),
-                    text(fl!("shrink-window"))
-                        .font(cosmic::font::FONT)
-                        .size(14)
-                        .into(),
+                    text::heading(&self.shortcut2).into(),
+                    text::body(fl!("shrink-window")).into(),
                 ])
                 .apply(container)
                 .center_x()
@@ -158,10 +146,10 @@ impl Program for ResizeIndicatorInternal {
                     } else {
                         "go-previous-symbolic"
                     })
-                    .size(32)
+                    .size(20)
                     .prefer_svg(true)
                     .apply(container)
-                    .padding(4)
+                    .padding(8)
                     .style(icon_container_style())
                     .height(Length::Shrink)
                     .apply(container)
@@ -181,10 +169,10 @@ impl Program for ResizeIndicatorInternal {
                 } else {
                     "go-up-symbolic"
                 })
-                .size(32)
+                .size(20)
                 .prefer_svg(true)
                 .apply(container)
-                .padding(4)
+                .padding(8)
                 .style(icon_container_style())
                 .width(Length::Shrink)
                 .apply(container)

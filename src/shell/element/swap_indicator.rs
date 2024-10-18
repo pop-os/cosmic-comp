@@ -35,10 +35,7 @@ impl Program for SwapIndicatorInternal {
                 .icon()
                 .into(),
             horizontal_space(16).into(),
-            text(fl!("swap-windows"))
-                .font(cosmic::font::FONT)
-                .size(24)
-                .into(),
+            text::title3(fl!("swap-windows")).into(),
         ])
         .align_items(Alignment::Center)
         .apply(container)

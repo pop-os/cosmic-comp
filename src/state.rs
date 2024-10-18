@@ -51,7 +51,7 @@ use smithay::{
         PopupManager,
     },
     input::{pointer::CursorImageStatus, SeatState},
-    output::{Mode as OutputMode, Output, Scale},
+    output::{Output, Scale},
     reexports::{
         calloop::{LoopHandle, LoopSignal},
         wayland_protocols::xdg::shell::server::xdg_toplevel::WmCapabilities,
@@ -306,11 +306,7 @@ impl BackendData {
                 .unwrap()
                 .borrow();
 
-            let mode = Some(OutputMode {
-                size: final_config.mode_size(),
-                refresh: final_config.mode_refresh() as i32,
-            })
-            .filter(|m| match output.current_mode() {
+            let mode = Some(final_config.output_mode()).filter(|m| match output.current_mode() {
                 None => true,
                 Some(c_m) => m.size != c_m.size || m.refresh != c_m.refresh,
             });
@@ -458,14 +454,7 @@ pub fn client_is_privileged(client: &Client) -> bool {
 }
 
 fn enable_wayland_security() -> bool {
-    std::env::var("COSMIC_ENABLE_WAYLAND_SECURITY")
-        .map(|x| {
-            x == "1"
-                || x.to_lowercase() == "true"
-                || x.to_lowercase() == "yes"
-                || x.to_lowercase() == "y"
-        })
-        .unwrap_or(false)
+    crate::utils::env::bool_var("COSMIC_ENABLE_WAYLAND_SECURITY").unwrap_or(false)
 }
 
 impl State {
@@ -528,8 +517,8 @@ impl State {
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(&dh);
         let idle_inhibiting_surfaces = HashSet::new();
 
-        let data_control_state = std::env::var("COSMIC_DATA_CONTROL_ENABLED")
-            .is_ok_and(|value| value == "1")
+        let data_control_state = crate::utils::env::bool_var("COSMIC_DATA_CONTROL_ENABLED")
+            .unwrap_or(false)
             .then(|| {
                 DataControlState::new::<Self, _>(dh, Some(&primary_selection_state), |_| true)
             });

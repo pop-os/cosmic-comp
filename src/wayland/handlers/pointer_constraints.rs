@@ -5,6 +5,7 @@ use smithay::{
     delegate_pointer_constraints,
     input::pointer::PointerHandle,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
+    utils::{Logical, Point},
     wayland::{
         pointer_constraints::{with_pointer_constraint, PointerConstraintsHandler},
         seat::WaylandFocus,
@@ -22,6 +23,15 @@ impl PointerConstraintsHandler for State {
                 constraint.unwrap().activate();
             });
         }
+    }
+
+    fn cursor_position_hint(
+        &mut self,
+        _surface: &WlSurface,
+        _pointer: &PointerHandle<Self>,
+        _location: Point<f64, Logical>,
+    ) {
+        // TODO
     }
 }
 delegate_pointer_constraints!(State);

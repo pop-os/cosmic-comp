@@ -5,11 +5,11 @@ use std::sync::{
 
 use calloop::LoopHandle;
 use cosmic::{
-    iced::Background,
-    iced_core::{alignment::Horizontal, Border, Length, Pixels, Rectangle as IcedRectangle},
-    iced_widget::{self, horizontal_rule, text::Appearance as TextAppearance, Column, Row},
+    iced::{Alignment, Background},
+    iced_core::{alignment::Horizontal, Border, Length, Rectangle as IcedRectangle},
+    iced_widget::{self, text::Appearance as TextAppearance, Column, Row},
     theme,
-    widget::{button, horizontal_space, icon::from_name, text},
+    widget::{button, divider, horizontal_space, icon::from_name, text},
     Apply as _, Command,
 };
 use smithay::{
@@ -348,13 +348,10 @@ impl Program for ContextMenu {
 
         Column::with_children(self.items.iter().enumerate().map(|(idx, item)| {
             match item {
-                Item::Separator => horizontal_rule(1)
-                    .style(theme::Rule::LightDivider)
-                    .width(mode)
-                    .into(),
+                Item::Separator => divider::horizontal::light().into(),
                 Item::Submenu { title, .. } => Row::with_children(vec![
                     horizontal_space(16).into(),
-                    text(title).width(mode).into(),
+                    text::body(title).width(mode).into(),
                     from_name("go-next-symbolic")
                         .size(16)
                         .prefer_svg(true)
@@ -363,7 +360,8 @@ impl Program for ContextMenu {
                 ])
                 .spacing(8)
                 .width(width)
-                .padding([8, 24])
+                .padding([8, 16])
+                .align_items(Alignment::Center)
                 .apply(|row| item::SubmenuItem::new(row, idx))
                 .style(theme::Button::MenuItem)
                 .into(),
@@ -387,7 +385,7 @@ impl Program for ContextMenu {
                         } else {
                             horizontal_space(16).into()
                         },
-                        text(title)
+                        text::body(title)
                             .width(mode)
                             .style(if *disabled {
                                 theme::Text::Custom(|theme| {
@@ -401,12 +399,11 @@ impl Program for ContextMenu {
                                 theme::Text::Default
                             })
                             .into(),
+                        horizontal_space(16).into(),
                     ];
                     if let Some(shortcut) = shortcut.as_ref() {
                         components.push(
-                            text(shortcut)
-                                .line_height(Pixels(20.))
-                                .size(14)
+                            text::body(shortcut)
                                 .horizontal_alignment(Horizontal::Right)
                                 .width(Length::Shrink)
                                 .style(theme::Text::Custom(|theme| {
@@ -419,14 +416,14 @@ impl Program for ContextMenu {
                                 .into(),
                         );
                     }
-                    components.push(horizontal_space(16).into());
 
                     Row::with_children(components)
                         .spacing(8)
                         .width(mode)
+                        .align_items(Alignment::Center)
                         .apply(button::custom)
                         .width(width)
-                        .padding([8, 24])
+                        .padding([8, 16])
                         .on_press_maybe((!disabled).then_some(Message::ItemPressed(idx)))
                         .style(theme::Button::MenuItem)
                         .into()
