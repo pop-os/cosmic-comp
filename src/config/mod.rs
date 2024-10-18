@@ -722,6 +722,13 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     state.common.config.cosmic_conf.focus_follows_cursor_delay = new;
                 }
             }
+            "smart_gaps" => {
+                let new = get_config::<bool>(&config, "smart_gaps");
+                if new != state.common.config.cosmic_conf.smart_gaps {
+                    state.common.config.cosmic_conf.smart_gaps = new;
+                    state.common.update_config();
+                }
+            }
             _ => {}
         }
     }

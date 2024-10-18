@@ -31,6 +31,8 @@ pub struct CosmicCompConfig {
     pub focus_follows_cursor_delay: u64,
     /// Let X11 applications scale themselves
     pub descale_xwayland: bool,
+    /// Smart gaps enabled
+    pub smart_gaps: bool,
 }
 
 impl Default for CosmicCompConfig {
@@ -60,6 +62,7 @@ impl Default for CosmicCompConfig {
             cursor_follows_focus: false,
             focus_follows_cursor_delay: 250,
             descale_xwayland: false,
+            smart_gaps: Default::default(),
         }
     }
 }

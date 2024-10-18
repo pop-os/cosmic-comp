@@ -135,6 +135,7 @@ pub struct TilingLayout {
     swapping_stack_surface_id: Id,
     last_overview_hover: Option<(Option<Instant>, TargetZone)>,
     pub theme: cosmic::Theme,
+    smart_gaps: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -342,7 +343,7 @@ pub struct MinimizedTilingState {
 }
 
 impl TilingLayout {
-    pub fn new(theme: cosmic::Theme, output: &Output) -> TilingLayout {
+    pub fn new(theme: cosmic::Theme, output: &Output, smart_gaps: bool) -> TilingLayout {
         TilingLayout {
             queue: TreeQueue {
                 trees: {
@@ -358,6 +359,7 @@ impl TilingLayout {
             swapping_stack_surface_id: Id::new(),
             last_overview_hover: None,
             theme,
+            smart_gaps,
         }
     }
 
@@ -377,7 +379,7 @@ impl TilingLayout {
             }
         }
 
-        let blocker = TilingLayout::update_positions(output, &mut tree, gaps);
+        let blocker = TilingLayout::update_positions(output, &mut tree, gaps, self.smart_gaps);
         self.queue.push_tree(tree, None, blocker);
         self.output = output.clone();
     }
@@ -420,7 +422,8 @@ impl TilingLayout {
             direction,
             minimize_rect,
         );
-        let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+        let blocker =
+            TilingLayout::update_positions(&self.output, &mut tree, gaps, self.smart_gaps);
         self.queue.push_tree(tree, duration, blocker);
     }
 
@@ -485,7 +488,12 @@ impl TilingLayout {
                     tree.make_nth_sibling(&new_id, idx).unwrap();
                     *window.tiling_node_id.lock().unwrap() = Some(new_id);
 
-                    let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+                    let blocker = TilingLayout::update_positions(
+                        &self.output,
+                        &mut tree,
+                        gaps,
+                        self.smart_gaps,
+                    );
                     self.queue
                         .push_tree(tree, MINIMIZE_ANIMATION_DURATION, blocker);
                     return;
@@ -524,7 +532,8 @@ impl TilingLayout {
 
                 *window.tiling_node_id.lock().unwrap() = Some(new_id);
 
-                let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+                let blocker =
+                    TilingLayout::update_positions(&self.output, &mut tree, gaps, self.smart_gaps);
                 self.queue
                     .push_tree(tree, MINIMIZE_ANIMATION_DURATION, blocker);
                 return;
@@ -629,7 +638,8 @@ impl TilingLayout {
             old.output_leave(&self.output);
             new.output_enter(&self.output, new.bbox());
 
-            let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+            let blocker =
+                TilingLayout::update_positions(&self.output, &mut tree, gaps, self.smart_gaps);
             self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
         }
     }
@@ -802,12 +812,20 @@ impl TilingLayout {
                 let other_gaps = other.gaps();
 
                 TilingLayout::unmap_internal(&mut this_tree, &desc.node);
-                let blocker =
-                    TilingLayout::update_positions(&this.output, &mut this_tree, this_gaps);
+                let blocker = TilingLayout::update_positions(
+                    &this.output,
+                    &mut this_tree,
+                    this_gaps,
+                    this.smart_gaps,
+                );
                 this.queue.push_tree(this_tree, ANIMATION_DURATION, blocker);
 
-                let blocker =
-                    TilingLayout::update_positions(&other.output, &mut other_tree, other_gaps);
+                let blocker = TilingLayout::update_positions(
+                    &other.output,
+                    &mut other_tree,
+                    other_gaps,
+                    other.smart_gaps,
+                );
                 other
                     .queue
                     .push_tree(other_tree, ANIMATION_DURATION, blocker);
@@ -1244,18 +1262,26 @@ impl TilingLayout {
         }
 
         let this_gaps = this.gaps();
-        let blocker = TilingLayout::update_positions(&this.output, &mut this_tree, this_gaps);
+        let this_is_smart_gaps = this.smart_gaps;
+        let blocker = TilingLayout::update_positions(
+            &this.output,
+            &mut this_tree,
+            this_gaps,
+            this_is_smart_gaps,
+        );
         this.queue.push_tree(this_tree, ANIMATION_DURATION, blocker);
 
         let has_other_tree = other_tree.is_some();
         if let Some(mut other_tree) = other_tree {
-            let (other_queue, gaps) = if let Some(other) = other.as_mut() {
+            let (other_queue, gaps, is_smart_gaps) = if let Some(other) = other.as_mut() {
                 let other_gaps = other.gaps();
-                (&mut other.queue, other_gaps)
+                let other_is_smart_gaps = other.smart_gaps;
+                (&mut other.queue, other_gaps, other_is_smart_gaps)
             } else {
-                (&mut this.queue, this_gaps)
+                (&mut this.queue, this_gaps, this_is_smart_gaps)
             };
-            let blocker = TilingLayout::update_positions(&other_output, &mut other_tree, gaps);
+            let blocker =
+                TilingLayout::update_positions(&other_output, &mut other_tree, gaps, is_smart_gaps);
             other_queue.push_tree(other_tree, ANIMATION_DURATION, blocker);
         }
 
@@ -1411,7 +1437,8 @@ impl TilingLayout {
                 } else {
                     ANIMATION_DURATION
                 };
-                let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+                let blocker =
+                    TilingLayout::update_positions(&self.output, &mut tree, gaps, self.smart_gaps);
                 self.queue.push_tree(tree, duration, blocker);
 
                 return true;
@@ -1526,7 +1553,12 @@ impl TilingLayout {
                     .unwrap();
                     *mapped.tiling_node_id.lock().unwrap() = Some(new_id);
 
-                    let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+                    let blocker = TilingLayout::update_positions(
+                        &self.output,
+                        &mut tree,
+                        gaps,
+                        self.smart_gaps,
+                    );
                     self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
                     return MoveResult::ShiftFocus(mapped.into());
                 }
@@ -1602,7 +1634,8 @@ impl TilingLayout {
                     .data_mut()
                     .remove_window(og_idx);
 
-                let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+                let blocker =
+                    TilingLayout::update_positions(&self.output, &mut tree, gaps, self.smart_gaps);
                 self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
                 return MoveResult::Done;
             }
@@ -1628,7 +1661,8 @@ impl TilingLayout {
                     .data_mut()
                     .remove_window(og_idx);
 
-                let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+                let blocker =
+                    TilingLayout::update_positions(&self.output, &mut tree, gaps, self.smart_gaps);
                 self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
                 return MoveResult::Done;
             }
@@ -1784,7 +1818,8 @@ impl TilingLayout {
                     MoveResult::Done
                 };
 
-                let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+                let blocker =
+                    TilingLayout::update_positions(&self.output, &mut tree, gaps, self.smart_gaps);
                 self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
                 return result;
             }
@@ -2110,7 +2145,12 @@ impl TilingLayout {
 
                     *orientation = new_orientation;
 
-                    let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+                    let blocker = TilingLayout::update_positions(
+                        &self.output,
+                        &mut tree,
+                        gaps,
+                        self.smart_gaps,
+                    );
                     self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
                 }
             }
@@ -2228,7 +2268,8 @@ impl TilingLayout {
             }
         };
 
-        let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+        let blocker =
+            TilingLayout::update_positions(&self.output, &mut tree, gaps, self.smart_gaps);
         self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
 
         Some(result)
@@ -2304,7 +2345,12 @@ impl TilingLayout {
                         minimize_rect: None,
                     };
 
-                    let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+                    let blocker = TilingLayout::update_positions(
+                        &self.output,
+                        &mut tree,
+                        gaps,
+                        self.smart_gaps,
+                    );
                     self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
 
                     return Some(KeyboardFocusTarget::Element(mapped));
@@ -2319,7 +2365,8 @@ impl TilingLayout {
         let gaps = self.gaps();
 
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
-        let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+        let blocker =
+            TilingLayout::update_positions(&self.output, &mut tree, gaps, self.smart_gaps);
         self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
     }
 
@@ -2589,7 +2636,8 @@ impl TilingLayout {
                 }
                 _ => unreachable!(),
             }
-            let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+            let blocker =
+                TilingLayout::update_positions(&self.output, &mut tree, gaps, self.smart_gaps);
             self.queue.push_tree(tree, None, blocker);
 
             return true;
@@ -2629,7 +2677,8 @@ impl TilingLayout {
                 }
             }
 
-            let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+            let blocker =
+                TilingLayout::update_positions(&self.output, &mut tree, gaps, self.smart_gaps);
             self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
         }
     }
@@ -2783,7 +2832,8 @@ impl TilingLayout {
             }
         }
 
-        let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+        let blocker =
+            TilingLayout::update_positions(&self.output, &mut tree, gaps, self.smart_gaps);
         self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
 
         let location = self.element_geometry(&mapped).unwrap().loc;
@@ -2957,6 +3007,7 @@ impl TilingLayout {
         output: &Output,
         tree: &mut Tree<Data>,
         gaps: (i32, i32),
+        smart_gaps: bool,
     ) -> Option<TilingBlocker> {
         if let Some(root_id) = tree.root_node_id() {
             let mut configures = Vec::new();
@@ -2965,10 +3016,15 @@ impl TilingLayout {
             let mut geo = layer_map_for_output(&output)
                 .non_exclusive_zone()
                 .as_local();
-            geo.loc.x += outer;
-            geo.loc.y += outer;
-            geo.size.w -= outer * 2;
-            geo.size.h -= outer * 2;
+
+            let root = tree.get(&root_id).unwrap();
+            if !smart_gaps || root.data().is_group() {
+                geo.loc.x += outer;
+                geo.loc.y += outer;
+                geo.size.w -= outer * 2;
+                geo.size.h -= outer * 2;
+            }
+
             let mut stack = vec![geo];
 
             for node_id in tree
@@ -3013,33 +3069,21 @@ impl TilingLayout {
                     let node = tree.get(&node_id).unwrap();
                     let data = node.data();
                     if data.is_mapped(None) {
+                        let calculate_gap = |dir| {
+                            if TilingLayout::has_adjacent_node(tree, &node_id, dir) {
+                                inner / 2
+                            } else if smart_gaps {
+                                0
+                            } else {
+                                inner
+                            }
+                        };
+
                         let gap = (
+                            (calculate_gap(Direction::Left), calculate_gap(Direction::Up)),
                             (
-                                if TilingLayout::has_adjacent_node(tree, &node_id, Direction::Left)
-                                {
-                                    inner / 2
-                                } else {
-                                    inner
-                                },
-                                if TilingLayout::has_adjacent_node(tree, &node_id, Direction::Up) {
-                                    inner / 2
-                                } else {
-                                    inner
-                                },
-                            ),
-                            (
-                                if TilingLayout::has_adjacent_node(tree, &node_id, Direction::Right)
-                                {
-                                    inner / 2
-                                } else {
-                                    inner
-                                },
-                                if TilingLayout::has_adjacent_node(tree, &node_id, Direction::Down)
-                                {
-                                    inner / 2
-                                } else {
-                                    inner
-                                },
+                                calculate_gap(Direction::Right),
+                                calculate_gap(Direction::Down),
                             ),
                         );
                         geo.loc += gap.0.into();
@@ -3128,6 +3172,7 @@ impl TilingLayout {
         overview: OverviewMode,
     ) -> Option<(PointerFocusTarget, Point<f64, Local>)> {
         let gaps = self.gaps();
+        let smart_gaps = self.smart_gaps;
         let last_overview_hover = &mut self.last_overview_hover;
         let placeholder_id = &self.placeholder_id;
         let tree = &self.queue.trees.back().unwrap().0;
@@ -3703,6 +3748,7 @@ impl TilingLayout {
                                         &self.output,
                                         &mut tree,
                                         gaps,
+                                        smart_gaps,
                                     );
                                     self.queue.push_tree(tree, duration, blocker);
                                 }
@@ -3810,7 +3856,7 @@ impl TilingLayout {
         };
         TilingLayout::merge_trees(src, &mut dst, orientation);
 
-        let blocker = TilingLayout::update_positions(&self.output, &mut dst, gaps);
+        let blocker = TilingLayout::update_positions(&self.output, &mut dst, gaps, self.smart_gaps);
         self.queue.push_tree(dst, ANIMATION_DURATION, blocker);
     }
 
