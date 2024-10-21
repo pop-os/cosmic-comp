@@ -441,7 +441,7 @@ impl Program for ContextMenu {
                 text_color: Some(component.on.into()),
                 background: Some(Background::Color(component.base.into())),
                 border: Border {
-                    radius: 8.0.into(),
+                    radius: cosmic.radius_s().into(),
                     width: 1.0,
                     color: component.divider.into(),
                 },
