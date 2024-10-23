@@ -10,26 +10,24 @@ use cosmic::{
     iced::{
         advanced::widget::Tree,
         event::Event,
+        futures::{FutureExt, StreamExt},
         keyboard::{Event as KeyboardEvent, Modifiers as IcedModifiers},
         mouse::{Button as MouseButton, Cursor, Event as MouseEvent, ScrollDelta},
         touch::{Event as TouchEvent, Finger},
-        window::{Event as WindowEvent, Id},
-        Command, Limits, Point as IcedPoint, Rectangle as IcedRectangle, Size as IcedSize,
+        window::Event as WindowEvent,
+        Limits, Point as IcedPoint, Size as IcedSize, Task,
     },
-    iced_core::{clipboard::Null as NullClipboard, renderer::Style, Color, Length, Pixels},
-    iced_renderer::graphics::Renderer as IcedGraphicsRenderer,
+    iced_core::{clipboard::Null as NullClipboard, id::Id, renderer::Style, Color, Length, Pixels},
     iced_runtime::{
-        command::Action,
         program::{Program as IcedProgram, State},
-        Debug,
+        task::into_stream,
+        Action, Debug,
     },
     Theme,
 };
-use iced_tiny_skia::{
-    graphics::{damage, Viewport},
-    Backend, Primitive,
-};
+use iced_tiny_skia::{graphics::Viewport, Primitive};
 
+use once_cell::sync::Lazy;
 use ordered_float::OrderedFloat;
 use smithay::{
     backend::{
@@ -66,6 +64,8 @@ use smithay::{
         Transform,
     },
 };
+
+static ID: Lazy<Id> = Lazy::new(|| Id::new("Program"));
 
 pub struct IcedElement<P: Program + Send + 'static>(pub(crate) Arc<Mutex<IcedElementInternal<P>>>);
 
@@ -104,9 +104,9 @@ pub trait Program {
         &mut self,
         message: Self::Message,
         loop_handle: &LoopHandle<'static, crate::state::State>,
-    ) -> Command<Self::Message> {
+    ) -> Task<Self::Message> {
         let _ = (message, loop_handle);
-        Command::none()
+        Task::none()
     }
     fn view(&self) -> cosmic::Element<'_, Self::Message>;
 
@@ -131,7 +131,7 @@ impl<P: Program> IcedProgram for ProgramWrapper<P> {
     type Renderer = cosmic::Renderer;
     type Theme = cosmic::Theme;
 
-    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
+    fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
         self.0.update(message, &self.1)
     }
 
@@ -159,9 +159,9 @@ pub(crate) struct IcedElementInternal<P: Program + Send + 'static> {
 
     // futures
     handle: LoopHandle<'static, crate::state::State>,
-    scheduler: Scheduler<<P as Program>::Message>,
+    scheduler: Scheduler<Option<<P as Program>::Message>>,
     executor_token: Option<RegistrationToken>,
-    rx: Receiver<<P as Program>::Message>,
+    rx: Receiver<Option<<P as Program>::Message>>,
 }
 
 impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
@@ -178,14 +178,10 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
         if !self.state.is_queue_empty() {
             tracing::warn!("Missing force_update call");
         }
-        let mut renderer = cosmic::Renderer::TinySkia(IcedGraphicsRenderer::new(
-            Backend::new(),
-            cosmic::font::default(),
-            Pixels(16.0),
-        ));
+        let mut renderer = cosmic::Renderer::new(cosmic::font::default(), Pixels(16.0));
         let mut debug = Debug::new();
         let state = State::new(
-            Id::MAIN,
+            ID.clone(),
             ProgramWrapper(self.state.program().0.clone(), handle.clone()),
             IcedSize::new(self.size.w as f32, self.size.h as f32),
             &mut renderer,
@@ -244,15 +240,11 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         theme: cosmic::Theme,
     ) -> IcedElement<P> {
         let size = size.into();
-        let mut renderer = cosmic::Renderer::TinySkia(IcedGraphicsRenderer::new(
-            Backend::new(),
-            cosmic::font::default(),
-            Pixels(16.0),
-        ));
+        let mut renderer = cosmic::Renderer::new(cosmic::font::default(), Pixels(16.0));
         let mut debug = Debug::new();
 
         let state = State::new(
-            Id::MAIN,
+            ID.clone(),
             ProgramWrapper(program, handle.clone()),
             IcedSize::new(size.w as f32, size.h as f32),
             &mut renderer,
@@ -368,8 +360,8 @@ impl<P: Program + Send + 'static + Clone> IcedElement<P> {
 
 impl<P: Program + Send + 'static> IcedElementInternal<P> {
     #[profiling::function]
-    fn update(&mut self, mut force: bool) -> Vec<Action<<P as Program>::Message>> {
-        while let Ok(message) = self.rx.try_recv() {
+    fn update(&mut self, mut force: bool) -> Vec<Task<<P as Program>::Message>> {
+        while let Ok(Some(message)) = self.rx.try_recv() {
             self.state.queue_message(message);
             force = true;
         }
@@ -383,17 +375,16 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
             .map(|p| IcedPoint::new(p.x as f32, p.y as f32))
             .map(Cursor::Available)
             .unwrap_or(Cursor::Unavailable);
-
         let actions = self
             .state
             .update(
-                Id::MAIN,
+                ID.clone(),
                 IcedSize::new(self.size.w as f32, self.size.h as f32),
                 cursor,
                 &mut self.renderer,
                 &self.theme,
                 &Style {
-                    scale_factor: 1.0, //TODO: why is this
+                    scale_factor: 1.0, // TODO: why is this
                     icon_color: self.theme.cosmic().on_bg_color().into(),
                     text_color: self.theme.cosmic().on_bg_color().into(),
                 },
@@ -402,17 +393,15 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
             )
             .1;
 
-        actions
-            .into_iter()
-            .filter_map(|action| {
-                if let Action::Future(future) = action {
-                    let _ = self.scheduler.schedule(future);
-                    None
-                } else {
-                    Some(action)
-                }
-            })
-            .collect::<Vec<_>>()
+        if let Some(action) = actions {
+            if let Some(t) = into_stream(action) {
+                let _ = self.scheduler.schedule(t.into_future().map(|f| match f.0 {
+                    Some(Action::Output(msg)) => Some(msg),
+                    _ => None,
+                }));
+            }
+        }
+        Vec::new()
     }
 }
 
@@ -751,14 +740,11 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
 
     fn set_activate(&self, activated: bool) {
         let mut internal = self.0.lock().unwrap();
-        internal.state.queue_event(Event::Window(
-            Id::MAIN,
-            if activated {
-                WindowEvent::Focused
-            } else {
-                WindowEvent::Unfocused
-            },
-        ));
+        internal.state.queue_event(Event::Window(if activated {
+            WindowEvent::Focused
+        } else {
+            WindowEvent::Unfocused
+        }));
         let _ = internal.update(true); // TODO
     }
 
@@ -860,83 +846,62 @@ where
         } else {
             false
         };
+        if force {
+            internal_ref.pending_update = None;
+        }
         let _ = internal_ref.update(force);
-
-        if let Some((buffer, ref mut old_primitives)) =
-            internal_ref.buffers.get_mut(&OrderedFloat(scale.x))
-        {
+        if let Some((buffer, _)) = internal_ref.buffers.get_mut(&OrderedFloat(scale.x)) {
             let size: Size<i32, BufferCoords> = internal_ref
                 .size
                 .to_f64()
                 .to_buffer(scale.x, Transform::Normal)
                 .to_i32_round();
-
             if size.w > 0 && size.h > 0 {
-                let cosmic::Renderer::TinySkia(renderer) = &mut internal_ref.renderer;
                 let state_ref = &internal_ref.state;
                 let mut clip_mask = tiny_skia::Mask::new(size.w as u32, size.h as u32).unwrap();
                 let overlay = internal_ref.debug.overlay();
                 let theme = &internal_ref.theme;
 
-                buffer
-                    .render()
-                    .draw(move |buf| {
-                        let mut pixels =
-                            tiny_skia::PixmapMut::from_bytes(buf, size.w as u32, size.h as u32)
-                                .expect("Failed to create pixel map");
+                _ = buffer.render().draw(|buf| {
+                    let mut pixels =
+                        tiny_skia::PixmapMut::from_bytes(buf, size.w as u32, size.h as u32)
+                            .expect("Failed to create pixel map");
 
-                        renderer.with_primitives(|backend, primitives| {
-                            let background_color = state_ref.program().0.background_color(theme);
-                            let bounds = IcedSize::new(size.w as u32, size.h as u32);
-                            let viewport = Viewport::with_physical_size(bounds, scale.x);
+                    let background_color = state_ref.program().0.background_color(theme);
+                    let bounds = IcedSize::new(size.w as u32, size.h as u32);
+                    let viewport = Viewport::with_physical_size(bounds, scale.x);
 
-                            let mut damage = old_primitives
-                                .as_ref()
-                                .and_then(|(last_primitives, last_color)| {
-                                    (last_color == &background_color)
-                                        .then(|| damage::list(last_primitives, primitives))
-                                })
-                                .unwrap_or_else(|| {
-                                    vec![IcedRectangle::with_size(viewport.logical_size())]
-                                });
-                            damage = damage::group(damage, scale.x as f32, bounds);
+                    let damage = vec![cosmic::iced::Rectangle::new(
+                        cosmic::iced::Point::default(),
+                        viewport.logical_size(),
+                    )];
 
-                            if !damage.is_empty() {
-                                backend.draw(
-                                    &mut pixels,
-                                    &mut clip_mask,
-                                    primitives,
-                                    &viewport,
-                                    &damage,
-                                    background_color,
-                                    &overlay,
-                                );
+                    internal_ref.renderer.draw(
+                        &mut pixels,
+                        &mut clip_mask,
+                        &viewport,
+                        &damage,
+                        background_color,
+                        &overlay,
+                    );
 
-                                *old_primitives = Some((primitives.to_vec(), background_color));
-                            }
-
-                            let damage = damage
-                                .into_iter()
-                                .map(|x| x.snap())
-                                .map(|damage_rect| {
-                                    Rectangle::from_loc_and_size(
-                                        (damage_rect.x as i32, damage_rect.y as i32),
-                                        (damage_rect.width as i32, damage_rect.height as i32),
-                                    )
-                                })
-                                .collect::<Vec<_>>();
-
-                            state_ref.program().0.foreground(
-                                &mut pixels,
-                                &damage,
-                                scale.x as f32,
-                                theme,
-                            );
-
-                            Result::<_, ()>::Ok(damage)
+                    let damage = damage
+                        .into_iter()
+                        .filter_map(|x| x.snap())
+                        .map(|damage_rect| {
+                            Rectangle::from_loc_and_size(
+                                (damage_rect.x as i32, damage_rect.y as i32),
+                                (damage_rect.width as i32, damage_rect.height as i32),
+                            )
                         })
-                    })
-                    .unwrap();
+                        .collect::<Vec<_>>();
+                    state_ref
+                        .program()
+                        .0
+                        .foreground(&mut pixels, &damage, scale.x as f32, theme);
+
+                    Result::<_, ()>::Ok(damage)
+                });
             }
 
             if let Ok(buffer) = MemoryRenderBufferRenderElement::from_buffer(
@@ -946,9 +911,11 @@ where
                 Some(alpha),
                 Some(Rectangle::from_loc_and_size(
                     (0., 0.),
-                    size.to_f64().to_logical(1.0, Transform::Normal),
+                    size.to_f64()
+                        .to_logical(1., Transform::Normal)
+                        .to_i32_round(),
                 )),
-                Some(internal_ref.size),
+                Some(size.to_logical(1, Transform::Normal)),
                 Kind::Unspecified,
             ) {
                 return vec![C::from(buffer)];
