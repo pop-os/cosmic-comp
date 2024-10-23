@@ -341,9 +341,7 @@ fn layer_popups<'a>(
         let location_clone = location.clone();
         let surface_clone = surface.clone();
         PopupManager::popups_for_surface(surface.wl_surface()).map(move |(popup, popup_offset)| {
-            let offset = (popup_offset - popup.geometry().loc)
-                .as_local()
-                .to_global(output);
+            let offset = (popup_offset - popup.geometry().loc).as_global();
             (surface_clone.clone(), popup, (location_clone + offset))
         })
     })
