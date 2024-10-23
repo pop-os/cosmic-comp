@@ -38,16 +38,16 @@ impl Program for StackHoverInternal {
                 .prefer_svg(true)
                 .icon()
                 .into(),
-            horizontal_space(16).into(),
+            horizontal_space().width(16).into(),
             text::title3(fl!("stack-windows")).into(),
         ])
-        .align_items(Alignment::Center)
+        .align_y(Alignment::Center)
         .apply(container)
-        .center_x()
-        .center_y()
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
         .padding(16)
         .apply(container)
-        .style(theme::Container::custom(|theme| container::Appearance {
+        .class(theme::Container::custom(|theme| container::Style {
             icon_color: Some(Color::from(theme.cosmic().accent.on)),
             text_color: Some(Color::from(theme.cosmic().accent.on)),
             background: Some(Background::Color(theme.cosmic().accent_color().into())),
@@ -61,10 +61,8 @@ impl Program for StackHoverInternal {
         .width(Length::Shrink)
         .height(Length::Shrink)
         .apply(container)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center_x()
-        .center_y()
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
         .into()
     }
 }

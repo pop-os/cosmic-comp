@@ -5,11 +5,7 @@ use cosmic::{
         alignment, event,
         layout::{Layout, Limits, Node},
         mouse, overlay, renderer,
-        widget::{
-            operation::{Operation, OperationOutputWrapper},
-            tree::Tree,
-            Id, Widget,
-        },
+        widget::{operation::Operation, tree::Tree, Id, Widget},
         Border, Clipboard, Color, Length, Rectangle, Shell, Size,
     },
     iced_widget::scrollable::AbsoluteOffset,
@@ -54,19 +50,19 @@ pub(super) enum TabRuleTheme {
 impl From<TabRuleTheme> for theme::Rule {
     fn from(theme: TabRuleTheme) -> Self {
         match theme {
-            TabRuleTheme::ActiveActivated => Self::custom(|theme| widget::rule::Appearance {
+            TabRuleTheme::ActiveActivated => Self::custom(|theme| widget::rule::Style {
                 color: theme.cosmic().accent_color().into(),
                 width: 4,
                 radius: 0.0.into(),
                 fill_mode: FillMode::Full,
             }),
-            TabRuleTheme::ActiveDeactivated => Self::custom(|theme| widget::rule::Appearance {
+            TabRuleTheme::ActiveDeactivated => Self::custom(|theme| widget::rule::Style {
                 color: theme.cosmic().palette.neutral_5.into(),
                 width: 4,
                 radius: 0.0.into(),
                 fill_mode: FillMode::Full,
             }),
-            TabRuleTheme::Default => Self::custom(|theme| widget::rule::Appearance {
+            TabRuleTheme::Default => Self::custom(|theme| widget::rule::Style {
                 color: theme.cosmic().palette.neutral_5.into(),
                 width: 4,
                 radius: 8.0.into(),
@@ -96,11 +92,11 @@ impl TabBackgroundTheme {
     }
 }
 
-impl From<TabBackgroundTheme> for theme::Container {
+impl From<TabBackgroundTheme> for theme::Container<'_> {
     fn from(background_theme: TabBackgroundTheme) -> Self {
         match background_theme {
             TabBackgroundTheme::ActiveActivated => {
-                Self::custom(move |theme| widget::container::Appearance {
+                Self::custom(move |theme| widget::container::Style {
                     icon_color: Some(Color::from(theme.cosmic().accent_text_color())),
                     text_color: Some(Color::from(theme.cosmic().accent_text_color())),
                     background: Some(background_theme.background_color(theme).into()),
@@ -113,7 +109,7 @@ impl From<TabBackgroundTheme> for theme::Container {
                 })
             }
             TabBackgroundTheme::ActiveDeactivated => {
-                Self::custom(move |theme| widget::container::Appearance {
+                Self::custom(move |theme| widget::container::Style {
                     icon_color: None,
                     text_color: None,
                     background: Some(background_theme.background_color(theme).into()),
@@ -215,20 +211,19 @@ impl<Message: TabMessage + 'static> Tab<Message> {
             .icon()
             .apply(widget::button)
             .padding(0)
-            .style(theme::iced::Button::Text);
+            .class(theme::iced::Button::Text);
         if let Some(close_message) = self.close_message {
             close_button = close_button.on_press(close_message);
         }
 
         let items = vec![
-            widget::vertical_rule(4).style(self.rule_theme).into(),
+            widget::vertical_rule(4).class(self.rule_theme).into(),
             self.app_icon
                 .clone()
                 .apply(widget::container)
-                .height(Length::Fill)
                 .width(Length::Shrink)
                 .padding([2, 4])
-                .center_y()
+                .center_y(Length::Fill)
                 .into(),
             tab_text(self.title, self.active)
                 .font(self.font)
@@ -238,10 +233,9 @@ impl<Message: TabMessage + 'static> Tab<Message> {
                 .into(),
             close_button
                 .apply(widget::container)
-                .height(Length::Fill)
                 .width(Length::Shrink)
                 .padding([2, 4])
-                .center_y()
+                .center_y(Length::Fill)
                 .align_x(alignment::Horizontal::Right)
                 .into(),
         ];
@@ -269,7 +263,7 @@ pub(super) struct TabInternal<'a, Message: TabMessage> {
     id: Id,
     idx: usize,
     active: bool,
-    background: theme::Container,
+    background: theme::Container<'a>,
     elements: Vec<cosmic::Element<'a, Message>>,
     press_message: Option<Message>,
     right_click_message: Option<Message>,
@@ -347,7 +341,7 @@ where
         tree: &mut Tree,
         layout: Layout<'_>,
         renderer: &cosmic::Renderer,
-        operation: &mut dyn Operation<OperationOutputWrapper<Message>>,
+        operation: &mut dyn Operation<()>,
     ) {
         operation.container(None, layout.bounds(), &mut |operation| {
             self.elements
@@ -454,8 +448,8 @@ where
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        use cosmic::widget::container::StyleSheet;
-        let style = theme.appearance(&self.background);
+        use cosmic::widget::container::Catalog;
+        let style = theme.style(&self.background);
 
         draw_background(renderer, &style, layout.bounds());
 
@@ -486,7 +480,8 @@ where
         tree: &'b mut Tree,
         layout: Layout<'_>,
         renderer: &cosmic::Renderer,
+        translation: cosmic::iced::Vector,
     ) -> Option<overlay::Element<'b, Message, cosmic::Theme, cosmic::Renderer>> {
-        overlay::from_children(&mut self.elements, tree, layout, renderer)
+        overlay::from_children(&mut self.elements, tree, layout, renderer, translation)
     }
 }

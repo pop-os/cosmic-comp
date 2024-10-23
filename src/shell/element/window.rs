@@ -11,7 +11,7 @@ use crate::{
     },
 };
 use calloop::LoopHandle;
-use cosmic::iced::{Color, Command};
+use cosmic::iced::{Color, Task};
 use smithay::{
     backend::{
         input::KeyState,
@@ -409,7 +409,7 @@ impl Program for CosmicWindowInternal {
         &mut self,
         message: Self::Message,
         loop_handle: &LoopHandle<'static, crate::state::State>,
-    ) -> Command<Self::Message> {
+    ) -> Task<Self::Message> {
         match message {
             Message::DragStart => {
                 if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
@@ -509,7 +509,7 @@ impl Program for CosmicWindowInternal {
                 }
             }
         }
-        Command::none()
+        Task::none()
     }
 
     fn background_color(&self, theme: &cosmic::Theme) -> Color {
@@ -522,7 +522,7 @@ impl Program for CosmicWindowInternal {
 
     fn view(&self) -> cosmic::Element<'_, Self::Message> {
         let mut header = cosmic::widget::header_bar()
-            .start(cosmic::widget::horizontal_space(32))
+            .start(cosmic::widget::horizontal_space().width(32))
             .title(self.last_title.lock().unwrap().clone())
             .on_drag(Message::DragStart)
             .on_close(Message::Close)
@@ -533,12 +533,12 @@ impl Program for CosmicWindowInternal {
         if cosmic::config::show_minimize() {
             header = header
                 .on_minimize(Message::Minimize)
-                .start(cosmic::widget::horizontal_space(40)); // 32 + 8 spacing
+                .start(cosmic::widget::horizontal_space().width(40)); // 32 + 8 spacing
         }
         if cosmic::config::show_maximize() {
             header = header
                 .on_maximize(Message::Maximize)
-                .start(cosmic::widget::horizontal_space(40)); // 32 + 8 spacing
+                .start(cosmic::widget::horizontal_space().width(40)); // 32 + 8 spacing
         }
 
         header.into()
