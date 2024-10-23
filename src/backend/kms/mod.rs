@@ -325,13 +325,13 @@ impl State {
         let backend = self.backend.kms();
         backend.libinput.suspend();
         for device in backend.drm_devices.values_mut() {
-            device.drm.pause();
             if let Some(lease_state) = device.leasing_global.as_mut() {
                 lease_state.suspend();
             }
             for surface in device.surfaces.values_mut() {
-                surface.suspend();
+                let _ = surface.suspend();
             }
+            device.drm.pause();
         }
     }
 }
