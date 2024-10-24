@@ -90,7 +90,7 @@ pub struct ToplevelHandleStateInner<W: Window> {
     title: String,
     app_id: String,
     states: Vec<States>,
-    pub(super) window: W,
+    pub(super) window: Option<W>,
 }
 pub type ToplevelHandleState<W> = Mutex<ToplevelHandleStateInner<W>>;
 
@@ -104,7 +104,20 @@ impl<W: Window> ToplevelHandleStateInner<W> {
             title: String::new(),
             app_id: String::new(),
             states: Vec::new(),
-            window: window.clone(),
+            window: Some(window.clone()),
+        })
+    }
+
+    fn empty() -> ToplevelHandleState<W> {
+        ToplevelHandleState::new(ToplevelHandleStateInner {
+            outputs: Vec::new(),
+            geometry: None,
+            wl_outputs: HashSet::new(),
+            workspaces: Vec::new(),
+            title: String::new(),
+            app_id: String::new(),
+            states: Vec::new(),
+            window: None,
         })
     }
 }
@@ -187,6 +200,10 @@ where
                         .instances
                         .push(instance);
                 } else {
+                    let _ = data_init.init(
+                        cosmic_toplevel,
+                        ToplevelHandleStateInner::empty(),
+                    );
                     error!(?foreign_toplevel, "Toplevel for foreign-toplevel-list not registered for cosmic-toplevel-info.");
                 }
             }
@@ -600,7 +617,7 @@ where
 pub fn window_from_handle<W: Window + 'static>(handle: ZcosmicToplevelHandleV1) -> Option<W> {
     handle
         .data::<ToplevelHandleState<W>>()
-        .map(|state| state.lock().unwrap().window.clone())
+        .and_then(|state| state.lock().unwrap().window.clone())
 }
 
 macro_rules! delegate_toplevel_info {
