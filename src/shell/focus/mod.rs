@@ -203,7 +203,7 @@ impl Shell {
                 m.window.configure();
             }
 
-            let workspace = self.workspaces.active_mut(&output);
+            let workspace = &mut set.workspaces[set.active];
             for focused in focused_windows.iter() {
                 raise_with_children(&mut workspace.floating_layer, focused);
             }
@@ -214,6 +214,16 @@ impl Shell {
             for m in workspace.minimized_windows.iter() {
                 m.window.set_activated(false);
                 m.window.configure();
+            }
+
+            for (i, workspace) in set.workspaces.iter().enumerate() {
+                if i == set.active {
+                    continue;
+                }
+                for window in workspace.mapped() {
+                    window.set_activated(false);
+                    window.configure();
+                }   
             }
         }
     }
