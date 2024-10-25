@@ -256,7 +256,7 @@ impl CosmicWindow {
                     || (point_i32.y - geo.loc.y >= -RESIZE_BORDER && point_i32.y - geo.loc.y < 0)
                     || (point_i32.x - geo.loc.x >= geo.size.w
                         && point_i32.x - geo.loc.x < geo.size.w + RESIZE_BORDER)
-                    || (point_i32.y - geo.loc.y >= geo.size.h
+                    || (point_i32.y - geo.loc.y >= geo.size.h + SSD_HEIGHT
                         && point_i32.y - geo.loc.y < geo.size.h + SSD_HEIGHT + RESIZE_BORDER)
                 {
                     window_ui = Some((
@@ -271,7 +271,9 @@ impl CosmicWindow {
                         Point::from((0., 0.)),
                     ));
                 }
+            }
 
+            if p.has_ssd(false) {
                 relative_pos.y -= SSD_HEIGHT as f64;
                 offset.y += SSD_HEIGHT as f64;
             }
