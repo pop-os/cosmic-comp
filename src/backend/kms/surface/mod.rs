@@ -124,6 +124,7 @@ pub struct SurfaceThreadState {
     primary_node: DrmNode,
     target_node: DrmNode,
     active: Arc<AtomicBool>,
+    allow_direct_scanout: bool,
     compositor: Option<GbmDrmCompositor>,
 
     state: QueueState,
@@ -197,23 +198,67 @@ pub type GbmDrmCompositor = DrmCompositor<
 pub enum QueueState {
     Idle,
     /// A redraw is queued.
-    Queued(RegistrationToken),
+    Queued {
+        queued_render: RegistrationToken,
+        pending_syncs: Vec<SyncSender<()>>,
+    },
     /// We submitted a frame to the KMS and waiting for it to be presented.
     WaitingForVBlank {
         redraw_needed: bool,
+        pending_syncs: Vec<SyncSender<()>>,
     },
     /// We did not submit anything to KMS and made a timer to fire at the estimated VBlank.
-    WaitingForEstimatedVBlank(RegistrationToken),
+    WaitingForEstimatedVBlank {
+        estimated_vblank: RegistrationToken,
+    },
     /// A redraw is queued on top of the above.
     WaitingForEstimatedVBlankAndQueued {
         estimated_vblank: RegistrationToken,
         queued_render: RegistrationToken,
+        pending_syncs: Vec<SyncSender<()>>,
     },
 }
 
 impl Default for QueueState {
     fn default() -> Self {
         QueueState::Idle
+    }
+}
+
+impl QueueState {
+    fn clear(&mut self, evlh: &LoopHandle<SurfaceThreadState>, timings: &mut Timings) {
+        match std::mem::replace(self, QueueState::Idle) {
+            QueueState::Idle => {}
+            QueueState::Queued {
+                queued_render,
+                pending_syncs,
+            } => {
+                evlh.remove(queued_render);
+                for sync in pending_syncs {
+                    let _ = sync.send(()); // compositor.clear satisfies the requirement
+                }
+            }
+            QueueState::WaitingForEstimatedVBlank { estimated_vblank } => {
+                evlh.remove(estimated_vblank);
+            }
+            QueueState::WaitingForVBlank { pending_syncs, .. } => {
+                timings.discard_current_frame();
+                for sync in pending_syncs {
+                    let _ = sync.send(()); // compositor.clear satisfies the requirement
+                }
+            }
+            QueueState::WaitingForEstimatedVBlankAndQueued {
+                estimated_vblank,
+                queued_render,
+                pending_syncs,
+            } => {
+                evlh.remove(estimated_vblank);
+                evlh.remove(queued_render);
+                for sync in pending_syncs {
+                    let _ = sync.send(()); // compositor.clear satisfies the requirement
+                }
+            }
+        };
     }
 }
 
@@ -239,6 +284,7 @@ pub enum ThreadCommand {
     VBlank(Option<DrmEventMetadata>),
     ScheduleRender,
     SetMode(Mode, SyncSender<Result<()>>),
+    SetDirectScanout(bool, SyncSender<()>),
     End,
     DpmsOff,
 }
@@ -401,6 +447,16 @@ impl Surface {
         rx.recv().context("Surface thread died")?
     }
 
+    pub fn set_direct_scanout(&mut self, allow: bool, sync: SyncSender<()>) {
+        if self
+            .thread_command
+            .send(ThreadCommand::SetDirectScanout(allow, sync.clone()))
+            .is_err()
+        {
+            let _ = sync.send(());
+        }
+    }
+
     pub fn suspend(&mut self) {
         let _ = self.thread_command.send(ThreadCommand::Suspend);
     }
@@ -502,6 +558,7 @@ fn surface_thread(
         target_node,
         active,
         compositor: None,
+        allow_direct_scanout: true,
 
         state: QueueState::Idle,
         timings: Timings::new(None, false),
@@ -549,7 +606,7 @@ fn surface_thread(
                     return;
                 }
 
-                state.queue_redraw(false);
+                state.queue_redraw(false, Vec::new());
             }
             Event::Msg(ThreadCommand::UpdateMirroring(mirroring_output)) => {
                 state.update_mirroring(mirroring_output);
@@ -566,23 +623,25 @@ fn surface_thread(
                     if let Err(err) = compositor.clear() {
                         error!("Failed to set DPMS off: {:?}", err);
                     }
-                    match std::mem::replace(&mut state.state, QueueState::Idle) {
-                        QueueState::Idle => {}
-                        QueueState::Queued(token)
-                        | QueueState::WaitingForEstimatedVBlank(token) => {
-                            state.loop_handle.remove(token);
-                        }
-                        QueueState::WaitingForVBlank { .. } => {
-                            state.timings.discard_current_frame()
-                        }
-                        QueueState::WaitingForEstimatedVBlankAndQueued {
-                            estimated_vblank,
-                            queued_render,
-                        } => {
-                            state.loop_handle.remove(estimated_vblank);
-                            state.loop_handle.remove(queued_render);
-                        }
-                    };
+                    state.state.clear(&state.loop_handle, &mut state.timings);
+                }
+            }
+            Event::Msg(ThreadCommand::SetDirectScanout(allow, sender)) => {
+                state.allow_direct_scanout = allow;
+                if let Some(compositor) = state.compositor.as_mut() {
+                    compositor.use_direct_scanout(
+                        !crate::utils::env::bool_var("COSMIC_DISABLE_DIRECT_SCANOUT")
+                            .unwrap_or(false)
+                            && allow,
+                    );
+                    let _ = compositor.reset_state();
+                    if !allow {
+                        state.queue_redraw(true, vec![sender]);
+                    } else {
+                        let _ = sender.send(());
+                    }
+                } else {
+                    let _ = sender.send(());
                 }
             }
             Event::Closed | Event::Msg(ThreadCommand::End) => {
@@ -600,21 +659,7 @@ impl SurfaceThreadState {
     fn suspend(&mut self) {
         self.active.store(false, Ordering::SeqCst);
         let _ = self.compositor.take();
-
-        match std::mem::replace(&mut self.state, QueueState::Idle) {
-            QueueState::Idle => {}
-            QueueState::Queued(token) | QueueState::WaitingForEstimatedVBlank(token) => {
-                self.loop_handle.remove(token);
-            }
-            QueueState::WaitingForVBlank { .. } => self.timings.discard_current_frame(),
-            QueueState::WaitingForEstimatedVBlankAndQueued {
-                estimated_vblank,
-                queued_render,
-            } => {
-                self.loop_handle.remove(estimated_vblank);
-                self.loop_handle.remove(queued_render);
-            }
-        };
+        self.state.clear(&self.loop_handle, &mut self.timings);
     }
 
     fn resume(
@@ -670,7 +715,9 @@ impl SurfaceThreadState {
             Some(gbm),
         ) {
             Ok(mut compositor) => {
-                if crate::utils::env::bool_var("COSMIC_DISABLE_DIRECT_SCANOUT").unwrap_or(false) {
+                if crate::utils::env::bool_var("COSMIC_DISABLE_DIRECT_SCANOUT").unwrap_or(false)
+                    || !self.allow_direct_scanout
+                {
                     compositor.use_direct_scanout(false);
                 }
                 self.active.store(true, Ordering::SeqCst);
@@ -775,17 +822,23 @@ impl SurfaceThreadState {
             }
         }
 
-        let redraw_needed = match mem::replace(&mut self.state, QueueState::Idle) {
+        let (redraw_needed, pending_syncs) = match mem::replace(&mut self.state, QueueState::Idle) {
             QueueState::Idle => unreachable!(),
-            QueueState::Queued(_) => unreachable!(),
-            QueueState::WaitingForVBlank { redraw_needed } => redraw_needed,
-            QueueState::WaitingForEstimatedVBlank(_) => unreachable!(),
+            QueueState::Queued { .. } => unreachable!(),
+            QueueState::WaitingForVBlank {
+                redraw_needed,
+                pending_syncs,
+            } => (redraw_needed, pending_syncs),
+            QueueState::WaitingForEstimatedVBlank { .. } => unreachable!(),
             QueueState::WaitingForEstimatedVBlankAndQueued { .. } => unreachable!(),
         };
 
         if redraw_needed || self.shell.read().unwrap().animations_going() {
-            self.queue_redraw(false);
+            self.queue_redraw(false, pending_syncs);
         } else {
+            for sync in pending_syncs {
+                let _ = sync.send(());
+            }
             self.send_frame_callbacks();
         }
     }
@@ -793,12 +846,19 @@ impl SurfaceThreadState {
     fn on_estimated_vblank(&mut self) {
         match mem::replace(&mut self.state, QueueState::Idle) {
             QueueState::Idle => unreachable!(),
-            QueueState::Queued(_) => unreachable!(),
+            QueueState::Queued { .. } => unreachable!(),
             QueueState::WaitingForVBlank { .. } => unreachable!(),
-            QueueState::WaitingForEstimatedVBlank(_) => (),
+            QueueState::WaitingForEstimatedVBlank { .. } => (),
             // The timer fired just in front of a redraw.
-            QueueState::WaitingForEstimatedVBlankAndQueued { queued_render, .. } => {
-                self.state = QueueState::Queued(queued_render);
+            QueueState::WaitingForEstimatedVBlankAndQueued {
+                queued_render,
+                pending_syncs,
+                ..
+            } => {
+                self.state = QueueState::Queued {
+                    queued_render,
+                    pending_syncs,
+                };
                 return;
             }
         }
@@ -806,31 +866,40 @@ impl SurfaceThreadState {
         self.frame_callback_seq = self.frame_callback_seq.wrapping_add(1);
 
         if self.shell.read().unwrap().animations_going() {
-            self.queue_redraw(false);
+            self.queue_redraw(false, Vec::new());
         } else {
             self.send_frame_callbacks();
         }
     }
 
-    fn queue_redraw(&mut self, force: bool) {
-        let Some(_compositor) = self.compositor.as_mut() else {
+    fn queue_redraw(&mut self, force: bool, mut syncs: Vec<SyncSender<()>>) {
+        if self.compositor.is_none() {
+            for sync in syncs {
+                let _ = sync.send(());
+            }
             return;
         };
 
-        if let QueueState::WaitingForVBlank { .. } = &self.state {
+        if let QueueState::WaitingForVBlank {
+            pending_syncs,
+            redraw_needed,
+            ..
+        } = &mut self.state
+        {
             // We're waiting for VBlank, request a redraw afterwards.
-            self.state = QueueState::WaitingForVBlank {
-                redraw_needed: true,
-            };
+            *redraw_needed = true;
+            pending_syncs.extend(syncs);
             return;
         }
 
         if !force {
-            match &self.state {
-                QueueState::Idle | QueueState::WaitingForEstimatedVBlank(_) => {}
+            match &mut self.state {
+                QueueState::Idle | QueueState::WaitingForEstimatedVBlank { .. } => {}
 
                 // A redraw is already queued.
-                QueueState::Queued(_) | QueueState::WaitingForEstimatedVBlankAndQueued { .. } => {
+                QueueState::Queued { pending_syncs, .. }
+                | QueueState::WaitingForEstimatedVBlankAndQueued { pending_syncs, .. } => {
+                    pending_syncs.extend(syncs);
                     return;
                 }
                 _ => unreachable!(),
@@ -854,34 +923,48 @@ impl SurfaceThreadState {
                 if let Err(err) = state.redraw(estimated_presentation) {
                     let name = state.output.name();
                     warn!(?name, "Failed to submit rendering: {:?}", err);
-                    state.queue_redraw(true);
+                    state.queue_redraw(true, Vec::new());
                 }
                 return TimeoutAction::Drop;
             })
             .expect("Failed to schedule render");
 
-        match &self.state {
+        match &mut self.state {
             QueueState::Idle => {
-                self.state = QueueState::Queued(token);
+                self.state = QueueState::Queued {
+                    queued_render: token,
+                    pending_syncs: syncs,
+                };
             }
-            QueueState::WaitingForEstimatedVBlank(estimated_vblank) => {
+            QueueState::WaitingForEstimatedVBlank { estimated_vblank } => {
                 self.state = QueueState::WaitingForEstimatedVBlankAndQueued {
                     estimated_vblank: estimated_vblank.clone(),
                     queued_render: token,
+                    pending_syncs: syncs,
                 };
             }
-            QueueState::Queued(old_token) if force => {
-                self.loop_handle.remove(*old_token);
-                self.state = QueueState::Queued(token);
+            QueueState::Queued {
+                queued_render,
+                pending_syncs,
+            } if force => {
+                self.loop_handle.remove(*queued_render);
+                syncs.extend(pending_syncs.drain(..));
+                self.state = QueueState::Queued {
+                    queued_render: token,
+                    pending_syncs: syncs,
+                };
             }
             QueueState::WaitingForEstimatedVBlankAndQueued {
                 estimated_vblank,
                 queued_render,
+                pending_syncs,
             } if force => {
                 self.loop_handle.remove(*queued_render);
+                syncs.extend(pending_syncs.drain(..));
                 self.state = QueueState::WaitingForEstimatedVBlankAndQueued {
                     estimated_vblank: estimated_vblank.clone(),
                     queued_render: token,
+                    pending_syncs: syncs,
                 };
             }
             _ => unreachable!(),
@@ -1278,21 +1361,34 @@ impl SurfaceThreadState {
                         }
 
                         if x.is_ok() {
-                            let new_state = QueueState::WaitingForVBlank {
-                                redraw_needed: false,
-                            };
-                            match mem::replace(&mut self.state, new_state) {
+                            match &mut self.state {
                                 QueueState::Idle => unreachable!(),
-                                QueueState::Queued(_) => (),
+                                QueueState::Queued { pending_syncs, .. } => {
+                                    self.state = QueueState::WaitingForVBlank {
+                                        redraw_needed: false,
+                                        pending_syncs: std::mem::take(pending_syncs),
+                                    };
+                                }
                                 QueueState::WaitingForVBlank { .. } => unreachable!(),
-                                QueueState::WaitingForEstimatedVBlank(estimated_vblank)
-                                | QueueState::WaitingForEstimatedVBlankAndQueued {
+                                QueueState::WaitingForEstimatedVBlank { estimated_vblank } => {
+                                    self.loop_handle.remove(*estimated_vblank);
+                                    self.state = QueueState::WaitingForVBlank {
+                                        redraw_needed: false,
+                                        pending_syncs: Vec::new(),
+                                    };
+                                }
+                                QueueState::WaitingForEstimatedVBlankAndQueued {
                                     estimated_vblank,
+                                    pending_syncs,
                                     ..
                                 } => {
-                                    self.loop_handle.remove(estimated_vblank);
+                                    self.loop_handle.remove(*estimated_vblank);
+                                    self.state = QueueState::WaitingForVBlank {
+                                        redraw_needed: false,
+                                        pending_syncs: std::mem::take(pending_syncs),
+                                    };
                                 }
-                            };
+                            }
 
                             if self.mirroring.is_none() {
                                 self.frame_callback_seq = self.frame_callback_seq.wrapping_add(1);
@@ -1329,14 +1425,25 @@ impl SurfaceThreadState {
     fn queue_estimated_vblank(&mut self, target_presentation_time: Duration) {
         match mem::take(&mut self.state) {
             QueueState::Idle => unreachable!(),
-            QueueState::Queued(_) => (),
+            QueueState::Queued { pending_syncs, .. } => {
+                for sync in pending_syncs {
+                    let _ = sync.send(());
+                }
+            }
             QueueState::WaitingForVBlank { .. } => unreachable!(),
-            QueueState::WaitingForEstimatedVBlank(token)
-            | QueueState::WaitingForEstimatedVBlankAndQueued {
-                estimated_vblank: token,
+            QueueState::WaitingForEstimatedVBlank { estimated_vblank } => {
+                self.state = QueueState::WaitingForEstimatedVBlank { estimated_vblank };
+                return;
+            }
+            QueueState::WaitingForEstimatedVBlankAndQueued {
+                estimated_vblank,
+                pending_syncs,
                 ..
             } => {
-                self.state = QueueState::WaitingForEstimatedVBlank(token);
+                for sync in pending_syncs {
+                    let _ = sync.send(());
+                }
+                self.state = QueueState::WaitingForEstimatedVBlank { estimated_vblank };
                 return;
             }
         }
@@ -1360,7 +1467,9 @@ impl SurfaceThreadState {
                 TimeoutAction::Drop
             })
             .unwrap();
-        self.state = QueueState::WaitingForEstimatedVBlank(token);
+        self.state = QueueState::WaitingForEstimatedVBlank {
+            estimated_vblank: token,
+        };
     }
 
     fn update_mirroring(&mut self, mirroring_output: Option<Output>) {
