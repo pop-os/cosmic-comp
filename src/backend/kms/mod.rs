@@ -35,7 +35,8 @@ use std::{
     borrow::BorrowMut,
     collections::{HashMap, HashSet},
     path::Path,
-    sync::{atomic::AtomicBool, Arc, RwLock},
+    sync::{atomic::AtomicBool, mpsc::sync_channel, Arc, RwLock},
+    time::Duration,
 };
 
 mod device;
@@ -530,6 +531,17 @@ impl KmsState {
 
         let mut all_outputs = Vec::new();
         for device in self.drm_devices.values_mut() {
+            // we want to lower the resource usage to make sure we can modeset and enable new outputs
+            let mut receivers = Vec::new();
+            for surface in device.surfaces.values_mut() {
+                let (tx, rx) = sync_channel(1);
+                surface.set_direct_scanout(false, tx);
+                receivers.push(rx);
+            }
+            for rx in receivers {
+                let _ = rx.recv_timeout(Duration::from_millis(100));
+            }
+
             // we only want outputs exposed to wayland - not leased ones
             // but that is also not all surface, because that doesn't contain all detected, but unmapped outputs
             let outputs = device
@@ -690,6 +702,12 @@ impl KmsState {
                         w += output.config().transformed_size().w as u32;
                     }
                     all_outputs.push(output);
+                }
+            }
+
+            if !test_only && device.active_leases.is_empty() {
+                for surface in device.surfaces.values_mut() {
+                    surface.set_direct_scanout(true, sync_channel(0).0);
                 }
             }
 
