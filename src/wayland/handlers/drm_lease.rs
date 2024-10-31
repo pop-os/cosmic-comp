@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::{sync::mpsc::sync_channel, time::Duration};
+
 use crate::state::State;
 use smithay::{
     backend::drm::DrmNode,
@@ -79,6 +81,17 @@ impl DrmLeaseHandler for State {
 
     fn new_active_lease(&mut self, node: DrmNode, lease: DrmLease) {
         if let Some(backend) = self.backend.kms().drm_devices.get_mut(&node) {
+            if backend.active_leases.is_empty() {
+                let mut receivers = Vec::new();
+                for surface in backend.surfaces.values_mut() {
+                    let (tx, rx) = sync_channel(1);
+                    surface.set_direct_scanout(false, tx);
+                    receivers.push(rx);
+                }
+                for rx in receivers {
+                    let _ = rx.recv_timeout(Duration::from_millis(100));
+                }
+            }
             backend.active_leases.push(lease);
         }
         // else the backend is gone, drop the lease
@@ -87,6 +100,11 @@ impl DrmLeaseHandler for State {
     fn lease_destroyed(&mut self, node: DrmNode, lease: u32) {
         if let Some(backend) = self.backend.kms().drm_devices.get_mut(&node) {
             backend.active_leases.retain(|l| l.id() != lease);
+            if backend.active_leases.is_empty() {
+                for surface in backend.surfaces.values_mut() {
+                    surface.set_direct_scanout(true, sync_channel(0).0);
+                }
+            }
         }
     }
 }
