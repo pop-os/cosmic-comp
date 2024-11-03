@@ -305,12 +305,10 @@ impl State {
                         .cloned()
                     {
                         let surface = device.surfaces.remove(&crtc).unwrap();
-                        // TODO: move up later outputs?
-                        w -= surface
-                            .output
-                            .current_mode()
-                            .map(|m| m.size.w as u32)
-                            .unwrap_or(0);
+                        if surface.output.mirroring().is_none() {
+                            // TODO: move up later outputs?
+                            w = w.saturating_sub(surface.output.config().transformed_size().w as u32);
+                        }
                     }
 
                     if !changes.added.iter().any(|(c, _)| c == &conn) {

@@ -21,10 +21,12 @@ use std::{borrow::Cow, mem, sync::Mutex};
 
 use tracing::{debug, trace};
 
+pub use self::order::{render_input_order, Stage};
 use self::target::{KeyboardFocusTarget, WindowGroup};
 
 use super::{grabs::SeatMoveGrabState, layout::floating::FloatingLayout, SeatExt};
 
+mod order;
 pub mod target;
 
 pub struct FocusStack<'a>(pub(super) Option<&'a IndexSet<CosmicMapped>>);
@@ -230,8 +232,8 @@ fn update_focus_state(
         if should_update_cursor && state.common.config.cosmic_conf.cursor_follows_focus {
             if target.is_some() {
                 //need to borrow mutably for surface under
-                let mut shell = state.common.shell.write().unwrap();
-                // get geometry of the target element
+                let shell = state.common.shell.read().unwrap();
+                // get the top left corner of the target element
                 let geometry = shell.focused_geometry(target.unwrap());
                 if let Some(geometry) = geometry {
                     // get the center of the target element
@@ -245,10 +247,9 @@ fn update_focus_state(
                         .cloned()
                         .unwrap_or(seat.active_output());
 
-                    let focus = shell
-                        .surface_under(new_pos, &output)
+                    let focus = State::surface_under(new_pos, &output, &*shell)
                         .map(|(focus, loc)| (focus, loc.as_logical()));
-                    //drop here to avoid multiple mutable borrows
+                    //drop here to avoid multiple borrows
                     mem::drop(shell);
                     seat.get_pointer().unwrap().motion(
                         state,

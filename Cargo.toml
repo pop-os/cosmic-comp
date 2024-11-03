@@ -54,12 +54,14 @@ wayland-scanner = "0.31.1"
 xcursor = "0.3.3"
 xdg = "^2.1"
 xdg-user = "0.2.1"
-xkbcommon = "0.7"
+xkbcommon = "0.8"
 zbus = "4.4.0"
 profiling = { version = "1.0" }
 rustix = { version = "0.38.32", features = ["process"] }
 smallvec = "1.13.2"
 rand = "0.8.5"
+reis = { version = "0.4", features = ["calloop"] }
+drm-ffi = "0.8.0"
 
 [dependencies.id_tree]
 branch = "feature/copy_clone"
@@ -117,4 +119,4 @@ inherits = "release"
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/smithay//smithay", rev = "df79eeb" }
+smithay = { git = "https://github.com/smithay//smithay", rev = "05c49f7" }

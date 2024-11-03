@@ -24,7 +24,7 @@ where
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
-    Workspace(RelocateRenderElement<WorkspaceRenderElement<R>>),
+    Workspace(RelocateRenderElement<CropRenderElement<WorkspaceRenderElement<R>>>),
     Cursor(RelocateRenderElement<CursorRenderElement<R>>),
     Dnd(WaylandSurfaceRenderElement<R>),
     MoveGrab(CosmicMappedRenderElement<R>),
@@ -266,13 +266,13 @@ where
     }
 }
 
-impl<R> From<WorkspaceRenderElement<R>> for CosmicElement<R>
+impl<R> From<CropRenderElement<WorkspaceRenderElement<R>>> for CosmicElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
-    fn from(elem: WorkspaceRenderElement<R>) -> Self {
+    fn from(elem: CropRenderElement<WorkspaceRenderElement<R>>) -> Self {
         Self::Workspace(RelocateRenderElement::from_element(
             elem,
             (0, 0),

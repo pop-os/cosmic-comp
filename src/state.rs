@@ -12,9 +12,11 @@ use crate::{
     shell::{grabs::SeatMoveGrabState, CosmicSurface, SeatExt, Shell},
     utils::prelude::OutputExt,
     wayland::protocols::{
+        atspi::AtspiState,
         drm::WlDrmState,
         image_source::ImageSourceState,
         output_configuration::OutputConfigurationState,
+        output_power::OutputPowerState,
         screencopy::ScreencopyState,
         toplevel_info::ToplevelInfoState,
         toplevel_management::{ManagementCapabilities, ToplevelManagementState},
@@ -198,6 +200,7 @@ pub struct Common {
     pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
     pub output_state: OutputManagerState,
     pub output_configuration_state: OutputConfigurationState<State>,
+    pub output_power_state: OutputPowerState,
     pub presentation_state: PresentationState,
     pub primary_selection_state: PrimarySelectionState,
     pub data_control_state: Option<DataControlState>,
@@ -227,6 +230,9 @@ pub struct Common {
     pub xwayland_state: Option<XWaylandState>,
     pub xwayland_shell_state: XWaylandShellState,
     pub pointer_focus_state: Option<PointerFocusState>,
+
+    pub atspi_state: AtspiState,
+    pub atspi_ei: crate::wayland::handlers::atspi::AtspiEiState,
 }
 
 #[derive(Debug)]
@@ -487,6 +493,7 @@ impl State {
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<Self>(dh);
         let output_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
         let output_configuration_state = OutputConfigurationState::new(dh, client_is_privileged);
+        let output_power_state = OutputPowerState::new::<Self, _>(dh, client_is_privileged);
         let presentation_state = PresentationState::new::<Self>(dh, clock.id() as u32);
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
         let image_source_state = ImageSourceState::new::<Self, _>(dh, client_is_privileged);
@@ -556,6 +563,9 @@ impl State {
             tracing::warn!(?err, "Failed to initialize dbus handlers");
         }
 
+        // TODO: Restrict to only specific client?
+        let atspi_state = AtspiState::new::<State, _>(dh, client_is_privileged);
+
         State {
             common: Common {
                 config,
@@ -593,6 +603,7 @@ impl State {
                 keyboard_shortcuts_inhibit_state,
                 output_state,
                 output_configuration_state,
+                output_power_state,
                 presentation_state,
                 primary_selection_state,
                 data_control_state,
@@ -611,6 +622,9 @@ impl State {
                 xwayland_state: None,
                 xwayland_shell_state,
                 pointer_focus_state: None,
+
+                atspi_state,
+                atspi_ei: Default::default(),
             },
             backend: BackendData::Unset,
             ready: Once::new(),
