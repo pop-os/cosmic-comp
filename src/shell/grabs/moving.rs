@@ -145,6 +145,7 @@ impl MoveGrabState {
         };
 
         let gaps = (theme.gaps.0 as i32, theme.gaps.1 as i32);
+        let thickness = self.indicator_thickness.max(1);
 
         let snapping_indicator = match &self.snapping_zone {
             Some(t) if &self.cursor_output == output => {
@@ -155,7 +156,7 @@ impl MoveGrabState {
                         renderer,
                         Key::Window(Usage::SnappingIndicator, self.window.key()),
                         overlay_geometry,
-                        3,
+                        thickness,
                         theme.radius_s()[0] as u8, // TODO: Fix once shaders support 4 corner radii customization
                         1.0,
                         output_scale.x,
