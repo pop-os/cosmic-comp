@@ -18,6 +18,16 @@ pub trait AtspiHandler {
         key_event_socket: UnixStream,
     );
     fn client_disconnected(&mut self, manager: &cosmic_atspi_manager_v1::CosmicAtspiManagerV1);
+    fn add_virtual_modifier(
+        &mut self,
+        manager: &cosmic_atspi_manager_v1::CosmicAtspiManagerV1,
+        key: Keycode,
+    );
+    fn remove_virtual_modifier(
+        &mut self,
+        manager: &cosmic_atspi_manager_v1::CosmicAtspiManagerV1,
+        key: Keycode,
+    );
     fn add_key_grab(
         &mut self,
         manager: &cosmic_atspi_manager_v1::CosmicAtspiManagerV1,
@@ -48,7 +58,7 @@ impl AtspiState {
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
         let global = dh.create_global::<D, cosmic_atspi_manager_v1::CosmicAtspiManagerV1, _>(
-            1,
+            2,
             AtspiGlobalData {
                 filter: Box::new(client_filter),
             },
@@ -133,6 +143,12 @@ where
             }
             cosmic_atspi_manager_v1::Request::UngrabKeyboard => {
                 state.ungrab_keyboard(manager);
+            }
+            cosmic_atspi_manager_v1::Request::AddVirtualModifier { key } => {
+                state.add_virtual_modifier(manager, (key + 8).into());
+            }
+            cosmic_atspi_manager_v1::Request::RemoveVirtualModifier { key } => {
+                state.remove_virtual_modifier(manager, (key + 8).into());
             }
             cosmic_atspi_manager_v1::Request::Destroy => {}
             _ => unreachable!(),
