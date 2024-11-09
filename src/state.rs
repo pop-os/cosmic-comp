@@ -11,6 +11,7 @@ use crate::{
     input::{gestures::GestureState, PointerFocusState},
     shell::{grabs::SeatMoveGrabState, CosmicSurface, SeatExt, Shell},
     utils::prelude::OutputExt,
+    wayland::handlers::screencopy::SessionHolder,
     wayland::protocols::{
         atspi::AtspiState,
         drm::WlDrmState,
@@ -108,6 +109,7 @@ use time::UtcOffset;
 
 use std::{
     cell::RefCell,
+    cmp::min,
     collections::HashSet,
     ffi::OsString,
     process::Child,
@@ -935,7 +937,17 @@ impl Common {
                 None
             }
         };
-        let throttle = Some(Duration::from_millis(995));
+        const THROTTLE: Option<Duration> = Some(Duration::from_millis(995));
+        const SCREENCOPY_THROTTLE: Option<Duration> = Some(Duration::from_nanos(16_666_666));
+
+        fn throttle(session_holder: &impl SessionHolder) -> Option<Duration> {
+            if session_holder.sessions().is_empty() && session_holder.cursor_sessions().is_empty() {
+                THROTTLE
+            } else {
+                SCREENCOPY_THROTTLE
+            }
+        }
+
         let shell = self.shell.read().unwrap();
 
         if let Some(session_lock) = shell.session_lock.as_ref() {
@@ -982,7 +994,7 @@ impl Common {
             if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {
                 if let Some(grab_state) = move_grab.lock().unwrap().as_ref() {
                     for (window, _) in grab_state.element().windows() {
-                        window.send_frame(output, time, throttle, should_send);
+                        window.send_frame(output, time, throttle(&window), should_send);
                     }
                 }
             }
@@ -997,21 +1009,21 @@ impl Common {
             .mapped()
             .for_each(|mapped| {
                 for (window, _) in mapped.windows() {
-                    window.send_frame(output, time, throttle, should_send);
+                    window.send_frame(output, time, throttle(&window), should_send);
                 }
             });
 
         let active = shell.active_space(output);
         active.mapped().for_each(|mapped| {
             for (window, _) in mapped.windows() {
-                window.send_frame(output, time, throttle, should_send);
+                window.send_frame(output, time, throttle(&window), should_send);
             }
         });
 
         // other (throttled) windows
         active.minimized_windows.iter().for_each(|m| {
             for (window, _) in m.window.windows() {
-                window.send_frame(output, time, throttle, |_, _| None);
+                window.send_frame(output, time, throttle(&window), |_, _| None);
             }
         });
         for space in shell
@@ -1021,25 +1033,26 @@ impl Common {
         {
             space.mapped().for_each(|mapped| {
                 for (window, _) in mapped.windows() {
+                    let throttle = min(throttle(space), throttle(&window));
                     window.send_frame(output, time, throttle, |_, _| None);
                 }
             });
             space.minimized_windows.iter().for_each(|m| {
                 for (window, _) in m.window.windows() {
-                    window.send_frame(output, time, throttle, |_, _| None);
+                    window.send_frame(output, time, throttle(&window), |_, _| None);
                 }
             })
         }
 
         shell.override_redirect_windows.iter().for_each(|or| {
             if let Some(wl_surface) = or.wl_surface() {
-                send_frames_surface_tree(&wl_surface, output, time, throttle, should_send);
+                send_frames_surface_tree(&wl_surface, output, time, THROTTLE, should_send);
             }
         });
 
         let map = smithay::desktop::layer_map_for_output(output);
         for layer_surface in map.layers() {
-            layer_surface.send_frame(output, time, throttle, should_send);
+            layer_surface.send_frame(output, time, THROTTLE, should_send);
         }
     }
 }
