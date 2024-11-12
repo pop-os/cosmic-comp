@@ -358,6 +358,9 @@ impl BackendData {
             self.schedule_render(&output);
         }
 
+        // Update layout for changes in resolution, scale, orientation
+        shell.workspaces.recalculate();
+
         loop_handle.insert_idle(|state| state.common.update_xwayland_scale());
 
         Ok(())
