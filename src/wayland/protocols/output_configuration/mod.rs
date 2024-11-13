@@ -203,12 +203,22 @@ where
             .collect::<Vec<_>>();
 
         for output in new_outputs {
-            output.user_data().insert_if_missing(|| {
+            let added = output.user_data().insert_if_missing(|| {
                 OutputState::new(OutputStateInner {
                     enabled: true,
                     global: None,
                 })
             });
+            if !added {
+                // If head was previous added, enable it again
+                let mut inner = output
+                    .user_data()
+                    .get::<OutputState>()
+                    .unwrap()
+                    .lock()
+                    .unwrap();
+                inner.enabled = true;
+            }
             self.outputs.push(output.clone());
         }
     }
@@ -219,8 +229,7 @@ where
                 self.removed_outputs.push(output.clone());
                 if let Some(inner) = output.user_data().get::<OutputState>() {
                     let mut inner = inner.lock().unwrap();
-                    // if it gets re-added it should start with being enabled and no global
-                    inner.enabled = true;
+                    inner.enabled = false;
                     if let Some(global) = inner.global.take() {
                         self.dh.remove_global::<D>(global);
                     }
