@@ -1205,13 +1205,23 @@ impl SurfaceThreadState {
                                     .into_iter()
                                     .flatten();
 
+                                // If the screen is rotated, we must convert damage to match output.
+                                let adjusted = damage.iter().copied().map(|mut d| {
+                                    d.size = d
+                                        .size
+                                        .to_logical(1)
+                                        .to_buffer(1, output_transform)
+                                        .to_logical(1, Transform::Normal)
+                                        .to_physical(1);
+                                    d
+                                });
                                 match frame_result
                                     .blit_frame_result(
                                         output_size,
                                         output_transform,
                                         output_scale,
                                         &mut renderer,
-                                        damage.iter().copied(),
+                                        adjusted,
                                         filter,
                                     )
                                     .map_err(|err| match err {
