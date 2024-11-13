@@ -27,6 +27,13 @@ use std::{convert::TryFrom, sync::Mutex};
 
 mod handlers;
 
+pub fn head_is_enabled(output: &Output) -> bool {
+    output
+        .user_data()
+        .get::<OutputState>()
+        .map_or(false, |inner| inner.lock().unwrap().enabled)
+}
+
 #[derive(Debug)]
 pub struct OutputConfigurationState<D> {
     outputs: Vec<Output>,
