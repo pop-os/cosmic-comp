@@ -38,7 +38,7 @@ use smithay::{
         renderer::{
             element::{
                 default_primary_scanout_output_compare, utils::select_dmabuf_feedback,
-                RenderElementStates,
+                RenderElementState, RenderElementStates,
             },
             ImportDma,
         },
@@ -649,6 +649,19 @@ impl State {
     }
 }
 
+fn primary_scanout_output_compare<'a>(
+    current_output: &'a Output,
+    current_state: &RenderElementState,
+    next_output: &'a Output,
+    next_state: &RenderElementState,
+) -> &'a Output {
+    if !crate::wayland::protocols::output_configuration::head_is_enabled(current_output) {
+        return next_output;
+    }
+
+    default_primary_scanout_output_compare(current_output, current_state, next_output, next_state)
+}
+
 impl Common {
     pub fn update_primary_output(
         &self,
@@ -662,7 +675,7 @@ impl Common {
                 output,
                 states,
                 render_element_states,
-                default_primary_scanout_output_compare,
+                primary_scanout_output_compare,
             );
             if let Some(output) = primary_scanout_output {
                 with_fractional_scale(states, |fraction_scale| {
