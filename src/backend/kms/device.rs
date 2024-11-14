@@ -307,7 +307,9 @@ impl State {
                         let surface = device.surfaces.remove(&crtc).unwrap();
                         if surface.output.mirroring().is_none() {
                             // TODO: move up later outputs?
-                            w = w.saturating_sub(surface.output.config().transformed_size().w as u32);
+                            w = w.saturating_sub(
+                                surface.output.config().transformed_size().w as u32,
+                            );
                         }
                     }
 

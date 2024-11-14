@@ -200,10 +200,7 @@ where
                         .instances
                         .push(instance);
                 } else {
-                    let _ = data_init.init(
-                        cosmic_toplevel,
-                        ToplevelHandleStateInner::empty(),
-                    );
+                    let _ = data_init.init(cosmic_toplevel, ToplevelHandleStateInner::empty());
                     error!(?foreign_toplevel, "Toplevel for foreign-toplevel-list not registered for cosmic-toplevel-info.");
                 }
             }

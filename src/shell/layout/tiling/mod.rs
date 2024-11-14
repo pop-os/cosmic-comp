@@ -3104,8 +3104,11 @@ impl TilingLayout {
 
         None
     }
-    
-    pub fn popup_element_under(&self, location_f64: Point<f64, Local>) -> Option<KeyboardFocusTarget> {
+
+    pub fn popup_element_under(
+        &self,
+        location_f64: Point<f64, Local>,
+    ) -> Option<KeyboardFocusTarget> {
         let location = location_f64.to_i32_round();
 
         for (mapped, geo) in self.mapped() {
@@ -3113,18 +3116,24 @@ impl TilingLayout {
                 continue;
             }
 
-            if mapped.focus_under(
-                (location_f64 - geo.loc.to_f64()).as_logical() + mapped.geometry().loc.to_f64(),
-                WindowSurfaceType::POPUP | WindowSurfaceType::SUBSURFACE,
-            ).is_some() {
+            if mapped
+                .focus_under(
+                    (location_f64 - geo.loc.to_f64()).as_logical() + mapped.geometry().loc.to_f64(),
+                    WindowSurfaceType::POPUP | WindowSurfaceType::SUBSURFACE,
+                )
+                .is_some()
+            {
                 return Some(mapped.clone().into());
             }
         }
 
         None
     }
-    
-    pub fn toplevel_element_under(&self, location_f64: Point<f64, Local>) -> Option<KeyboardFocusTarget> {
+
+    pub fn toplevel_element_under(
+        &self,
+        location_f64: Point<f64, Local>,
+    ) -> Option<KeyboardFocusTarget> {
         let location = location_f64.to_i32_round();
 
         for (mapped, geo) in self.mapped() {
@@ -3132,10 +3141,13 @@ impl TilingLayout {
                 continue;
             }
 
-            if mapped.focus_under(
-                (location_f64 - geo.loc.to_f64()).as_logical() + mapped.geometry().loc.to_f64(),
-                WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
-            ).is_some() {
+            if mapped
+                .focus_under(
+                    (location_f64 - geo.loc.to_f64()).as_logical() + mapped.geometry().loc.to_f64(),
+                    WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+                )
+                .is_some()
+            {
                 return Some(mapped.clone().into());
             }
         }
