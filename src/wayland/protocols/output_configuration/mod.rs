@@ -6,7 +6,7 @@ use cosmic_protocols::output_management::v1::server::{
     zcosmic_output_head_v1::ZcosmicOutputHeadV1, zcosmic_output_manager_v1::ZcosmicOutputManagerV1,
 };
 use smithay::{
-    output::{Mode, Output},
+    output::{Mode, Output, WeakOutput},
     reexports::{
         wayland_protocols_wlr::output_management::v1::server::{
             zwlr_output_configuration_head_v1::{self, ZwlrOutputConfigurationHeadV1},
@@ -154,7 +154,7 @@ where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + GlobalDispatch<WlOutput, WlOutputData>
         + Dispatch<ZwlrOutputManagerV1, ()>
-        + Dispatch<ZwlrOutputHeadV1, Output>
+        + Dispatch<ZwlrOutputHeadV1, WeakOutput>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration>
@@ -312,7 +312,7 @@ fn send_head_to_client<D>(dh: &DisplayHandle, mngr: &mut OutputMngrInstance, out
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, ()>
-        + Dispatch<ZwlrOutputHeadV1, Output>
+        + Dispatch<ZwlrOutputHeadV1, WeakOutput>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + OutputConfigurationHandler
@@ -330,7 +330,7 @@ where
                 if let Ok(head) = client.create_resource::<ZwlrOutputHeadV1, _, D>(
                     dh,
                     mngr.obj.version(),
-                    output.clone(),
+                    output.downgrade(),
                 ) {
                     mngr.obj.head(&head);
                     let data = OutputHeadInstance {
@@ -468,7 +468,7 @@ macro_rules! delegate_output_configuration {
             smithay::reexports::wayland_protocols_wlr::output_management::v1::server::zwlr_output_manager_v1::ZwlrOutputManagerV1: ()
         ] => $crate::wayland::protocols::output_configuration::OutputConfigurationState<Self>);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            smithay::reexports::wayland_protocols_wlr::output_management::v1::server::zwlr_output_head_v1::ZwlrOutputHeadV1: smithay::output::Output
+            smithay::reexports::wayland_protocols_wlr::output_management::v1::server::zwlr_output_head_v1::ZwlrOutputHeadV1: smithay::output::WeakOutput
         ] => $crate::wayland::protocols::output_configuration::OutputConfigurationState<Self>);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
             smithay::reexports::wayland_protocols_wlr::output_management::v1::server::zwlr_output_mode_v1::ZwlrOutputModeV1: smithay::output::Mode

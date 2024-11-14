@@ -2,7 +2,7 @@
 
 use cosmic_protocols::output_management::v1::server::zcosmic_output_configuration_v1;
 use smithay::{
-    output::{Mode, Output},
+    output::{Mode, Output, WeakOutput},
     reexports::{
         wayland_protocols_wlr::output_management::v1::server::{
             zwlr_output_configuration_head_v1::{self, ZwlrOutputConfigurationHeadV1},
@@ -26,7 +26,7 @@ impl<D> GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData, D> for OutputC
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, ()>
-        + Dispatch<ZwlrOutputHeadV1, Output>
+        + Dispatch<ZwlrOutputHeadV1, WeakOutput>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration>
@@ -63,7 +63,7 @@ impl<D> Dispatch<ZwlrOutputManagerV1, (), D> for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, ()>
-        + Dispatch<ZwlrOutputHeadV1, Output>
+        + Dispatch<ZwlrOutputHeadV1, WeakOutput>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration>
@@ -116,11 +116,11 @@ where
     }
 }
 
-impl<D> Dispatch<ZwlrOutputHeadV1, Output, D> for OutputConfigurationState<D>
+impl<D> Dispatch<ZwlrOutputHeadV1, WeakOutput, D> for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, ()>
-        + Dispatch<ZwlrOutputHeadV1, Output>
+        + Dispatch<ZwlrOutputHeadV1, WeakOutput>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration>
@@ -132,7 +132,7 @@ where
         _client: &Client,
         obj: &ZwlrOutputHeadV1,
         request: zwlr_output_head_v1::Request,
-        _data: &Output,
+        _data: &WeakOutput,
         _dh: &DisplayHandle,
         _data_init: &mut DataInit<'_, D>,
     ) {
@@ -146,7 +146,7 @@ where
         }
     }
 
-    fn destroyed(state: &mut D, _client: ClientId, obj: &ZwlrOutputHeadV1, _data: &Output) {
+    fn destroyed(state: &mut D, _client: ClientId, obj: &ZwlrOutputHeadV1, _data: &WeakOutput) {
         for instance in &mut state.output_configuration_state().instances {
             instance.heads.retain(|h| &h.obj != obj);
         }
@@ -157,7 +157,7 @@ impl<D> Dispatch<ZwlrOutputModeV1, Mode, D> for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, ()>
-        + Dispatch<ZwlrOutputHeadV1, Output>
+        + Dispatch<ZwlrOutputHeadV1, WeakOutput>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration>
@@ -191,7 +191,7 @@ impl<D> Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration, D> for OutputC
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, ()>
-        + Dispatch<ZwlrOutputHeadV1, Output>
+        + Dispatch<ZwlrOutputHeadV1, WeakOutput>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration>
@@ -382,7 +382,7 @@ impl<D> Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration, D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, ()>
-        + Dispatch<ZwlrOutputHeadV1, Output>
+        + Dispatch<ZwlrOutputHeadV1, WeakOutput>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration>
