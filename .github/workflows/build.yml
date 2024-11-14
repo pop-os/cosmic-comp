@@ -25,3 +25,4 @@ jobs:
     - run: cargo check --no-default-features
     - run: cargo check --features debug
     - run: cargo check --features profile-with-tracy
+    - run: cargo fmt --all -- --check
