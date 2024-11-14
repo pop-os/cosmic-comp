@@ -1960,13 +1960,14 @@ impl Shell {
         self.pending_windows.retain(|(s, _, _)| s.alive());
     }
 
-    pub fn update_pointer_position(&mut self, location: Point<f64, Local>, output: &Output) { 
+    pub fn update_pointer_position(&mut self, location: Point<f64, Local>, output: &Output) {
         for (o, set) in self.workspaces.sets.iter_mut() {
             if o == output {
                 set.sticky_layer.update_pointer_position(Some(location));
                 for (i, workspace) in set.workspaces.iter_mut().enumerate() {
                     if i == set.active {
-                        workspace.update_pointer_position(Some(location), self.overview_mode.clone());
+                        workspace
+                            .update_pointer_position(Some(location), self.overview_mode.clone());
                     } else {
                         workspace.update_pointer_position(None, self.overview_mode.clone());
                     }

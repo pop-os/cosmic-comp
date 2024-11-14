@@ -732,41 +732,60 @@ impl FloatingLayout {
         self.space
             .elements()
             .rev()
-            .map(|e| (e, self.space.element_location(e).unwrap() - e.geometry().loc))
+            .map(|e| {
+                (
+                    e,
+                    self.space.element_location(e).unwrap() - e.geometry().loc,
+                )
+            })
             .filter(|(e, render_location)| {
                 let mut bbox = e.bbox();
                 bbox.loc += *render_location;
                 bbox.to_f64().contains(location.as_logical())
             })
             .find_map(|(e, render_location)| {
-                let render_location = render_location
-                    .as_local()
-                    .to_f64();
+                let render_location = render_location.as_local().to_f64();
                 let point = location - render_location;
-                if e.focus_under(point.as_logical(), WindowSurfaceType::POPUP | WindowSurfaceType::SUBSURFACE).is_some() {
+                if e.focus_under(
+                    point.as_logical(),
+                    WindowSurfaceType::POPUP | WindowSurfaceType::SUBSURFACE,
+                )
+                .is_some()
+                {
                     Some(e.clone().into())
                 } else {
                     None
                 }
             })
     }
-    
-    pub fn toplevel_element_under(&self, location: Point<f64, Local>) -> Option<KeyboardFocusTarget> {
+
+    pub fn toplevel_element_under(
+        &self,
+        location: Point<f64, Local>,
+    ) -> Option<KeyboardFocusTarget> {
         self.space
             .elements()
             .rev()
-            .map(|e| (e, self.space.element_location(e).unwrap() - e.geometry().loc))
+            .map(|e| {
+                (
+                    e,
+                    self.space.element_location(e).unwrap() - e.geometry().loc,
+                )
+            })
             .filter(|(e, render_location)| {
                 let mut bbox = e.bbox();
                 bbox.loc += *render_location;
                 bbox.to_f64().contains(location.as_logical())
             })
             .find_map(|(e, render_location)| {
-                let render_location = render_location
-                    .as_local()
-                    .to_f64();
+                let render_location = render_location.as_local().to_f64();
                 let point = location - render_location;
-                if e.focus_under(point.as_logical(), WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE).is_some() {
+                if e.focus_under(
+                    point.as_logical(),
+                    WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+                )
+                .is_some()
+                {
                     Some(e.clone().into())
                 } else {
                     None
@@ -781,16 +800,19 @@ impl FloatingLayout {
         self.space
             .elements()
             .rev()
-            .map(|e| (e, self.space.element_location(e).unwrap() - e.geometry().loc))
+            .map(|e| {
+                (
+                    e,
+                    self.space.element_location(e).unwrap() - e.geometry().loc,
+                )
+            })
             .filter(|(e, render_location)| {
                 let mut bbox = e.bbox();
                 bbox.loc += *render_location;
                 bbox.to_f64().contains(location.as_logical())
             })
             .find_map(|(e, render_location)| {
-                let render_location = render_location
-                    .as_local()
-                    .to_f64();
+                let render_location = render_location.as_local().to_f64();
                 let point = location - render_location;
                 e.focus_under(
                     point.as_logical(),
@@ -809,7 +831,12 @@ impl FloatingLayout {
         self.space
             .elements()
             .rev()
-            .map(|e| (e, self.space.element_location(e).unwrap() - e.geometry().loc))
+            .map(|e| {
+                (
+                    e,
+                    self.space.element_location(e).unwrap() - e.geometry().loc,
+                )
+            })
             .filter(|(e, render_location)| {
                 let mut bbox = e.bbox();
                 bbox.loc += *render_location;
@@ -823,10 +850,7 @@ impl FloatingLayout {
                     WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
                 )
                 .map(|(surface, surface_offset)| {
-                    (
-                        surface,
-                        render_location + surface_offset.as_local(),
-                    )
+                    (surface, render_location + surface_offset.as_local())
                 })
             })
     }
