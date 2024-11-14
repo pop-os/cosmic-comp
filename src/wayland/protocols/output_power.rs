@@ -58,7 +58,7 @@ impl OutputPowerState {
         let mut output_powers = mem::take(&mut state.output_power_state().output_powers);
         for (output_power, old_mode) in output_powers.iter_mut() {
             let data = output_power.data::<OutputPowerData>().unwrap();
-            if let Some(output) = data.output.as_ref().and_then(|o| o.upgrade()) {
+            if let Some(output) = data.output.upgrade() {
                 if let Some(on) = state.get_dpms(&output) {
                     let mode = output_power_mode(on);
                     if mode != *old_mode {
@@ -77,7 +77,7 @@ pub struct OutputPowerManagerGlobalData {
 }
 
 pub struct OutputPowerData {
-    output: Option<WeakOutput>,
+    output: WeakOutput,
 }
 
 impl<D> GlobalDispatch<ZwlrOutputPowerManagerV1, OutputPowerManagerGlobalData, D>
@@ -126,7 +126,7 @@ where
                 let output_power = data_init.init(
                     id,
                     OutputPowerData {
-                        output: output.as_ref().map(|o| o.downgrade()),
+                        output: output.as_ref().map(|o| o.downgrade()).unwrap_or_default(),
                     },
                 );
                 if let Some(on) = output.as_ref().and_then(|o| state.get_dpms(o)) {
@@ -161,7 +161,7 @@ where
     ) {
         match request {
             zwlr_output_power_v1::Request::SetMode { mode } => {
-                if let Some(output) = data.output.as_ref().and_then(|o| o.upgrade()) {
+                if let Some(output) = data.output.upgrade() {
                     let on = match mode {
                         WEnum::Value(zwlr_output_power_v1::Mode::On) => true,
                         WEnum::Value(zwlr_output_power_v1::Mode::Off) => false,
@@ -176,11 +176,9 @@ where
                             state.output_power_state().output_powers.iter_mut()
                         {
                             let data = output_power.data::<OutputPowerData>().unwrap();
-                            if let Some(o) = data.output.as_ref() {
-                                if o == &output && mode != *old_mode {
-                                    output_power.mode(mode);
-                                    *old_mode = mode;
-                                }
+                            if data.output == output && mode != *old_mode {
+                                output_power.mode(mode);
+                                *old_mode = mode;
                             }
                         }
                     } else {
