@@ -4,7 +4,7 @@ use smithay::{output::Output, utils::Point};
 use tracing::{error, warn};
 
 use crate::{
-    config::{OutputConfig, OutputState},
+    config::{AdaptiveSync, OutputConfig, OutputState},
     state::State,
     wayland::protocols::output_configuration::{
         delegate_output_configuration, ModeConfiguration, OutputConfiguration,
@@ -120,7 +120,11 @@ impl State {
                         current_config.position = (position.x as u32, position.y as u32);
                     }
                     if let Some(vrr) = adaptive_sync {
-                        current_config.vrr = *vrr;
+                        current_config.vrr = if *vrr {
+                            AdaptiveSync::Force
+                        } else {
+                            AdaptiveSync::Disabled
+                        };
                     }
                     if let Some(mirror) = mirroring {
                         current_config.enabled = OutputState::Mirroring(mirror.name());

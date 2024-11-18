@@ -4,7 +4,7 @@ use smithay::{
 };
 
 pub use super::geometry::*;
-use crate::config::{OutputConfig, OutputState};
+use crate::config::{AdaptiveSync, OutputConfig, OutputState};
 pub use crate::shell::{SeatExt, Shell, Workspace};
 pub use crate::state::{Common, State};
 pub use crate::wayland::handlers::xdg_shell::popup::update_reactive_popups;
@@ -12,15 +12,15 @@ pub use crate::wayland::handlers::xdg_shell::popup::update_reactive_popups;
 use std::{
     cell::{Ref, RefCell, RefMut},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicU8, Ordering},
         Mutex,
     },
 };
 
 pub trait OutputExt {
     fn geometry(&self) -> Rectangle<i32, Global>;
-    fn adaptive_sync(&self) -> bool;
-    fn set_adaptive_sync(&self, vrr: bool);
+    fn adaptive_sync(&self) -> AdaptiveSync;
+    fn set_adaptive_sync(&self, vrr: AdaptiveSync);
     fn mirroring(&self) -> Option<Output>;
     fn set_mirroring(&self, output: Option<Output>);
 
@@ -29,7 +29,7 @@ pub trait OutputExt {
     fn config_mut(&self) -> RefMut<'_, OutputConfig>;
 }
 
-struct Vrr(AtomicBool);
+struct Vrr(AtomicU8);
 
 struct Mirroring(Mutex<Option<WeakOutput>>);
 
@@ -49,20 +49,27 @@ impl OutputExt for Output {
         .as_global()
     }
 
-    fn adaptive_sync(&self) -> bool {
+    fn adaptive_sync(&self) -> AdaptiveSync {
         self.user_data()
             .get::<Vrr>()
-            .map(|vrr| vrr.0.load(Ordering::SeqCst))
-            .unwrap_or(false)
+            .map(|vrr| match vrr.0.load(Ordering::SeqCst) {
+                2 => AdaptiveSync::Force,
+                1 => AdaptiveSync::Enabled,
+                _ => AdaptiveSync::Disabled,
+            })
+            .unwrap_or(AdaptiveSync::Disabled)
     }
-    fn set_adaptive_sync(&self, vrr: bool) {
+    fn set_adaptive_sync(&self, vrr: AdaptiveSync) {
         let user_data = self.user_data();
-        user_data.insert_if_missing_threadsafe(|| Vrr(AtomicBool::new(false)));
-        user_data
-            .get::<Vrr>()
-            .unwrap()
-            .0
-            .store(vrr, Ordering::SeqCst);
+        user_data.insert_if_missing_threadsafe(|| Vrr(AtomicU8::new(0)));
+        user_data.get::<Vrr>().unwrap().0.store(
+            match vrr {
+                AdaptiveSync::Disabled => 0,
+                AdaptiveSync::Enabled => 1,
+                AdaptiveSync::Force => 2,
+            },
+            Ordering::SeqCst,
+        );
     }
 
     fn mirroring(&self) -> Option<Output> {

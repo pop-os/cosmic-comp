@@ -5,6 +5,7 @@ use crate::{
         element::{CosmicElement, DamageElement},
         init_shaders, workspace_elements, CursorMode, ElementFilter, GlMultiRenderer, CLEAR_COLOR,
     },
+    config::AdaptiveSync,
     shell::Shell,
     state::SurfaceDmabufFeedback,
     utils::{prelude::*, quirks::workspace_overview_is_open},
@@ -27,7 +28,7 @@ use smithay::{
         },
         drm::{
             compositor::{BlitFrameResultError, DrmCompositor, FrameError, PrimaryPlaneElement},
-            DrmDeviceFd, DrmEventMetadata, DrmEventTime, DrmNode, DrmSurface,
+            DrmDeviceFd, DrmEventMetadata, DrmEventTime, DrmNode, DrmSurface, VrrSupport,
         },
         egl::EGLContext,
         renderer::{
@@ -104,7 +105,7 @@ static NVIDIA_LOGO: &'static [u8] = include_bytes!("../../../../resources/icons/
 #[derive(Debug)]
 pub struct Surface {
     pub(crate) connector: connector::Handle,
-    pub(super) crtc: crtc::Handle,
+    pub(super) _crtc: crtc::Handle,
     pub(crate) output: Output,
     known_nodes: HashSet<DrmNode>,
 
@@ -125,6 +126,7 @@ pub struct SurfaceThreadState {
     primary_node: DrmNode,
     target_node: DrmNode,
     active: Arc<AtomicBool>,
+    vrr_mode: AdaptiveSync,
     compositor: Option<GbmDrmCompositor>,
 
     state: QueueState,
@@ -225,7 +227,6 @@ pub enum ThreadCommand {
         surface: DrmSurface,
         gbm: GbmDevice<DrmDeviceFd>,
         cursor_size: Size<u32, BufferCoords>,
-        vrr: bool,
         result: SyncSender<Result<()>>,
     },
     NodeAdded {
@@ -240,6 +241,8 @@ pub enum ThreadCommand {
     VBlank(Option<DrmEventMetadata>),
     ScheduleRender,
     SetMode(Mode, SyncSender<Result<()>>),
+    AdaptiveSyncAvailable(SyncSender<Result<VrrSupport>>),
+    UseAdaptiveSync(AdaptiveSync),
     End,
     DpmsOff,
 }
@@ -345,7 +348,7 @@ impl Surface {
 
         Ok(Surface {
             connector,
-            crtc,
+            _crtc: crtc,
             output: output.clone(),
             known_nodes: HashSet::new(),
             active,
@@ -402,6 +405,25 @@ impl Surface {
         rx.recv().context("Surface thread died")?
     }
 
+    pub fn use_adaptive_sync(&mut self, vrr: AdaptiveSync) -> Result<bool> {
+        if vrr != AdaptiveSync::Disabled {
+            let (tx, rx) = std::sync::mpsc::sync_channel(1);
+            let _ = self
+                .thread_command
+                .send(ThreadCommand::AdaptiveSyncAvailable(tx));
+            match rx.recv().context("Surface thread died")?? {
+                VrrSupport::RequiresModeset if vrr == AdaptiveSync::Enabled => return Ok(false),
+                VrrSupport::NotSupported => return Ok(false),
+                _ => {}
+            };
+        }
+
+        let _ = self
+            .thread_command
+            .send(ThreadCommand::UseAdaptiveSync(vrr));
+        Ok(true)
+    }
+
     pub fn suspend(&mut self) {
         let _ = self.thread_command.send(ThreadCommand::Suspend);
     }
@@ -411,7 +433,6 @@ impl Surface {
         surface: DrmSurface,
         gbm: GbmDevice<DrmDeviceFd>,
         cursor_size: Size<u32, BufferCoords>,
-        vrr: bool,
     ) -> Result<()> {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         self.plane_formats = surface
@@ -432,7 +453,6 @@ impl Surface {
             surface,
             gbm,
             cursor_size,
-            vrr,
             result: tx,
         });
 
@@ -503,6 +523,7 @@ fn surface_thread(
         target_node,
         active,
         compositor: None,
+        vrr_mode: AdaptiveSync::Disabled,
 
         state: QueueState::Idle,
         timings: Timings::new(None, false),
@@ -529,10 +550,9 @@ fn surface_thread(
                 surface,
                 gbm,
                 cursor_size,
-                vrr,
                 result,
             }) => {
-                let _ = result.send(state.resume(surface, gbm, cursor_size, vrr));
+                let _ = result.send(state.resume(surface, gbm, cursor_size));
             }
             Event::Msg(ThreadCommand::NodeAdded { node, gbm, egl }) => {
                 if let Err(err) = state.node_added(node, gbm, egl) {
@@ -561,6 +581,22 @@ fn surface_thread(
                 } else {
                     let _ = result.send(Err(anyhow::anyhow!("Set mode with inactive surface")));
                 }
+            }
+            Event::Msg(ThreadCommand::AdaptiveSyncAvailable(result)) => {
+                if let Some(compositor) = state.compositor.as_mut() {
+                    let _ = result.send(
+                        compositor
+                            .vrr_supported(
+                                compositor.pending_connectors().into_iter().next().unwrap(),
+                            )
+                            .map_err(Into::into),
+                    );
+                } else {
+                    let _ = result.send(Err(anyhow::anyhow!("Set vrr with inactive surface")));
+                }
+            }
+            Event::Msg(ThreadCommand::UseAdaptiveSync(vrr)) => {
+                state.vrr_mode = vrr;
             }
             Event::Msg(ThreadCommand::DpmsOff) => {
                 if let Some(compositor) = state.compositor.as_mut() {
@@ -623,7 +659,6 @@ impl SurfaceThreadState {
         surface: DrmSurface,
         gbm: GbmDevice<DrmDeviceFd>,
         cursor_size: Size<u32, BufferCoords>,
-        vrr: bool,
     ) -> Result<()> {
         let driver = surface.get_driver().ok();
         let mut planes = surface.planes().clone();
@@ -649,7 +684,6 @@ impl SurfaceThreadState {
             .set_refresh_interval(Some(Duration::from_secs_f64(
                 1_000.0 / drm_helpers::calculate_refresh_rate(surface.pending_mode()) as f64,
             )));
-        self.timings.set_vrr(vrr);
 
         match DrmCompositor::new(
             &self.output,
@@ -920,6 +954,11 @@ impl SurfaceThreadState {
 
         self.timings.start_render(&self.clock);
 
+        let mut vrr = match self.vrr_mode {
+            AdaptiveSync::Force => true,
+            _ => false,
+        };
+
         let mut elements = {
             let shell = self.shell.read().unwrap();
             let output = self.mirroring.as_ref().unwrap_or(&self.output);
@@ -929,6 +968,9 @@ impl SurfaceThreadState {
             let previous_workspace = previous_workspace
                 .zip(previous_idx)
                 .map(|((w, start), idx)| (w.handle, idx, start));
+            if self.vrr_mode == AdaptiveSync::Enabled {
+                vrr = workspace.get_fullscreen().is_some();
+            }
             let workspace = (workspace.handle, idx);
 
             std::mem::drop(shell);
@@ -958,6 +1000,7 @@ impl SurfaceThreadState {
                 anyhow::format_err!("Failed to accumulate elements for rendering: {:?}", err)
             })?
         };
+        self.timings.set_vrr(vrr);
         self.timings.elements_done(&self.clock);
 
         // we can't use the elements after `compositor.render_frame`,
@@ -1113,8 +1156,14 @@ impl SurfaceThreadState {
             .collect::<Vec<_>>();
 
             renderer = self.api.single_renderer(&self.target_node).unwrap();
+            if let Err(err) = compositor.use_vrr(false) {
+                warn!("Unable to set adaptive VRR state: {}", err);
+            }
             compositor.render_frame(&mut renderer, &elements, [0.0, 0.0, 0.0, 1.0])
         } else {
+            if let Err(err) = compositor.use_vrr(vrr) {
+                warn!("Unable to set adaptive VRR state: {}", err);
+            }
             compositor.render_frame(
                 &mut renderer,
                 &elements,

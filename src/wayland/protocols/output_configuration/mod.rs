@@ -441,11 +441,13 @@ where
         }
 
         if instance.obj.version() >= zwlr_output_head_v1::EVT_ADAPTIVE_SYNC_SINCE {
-            instance.obj.adaptive_sync(if output.adaptive_sync() {
-                zwlr_output_head_v1::AdaptiveSyncState::Enabled
-            } else {
-                zwlr_output_head_v1::AdaptiveSyncState::Disabled
-            });
+            instance
+                .obj
+                .adaptive_sync(if output.adaptive_sync() == AdaptiveSync::Disabled {
+                    zwlr_output_head_v1::AdaptiveSyncState::Disabled
+                } else {
+                    zwlr_output_head_v1::AdaptiveSyncState::Enabled
+                });
         }
     }
 
@@ -498,4 +500,4 @@ macro_rules! delegate_output_configuration {
 }
 pub(crate) use delegate_output_configuration;
 
-use crate::utils::prelude::OutputExt;
+use crate::{config::AdaptiveSync, utils::prelude::OutputExt};
