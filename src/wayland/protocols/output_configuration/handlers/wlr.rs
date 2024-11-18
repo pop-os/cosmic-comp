@@ -481,8 +481,8 @@ where
                 }
                 pending.adaptive_sync = Some(match state.into_result() {
                     Ok(state) => match state {
-                        zwlr_output_head_v1::AdaptiveSyncState::Enabled => true,
-                        _ => false,
+                        zwlr_output_head_v1::AdaptiveSyncState::Enabled => AdaptiveSync::Force,
+                        _ => AdaptiveSync::Disabled,
                     },
                     Err(err) => {
                         obj.post_error(

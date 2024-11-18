@@ -405,6 +405,14 @@ impl Surface {
         rx.recv().context("Surface thread died")?
     }
 
+    pub fn adaptive_sync_support(&self) -> Result<VrrSupport> {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let _ = self
+            .thread_command
+            .send(ThreadCommand::AdaptiveSyncAvailable(tx));
+        rx.recv().context("Surface thread died")?
+    }
+
     pub fn use_adaptive_sync(&mut self, vrr: AdaptiveSync) -> Result<bool> {
         if vrr != AdaptiveSync::Disabled {
             let (tx, rx) = std::sync::mpsc::sync_channel(1);

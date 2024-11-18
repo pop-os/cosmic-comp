@@ -1,4 +1,5 @@
 use smithay::{
+    backend::drm::VrrSupport as Support,
     output::{Output, WeakOutput},
     utils::{Rectangle, Transform},
 };
@@ -21,6 +22,8 @@ pub trait OutputExt {
     fn geometry(&self) -> Rectangle<i32, Global>;
     fn adaptive_sync(&self) -> AdaptiveSync;
     fn set_adaptive_sync(&self, vrr: AdaptiveSync);
+    fn adaptive_sync_support(&self) -> Option<Support>;
+    fn set_adaptive_sync_support(&self, vrr: Option<Support>);
     fn mirroring(&self) -> Option<Output>;
     fn set_mirroring(&self, output: Option<Output>);
 
@@ -30,7 +33,7 @@ pub trait OutputExt {
 }
 
 struct Vrr(AtomicU8);
-
+struct VrrSupport(AtomicU8);
 struct Mirroring(Mutex<Option<WeakOutput>>);
 
 impl OutputExt for Output {
@@ -67,6 +70,32 @@ impl OutputExt for Output {
                 AdaptiveSync::Disabled => 0,
                 AdaptiveSync::Enabled => 1,
                 AdaptiveSync::Force => 2,
+            },
+            Ordering::SeqCst,
+        );
+    }
+
+    fn adaptive_sync_support(&self) -> Option<Support> {
+        self.user_data()
+            .get::<VrrSupport>()
+            .map(|vrr| match vrr.0.load(Ordering::SeqCst) {
+                0 => None,
+                2 => Some(Support::RequiresModeset),
+                3 => Some(Support::Supported),
+                _ => Some(Support::NotSupported),
+            })
+            .flatten()
+    }
+
+    fn set_adaptive_sync_support(&self, vrr: Option<Support>) {
+        let user_data = self.user_data();
+        user_data.insert_if_missing_threadsafe(|| VrrSupport(AtomicU8::new(0)));
+        user_data.get::<VrrSupport>().unwrap().0.store(
+            match vrr {
+                None => 0,
+                Some(Support::NotSupported) => 1,
+                Some(Support::RequiresModeset) => 2,
+                Some(Support::Supported) => 3,
             },
             Ordering::SeqCst,
         );

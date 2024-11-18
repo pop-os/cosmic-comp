@@ -684,6 +684,9 @@ impl KmsState {
 
                         match surface.resume(drm_surface, gbm, cursor_size) {
                             Ok(_) => {
+                                surface.output.set_adaptive_sync_support(
+                                    surface.adaptive_sync_support().ok(),
+                                );
                                 if surface.use_adaptive_sync(vrr)? {
                                     surface.output.set_adaptive_sync(vrr);
                                 } else {
