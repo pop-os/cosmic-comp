@@ -10,6 +10,7 @@ use reis::{
 use smithay::{
     backend::input::{KeyState, Keycode},
     input::keyboard::ModifiersState,
+    reexports::wayland_server::Resource,
     utils::SealedFile,
 };
 use std::{
@@ -35,6 +36,7 @@ pub struct AtspiKeyGrab {
 #[derive(Debug, Default)]
 struct AtspiClient {
     key_grabs: Vec<AtspiKeyGrab>,
+    virtual_mods: HashSet<Keycode>,
     has_keyboard_grab: bool,
     // TODO: purge old instances
     keyboards: Vec<(Connection, Device, eis::Keyboard)>,
@@ -148,12 +150,14 @@ impl AtspiEiState {
 
     fn update_virtual_mods(&mut self) {
         self.virtual_mods.clear();
-        self.virtual_mods.extend(
-            self.clients
-                .values()
-                .flat_map(|client| &client.key_grabs)
-                .flat_map(|grab| &grab.virtual_mods),
-        );
+        for (manager, client) in self.clients.iter() {
+            if manager.version() >= 2 {
+                self.virtual_mods.extend(&client.virtual_mods);
+            } else {
+                self.virtual_mods
+                    .extend(client.key_grabs.iter().flat_map(|grab| &grab.virtual_mods));
+            }
+        }
     }
 
     pub fn update_keymap(&mut self, xkb_config: XkbConfig) {
@@ -189,6 +193,18 @@ impl AtspiHandler for State {
 
     fn client_disconnected(&mut self, manager: &CosmicAtspiManagerV1) {
         self.common.atspi_ei.clients.remove(manager);
+        self.common.atspi_ei.update_virtual_mods();
+    }
+
+    fn add_virtual_modifier(&mut self, manager: &CosmicAtspiManagerV1, key: Keycode) {
+        let client = self.common.atspi_ei.clients.get_mut(manager).unwrap();
+        client.virtual_mods.insert(key);
+        self.common.atspi_ei.update_virtual_mods();
+    }
+
+    fn remove_virtual_modifier(&mut self, manager: &CosmicAtspiManagerV1, key: Keycode) {
+        let client = self.common.atspi_ei.clients.get_mut(manager).unwrap();
+        client.virtual_mods.remove(&key);
         self.common.atspi_ei.update_virtual_mods();
     }
 
