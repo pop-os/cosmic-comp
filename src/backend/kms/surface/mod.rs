@@ -67,6 +67,7 @@ use smithay::{
     utils::{Buffer as BufferCoords, Clock, Monotonic, Physical, Rectangle, Size, Transform},
     wayland::{
         dmabuf::{get_dmabuf, DmabufFeedbackBuilder},
+        presentation::Refresh,
         seat::WaylandFocus,
         shm::{shm_format_to_fourcc, with_buffer_contents},
     },
@@ -757,15 +758,24 @@ impl SurfaceThreadState {
                     )
                 };
 
-                feedback.presented(
-                    clock,
-                    self.output
-                        .current_mode()
-                        .map(|mode| Duration::from_secs_f64(1_000.0 / mode.refresh as f64))
-                        .unwrap_or_default(),
-                    sequence as u64,
-                    flags,
-                );
+                let rate = self
+                    .output
+                    .current_mode()
+                    .map(|mode| Duration::from_secs_f64(1_000.0 / mode.refresh as f64));
+                let refresh = match rate {
+                    Some(rate)
+                        if self
+                            .compositor
+                            .as_ref()
+                            .is_some_and(|comp| comp.vrr_enabled()) =>
+                    {
+                        Refresh::Variable(rate)
+                    }
+                    Some(rate) => Refresh::Fixed(rate),
+                    None => Refresh::Unknown,
+                };
+
+                feedback.presented(clock, refresh, sequence as u64, flags);
 
                 self.timings.presented(clock);
 
