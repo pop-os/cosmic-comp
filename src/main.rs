@@ -13,7 +13,9 @@ use state::State;
 use std::{env, ffi::OsString, os::unix::process::CommandExt, process, sync::Arc};
 use tracing::{error, info, warn};
 
-use crate::wayland::handlers::compositor::client_compositor_state;
+use crate::wayland::{
+    handlers::compositor::client_compositor_state, protocols::keymap::KeymapState,
+};
 
 pub mod backend;
 pub mod config;
@@ -132,6 +134,8 @@ fn main() -> Result<()> {
         state.common.refresh();
         state::Common::refresh_focus(state);
         state.common.update_x11_stacking_order();
+
+        KeymapState::refresh(state);
 
         {
             let shell = state.common.shell.read().unwrap();

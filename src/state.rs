@@ -16,6 +16,7 @@ use crate::{
         atspi::AtspiState,
         drm::WlDrmState,
         image_source::ImageSourceState,
+        keymap::KeymapState,
         output_configuration::OutputConfigurationState,
         output_power::OutputPowerState,
         screencopy::ScreencopyState,
@@ -219,6 +220,7 @@ pub struct Common {
     pub viewporter_state: ViewporterState,
     pub kde_decoration_state: KdeDecorationState,
     pub xdg_decoration_state: XdgDecorationState,
+    pub keymap_state: KeymapState,
 
     // shell-related wayland state
     pub xdg_shell_state: XdgShellState,
@@ -524,6 +526,7 @@ impl State {
         VirtualKeyboardManagerState::new::<State, _>(&dh, client_is_privileged);
         AlphaModifierState::new::<Self>(&dh);
         SinglePixelBufferState::new::<Self>(&dh);
+        let keymap_state = KeymapState::new::<State, _>(&dh, client_is_privileged);
 
         let idle_notifier_state = IdleNotifierState::<Self>::new(&dh, handle.clone());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(&dh);
@@ -627,6 +630,7 @@ impl State {
                 xwayland_state: None,
                 xwayland_shell_state,
                 pointer_focus_state: None,
+                keymap_state,
 
                 atspi_state,
                 atspi_ei: Default::default(),
