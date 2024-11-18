@@ -270,6 +270,29 @@ where
                     }
                 }
             }
+            zcosmic_output_configuration_head_v1::Request::SetAdaptiveSyncExt { state } => {
+                if let Ok(obj) = obj.upgrade() {
+                    if let Some(data) = obj.data::<PendingOutputConfiguration>() {
+                        let mut pending = data.lock().unwrap();
+                        if pending.adaptive_sync.is_some() {
+                            obj.post_error(
+                                zwlr_output_configuration_head_v1::Error::AlreadySet,
+                                format!("{:?} already had an adaptive_sync state configured", obj),
+                            );
+                            return;
+                        }
+                        pending.adaptive_sync = match state.into_result() {
+                            Ok(zcosmic_output_head_v1::AdaptiveSyncStateExt::Always) => {
+                                Some(AdaptiveSync::Force)
+                            }
+                            Ok(zcosmic_output_head_v1::AdaptiveSyncStateExt::Automatic) => {
+                                Some(AdaptiveSync::Enabled)
+                            }
+                            _ => Some(AdaptiveSync::Disabled),
+                        };
+                    }
+                }
+            }
             _ => {}
         }
     }

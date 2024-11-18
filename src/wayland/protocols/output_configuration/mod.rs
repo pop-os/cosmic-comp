@@ -3,9 +3,11 @@
 use cosmic_protocols::output_management::v1::server::{
     zcosmic_output_configuration_head_v1::ZcosmicOutputConfigurationHeadV1,
     zcosmic_output_configuration_v1::ZcosmicOutputConfigurationV1,
-    zcosmic_output_head_v1::ZcosmicOutputHeadV1, zcosmic_output_manager_v1::ZcosmicOutputManagerV1,
+    zcosmic_output_head_v1::{self, ZcosmicOutputHeadV1},
+    zcosmic_output_manager_v1::ZcosmicOutputManagerV1,
 };
 use smithay::{
+    backend::drm::VrrSupport,
     output::{Mode, Output, WeakOutput},
     reexports::{
         wayland_protocols_wlr::output_management::v1::server::{
@@ -98,7 +100,7 @@ pub struct PendingOutputConfigurationInner {
     position: Option<Point<i32, Logical>>,
     transform: Option<Transform>,
     scale: Option<f64>,
-    adaptive_sync: Option<bool>,
+    adaptive_sync: Option<AdaptiveSync>,
 }
 pub type PendingOutputConfiguration = Mutex<PendingOutputConfigurationInner>;
 
@@ -110,7 +112,7 @@ pub enum OutputConfiguration {
         position: Option<Point<i32, Logical>>,
         transform: Option<Transform>,
         scale: Option<f64>,
-        adaptive_sync: Option<bool>,
+        adaptive_sync: Option<AdaptiveSync>,
     },
     Disabled,
 }
@@ -178,7 +180,7 @@ where
         );
 
         let extension_global = dh.create_global::<D, ZcosmicOutputManagerV1, _>(
-            1,
+            2,
             OutputMngrGlobalData {
                 filter: Box::new(client_filter),
             },
@@ -434,11 +436,6 @@ where
 
         let scale = output.current_scale().fractional_scale();
         instance.obj.scale(scale);
-        if let Some(extension_obj) = instance.extension_obj.as_ref() {
-            extension_obj.scale_1000((scale * 1000.0).round() as i32);
-
-            extension_obj.mirroring(output.mirroring().map(|o| o.name()));
-        }
 
         if instance.obj.version() >= zwlr_output_head_v1::EVT_ADAPTIVE_SYNC_SINCE {
             instance
@@ -448,6 +445,41 @@ where
                 } else {
                     zwlr_output_head_v1::AdaptiveSyncState::Enabled
                 });
+        }
+
+        if let Some(extension_obj) = instance.extension_obj.as_ref() {
+            extension_obj.scale_1000((scale * 1000.0).round() as i32);
+
+            extension_obj.mirroring(output.mirroring().map(|o| o.name()));
+
+            if extension_obj.version() >= zcosmic_output_head_v1::EVT_ADAPTIVE_SYNC_EXT_SINCE {
+                extension_obj.adaptive_sync_ext(match output.adaptive_sync() {
+                    AdaptiveSync::Disabled => {
+                        zcosmic_output_head_v1::AdaptiveSyncStateExt::Disabled
+                    }
+                    AdaptiveSync::Enabled => {
+                        zcosmic_output_head_v1::AdaptiveSyncStateExt::Automatic
+                    }
+                    AdaptiveSync::Force => zcosmic_output_head_v1::AdaptiveSyncStateExt::Always,
+                });
+
+                extension_obj.adaptive_sync_available(
+                    match output
+                        .adaptive_sync_support()
+                        .unwrap_or(VrrSupport::NotSupported)
+                    {
+                        VrrSupport::NotSupported => {
+                            zcosmic_output_head_v1::AdaptiveSyncAvailability::Unsupported
+                        }
+                        VrrSupport::RequiresModeset => {
+                            zcosmic_output_head_v1::AdaptiveSyncAvailability::RequiresModeset
+                        }
+                        VrrSupport::Supported => {
+                            zcosmic_output_head_v1::AdaptiveSyncAvailability::Supported
+                        }
+                    },
+                );
+            }
         }
     }
 

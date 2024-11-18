@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    config::{OutputConfig, OutputState},
+    config::{AdaptiveSync, OutputConfig, OutputState},
     shell::Shell,
     utils::prelude::*,
 };
@@ -664,6 +664,10 @@ fn populate_modes(
         max_bpc,
         scale,
         transform,
+        // Try opportunistic VRR by default,
+        // if not supported this will be turned off on `resume`,
+        // when we have the `Surface` to actually check for support.
+        vrr: AdaptiveSync::Enabled,
         ..std::mem::take(&mut *output_config)
     };
 
