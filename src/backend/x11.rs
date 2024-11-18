@@ -36,7 +36,7 @@ use smithay::{
         wayland_server::DisplayHandle,
     },
     utils::{DeviceFd, Transform},
-    wayland::dmabuf::DmabufFeedbackBuilder,
+    wayland::{dmabuf::DmabufFeedbackBuilder, presentation::Refresh},
 };
 use std::{borrow::BorrowMut, cell::RefCell, os::unix::io::OwnedFd, time::Duration};
 use tracing::{debug, error, info, warn};
@@ -234,8 +234,12 @@ impl Surface {
                         state.clock.now(),
                         self.output
                             .current_mode()
-                            .map(|mode| Duration::from_secs_f64(1_000.0 / mode.refresh as f64))
-                            .unwrap_or_default(),
+                            .map(|mode| {
+                                Refresh::Fixed(Duration::from_secs_f64(
+                                    1_000.0 / mode.refresh as f64,
+                                ))
+                            })
+                            .unwrap_or(Refresh::Unknown),
                         0,
                         wp_presentation_feedback::Kind::Vsync,
                     )
