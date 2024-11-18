@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{config::OutputState, shell::Shell, state::BackendData, utils::prelude::*};
+use crate::{
+    config::{AdaptiveSync, OutputState},
+    shell::Shell,
+    state::BackendData,
+    utils::prelude::*,
+};
 
 use anyhow::{Context, Result};
 use calloop::LoopSignal;
@@ -663,10 +668,6 @@ impl KmsState {
                         let gbm = device.gbm.clone();
                         let cursor_size = drm.cursor_size();
 
-                        let vrr = drm_helpers::set_vrr(drm, *crtc, conn, output_config.vrr)
-                            .unwrap_or(false);
-                        surface.output.set_adaptive_sync(vrr);
-
                         if let Some(bpc) = output_config.max_bpc {
                             if let Err(err) = drm_helpers::set_max_bpc(drm, conn, bpc) {
                                 warn!(
@@ -678,20 +679,35 @@ impl KmsState {
                             }
                         }
 
+                        let vrr = output_config.vrr;
                         std::mem::drop(output_config);
-                        surface
-                            .resume(drm_surface, gbm, cursor_size, vrr)
-                            .context("Failed to create surface")?;
-                    } else {
-                        if output_config.vrr != surface.output.adaptive_sync() {
-                            surface.output.set_adaptive_sync(drm_helpers::set_vrr(
-                                drm,
-                                surface.crtc,
-                                surface.connector,
-                                output_config.vrr,
-                            )?);
+
+                        match surface.resume(drm_surface, gbm, cursor_size) {
+                            Ok(_) => {
+                                if surface.use_adaptive_sync(vrr)? {
+                                    surface.output.set_adaptive_sync(vrr);
+                                } else {
+                                    surface.output.config_mut().vrr = AdaptiveSync::Disabled;
+                                    surface.output.set_adaptive_sync(AdaptiveSync::Disabled);
+                                }
+                            }
+                            Err(err) => {
+                                surface.output.config_mut().enabled = OutputState::Disabled;
+                                return Err(err).context("Failed to create surface");
+                            }
                         }
+                    } else {
+                        let vrr = output_config.vrr;
                         std::mem::drop(output_config);
+                        if vrr != surface.output.adaptive_sync() {
+                            if surface.use_adaptive_sync(vrr)? {
+                                surface.output.set_adaptive_sync(vrr);
+                            } else if vrr != AdaptiveSync::Disabled {
+                                anyhow::bail!("Requested VRR mode unsupported");
+                            } else {
+                                surface.output.set_adaptive_sync(AdaptiveSync::Disabled);
+                            }
+                        }
                         surface
                             .set_mode(*mode)
                             .context("Failed to apply new mode")?;

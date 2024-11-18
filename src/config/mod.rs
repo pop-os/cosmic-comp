@@ -98,19 +98,34 @@ pub enum OutputState {
     Mirroring(String),
 }
 
-fn default_enabled() -> OutputState {
+fn default_state() -> OutputState {
     OutputState::Enabled
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum AdaptiveSync {
+    #[serde(rename = "true")]
+    Enabled,
+    #[serde(rename = "false")]
+    Disabled,
+    Force,
+}
+
+fn default_sync() -> AdaptiveSync {
+    AdaptiveSync::Enabled
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct OutputConfig {
     pub mode: ((i32, i32), Option<u32>),
-    pub vrr: bool,
+    #[serde(default = "default_sync")]
+    pub vrr: AdaptiveSync,
     pub scale: f64,
     #[serde(with = "TransformDef")]
     pub transform: Transform,
     pub position: (u32, u32),
-    #[serde(default = "default_enabled")]
+    #[serde(default = "default_state")]
     pub enabled: OutputState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_bpc: Option<u32>,
@@ -120,7 +135,7 @@ impl Default for OutputConfig {
     fn default() -> OutputConfig {
         OutputConfig {
             mode: ((0, 0), None),
-            vrr: false,
+            vrr: AdaptiveSync::Enabled,
             scale: 1.0,
             transform: Transform::Normal,
             position: (0, 0),
