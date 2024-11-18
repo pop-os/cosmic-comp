@@ -528,7 +528,6 @@ impl KmsState {
             return Ok(Vec::new());
         }
 
-        let mut all_outputs = Vec::new();
         for device in self.drm_devices.values_mut() {
             // we only want outputs exposed to wayland - not leased ones
             // but that is also not all surface, because that doesn't contain all detected, but unmapped outputs
@@ -587,7 +586,7 @@ impl KmsState {
                     .flat_map(|encoder_handle| device.drm.get_encoder(*encoder_handle))
                 {
                     for crtc in res_handles.filter_crtcs(encoder_info.possible_crtcs()) {
-                        if !free_crtcs.contains(&crtc) {
+                        if free_crtcs.contains(&crtc) {
                             new_pairings.insert(conn, crtc);
                             break 'outer;
                         }
@@ -607,7 +606,34 @@ impl KmsState {
                 }
             }
 
-            // reconfigure existing
+            // add new ones
+            let mut w = shell.read().unwrap().global_space().size.w as u32;
+            if !test_only {
+                for (conn, crtc) in new_pairings {
+                    let (output, _) = device.connector_added(
+                        self.primary_node.as_ref(),
+                        conn,
+                        Some(crtc),
+                        (w, 0),
+                        loop_handle,
+                        shell.clone(),
+                        startup_done.clone(),
+                    )?;
+                    if output.mirroring().is_none() {
+                        w += output.config().transformed_size().w as u32;
+                    }
+                }
+            }
+        }
+
+        if !test_only {
+            self.refresh_used_devices()
+                .context("Failed to enable devices")?;
+        }
+
+        let mut all_outputs = Vec::new();
+        for device in self.drm_devices.values_mut() {
+            // reconfigure
             for (crtc, surface) in device.surfaces.iter_mut() {
                 let output_config = surface.output.config();
 
@@ -673,27 +699,19 @@ impl KmsState {
                 }
             }
 
-            // add new ones
-            let mut w = shell.read().unwrap().global_space().size.w as u32;
-            if !test_only {
-                for (conn, crtc) in new_pairings {
-                    let (output, _) = device.connector_added(
-                        self.primary_node.as_ref(),
-                        conn,
-                        Some(crtc),
-                        (0, w),
-                        loop_handle,
-                        shell.clone(),
-                        startup_done.clone(),
-                    )?;
-                    if output.mirroring().is_none() {
-                        w += output.config().transformed_size().w as u32;
-                    }
-                    all_outputs.push(output);
-                }
-            }
-
-            all_outputs.extend(outputs);
+            all_outputs.extend(
+                device
+                    .outputs
+                    .iter()
+                    .filter(|(conn, _)| {
+                        !device
+                            .leased_connectors
+                            .iter()
+                            .any(|(leased_conn, _)| *conn == leased_conn)
+                    })
+                    .map(|(_, output)| output.clone())
+                    .collect::<Vec<_>>(),
+            );
         }
 
         // we need to handle mirroring, after all outputs have been enabled

@@ -253,8 +253,6 @@ impl State {
             self.backend.kms().drm_devices.insert(drm_node, device);
         }
 
-        self.backend.kms().refresh_used_devices()?;
-
         self.common
             .output_configuration_state
             .add_heads(wl_outputs.iter());
@@ -267,6 +265,8 @@ impl State {
             &self.common.xdg_activation_state,
             self.common.startup_done.clone(),
         );
+
+        self.backend.kms().refresh_used_devices()?;
         self.common.refresh();
 
         Ok(())
@@ -349,8 +349,6 @@ impl State {
             }
         }
 
-        self.backend.kms().refresh_used_devices()?;
-
         self.common
             .output_configuration_state
             .remove_heads(outputs_removed.iter());
@@ -375,6 +373,8 @@ impl State {
             }
             self.common.refresh();
         }
+
+        self.backend.kms().refresh_used_devices()?;
 
         Ok(())
     }
