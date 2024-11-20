@@ -2146,10 +2146,14 @@ where
     B::Device: 'static,
 {
     let geometry = output.geometry();
-    event
-        .position_transformed(geometry.size.as_logical())
-        .as_global()
-        + geometry.loc.to_f64()
+    let transform = output.current_transform();
+    let size = transform
+        .invert()
+        .transform_size(geometry.size.as_logical());
+    geometry.loc.to_f64()
+        + transform
+            .transform_point_in(event.position_transformed(size), &size.to_f64())
+            .as_global()
 }
 
 // TODO Is it possible to determine mapping for external touchscreen?
