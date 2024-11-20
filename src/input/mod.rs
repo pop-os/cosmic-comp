@@ -1143,13 +1143,7 @@ impl State {
                         return;
                     };
 
-                    let geometry = output.geometry();
-
-                    let position = geometry.loc.to_f64()
-                        + event
-                            .position_transformed(geometry.size.as_logical())
-                            .as_global();
-
+                    let position = transform_output_mapped_position(&output, &event);
                     let under = State::surface_under(position, &output, &mut *shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -1180,13 +1174,7 @@ impl State {
                         return;
                     };
 
-                    let geometry = output.geometry();
-
-                    let position = geometry.loc.to_f64()
-                        + event
-                            .position_transformed(geometry.size.as_logical())
-                            .as_global();
-
+                    let position = transform_output_mapped_position(&output, &event);
                     let under = State::surface_under(position, &output, &mut *shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -1269,13 +1257,8 @@ impl State {
                     else {
                         return;
                     };
-                    let geometry = output.geometry();
 
-                    let position = event
-                        .position_transformed(geometry.size.as_logical())
-                        .as_global()
-                        + geometry.loc.to_f64();
-
+                    let position = transform_output_mapped_position(&output, &event);
                     let under = State::surface_under(position, &output, &mut *shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -1338,13 +1321,8 @@ impl State {
                     else {
                         return;
                     };
-                    let geometry = output.geometry();
 
-                    let position = event
-                        .position_transformed(geometry.size.as_logical())
-                        .as_global()
-                        + geometry.loc.to_f64();
-
+                    let position = transform_output_mapped_position(&output, &event);
                     let under = State::surface_under(position, &output, &mut *shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -2159,6 +2137,19 @@ fn cursor_sessions_for_output(
                 .flatten(),
         )
         .chain(output.cursor_sessions().into_iter())
+}
+
+fn transform_output_mapped_position<'a, B, E>(output: &Output, event: &E) -> Point<f64, Global>
+where
+    B: InputBackend,
+    E: AbsolutePositionEvent<B>,
+    B::Device: 'static,
+{
+    let geometry = output.geometry();
+    event
+        .position_transformed(geometry.size.as_logical())
+        .as_global()
+        + geometry.loc.to_f64()
 }
 
 // TODO Is it possible to determine mapping for external touchscreen?
