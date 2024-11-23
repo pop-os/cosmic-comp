@@ -36,6 +36,7 @@ use super::toplevel_info::{
     ToplevelHandleState, ToplevelInfoGlobalData, ToplevelInfoHandler, ToplevelState, Window,
 };
 
+#[derive(Debug)]
 pub struct OverlapNotifyState {
     instances: Vec<ZcosmicOverlapNotifyV1>,
     global: GlobalId,
@@ -82,7 +83,7 @@ impl OverlapNotifyState {
         W: Window + 'static,
     {
         for output in state.outputs() {
-            let map = layer_map_for_output(output);
+            let map = layer_map_for_output(&output);
             for layer_surface in map.layers() {
                 if let Some(data) = layer_surface
                     .user_data()
@@ -144,7 +145,7 @@ impl OverlapNotifyState {
 pub trait OverlapNotifyHandler: ToplevelInfoHandler {
     fn overlap_notify_state(&mut self) -> &mut OverlapNotifyState;
     fn layer_surface_from_resource(&self, resource: ZwlrLayerSurfaceV1) -> Option<LayerSurface>;
-    fn outputs(&self) -> impl Iterator<Item = &Output>;
+    fn outputs(&self) -> impl Iterator<Item = Output>;
 }
 
 pub struct OverlapNotifyGlobalData {
@@ -428,3 +429,18 @@ where
         }
     }
 }
+
+macro_rules! delegate_overlap_notify {
+    ($(@<$( $lt:tt $( : $clt:tt $(+ $dlt:tt )* )? ),+>)? $ty: ty) => {
+        smithay::reexports::wayland_server::delegate_global_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
+            cosmic_protocols::overlap_notify::v1::server::zcosmic_overlap_notify_v1::ZcosmicOverlapNotifyV1: $crate::wayland::protocols::overlap_notify::OverlapNotifyGlobalData
+        ] => $crate::wayland::protocols::overlap_notify::OverlapNotifyState);
+        smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
+            cosmic_protocols::overlap_notify::v1::server::zcosmic_overlap_notify_v1::ZcosmicOverlapNotifyV1: ()
+        ] => $crate::wayland::protocols::overlap_notify::OverlapNotifyState);
+        smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
+            cosmic_protocols::overlap_notify::v1::server::zcosmic_overlap_notification_v1::ZcosmicOverlapNotificationV1: ()
+        ] => $crate::wayland::protocols::overlap_notify::OverlapNotifyState);
+    };
+}
+pub(crate) use delegate_overlap_notify;
