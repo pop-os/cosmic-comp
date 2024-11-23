@@ -18,6 +18,7 @@ use crate::{
         image_source::ImageSourceState,
         output_configuration::OutputConfigurationState,
         output_power::OutputPowerState,
+        overlap_notify::OverlapNotifyState,
         screencopy::ScreencopyState,
         toplevel_info::ToplevelInfoState,
         toplevel_management::{ManagementCapabilities, ToplevelManagementState},
@@ -219,6 +220,7 @@ pub struct Common {
     pub viewporter_state: ViewporterState,
     pub kde_decoration_state: KdeDecorationState,
     pub xdg_decoration_state: XdgDecorationState,
+    pub overlap_notify_state: OverlapNotifyState,
 
     // shell-related wayland state
     pub xdg_shell_state: XdgShellState,
@@ -499,6 +501,8 @@ impl State {
         let output_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
         let output_configuration_state = OutputConfigurationState::new(dh, client_is_privileged);
         let output_power_state = OutputPowerState::new::<Self, _>(dh, client_is_privileged);
+        let overlap_notify_state =
+            OverlapNotifyState::new::<Self, _>(dh, client_has_no_security_context);
         let presentation_state = PresentationState::new::<Self>(dh, clock.id() as u32);
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
         let image_source_state = ImageSourceState::new::<Self, _>(dh, client_is_privileged);
@@ -609,6 +613,7 @@ impl State {
                 output_state,
                 output_configuration_state,
                 output_power_state,
+                overlap_notify_state,
                 presentation_state,
                 primary_selection_state,
                 data_control_state,

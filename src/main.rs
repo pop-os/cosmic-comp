@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use state::State;
 use std::{env, ffi::OsString, os::unix::process::CommandExt, process, sync::Arc};
 use tracing::{error, info, warn};
+use wayland::protocols::overlap_notify::OverlapNotifyState;
 
 use crate::wayland::handlers::compositor::client_compositor_state;
 
@@ -131,6 +132,7 @@ fn main() -> Result<()> {
         }
         state.common.refresh();
         state::Common::refresh_focus(state);
+        OverlapNotifyState::refresh(state);
         state.common.update_x11_stacking_order();
 
         {
