@@ -140,6 +140,7 @@ impl State {
             &mut self.common.workspace_state.update(),
             &self.common.xdg_activation_state,
             self.common.startup_done.clone(),
+            &self.common.clock,
         );
         if let Err(err) = res {
             warn!(?err, "Failed to apply config. Resetting");
@@ -161,6 +162,7 @@ impl State {
                     &mut self.common.workspace_state.update(),
                     &self.common.xdg_activation_state,
                     self.common.startup_done.clone(),
+                    &self.common.clock,
                 ) {
                     error!(?err, "Failed to reset output config.");
                 }
