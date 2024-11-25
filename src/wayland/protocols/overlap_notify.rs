@@ -12,7 +12,6 @@ use cosmic_protocols::{
         zcosmic_toplevel_info_v1::ZcosmicToplevelInfoV1,
     },
 };
-use rand::distributions::{Alphanumeric, DistString};
 use smithay::{
     desktop::{layer_map_for_output, LayerSurface},
     output::Output,
@@ -29,7 +28,7 @@ use smithay::{
         shell::wlr_layer::{ExclusiveZone, Layer},
     },
 };
-use wayland_backend::server::GlobalId;
+use wayland_backend::server::{GlobalId, ObjectId};
 
 use crate::utils::prelude::{RectExt, RectGlobalExt, RectLocalExt};
 
@@ -94,14 +93,18 @@ impl OverlapNotifyState {
                     if inner.has_active_notifications() {
                         let mut new_snapshot = OverlapSnapshot::default();
 
-                        let layer_geo = layer_surface.bbox().as_local().to_global(output);
+                        let layer_geo = map
+                            .layer_geometry(layer_surface)
+                            .unwrap_or_default()
+                            .as_local()
+                            .to_global(&output);
 
                         for window in state.toplevel_info_state().registered_toplevels() {
                             if let Some(window_geo) = window.global_geometry() {
                                 if let Some(intersection) = layer_geo.intersection(window_geo) {
-                                    // relative to window location
+                                    // relative to layer location
                                     let region = Rectangle::from_loc_and_size(
-                                        intersection.loc - window_geo.loc,
+                                        intersection.loc - layer_geo.loc,
                                         intersection.size,
                                     )
                                     .as_logical();
@@ -111,11 +114,18 @@ impl OverlapNotifyState {
                         }
 
                         for other_surface in map.layers().filter(|s| *s != layer_surface) {
-                            let other_geo = other_surface.bbox().as_local().to_global(output);
+                            if other_surface.wl_surface().id() == layer_surface.wl_surface().id() {
+                                continue;
+                            }
+                            let other_geo = map
+                                .layer_geometry(other_surface)
+                                .unwrap_or_default()
+                                .as_local()
+                                .to_global(&output);
                             if let Some(intersection) = layer_geo.intersection(other_geo) {
-                                // relative to window location
+                                // relative to layer location
                                 let region = Rectangle::from_loc_and_size(
-                                    intersection.loc - other_geo.loc,
+                                    intersection.loc - layer_geo.loc,
                                     intersection.size,
                                 )
                                 .as_logical();
@@ -156,20 +166,26 @@ impl LayerOverlapNotificationDataInternal {
     }
 
     pub fn add_notification(&mut self, new_notification: ZcosmicOverlapNotificationV1) {
-        for (toplevel, overlap) in &self.last_snapshot.toplevel_overlaps {
-            if let Ok(toplevel) = toplevel.upgrade() {
-                new_notification.toplevel_enter(
-                    &toplevel,
-                    overlap.loc.x,
-                    overlap.loc.y,
-                    overlap.size.w,
-                    overlap.size.h,
-                );
+        if let Some(client) = new_notification.client() {
+            for (toplevel, overlap) in &self.last_snapshot.toplevel_overlaps {
+                if let Some(toplevel) = toplevel
+                    .upgrade()
+                    .ok()
+                    .filter(|handle| handle.client().is_some_and(|c| c == client))
+                {
+                    new_notification.toplevel_enter(
+                        &toplevel,
+                        overlap.loc.x,
+                        overlap.loc.y,
+                        overlap.size.w,
+                        overlap.size.h,
+                    );
+                }
             }
         }
-        for (layer_surface, (exclusive, layer, overlap)) in &self.last_snapshot.layer_overlaps {
+        for (_, (identifier, exclusive, layer, overlap)) in &self.last_snapshot.layer_overlaps {
             new_notification.layer_enter(
-                layer_surface.clone(),
+                identifier.clone(),
                 if *exclusive { 1 } else { 0 },
                 match layer {
                     Layer::Background => WlrLayer::Background,
@@ -196,44 +212,61 @@ impl LayerOverlapNotificationDataInternal {
         for toplevel in self.last_snapshot.toplevel_overlaps.keys() {
             if !new_snapshot.toplevel_overlaps.contains_key(toplevel) {
                 if let Ok(toplevel) = toplevel.upgrade() {
-                    for notification in &notifications {
-                        notification.toplevel_leave(&toplevel);
+                    if let Some(client) = toplevel.client() {
+                        for notification in notifications
+                            .iter()
+                            .filter(|n| n.client().is_some_and(|c| c == client))
+                        {
+                            notification.toplevel_leave(&toplevel);
+                        }
                     }
                 }
             }
         }
         for (toplevel, overlap) in &new_snapshot.toplevel_overlaps {
-            if !self.last_snapshot.toplevel_overlaps.contains_key(toplevel) {
+            if !self
+                .last_snapshot
+                .toplevel_overlaps
+                .get(toplevel)
+                .is_some_and(|old_overlap| old_overlap == overlap)
+            {
                 if let Ok(toplevel) = toplevel.upgrade() {
-                    for notification in &notifications {
-                        notification.toplevel_enter(
-                            &toplevel,
-                            overlap.loc.x,
-                            overlap.loc.y,
-                            overlap.size.w,
-                            overlap.size.h,
-                        );
+                    if let Some(client) = toplevel.client() {
+                        for notification in notifications
+                            .iter()
+                            .filter(|n| n.client().is_some_and(|c| c == client))
+                        {
+                            notification.toplevel_enter(
+                                &toplevel,
+                                overlap.loc.x,
+                                overlap.loc.y,
+                                overlap.size.w,
+                                overlap.size.h,
+                            );
+                        }
                     }
                 }
             }
         }
 
-        for layer_surface in self.last_snapshot.layer_overlaps.keys() {
-            if new_snapshot.layer_overlaps.contains_key(layer_surface) {
+        for (layer_surface, (identifier, ..)) in &self.last_snapshot.layer_overlaps {
+            if !new_snapshot.layer_overlaps.contains_key(layer_surface) {
                 for notification in &notifications {
-                    notification.layer_leave(layer_surface.clone());
+                    notification.layer_leave(identifier.clone());
                 }
             }
         }
-        for (layer_surface, (exclusive, layer, overlap)) in &new_snapshot.layer_overlaps {
+        for (layer_surface, (identifier, exclusive, layer, overlap)) in &new_snapshot.layer_overlaps
+        {
             if !self
                 .last_snapshot
                 .layer_overlaps
-                .contains_key(layer_surface)
+                .get(layer_surface)
+                .is_some_and(|(_, _, _, old_overlap)| old_overlap == overlap)
             {
                 for notification in &notifications {
                     notification.layer_enter(
-                        layer_surface.clone(),
+                        identifier.clone(),
                         if *exclusive { 1 } else { 0 },
                         match layer {
                             Layer::Background => WlrLayer::Background,
@@ -257,7 +290,7 @@ impl LayerOverlapNotificationDataInternal {
 #[derive(Debug, Default, Clone)]
 struct OverlapSnapshot {
     toplevel_overlaps: HashMap<Weak<ExtForeignToplevelHandleV1>, Rectangle<i32, Logical>>,
-    layer_overlaps: HashMap<String, (bool, Layer, Rectangle<i32, Logical>)>,
+    layer_overlaps: HashMap<ObjectId, (String, bool, Layer, Rectangle<i32, Logical>)>,
 }
 
 impl OverlapSnapshot {
@@ -283,18 +316,21 @@ impl OverlapSnapshot {
             ExclusiveZone::Exclusive(_)
         );
         let layer = layer_surface.layer();
-        let identifier = layer_surface.user_data().get_or_insert(Identifier::default);
+        let id = layer_surface.wl_surface().id();
+        let identifier = layer_surface
+            .user_data()
+            .get_or_insert(|| Identifier::from(id.clone()));
 
         self.layer_overlaps
-            .insert(identifier.0.clone(), (exclusive, layer, overlap));
+            .insert(id, (identifier.0.clone(), exclusive, layer, overlap));
     }
 }
 
 struct Identifier(String);
 
-impl Default for Identifier {
-    fn default() -> Self {
-        Identifier(Alphanumeric.sample_string(&mut rand::thread_rng(), 32))
+impl From<ObjectId> for Identifier {
+    fn from(value: ObjectId) -> Self {
+        Identifier(value.to_string())
     }
 }
 
