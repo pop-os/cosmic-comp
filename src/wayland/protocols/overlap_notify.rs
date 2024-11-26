@@ -318,9 +318,10 @@ impl OverlapSnapshot {
         );
         let layer = layer_surface.layer();
         let id = layer_surface.wl_surface().id();
+        let prefix = layer_surface.namespace();
         let identifier = layer_surface
             .user_data()
-            .get_or_insert(|| Identifier::from(id.clone()));
+            .get_or_insert(|| Identifier::new(prefix, id.clone()));
 
         self.layer_overlaps
             .insert(id, (identifier.0.clone(), exclusive, layer, overlap));
@@ -329,9 +330,9 @@ impl OverlapSnapshot {
 
 struct Identifier(String);
 
-impl From<ObjectId> for Identifier {
-    fn from(value: ObjectId) -> Self {
-        Identifier(value.to_string())
+impl Identifier {
+    fn new(prefix: &str, id: ObjectId) -> Self {
+        Identifier(format!("{prefix}-{id}"))
     }
 }
 
