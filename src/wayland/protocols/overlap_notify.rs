@@ -184,9 +184,12 @@ impl LayerOverlapNotificationDataInternal {
                 }
             }
         }
-        for (_, (identifier, exclusive, layer, overlap)) in &self.last_snapshot.layer_overlaps {
+        for (_, (identifier, namespace, exclusive, layer, overlap)) in
+            &self.last_snapshot.layer_overlaps
+        {
             new_notification.layer_enter(
                 identifier.clone(),
+                namespace.clone(),
                 if *exclusive { 1 } else { 0 },
                 match layer {
                     Layer::Background => WlrLayer::Background,
@@ -257,17 +260,19 @@ impl LayerOverlapNotificationDataInternal {
                 }
             }
         }
-        for (layer_surface, (identifier, exclusive, layer, overlap)) in &new_snapshot.layer_overlaps
+        for (layer_surface, (identifier, namespace, exclusive, layer, overlap)) in
+            &new_snapshot.layer_overlaps
         {
             if !self
                 .last_snapshot
                 .layer_overlaps
                 .get(layer_surface)
-                .is_some_and(|(_, _, _, old_overlap)| old_overlap == overlap)
+                .is_some_and(|(_, _, _, _, old_overlap)| old_overlap == overlap)
             {
                 for notification in &notifications {
                     notification.layer_enter(
                         identifier.clone(),
+                        namespace.clone(),
                         if *exclusive { 1 } else { 0 },
                         match layer {
                             Layer::Background => WlrLayer::Background,
@@ -291,7 +296,7 @@ impl LayerOverlapNotificationDataInternal {
 #[derive(Debug, Default, Clone)]
 struct OverlapSnapshot {
     toplevel_overlaps: HashMap<Weak<ExtForeignToplevelHandleV1>, Rectangle<i32, Logical>>,
-    layer_overlaps: HashMap<ObjectId, (String, bool, Layer, Rectangle<i32, Logical>)>,
+    layer_overlaps: HashMap<ObjectId, (String, String, bool, Layer, Rectangle<i32, Logical>)>,
 }
 
 impl OverlapSnapshot {
@@ -322,8 +327,16 @@ impl OverlapSnapshot {
             .user_data()
             .get_or_insert(|| Identifier::from(id.clone()));
 
-        self.layer_overlaps
-            .insert(id, (identifier.0.clone(), exclusive, layer, overlap));
+        self.layer_overlaps.insert(
+            id,
+            (
+                identifier.0.clone(),
+                layer_surface.namespace().to_string(),
+                exclusive,
+                layer,
+                overlap,
+            ),
+        );
     }
 }
 
