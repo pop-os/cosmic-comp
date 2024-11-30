@@ -12,7 +12,7 @@ use smithay::{
             gles::{GlesError, GlesRenderbuffer},
             sync::SyncPoint,
             utils::with_renderer_surface_state,
-            Bind, Blit, BufferType, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
+            Bind, Blit, BufferType, Color32F, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
         },
     },
     desktop::space::SpaceElement,
@@ -36,7 +36,7 @@ use crate::{
     backend::render::{
         cursor,
         element::{AsGlowRenderer, CosmicElement, DamageElement, FromGlesError},
-        render_workspace, CursorMode, ElementFilter, RendererRef, CLEAR_COLOR,
+        render_workspace, CursorMode, ElementFilter, RendererRef,
     },
     shell::{CosmicMappedRenderElement, CosmicSurface, WorkspaceRenderElement},
     state::{Common, KmsNodes, State},
@@ -573,12 +573,7 @@ pub fn render_window_to_buffer(
             renderer.bind(render_buffer).map_err(DTError::Rendering)?;
         }
 
-        dt.render_output(
-            renderer,
-            age,
-            &elements,
-            CLEAR_COLOR, // TODO use a theme neutral color
-        )
+        dt.render_output(renderer, age, &elements, Color32F::TRANSPARENT)
     }
 
     let common = &mut state.common;
