@@ -255,6 +255,8 @@ pub struct Shell {
     )>,
     resize_indicator: Option<ResizeIndicator>,
     tiling_exceptions: TilingExceptions,
+    active_window_needs_reset: Option<CosmicMapped>,
+    pub swapped_output: bool,
 
     #[cfg(feature = "debug")]
     pub debug_active: bool,
@@ -721,6 +723,8 @@ impl Workspaces {
                 for seat in seats {
                     if &seat.active_output() == output {
                         seat.set_active_output(&new_output);
+                        // TODO do we need to mark swap output here?
+                        // Maybe not because the results are going to be weird anyways?
                     }
                 }
 
@@ -1187,11 +1191,22 @@ impl Common {
         self.xdg_activation_state.retain_tokens(|_, data| {
             Instant::now().duration_since(data.timestamp) < Duration::from_secs(5)
         });
-        self.shell.write().unwrap().refresh(
+        let mut guard = self.shell.write().unwrap();
+        guard.refresh(
             &self.xdg_activation_state,
             &mut self.workspace_state.update(),
         );
+        // check current active and ensure it is called twice if it is already activated and needs reactivation
+        if let Some(w) = guard.active_window_needs_reset.take() {
+            drop(guard);
+
+            self.toplevel_info_state.refresh(&self.workspace_state);
+            w.set_activated(true);
+        } else {
+            drop(guard);
+        }
         self.popups.cleanup();
+
         self.toplevel_info_state.refresh(&self.workspace_state);
         self.refresh_idle_inhibit();
     }
@@ -1279,11 +1294,13 @@ impl Shell {
 
             theme,
             active_hint: config.cosmic_conf.active_hint,
+            active_window_needs_reset: None,
             overview_mode: OverviewMode::None,
             swap_indicator: None,
             resize_mode: ResizeMode::None,
             resize_state: None,
             resize_indicator: None,
+            swapped_output: false,
             tiling_exceptions,
 
             #[cfg(feature = "debug")]
@@ -2340,6 +2357,7 @@ impl Shell {
         let new_pos = if follow {
             if let Some(seat) = seat {
                 seat.set_active_output(&to_output);
+                self.swapped_output = true;
             }
             self.workspaces
                 .idx_for_handle(&to_output, to)
@@ -2455,6 +2473,8 @@ impl Shell {
             })) => {
                 let new_pos = if follow {
                     seat.set_active_output(&to_output);
+                    self.swapped_output = true;
+
                     self.workspaces
                         .idx_for_handle(&to_output, &to)
                         .and_then(|to_idx| {

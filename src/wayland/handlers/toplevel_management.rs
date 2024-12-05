@@ -59,14 +59,17 @@ impl ToplevelManagementHandler for State {
                     WorkspaceDelta::new_shortcut(),
                     &mut self.common.workspace_state.update(),
                 );
-                std::mem::drop(shell);
 
                 if seat.active_output() != *output {
                     match res {
                         Ok(Some(new_pos)) => {
                             seat.set_active_output(&output);
+                            shell.swapped_output = true;
+                            std::mem::drop(shell);
+
                             if let Some(ptr) = seat.get_pointer() {
                                 let serial = SERIAL_COUNTER.next_serial();
+
                                 ptr.motion(
                                     self,
                                     None,
@@ -81,9 +84,15 @@ impl ToplevelManagementHandler for State {
                         }
                         Ok(None) => {
                             seat.set_active_output(&output);
+                            shell.swapped_output = true;
+                            std::mem::drop(shell);
                         }
-                        _ => {}
+                        _ => {
+                            std::mem::drop(shell);
+                        }
                     }
+                } else {
+                    std::mem::drop(shell);
                 }
 
                 mapped.focus_window(window);

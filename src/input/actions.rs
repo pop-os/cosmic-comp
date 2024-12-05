@@ -403,6 +403,7 @@ impl State {
                         &mut self.common.workspace_state.update(),
                     );
                     seat.set_active_output(&next_output);
+                    shell.swapped_output = true;
 
                     if let Ok(Some(new_pos)) = res {
                         let new_target = shell
@@ -490,6 +491,7 @@ impl State {
                         &mut self.common.workspace_state.update(),
                     );
                     seat.set_active_output(&next_output);
+                    shell.swapped_output = true;
 
                     if let Ok(Some(new_pos)) = res {
                         let new_target = shell
@@ -549,6 +551,7 @@ impl State {
                         &mut self.common.workspace_state.update(),
                     );
                     seat.set_active_output(&prev_output);
+                    shell.swapped_output = true;
 
                     if let Ok(Some(new_pos)) = res {
                         let new_target = shell

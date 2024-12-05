@@ -507,6 +507,7 @@ impl State {
                             session.set_cursor_pos(None);
                         }
                         seat.set_active_output(&output);
+                        shell.swapped_output = true;
                     }
 
                     for session in cursor_sessions_for_output(&shell, &output) {

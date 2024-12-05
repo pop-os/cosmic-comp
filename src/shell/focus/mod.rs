@@ -169,6 +169,8 @@ impl Shell {
 
     fn update_active(&mut self) {
         // update activate status
+        let mut focused_output = None;
+
         let focused_windows = self
             .seats
             .iter()
@@ -179,6 +181,9 @@ impl Shell {
                 ) {
                     return None;
                 }
+                focused_output = self
+                    .swapped_output
+                    .then_some(seat.focused_or_active_output());
 
                 Some(self.outputs().flat_map(|o| {
                     let space = self.active_space(o);
@@ -188,7 +193,7 @@ impl Shell {
             })
             .flatten()
             .collect::<Vec<_>>();
-
+        self.swapped_output = false;
         for output in self.outputs().cloned().collect::<Vec<_>>().into_iter() {
             let set = self.workspaces.sets.get_mut(&output).unwrap();
             for focused in focused_windows.iter() {
@@ -208,7 +213,17 @@ impl Shell {
                 raise_with_children(&mut workspace.floating_layer, focused);
             }
             for window in workspace.mapped() {
-                window.set_activated(focused_windows.contains(&window));
+                let focused = focused_windows.contains(&window);
+                window.set_activated(focused);
+
+                if focused
+                    && window.is_activated(false)
+                    && focused_output.as_ref().is_some_and(|f| *f == output)
+                {
+                    self.active_window_needs_reset = Some(window.clone());
+                    window.set_activated(false);
+                }
+
                 window.configure();
             }
             for m in workspace.minimized_windows.iter() {
@@ -223,7 +238,7 @@ impl Shell {
                 for window in workspace.mapped() {
                     window.set_activated(false);
                     window.configure();
-                }   
+                }
             }
         }
     }
@@ -355,6 +370,8 @@ impl Common {
                 if let Some(other) = shell.outputs().next() {
                     seat.set_active_output(other);
                 }
+                shell.swapped_output = true;
+
                 continue;
             }
 
