@@ -37,6 +37,19 @@ impl OverlapNotifyHandler for State {
         let shell = self.common.shell.read().unwrap();
         shell.outputs().cloned().collect::<Vec<_>>().into_iter()
     }
+
+    fn active_workspaces(
+        &self,
+    ) -> impl Iterator<Item = crate::wayland::protocols::workspace::WorkspaceHandle> {
+        let shell = self.common.shell.read().unwrap();
+        shell
+            .workspaces
+            .sets
+            .iter()
+            .map(|(_, set)| set.workspaces[set.active].handle)
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
 }
 
 delegate_overlap_notify!(State);
