@@ -125,6 +125,7 @@ pub struct SurfaceThreadState {
     target_node: DrmNode,
     active: Arc<AtomicBool>,
     vrr_mode: AdaptiveSync,
+    direct_scanout_allowed: bool,
     compositor: Option<GbmDrmOutput>,
 
     state: QueueState,
@@ -238,6 +239,7 @@ pub enum ThreadCommand {
     ScheduleRender,
     AdaptiveSyncAvailable(SyncSender<Result<VrrSupport>>),
     UseAdaptiveSync(AdaptiveSync),
+    AllowDirectScanout(bool, SyncSender<()>),
     End,
     DpmsOff,
 }
@@ -421,6 +423,14 @@ impl Surface {
         Ok(true)
     }
 
+    pub fn allow_direct_scanout(&mut self, flag: bool) {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let _ = self
+            .thread_command
+            .send(ThreadCommand::AllowDirectScanout(flag, tx));
+        let _ = rx.recv();
+    }
+
     pub fn suspend(&mut self) {
         let _ = self.thread_command.send(ThreadCommand::Suspend);
     }
@@ -515,6 +525,8 @@ fn surface_thread(
         target_node,
         active,
         compositor: None,
+        direct_scanout_allowed: !crate::utils::env::bool_var("COSMIC_DISABLE_DIRECT_SCANOUT")
+            .unwrap_or(false),
         vrr_mode: AdaptiveSync::Disabled,
 
         state: QueueState::Idle,
@@ -601,6 +613,12 @@ fn surface_thread(
                         }
                     };
                 }
+            }
+            Event::Msg(ThreadCommand::AllowDirectScanout(flag, tx)) => {
+                state.direct_scanout_allowed = flag
+                    && !crate::utils::env::bool_var("COSMIC_DISABLE_DIRECT_SCANOUT")
+                        .unwrap_or(false);
+                let _ = tx.send(());
             }
             Event::Closed | Event::Msg(ThreadCommand::End) => {
                 signal.stop();
@@ -1070,7 +1088,11 @@ impl SurfaceThreadState {
                 &mut renderer,
                 &elements,
                 [0.0, 0.0, 0.0, 1.0],
-                FrameMode::ALL,
+                if self.direct_scanout_allowed {
+                    FrameMode::ALL
+                } else {
+                    FrameMode::COMPOSITE
+                },
             )
         } else {
             if let Err(err) = compositor.with_compositor(|c| c.use_vrr(vrr)) {
@@ -1080,7 +1102,11 @@ impl SurfaceThreadState {
                 &mut renderer,
                 &elements,
                 CLEAR_COLOR, // TODO use a theme neutral color
-                FrameMode::ALL,
+                if self.direct_scanout_allowed {
+                    FrameMode::ALL
+                } else {
+                    FrameMode::COMPOSITE
+                },
             )
         };
         self.timings.draw_done(&self.clock);
