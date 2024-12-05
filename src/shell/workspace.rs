@@ -797,7 +797,7 @@ impl Workspace {
                 } else {
                     None
                 };
-                fullscreen.surface.set_geometry(geo);
+                fullscreen.surface.set_geometry(geo, 0);
                 fullscreen.surface.send_configure();
             }
 
@@ -835,7 +835,7 @@ impl Workspace {
 
         window.set_fullscreen(true);
         let geo = self.output.geometry();
-        let original_geometry = window.geometry().as_global();
+        let original_geometry = window.global_geometry().unwrap_or_default();
         let signal = if let Some(surface) = window.wl_surface() {
             let signal = Arc::new(AtomicBool::new(false));
             add_blocker(
@@ -848,7 +848,7 @@ impl Workspace {
         } else {
             None
         };
-        window.set_geometry(geo);
+        window.set_geometry(geo, 0);
         window.send_configure();
 
         self.fullscreen = Some(FullscreenSurface {
@@ -878,7 +878,7 @@ impl Workspace {
             .filter(|f| &f.surface == window && f.ended_at.is_none())
         {
             window.set_fullscreen(false);
-            window.set_geometry(f.original_geometry);
+            window.set_geometry(f.original_geometry, 0);
 
             self.floating_layer.refresh();
             self.tiling_layer.recalculate();

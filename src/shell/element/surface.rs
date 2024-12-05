@@ -92,7 +92,7 @@ struct Minimized(AtomicBool);
 struct Sticky(AtomicBool);
 
 #[derive(Default)]
-pub struct GlobalGeometry(pub Mutex<Option<Rectangle<i32, Global>>>);
+struct GlobalGeometry(Mutex<Option<Rectangle<i32, Global>>>);
 
 pub const SSD_HEIGHT: i32 = 36;
 pub const RESIZE_BORDER: i32 = 10;
@@ -139,14 +139,30 @@ impl CosmicSurface {
         }
     }
 
-    pub fn set_geometry(&self, geo: Rectangle<i32, Global>) {
+    pub fn global_geometry(&self) -> Option<Rectangle<i32, Global>> {
         *self
             .0
             .user_data()
             .get_or_insert_threadsafe(GlobalGeometry::default)
             .0
             .lock()
-            .unwrap() = Some(geo);
+            .unwrap()
+    }
+
+    pub fn set_geometry(&self, geo: Rectangle<i32, Global>, ssd_height: u32) {
+        {
+            let mut geo = geo;
+            geo.size.h += ssd_height as i32;
+            geo.loc.y -= ssd_height as i32;
+
+            *self
+                .0
+                .user_data()
+                .get_or_insert_threadsafe(GlobalGeometry::default)
+                .0
+                .lock()
+                .unwrap() = Some(geo);
+        }
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 toplevel.with_pending_state(|state| state.size = Some(geo.size.as_logical()))

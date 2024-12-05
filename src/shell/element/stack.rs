@@ -170,7 +170,7 @@ impl CosmicStack {
             if let Some(mut geo) = p.geometry.lock().unwrap().clone() {
                 geo.loc.y += TAB_HEIGHT;
                 geo.size.h -= TAB_HEIGHT;
-                window.set_geometry(geo);
+                window.set_geometry(geo, TAB_HEIGHT as u32);
             }
             window.send_configure();
             if let Some(idx) = idx {
@@ -490,7 +490,7 @@ impl CosmicStack {
 
             let win_geo = Rectangle::from_loc_and_size(loc, size);
             for window in p.windows.lock().unwrap().iter() {
-                window.set_geometry(win_geo);
+                window.set_geometry(win_geo, TAB_HEIGHT as u32);
             }
 
             *p.geometry.lock().unwrap() = Some(geo);
