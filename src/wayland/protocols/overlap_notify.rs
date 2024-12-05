@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{collections::HashMap, sync::Mutex};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Mutex,
+};
 
 use cosmic_protocols::{
     overlap_notify::v1::server::{
@@ -32,8 +35,11 @@ use wayland_backend::server::{GlobalId, ObjectId};
 
 use crate::utils::prelude::{RectExt, RectGlobalExt, RectLocalExt};
 
-use super::toplevel_info::{
-    ToplevelHandleState, ToplevelInfoGlobalData, ToplevelInfoHandler, ToplevelState, Window,
+use super::{
+    toplevel_info::{
+        ToplevelHandleState, ToplevelInfoGlobalData, ToplevelInfoHandler, ToplevelState, Window,
+    },
+    workspace::WorkspaceHandle,
 };
 
 #[derive(Debug)]
@@ -82,8 +88,10 @@ impl OverlapNotifyState {
             + 'static,
         W: Window + 'static,
     {
+        let active_workspaces: Vec<_> = state.active_workspaces().collect();
         for output in state.outputs() {
             let map = layer_map_for_output(&output);
+
             for layer_surface in map.layers() {
                 if let Some(data) = layer_surface
                     .user_data()
@@ -100,7 +108,22 @@ impl OverlapNotifyState {
                             .as_local()
                             .to_global(&output);
 
-                        for window in state.toplevel_info_state().registered_toplevels() {
+                        for window in
+                            state
+                                .toplevel_info_state()
+                                .registered_toplevels()
+                                .filter(|w| {
+                                    let state = w
+                                        .user_data()
+                                        .get::<ToplevelState>()
+                                        .unwrap()
+                                        .lock()
+                                        .unwrap();
+                                    active_workspaces.iter().any(|active_workspace| {
+                                        state.in_workspace(&active_workspace)
+                                    })
+                                })
+                        {
                             if let Some(window_geo) = window.global_geometry() {
                                 if let Some(intersection) = layer_geo.intersection(window_geo) {
                                     // relative to layer location
@@ -146,6 +169,7 @@ pub trait OverlapNotifyHandler: ToplevelInfoHandler {
     fn overlap_notify_state(&mut self) -> &mut OverlapNotifyState;
     fn layer_surface_from_resource(&self, resource: ZwlrLayerSurfaceV1) -> Option<LayerSurface>;
     fn outputs(&self) -> impl Iterator<Item = Output>;
+    fn active_workspaces(&self) -> impl Iterator<Item = (WorkspaceHandle)>;
 }
 
 pub struct OverlapNotifyGlobalData {

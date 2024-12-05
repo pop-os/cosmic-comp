@@ -80,6 +80,10 @@ impl ToplevelStateInner {
     pub fn foreign_handle(&self) -> Option<&ForeignToplevelHandle> {
         self.foreign_handle.as_ref()
     }
+
+    pub fn in_workspace(&self, handle: &WorkspaceHandle) -> bool {
+        self.workspaces.contains(handle)
+    }
 }
 
 pub struct ToplevelHandleStateInner<W: Window> {
