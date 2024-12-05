@@ -13,21 +13,19 @@ use cosmic::{
         keyboard::{Event as KeyboardEvent, Modifiers as IcedModifiers},
         mouse::{Button as MouseButton, Cursor, Event as MouseEvent, ScrollDelta},
         touch::{Event as TouchEvent, Finger},
-        window::{Event as WindowEvent, Id},
-        Command, Limits, Point as IcedPoint, Rectangle as IcedRectangle, Size as IcedSize,
+        window::Event as WindowEvent,
+        Limits, Point as IcedPoint, Rectangle as IcedRectangle, Size as IcedSize, Task,
     },
-    iced_core::{clipboard::Null as NullClipboard, renderer::Style, Color, Length, Pixels},
-    iced_renderer::graphics::Renderer as IcedGraphicsRenderer,
+    iced_core::{clipboard::Null as NullClipboard, id::Id, renderer::Style, Color, Length, Pixels},
     iced_runtime::{
-        command::Action,
         program::{Program as IcedProgram, State},
-        Debug,
+        Action, Debug,
     },
     Theme,
 };
 use iced_tiny_skia::{
     graphics::{damage, Viewport},
-    Backend, Primitive,
+    Primitive,
 };
 
 use ordered_float::OrderedFloat;
@@ -104,9 +102,9 @@ pub trait Program {
         &mut self,
         message: Self::Message,
         loop_handle: &LoopHandle<'static, crate::state::State>,
-    ) -> Command<Self::Message> {
+    ) -> Task<Self::Message> {
         let _ = (message, loop_handle);
-        Command::none()
+        Task::none()
     }
     fn view(&self) -> cosmic::Element<'_, Self::Message>;
 
@@ -131,7 +129,7 @@ impl<P: Program> IcedProgram for ProgramWrapper<P> {
     type Renderer = cosmic::Renderer;
     type Theme = cosmic::Theme;
 
-    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
+    fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
         self.0.update(message, &self.1)
     }
 
@@ -178,14 +176,10 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
         if !self.state.is_queue_empty() {
             tracing::warn!("Missing force_update call");
         }
-        let mut renderer = cosmic::Renderer::TinySkia(IcedGraphicsRenderer::new(
-            Backend::new(),
-            cosmic::font::default(),
-            Pixels(16.0),
-        ));
+        let mut renderer = cosmic::Renderer::new(cosmic::font::default(), Pixels(16.0));
         let mut debug = Debug::new();
         let state = State::new(
-            Id::MAIN,
+            Id::unique(), // FIX: not sure if this works
             ProgramWrapper(self.state.program().0.clone(), handle.clone()),
             IcedSize::new(self.size.w as f32, self.size.h as f32),
             &mut renderer,
@@ -244,15 +238,11 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         theme: cosmic::Theme,
     ) -> IcedElement<P> {
         let size = size.into();
-        let mut renderer = cosmic::Renderer::TinySkia(IcedGraphicsRenderer::new(
-            Backend::new(),
-            cosmic::font::default(),
-            Pixels(16.0),
-        ));
+        let mut renderer = cosmic::Renderer::new(cosmic::font::default(), Pixels(16.0));
         let mut debug = Debug::new();
 
         let state = State::new(
-            Id::MAIN,
+            Id::unique(), // FIX: not sure if this works
             ProgramWrapper(program, handle.clone()),
             IcedSize::new(size.w as f32, size.h as f32),
             &mut renderer,
@@ -368,7 +358,7 @@ impl<P: Program + Send + 'static + Clone> IcedElement<P> {
 
 impl<P: Program + Send + 'static> IcedElementInternal<P> {
     #[profiling::function]
-    fn update(&mut self, mut force: bool) -> Vec<Action<<P as Program>::Message>> {
+    fn update(&mut self, mut force: bool) -> Vec<Task<<P as Program>::Message>> {
         while let Ok(message) = self.rx.try_recv() {
             self.state.queue_message(message);
             force = true;
@@ -387,7 +377,7 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
         let actions = self
             .state
             .update(
-                Id::MAIN,
+                Id::unique(), // FIX: not sure if this works
                 IcedSize::new(self.size.w as f32, self.size.h as f32),
                 cursor,
                 &mut self.renderer,
@@ -751,14 +741,11 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
 
     fn set_activate(&self, activated: bool) {
         let mut internal = self.0.lock().unwrap();
-        internal.state.queue_event(Event::Window(
-            Id::MAIN,
-            if activated {
-                WindowEvent::Focused
-            } else {
-                WindowEvent::Unfocused
-            },
-        ));
+        internal.state.queue_event(Event::Window(if activated {
+            WindowEvent::Focused
+        } else {
+            WindowEvent::Unfocused
+        }));
         let _ = internal.update(true); // TODO
     }
 

@@ -34,16 +34,16 @@ impl Program for SwapIndicatorInternal {
                 .prefer_svg(true)
                 .icon()
                 .into(),
-            horizontal_space(16).into(),
+            horizontal_space().width(16).into(),
             text::title3(fl!("swap-windows")).into(),
         ])
-        .align_items(Alignment::Center)
+        .align_y(Alignment::Center)
         .apply(container)
-        .center_x()
-        .center_y()
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
         .padding(16)
         .apply(container)
-        .style(theme::Container::custom(|theme| container::Appearance {
+        .class(theme::Container::custom(|theme| container::Style {
             icon_color: Some(Color::from(theme.cosmic().accent.on)),
             text_color: Some(Color::from(theme.cosmic().accent.on)),
             background: Some(Background::Color(theme.cosmic().accent_color().into())),
@@ -57,10 +57,8 @@ impl Program for SwapIndicatorInternal {
         .width(Length::Shrink)
         .height(Length::Shrink)
         .apply(container)
-        .height(Length::Fill)
-        .width(Length::Fill)
-        .center_x()
-        .center_y()
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
         .into()
     }
 }

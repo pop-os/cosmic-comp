@@ -3,17 +3,17 @@ use cosmic::{
     iced_core::{
         event, layout, mouse, overlay,
         renderer::{Quad, Style},
-        widget::{tree, Id, OperationOutputWrapper, Tree, Widget},
+        widget::{tree, Id, Tree, Widget},
         Background, Border, Clipboard, Color, Event, Layout, Length, Rectangle,
         Renderer as IcedRenderer, Shell, Size,
     },
-    widget::button::StyleSheet,
+    widget::button::Catalog,
 };
 
 pub struct SubmenuItem<'a, Message> {
     elem: cosmic::Element<'a, Message>,
     idx: usize,
-    styling: <cosmic::Theme as StyleSheet>::Style,
+    styling: <cosmic::Theme as Catalog>::Class,
 }
 
 impl<'a, Message> SubmenuItem<'a, Message> {
@@ -25,7 +25,7 @@ impl<'a, Message> SubmenuItem<'a, Message> {
         }
     }
 
-    pub fn style(mut self, style: <cosmic::Theme as StyleSheet>::Style) -> Self {
+    pub fn style(mut self, style: <cosmic::Theme as Catalog>::Class) -> Self {
         self.styling = style;
         self
     }
@@ -133,7 +133,7 @@ where
         state: &mut Tree,
         layout: Layout<'_>,
         renderer: &cosmic::Renderer,
-        operation: &mut dyn cosmic::widget::Operation<OperationOutputWrapper<Message>>,
+        operation: &mut dyn cosmic::widget::Operation<()>,
     ) {
         let state = &mut state.children[0];
         let layout = layout.children().next().unwrap();
@@ -206,10 +206,13 @@ where
         state: &'b mut Tree,
         layout: Layout<'_>,
         renderer: &cosmic::Renderer,
+        translation: cosmic::iced::Vector,
     ) -> Option<overlay::Element<'b, Message, cosmic::Theme, cosmic::Renderer>> {
         let state = &mut state.children[0];
         let layout = layout.children().next().unwrap();
-        self.elem.as_widget_mut().overlay(state, layout, renderer)
+        self.elem
+            .as_widget_mut()
+            .overlay(state, layout, renderer, translation)
     }
 }
 

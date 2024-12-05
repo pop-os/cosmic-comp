@@ -84,7 +84,7 @@ impl TabText {
             vertical_alignment: alignment::Vertical::Center,
             shaping: Shaping::Advanced,
             line_height: LineHeight::default(),
-            wrap: cosmic::iced::advanced::text::Wrap::None,
+            wrapping: cosmic::iced::advanced::text::Wrapping::None,
         })
     }
 }

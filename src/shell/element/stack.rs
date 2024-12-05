@@ -14,9 +14,9 @@ use crate::{
 };
 use calloop::LoopHandle;
 use cosmic::{
-    iced::{id::Id, widget as iced_widget},
+    iced::{id::Id, widget as iced_widget, Alignment},
     iced_core::{border::Radius, Background, Border, Color, Length},
-    iced_runtime::Command,
+    iced_runtime::Task,
     iced_widget::scrollable::AbsoluteOffset,
     theme, widget as cosmic_widget, Apply, Element as CosmicElement, Theme,
 };
@@ -712,7 +712,7 @@ impl Program for CosmicStackInternal {
         &mut self,
         message: Self::Message,
         loop_handle: &LoopHandle<'static, crate::state::State>,
-    ) -> Command<Self::Message> {
+    ) -> Task<Self::Message> {
         match message {
             Message::DragStart => {
                 if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
@@ -874,7 +874,7 @@ impl Program for CosmicStackInternal {
             }
             _ => unreachable!(),
         }
-        Command::none()
+        Task::none()
     }
 
     fn view(&self) -> CosmicElement<'_, Self::Message> {
@@ -890,8 +890,8 @@ impl Program for CosmicStackInternal {
                 .size(16)
                 .prefer_svg(true)
                 .icon()
-                .style(if group_focused {
-                    theme::Svg::custom(|theme| iced_widget::svg::Appearance {
+                .class(if group_focused {
+                    theme::Svg::custom(|theme| iced_widget::svg::Style {
                         color: Some(if theme.cosmic().is_dark {
                             Color::BLACK
                         } else {
@@ -903,7 +903,7 @@ impl Program for CosmicStackInternal {
                 })
                 .apply(iced_widget::container)
                 .padding([4, 24])
-                .center_y()
+                .align_y(Alignment::Center)
                 .apply(iced_widget::mouse_area)
                 .on_press(Message::DragStart)
                 .on_right_press(Message::Menu)
@@ -935,7 +935,8 @@ impl Program for CosmicStackInternal {
                 .height(Length::Fill)
                 .width(Length::Fill),
             ),
-            iced_widget::horizontal_space(0)
+            iced_widget::horizontal_space()
+                .width(Length::Fixed(0.0))
                 .apply(iced_widget::container)
                 .padding([64, 24])
                 .apply(iced_widget::mouse_area)
@@ -953,10 +954,10 @@ impl Program for CosmicStackInternal {
 
         iced_widget::row(elements)
             .height(TAB_HEIGHT as u16)
-            .width(Length::Fill) //width as u16)
+            .width(Length::Fill)
             .apply(iced_widget::container)
-            .center_y()
-            .style(theme::Container::custom(move |theme| {
+            .align_y(Alignment::Center)
+            .class(theme::Container::custom(move |theme| {
                 let background = if group_focused {
                     Some(Background::Color(theme.cosmic().accent_color().into()))
                 } else {
@@ -965,7 +966,7 @@ impl Program for CosmicStackInternal {
                     )))
                 };
 
-                iced_widget::container::Appearance {
+                iced_widget::container::Style {
                     icon_color: Some(Color::from(theme.cosmic().background.on)),
                     text_color: Some(Color::from(theme.cosmic().background.on)),
                     background,
