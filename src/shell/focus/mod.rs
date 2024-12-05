@@ -172,7 +172,7 @@ impl Shell {
         let focused_windows = self
             .seats
             .iter()
-            .flat_map(|seat| {
+            .map(|seat| {
                 if matches!(
                     seat.get_keyboard().unwrap().current_focus(),
                     Some(KeyboardFocusTarget::Group(_))
@@ -180,11 +180,10 @@ impl Shell {
                     return None;
                 }
 
-                Some(self.outputs().flat_map(|o| {
-                    let space = self.active_space(o);
-                    let stack = space.focus_stack.get(seat);
-                    stack.last().cloned()
-                }))
+                let output = seat.focused_or_active_output();
+                let space = self.active_space(&output);
+                let stack = space.focus_stack.get(seat);
+                stack.last().cloned()
             })
             .flatten()
             .collect::<Vec<_>>();
@@ -223,7 +222,7 @@ impl Shell {
                 for window in workspace.mapped() {
                     window.set_activated(false);
                     window.configure();
-                }   
+                }
             }
         }
     }
