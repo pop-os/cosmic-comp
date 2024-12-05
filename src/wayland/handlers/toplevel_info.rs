@@ -3,7 +3,7 @@
 use smithay::utils::{user_data::UserDataMap, Rectangle};
 
 use crate::{
-    shell::{element::surface::GlobalGeometry, CosmicSurface},
+    shell::CosmicSurface,
     state::State,
     utils::prelude::Global,
     wayland::protocols::toplevel_info::{
@@ -52,13 +52,7 @@ impl Window for CosmicSurface {
     }
 
     fn global_geometry(&self) -> Option<Rectangle<i32, Global>> {
-        self.user_data()
-            .get_or_insert(GlobalGeometry::default)
-            .0
-            .lock()
-            .unwrap()
-            .clone()
-            .filter(|_| !self.is_minimized())
+        CosmicSurface::global_geometry(self)
     }
 
     fn user_data(&self) -> &UserDataMap {

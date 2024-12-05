@@ -210,16 +210,11 @@ impl CosmicWindow {
 
     pub fn set_geometry(&self, geo: Rectangle<i32, Global>) {
         self.0.with_program(|p| {
-            let loc = (
-                geo.loc.x,
-                geo.loc.y + if p.has_ssd(true) { SSD_HEIGHT } else { 0 },
-            );
-            let size = (
-                geo.size.w,
-                std::cmp::max(geo.size.h - if p.has_ssd(true) { SSD_HEIGHT } else { 0 }, 0),
-            );
+            let ssd_height = if p.has_ssd(true) { SSD_HEIGHT } else { 0 };
+            let loc = (geo.loc.x, geo.loc.y + ssd_height);
+            let size = (geo.size.w, std::cmp::max(geo.size.h - ssd_height, 0));
             p.window
-                .set_geometry(Rectangle::from_loc_and_size(loc, size));
+                .set_geometry(Rectangle::from_loc_and_size(loc, size), ssd_height as u32);
         });
     }
 
