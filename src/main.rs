@@ -45,9 +45,13 @@ impl State {
         // into systemd and the session?
         self.ready.call_once(|| {
             // potentially tell systemd we are setup now
-            #[cfg(feature = "systemd")]
             if let state::BackendData::Kms(_) = &self.backend {
+                #[cfg(feature = "systemd")]
                 systemd::ready(&self.common);
+                #[cfg(not(feature = "systemd"))]
+                if let Err(err) = dbus::ready(&self.common) {
+                    error!(?err, "Failed to update the D-Bus activation environment");
+                }
             }
 
             // potentially tell the session we are setup now
