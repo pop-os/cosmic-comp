@@ -1,6 +1,8 @@
-use crate::state::{BackendData, State};
+use crate::state::{BackendData, Common, State};
 use anyhow::{Context, Result};
 use calloop::{InsertError, LoopHandle, RegistrationToken};
+use std::collections::HashMap;
+use zbus::blocking::{fdo::DBusProxy, Connection};
 
 mod power;
 
@@ -63,4 +65,25 @@ pub fn init(evlh: &LoopHandle<'static, State>) -> Result<Vec<RegistrationToken>>
     };
 
     Ok(tokens)
+}
+
+/// Updated the D-Bus activation environment with `WAYLAND_DISPLAY` and
+/// `DISPLAY` variables.
+pub fn ready(common: &Common) -> Result<()> {
+    let conn = Connection::session()?;
+    let proxy = DBusProxy::new(&conn)?;
+
+    proxy.update_activation_environment(HashMap::from([
+        ("WAYLAND_DISPLAY", common.socket.to_str().unwrap()),
+        (
+            "DISPLAY",
+            &common
+                .xwayland_state
+                .as_ref()
+                .map(|s| format!(":{}", s.display))
+                .unwrap_or(String::new()),
+        ),
+    ]))?;
+
+    Ok(())
 }
