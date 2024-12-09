@@ -1366,12 +1366,7 @@ where
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => {
                 let glow_renderer = renderer.glow_renderer_mut();
-                match elem.underlying_storage(glow_renderer) {
-                    Some(UnderlyingStorage::Wayland(buffer)) => {
-                        Some(UnderlyingStorage::Wayland(buffer))
-                    }
-                    _ => None,
-                }
+                elem.underlying_storage(glow_renderer)
             }
         }
     }
