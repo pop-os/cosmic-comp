@@ -217,36 +217,30 @@ where
                 RenderElement::<R>::draw(elem, frame, src, dst, damage, opaque_regions)
             }
             CosmicElement::Mirror(elem) => {
-                let elem = {
-                    let glow_frame = R::glow_frame_mut(frame);
-                    RenderElement::<GlowRenderer>::draw(
-                        elem,
-                        glow_frame,
-                        src,
-                        dst,
-                        damage,
-                        opaque_regions,
-                    )
-                    .map_err(FromGlesError::from_gles_error)
-                };
-                elem
+                let glow_frame = R::glow_frame_mut(frame);
+                RenderElement::<GlowRenderer>::draw(
+                    elem,
+                    glow_frame,
+                    src,
+                    dst,
+                    damage,
+                    opaque_regions,
+                )
+                .map_err(FromGlesError::from_gles_error)
             }
             CosmicElement::Zoom(elem) => elem.draw(frame, src, dst, damage, opaque_regions),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => {
-                let elem = {
-                    let glow_frame = R::glow_frame_mut(frame);
-                    RenderElement::<GlowRenderer>::draw(
-                        elem,
-                        glow_frame,
-                        src,
-                        dst,
-                        damage,
-                        opaque_regions,
-                    )
-                    .map_err(FromGlesError::from_gles_error)
-                };
-                elem
+                let glow_frame = R::glow_frame_mut(frame);
+                RenderElement::<GlowRenderer>::draw(
+                    elem,
+                    glow_frame,
+                    src,
+                    dst,
+                    damage,
+                    opaque_regions,
+                )
+                .map_err(FromGlesError::from_gles_error)
             }
         }
     }
@@ -260,23 +254,13 @@ where
             CosmicElement::AdditionalDamage(elem) => elem.underlying_storage(renderer),
             CosmicElement::Mirror(elem) => {
                 let glow_renderer = renderer.glow_renderer_mut();
-                match elem.underlying_storage(glow_renderer) {
-                    Some(UnderlyingStorage::Wayland(buffer)) => {
-                        Some(UnderlyingStorage::Wayland(buffer))
-                    }
-                    _ => None,
-                }
+                elem.underlying_storage(glow_renderer)
             }
             CosmicElement::Zoom(elem) => elem.underlying_storage(renderer),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => {
                 let glow_renderer = renderer.glow_renderer_mut();
-                match elem.underlying_storage(glow_renderer) {
-                    Some(UnderlyingStorage::Wayland(buffer)) => {
-                        Some(UnderlyingStorage::Wayland(buffer))
-                    }
-                    _ => None,
-                }
+                elem.underlying_storage(glow_renderer)
             }
         }
     }
