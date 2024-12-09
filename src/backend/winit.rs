@@ -228,6 +228,7 @@ pub fn init_backend(
             &mut state.common.workspace_state.update(),
             &state.common.xdg_activation_state,
             state.common.startup_done.clone(),
+            &state.common.clock,
         );
         state.common.refresh();
     }

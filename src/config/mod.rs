@@ -11,7 +11,6 @@ use cosmic_config::{ConfigGet, CosmicConfigEntry};
 use cosmic_settings_config::window_rules::ApplicationException;
 use cosmic_settings_config::{shortcuts, window_rules, Shortcuts};
 use serde::{Deserialize, Serialize};
-use smithay::wayland::xdg_activation::XdgActivationState;
 pub use smithay::{
     backend::input::KeyState,
     input::keyboard::{keysyms as KeySyms, Keysym, ModifiersState},
@@ -24,6 +23,10 @@ pub use smithay::{
         },
     },
     utils::{Logical, Physical, Point, Size, Transform},
+};
+use smithay::{
+    utils::{Clock, Monotonic},
+    wayland::xdg_activation::XdgActivationState,
 };
 use std::{
     cell::RefCell,
@@ -381,6 +384,7 @@ impl Config {
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
         xdg_activation_state: &XdgActivationState,
         startup_done: Arc<AtomicBool>,
+        clock: &Clock<Monotonic>,
     ) {
         let outputs = output_state.outputs().collect::<Vec<_>>();
         let mut infos = outputs
@@ -422,6 +426,7 @@ impl Config {
                 workspace_state,
                 xdg_activation_state,
                 startup_done.clone(),
+                clock,
             ) {
                 warn!(?err, "Failed to set new config.");
                 found_outputs.clear();
@@ -446,6 +451,7 @@ impl Config {
                     workspace_state,
                     xdg_activation_state,
                     startup_done,
+                    clock,
                 ) {
                     error!(?err, "Failed to reset config.");
                 } else {
@@ -477,6 +483,7 @@ impl Config {
                 workspace_state,
                 xdg_activation_state,
                 startup_done,
+                clock,
             ) {
                 warn!(?err, "Failed to set new config.",);
             } else {
