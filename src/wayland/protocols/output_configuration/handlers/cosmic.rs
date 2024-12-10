@@ -213,7 +213,13 @@ where
                         output_conf.lock().unwrap().mirroring = Some(output.clone());
                         let conf_head = data_init.init(id, output_conf);
                         pending.heads.push((head, Some(conf_head)));
+                    } else {
+                        let output_conf = PendingOutputConfiguration::default();
+                        data_init.init(id, output_conf);
                     }
+                } else {
+                    let output_conf = PendingOutputConfiguration::default();
+                    data_init.init(id, output_conf);
                 }
             }
             zcosmic_output_configuration_v1::Request::Release => {
