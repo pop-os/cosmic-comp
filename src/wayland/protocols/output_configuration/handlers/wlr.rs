@@ -233,16 +233,10 @@ where
 
                 if pending.heads.iter().any(|(_, c)| match c {
                     Some(conf) => {
-                        if let Some(output_conf) = conf.data::<PendingOutputConfiguration>() {
-                            if let Some(output) = head.data::<WeakOutput>() {
-                                let pending_conf = output_conf.lock().unwrap();
-                                pending_conf.mirroring.as_ref().is_some_and(|o| o == output)
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
+                        let output_conf = conf.data::<PendingOutputConfiguration>().unwrap();
+                        let output = head.data::<WeakOutput>().unwrap();
+                        let pending_conf = output_conf.lock().unwrap();
+                        pending_conf.mirroring.as_ref().is_some_and(|o| o == output)
                     }
                     None => false,
                 }) {

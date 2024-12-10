@@ -99,10 +99,9 @@ where
                 }
             }
             zcosmic_output_manager_v1::Request::GetConfiguration { extended, config } => {
-                if let Some(pending) = config.data::<PendingConfiguration>() {
-                    let obj = data_init.init(extended, config.downgrade());
-                    pending.lock().unwrap().extension_obj = Some(obj);
-                }
+                let pending = config.data::<PendingConfiguration>().unwrap();
+                let obj = data_init.init(extended, config.downgrade());
+                pending.lock().unwrap().extension_obj = Some(obj);
             }
             zcosmic_output_manager_v1::Request::GetConfigurationHead {
                 extended,
@@ -178,56 +177,49 @@ where
                 mirroring,
             } => {
                 if let Ok(obj) = obj.upgrade() {
-                    if let Some(data) = obj.data::<PendingConfiguration>() {
-                        if let Some(output) =
-                            mirroring.data::<WeakOutput>().and_then(|x| x.upgrade())
-                        {
-                            let mut pending = data.lock().unwrap();
-                            if pending.heads.iter().any(|(h, _)| *h == head) {
-                                obj.post_error(
-                                    zwlr_output_configuration_v1::Error::AlreadyConfiguredHead,
-                                    format!("{:?} was already configured", head),
-                                );
-                                return;
-                            }
-
-                            if pending.heads.iter().any(|(h, c)| {
-                                match c.as_ref() {
-                                    Some(c) => {
-                                        if let Some(conf) = c.data::<PendingOutputConfiguration>() {
-                                            match conf.lock().unwrap().mirroring.as_ref() {
-                                                Some(mirrored) => {
-                                                    head.data::<WeakOutput>().is_some_and(|o| o == mirrored) // we are already a mirror target -> invalid
-                                                    || *h == mirroring // our target already mirrors -> invalid
-                                                }
-                                                None => false,
-                                            }
-                                        } else {
-                                            *h == mirroring // unknown state for our mirror target -> invalid
-                                        }
-                                    }
-                                    None => *h == mirroring, // disabled state for our mirror target -> invalid
-                                }
-                            }) {
-                                extension_obj.post_error(
-                                zcosmic_output_configuration_v1::Error::MirroredHeadBusy,
-                                format!("{:?} can't mirror, it is either a mirror target itself or {:?} is not enabled/already mirroring", head, mirroring),
+                    let data = obj.data::<PendingConfiguration>().unwrap();
+                    if let Some(output) = mirroring.data::<WeakOutput>().unwrap().upgrade() {
+                        let mut pending = data.lock().unwrap();
+                        if pending.heads.iter().any(|(h, _)| *h == head) {
+                            obj.post_error(
+                                zwlr_output_configuration_v1::Error::AlreadyConfiguredHead,
+                                format!("{:?} was already configured", head),
                             );
-                            }
-
-                            let output_conf = PendingOutputConfiguration::default();
-                            output_conf.lock().unwrap().mirroring = Some(output.clone());
-                            let conf_head = data_init.init(id, output_conf);
-                            pending.heads.push((head, Some(conf_head)));
+                            return;
                         }
+
+                        if pending.heads.iter().any(|(h, c)| {
+                            match c.as_ref() {
+                                Some(c) => {
+                                    let conf = c.data::<PendingOutputConfiguration>().unwrap();
+                                    match conf.lock().unwrap().mirroring.as_ref() {
+                                        Some(mirrored) => {
+                                            head.data::<WeakOutput>().unwrap() == mirrored // we are already a mirror target -> invalid
+                                            || *h == mirroring // our target already mirrors -> invalid
+                                        }
+                                        None => false,
+                                    }
+                                }
+                                None => *h == mirroring, // disabled state for our mirror target -> invalid
+                            }
+                        }) {
+                            extension_obj.post_error(
+                            zcosmic_output_configuration_v1::Error::MirroredHeadBusy,
+                            format!("{:?} can't mirror, it is either a mirror target itself or {:?} is not enabled/already mirroring", head, mirroring),
+                        );
+                        }
+
+                        let output_conf = PendingOutputConfiguration::default();
+                        output_conf.lock().unwrap().mirroring = Some(output.clone());
+                        let conf_head = data_init.init(id, output_conf);
+                        pending.heads.push((head, Some(conf_head)));
                     }
                 }
             }
             zcosmic_output_configuration_v1::Request::Release => {
                 if let Ok(obj) = obj.upgrade() {
-                    if let Some(data) = obj.data::<PendingConfiguration>() {
-                        data.lock().unwrap().extension_obj.take();
-                    }
+                    let data = obj.data::<PendingConfiguration>().unwrap();
+                    data.lock().unwrap().extension_obj.take();
                 }
             }
             _ => {}
@@ -259,40 +251,38 @@ where
         match request {
             zcosmic_output_configuration_head_v1::Request::SetScale1000 { scale_1000 } => {
                 if let Ok(obj) = obj.upgrade() {
-                    if let Some(data) = obj.data::<PendingOutputConfiguration>() {
-                        let mut pending = data.lock().unwrap();
-                        if pending.scale.is_some() {
-                            obj.post_error(
-                                zwlr_output_configuration_head_v1::Error::AlreadySet,
-                                format!("{:?} already had a scale configured", obj),
-                            );
-                            return;
-                        }
-                        pending.scale = Some((scale_1000 as f64) / 1000.0);
+                    let data = obj.data::<PendingOutputConfiguration>().unwrap();
+                    let mut pending = data.lock().unwrap();
+                    if pending.scale.is_some() {
+                        obj.post_error(
+                            zwlr_output_configuration_head_v1::Error::AlreadySet,
+                            format!("{:?} already had a scale configured", obj),
+                        );
+                        return;
                     }
+                    pending.scale = Some((scale_1000 as f64) / 1000.0);
                 }
             }
             zcosmic_output_configuration_head_v1::Request::SetAdaptiveSyncExt { state } => {
                 if let Ok(obj) = obj.upgrade() {
-                    if let Some(data) = obj.data::<PendingOutputConfiguration>() {
-                        let mut pending = data.lock().unwrap();
-                        if pending.adaptive_sync.is_some() {
-                            obj.post_error(
-                                zwlr_output_configuration_head_v1::Error::AlreadySet,
-                                format!("{:?} already had an adaptive_sync state configured", obj),
-                            );
-                            return;
-                        }
-                        pending.adaptive_sync = match state.into_result() {
-                            Ok(zcosmic_output_head_v1::AdaptiveSyncStateExt::Always) => {
-                                Some(AdaptiveSync::Force)
-                            }
-                            Ok(zcosmic_output_head_v1::AdaptiveSyncStateExt::Automatic) => {
-                                Some(AdaptiveSync::Enabled)
-                            }
-                            _ => Some(AdaptiveSync::Disabled),
-                        };
+                    let data = obj.data::<PendingOutputConfiguration>().unwrap();
+                    let mut pending = data.lock().unwrap();
+                    if pending.adaptive_sync.is_some() {
+                        obj.post_error(
+                            zwlr_output_configuration_head_v1::Error::AlreadySet,
+                            format!("{:?} already had an adaptive_sync state configured", obj),
+                        );
+                        return;
                     }
+                    pending.adaptive_sync = match state.into_result() {
+                        Ok(zcosmic_output_head_v1::AdaptiveSyncStateExt::Always) => {
+                            Some(AdaptiveSync::Force)
+                        }
+                        Ok(zcosmic_output_head_v1::AdaptiveSyncStateExt::Automatic) => {
+                            Some(AdaptiveSync::Enabled)
+                        }
+                        _ => Some(AdaptiveSync::Disabled),
+                    };
                 }
             }
             _ => {}
