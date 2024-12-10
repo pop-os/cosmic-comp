@@ -152,7 +152,7 @@ impl XdgActivationHandler for State {
                             }
                         }
 
-                        if workspace == &current_workspace.handle || in_current_workspace {
+                        if in_current_workspace {
                             let target = element.into();
 
                             std::mem::drop(shell);
