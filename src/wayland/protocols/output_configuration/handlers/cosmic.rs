@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use smithay::{
-    output::{Mode, Output},
+    output::Mode,
     reexports::{
         wayland_protocols_wlr::output_management::v1::server::{
             zwlr_output_configuration_head_v1::{self, ZwlrOutputConfigurationHeadV1},
@@ -179,7 +179,9 @@ where
             } => {
                 if let Ok(obj) = obj.upgrade() {
                     if let Some(data) = obj.data::<PendingConfiguration>() {
-                        if let Some(output) = mirroring.data::<Output>() {
+                        if let Some(output) =
+                            mirroring.data::<WeakOutput>().and_then(|x| x.upgrade())
+                        {
                             let mut pending = data.lock().unwrap();
                             if pending.heads.iter().any(|(h, _)| *h == head) {
                                 obj.post_error(
@@ -195,7 +197,7 @@ where
                                         if let Some(conf) = c.data::<PendingOutputConfiguration>() {
                                             match conf.lock().unwrap().mirroring.as_ref() {
                                                 Some(mirrored) => {
-                                                    head.data::<Output>().is_some_and(|o| o == mirrored) // we are already a mirror target -> invalid
+                                                    head.data::<WeakOutput>().is_some_and(|o| o == mirrored) // we are already a mirror target -> invalid
                                                     || *h == mirroring // our target already mirrors -> invalid
                                                 }
                                                 None => false,
