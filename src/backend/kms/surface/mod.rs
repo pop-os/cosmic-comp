@@ -222,7 +222,7 @@ impl Default for QueueState {
 
 #[derive(Debug)]
 pub enum ThreadCommand {
-    Suspend,
+    Suspend(SyncSender<()>),
     Resume {
         surface: DrmSurface,
         gbm: GbmDevice<DrmDeviceFd>,
@@ -433,7 +433,9 @@ impl Surface {
     }
 
     pub fn suspend(&mut self) {
-        let _ = self.thread_command.send(ThreadCommand::Suspend);
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let _ = self.thread_command.send(ThreadCommand::Suspend(tx));
+        let _ = rx.recv();
     }
 
     pub fn resume(
@@ -553,7 +555,7 @@ fn surface_thread(
     event_loop
         .handle()
         .insert_source(thread_receiver, move |command, _, state| match command {
-            Event::Msg(ThreadCommand::Suspend) => state.suspend(),
+            Event::Msg(ThreadCommand::Suspend(tx)) => state.suspend(tx),
             Event::Msg(ThreadCommand::Resume {
                 surface,
                 gbm,
@@ -642,7 +644,7 @@ fn surface_thread(
 }
 
 impl SurfaceThreadState {
-    fn suspend(&mut self) {
+    fn suspend(&mut self, tx: SyncSender<()>) {
         self.active.store(false, Ordering::SeqCst);
         let _ = self.compositor.take();
 
@@ -660,6 +662,8 @@ impl SurfaceThreadState {
                 self.loop_handle.remove(queued_render);
             }
         };
+
+        let _ = tx.send(());
     }
 
     fn resume(
