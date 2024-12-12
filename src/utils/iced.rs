@@ -915,7 +915,7 @@ where
                         .to_logical(1., Transform::Normal)
                         .to_i32_round(),
                 )),
-                Some(size.to_logical(1, Transform::Normal)),
+                Some(internal_ref.size),
                 Kind::Unspecified,
             ) {
                 return vec![C::from(buffer)];
