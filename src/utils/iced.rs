@@ -875,7 +875,7 @@ where
                     let background_color = state_ref.program().0.background_color(theme);
                     let bounds = IcedSize::new(size.w as u32, size.h as u32);
                     let viewport = Viewport::with_physical_size(bounds, scale.x);
-
+                    let scale_x = scale.x as f32;
                     let current_layers = internal_ref.renderer.layers();
                     let mut damage: Vec<_> = old_layers
                         .as_ref()
@@ -922,8 +922,10 @@ where
                             &overlay,
                         );
                     }
+
                     let damage = damage
                         .into_iter()
+                        .map(|d| d * scale_x)
                         .filter_map(|x| x.snap())
                         .map(|damage_rect| {
                             Rectangle::from_loc_and_size(
