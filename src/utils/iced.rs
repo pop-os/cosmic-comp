@@ -25,7 +25,10 @@ use cosmic::{
     },
     Theme,
 };
-use iced_tiny_skia::{graphics::Viewport, Primitive};
+use iced_tiny_skia::{
+    graphics::{damage, Viewport},
+    Layer,
+};
 
 use once_cell::sync::Lazy;
 use ordered_float::OrderedFloat;
@@ -143,7 +146,7 @@ impl<P: Program> IcedProgram for ProgramWrapper<P> {
 pub(crate) struct IcedElementInternal<P: Program + Send + 'static> {
     // draw buffer
     outputs: HashSet<Output>,
-    buffers: HashMap<OrderedFloat<f64>, (MemoryRenderBuffer, Option<(Vec<Primitive>, Color)>)>,
+    buffers: HashMap<OrderedFloat<f64>, (MemoryRenderBuffer, Option<(Vec<Layer>, Color)>)>,
     pending_update: Option<Instant>,
 
     // state
@@ -850,7 +853,9 @@ where
             internal_ref.pending_update = None;
         }
         let _ = internal_ref.update(force);
-        if let Some((buffer, _)) = internal_ref.buffers.get_mut(&OrderedFloat(scale.x)) {
+        if let Some((buffer, ref mut old_layers)) =
+            internal_ref.buffers.get_mut(&OrderedFloat(scale.x))
+        {
             let size: Size<i32, BufferCoords> = internal_ref
                 .size
                 .to_f64()
@@ -871,20 +876,52 @@ where
                     let bounds = IcedSize::new(size.w as u32, size.h as u32);
                     let viewport = Viewport::with_physical_size(bounds, scale.x);
 
-                    let damage = vec![cosmic::iced::Rectangle::new(
-                        cosmic::iced::Point::default(),
-                        viewport.logical_size(),
-                    )];
+                    let current_layers = internal_ref.renderer.layers();
+                    let mut damage: Vec<_> = old_layers
+                        .as_ref()
+                        .and_then(|(last_primitives, last_color)| {
+                            (last_color == &background_color).then(|| {
+                                damage::diff(
+                                    &last_primitives,
+                                    current_layers,
+                                    |_| {
+                                        vec![cosmic::iced::Rectangle::new(
+                                            cosmic::iced::Point::default(),
+                                            viewport.logical_size(),
+                                        )]
+                                    },
+                                    Layer::damage,
+                                )
+                                .into_iter()
+                                .filter(|d| {
+                                    let width = d.width as u32;
+                                    let height = d.height as u32;
 
-                    internal_ref.renderer.draw(
-                        &mut pixels,
-                        &mut clip_mask,
-                        &viewport,
-                        &damage,
-                        background_color,
-                        &overlay,
+                                    width > 1 && height > 1
+                                })
+                                .collect()
+                            })
+                        })
+                        .unwrap_or_else(|| {
+                            vec![cosmic::iced::Rectangle::with_size(viewport.logical_size())]
+                        });
+                    damage = damage::group(
+                        damage,
+                        cosmic::iced::Rectangle::with_size(viewport.logical_size()),
                     );
 
+                    if !damage.is_empty() {
+                        *old_layers = Some((current_layers.to_vec(), background_color));
+
+                        internal_ref.renderer.draw(
+                            &mut pixels,
+                            &mut clip_mask,
+                            &viewport,
+                            &damage,
+                            background_color,
+                            &overlay,
+                        );
+                    }
                     let damage = damage
                         .into_iter()
                         .filter_map(|x| x.snap())
