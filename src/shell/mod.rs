@@ -3501,7 +3501,12 @@ impl Shell {
         let workspace = &mut set.workspaces[set.active];
         let maybe_window = workspace.focus_stack.get(seat).iter().next().cloned();
         if let Some(window) = maybe_window {
-            if set.sticky_layer.mapped().any(|m| m == &window) {
+            let was_maximized = window.is_maximized(false);
+            if was_maximized {
+                workspace.unmaximize_request(&window);
+            }
+
+            let res = if set.sticky_layer.mapped().any(|m| m == &window) {
                 set.sticky_layer
                     .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat))
             } else if workspace.tiling_layer.mapped().any(|(m, _)| m == &window) {
@@ -3514,7 +3519,15 @@ impl Shell {
                     .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat))
             } else {
                 None
+            };
+
+            if was_maximized {
+                if let Some(KeyboardFocusTarget::Element(mapped)) = res.as_ref() {
+                    self.maximize_request(mapped, seat);
+                }
             }
+
+            res
         } else {
             None
         }
