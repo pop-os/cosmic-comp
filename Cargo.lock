@@ -3874,9 +3874,8 @@ dependencies = [
 
 [[package]]
 name = "pixman"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d24a24da0bec14f4e43a495c1837a3c358b87532e7fe66bd75c348b89f0451b6"
+version = "0.2.0"
+source = "git+https://github.com/ids1024/pixman-rs?branch=send#096317d6ffa277a222c5deafe74fcf767cf55bf1"
 dependencies = [
  "drm-fourcc",
  "paste",
@@ -3887,8 +3886,7 @@ dependencies = [
 [[package]]
 name = "pixman-sys"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1a0483e89e81d7915defe83c51f23f6800594d64f6f4a21253ce87fd8444ada"
+source = "git+https://github.com/ids1024/pixman-rs?branch=send#096317d6ffa277a222c5deafe74fcf767cf55bf1"
 
 [[package]]
 name = "pkg-config"
