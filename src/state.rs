@@ -153,7 +153,7 @@ impl ClientData for ClientState {
 pub fn advertised_node_for_client(client: &Client) -> Option<DrmNode> {
     // Lets check the global drm-node the client got either through default-feedback or wl_drm
     if let Some(normal_client) = client.get_data::<ClientState>() {
-        return normal_client.advertised_drm_node.clone();
+        return normal_client.advertised_drm_node;
     }
     // last but not least all xwayland-surfaces should also share a single node
     if let Some(xwayland_client) = client.get_data::<XWaylandClientData>() {
@@ -321,7 +321,7 @@ impl BackendData {
                 Some(c_m) => m.size != c_m.size || m.refresh != c_m.refresh,
             });
             let transform =
-                Some(final_config.transform.into()).filter(|x| *x != output.current_transform());
+                Some(final_config.transform).filter(|x| *x != output.current_transform());
             let scale = Some(final_config.scale)
                 .filter(|x| *x != output.current_scale().fractional_scale());
             let location = Some(Point::from((
@@ -389,9 +389,7 @@ impl BackendData {
     ) -> Result<Option<DrmNode>, anyhow::Error> {
         match self {
             BackendData::Kms(ref mut state) => {
-                return state
-                    .dmabuf_imported(client, global, dmabuf)
-                    .map(|node| Some(node))
+                return state.dmabuf_imported(client, global, dmabuf).map(Some)
             }
             BackendData::Winit(ref mut state) => {
                 state.backend.renderer().import_dmabuf(&dmabuf, None)?;
@@ -513,24 +511,24 @@ impl State {
         let seat_state = SeatState::<Self>::new();
         let viewporter_state = ViewporterState::new::<Self>(dh);
         let wl_drm_state = WlDrmState::<Option<DrmNode>>::default();
-        let kde_decoration_state = KdeDecorationState::new::<Self>(&dh, Mode::Client);
-        let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
+        let kde_decoration_state = KdeDecorationState::new::<Self>(dh, Mode::Client);
+        let xdg_decoration_state = XdgDecorationState::new::<Self>(dh);
         let session_lock_manager_state =
-            SessionLockManagerState::new::<Self, _>(&dh, client_is_privileged);
-        XWaylandKeyboardGrabState::new::<Self>(&dh);
-        let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
-        PointerConstraintsState::new::<Self>(&dh);
-        PointerGesturesState::new::<Self>(&dh);
-        TabletManagerState::new::<Self>(&dh);
-        SecurityContextState::new::<Self, _>(&dh, client_has_no_security_context);
-        InputMethodManagerState::new::<Self, _>(&dh, client_is_privileged);
-        TextInputManagerState::new::<Self>(&dh);
-        VirtualKeyboardManagerState::new::<State, _>(&dh, client_is_privileged);
-        AlphaModifierState::new::<Self>(&dh);
-        SinglePixelBufferState::new::<Self>(&dh);
+            SessionLockManagerState::new::<Self, _>(dh, client_is_privileged);
+        XWaylandKeyboardGrabState::new::<Self>(dh);
+        let xwayland_shell_state = XWaylandShellState::new::<Self>(dh);
+        PointerConstraintsState::new::<Self>(dh);
+        PointerGesturesState::new::<Self>(dh);
+        TabletManagerState::new::<Self>(dh);
+        SecurityContextState::new::<Self, _>(dh, client_has_no_security_context);
+        InputMethodManagerState::new::<Self, _>(dh, client_is_privileged);
+        TextInputManagerState::new::<Self>(dh);
+        VirtualKeyboardManagerState::new::<State, _>(dh, client_is_privileged);
+        AlphaModifierState::new::<Self>(dh);
+        SinglePixelBufferState::new::<Self>(dh);
 
-        let idle_notifier_state = IdleNotifierState::<Self>::new(&dh, handle.clone());
-        let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(&dh);
+        let idle_notifier_state = IdleNotifierState::<Self>::new(dh, handle.clone());
+        let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(dh);
         let idle_inhibiting_surfaces = HashSet::new();
 
         let data_control_state = crate::utils::env::bool_var("COSMIC_DATA_CONTROL_ENABLED")
@@ -783,10 +781,10 @@ impl Common {
             if let Some(lock_surface) = session_lock.surfaces.get(output) {
                 if let Some(feedback) =
                     advertised_node_for_surface(lock_surface.wl_surface(), &self.display_handle)
-                        .and_then(|source| dmabuf_feedback(source))
+                        .and_then(&mut dmabuf_feedback)
                 {
                     send_dmabuf_feedback_surface_tree(
-                        &lock_surface.wl_surface(),
+                        lock_surface.wl_surface(),
                         output,
                         surface_primary_scanout_output,
                         |surface, _| {
@@ -815,7 +813,7 @@ impl Common {
                             .and_then(|wl_surface| {
                                 advertised_node_for_surface(&wl_surface, &self.display_handle)
                             })
-                            .and_then(|source| dmabuf_feedback(source))
+                            .and_then(&mut dmabuf_feedback)
                         {
                             window.send_dmabuf_feedback(
                                 output,
@@ -843,7 +841,7 @@ impl Common {
                         .and_then(|wl_surface| {
                             advertised_node_for_surface(&wl_surface, &self.display_handle)
                         })
-                        .and_then(|source| dmabuf_feedback(source))
+                        .and_then(&mut dmabuf_feedback)
                     {
                         window.send_dmabuf_feedback(
                             output,
@@ -863,7 +861,7 @@ impl Common {
                     .and_then(|wl_surface| {
                         advertised_node_for_surface(&wl_surface, &self.display_handle)
                     })
-                    .and_then(|source| dmabuf_feedback(source))
+                    .and_then(&mut dmabuf_feedback)
                 {
                     window.send_dmabuf_feedback(
                         output,
@@ -879,7 +877,7 @@ impl Common {
             if let Some(wl_surface) = or.wl_surface() {
                 if let Some(feedback) =
                     advertised_node_for_surface(&wl_surface, &self.display_handle)
-                        .and_then(|source| dmabuf_feedback(source))
+                        .and_then(&mut dmabuf_feedback)
                 {
                     send_dmabuf_feedback_surface_tree(
                         &wl_surface,
@@ -902,7 +900,7 @@ impl Common {
         for layer_surface in map.layers() {
             if let Some(feedback) =
                 advertised_node_for_surface(layer_surface.wl_surface(), &self.display_handle)
-                    .and_then(|source| dmabuf_feedback(source))
+                    .and_then(&mut dmabuf_feedback)
             {
                 layer_surface.send_dmabuf_feedback(
                     output,

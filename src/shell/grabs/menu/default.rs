@@ -70,8 +70,7 @@ fn move_next_workspace(state: &mut State, mapped: &CosmicMapped) {
         .workspaces
         .spaces_for_output(&output)
         .skip_while(|space| space.handle != current_handle)
-        .skip(1)
-        .next()
+        .nth(1)
         .map(|space| space.handle);
     if let Some(next_handle) = maybe_handle {
         let res = shell.move_window(

@@ -245,10 +245,7 @@ where
         _dh: &DisplayHandle,
         _data_init: &mut DataInit<'_, D>,
     ) {
-        match request {
-            zcosmic_toplevel_handle_v1::Request::Destroy => {}
-            _ => {}
-        }
+        if let zcosmic_toplevel_handle_v1::Request::Destroy = request {}
     }
 
     fn destroyed(
@@ -283,7 +280,7 @@ pub fn toplevel_leave_output(toplevel: &impl Window, output: &Output) {
 
 pub fn toplevel_enter_workspace(toplevel: &impl Window, workspace: &WorkspaceHandle) {
     if let Some(state) = toplevel.user_data().get::<ToplevelState>() {
-        state.lock().unwrap().workspaces.push(workspace.clone());
+        state.lock().unwrap().workspaces.push(*workspace);
     }
 }
 
@@ -426,7 +423,7 @@ where
     }
 }
 
-fn send_toplevel_to_client<D, W: 'static>(
+fn send_toplevel_to_client<D, W>(
     dh: &DisplayHandle,
     workspace_state: &WorkspaceState<D>,
     info: &ZcosmicToplevelInfoV1,
@@ -438,7 +435,7 @@ where
         + Dispatch<ZcosmicToplevelHandleV1, ToplevelHandleState<W>>
         + ToplevelInfoHandler<Window = W>
         + 'static,
-    W: Window,
+    W: Window + 'static,
 {
     let mut state = window
         .user_data()
@@ -552,7 +549,7 @@ where
                 .geometry
                 .filter(|_| instance.version() >= zcosmic_toplevel_handle_v1::EVT_GEOMETRY_SINCE)
                 .filter(|geo| output.geometry().intersection(*geo).is_some())
-                .map(|geo| geo.to_local(&output));
+                .map(|geo| geo.to_local(output));
             for wl_output in output.client_outputs(&client) {
                 if handle_state.wl_outputs.insert(wl_output.clone()) {
                     instance.output_enter(&wl_output);
@@ -574,7 +571,7 @@ where
                     .iter()
                     .any(|output| output.owns(wl_output));
             if !retain {
-                instance.output_leave(&wl_output);
+                instance.output_leave(wl_output);
                 changed = true;
             }
             retain
@@ -586,7 +583,7 @@ where
         .iter()
         .filter(|w| !handle_state.workspaces.contains(w))
     {
-        if let Some(handle) = workspace_state.raw_workspace_handle(&new_workspace, &instance.id()) {
+        if let Some(handle) = workspace_state.raw_workspace_handle(new_workspace, &instance.id()) {
             instance.workspace_enter(&handle);
             changed = true;
         }
@@ -596,7 +593,7 @@ where
         .iter()
         .filter(|w| !state.workspaces.contains(w))
     {
-        if let Some(handle) = workspace_state.raw_workspace_handle(&old_workspace, &instance.id()) {
+        if let Some(handle) = workspace_state.raw_workspace_handle(old_workspace, &instance.id()) {
             instance.workspace_leave(&handle);
             changed = true;
         }

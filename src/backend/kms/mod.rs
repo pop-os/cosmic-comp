@@ -181,7 +181,7 @@ fn init_libinput(
     .context("Failed to initialize libinput event source")?;
 
     // Create relative pointer global
-    RelativePointerManagerState::new::<State>(&dh);
+    RelativePointerManagerState::new::<State>(dh);
 
     Ok(libinput_context)
 }
@@ -454,11 +454,9 @@ impl KmsState {
                     device.egl = Some(egl);
                 }
                 used_devices.insert(device.render_node);
-            } else {
-                if device.egl.is_some() {
-                    let _ = device.egl.take();
-                    self.api.as_mut().remove_node(&device.render_node);
-                }
+            } else if device.egl.is_some() {
+                let _ = device.egl.take();
+                self.api.as_mut().remove_node(&device.render_node);
             }
         }
 
@@ -749,10 +747,8 @@ impl KmsState {
                         None
                     };
 
-                if !test_only {
-                    if mirrored_output != surface.output.mirroring() {
-                        surface.set_mirroring(mirrored_output.clone());
-                    }
+                if !test_only && mirrored_output != surface.output.mirroring() {
+                    surface.set_mirroring(mirrored_output.clone());
                 }
             }
         }

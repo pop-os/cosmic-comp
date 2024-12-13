@@ -35,12 +35,11 @@ impl PreferredDecorationMode {
     pub fn mode(window: &Window) -> Option<XdgMode> {
         let user_data = window.user_data();
         user_data.insert_if_missing(|| PreferredDecorationMode(RefCell::new(None)));
-        user_data
+        *user_data
             .get::<PreferredDecorationMode>()
             .unwrap()
             .0
             .borrow()
-            .clone()
     }
 
     pub fn update(window: &Window, update: Option<XdgMode>) {

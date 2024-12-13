@@ -116,7 +116,7 @@ impl XdgActivationHandler for State {
                             workspace_guard.add_workspace_state(&workspace, WState::Urgent);
                         }
                     }
-                    ActivationContext::Workspace(workspace) => {
+                    ActivationContext::Workspace(_) => {
                         let seat = shell.seats.last_active().clone();
                         let current_output = seat.active_output();
 
@@ -157,8 +157,7 @@ impl XdgActivationHandler for State {
 
                             std::mem::drop(shell);
                             Shell::set_focus(self, Some(&target), &seat, None, false);
-                        } else if let Some(w) = shell.space_for(&element).map(|w| w.handle.clone())
-                        {
+                        } else if let Some(w) = shell.space_for(&element).map(|w| w.handle) {
                             shell.append_focus_stack(&element, &seat);
                             let mut workspace_guard = self.common.workspace_state.update();
                             workspace_guard.add_workspace_state(&w, WState::Urgent);
@@ -168,7 +167,7 @@ impl XdgActivationHandler for State {
             } else {
                 shell
                     .pending_activations
-                    .insert(ActivationKey::Wayland(surface), context.clone());
+                    .insert(ActivationKey::Wayland(surface), *context);
             }
         }
     }

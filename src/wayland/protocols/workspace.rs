@@ -574,8 +574,8 @@ where
     fn done(&mut self) {
         let mut changed = false;
         for instance in &self.instances {
-            for mut group in &mut self.groups {
-                if send_group_to_client::<D>(&self.dh, instance, &mut group) {
+            for group in &mut self.groups {
+                if send_group_to_client::<D>(&self.dh, instance, group) {
                     changed = true;
                 }
             }
@@ -776,11 +776,7 @@ where
             .iter_mut()
             .find_map(|g| g.workspaces.iter_mut().find(|w| w.id == workspace.id))
         {
-            workspace.coordinates = coords
-                .iter()
-                .flat_map(std::convert::identity)
-                .copied()
-                .collect();
+            workspace.coordinates = coords.iter().flatten().copied().collect();
         }
     }
 
@@ -1030,16 +1026,15 @@ where
         handle_state.states = workspace.states.clone();
         changed = true;
     }
-    if instance.version() >= zcosmic_workspace_handle_v1::EVT_TILING_STATE_SINCE {
-        if handle_state
+    if instance.version() >= zcosmic_workspace_handle_v1::EVT_TILING_STATE_SINCE
+        && handle_state
             .tiling
             .map(|state| state != workspace.tiling)
             .unwrap_or(true)
-        {
-            instance.tiling_state(workspace.tiling);
-            handle_state.tiling = Some(workspace.tiling);
-            changed = true;
-        }
+    {
+        instance.tiling_state(workspace.tiling);
+        handle_state.tiling = Some(workspace.tiling);
+        changed = true;
     }
 
     changed

@@ -194,9 +194,9 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
         IcedElementInternal {
             outputs: self.outputs.clone(),
             buffers: self.buffers.clone(),
-            pending_update: self.pending_update.clone(),
-            size: self.size.clone(),
-            cursor_pos: self.cursor_pos.clone(),
+            pending_update: self.pending_update,
+            size: self.size,
+            cursor_pos: self.cursor_pos,
             touch_map: self.touch_map.clone(),
             theme: self.theme.clone(),
             renderer,
@@ -841,14 +841,10 @@ where
         let mut internal = self.0.lock().unwrap();
         // makes partial borrows easier
         let internal_ref = &mut *internal;
-        let force = if matches!(
+        let force = matches!(
             internal_ref.pending_update,
             Some(instant) if Instant::now().duration_since(instant) > Duration::from_millis(25)
-        ) {
-            true
-        } else {
-            false
-        };
+        );
         if force {
             internal_ref.pending_update = None;
         }
@@ -882,7 +878,7 @@ where
                         .and_then(|(last_primitives, last_color)| {
                             (last_color == &background_color).then(|| {
                                 damage::diff(
-                                    &last_primitives,
+                                    last_primitives,
                                     current_layers,
                                     |_| {
                                         vec![cosmic::iced::Rectangle::new(
@@ -946,7 +942,7 @@ where
             if let Ok(buffer) = MemoryRenderBufferRenderElement::from_buffer(
                 renderer,
                 location.to_f64(),
-                &buffer,
+                buffer,
                 Some(alpha),
                 Some(Rectangle::from_loc_and_size(
                     (0., 0.),

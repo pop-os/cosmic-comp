@@ -98,16 +98,16 @@ impl State {
         match action {
             SwipeAction::NextWorkspace => {
                 let _ = to_next_workspace(
-                    &mut *self.common.shell.write().unwrap(),
-                    &seat,
+                    &mut self.common.shell.write().unwrap(),
+                    seat,
                     true,
                     &mut self.common.workspace_state.update(),
                 );
             }
             SwipeAction::PrevWorkspace => {
                 let _ = to_previous_workspace(
-                    &mut *self.common.shell.write().unwrap(),
-                    &seat,
+                    &mut self.common.shell.write().unwrap(),
+                    seat,
                     true,
                     &mut self.common.workspace_state.update(),
                 );
@@ -184,7 +184,7 @@ impl State {
 
             Action::NextWorkspace => {
                 let next = to_next_workspace(
-                    &mut *self.common.shell.write().unwrap(),
+                    &mut self.common.shell.write().unwrap(),
                     seat,
                     false,
                     &mut self.common.workspace_state.update(),
@@ -206,7 +206,7 @@ impl State {
 
             Action::PreviousWorkspace => {
                 let previous = to_previous_workspace(
-                    &mut *self.common.shell.write().unwrap(),
+                    &mut self.common.shell.write().unwrap(),
                     seat,
                     false,
                     &mut self.common.workspace_state.update(),
@@ -410,7 +410,7 @@ impl State {
                             .active(&next_output)
                             .1
                             .focus_stack
-                            .get(&seat)
+                            .get(seat)
                             .last()
                             .cloned()
                             .map(KeyboardFocusTarget::from);
@@ -478,8 +478,7 @@ impl State {
                 let next_output = shell
                     .outputs()
                     .skip_while(|o| *o != &current_output)
-                    .skip(1)
-                    .next()
+                    .nth(1)
                     .cloned();
                 if let Some(next_output) = next_output {
                     let idx = shell.workspaces.active_num(&next_output).1;
@@ -497,7 +496,7 @@ impl State {
                             .active(&next_output)
                             .1
                             .focus_stack
-                            .get(&seat)
+                            .get(seat)
                             .last()
                             .cloned()
                             .map(KeyboardFocusTarget::from);
@@ -537,8 +536,7 @@ impl State {
                     .outputs()
                     .rev()
                     .skip_while(|o| *o != &current_output)
-                    .skip(1)
-                    .next()
+                    .nth(1)
                     .cloned();
                 if let Some(prev_output) = prev_output {
                     let idx = shell.workspaces.active_num(&prev_output).1;
@@ -556,7 +554,7 @@ impl State {
                             .active(&prev_output)
                             .1
                             .focus_stack
-                            .get(&seat)
+                            .get(seat)
                             .last()
                             .cloned()
                             .map(KeyboardFocusTarget::from);
@@ -670,8 +668,7 @@ impl State {
                 let next_output = shell
                     .outputs()
                     .skip_while(|o| *o != &focused_output)
-                    .skip(1)
-                    .next()
+                    .nth(1)
                     .cloned();
                 if let Some(next_output) = next_output {
                     let res = shell.move_current_window(
@@ -717,8 +714,7 @@ impl State {
                     .outputs()
                     .rev()
                     .skip_while(|o| *o != &focused_output)
-                    .skip(1)
-                    .next()
+                    .nth(1)
                     .cloned();
                 if let Some(prev_output) = prev_output {
                     let res = shell.move_current_window(
@@ -761,8 +757,7 @@ impl State {
                     let output = shell
                         .outputs()
                         .skip_while(|o| *o != &active_output)
-                        .skip(1)
-                        .next()
+                        .nth(1)
                         .cloned();
 
                     (shell.active_space(&active_output).handle, output)
@@ -781,8 +776,7 @@ impl State {
                         .outputs()
                         .rev()
                         .skip_while(|o| *o != &active_output)
-                        .skip(1)
-                        .next()
+                        .nth(1)
                         .cloned();
 
                     (shell.active_space(&active_output).handle, output)
@@ -941,7 +935,7 @@ impl State {
                 let output = seat.active_output();
                 let mut shell = self.common.shell.write().unwrap();
                 let workspace = shell.active_space_mut(&output);
-                workspace.tiling_layer.update_orientation(None, &seat);
+                workspace.tiling_layer.update_orientation(None, seat);
             }
 
             Action::Orientation(orientation) => {
@@ -950,7 +944,7 @@ impl State {
                 let workspace = shell.active_space_mut(&output);
                 workspace
                     .tiling_layer
-                    .update_orientation(Some(orientation), &seat);
+                    .update_orientation(Some(orientation), seat);
             }
 
             Action::ToggleStacking => {
@@ -1059,7 +1053,12 @@ impl State {
             .env("XDG_ACTIVATION_TOKEN", &*token)
             .env("DESKTOP_STARTUP_ID", &*token)
             .env_remove("COSMIC_SESSION_SOCK");
-        unsafe { cmd.pre_exec(|| Ok(crate::utils::rlimit::restore_nofile_limit())) };
+        unsafe {
+            cmd.pre_exec(|| {
+                crate::utils::rlimit::restore_nofile_limit();
+                Ok(())
+            })
+        };
 
         std::thread::spawn(move || match cmd.spawn() {
             Ok(mut child) => {

@@ -85,7 +85,7 @@ pub fn display_configuration(
             .flat_map(|conn| device.get_connector(*conn, false).ok())
             .filter(|conn| {
                 if let Some(enc) = conn.current_encoder() {
-                    if let Some(enc) = device.get_encoder(enc).ok() {
+                    if let Ok(enc) = device.get_encoder(enc) {
                         if let Some(crtc) = enc.crtc() {
                             return cleanup.contains(&crtc);
                         }

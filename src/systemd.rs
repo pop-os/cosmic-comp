@@ -12,11 +12,11 @@ pub fn ready(common: &Common) {
             .env("WAYLAND_DISPLAY", &common.socket)
             .env(
                 "DISPLAY",
-                &common
+                common
                     .xwayland_state
                     .as_ref()
                     .map(|s| format!(":{}", s.display))
-                    .unwrap_or(String::new()),
+                    .unwrap_or_default(),
             )
             .status()
         {

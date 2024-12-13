@@ -99,10 +99,7 @@ impl Timings {
         if let Some(frame) = self.pending_frame.as_mut() {
             frame.render_duration_draw = Some(
                 Time::elapsed(&frame.render_start, clock.now())
-                    - frame
-                        .render_duration_elements
-                        .clone()
-                        .unwrap_or(Duration::ZERO),
+                    - frame.render_duration_elements.unwrap_or(Duration::ZERO),
             );
         }
     }
@@ -201,7 +198,7 @@ impl Timings {
         }
         let secs = match (self.previous_frames.front(), self.previous_frames.back()) {
             (Some(Frame { render_start, .. }), Some(end_frame)) => {
-                Time::elapsed(render_start, end_frame.render_start.clone()) + end_frame.frame_time()
+                Time::elapsed(render_start, end_frame.render_start) + end_frame.frame_time()
             }
             _ => Duration::ZERO,
         }

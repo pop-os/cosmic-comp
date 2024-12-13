@@ -125,7 +125,7 @@ where
     Ok(Some((
         frame,
         damage
-            .into_iter()
+            .iter()
             .map(|rect| {
                 let logical = rect.to_logical(1);
                 logical.to_buffer(1, transform, &logical.size)
@@ -283,7 +283,7 @@ pub fn render_workspace_to_buffer(
                 additional_damage,
                 &common.shell,
                 common.clock.now(),
-                &output,
+                output,
                 None,
                 handle,
                 cursor_mode,
@@ -313,7 +313,7 @@ pub fn render_workspace_to_buffer(
                 additional_damage,
                 &common.shell,
                 common.clock.now(),
-                &output,
+                output,
                 None,
                 handle,
                 cursor_mode,
@@ -589,7 +589,7 @@ pub fn render_window_to_buffer(
                     .and_then(|wl_surface| {
                         with_renderer_surface_state(&wl_surface, |state| {
                             let buffer = state.buffer()?;
-                            let dmabuf = get_dmabuf(&*buffer).ok()?;
+                            let dmabuf = get_dmabuf(buffer).ok()?;
                             dmabuf.node()
                         })
                     })
@@ -717,7 +717,7 @@ pub fn render_cursor_to_buffer(
     {
         let mut elements = cursor::draw_cursor(
             renderer,
-            &seat,
+            seat,
             Point::from((0.0, 0.0)),
             1.0.into(),
             common.clock.now(),

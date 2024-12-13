@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Mutex,
-};
+use std::{collections::HashMap, sync::Mutex};
 
 use cosmic_protocols::{
     overlap_notify::v1::server::{
@@ -120,7 +117,7 @@ impl OverlapNotifyState {
                                         .lock()
                                         .unwrap();
                                     active_workspaces.iter().any(|active_workspace| {
-                                        state.in_workspace(&active_workspace)
+                                        state.in_workspace(active_workspace)
                                     })
                                 })
                         {
@@ -169,7 +166,7 @@ pub trait OverlapNotifyHandler: ToplevelInfoHandler {
     fn overlap_notify_state(&mut self) -> &mut OverlapNotifyState;
     fn layer_surface_from_resource(&self, resource: ZwlrLayerSurfaceV1) -> Option<LayerSurface>;
     fn outputs(&self) -> impl Iterator<Item = Output>;
-    fn active_workspaces(&self) -> impl Iterator<Item = (WorkspaceHandle)>;
+    fn active_workspaces(&self) -> impl Iterator<Item = WorkspaceHandle>;
 }
 
 pub struct OverlapNotifyGlobalData {
@@ -208,8 +205,8 @@ impl LayerOverlapNotificationDataInternal {
                 }
             }
         }
-        for (_, (identifier, namespace, exclusive, layer, overlap)) in
-            &self.last_snapshot.layer_overlaps
+        for (identifier, namespace, exclusive, layer, overlap) in
+            self.last_snapshot.layer_overlaps.values()
         {
             new_notification.layer_enter(
                 identifier.clone(),
@@ -414,22 +411,20 @@ where
         _dhandle: &DisplayHandle,
         data_init: &mut smithay::reexports::wayland_server::DataInit<'_, D>,
     ) {
-        match request {
-            zcosmic_overlap_notify_v1::Request::NotifyOnOverlap {
-                overlap_notification,
-                layer_surface,
-            } => {
-                let notification = data_init.init(overlap_notification, ());
-                if let Some(surface) = state.layer_surface_from_resource(layer_surface) {
-                    let mut data = surface
-                        .user_data()
-                        .get_or_insert_threadsafe(LayerOverlapNotificationData::default)
-                        .lock()
-                        .unwrap();
-                    data.add_notification(notification);
-                }
+        if let zcosmic_overlap_notify_v1::Request::NotifyOnOverlap {
+            overlap_notification,
+            layer_surface,
+        } = request
+        {
+            let notification = data_init.init(overlap_notification, ());
+            if let Some(surface) = state.layer_surface_from_resource(layer_surface) {
+                let mut data = surface
+                    .user_data()
+                    .get_or_insert_threadsafe(LayerOverlapNotificationData::default)
+                    .lock()
+                    .unwrap();
+                data.add_notification(notification);
             }
-            _ => {}
         }
     }
 
@@ -456,14 +451,12 @@ where
         _state: &mut D,
         _client: &Client,
         _resource: &ZcosmicOverlapNotificationV1,
-        request: <ZcosmicOverlapNotificationV1 as Resource>::Request,
+        _request: <ZcosmicOverlapNotificationV1 as Resource>::Request,
         _data: &(),
         _dhandle: &DisplayHandle,
         _data_init: &mut smithay::reexports::wayland_server::DataInit<'_, D>,
     ) {
-        match request {
-            _ => {}
-        }
+        {}
     }
 }
 

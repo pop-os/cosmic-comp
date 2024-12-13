@@ -167,7 +167,7 @@ impl CosmicStack {
         window.try_force_undecorated(true);
         window.set_tiled(true);
         self.0.with_program(|p| {
-            if let Some(mut geo) = p.geometry.lock().unwrap().clone() {
+            if let Some(mut geo) = *p.geometry.lock().unwrap() {
                 geo.loc.y += TAB_HEIGHT;
                 geo.size.h -= TAB_HEIGHT;
                 window.set_geometry(geo, TAB_HEIGHT as u32);
@@ -197,7 +197,7 @@ impl CosmicStack {
             let mut windows = p.windows.lock().unwrap();
             if windows.len() == 1 {
                 p.override_alive.store(false, Ordering::SeqCst);
-                let window = windows.get(0).unwrap();
+                let window = windows.first().unwrap();
                 window.try_force_undecorated(false);
                 window.set_tiled(false);
                 return;
@@ -225,7 +225,7 @@ impl CosmicStack {
             let mut windows = p.windows.lock().unwrap();
             if windows.len() == 1 {
                 p.override_alive.store(false, Ordering::SeqCst);
-                let window = windows.get(0).unwrap();
+                let window = windows.first().unwrap();
                 window.try_force_undecorated(false);
                 window.set_tiled(false);
                 return Some(window.clone());
@@ -252,6 +252,10 @@ impl CosmicStack {
 
     pub fn len(&self) -> usize {
         self.0.with_program(|p| p.windows.lock().unwrap().len())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn handle_focus(&self, direction: FocusDirection, swap: Option<NodeDesc>) -> bool {
@@ -474,13 +478,8 @@ impl CosmicStack {
     }
 
     pub fn pending_size(&self) -> Option<Size<i32, Logical>> {
-        self.0.with_program(|p| {
-            p.geometry
-                .lock()
-                .unwrap()
-                .clone()
-                .map(|geo| geo.size.as_logical())
-        })
+        self.0
+            .with_program(|p| (*p.geometry.lock().unwrap()).map(|geo| geo.size.as_logical()))
     }
 
     pub fn set_geometry(&self, geo: Rectangle<i32, Global>) {
@@ -1331,16 +1330,14 @@ impl PointerTarget<State> for CosmicStack {
     }
 
     fn axis(&self, seat: &Seat<State>, data: &mut State, frame: AxisFrame) {
-        match self.0.with_program(|p| p.current_focus()) {
-            Some(Focus::Header) => PointerTarget::axis(&self.0, seat, data, frame),
-            _ => {}
+        if let Some(Focus::Header) = self.0.with_program(|p| p.current_focus()) {
+            PointerTarget::axis(&self.0, seat, data, frame)
         }
     }
 
     fn frame(&self, seat: &Seat<State>, data: &mut State) {
-        match self.0.with_program(|p| p.current_focus()) {
-            Some(Focus::Header) => PointerTarget::frame(&self.0, seat, data),
-            _ => {}
+        if let Some(Focus::Header) = self.0.with_program(|p| p.current_focus()) {
+            PointerTarget::frame(&self.0, seat, data)
         }
     }
 
@@ -1474,7 +1471,7 @@ impl TouchTarget<State> for CosmicStack {
     }
 
     fn up(&self, seat: &Seat<State>, data: &mut State, event: &UpEvent, seq: Serial) {
-        TouchTarget::up(&self.0, seat, data, &event, seq)
+        TouchTarget::up(&self.0, seat, data, event, seq)
     }
 
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &TouchMotionEvent, seq: Serial) {
