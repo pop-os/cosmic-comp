@@ -72,6 +72,8 @@ pub struct KmsState {
     pub software_renderer: Option<GlowRenderer>,
     pub api: GpuManager<GbmGlowBackend<DrmDeviceFd>>,
 
+    postprocess_shader: Option<String>,
+
     session: LibSeatSession,
     libinput: Libinput,
 
@@ -139,6 +141,8 @@ pub fn init_backend(
         primary_node: primary,
         software_renderer,
         api: GpuManager::new(GbmGlowBackend::new()).context("Failed to initialize gpu backend")?,
+
+        postprocess_shader: None,
 
         session,
         libinput: libinput_context,
@@ -660,6 +664,7 @@ impl KmsState {
                         loop_handle,
                         shell.clone(),
                         startup_done.clone(),
+                        self.postprocess_shader.clone(),
                     )?;
                     if output.mirroring().is_none() {
                         w += output.geometry().size.w as u32;
@@ -926,5 +931,14 @@ impl KmsState {
         }
 
         Ok(all_outputs)
+    }
+
+    pub fn update_postprocess_shader(&mut self, shader: Option<&str>) {
+        self.postprocess_shader = shader.map(|x| x.to_owned());
+        for device in self.drm_devices.values_mut() {
+            for surface in device.surfaces.values_mut() {
+                surface.set_postprocess_shader(self.postprocess_shader.clone());
+            }
+        }
     }
 }

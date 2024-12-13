@@ -852,6 +852,22 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     state.common.config.cosmic_conf.edge_snap_threshold = new;
                 }
             }
+            "postprocess_shader_path" => {
+                let new = get_config::<Option<PathBuf>>(&config, "postprocess_shader_path");
+                if new != state.common.config.cosmic_conf.postprocess_shader_path {
+                    let shader =
+                        new.as_ref()
+                            .and_then(|path| match std::fs::read_to_string(path) {
+                                Ok(shader) => Some(shader),
+                                Err(_) => {
+                                    error!("failed to read shader at path: {}", path.display());
+                                    None
+                                }
+                            });
+                    state.backend.update_postprocess_shader(shader.as_deref());
+                    state.common.config.cosmic_conf.postprocess_shader_path = new;
+                }
+            }
             _ => {}
         }
     }

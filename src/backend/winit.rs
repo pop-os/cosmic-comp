@@ -34,7 +34,7 @@ use smithay::{
 use std::{borrow::BorrowMut, cell::RefCell, time::Duration};
 use tracing::{error, info, warn};
 
-use super::render::{init_shaders, CursorMode};
+use super::render::{init_shaders, update_postprocess_shader, CursorMode};
 
 #[derive(Debug)]
 pub struct WinitState {
@@ -124,6 +124,10 @@ impl WinitState {
         } else {
             Ok(vec![self.output.clone()])
         }
+    }
+
+    pub fn update_postprocess_shader(&mut self, shader: Option<&str>) {
+        update_postprocess_shader(self.backend.renderer().borrow_mut(), shader)
     }
 }
 

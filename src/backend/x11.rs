@@ -41,7 +41,7 @@ use smithay::{
 use std::{borrow::BorrowMut, cell::RefCell, os::unix::io::OwnedFd, time::Duration};
 use tracing::{debug, error, info, warn};
 
-use super::render::init_shaders;
+use super::render::{init_shaders, update_postprocess_shader};
 
 #[derive(Debug)]
 enum Allocator {
@@ -186,6 +186,10 @@ impl X11State {
         } else {
             Ok(vec![surface.output.clone()])
         }
+    }
+
+    pub fn update_postprocess_shader(&mut self, shader: Option<&str>) {
+        update_postprocess_shader(self.renderer.borrow_mut(), shader)
     }
 }
 

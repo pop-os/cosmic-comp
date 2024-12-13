@@ -266,6 +266,7 @@ impl State {
 
         {
             for (conn, maybe_crtc) in connectors {
+                let postprocess_shader = self.backend.kms().postprocess_shader.clone();
                 match device.connector_added(
                     self.backend.kms().primary_node.as_ref(),
                     conn,
@@ -274,6 +275,7 @@ impl State {
                     &self.common.event_loop_handle,
                     self.common.shell.clone(),
                     self.common.startup_done.clone(),
+                    postprocess_shader,
                 ) {
                     Ok((output, should_expose)) => {
                         if should_expose {
@@ -359,6 +361,7 @@ impl State {
                 }
 
                 for (conn, maybe_crtc) in changes.added {
+                    let postprocess_shader = backend.postprocess_shader.clone();
                     match device.connector_added(
                         backend.primary_node.as_ref(),
                         conn,
@@ -367,6 +370,7 @@ impl State {
                         &self.common.event_loop_handle,
                         self.common.shell.clone(),
                         self.common.startup_done.clone(),
+                        postprocess_shader,
                     ) {
                         Ok((output, should_expose)) => {
                             if should_expose {
@@ -518,6 +522,7 @@ impl Device {
         evlh: &LoopHandle<'static, State>,
         shell: Arc<RwLock<Shell>>,
         startup_done: Arc<AtomicBool>,
+        postprocess_shader: Option<String>,
     ) -> Result<(Output, bool)> {
         let output = self
             .outputs
@@ -582,7 +587,8 @@ impl Device {
                     shell,
                     startup_done,
                 ) {
-                    Ok(data) => {
+                    Ok(mut data) => {
+                        data.set_postprocess_shader(postprocess_shader);
                         self.surfaces.insert(crtc, data);
                         true
                     }

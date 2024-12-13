@@ -8,7 +8,7 @@ use smithay::{
             utils::{CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement},
             Element, Id, Kind, RenderElement, UnderlyingStorage,
         },
-        gles::{GlesError, GlesTexture},
+        gles::{element::TextureShaderElement, GlesError, GlesTexture},
         glow::{GlowFrame, GlowRenderer},
         utils::{CommitCounter, DamageSet, OpaqueRegions},
         ImportAll, ImportMem, Renderer,
@@ -34,6 +34,9 @@ where
             RelocateRenderElement<RescaleRenderElement<TextureRenderElement<GlesTexture>>>,
         >,
     ),
+    Postprocess(
+        CropRenderElement<RelocateRenderElement<RescaleRenderElement<TextureShaderElement>>>,
+    ),
     #[cfg(feature = "debug")]
     Egui(TextureRenderElement<GlesTexture>),
 }
@@ -52,6 +55,7 @@ where
             CosmicElement::MoveGrab(elem) => elem.id(),
             CosmicElement::AdditionalDamage(elem) => elem.id(),
             CosmicElement::Mirror(elem) => elem.id(),
+            CosmicElement::Postprocess(elem) => elem.id(),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.id(),
         }
@@ -65,6 +69,7 @@ where
             CosmicElement::MoveGrab(elem) => elem.current_commit(),
             CosmicElement::AdditionalDamage(elem) => elem.current_commit(),
             CosmicElement::Mirror(elem) => elem.current_commit(),
+            CosmicElement::Postprocess(elem) => elem.current_commit(),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.current_commit(),
         }
@@ -78,6 +83,7 @@ where
             CosmicElement::MoveGrab(elem) => elem.src(),
             CosmicElement::AdditionalDamage(elem) => elem.src(),
             CosmicElement::Mirror(elem) => elem.src(),
+            CosmicElement::Postprocess(elem) => elem.src(),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.src(),
         }
@@ -91,6 +97,7 @@ where
             CosmicElement::MoveGrab(elem) => elem.geometry(scale),
             CosmicElement::AdditionalDamage(elem) => elem.geometry(scale),
             CosmicElement::Mirror(elem) => elem.geometry(scale),
+            CosmicElement::Postprocess(elem) => elem.geometry(scale),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.geometry(scale),
         }
@@ -104,6 +111,7 @@ where
             CosmicElement::MoveGrab(elem) => elem.location(scale),
             CosmicElement::AdditionalDamage(elem) => elem.location(scale),
             CosmicElement::Mirror(elem) => elem.location(scale),
+            CosmicElement::Postprocess(elem) => elem.location(scale),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.location(scale),
         }
@@ -117,6 +125,7 @@ where
             CosmicElement::MoveGrab(elem) => elem.transform(),
             CosmicElement::AdditionalDamage(elem) => elem.transform(),
             CosmicElement::Mirror(elem) => elem.transform(),
+            CosmicElement::Postprocess(elem) => elem.transform(),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.transform(),
         }
@@ -134,6 +143,7 @@ where
             CosmicElement::MoveGrab(elem) => elem.damage_since(scale, commit),
             CosmicElement::AdditionalDamage(elem) => elem.damage_since(scale, commit),
             CosmicElement::Mirror(elem) => elem.damage_since(scale, commit),
+            CosmicElement::Postprocess(elem) => elem.damage_since(scale, commit),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.damage_since(scale, commit),
         }
@@ -147,6 +157,7 @@ where
             CosmicElement::MoveGrab(elem) => elem.opaque_regions(scale),
             CosmicElement::AdditionalDamage(elem) => elem.opaque_regions(scale),
             CosmicElement::Mirror(elem) => elem.opaque_regions(scale),
+            CosmicElement::Postprocess(elem) => elem.opaque_regions(scale),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.opaque_regions(scale),
         }
@@ -160,6 +171,7 @@ where
             CosmicElement::MoveGrab(elem) => elem.alpha(),
             CosmicElement::AdditionalDamage(elem) => elem.alpha(),
             CosmicElement::Mirror(elem) => elem.alpha(),
+            CosmicElement::Postprocess(elem) => elem.alpha(),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.alpha(),
         }
@@ -173,6 +185,7 @@ where
             CosmicElement::MoveGrab(elem) => elem.kind(),
             CosmicElement::AdditionalDamage(elem) => elem.kind(),
             CosmicElement::Mirror(elem) => elem.kind(),
+            CosmicElement::Postprocess(elem) => elem.kind(),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.kind(),
         }
@@ -214,6 +227,18 @@ where
                 )
                 .map_err(FromGlesError::from_gles_error)
             }
+            CosmicElement::Postprocess(elem) => {
+                let glow_frame = R::glow_frame_mut(frame);
+                RenderElement::<GlowRenderer>::draw(
+                    elem,
+                    glow_frame,
+                    src,
+                    dst,
+                    damage,
+                    opaque_regions,
+                )
+                .map_err(FromGlesError::from_gles_error)
+            }
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => {
                 let glow_frame = R::glow_frame_mut(frame);
@@ -238,6 +263,10 @@ where
             CosmicElement::MoveGrab(elem) => elem.underlying_storage(renderer),
             CosmicElement::AdditionalDamage(elem) => elem.underlying_storage(renderer),
             CosmicElement::Mirror(elem) => {
+                let glow_renderer = renderer.glow_renderer_mut();
+                elem.underlying_storage(glow_renderer)
+            }
+            CosmicElement::Postprocess(elem) => {
                 let glow_renderer = renderer.glow_renderer_mut();
                 elem.underlying_storage(glow_renderer)
             }
