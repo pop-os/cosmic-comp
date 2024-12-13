@@ -722,6 +722,9 @@ impl Workspaces {
                     if &seat.active_output() == output {
                         seat.set_active_output(&new_output);
                     }
+                    if seat.focused_output().as_ref() == Some(output) {
+                        seat.set_focused_output(None);
+                    }
                 }
 
                 let new_set = self.sets.get_mut(&new_output).unwrap();
