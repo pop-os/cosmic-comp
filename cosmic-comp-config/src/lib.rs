@@ -2,7 +2,7 @@
 
 use cosmic_config::{cosmic_config_derive::CosmicConfigEntry, CosmicConfigEntry};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 
 pub mod input;
 pub mod workspace;
@@ -31,6 +31,8 @@ pub struct CosmicCompConfig {
     pub focus_follows_cursor_delay: u64,
     /// Let X11 applications scale themselves
     pub descale_xwayland: bool,
+    /// Path to postprocess shader applied to whole screen
+    pub postprocess_shader_path: Option<PathBuf>,
 }
 
 impl Default for CosmicCompConfig {
@@ -60,6 +62,7 @@ impl Default for CosmicCompConfig {
             cursor_follows_focus: false,
             focus_follows_cursor_delay: 250,
             descale_xwayland: false,
+            postprocess_shader_path: None,
         }
     }
 }
