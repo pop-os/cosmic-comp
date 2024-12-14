@@ -62,7 +62,7 @@ pub struct ToplevelInfoGlobalData {
 #[derive(Default)]
 pub(super) struct ToplevelStateInner {
     foreign_handle: Option<ForeignToplevelHandle>,
-    instances: Vec<ZcosmicToplevelHandleV1>,
+    instances: Vec<(Weak<ZcosmicToplevelInfoV1>, ZcosmicToplevelHandleV1)>,
     outputs: Vec<Output>,
     workspaces: Vec<WorkspaceHandle>,
     pub(super) rectangles: Vec<(Weak<WlSurface>, Rectangle<i32, Logical>)>,
@@ -202,7 +202,7 @@ where
                         .lock()
                         .unwrap()
                         .instances
-                        .push(instance);
+                        .push((obj.downgrade(), instance));
                 } else {
                     let _ = data_init.init(cosmic_toplevel, ToplevelHandleStateInner::empty());
                     error!(?foreign_toplevel, "Toplevel for foreign-toplevel-list not registered for cosmic-toplevel-info.");
@@ -259,7 +259,11 @@ where
     ) {
         for toplevel in &state.toplevel_info_state_mut().toplevels {
             if let Some(state) = toplevel.user_data().get::<ToplevelState>() {
-                state.lock().unwrap().instances.retain(|i| i != resource);
+                state
+                    .lock()
+                    .unwrap()
+                    .instances
+                    .retain(|(_, i)| i != resource);
             }
         }
     }
@@ -340,7 +344,7 @@ where
     pub fn remove_toplevel(&mut self, toplevel: &W) {
         if let Some(state) = toplevel.user_data().get::<ToplevelState>() {
             let mut state_inner = state.lock().unwrap();
-            for handle in &state_inner.instances {
+            for (_info, handle) in &state_inner.instances {
                 // don't send events to stopped instances
                 if handle.version() < zcosmic_toplevel_info_v1::REQ_GET_COSMIC_TOPLEVEL_SINCE
                     && self
@@ -386,7 +390,7 @@ where
                 }
                 true
             } else {
-                for handle in &state.instances {
+                for (_info, handle) in &state.instances {
                     // don't send events to stopped instances
                     if handle.version() < zcosmic_toplevel_info_v1::REQ_GET_COSMIC_TOPLEVEL_SINCE
                         && self
@@ -442,11 +446,7 @@ where
         .unwrap()
         .lock()
         .unwrap();
-    let instance = match state
-        .instances
-        .iter()
-        .find(|i| i.id().same_client_as(&info.id()))
-    {
+    let (_info, instance) = match state.instances.iter().find(|(i, _)| i == info) {
         Some(i) => i,
         None => {
             if info.version() < zcosmic_toplevel_info_v1::REQ_GET_COSMIC_TOPLEVEL_SINCE {
@@ -459,7 +459,7 @@ where
                         )
                     {
                         info.toplevel(&toplevel_handle);
-                        state.instances.push(toplevel_handle);
+                        state.instances.push((info.downgrade(), toplevel_handle));
                         state.instances.last().unwrap()
                     } else {
                         return false;
