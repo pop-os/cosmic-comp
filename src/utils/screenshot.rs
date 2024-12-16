@@ -76,7 +76,7 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
             ));
             let file = std::fs::File::create(path.join(name))?;
 
-            let ref mut writer = std::io::BufWriter::new(file);
+            let writer = &mut std::io::BufWriter::new(file);
             let mut encoder = png::Encoder::new(writer, bbox.size.w as u32, bbox.size.h as u32);
             encoder.set_color(png::ColorType::Rgba);
             encoder.set_depth(png::BitDepth::Eight);
@@ -90,7 +90,7 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
             );
             encoder.set_source_chromaticities(source_chromaticities);
             let mut writer = encoder.write_header()?;
-            writer.write_image_data(&gl_data)?;
+            writer.write_image_data(gl_data)?;
         }
 
         Ok(())

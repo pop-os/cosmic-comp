@@ -48,7 +48,7 @@ impl Window for CosmicSurface {
     }
 
     fn is_sticky(&self) -> bool {
-        CosmicSurface::is_sticky(&self)
+        CosmicSurface::is_sticky(self)
     }
 
     fn global_geometry(&self) -> Option<Rectangle<i32, Global>> {

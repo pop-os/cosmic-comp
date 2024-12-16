@@ -191,15 +191,12 @@ where
         _dhandle: &DisplayHandle,
         data_init: &mut DataInit<'_, D>,
     ) {
-        match request {
-            OutputSourceRequest::CreateSource { source, output } => {
-                let data = match Output::from_resource(&output) {
-                    Some(output) => ImageSourceData::Output(output.downgrade()),
-                    None => ImageSourceData::Destroyed,
-                };
-                data_init.init(source, data);
-            }
-            _ => {}
+        if let OutputSourceRequest::CreateSource { source, output } = request {
+            let data = match Output::from_resource(&output) {
+                Some(output) => ImageSourceData::Output(output.downgrade()),
+                None => ImageSourceData::Destroyed,
+            };
+            data_init.init(source, data);
         }
     }
 
@@ -228,15 +225,12 @@ where
         _dhandle: &DisplayHandle,
         data_init: &mut DataInit<'_, D>,
     ) {
-        match request {
-            WorkspaceSourceRequest::CreateSource { source, output } => {
-                let data = match state.workspace_state().workspace_handle(&output) {
-                    Some(workspace) => ImageSourceData::Workspace(workspace),
-                    None => ImageSourceData::Destroyed,
-                };
-                data_init.init(source, data);
-            }
-            _ => {}
+        if let WorkspaceSourceRequest::CreateSource { source, output } = request {
+            let data = match state.workspace_state().workspace_handle(&output) {
+                Some(workspace) => ImageSourceData::Workspace(workspace),
+                None => ImageSourceData::Destroyed,
+            };
+            data_init.init(source, data);
         }
     }
 
@@ -264,18 +258,16 @@ where
         _dhandle: &DisplayHandle,
         data_init: &mut DataInit<'_, D>,
     ) {
-        match request {
-            ToplevelSourceRequest::CreateSource {
-                source,
-                toplevel_handle,
-            } => {
-                let data = match window_from_handle(toplevel_handle) {
-                    Some(toplevel) => ImageSourceData::Toplevel(toplevel),
-                    None => ImageSourceData::Destroyed,
-                };
-                data_init.init(source, data);
-            }
-            _ => {}
+        if let ToplevelSourceRequest::CreateSource {
+            source,
+            toplevel_handle,
+        } = request
+        {
+            let data = match window_from_handle(toplevel_handle) {
+                Some(toplevel) => ImageSourceData::Toplevel(toplevel),
+                None => ImageSourceData::Destroyed,
+            };
+            data_init.init(source, data);
         }
     }
 
@@ -296,14 +288,12 @@ where
         _state: &mut D,
         _client: &Client,
         _resource: &ZcosmicImageSourceV1,
-        request: <ZcosmicImageSourceV1 as Resource>::Request,
+        _request: <ZcosmicImageSourceV1 as Resource>::Request,
         _data: &ImageSourceData,
         _dhandle: &DisplayHandle,
         _data_init: &mut DataInit<'_, D>,
     ) {
-        match request {
-            _ => {}
-        }
+        {}
     }
 
     fn destroyed(

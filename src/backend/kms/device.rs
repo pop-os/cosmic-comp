@@ -450,7 +450,7 @@ impl Device {
 
         let added = config
             .iter()
-            .filter(|(conn, maybe)| match (surfaces.get(&conn), maybe) {
+            .filter(|(conn, maybe)| match (surfaces.get(conn), maybe) {
                 (Some(current_crtc), Some(new_crtc)) => current_crtc != new_crtc,
                 (None, _) => true,
                 _ => false,
@@ -462,7 +462,7 @@ impl Device {
             .outputs
             .iter()
             .filter(|(conn, _)| match config.get(conn) {
-                Some(Some(c)) => surfaces.get(&conn).is_some_and(|crtc| c != crtc),
+                Some(Some(c)) => surfaces.get(conn).is_some_and(|crtc| c != crtc),
                 _ => true,
             })
             .map(|(conn, _)| *conn)
@@ -485,7 +485,7 @@ impl Device {
             .outputs
             .get(&conn)
             .cloned()
-            .map(|output| Ok(output))
+            .map(Ok)
             .unwrap_or_else(|| create_output_for_conn(&mut self.drm, conn))
             .context("Failed to create `Output`")?;
 
@@ -621,7 +621,7 @@ fn populate_modes(
         .iter()
         .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
         .copied()
-        .or(conn_info.modes().get(0).copied())
+        .or(conn_info.modes().first().copied())
     else {
         anyhow::bail!("No mode found");
     };

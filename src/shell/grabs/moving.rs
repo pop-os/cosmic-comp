@@ -92,11 +92,11 @@ impl MoveGrabState {
 
         let mut window_geo = self.window.geometry();
         window_geo.loc += self.location.to_i32_round() + self.window_offset;
-        if !output
+        if output
             .geometry()
             .as_logical()
             .intersection(window_geo)
-            .is_some()
+            .is_none()
         {
             return Vec::new();
         }
@@ -110,8 +110,8 @@ impl MoveGrabState {
 
         let active_window_hint = crate::theme::active_window_hint(theme);
         let focus_element = if self.indicator_thickness > 0 {
-            Some(
-                CosmicMappedRenderElement::from(IndicatorShader::focus_element(
+            Some(CosmicMappedRenderElement::from(
+                IndicatorShader::focus_element(
                     renderer,
                     Key::Window(Usage::MoveGrabIndicator, self.window.key()),
                     Rectangle::from_loc_and_size(
@@ -132,15 +132,14 @@ impl MoveGrabState {
                         active_window_hint.green,
                         active_window_hint.blue,
                     ],
-                ))
-                .into(),
-            )
+                ),
+            ))
         } else {
             None
         };
 
         let non_exclusive_geometry = {
-            let layers = layer_map_for_output(&output);
+            let layers = layer_map_for_output(output);
             layers.non_exclusive_zone()
         };
 
@@ -165,8 +164,7 @@ impl MoveGrabState {
                             active_window_hint.green,
                             active_window_hint.blue,
                         ],
-                    ))
-                    .into(),
+                    )),
                     CosmicMappedRenderElement::from(BackdropShader::element(
                         renderer,
                         Key::Window(Usage::SnappingIndicator, self.window.key()),
@@ -174,8 +172,7 @@ impl MoveGrabState {
                         theme.radius_s()[0], // TODO: Fix once shaders support 4 corner radii customization
                         0.4,
                         [base_color.red, base_color.green, base_color.blue],
-                    ))
-                    .into(),
+                    )),
                 ]
             }
             _ => vec![],
@@ -392,7 +389,7 @@ impl MoveGrab {
                             indicator.output_enter(output, overlap);
                         }
                     }
-                } else if self.window_outputs.remove(&output) {
+                } else if self.window_outputs.remove(output) {
                     self.window.output_leave(output);
                     if let Some(indicator) = grab_state.stacking_indicator.as_ref().map(|x| &x.0) {
                         indicator.output_leave(output);

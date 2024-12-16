@@ -103,8 +103,8 @@ impl ResizeSurfaceGrab {
 
         let min_width = min_size.map(|s| s.w).unwrap_or(360);
         let min_height = min_size.map(|s| s.h).unwrap_or(240);
-        let max_width = max_size.map(|s| s.w).unwrap_or(i32::max_value());
-        let max_height = max_size.map(|s| s.h).unwrap_or(i32::max_value());
+        let max_width = max_size.map(|s| s.w).unwrap_or(i32::MAX);
+        let max_height = max_size.map(|s| s.h).unwrap_or(i32::MAX);
 
         new_window_width = new_window_width.max(min_width).min(max_width);
         new_window_height = new_window_height.max(min_height).min(max_height);
@@ -312,10 +312,10 @@ impl TouchGrab<State> for ResizeSurfaceGrab {
         event: &TouchMotionEvent,
         seq: Serial,
     ) {
-        if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
-            if self.update_location(event.location) {
-                handle.unset_grab(self, data);
-            }
+        if event.slot == <Self as TouchGrab<State>>::start_data(self).slot
+            && self.update_location(event.location)
+        {
+            handle.unset_grab(self, data);
         }
 
         handle.motion(data, None, event, seq);
@@ -460,7 +460,7 @@ impl ResizeSurfaceGrab {
 
                     if edges.intersects(ResizeEdge::TOP_LEFT) {
                         let size = window.geometry().size;
-                        let mut new = location.clone();
+                        let mut new = location;
                         if edges.intersects(ResizeEdge::LEFT) {
                             new.x = initial_window_location.x + (initial_window_size.w - size.w);
                         }
@@ -501,7 +501,7 @@ impl ResizeSurfaceGrab {
                 }
                 floating_layer.space.map_element(
                     window,
-                    new_location.to_local(&output).as_logical(),
+                    new_location.to_local(output).as_logical(),
                     false,
                 );
             }

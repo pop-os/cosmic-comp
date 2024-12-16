@@ -131,7 +131,6 @@ impl State {
             Err(err) => {
                 error!(?err, "Failed to listen for Xwayland");
                 self.notify_ready();
-                return;
             }
         }
     }
@@ -347,7 +346,7 @@ impl XwmHandler for State {
         {
             shell.pending_activations.insert(
                 crate::shell::ActivationKey::X11(window.window_id()),
-                context.clone(),
+                *context,
             );
         }
 
@@ -363,9 +362,9 @@ impl XwmHandler for State {
             .find(|(window, _, _)| window.x11_surface() == Some(&surface))
             .cloned()
         {
-            if !shell
+            if let std::collections::hash_map::Entry::Vacant(e) = shell
                 .pending_activations
-                .contains_key(&crate::shell::ActivationKey::X11(surface.window_id()))
+                .entry(crate::shell::ActivationKey::X11(surface.window_id()))
             {
                 if let Some(startup_id) = window.x11_surface().and_then(|x| x.startup_id()) {
                     if let Some(context) = self
@@ -374,10 +373,7 @@ impl XwmHandler for State {
                         .data_for_token(&XdgActivationToken::from(startup_id))
                         .and_then(|data| data.user_data.get::<ActivationContext>())
                     {
-                        shell.pending_activations.insert(
-                            crate::shell::ActivationKey::X11(surface.window_id()),
-                            context.clone(),
-                        );
+                        e.insert(*context);
                     }
                 }
             }
@@ -466,7 +462,7 @@ impl XwmHandler for State {
                     set.sticky_layer
                         .element_geometry(mapped)
                         .unwrap()
-                        .to_global(&output),
+                        .to_global(output),
                 )
             } else {
                 None
@@ -647,7 +643,7 @@ impl XwmHandler for State {
         if let Some(mapped) = shell.element_for_surface(&window).cloned() {
             if let Some((output, handle)) = shell
                 .space_for(&mapped)
-                .map(|workspace| (workspace.output.clone(), workspace.handle.clone()))
+                .map(|workspace| (workspace.output.clone(), workspace.handle))
             {
                 if let Some((surface, _)) = mapped
                     .windows()

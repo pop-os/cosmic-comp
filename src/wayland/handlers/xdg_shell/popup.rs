@@ -27,7 +27,7 @@ use tracing::{trace, warn};
 
 impl Shell {
     pub fn unconstrain_popup(&self, surface: &PopupSurface) {
-        if let Some(parent) = get_popup_toplevel(&surface) {
+        if let Some(parent) = get_popup_toplevel(surface) {
             if let Some(elem) = self.element_for_surface(&parent) {
                 let (mut element_geo, output, is_tiled) =
                     if let Some(workspace) = self.space_for(elem) {
@@ -92,14 +92,14 @@ pub fn update_reactive_popups<'a>(
     for (popup, _) in PopupManager::popups_for_surface(toplevel.wl_surface()) {
         match popup {
             PopupKind::Xdg(surface) => {
-                let positioner = with_states(&surface.wl_surface(), |states| {
+                let positioner = with_states(surface.wl_surface(), |states| {
                     let attributes = states
                         .data_map
                         .get::<XdgPopupSurfaceData>()
                         .unwrap()
                         .lock()
                         .unwrap();
-                    attributes.current.positioner.clone()
+                    attributes.current.positioner
                 });
                 if positioner.reactive {
                     let anchor_point = loc + get_anchor_point(&positioner).as_global();
@@ -131,8 +131,8 @@ fn unconstrain_xdg_popup_tile(surface: &PopupSurface, rect: Rectangle<i32, Logic
 
     if offset.x != 0 || offset.y != 0 {
         trace!(?surface, "Unconstraining popup to tile.");
-        if !unconstrain_flip(&surface, rect) {
-            return unconstrain_slide(&surface, rect);
+        if !unconstrain_flip(surface, rect) {
+            return unconstrain_slide(surface, rect);
             // don't try to resize for fitting to a tile
         }
     }
@@ -153,10 +153,8 @@ fn unconstrain_xdg_popup(
 
     if offset.x != 0 || offset.y != 0 {
         trace!(?surface, "Unconstraining popup.");
-        if !unconstrain_flip(&surface, relative) {
-            if !unconstrain_slide(&surface, relative) {
-                unconstrain_resize(&surface, relative);
-            }
+        if !unconstrain_flip(surface, relative) && !unconstrain_slide(surface, relative) {
+            unconstrain_resize(surface, relative);
         }
     }
 }
@@ -175,17 +173,15 @@ fn unconstrain_layer_popup(surface: &PopupSurface, output: &Output, layer_surfac
 
     if offset.x != 0 || offset.y != 0 {
         trace!(?surface, "Unconstraining popup.");
-        if !unconstrain_flip(&surface, relative) {
-            if !unconstrain_slide(&surface, relative) {
-                unconstrain_resize(&surface, relative);
-            }
+        if !unconstrain_flip(surface, relative) && !unconstrain_slide(surface, relative) {
+            unconstrain_resize(surface, relative);
         }
     }
 }
 
 fn unconstrain_flip(popup: &PopupSurface, toplevel_box: Rectangle<i32, Logical>) -> bool {
     let toplevel_offset = get_popup_toplevel_coords(popup);
-    let positioner = popup.with_pending_state(|state| state.positioner.clone());
+    let positioner = popup.with_pending_state(|state| state.positioner);
     let mut geometry = positioner.get_geometry();
     geometry.loc += toplevel_offset;
     let offset = check_constrained(geometry, toplevel_box);
@@ -193,7 +189,7 @@ fn unconstrain_flip(popup: &PopupSurface, toplevel_box: Rectangle<i32, Logical>)
         return true;
     }
 
-    let mut positioner = positioner.clone();
+    let mut positioner = positioner;
 
     let flip_x = offset.x != 0
         && positioner
@@ -205,24 +201,24 @@ fn unconstrain_flip(popup: &PopupSurface, toplevel_box: Rectangle<i32, Logical>)
             .contains(ConstraintAdjustment::FlipY);
 
     if flip_x {
-        let old_positioner = positioner.clone();
+        let old_positioner = positioner;
         positioner.anchor_edges = invert_anchor_x(positioner.anchor_edges);
         positioner.gravity = invert_gravity_x(positioner.gravity);
         geometry = positioner.get_geometry();
         geometry.loc += toplevel_offset;
         let new_offset = check_constrained(geometry, toplevel_box);
-        if !(new_offset.x.abs() < offset.x.abs()) {
+        if new_offset.x.abs() >= offset.x.abs() {
             positioner = old_positioner;
         }
     }
     if flip_y {
-        let old_positioner = positioner.clone();
+        let old_positioner = positioner;
         positioner.anchor_edges = invert_anchor_y(positioner.anchor_edges);
         positioner.gravity = invert_gravity_y(positioner.gravity);
         geometry = positioner.get_geometry();
         geometry.loc += toplevel_offset;
         let new_offset = check_constrained(geometry, toplevel_box);
-        if !(new_offset.y.abs() < offset.y.abs()) {
+        if new_offset.y.abs() >= offset.y.abs() {
             positioner = old_positioner;
         }
     }
@@ -242,7 +238,7 @@ fn unconstrain_flip(popup: &PopupSurface, toplevel_box: Rectangle<i32, Logical>)
 
 fn unconstrain_slide(popup: &PopupSurface, toplevel_box: Rectangle<i32, Logical>) -> bool {
     let toplevel_offset = get_popup_toplevel_coords(popup);
-    let positioner = popup.with_pending_state(|state| state.positioner.clone());
+    let positioner = popup.with_pending_state(|state| state.positioner);
     let mut geometry = positioner.get_geometry();
     geometry.loc += toplevel_offset;
     let offset = check_constrained(geometry, toplevel_box);
@@ -275,7 +271,7 @@ fn unconstrain_slide(popup: &PopupSurface, toplevel_box: Rectangle<i32, Logical>
         geometry.loc.y += toplevel_box.loc.y - toplevel.y;
     }
 
-    let mut check_geometry = geometry.clone();
+    let mut check_geometry = geometry;
     check_geometry.loc += toplevel;
     let new_offset = check_constrained(check_geometry, toplevel_box);
     if new_offset.x.abs() < offset.x.abs() || new_offset.y.abs() < offset.y.abs() {
@@ -289,7 +285,7 @@ fn unconstrain_slide(popup: &PopupSurface, toplevel_box: Rectangle<i32, Logical>
 
 fn unconstrain_resize(popup: &PopupSurface, toplevel_box: Rectangle<i32, Logical>) -> bool {
     let toplevel_offset = get_popup_toplevel_coords(popup);
-    let positioner = popup.with_pending_state(|state| state.positioner.clone());
+    let positioner = popup.with_pending_state(|state| state.positioner);
     let mut geometry = positioner.get_geometry();
     geometry.loc += toplevel_offset;
     let offset = check_constrained(geometry, toplevel_box);
@@ -314,7 +310,7 @@ fn unconstrain_resize(popup: &PopupSurface, toplevel_box: Rectangle<i32, Logical
         geometry.size.h -= offset.y;
     }
 
-    let mut check_geometry = geometry.clone();
+    let mut check_geometry = geometry;
     check_geometry.loc += toplevel_offset;
     let offset = check_constrained(geometry, toplevel_box);
     if offset.x == 0 && offset.y == 0 {
@@ -363,7 +359,7 @@ fn get_anchor_point(positioner: &PositionerState) -> Point<i32, Logical> {
         Anchor::TopRight => (rect.loc.x + rect.size.w, rect.loc.y),
         Anchor::BottomLeft => (rect.loc.x, rect.loc.y + rect.size.h),
         Anchor::BottomRight => (rect.loc.x + rect.size.w, rect.loc.y + rect.size.h),
-        Anchor::None | _ => (
+        _ => (
             rect.loc.x + (rect.size.w / 2),
             rect.loc.y + (rect.size.h / 2),
         ),

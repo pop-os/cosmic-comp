@@ -196,15 +196,14 @@ pub type GbmDrmCompositor = DrmCompositor<
     DrmDeviceFd,
 >;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub enum QueueState {
+    #[default]
     Idle,
     /// A redraw is queued.
     Queued(RegistrationToken),
     /// We submitted a frame to the KMS and waiting for it to be presented.
-    WaitingForVBlank {
-        redraw_needed: bool,
-    },
+    WaitingForVBlank { redraw_needed: bool },
     /// We did not submit anything to KMS and made a timer to fire at the estimated VBlank.
     WaitingForEstimatedVBlank(RegistrationToken),
     /// A redraw is queued on top of the above.
@@ -212,12 +211,6 @@ pub enum QueueState {
         estimated_vblank: RegistrationToken,
         queued_render: RegistrationToken,
     },
-}
-
-impl Default for QueueState {
-    fn default() -> Self {
-        QueueState::Idle
-    }
 }
 
 #[derive(Debug)]
@@ -781,7 +774,7 @@ impl SurfaceThreadState {
 
         let now = self.clock.now();
         let presentation_time = match metadata.as_ref().map(|data| &data.time) {
-            Some(DrmEventTime::Monotonic(tp)) => Some(tp.clone()),
+            Some(DrmEventTime::Monotonic(tp)) => Some(*tp),
             _ => None,
         };
         let sequence = metadata.as_ref().map(|data| data.sequence).unwrap_or(0);
@@ -912,7 +905,7 @@ impl SurfaceThreadState {
                     warn!(?name, "Failed to submit rendering: {:?}", err);
                     state.queue_redraw(true);
                 }
-                return TimeoutAction::Drop;
+                TimeoutAction::Drop
             })
             .expect("Failed to schedule render");
 
@@ -922,7 +915,7 @@ impl SurfaceThreadState {
             }
             QueueState::WaitingForEstimatedVBlank(estimated_vblank) => {
                 self.state = QueueState::WaitingForEstimatedVBlankAndQueued {
-                    estimated_vblank: estimated_vblank.clone(),
+                    estimated_vblank: *estimated_vblank,
                     queued_render: token,
                 };
             }
@@ -936,7 +929,7 @@ impl SurfaceThreadState {
             } if force => {
                 self.loop_handle.remove(*queued_render);
                 self.state = QueueState::WaitingForEstimatedVBlankAndQueued {
-                    estimated_vblank: estimated_vblank.clone(),
+                    estimated_vblank: *estimated_vblank,
                     queued_render: token,
                 };
             }
@@ -953,7 +946,7 @@ impl SurfaceThreadState {
             self.mirroring.as_ref().unwrap_or(&self.output),
             &self.primary_node,
             &self.target_node,
-            &*self.shell.read().unwrap(),
+            &self.shell.read().unwrap(),
         );
 
         let mut renderer = if render_node != self.target_node {
@@ -966,17 +959,14 @@ impl SurfaceThreadState {
 
         self.timings.start_render(&self.clock);
 
-        let mut vrr = match self.vrr_mode {
-            AdaptiveSync::Force => true,
-            _ => false,
-        };
+        let mut vrr = matches!(self.vrr_mode, AdaptiveSync::Force);
 
         let mut elements = {
             let shell = self.shell.read().unwrap();
             let output = self.mirroring.as_ref().unwrap_or(&self.output);
 
             let (previous_workspace, workspace) = shell.workspaces.active(output);
-            let (previous_idx, idx) = shell.workspaces.active_num(&output);
+            let (previous_idx, idx) = shell.workspaces.active_num(output);
             let previous_workspace = previous_workspace
                 .zip(previous_idx)
                 .map(|((w, start), idx)| (w.handle, idx, start));
@@ -1497,7 +1487,7 @@ fn render_node_for_output(
         .flat_map(|w| w.wl_surface().and_then(|s| source_node_for_surface(&s)))
         .collect::<Vec<_>>();
 
-    if nodes.contains(&target_node) || nodes.is_empty() {
+    if nodes.contains(target_node) || nodes.is_empty() {
         *target_node
     } else {
         *primary_node

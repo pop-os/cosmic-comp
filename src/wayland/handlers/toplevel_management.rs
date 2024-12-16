@@ -54,7 +54,7 @@ impl ToplevelManagementHandler for State {
                     .clone();
 
                 let res = shell.activate(
-                    &output,
+                    output,
                     idx,
                     WorkspaceDelta::new_shortcut(),
                     &mut self.common.workspace_state.update(),
@@ -64,7 +64,7 @@ impl ToplevelManagementHandler for State {
                 if seat.active_output() != *output {
                     match res {
                         Ok(Some(new_pos)) => {
-                            seat.set_active_output(&output);
+                            seat.set_active_output(output);
                             if let Some(ptr) = seat.get_pointer() {
                                 let serial = SERIAL_COUNTER.next_serial();
                                 ptr.motion(
@@ -80,7 +80,7 @@ impl ToplevelManagementHandler for State {
                             }
                         }
                         Ok(None) => {
-                            seat.set_active_output(&output);
+                            seat.set_active_output(output);
                         }
                         _ => {}
                     }
@@ -135,7 +135,6 @@ impl ToplevelManagementHandler for State {
                 std::mem::drop(shell);
                 Shell::set_focus(self, Some(&target), &seat, None, true);
             }
-            return;
         }
     }
 
@@ -154,7 +153,7 @@ impl ToplevelManagementHandler for State {
                 workspace.fullscreen_request(window, None, from, &seat);
             } else if let Some((output, handle)) = shell
                 .space_for(&mapped)
-                .map(|workspace| (workspace.output.clone(), workspace.handle.clone()))
+                .map(|workspace| (workspace.output.clone(), workspace.handle))
             {
                 let from = minimize_rectangle(&output, window);
                 shell
@@ -175,13 +174,16 @@ impl ToplevelManagementHandler for State {
         if let Some(mapped) = shell.element_for_surface(window).cloned() {
             if let Some(workspace) = shell.space_for_mut(&mapped) {
                 if let Some((layer, previous_workspace)) = workspace.unfullscreen_request(window) {
-                    let old_handle = workspace.handle.clone();
-                    let new_workspace_handle = shell
+                    let old_handle = workspace.handle;
+                    let new_workspace_handle = if shell
                         .workspaces
                         .space_for_handle(&previous_workspace)
                         .is_some()
-                        .then_some(previous_workspace)
-                        .unwrap_or(old_handle); // if the workspace doesn't exist anymore, we can still remap on the right layer
+                    {
+                        previous_workspace
+                    } else {
+                        old_handle
+                    }; // if the workspace doesn't exist anymore, we can still remap on the right layer
 
                     shell.remap_unfullscreened_window(
                         mapped,

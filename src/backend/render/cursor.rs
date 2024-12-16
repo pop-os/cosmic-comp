@@ -135,7 +135,7 @@ where
 {
     let position = location.into();
     let scale = scale.into();
-    let h = with_states(&surface, |states| {
+    let h = with_states(surface, |states| {
         states
             .data_map
             .get::<Mutex<CursorImageAttributes>>()
@@ -174,7 +174,7 @@ where
     R: Renderer + ImportAll,
     <R as Renderer>::TextureId: Clone + 'static,
 {
-    if get_role(&surface) != Some("dnd_icon") {
+    if get_role(surface) != Some("dnd_icon") {
         warn!(
             ?surface,
             "Trying to display as a dnd icon a surface that does not have the DndIcon role."
@@ -322,7 +322,7 @@ where
                 MemoryRenderBufferRenderElement::from_buffer(
                     renderer,
                     location.to_physical(scale),
-                    &pointer_image,
+                    pointer_image,
                     None,
                     None,
                     None,

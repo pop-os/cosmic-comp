@@ -50,12 +50,10 @@ impl GestureState {
                 } else {
                     Some(Direction::Left)
                 }
+            } else if movement.y > 0.0 {
+                Some(Direction::Down)
             } else {
-                if movement.y > 0.0 {
-                    Some(Direction::Down)
-                } else {
-                    Some(Direction::Up)
-                }
+                Some(Direction::Up)
             }
         }
 

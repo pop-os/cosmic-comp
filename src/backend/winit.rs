@@ -138,7 +138,7 @@ pub fn init_backend(
 
     init_egl_client_side(dh, state, &mut backend)?;
 
-    let name = format!("WINIT-0");
+    let name = "WINIT-0".to_string();
     let size = backend.window_size();
     let props = PhysicalProperties {
         size: (0, 0).into(),
@@ -162,7 +162,7 @@ pub fn init_backend(
     output.user_data().insert_if_missing(|| {
         RefCell::new(OutputConfig {
             mode: ((size.w, size.h), None),
-            transform: Transform::Flipped180.into(),
+            transform: Transform::Flipped180,
             ..Default::default()
         })
     });

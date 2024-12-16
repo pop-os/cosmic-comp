@@ -127,7 +127,7 @@ impl<'a> TryFrom<&'a mut PendingOutputConfigurationInner> for OutputConfiguratio
                 wlr_mode
                     .data::<Mode>()
                     .cloned()
-                    .ok_or_else(|| zwlr_output_configuration_head_v1::Error::InvalidMode)?,
+                    .ok_or(zwlr_output_configuration_head_v1::Error::InvalidMode)?,
             )),
             Some(ModeConfiguration::Custom { size, refresh }) => {
                 Some(ModeConfiguration::Custom { size, refresh })
@@ -269,7 +269,7 @@ where
             for instance in &mut self.instances {
                 let mut removed_heads = Vec::new();
                 for head in &mut instance.heads {
-                    if &head.output == &output {
+                    if head.output == output {
                         if head.obj.version() < zwlr_output_head_v1::REQ_RELEASE_SINCE {
                             removed_heads.push(head.obj.clone());
                         }
@@ -417,7 +417,7 @@ where
                     .map(|c| c == output_mode)
                     .unwrap_or(false)
             {
-                instance.obj.current_mode(&*mode);
+                instance.obj.current_mode(mode);
             }
         }
     }

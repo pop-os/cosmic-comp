@@ -518,7 +518,7 @@ impl Config {
                 )
             })
             .collect::<Vec<(OutputInfo, OutputConfig)>>();
-        infos.sort_by(|&(ref a, _), &(ref b, _)| a.cmp(b));
+        infos.sort_by(|(a, _), (b, _)| a.cmp(b));
         let (infos, configs) = infos.into_iter().unzip();
         self.dynamic_conf
             .outputs_mut()
@@ -569,13 +569,13 @@ pub struct PersistenceGuard<'a, T: Serialize>(Option<PathBuf>, &'a mut T);
 impl<'a, T: Serialize> std::ops::Deref for PersistenceGuard<'a, T> {
     type Target = T;
     fn deref(&self) -> &T {
-        &self.1
+        self.1
     }
 }
 
 impl<'a, T: Serialize> std::ops::DerefMut for PersistenceGuard<'a, T> {
     fn deref_mut(&mut self) -> &mut T {
-        &mut self.1
+        self.1
     }
 }
 

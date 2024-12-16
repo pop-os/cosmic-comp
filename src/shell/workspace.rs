@@ -392,8 +392,8 @@ impl Workspace {
             let _ = self.unmaximize_request(mapped);
         }
 
-        let mut was_floating = self.floating_layer.unmap(&mapped).is_some();
-        let mut was_tiling = self.tiling_layer.unmap(&mapped);
+        let mut was_floating = self.floating_layer.unmap(mapped).is_some();
+        let mut was_tiling = self.tiling_layer.unmap(mapped);
         if was_floating || was_tiling {
             assert!(was_floating != was_tiling);
         }
@@ -636,14 +636,14 @@ impl Workspace {
                 match state.original_layer {
                     ManagedLayer::Tiling if self.tiling_enabled => {
                         // should still be mapped in tiling
-                        self.floating_layer.unmap(&elem);
+                        self.floating_layer.unmap(elem);
                         elem.output_enter(&self.output, elem.bbox());
                         elem.set_maximized(false);
                         elem.set_geometry(state.original_geometry.to_global(&self.output));
                         elem.configure();
                         self.tiling_layer.recalculate();
                         self.tiling_layer
-                            .element_geometry(&elem)
+                            .element_geometry(elem)
                             .map(|geo| geo.size.as_logical())
                     }
                     ManagedLayer::Sticky => unreachable!(),
@@ -695,7 +695,7 @@ impl Workspace {
         };
 
         if self.tiling_layer.mapped().any(|(m, _)| m == elem) {
-            let was_maximized = self.floating_layer.unmap(&elem).is_some();
+            let was_maximized = self.floating_layer.unmap(elem).is_some();
             let tiling_state = self.tiling_layer.unmap_minimize(elem, to);
             Some(MinimizedWindow {
                 window: elem.clone(),
@@ -759,22 +759,17 @@ impl Workspace {
                         self.floating_layer
                             .map_maximized(window.window, previous_geometry, true);
                     }
+                } else if was_maximized {
+                    self.floating_layer.map_maximized(window.window, from, true);
                 } else {
-                    if was_maximized {
-                        self.floating_layer.map_maximized(window.window, from, true);
-                    } else {
-                        self.floating_layer.map(window.window.clone(), None);
-                        // get the right animation
-                        let geometry = self
-                            .floating_layer
-                            .element_geometry(&window.window)
-                            .unwrap();
-                        self.floating_layer.remap_minimized(
-                            window.window.clone(),
-                            from,
-                            geometry.loc,
-                        );
-                    }
+                    self.floating_layer.map(window.window.clone(), None);
+                    // get the right animation
+                    let geometry = self
+                        .floating_layer
+                        .element_geometry(&window.window)
+                        .unwrap();
+                    self.floating_layer
+                        .remap_minimized(window.window.clone(), from, geometry.loc);
                 }
             }
         }
@@ -985,9 +980,9 @@ impl Workspace {
             for window in floating_windows.iter().filter(|w| w.is_maximized(false)) {
                 let original_geometry = {
                     let state = window.maximized_state.lock().unwrap();
-                    state.as_ref().unwrap().original_geometry.clone()
+                    state.as_ref().unwrap().original_geometry
                 };
-                self.unmaximize_request(&window);
+                self.unmaximize_request(window);
                 maximized_windows.push((window.clone(), ManagedLayer::Tiling, original_geometry));
             }
 
@@ -1010,7 +1005,7 @@ impl Workspace {
                 if window.is_maximized(false) {
                     let original_geometry = {
                         let state = window.maximized_state.lock().unwrap();
-                        state.as_ref().unwrap().original_geometry.clone()
+                        state.as_ref().unwrap().original_geometry
                     };
                     self.unmaximize_request(&window);
                     maximized_windows.push((
@@ -1048,7 +1043,7 @@ impl Workspace {
                 self.floating_layer.map(window.clone(), None);
             } else if self.floating_layer.mapped().any(|w| w == window) {
                 let focus_stack = self.focus_stack.get(seat);
-                self.floating_layer.unmap(&window);
+                self.floating_layer.unmap(window);
                 self.tiling_layer
                     .map(window.clone(), Some(focus_stack.iter()), None)
             }
@@ -1116,7 +1111,7 @@ impl Workspace {
                             .unwrap()
                             .clone()
                             .map(|node_id| NodeDesc {
-                                handle: self.handle.clone(),
+                                handle: self.handle,
                                 node: node_id.clone(),
                                 stack_window: if mapped
                                     .stack_ref()
@@ -1137,7 +1132,7 @@ impl Workspace {
             KeyboardFocusTarget::Group(WindowGroup {
                 node, focus_stack, ..
             }) => Some(NodeDesc {
-                handle: self.handle.clone(),
+                handle: self.handle,
                 node,
                 stack_window: None,
                 focus_stack,
@@ -1193,16 +1188,14 @@ impl Workspace {
 
             let mut full_geo =
                 Rectangle::from_loc_and_size((0, 0), self.output.geometry().size.as_local());
-            if fullscreen.start_at.is_none() {
-                if bbox != full_geo {
-                    if bbox.size.w < full_geo.size.w {
-                        full_geo.loc.x += (full_geo.size.w - bbox.size.w) / 2;
-                        full_geo.size.w = bbox.size.w;
-                    }
-                    if bbox.size.h < full_geo.size.h {
-                        full_geo.loc.y += (full_geo.size.h - bbox.size.h) / 2;
-                        full_geo.size.h = bbox.size.h;
-                    }
+            if fullscreen.start_at.is_none() && bbox != full_geo {
+                if bbox.size.w < full_geo.size.w {
+                    full_geo.loc.x += (full_geo.size.w - bbox.size.w) / 2;
+                    full_geo.size.w = bbox.size.w;
+                }
+                if bbox.size.h < full_geo.size.h {
+                    full_geo.loc.y += (full_geo.size.h - bbox.size.h) / 2;
+                    full_geo.size.h = bbox.size.h;
                 }
             }
 
@@ -1269,7 +1262,7 @@ impl Workspace {
             .unwrap_or(true)
         {
             let focused = draw_focus_indicator
-                .filter(|_| !self.fullscreen.is_some())
+                .filter(|_| self.fullscreen.is_none())
                 .and_then(|seat| self.focus_stack.get(seat).last().cloned());
 
             // floating surfaces
@@ -1400,16 +1393,14 @@ impl Workspace {
 
             let mut full_geo =
                 Rectangle::from_loc_and_size((0, 0), self.output.geometry().size.as_local());
-            if fullscreen.start_at.is_none() {
-                if bbox != full_geo {
-                    if bbox.size.w < full_geo.size.w {
-                        full_geo.loc.x += (full_geo.size.w - bbox.size.w) / 2;
-                        full_geo.size.w = bbox.size.w;
-                    }
-                    if bbox.size.h < full_geo.size.h {
-                        full_geo.loc.y += (full_geo.size.h - bbox.size.h) / 2;
-                        full_geo.size.h = bbox.size.h;
-                    }
+            if fullscreen.start_at.is_none() && bbox != full_geo {
+                if bbox.size.w < full_geo.size.w {
+                    full_geo.loc.x += (full_geo.size.w - bbox.size.w) / 2;
+                    full_geo.size.w = bbox.size.w;
+                }
+                if bbox.size.h < full_geo.size.h {
+                    full_geo.loc.y += (full_geo.size.h - bbox.size.h) / 2;
+                    full_geo.size.h = bbox.size.h;
                 }
             }
 

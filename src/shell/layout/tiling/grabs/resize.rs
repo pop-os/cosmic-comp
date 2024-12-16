@@ -511,10 +511,10 @@ impl TouchGrab<State> for ResizeForkGrab {
         event: &TouchMotionEvent,
         seq: Serial,
     ) {
-        if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
-            if self.update_location(data, event.location) {
-                handle.unset_grab(self, data);
-            }
+        if event.slot == <Self as TouchGrab<State>>::start_data(self).slot
+            && self.update_location(data, event.location)
+        {
+            handle.unset_grab(self, data);
         }
 
         handle.motion(data, None, event, seq);

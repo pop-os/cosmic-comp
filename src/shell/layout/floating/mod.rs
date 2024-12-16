@@ -136,7 +136,7 @@ impl Animation {
             }
             | Animation::Unminimize {
                 target_geometry, ..
-            } => (MINIMIZE_ANIMATION_DURATION, target_geometry.clone()),
+            } => (MINIMIZE_ANIMATION_DURATION, *target_geometry),
             Animation::Tiled { .. } => {
                 let target_geometry = if let Some(target_rect) =
                     tiled_state.map(|state| state.relative_geometry(output_geometry, gaps))
@@ -148,7 +148,7 @@ impl Animation {
                 (ANIMATION_DURATION, target_geometry)
             }
         };
-        let previous_rect = self.previous_geometry().clone();
+        let previous_rect = *self.previous_geometry();
         let start = *self.start();
         let now = Instant::now();
         let progress =
@@ -281,7 +281,7 @@ impl FloatingLayout {
             layers.non_exclusive_zone()
         };
         let output_geometry = {
-            let layers = layer_map_for_output(&output);
+            let layers = layer_map_for_output(output);
             layers.non_exclusive_zone()
         };
 
@@ -292,7 +292,7 @@ impl FloatingLayout {
             .collect::<Vec<_>>()
             .into_iter()
         {
-            let tiled_state = mapped.floating_tiled.lock().unwrap().clone();
+            let tiled_state = *mapped.floating_tiled.lock().unwrap();
             if let Some(tiled_state) = tiled_state {
                 let geometry = tiled_state.relative_geometry(output_geometry, self.gaps());
                 self.map_internal(
@@ -364,7 +364,7 @@ impl FloatingLayout {
         }
         if mapped.floating_tiled.lock().unwrap().take().is_some() {
             if let Some(state) = mapped.maximized_state.lock().unwrap().as_mut() {
-                if let Some(real_old_geo) = mapped.last_geometry.lock().unwrap().clone() {
+                if let Some(real_old_geo) = *mapped.last_geometry.lock().unwrap() {
                     state.original_geometry = real_old_geo;
                 }
             };
@@ -387,7 +387,7 @@ impl FloatingLayout {
         let layers = layer_map_for_output(&output);
         let output_geometry = layers.non_exclusive_zone();
         mapped.set_bounds(output_geometry.size);
-        let last_geometry = mapped.last_geometry.lock().unwrap().clone();
+        let last_geometry = *mapped.last_geometry.lock().unwrap();
         let min_size = mapped.min_size().unwrap_or((320, 240).into());
 
         if let Some(size) = size
@@ -628,7 +628,7 @@ impl FloatingLayout {
     pub fn unmap(&mut self, window: &CosmicMapped) -> Option<Size<i32, Logical>> {
         let mut new_size = None;
 
-        if let Some(_) = window.floating_tiled.lock().unwrap().take() {
+        if window.floating_tiled.lock().unwrap().take().is_some() {
             if let Some(last_size) = window.last_geometry.lock().unwrap().map(|geo| geo.size) {
                 if let Some(location) = self.space.element_location(window) {
                     window.set_tiled(false);
@@ -658,7 +658,7 @@ impl FloatingLayout {
         let _ = self.animations.remove(window);
 
         let was_unmaped = self.space.elements().any(|e| e == window);
-        self.space.unmap_elem(&window);
+        self.space.unmap_elem(window);
 
         if was_unmaped {
             if let Some(pos) = self.spawn_order.iter().position(|w| w == window) {
@@ -677,7 +677,7 @@ impl FloatingLayout {
         to: Rectangle<i32, Local>,
     ) -> Option<(CosmicMapped, Point<i32, Local>)> {
         let previous_geometry = self.space.element_geometry(window);
-        self.space.unmap_elem(&window);
+        self.space.unmap_elem(window);
         if let Some(previous_geometry) = previous_geometry {
             if let Some(pos) = self.spawn_order.iter().position(|w| w == window) {
                 self.spawn_order.truncate(pos);
@@ -880,7 +880,7 @@ impl FloatingLayout {
     }
 
     pub fn stacking_indicator(&self) -> Option<Rectangle<i32, Local>> {
-        self.hovered_stack.as_ref().map(|(_, geo)| geo.clone())
+        self.hovered_stack.as_ref().map(|(_, geo)| *geo)
     }
 
     pub fn resize_request(
@@ -892,7 +892,7 @@ impl FloatingLayout {
         release: ReleaseMode,
     ) -> Option<ResizeSurfaceGrab> {
         if seat.get_pointer().is_some() {
-            let location = self.space.element_location(&mapped)?.as_local();
+            let location = self.space.element_location(mapped)?.as_local();
             let size = mapped.geometry().size;
             mapped.moved_since_mapped.store(true, Ordering::SeqCst);
 
@@ -934,7 +934,7 @@ impl FloatingLayout {
         let Some(original_geo) = self.space.element_geometry(mapped) else {
             return false; // we don't have that window
         };
-        let mut geo = original_geo.clone();
+        let mut geo = original_geo;
 
         if edge.contains(ResizeEdge::RIGHT) || edge.contains(ResizeEdge::LEFT) {
             if direction == ResizeDirection::Inwards {
@@ -972,8 +972,8 @@ impl FloatingLayout {
         let (min_size, max_size) = (mapped.min_size(), mapped.max_size());
         let min_width = min_size.map(|s| s.w).unwrap_or(360);
         let min_height = min_size.map(|s| s.h).unwrap_or(240);
-        let max_width = max_size.map(|s| s.w).unwrap_or(i32::max_value());
-        let max_height = max_size.map(|s| s.h).unwrap_or(i32::max_value());
+        let max_width = max_size.map(|s| s.w).unwrap_or(i32::MAX);
+        let max_height = max_size.map(|s| s.h).unwrap_or(i32::MAX);
 
         geo.size.w = min_width.max(geo.size.w).min(max_width);
         geo.size.h = min_height.max(geo.size.h).min(max_height);
@@ -1308,8 +1308,7 @@ impl FloatingLayout {
                 mapped.set_geometry(geometry.to_global(&output));
                 geometry.loc
             } else {
-                prev.clone()
-                    .map(|rect| rect.loc.constrain(geometry))
+                prev.map(|rect| rect.loc.constrain(geometry))
                     .unwrap_or(Point::from((0, 0)))
             };
 
@@ -1501,14 +1500,14 @@ impl FloatingLayout {
                                         .to_physical_precise_round(output_scale),
                                     scale,
                                 );
-                                let relocated = RelocateRenderElement::from_element(
+
+                                RelocateRenderElement::from_element(
                                     rescaled,
                                     (geometry.loc - original_geo.loc)
                                         .as_logical()
                                         .to_physical_precise_round(output_scale),
                                     Relocate::Relative,
-                                );
-                                relocated
+                                )
                             })
                         }
                         CosmicMappedRenderElement::Window(elem) => {
@@ -1521,14 +1520,14 @@ impl FloatingLayout {
                                         .to_physical_precise_round(output_scale),
                                     scale,
                                 );
-                                let relocated = RelocateRenderElement::from_element(
+
+                                RelocateRenderElement::from_element(
                                     rescaled,
                                     (geometry.loc - original_geo.loc)
                                         .as_logical()
                                         .to_physical_precise_round(output_scale),
                                     Relocate::Relative,
-                                );
-                                relocated
+                                )
                             })
                         }
                         x => x,
@@ -1538,7 +1537,7 @@ impl FloatingLayout {
 
             if focused == Some(elem) && !elem.is_maximized(false) {
                 if let Some((mode, resize)) = resize_indicator.as_mut() {
-                    let mut resize_geometry = geometry.clone();
+                    let mut resize_geometry = geometry;
                     resize_geometry.loc -= (18, 18).into();
                     resize_geometry.size += (36, 36).into();
 

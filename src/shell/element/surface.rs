@@ -241,8 +241,7 @@ impl CosmicSurface {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 if enable {
-                    let previous_decoration_state =
-                        toplevel.current_state().decoration_mode.clone();
+                    let previous_decoration_state = toplevel.current_state().decoration_mode;
                     if PreferredDecorationMode::is_unset(&self.0) {
                         PreferredDecorationMode::update(&self.0, previous_decoration_state);
                     }
