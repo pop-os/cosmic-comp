@@ -344,19 +344,27 @@ impl Common {
             .cloned()
             .collect::<Vec<_>>();
         for seat in &seats {
-            update_pointer_focus(state, &seat);
+            {
+                let shell = state.common.shell.read().unwrap();
+                let focused_output = seat.focused_output();
+                let active_output = seat.active_output();
 
-            let mut shell = state.common.shell.write().unwrap();
-            let output = seat.focused_or_active_output();
-
-            // If the focused or active output is not in the list of outputs, switch to the first output
-            if !shell.outputs().any(|o| o == &output) {
-                if let Some(other) = shell.outputs().next() {
-                    seat.set_active_output(other);
+                // If the focused or active output is not in the list of outputs, switch to the first output
+                if focused_output.is_some_and(|f| !shell.outputs().any(|o| &f == o)) {
+                    seat.set_focused_output(None);
                 }
-                continue;
+                if !shell.outputs().any(|o| o == &active_output) {
+                    if let Some(other) = shell.outputs().next() {
+                        seat.set_active_output(other);
+                    }
+                    continue;
+                }
             }
 
+            update_pointer_focus(state, &seat);
+
+            let output = seat.focused_or_active_output();
+            let mut shell = state.common.shell.write().unwrap();
             let last_known_focus = ActiveFocus::get(&seat);
 
             if let Some(target) = last_known_focus {
