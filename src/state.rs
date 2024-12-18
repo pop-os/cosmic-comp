@@ -499,7 +499,8 @@ impl State {
         let fractional_scale_state = FractionalScaleManagerState::new::<State>(dh);
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<Self>(dh);
         let output_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
-        let output_configuration_state = OutputConfigurationState::new(dh, client_is_privileged);
+        let output_configuration_state =
+            OutputConfigurationState::new(dh, handle.clone(), client_is_privileged);
         let output_power_state = OutputPowerState::new::<Self, _>(dh, client_is_privileged);
         let overlap_notify_state =
             OverlapNotifyState::new::<Self, _>(dh, client_has_no_security_context);

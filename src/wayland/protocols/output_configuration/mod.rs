@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use calloop::{
+    timer::{TimeoutAction, Timer},
+    LoopHandle,
+};
 use cosmic_protocols::output_management::v1::server::{
     zcosmic_output_configuration_head_v1::ZcosmicOutputConfigurationHeadV1,
     zcosmic_output_configuration_v1::ZcosmicOutputConfigurationV1,
@@ -25,7 +29,7 @@ use smithay::{
     utils::{Logical, Physical, Point, Size, Transform},
     wayland::output::WlOutputData,
 };
-use std::{convert::TryFrom, sync::Mutex};
+use std::{convert::TryFrom, sync::Mutex, time::Duration};
 
 mod handlers;
 
@@ -45,6 +49,7 @@ pub struct OutputConfigurationState<D> {
     global: GlobalId,
     extension_global: GlobalId,
     dh: DisplayHandle,
+    event_loop_handle: LoopHandle<'static, D>,
     _dispatch: std::marker::PhantomData<D>,
 }
 
@@ -168,7 +173,11 @@ where
         + OutputConfigurationHandler
         + 'static,
 {
-    pub fn new<F>(dh: &DisplayHandle, client_filter: F) -> OutputConfigurationState<D>
+    pub fn new<F>(
+        dh: &DisplayHandle,
+        event_loop_handle: LoopHandle<'static, D>,
+        client_filter: F,
+    ) -> OutputConfigurationState<D>
     where
         F: for<'a> Fn(&'a Client) -> bool + Clone + Send + Sync + 'static,
     {
@@ -194,6 +203,7 @@ where
             global,
             extension_global,
             dh: dh.clone(),
+            event_loop_handle: event_loop_handle.clone(),
             _dispatch: std::marker::PhantomData,
         }
     }
@@ -240,7 +250,7 @@ where
                     let mut inner = inner.lock().unwrap();
                     inner.enabled = false;
                     if let Some(global) = inner.global.take() {
-                        self.dh.remove_global::<D>(global);
+                        remove_global_with_timer(&self.dh, &self.event_loop_handle, global);
                     }
                 }
             }
@@ -292,7 +302,11 @@ where
                     inner.global = Some(output.create_global::<D>(&self.dh));
                 }
                 if !inner.enabled && inner.global.is_some() {
-                    self.dh.remove_global::<D>(inner.global.take().unwrap());
+                    remove_global_with_timer(
+                        &self.dh,
+                        &self.event_loop_handle,
+                        inner.global.take().unwrap(),
+                    );
                 }
             }
             for manager in self.instances.iter_mut() {
@@ -490,6 +504,26 @@ where
         if physical.model != "Unknown" {
             instance.obj.model(physical.model);
         }
+    }
+}
+
+fn remove_global_with_timer<D: 'static>(
+    dh: &DisplayHandle,
+    event_loop_handle: &LoopHandle<D>,
+    id: GlobalId,
+) {
+    dh.disable_global::<D>(id.clone());
+    let source = Timer::from_duration(Duration::from_secs(5));
+    let dh = dh.clone();
+    let res = event_loop_handle.insert_source(source, move |_, _, _state| {
+        dh.remove_global::<D>(id.clone());
+        TimeoutAction::Drop
+    });
+    if let Err(err) = res {
+        tracing::error!(
+            "failed to insert timer source to destroy output global: {}",
+            err
+        );
     }
 }
 
