@@ -44,7 +44,6 @@ impl FractionalScaleHandler for State {
                         .read()
                         .unwrap()
                         .visible_output_for_surface(&surface)
-                        .cloned()
                 })
         })
         .unwrap_or_else(|| {
