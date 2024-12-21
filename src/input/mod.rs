@@ -33,7 +33,7 @@ use calloop::{
     timer::{TimeoutAction, Timer},
     RegistrationToken,
 };
-use cosmic_comp_config::workspace::WorkspaceLayout;
+use cosmic_comp_config::{workspace::WorkspaceLayout, NumlockState};
 use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, ResizeDirection};
 use smithay::{
@@ -1454,6 +1454,19 @@ impl State {
             event.state(),
             event.time() as u64 * 1000,
         );
+
+        // If the numlock key is pressed ...
+        if event.key_code() == Keycode::new(77) && event.state() == KeyState::Pressed {
+            // ... and we want to track numlock state so it can be reused on the next boot...
+            if let NumlockState::LastBoot =
+                self.common.config.cosmic_conf.keyboard_config.numlock_state
+            {
+                // ... then record the updated config.
+                // The call to `numlock_mut` will generate a `PersistenceGuard`. The
+                // `PersistenceGuard` will write to a file when it's dropped here.
+                self.common.config.dynamic_conf.numlock_mut().last_state = modifiers.num_lock;
+            }
+        }
 
         // Leave move overview mode, if any modifier was released
         if let Some(Trigger::KeyboardMove(action_modifiers)) =
