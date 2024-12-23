@@ -31,6 +31,22 @@ pub struct InputConfig {
     pub tap_config: Option<TapConfig>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub map_to_output: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub three_finger_drag: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub three_finger_drag_delay: Option<u32>,
+    // #[serde(skip_serializing_if = "Option::is_none", default)]
+    // pub three_finger_gesture: Option<Gesture>,
+    // #[serde(skip_serializing_if = "Option::is_none", default)]
+    // pub four_finger_gesture: Option<Gesture>,
+    // #[serde(skip_serializing_if = "Option::is_none", default)]
+    // pub gesture_drag_delay: Option<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub enum Gesture {
+    Drag,
+    SwitchWorkspace,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]

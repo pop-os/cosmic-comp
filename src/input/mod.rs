@@ -40,7 +40,7 @@ use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisSource, Device, DeviceCapability, GestureBeginEvent,
         GestureEndEvent, GesturePinchUpdateEvent as _, GestureSwipeUpdateEvent as _, InputBackend,
-        InputEvent, KeyState, KeyboardKeyEvent, PointerAxisEvent, ProximityState,
+        InputEvent, KeyState, KeyboardKeyEvent, MouseButton, PointerAxisEvent, ProximityState,
         TabletToolButtonEvent, TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent,
         TabletToolTipState, TouchEvent,
     },
@@ -60,7 +60,7 @@ use smithay::{
     reexports::{
         input::Device as InputDevice, wayland_server::protocol::wl_shm::Format as ShmFormat,
     },
-    utils::{Point, Rectangle, Serial, SERIAL_COUNTER},
+    utils::{Logical, Point, Rectangle, Serial, SERIAL_COUNTER},
     wayland::{
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
         pointer_constraints::{with_pointer_constraint, PointerConstraint},
@@ -158,6 +158,10 @@ impl ModifiersShortcutQueue {
         *set = None;
     }
 }
+
+// libinput's BTN_LEFT and BTN_RIGHT
+const BTN_LEFT: u32 = 0x110;
+const BTN_RIGHT: u32 = 0x111;
 
 impl State {
     pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>)
@@ -276,6 +280,7 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
+                    self.check_end_drag(&seat, event.time_msec());
                     let output = seat.active_output();
                     let geometry = output.geometry();
                     let position = geometry.loc.to_f64()
@@ -332,9 +337,8 @@ impl State {
                 }
             }
             InputEvent::PointerButton { event, .. } => {
-                use smithay::backend::input::{ButtonState, PointerButtonEvent};
+                use smithay::backend::input::PointerButtonEvent;
 
-                //
                 let Some(seat) = self
                     .common
                     .shell
@@ -348,6 +352,7 @@ impl State {
                 };
                 self.common.idle_notifier_state.notify_activity(&seat);
 
+                self.check_end_drag(&seat, event.time_msec());
                 self.process_pointer_button(
                     &seat,
                     event.button_code(),
@@ -374,6 +379,7 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
+                    self.check_end_drag(&seat, event.time_msec());
 
                     let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
                     if let Some(horizontal_amount) = event.amount(Axis::Horizontal) {
@@ -420,9 +426,37 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    if event.fingers() >= 3 && !workspace_overview_is_open(&seat.active_output()) {
-                        self.common.gesture_state = Some(GestureState::new(event.fingers()));
+                    if event.fingers() == 3
+                        || (event.fingers() > 3
+                            && !workspace_overview_is_open(&seat.active_output()))
+                    {
+                        // Handle the DragEnd state.
+                        let mut continuation = false;
+                        if let Some(GestureState {
+                            action: Some(SwipeAction::DragEnd(ref token)),
+                            ..
+                        }) = self.common.gesture_state
+                        {
+                            if self.common.event_loop_handle.disable(token).is_ok() {
+                                // The token was still valid. Remove the event and return true to
+                                // signify the drag should continue.
+                                self.common.event_loop_handle.remove(*token);
+                                if event.fingers() == 3 {
+                                    // If this is a three-finger swipe, then it's a continuation of
+                                    // the three-finger drag
+                                    continuation = true
+                                } else {
+                                    // This is a four-finger swipe, so end the current drag before
+                                    // starting a new swipe action
+                                    self.end_drag(&seat, event.time_msec());
+                                }
+                            }
+                        };
+
+                        self.common.gesture_state =
+                            Some(GestureState::new(event.fingers(), continuation));
                     } else {
+                        self.check_end_drag(&seat, event.time_msec());
                         let serial = SERIAL_COUNTER.next_serial();
                         let pointer = seat.get_pointer().unwrap();
                         pointer.gesture_swipe_begin(
@@ -448,6 +482,7 @@ impl State {
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let mut activate_action: Option<SwipeAction> = None;
+                    let mut continuation = false;
                     if let Some(ref mut gesture_state) = self.common.gesture_state {
                         let first_update = gesture_state.update(
                             event.delta(),
@@ -464,7 +499,22 @@ impl State {
                                 }
                             }
                             activate_action = match gesture_state.fingers {
-                                3 => None, // TODO: 3 finger gestures
+                                3 => {
+                                    // Start a drag if three-finger drag enabled, and it's not a
+                                    // continuation of a previous drag.
+                                    (self
+                                        .common
+                                        .config
+                                        .cosmic_conf
+                                        .input_touchpad
+                                        .three_finger_drag
+                                        .unwrap_or(false))
+                                    .then(|| {
+                                        continuation = gesture_state.continuation;
+                                        SwipeAction::Drag
+                                    })
+                                    // TODO other 3-finger gestures
+                                }
                                 4 => {
                                     if self.common.config.cosmic_conf.workspaces.workspace_layout
                                         == WorkspaceLayout::Horizontal
@@ -519,6 +569,15 @@ impl State {
                                     gesture_state.delta,
                                 )
                             }
+                            Some(SwipeAction::Drag) => {
+                                self.process_motion_relative(
+                                    &seat,
+                                    // TODO extract acceleration scale into config
+                                    event.delta().upscale(2.0),
+                                    event.delta(),
+                                    event.time(),
+                                );
+                            }
                             _ => {}
                         }
                     } else {
@@ -533,7 +592,7 @@ impl State {
                     }
 
                     if let Some(action) = activate_action {
-                        self.handle_swipe_action(action, &seat);
+                        self.handle_swipe_action(action, &seat, event.time_msec(), continuation);
                     }
                 }
             }
@@ -548,7 +607,8 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    if let Some(ref gesture_state) = self.common.gesture_state {
+                    if let Some(ref mut gesture_state) = self.common.gesture_state {
+                        let mut clear_state = true;
                         match gesture_state.action {
                             Some(SwipeAction::NextWorkspace) | Some(SwipeAction::PrevWorkspace) => {
                                 let velocity = gesture_state.velocity();
@@ -566,9 +626,52 @@ impl State {
                                     &mut self.common.workspace_state.update(),
                                 );
                             }
+                            Some(SwipeAction::Drag) => {
+                                // Start a delayed drag-end event. This will allow a user to lift
+                                // their fingers and continue the drag event. When the event needs
+                                // to continue or end due to a different pointer interaction, the
+                                // token can be used to cancel the delayed end and either continue
+                                // the drag or activate it immediately via `State::end_drag`.
+                                // TODO reword above.
+                                let delay_ms = self
+                                    .common
+                                    .config
+                                    .cosmic_conf
+                                    .input_touchpad
+                                    .three_finger_drag_delay
+                                    .unwrap_or(1000);
+                                let delay = calloop::timer::Timer::from_duration(
+                                    std::time::Duration::from_millis(delay_ms as u64),
+                                );
+                                let seat = seat.clone();
+                                let time = event.time_msec();
+                                let token = self
+                                    .common
+                                    .event_loop_handle
+                                    .insert_source(delay, move |_, _, state| {
+                                        if let Some(SwipeAction::DragEnd(_)) = state
+                                            .common
+                                            .gesture_state
+                                            .as_ref()
+                                            .and_then(|g| g.action)
+                                        {
+                                            state.end_drag(&seat, time);
+                                            state.common.gesture_state = None;
+                                        }
+
+                                        TimeoutAction::Drop
+                                    })
+                                    .ok();
+                                if let Some(token) = token {
+                                    gesture_state.action = Some(SwipeAction::DragEnd(token));
+                                    clear_state = false;
+                                }
+                            }
                             _ => {}
+                        };
+                        if clear_state {
+                            self.common.gesture_state = None;
                         }
-                        self.common.gesture_state = None;
                     } else {
                         let serial = SERIAL_COUNTER.next_serial();
                         let pointer = seat.get_pointer().unwrap();
@@ -1428,6 +1531,47 @@ impl State {
         } else if button_state == ButtonState::Released {
             ptr.unset_grab(self, serial, time)
         }
+    }
+
+    /// Check if there's an active DragEnd swipe, and if so, cancel its token
+    /// and trigger the DragEnd action immediately.
+    fn check_end_drag(&mut self, seat: &Seat<State>, event_time_msec: u32) {
+        let Some(GestureState {
+            action: Some(SwipeAction::DragEnd(ref token)),
+            ..
+        }) = self.common.gesture_state
+        else {
+            return;
+        };
+
+        self.common.event_loop_handle.remove(*token);
+        self.common.gesture_state = None;
+        self.end_drag(seat, event_time_msec);
+    }
+
+    /// End the drag event.
+    fn end_drag(&mut self, seat: &Seat<State>, event_time_msec: u32) {
+        use smithay::backend::input::ButtonState;
+
+        let left_handed = self
+            .common
+            .config
+            .cosmic_conf
+            .input_touchpad
+            .left_handed
+            .unwrap_or(false);
+        let (button, mouse_button) = if left_handed {
+            (BTN_RIGHT, MouseButton::Right)
+        } else {
+            (BTN_LEFT, MouseButton::Left)
+        };
+        self.process_pointer_button(
+            seat,
+            button,
+            ButtonState::Released,
+            Some(mouse_button),
+            event_time_msec,
+        );
     }
 
     /// Determine is key event should be intercepted as a key binding, or forwarded to surface

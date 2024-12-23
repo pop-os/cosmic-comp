@@ -12,7 +12,8 @@ pub fn init_logger() -> Result<()> {
     let level = if cfg!(debug_assertions) {
         "debug"
     } else {
-        "warn"
+        // "warn"
+        "debug"
     };
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| {
