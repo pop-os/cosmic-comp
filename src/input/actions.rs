@@ -102,11 +102,9 @@ impl State {
         }
     }
 
-    pub fn handle_swipe_action(&mut self, action: gestures::SwipeAction, seat: &Seat<State>) {
-        use gestures::SwipeAction;
-
+    pub fn handle_swipe_action(&mut self, action: shortcuts::Action, seat: &Seat<State>) {
         match action {
-            SwipeAction::NextWorkspace => {
+            shortcuts::Action::NextWorkspace => {
                 let _ = to_next_workspace(
                     &mut *self.common.shell.write().unwrap(),
                     &seat,
@@ -114,7 +112,7 @@ impl State {
                     &mut self.common.workspace_state.update(),
                 );
             }
-            SwipeAction::PrevWorkspace => {
+            shortcuts::Action::PreviousWorkspace => {
                 let _ = to_previous_workspace(
                     &mut *self.common.shell.write().unwrap(),
                     &seat,
@@ -122,6 +120,7 @@ impl State {
                     &mut self.common.workspace_state.update(),
                 );
             }
+            _ => {} // TODO: Handle more actions
         }
     }
 
