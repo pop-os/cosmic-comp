@@ -618,176 +618,13 @@ impl State {
                 };
                 self.common.idle_notifier_state.notify_activity(&seat);
 
-                let current_focus = seat.get_keyboard().unwrap().current_focus();
-                let shortcuts_inhibited = current_focus.is_some_and(|f| {
-                    f.wl_surface()
-                        .and_then(|surface| {
-                            seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
-                                .map(|inhibitor| inhibitor.is_active())
-                        })
-                        .unwrap_or(false)
-                });
-
-                let serial = SERIAL_COUNTER.next_serial();
-                let button = event.button_code();
-                let mut pass_event = !seat.supressed_buttons().remove(button);
-                if event.state() == ButtonState::Pressed {
-                    // change the keyboard focus unless the pointer is grabbed
-                    // We test for any matching surface type here but always use the root
-                    // (in case of a window the toplevel) surface for the focus.
-                    // see: https://gitlab.freedesktop.org/wayland/wayland/-/issues/294
-                    if !seat.get_pointer().unwrap().is_grabbed() {
-                        let output = seat.active_output();
-
-                        let global_position =
-                            seat.get_pointer().unwrap().current_location().as_global();
-                        let under = {
-                            let shell = self.common.shell.read().unwrap();
-                            State::element_under(global_position, &output, &shell)
-                        };
-                        if let Some(target) = under {
-                            if let Some(surface) = target.toplevel().map(Cow::into_owned) {
-                                if seat.get_keyboard().unwrap().modifier_state().logo
-                                    && !shortcuts_inhibited
-                                {
-                                    let seat_clone = seat.clone();
-                                    let mouse_button = PointerButtonEvent::button(&event);
-
-                                    let mut supress_button = || {
-                                        // If the logo is held then the pointer event is
-                                        // aimed at the compositor and shouldn't be passed
-                                        // to the application.
-                                        pass_event = false;
-                                        seat.supressed_buttons().add(button);
-                                    };
-
-                                    fn dispatch_grab<G: PointerGrab<State> + 'static>(
-                                        grab: Option<(G, smithay::input::pointer::Focus)>,
-                                        seat: Seat<State>,
-                                        serial: Serial,
-                                        state: &mut State,
-                                    ) {
-                                        if let Some((target, focus)) = grab {
-                                            seat.modifiers_shortcut_queue().clear();
-
-                                            seat.get_pointer()
-                                                .unwrap()
-                                                .set_grab(state, target, serial, focus);
-                                        }
-                                    }
-
-                                    if let Some(mouse_button) = mouse_button {
-                                        match mouse_button {
-                                            smithay::backend::input::MouseButton::Left => {
-                                                supress_button();
-                                                self.common.event_loop_handle.insert_idle(
-                                                    move |state| {
-                                                        let mut shell =
-                                                            state.common.shell.write().unwrap();
-                                                        let res = shell.move_request(
-                                                            &surface,
-                                                            &seat_clone,
-                                                            serial,
-                                                            ReleaseMode::NoMouseButtons,
-                                                            false,
-                                                            &state.common.config,
-                                                            &state.common.event_loop_handle,
-                                                            &state.common.xdg_activation_state,
-                                                            false,
-                                                        );
-                                                        drop(shell);
-                                                        dispatch_grab(
-                                                            res, seat_clone, serial, state,
-                                                        );
-                                                    },
-                                                );
-                                            }
-                                            smithay::backend::input::MouseButton::Right => {
-                                                supress_button();
-                                                self.common.event_loop_handle.insert_idle(
-                                                    move |state| {
-                                                        let mut shell =
-                                                            state.common.shell.write().unwrap();
-                                                        let Some(target_elem) =
-                                                            shell.element_for_surface(&surface)
-                                                        else {
-                                                            return;
-                                                        };
-                                                        let Some(geom) =
-                                                            shell.space_for(target_elem).and_then(
-                                                                |f| f.element_geometry(target_elem),
-                                                            )
-                                                        else {
-                                                            return;
-                                                        };
-                                                        let geom = geom.to_f64();
-                                                        let center =
-                                                            geom.loc + geom.size.downscale(2.0);
-                                                        let offset = center.to_global(&output)
-                                                            - global_position;
-                                                        let edge = match (
-                                                            offset.x > 0.0,
-                                                            offset.y > 0.0,
-                                                        ) {
-                                                            (true, true) => ResizeEdge::TOP_LEFT,
-                                                            (false, true) => ResizeEdge::TOP_RIGHT,
-                                                            (true, false) => {
-                                                                ResizeEdge::BOTTOM_LEFT
-                                                            }
-                                                            (false, false) => {
-                                                                ResizeEdge::BOTTOM_RIGHT
-                                                            }
-                                                        };
-                                                        let res = shell.resize_request(
-                                                            &surface,
-                                                            &seat_clone,
-                                                            serial,
-                                                            edge,
-                                                            false,
-                                                        );
-                                                        drop(shell);
-                                                        dispatch_grab(
-                                                            res, seat_clone, serial, state,
-                                                        );
-                                                    },
-                                                );
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-                                }
-                            }
-
-                            Shell::set_focus(self, Some(&target), &seat, Some(serial), false);
-                        }
-                    }
-                } else {
-                    let mut shell = self.common.shell.write().unwrap();
-                    if let Some(Trigger::Pointer(action_button)) =
-                        shell.overview_mode().0.active_trigger()
-                    {
-                        if *action_button == button {
-                            shell.set_overview_mode(None, self.common.event_loop_handle.clone());
-                        }
-                    }
-                    std::mem::drop(shell);
-                };
-
-                let ptr = seat.get_pointer().unwrap();
-                if pass_event {
-                    ptr.button(
-                        self,
-                        &ButtonEvent {
-                            button,
-                            state: event.state(),
-                            serial,
-                            time: event.time_msec(),
-                        },
-                    );
-                    ptr.frame(self);
-                } else if event.state() == ButtonState::Released {
-                    ptr.unset_grab(self, serial, event.time_msec())
-                }
+                self.process_pointer_button(
+                    &seat,
+                    event.button_code(),
+                    event.state(),
+                    event.button(),
+                    event.time_msec(),
+                )
             }
             InputEvent::PointerAxis { event, .. } => {
                 let scroll_factor =
@@ -1411,6 +1248,165 @@ impl State {
             }
             InputEvent::Special(_) => {}
             InputEvent::SwitchToggle { event: _ } => {}
+        }
+    }
+
+    /// Process a button press.
+    fn process_pointer_button(
+        &mut self,
+        seat: &Seat<Self>,
+        button: u32,
+        button_state: smithay::backend::input::ButtonState,
+        mouse_button: Option<MouseButton>,
+        time: u32,
+    ) {
+        use smithay::backend::input::ButtonState;
+
+        let current_focus = seat.get_keyboard().unwrap().current_focus();
+        let shortcuts_inhibited = current_focus.is_some_and(|f| {
+            f.wl_surface()
+                .and_then(|surface| {
+                    seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
+                        .map(|inhibitor| inhibitor.is_active())
+                })
+                .unwrap_or(false)
+        });
+
+        let serial = SERIAL_COUNTER.next_serial();
+        let mut pass_event = !seat.supressed_buttons().remove(button);
+        if button_state == ButtonState::Pressed {
+            // change the keyboard focus unless the pointer is grabbed
+            // We test for any matching surface type here but always use the root
+            // (in case of a window the toplevel) surface for the focus.
+            // see: https://gitlab.freedesktop.org/wayland/wayland/-/issues/294
+            if !seat.get_pointer().unwrap().is_grabbed() {
+                let output = seat.active_output();
+
+                let global_position = seat.get_pointer().unwrap().current_location().as_global();
+                let under = {
+                    let shell = self.common.shell.read().unwrap();
+                    State::element_under(global_position, &output, &shell)
+                };
+                if let Some(target) = under {
+                    if let Some(surface) = target.toplevel().map(Cow::into_owned) {
+                        if seat.get_keyboard().unwrap().modifier_state().logo
+                            && !shortcuts_inhibited
+                        {
+                            let seat_clone = seat.clone();
+                            let mut supress_button = || {
+                                // If the logo is held then the pointer event is
+                                // aimed at the compositor and shouldn't be passed
+                                // to the application.
+                                pass_event = false;
+                                seat.supressed_buttons().add(button);
+                            };
+
+                            fn dispatch_grab<G: PointerGrab<State> + 'static>(
+                                grab: Option<(G, smithay::input::pointer::Focus)>,
+                                seat: Seat<State>,
+                                serial: Serial,
+                                state: &mut State,
+                            ) {
+                                if let Some((target, focus)) = grab {
+                                    seat.modifiers_shortcut_queue().clear();
+
+                                    seat.get_pointer()
+                                        .unwrap()
+                                        .set_grab(state, target, serial, focus);
+                                }
+                            }
+
+                            if let Some(mouse_button) = mouse_button {
+                                match mouse_button {
+                                    smithay::backend::input::MouseButton::Left => {
+                                        supress_button();
+                                        self.common.event_loop_handle.insert_idle(move |state| {
+                                            let mut shell = state.common.shell.write().unwrap();
+                                            let res = shell.move_request(
+                                                &surface,
+                                                &seat_clone,
+                                                serial,
+                                                ReleaseMode::NoMouseButtons,
+                                                false,
+                                                &state.common.config,
+                                                &state.common.event_loop_handle,
+                                                &state.common.xdg_activation_state,
+                                                false,
+                                            );
+                                            drop(shell);
+                                            dispatch_grab(res, seat_clone, serial, state);
+                                        });
+                                    }
+                                    smithay::backend::input::MouseButton::Right => {
+                                        supress_button();
+                                        self.common.event_loop_handle.insert_idle(move |state| {
+                                            let mut shell = state.common.shell.write().unwrap();
+                                            let Some(target_elem) =
+                                                shell.element_for_surface(&surface)
+                                            else {
+                                                return;
+                                            };
+                                            let Some(geom) = shell
+                                                .space_for(target_elem)
+                                                .and_then(|f| f.element_geometry(target_elem))
+                                            else {
+                                                return;
+                                            };
+                                            let geom = geom.to_f64();
+                                            let center = geom.loc + geom.size.downscale(2.0);
+                                            let offset =
+                                                center.to_global(&output) - global_position;
+                                            let edge = match (offset.x > 0.0, offset.y > 0.0) {
+                                                (true, true) => ResizeEdge::TOP_LEFT,
+                                                (false, true) => ResizeEdge::TOP_RIGHT,
+                                                (true, false) => ResizeEdge::BOTTOM_LEFT,
+                                                (false, false) => ResizeEdge::BOTTOM_RIGHT,
+                                            };
+                                            let res = shell.resize_request(
+                                                &surface,
+                                                &seat_clone,
+                                                serial,
+                                                edge,
+                                                false,
+                                            );
+                                            drop(shell);
+                                            dispatch_grab(res, seat_clone, serial, state);
+                                        });
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+
+                    Shell::set_focus(self, Some(&target), &seat, Some(serial), false);
+                }
+            }
+        } else {
+            let mut shell = self.common.shell.write().unwrap();
+            if let Some(Trigger::Pointer(action_button)) = shell.overview_mode().0.active_trigger()
+            {
+                if *action_button == button {
+                    shell.set_overview_mode(None, self.common.event_loop_handle.clone());
+                }
+            }
+            std::mem::drop(shell);
+        };
+
+        let ptr = seat.get_pointer().unwrap();
+        if pass_event {
+            ptr.button(
+                self,
+                &ButtonEvent {
+                    button,
+                    state: button_state,
+                    serial,
+                    time,
+                },
+            );
+            ptr.frame(self);
+        } else if button_state == ButtonState::Released {
+            ptr.unset_grab(self, serial, time)
         }
     }
 
