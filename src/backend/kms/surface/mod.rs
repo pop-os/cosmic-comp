@@ -159,25 +159,32 @@ impl MirroringState {
         format: Fourcc,
         output: &Output,
     ) -> Result<Self> {
-        let size = output
-            .current_mode()
-            .map(|mode| mode.size)
-            .unwrap_or_default()
-            .to_logical(1)
-            .to_buffer(1, Transform::Normal);
-        let opaque_regions = vec![Rectangle::from_size(size)];
+        // Apply inverse of output transform to mode size to get correct size
+        // for an untransformed render.
+        let size = output.current_transform().invert().transform_size(
+            output
+                .current_mode()
+                .map(|mode| mode.size)
+                .unwrap_or_default(),
+        );
+        let buffer_size = size.to_logical(1).to_buffer(1, Transform::Normal);
+        let opaque_regions = vec![Rectangle::from_size(buffer_size)];
 
-        let texture = Offscreen::<GlesTexture>::create_buffer(renderer, format, size)?;
-        let transform = output.current_transform();
+        let texture = Offscreen::<GlesTexture>::create_buffer(renderer, format, buffer_size)?;
         let texture_buffer = TextureRenderBuffer::from_texture(
             renderer,
             texture,
             1,
-            transform,
+            Transform::Normal,
             Some(opaque_regions),
         );
 
-        let damage_tracker = OutputDamageTracker::from_output(output);
+        // Don't use `from_output` to avoid applying output transform
+        let damage_tracker = OutputDamageTracker::new(
+            size,
+            output.current_scale().fractional_scale(),
+            Transform::Normal,
+        );
 
         Ok(MirroringState {
             texture: texture_buffer,
