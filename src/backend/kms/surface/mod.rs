@@ -63,7 +63,7 @@ use smithay::{
         },
         wayland_server::protocol::wl_surface::WlSurface,
     },
-    utils::{Buffer as BufferCoords, Clock, Monotonic, Physical, Rectangle, Transform},
+    utils::{Buffer as BufferCoords, Clock, Monotonic, Physical, Rectangle, Size, Transform},
     wayland::{
         dmabuf::{get_dmabuf, DmabufFeedbackBuilder},
         presentation::Refresh,
@@ -147,26 +147,52 @@ pub struct SurfaceThreadState {
     egui: EguiState,
 }
 
+#[derive(Debug, PartialEq)]
+struct MirroringOutputConfig {
+    size: Size<i32, Physical>,
+    fractional_scale: f64,
+}
+
+impl MirroringOutputConfig {
+    fn for_output_untransformed(output: &Output) -> Self {
+        Self {
+            // Apply inverse of output transform to mode size to get correct size
+            // for an untransformed render.
+            size: output.current_transform().invert().transform_size(
+                output
+                    .current_mode()
+                    .map(|mode| mode.size)
+                    .unwrap_or_default(),
+            ),
+            fractional_scale: output.current_scale().fractional_scale(),
+        }
+    }
+
+    fn for_output(output: &Output) -> Self {
+        Self {
+            size: output
+                .current_mode()
+                .map(|mode| mode.size)
+                .unwrap_or_default(),
+            fractional_scale: output.current_scale().fractional_scale(),
+        }
+    }
+}
+
 #[derive(Debug)]
 struct MirroringState {
     texture: TextureRenderBuffer<GlesTexture>,
     damage_tracker: OutputDamageTracker,
+    output_config: MirroringOutputConfig,
 }
 
 impl MirroringState {
     fn new_with_renderer(
         renderer: &mut GlMultiRenderer,
         format: Fourcc,
-        output: &Output,
+        output_config: MirroringOutputConfig,
     ) -> Result<Self> {
-        // Apply inverse of output transform to mode size to get correct size
-        // for an untransformed render.
-        let size = output.current_transform().invert().transform_size(
-            output
-                .current_mode()
-                .map(|mode| mode.size)
-                .unwrap_or_default(),
-        );
+        let size = output_config.size;
         let buffer_size = size.to_logical(1).to_buffer(1, Transform::Normal);
         let opaque_regions = vec![Rectangle::from_size(buffer_size)];
 
@@ -180,15 +206,13 @@ impl MirroringState {
         );
 
         // Don't use `from_output` to avoid applying output transform
-        let damage_tracker = OutputDamageTracker::new(
-            size,
-            output.current_scale().fractional_scale(),
-            Transform::Normal,
-        );
+        let damage_tracker =
+            OutputDamageTracker::new(size, output_config.fractional_scale, Transform::Normal);
 
         Ok(MirroringState {
             texture: texture_buffer,
             damage_tracker,
+            output_config,
         })
     }
 }
@@ -1053,20 +1077,29 @@ impl SurfaceThreadState {
 
         // actual rendering
         let res = if let Some(mirrored_output) = self.mirroring.as_ref().filter(|mirrored_output| {
-            mirrored_output.current_mode().is_some_and(|mirror_mode| {
-                self.output
-                    .current_mode()
-                    .is_some_and(|mode| mode != mirror_mode)
-            }) || mirrored_output.current_scale().fractional_scale()
-                != self.output.current_scale().fractional_scale()
+            MirroringOutputConfig::for_output_untransformed(mirrored_output)
+                != MirroringOutputConfig::for_output(&self.output)
         }) {
+            let mirrored_output_config =
+                MirroringOutputConfig::for_output_untransformed(mirrored_output);
             let mirroring_state = match self.mirroring_textures.entry(self.target_node) {
-                hash_map::Entry::Occupied(occupied) => occupied.into_mut(),
+                hash_map::Entry::Occupied(occupied) => {
+                    let mirroring_state = occupied.into_mut();
+                    // If output config is different, re-create offscreen state
+                    if mirroring_state.output_config != mirrored_output_config {
+                        *mirroring_state = MirroringState::new_with_renderer(
+                            &mut renderer,
+                            compositor.format(),
+                            mirrored_output_config,
+                        )?
+                    }
+                    mirroring_state
+                }
                 hash_map::Entry::Vacant(vacant) => {
                     vacant.insert(MirroringState::new_with_renderer(
                         &mut renderer,
                         compositor.format(),
-                        mirrored_output,
+                        mirrored_output_config,
                     )?)
                 }
             };
