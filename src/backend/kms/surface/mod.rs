@@ -75,7 +75,7 @@ use tracing::{error, trace, warn};
 
 use std::{
     borrow::BorrowMut,
-    collections::{HashMap, HashSet},
+    collections::{hash_map, HashMap, HashSet},
     mem,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -1060,18 +1060,15 @@ impl SurfaceThreadState {
             }) || mirrored_output.current_scale().fractional_scale()
                 != self.output.current_scale().fractional_scale()
         }) {
-            let mirroring_state = {
-                let entry = self.mirroring_textures.entry(self.target_node);
-                let mut new_state = None;
-                if matches!(entry, std::collections::hash_map::Entry::Vacant(_)) {
-                    new_state = Some(MirroringState::new_with_renderer(
+            let mirroring_state = match self.mirroring_textures.entry(self.target_node) {
+                hash_map::Entry::Occupied(occupied) => occupied.into_mut(),
+                hash_map::Entry::Vacant(vacant) => {
+                    vacant.insert(MirroringState::new_with_renderer(
                         &mut renderer,
                         compositor.format(),
                         mirrored_output,
-                    )?);
+                    )?)
                 }
-                // I really want a failable initializer...
-                entry.or_insert_with(|| new_state.unwrap())
             };
 
             mirroring_state
