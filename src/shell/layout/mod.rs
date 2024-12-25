@@ -44,8 +44,8 @@ pub fn is_dialog(window: &CosmicSurface) -> bool {
     };
 
     // Check if sizing suggest dialog
-    let max_size = window.max_size();
-    let min_size = window.min_size();
+    let max_size = window.max_size_without_ssd();
+    let min_size = window.min_size_without_ssd();
 
     if min_size.is_some() && min_size == max_size {
         return true;

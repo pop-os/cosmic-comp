@@ -55,10 +55,10 @@ use std::{
 };
 use wayland_backend::server::ObjectId;
 
-use super::{
-    surface::{RESIZE_BORDER, SSD_HEIGHT},
-    CosmicSurface,
-};
+use super::CosmicSurface;
+
+pub const SSD_HEIGHT: i32 = 36;
+pub const RESIZE_BORDER: i32 = 10;
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct CosmicWindow(pub(super) IcedElement<CosmicWindowInternal>);
@@ -385,6 +385,29 @@ impl CosmicWindow {
 
     pub(crate) fn force_redraw(&self) {
         self.0.force_redraw();
+    }
+
+    pub fn min_size(&self) -> Option<Size<i32, Logical>> {
+        self.0
+            .with_program(|p| p.window.min_size_without_ssd())
+            .map(|size| {
+                if self.0.with_program(|p| !p.window.is_decorated(false)) {
+                    size + (0, SSD_HEIGHT).into()
+                } else {
+                    size
+                }
+            })
+    }
+    pub fn max_size(&self) -> Option<Size<i32, Logical>> {
+        self.0
+            .with_program(|p| p.window.max_size_without_ssd())
+            .map(|size| {
+                if self.0.with_program(|p| !p.window.is_decorated(false)) {
+                    size + (0, SSD_HEIGHT).into()
+                } else {
+                    size
+                }
+            })
     }
 }
 

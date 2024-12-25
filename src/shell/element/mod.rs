@@ -468,61 +468,16 @@ impl CosmicMapped {
 
     pub fn min_size(&self) -> Option<Size<i32, Logical>> {
         match &self.element {
-            CosmicMappedInternal::Stack(stack) => {
-                stack.surfaces().fold(None, |min_size, window| {
-                    let win_min_size = window.min_size();
-                    match (min_size, win_min_size) {
-                        (None, None) => None,
-                        (None, x) | (x, None) => x,
-                        (Some(min1), Some(min2)) => {
-                            Some((min1.w.max(min2.w), min1.h.max(min2.h)).into())
-                        }
-                    }
-                })
-            }
-            CosmicMappedInternal::Window(window) => window.surface().min_size(),
+            CosmicMappedInternal::Stack(stack) => stack.min_size(),
+            CosmicMappedInternal::Window(window) => window.min_size(),
             _ => unreachable!(),
         }
     }
 
     pub fn max_size(&self) -> Option<Size<i32, Logical>> {
         match &self.element {
-            CosmicMappedInternal::Stack(stack) => {
-                let theoretical_max = stack.surfaces().fold(None, |max_size, window| {
-                    let win_max_size = window.max_size();
-                    match (max_size, win_max_size) {
-                        (None, None) => None,
-                        (None, x) | (x, None) => x,
-                        (Some(max1), Some(max2)) => Some(
-                            (
-                                if max1.w == 0 {
-                                    max2.w
-                                } else if max2.w == 0 {
-                                    max1.w
-                                } else {
-                                    max1.w.min(max2.w)
-                                },
-                                if max1.h == 0 {
-                                    max2.h
-                                } else if max2.h == 0 {
-                                    max1.h
-                                } else {
-                                    max1.h.min(max2.h)
-                                },
-                            )
-                                .into(),
-                        ),
-                    }
-                });
-                // The problem is, with accumulated sizes, the minimum size could be larger than our maximum...
-                let min_size = self.min_size();
-                match (theoretical_max, min_size) {
-                    (None, _) => None,
-                    (Some(max), None) => Some(max),
-                    (Some(max), Some(min)) => Some((max.w.max(min.w), max.h.max(min.h)).into()),
-                }
-            }
-            CosmicMappedInternal::Window(window) => window.surface().max_size(),
+            CosmicMappedInternal::Stack(stack) => stack.max_size(),
+            CosmicMappedInternal::Window(window) => window.max_size(),
             _ => unreachable!(),
         }
     }
@@ -910,6 +865,15 @@ impl CosmicMapped {
             }
             _ => unreachable!(),
         })
+    }
+
+    pub fn ssd_height(&self, pending: bool) -> Option<i32> {
+        match &self.element {
+            CosmicMappedInternal::Window(w) => (!w.surface().is_decorated(pending))
+                .then(|| crate::shell::element::window::SSD_HEIGHT),
+            CosmicMappedInternal::Stack(s) => Some(crate::shell::element::stack::TAB_HEIGHT),
+            _ => unreachable!(),
+        }
     }
 }
 
