@@ -1,4 +1,7 @@
-use super::{surface::RESIZE_BORDER, window::Focus, CosmicSurface};
+use super::{
+    window::{Focus, RESIZE_BORDER},
+    CosmicSurface,
+};
 use crate::{
     backend::render::cursor::CursorState,
     shell::{
@@ -656,6 +659,59 @@ impl CosmicStack {
                     });
                 }
             }
+        }
+    }
+
+    pub fn min_size(&self) -> Option<Size<i32, Logical>> {
+        self.surfaces()
+            .fold(None, |min_size, window| {
+                let win_min_size = window.min_size_without_ssd();
+                match (min_size, win_min_size) {
+                    (None, None) => None,
+                    (None, x) | (x, None) => x,
+                    (Some(min1), Some(min2)) => {
+                        Some((min1.w.max(min2.w), min1.h.max(min2.h)).into())
+                    }
+                }
+            })
+            .map(|size| size + (0, TAB_HEIGHT).into())
+    }
+    pub fn max_size(&self) -> Option<Size<i32, Logical>> {
+        let theoretical_max = self
+            .surfaces()
+            .fold(None, |max_size, window| {
+                let win_max_size = window.max_size_without_ssd();
+                match (max_size, win_max_size) {
+                    (None, None) => None,
+                    (None, x) | (x, None) => x,
+                    (Some(max1), Some(max2)) => Some(
+                        (
+                            if max1.w == 0 {
+                                max2.w
+                            } else if max2.w == 0 {
+                                max1.w
+                            } else {
+                                max1.w.min(max2.w)
+                            },
+                            if max1.h == 0 {
+                                max2.h
+                            } else if max2.h == 0 {
+                                max1.h
+                            } else {
+                                max1.h.min(max2.h)
+                            },
+                        )
+                            .into(),
+                    ),
+                }
+            })
+            .map(|size| size + (0, TAB_HEIGHT).into());
+        // The problem is, with accumulated sizes, the minimum size could be larger than our maximum...
+        let min_size = self.min_size();
+        match (theoretical_max, min_size) {
+            (None, _) => None,
+            (Some(max), None) => Some(max),
+            (Some(max), Some(min)) => Some((max.w.max(min.w), max.h.max(min.h)).into()),
         }
     }
 }

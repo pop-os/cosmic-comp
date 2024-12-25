@@ -2,10 +2,7 @@ use std::{ffi::OsString, os::unix::io::OwnedFd, process::Stdio};
 
 use crate::{
     backend::render::cursor::{load_cursor_theme, Cursor},
-    shell::{
-        element::surface::SSD_HEIGHT, focus::target::KeyboardFocusTarget, grabs::ReleaseMode,
-        CosmicSurface, Shell,
-    },
+    shell::{focus::target::KeyboardFocusTarget, grabs::ReleaseMode, CosmicSurface, Shell},
     state::State,
     utils::prelude::*,
     wayland::handlers::{
@@ -473,7 +470,7 @@ impl XwmHandler for State {
             };
 
             if let Some(current_geo) = current_geo {
-                let ssd_height = if window.is_decorated() { 0 } else { SSD_HEIGHT };
+                let ssd_height = mapped.ssd_height(false).unwrap_or(0);
                 mapped.set_geometry(Rectangle::from_loc_and_size(
                     current_geo.loc,
                     (

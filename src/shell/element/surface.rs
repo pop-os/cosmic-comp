@@ -94,9 +94,6 @@ struct Sticky(AtomicBool);
 #[derive(Default)]
 struct GlobalGeometry(Mutex<Option<Rectangle<i32, Global>>>);
 
-pub const SSD_HEIGHT: i32 = 36;
-pub const RESIZE_BORDER: i32 = 10;
-
 impl CosmicSurface {
     pub fn title(&self) -> String {
         match self.0.underlying_surface() {
@@ -451,7 +448,7 @@ impl CosmicSurface {
         }
     }
 
-    pub fn min_size(&self) -> Option<Size<i32, Logical>> {
+    pub fn min_size_without_ssd(&self) -> Option<Size<i32, Logical>> {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 Some(with_states(toplevel.wl_surface(), |states| {
@@ -465,16 +462,9 @@ impl CosmicSurface {
             }
             WindowSurface::X11(surface) => surface.min_size(),
         }
-        .map(|size| {
-            if self.is_decorated(false) {
-                size
-            } else {
-                size + (0, SSD_HEIGHT).into()
-            }
-        })
     }
 
-    pub fn max_size(&self) -> Option<Size<i32, Logical>> {
+    pub fn max_size_without_ssd(&self) -> Option<Size<i32, Logical>> {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 Some(with_states(toplevel.wl_surface(), |states| {
@@ -488,13 +478,6 @@ impl CosmicSurface {
             }
             WindowSurface::X11(surface) => surface.max_size(),
         }
-        .map(|size| {
-            if self.is_decorated(false) {
-                size
-            } else {
-                size + (0, SSD_HEIGHT).into()
-            }
-        })
     }
 
     pub fn serial_acked(&self, serial: &Serial) -> bool {
