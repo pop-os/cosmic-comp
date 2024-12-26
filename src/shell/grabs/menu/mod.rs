@@ -7,10 +7,10 @@ use calloop::LoopHandle;
 use cosmic::{
     iced::{Alignment, Background},
     iced_core::{alignment::Horizontal, Border, Length, Rectangle as IcedRectangle},
-    iced_widget::{self, text::Appearance as TextAppearance, Column, Row},
+    iced_widget::{self, text::Style as TextStyle, Column, Row},
     theme,
     widget::{button, divider, horizontal_space, icon::from_name, text},
-    Apply as _, Command,
+    Apply as _, Task,
 };
 use smithay::{
     backend::{
@@ -202,7 +202,7 @@ impl Program for ContextMenu {
         &mut self,
         message: Self::Message,
         loop_handle: &LoopHandle<'static, crate::state::State>,
-    ) -> Command<Self::Message> {
+    ) -> Task<Self::Message> {
         match message {
             Message::ItemPressed(idx) => {
                 if let Some(Item::Entry { on_press, .. }) = self.items.get_mut(idx) {
@@ -331,7 +331,7 @@ impl Program for ContextMenu {
             }
         };
 
-        Command::none()
+        Task::none()
     }
 
     fn view(&self) -> cosmic::Element<'_, Self::Message> {
@@ -350,7 +350,7 @@ impl Program for ContextMenu {
             match item {
                 Item::Separator => divider::horizontal::light().into(),
                 Item::Submenu { title, .. } => Row::with_children(vec![
-                    horizontal_space(16).into(),
+                    horizontal_space().width(16).into(),
                     text::body(title).width(mode).into(),
                     from_name("go-next-symbolic")
                         .size(16)
@@ -361,7 +361,7 @@ impl Program for ContextMenu {
                 .spacing(8)
                 .width(width)
                 .padding([8, 16])
-                .align_items(Alignment::Center)
+                .align_y(Alignment::Center)
                 .apply(|row| item::SubmenuItem::new(row, idx))
                 .style(theme::Button::MenuItem)
                 .into(),
@@ -378,20 +378,20 @@ impl Program for ContextMenu {
                                 .size(16)
                                 .prefer_svg(true)
                                 .icon()
-                                .style(theme::Svg::custom(|theme| iced_widget::svg::Appearance {
+                                .class(theme::Svg::custom(|theme| iced_widget::svg::Style {
                                     color: Some(theme.cosmic().accent.base.into()),
                                 }))
                                 .into()
                         } else {
-                            horizontal_space(16).into()
+                            horizontal_space().width(16).into()
                         },
                         text::body(title)
                             .width(mode)
-                            .style(if *disabled {
+                            .class(if *disabled {
                                 theme::Text::Custom(|theme| {
                                     let mut color = theme.cosmic().background.component.on;
                                     color.alpha *= 0.5;
-                                    TextAppearance {
+                                    TextStyle {
                                         color: Some(color.into()),
                                     }
                                 })
@@ -399,17 +399,17 @@ impl Program for ContextMenu {
                                 theme::Text::Default
                             })
                             .into(),
-                        horizontal_space(16).into(),
+                        horizontal_space().width(16).into(),
                     ];
                     if let Some(shortcut) = shortcut.as_ref() {
                         components.push(
                             text::body(shortcut)
-                                .horizontal_alignment(Horizontal::Right)
+                                .align_x(Horizontal::Right)
                                 .width(Length::Shrink)
-                                .style(theme::Text::Custom(|theme| {
+                                .class(theme::Text::Custom(|theme| {
                                     let mut color = theme.cosmic().background.component.on;
                                     color.alpha *= 0.75;
-                                    TextAppearance {
+                                    TextStyle {
                                         color: Some(color.into()),
                                     }
                                 }))
@@ -420,12 +420,12 @@ impl Program for ContextMenu {
                     Row::with_children(components)
                         .spacing(8)
                         .width(mode)
-                        .align_items(Alignment::Center)
+                        .align_y(Alignment::Center)
                         .apply(button::custom)
                         .width(width)
                         .padding([8, 16])
                         .on_press_maybe((!disabled).then_some(Message::ItemPressed(idx)))
-                        .style(theme::Button::MenuItem)
+                        .class(theme::Button::MenuItem)
                         .into()
                 }
             }
@@ -433,15 +433,15 @@ impl Program for ContextMenu {
         .width(Length::Shrink)
         .apply(iced_widget::container)
         .padding(1)
-        .style(theme::Container::custom(|theme| {
+        .class(theme::Container::custom(|theme| {
             let cosmic = theme.cosmic();
             let component = &cosmic.background.component;
-            iced_widget::container::Appearance {
+            iced_widget::container::Style {
                 icon_color: Some(cosmic.accent.base.into()),
                 text_color: Some(component.on.into()),
                 background: Some(Background::Color(component.base.into())),
                 border: Border {
-                    radius: 8.0.into(),
+                    radius: cosmic.radius_s().into(),
                     width: 1.0,
                     color: component.divider.into(),
                 },

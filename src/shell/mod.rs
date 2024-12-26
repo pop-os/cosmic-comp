@@ -54,8 +54,6 @@ use smithay::{
     xwayland::X11Surface,
 };
 
-use smithay::wayland::shell::wlr_layer::Layer as WlrLayer;
-
 use crate::{
     backend::render::animations::spring::{Spring, SpringParams},
     config::Config,
@@ -419,22 +417,6 @@ impl WorkspaceSet {
         theme: cosmic::Theme,
     ) -> WorkspaceSet {
         let group_handle = state.create_workspace_group();
-        let workspaces = {
-            let workspace = create_workspace(
-                state,
-                output,
-                &group_handle,
-                true,
-                tiling_enabled,
-                theme.clone(),
-            );
-            workspace_set_idx(state, 1, idx, &workspace.handle);
-            state.set_workspace_capabilities(
-                &workspace.handle,
-                [WorkspaceCapabilities::Activate].into_iter(),
-            );
-            vec![workspace]
-        };
         let sticky_layer = FloatingLayout::new(theme.clone(), output);
 
         WorkspaceSet {
@@ -446,7 +428,7 @@ impl WorkspaceSet {
             theme,
             sticky_layer,
             minimized_windows: Vec::new(),
-            workspaces,
+            workspaces: Vec::new(),
             output: output.clone(),
         }
     }
@@ -660,7 +642,7 @@ impl Workspaces {
             return;
         }
 
-        let set = self
+        let mut set = self
             .backup_set
             .take()
             .map(|mut set| {
@@ -678,35 +660,51 @@ impl Workspaces {
             });
         workspace_state.add_group_output(&set.group, &output);
 
-        self.sets.insert(output.clone(), set);
+        // Remove workspaces that prefer this output from other sets
         let mut moved_workspaces = Vec::new();
-        for set in self.sets.values_mut() {
-            let (preferrs, doesnt) = set
+        for other_set in self.sets.values_mut() {
+            let active_handle = other_set.workspaces[set.active].handle;
+            let (prefers, doesnt) = other_set
                 .workspaces
                 .drain(..)
-                .partition(|w| w.preferrs_output(output));
-            moved_workspaces.extend(preferrs);
-            set.workspaces = doesnt;
-            if set.workspaces.is_empty() {
-                set.add_empty_workspace(workspace_state);
+                .partition(|w| w.prefers_output(output));
+            moved_workspaces.extend(prefers);
+            other_set.workspaces = doesnt;
+            if other_set.workspaces.is_empty() {
+                other_set.add_empty_workspace(workspace_state);
             }
-            set.active = set.active.min(set.workspaces.len() - 1);
+            for (i, workspace) in other_set.workspaces.iter_mut().enumerate() {
+                workspace_set_idx(
+                    workspace_state,
+                    i as u8 + 1,
+                    other_set.idx,
+                    &workspace.handle,
+                );
+            }
+            other_set.active = other_set
+                .workspaces
+                .iter()
+                .position(|w| w.handle == active_handle)
+                .unwrap_or(other_set.workspaces.len() - 1);
         }
-        {
-            let set = self.sets.get_mut(output).unwrap();
-            for workspace in &mut moved_workspaces {
-                move_workspace_to_group(workspace, &set.group, workspace_state);
-            }
-            set.workspaces.extend(moved_workspaces);
-            for (i, workspace) in set.workspaces.iter_mut().enumerate() {
-                workspace.set_output(output);
-                workspace.refresh(xdg_activation_state);
-                workspace_set_idx(workspace_state, i as u8 + 1, set.idx, &workspace.handle);
-                if i == set.active {
-                    workspace_state.add_workspace_state(&workspace.handle, WState::Active);
-                }
+
+        // Add `moved_workspaces` to set, and update output and index of workspaces
+        for workspace in &mut moved_workspaces {
+            move_workspace_to_group(workspace, &set.group, workspace_state);
+        }
+        set.workspaces.extend(moved_workspaces);
+        if set.workspaces.is_empty() {
+            set.add_empty_workspace(workspace_state);
+        }
+        for (i, workspace) in set.workspaces.iter_mut().enumerate() {
+            workspace.set_output(output);
+            workspace.refresh(xdg_activation_state);
+            workspace_set_idx(workspace_state, i as u8 + 1, set.idx, &workspace.handle);
+            if i == set.active {
+                workspace_state.add_workspace_state(&workspace.handle, WState::Active);
             }
         }
+        self.sets.insert(output.clone(), set);
     }
 
     pub fn remove_output<'a>(
@@ -737,18 +735,25 @@ impl Workspaces {
                     if &seat.active_output() == output {
                         seat.set_active_output(&new_output);
                     }
+                    if seat.focused_output().as_ref() == Some(output) {
+                        seat.set_focused_output(None);
+                    }
                 }
 
                 let new_set = self.sets.get_mut(&new_output).unwrap();
                 let workspace_group = new_set.group;
                 for mut workspace in set.workspaces.into_iter() {
-                    // update workspace protocol state
-                    move_workspace_to_group(&mut workspace, &workspace_group, workspace_state);
+                    if workspace.is_empty() {
+                        workspace_state.remove_workspace(workspace.handle);
+                    } else {
+                        // update workspace protocol state
+                        move_workspace_to_group(&mut workspace, &workspace_group, workspace_state);
 
-                    // update mapping
-                    workspace.set_output(&new_output);
-                    workspace.refresh(xdg_activation_state);
-                    new_set.workspaces.push(workspace);
+                        // update mapping
+                        workspace.set_output(&new_output);
+                        workspace.refresh(xdg_activation_state);
+                        new_set.workspaces.push(workspace);
+                    }
                 }
 
                 for window in set.sticky_layer.mapped() {
@@ -1569,97 +1574,6 @@ impl Shell {
         }
     }
 
-    /// Derives a keyboard focus target from a global position, and indicates whether the
-    /// the shell should start a move request event. Used during cursor related focus checks
-    pub fn keyboard_target_from_position(
-        &self,
-        global_position: Point<f64, Global>,
-        output: &Output,
-    ) -> Option<KeyboardFocusTarget> {
-        let relative_pos = global_position.to_local(output);
-
-        let mut under: Option<KeyboardFocusTarget> = None;
-        // if the lockscreen is active
-        if let Some(session_lock) = self.session_lock.as_ref() {
-            under = session_lock
-                .surfaces
-                .get(output)
-                .map(|lock| lock.clone().into());
-            // if the output can receive keyboard focus
-        } else if let Some(window) = self.active_space(output).get_fullscreen() {
-            let layers = layer_map_for_output(output);
-            if let Some(layer) = layers.layer_under(WlrLayer::Overlay, relative_pos.as_logical()) {
-                let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                if layer.can_receive_keyboard_focus()
-                    && layer
-                        .surface_under(
-                            relative_pos.as_logical() - layer_loc.to_f64(),
-                            WindowSurfaceType::ALL,
-                        )
-                        .is_some()
-                {
-                    under = Some(layer.clone().into());
-                }
-            } else {
-                under = Some(window.clone().into());
-            }
-        } else {
-            let done = {
-                let layers = layer_map_for_output(output);
-                if let Some(layer) = layers
-                    .layer_under(WlrLayer::Overlay, relative_pos.as_logical())
-                    .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos.as_logical()))
-                {
-                    let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                    if layer.can_receive_keyboard_focus()
-                        && layer
-                            .surface_under(
-                                relative_pos.as_logical() - layer_loc.to_f64(),
-                                WindowSurfaceType::ALL,
-                            )
-                            .is_some()
-                    {
-                        under = Some(layer.clone().into());
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            };
-            if !done {
-                // Don't check override redirect windows, because we don't set keyboard focus to them explicitly.
-                // These cases are handled by the XwaylandKeyboardGrab.
-                if let Some(target) = self.element_under(global_position, output) {
-                    under = Some(target);
-                } else {
-                    let layers = layer_map_for_output(output);
-                    if let Some(layer) = layers
-                        .layer_under(WlrLayer::Bottom, relative_pos.as_logical())
-                        .or_else(|| {
-                            layers.layer_under(WlrLayer::Background, relative_pos.as_logical())
-                        })
-                    {
-                        let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                        if layer.can_receive_keyboard_focus()
-                            && layer
-                                .surface_under(
-                                    relative_pos.as_logical() - layer_loc.to_f64(),
-                                    WindowSurfaceType::ALL,
-                                )
-                                .is_some()
-                        {
-                            under = Some(layer.clone().into());
-                        }
-                    };
-                }
-            }
-        }
-
-        under
-    }
-
     /// Coerce a keyboard focus target into a CosmicMapped element. This is useful when performing window specific
     /// actions, such as closing a window
     pub fn focused_element(&self, focus_target: &KeyboardFocusTarget) -> Option<CosmicMapped> {
@@ -2090,6 +2004,27 @@ impl Shell {
         self.pending_windows.retain(|(s, _, _)| s.alive());
     }
 
+    pub fn update_pointer_position(&mut self, location: Point<f64, Local>, output: &Output) {
+        for (o, set) in self.workspaces.sets.iter_mut() {
+            if o == output {
+                set.sticky_layer.update_pointer_position(Some(location));
+                for (i, workspace) in set.workspaces.iter_mut().enumerate() {
+                    if i == set.active {
+                        workspace
+                            .update_pointer_position(Some(location), self.overview_mode.clone());
+                    } else {
+                        workspace.update_pointer_position(None, self.overview_mode.clone());
+                    }
+                }
+            } else {
+                set.sticky_layer.update_pointer_position(None);
+                for workspace in &mut set.workspaces {
+                    workspace.update_pointer_position(None, self.overview_mode.clone());
+                }
+            }
+        }
+    }
+
     pub fn remap_unfullscreened_window(
         &mut self,
         mapped: CosmicMapped,
@@ -2417,33 +2352,6 @@ impl Shell {
                 return;
             }
         }
-    }
-
-    pub fn element_under(
-        &self,
-        location: Point<f64, Global>,
-        output: &Output,
-    ) -> Option<KeyboardFocusTarget> {
-        self.workspaces.sets.get(output).and_then(|set| {
-            set.sticky_layer
-                .space
-                .element_under(location.to_local(output).as_logical())
-                .map(|(mapped, _)| mapped.clone().into())
-                .or_else(|| set.workspaces[set.active].element_under(location))
-        })
-    }
-    pub fn surface_under(
-        &mut self,
-        location: Point<f64, Global>,
-        output: &Output,
-    ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
-        let overview = self.overview_mode.clone();
-        self.workspaces.sets.get_mut(output).and_then(|set| {
-            set.sticky_layer
-                .surface_under(location.to_local(output))
-                .map(|(target, offset)| (target, offset.to_global(output)))
-                .or_else(|| set.workspaces[set.active].surface_under(location, overview))
-        })
     }
 
     #[must_use]
@@ -2819,7 +2727,7 @@ impl Shell {
         let mapped = if move_out_of_stack {
             let new_mapped: CosmicMapped =
                 CosmicWindow::new(window.clone(), evlh.clone(), self.theme.clone()).into();
-            start_data.set_focus(new_mapped.focus_under((0., 0.).into()));
+            start_data.set_focus(new_mapped.focus_under((0., 0.).into(), WindowSurfaceType::ALL));
             new_mapped
         } else {
             old_mapped.clone()
@@ -3287,7 +3195,7 @@ impl Shell {
 
         let element_offset = (new_loc - geometry.loc).as_logical();
         let focus = mapped
-            .focus_under(element_offset.to_f64())
+            .focus_under(element_offset.to_f64(), WindowSurfaceType::ALL)
             .map(|(target, surface_offset)| (target, (surface_offset + element_offset.to_f64())));
         start_data.set_location(new_loc.as_logical().to_f64());
         start_data.set_focus(focus.clone());
@@ -3634,7 +3542,12 @@ impl Shell {
         let workspace = &mut set.workspaces[set.active];
         let maybe_window = workspace.focus_stack.get(seat).iter().next().cloned();
         if let Some(window) = maybe_window {
-            if set.sticky_layer.mapped().any(|m| m == &window) {
+            let was_maximized = window.is_maximized(false);
+            if was_maximized {
+                workspace.unmaximize_request(&window);
+            }
+
+            let res = if set.sticky_layer.mapped().any(|m| m == &window) {
                 set.sticky_layer
                     .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat))
             } else if workspace.tiling_layer.mapped().any(|(m, _)| m == &window) {
@@ -3647,7 +3560,15 @@ impl Shell {
                     .toggle_stacking_focused(seat, workspace.focus_stack.get_mut(seat))
             } else {
                 None
+            };
+
+            if was_maximized {
+                if let Some(KeyboardFocusTarget::Element(mapped)) = res.as_ref() {
+                    self.maximize_request(mapped, seat);
+                }
             }
+
+            res
         } else {
             None
         }

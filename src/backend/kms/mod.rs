@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{config::OutputState, shell::Shell, state::BackendData, utils::prelude::*};
+use crate::{
+    config::{AdaptiveSync, OutputState},
+    shell::Shell,
+    state::BackendData,
+    utils::prelude::*,
+};
 
 use anyhow::{Context, Result};
 use calloop::LoopSignal;
@@ -43,6 +48,7 @@ mod drm_helpers;
 pub mod render;
 mod socket;
 mod surface;
+pub(crate) use surface::Surface;
 
 use device::*;
 pub use surface::Timings;
@@ -527,7 +533,6 @@ impl KmsState {
             return Ok(Vec::new());
         }
 
-        let mut all_outputs = Vec::new();
         for device in self.drm_devices.values_mut() {
             // we only want outputs exposed to wayland - not leased ones
             // but that is also not all surface, because that doesn't contain all detected, but unmapped outputs
@@ -586,7 +591,7 @@ impl KmsState {
                     .flat_map(|encoder_handle| device.drm.get_encoder(*encoder_handle))
                 {
                     for crtc in res_handles.filter_crtcs(encoder_info.possible_crtcs()) {
-                        if !free_crtcs.contains(&crtc) {
+                        if free_crtcs.contains(&crtc) {
                             new_pairings.insert(conn, crtc);
                             break 'outer;
                         }
@@ -606,7 +611,34 @@ impl KmsState {
                 }
             }
 
-            // reconfigure existing
+            // add new ones
+            let mut w = shell.read().unwrap().global_space().size.w as u32;
+            if !test_only {
+                for (conn, crtc) in new_pairings {
+                    let (output, _) = device.connector_added(
+                        self.primary_node.as_ref(),
+                        conn,
+                        Some(crtc),
+                        (w, 0),
+                        loop_handle,
+                        shell.clone(),
+                        startup_done.clone(),
+                    )?;
+                    if output.mirroring().is_none() {
+                        w += output.config().transformed_size().w as u32;
+                    }
+                }
+            }
+        }
+
+        if !test_only {
+            self.refresh_used_devices()
+                .context("Failed to enable devices")?;
+        }
+
+        let mut all_outputs = Vec::new();
+        for device in self.drm_devices.values_mut() {
+            // reconfigure
             for (crtc, surface) in device.surfaces.iter_mut() {
                 let output_config = surface.output.config();
 
@@ -636,10 +668,6 @@ impl KmsState {
                         let gbm = device.gbm.clone();
                         let cursor_size = drm.cursor_size();
 
-                        let vrr = drm_helpers::set_vrr(drm, *crtc, conn, output_config.vrr)
-                            .unwrap_or(false);
-                        surface.output.set_adaptive_sync(vrr);
-
                         if let Some(bpc) = output_config.max_bpc {
                             if let Err(err) = drm_helpers::set_max_bpc(drm, conn, bpc) {
                                 warn!(
@@ -651,20 +679,38 @@ impl KmsState {
                             }
                         }
 
+                        let vrr = output_config.vrr;
                         std::mem::drop(output_config);
-                        surface
-                            .resume(drm_surface, gbm, cursor_size, vrr)
-                            .context("Failed to create surface")?;
-                    } else {
-                        if output_config.vrr != surface.output.adaptive_sync() {
-                            surface.output.set_adaptive_sync(drm_helpers::set_vrr(
-                                drm,
-                                surface.crtc,
-                                surface.connector,
-                                output_config.vrr,
-                            )?);
+
+                        match surface.resume(drm_surface, gbm, cursor_size) {
+                            Ok(_) => {
+                                surface.output.set_adaptive_sync_support(
+                                    surface.adaptive_sync_support().ok(),
+                                );
+                                if surface.use_adaptive_sync(vrr)? {
+                                    surface.output.set_adaptive_sync(vrr);
+                                } else {
+                                    surface.output.config_mut().vrr = AdaptiveSync::Disabled;
+                                    surface.output.set_adaptive_sync(AdaptiveSync::Disabled);
+                                }
+                            }
+                            Err(err) => {
+                                surface.output.config_mut().enabled = OutputState::Disabled;
+                                return Err(err).context("Failed to create surface");
+                            }
                         }
+                    } else {
+                        let vrr = output_config.vrr;
                         std::mem::drop(output_config);
+                        if vrr != surface.output.adaptive_sync() {
+                            if surface.use_adaptive_sync(vrr)? {
+                                surface.output.set_adaptive_sync(vrr);
+                            } else if vrr != AdaptiveSync::Disabled {
+                                anyhow::bail!("Requested VRR mode unsupported");
+                            } else {
+                                surface.output.set_adaptive_sync(AdaptiveSync::Disabled);
+                            }
+                        }
                         surface
                             .set_mode(*mode)
                             .context("Failed to apply new mode")?;
@@ -672,27 +718,19 @@ impl KmsState {
                 }
             }
 
-            // add new ones
-            let mut w = shell.read().unwrap().global_space().size.w as u32;
-            if !test_only {
-                for (conn, crtc) in new_pairings {
-                    let (output, _) = device.connector_added(
-                        self.primary_node.as_ref(),
-                        conn,
-                        Some(crtc),
-                        (0, w),
-                        loop_handle,
-                        shell.clone(),
-                        startup_done.clone(),
-                    )?;
-                    if output.mirroring().is_none() {
-                        w += output.config().transformed_size().w as u32;
-                    }
-                    all_outputs.push(output);
-                }
-            }
-
-            all_outputs.extend(outputs);
+            all_outputs.extend(
+                device
+                    .outputs
+                    .iter()
+                    .filter(|(conn, _)| {
+                        !device
+                            .leased_connectors
+                            .iter()
+                            .any(|(leased_conn, _)| *conn == leased_conn)
+                    })
+                    .map(|(_, output)| output.clone())
+                    .collect::<Vec<_>>(),
+            );
         }
 
         // we need to handle mirroring, after all outputs have been enabled

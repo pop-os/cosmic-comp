@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use state::State;
 use std::{env, ffi::OsString, os::unix::process::CommandExt, process, sync::Arc};
 use tracing::{error, info, warn};
+use wayland::protocols::overlap_notify::OverlapNotifyState;
 
 use crate::wayland::handlers::compositor::client_compositor_state;
 
@@ -44,9 +45,13 @@ impl State {
         // into systemd and the session?
         self.ready.call_once(|| {
             // potentially tell systemd we are setup now
-            #[cfg(feature = "systemd")]
             if let state::BackendData::Kms(_) = &self.backend {
+                #[cfg(feature = "systemd")]
                 systemd::ready(&self.common);
+                #[cfg(not(feature = "systemd"))]
+                if let Err(err) = dbus::ready(&self.common) {
+                    error!(?err, "Failed to update the D-Bus activation environment");
+                }
             }
 
             // potentially tell the session we are setup now
@@ -131,6 +136,7 @@ fn main() -> Result<()> {
         }
         state.common.refresh();
         state::Common::refresh_focus(state);
+        OverlapNotifyState::refresh(state);
         state.common.update_x11_stacking_order();
 
         {

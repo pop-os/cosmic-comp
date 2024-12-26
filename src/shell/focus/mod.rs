@@ -21,10 +21,12 @@ use std::{borrow::Cow, mem, sync::Mutex};
 
 use tracing::{debug, trace};
 
+pub use self::order::{render_input_order, Stage};
 use self::target::{KeyboardFocusTarget, WindowGroup};
 
 use super::{grabs::SeatMoveGrabState, layout::floating::FloatingLayout, SeatExt};
 
+mod order;
 pub mod target;
 
 pub struct FocusStack<'a>(pub(super) Option<&'a IndexSet<CosmicMapped>>);
@@ -170,7 +172,7 @@ impl Shell {
         let focused_windows = self
             .seats
             .iter()
-            .flat_map(|seat| {
+            .map(|seat| {
                 if matches!(
                     seat.get_keyboard().unwrap().current_focus(),
                     Some(KeyboardFocusTarget::Group(_))
@@ -178,11 +180,10 @@ impl Shell {
                     return None;
                 }
 
-                Some(self.outputs().flat_map(|o| {
-                    let space = self.active_space(o);
-                    let stack = space.focus_stack.get(seat);
-                    stack.last().cloned()
-                }))
+                let output = seat.focused_or_active_output();
+                let space = self.active_space(&output);
+                let stack = space.focus_stack.get(seat);
+                stack.last().cloned()
             })
             .flatten()
             .collect::<Vec<_>>();
@@ -201,7 +202,7 @@ impl Shell {
                 m.window.configure();
             }
 
-            let workspace = self.workspaces.active_mut(&output);
+            let workspace = &mut set.workspaces[set.active];
             for focused in focused_windows.iter() {
                 raise_with_children(&mut workspace.floating_layer, focused);
             }
@@ -212,6 +213,16 @@ impl Shell {
             for m in workspace.minimized_windows.iter() {
                 m.window.set_activated(false);
                 m.window.configure();
+            }
+
+            for (i, workspace) in set.workspaces.iter().enumerate() {
+                if i == set.active {
+                    continue;
+                }
+                for window in workspace.mapped() {
+                    window.set_activated(false);
+                    window.configure();
+                }
             }
         }
     }
@@ -230,8 +241,8 @@ fn update_focus_state(
         if should_update_cursor && state.common.config.cosmic_conf.cursor_follows_focus {
             if target.is_some() {
                 //need to borrow mutably for surface under
-                let mut shell = state.common.shell.write().unwrap();
-                // get geometry of the target element
+                let shell = state.common.shell.read().unwrap();
+                // get the top left corner of the target element
                 let geometry = shell.focused_geometry(target.unwrap());
                 if let Some(geometry) = geometry {
                     // get the center of the target element
@@ -245,10 +256,9 @@ fn update_focus_state(
                         .cloned()
                         .unwrap_or(seat.active_output());
 
-                    let focus = shell
-                        .surface_under(new_pos, &output)
+                    let focus = State::surface_under(new_pos, &output, &*shell)
                         .map(|(focus, loc)| (focus, loc.as_logical()));
-                    //drop here to avoid multiple mutable borrows
+                    //drop here to avoid multiple borrows
                     mem::drop(shell);
                     seat.get_pointer().unwrap().motion(
                         state,
@@ -334,19 +344,27 @@ impl Common {
             .cloned()
             .collect::<Vec<_>>();
         for seat in &seats {
-            update_pointer_focus(state, &seat);
+            {
+                let shell = state.common.shell.read().unwrap();
+                let focused_output = seat.focused_output();
+                let active_output = seat.active_output();
 
-            let mut shell = state.common.shell.write().unwrap();
-            let output = seat.focused_or_active_output();
-
-            // If the focused or active output is not in the list of outputs, switch to the first output
-            if !shell.outputs().any(|o| o == &output) {
-                if let Some(other) = shell.outputs().next() {
-                    seat.set_active_output(other);
+                // If the focused or active output is not in the list of outputs, switch to the first output
+                if focused_output.is_some_and(|f| !shell.outputs().any(|o| &f == o)) {
+                    seat.set_focused_output(None);
                 }
-                continue;
+                if !shell.outputs().any(|o| o == &active_output) {
+                    if let Some(other) = shell.outputs().next() {
+                        seat.set_active_output(other);
+                    }
+                    continue;
+                }
             }
 
+            update_pointer_focus(state, &seat);
+
+            let output = seat.focused_or_active_output();
+            let mut shell = state.common.shell.write().unwrap();
             let last_known_focus = ActiveFocus::get(&seat);
 
             if let Some(target) = last_known_focus {

@@ -1,6 +1,6 @@
 use super::{surface::RESIZE_BORDER, window::Focus, CosmicSurface};
 use crate::{
-    backend::render::{cursor::CursorState, SplitRenderElements},
+    backend::render::cursor::CursorState,
     shell::{
         focus::target::PointerFocusTarget,
         grabs::{ReleaseMode, ResizeEdge},
@@ -14,9 +14,9 @@ use crate::{
 };
 use calloop::LoopHandle;
 use cosmic::{
-    iced::{id::Id, widget as iced_widget},
+    iced::{id::Id, widget as iced_widget, Alignment},
     iced_core::{border::Radius, Background, Border, Color, Length},
-    iced_runtime::Command,
+    iced_runtime::Task,
     iced_widget::scrollable::AbsoluteOffset,
     theme, widget as cosmic_widget, Apply, Element as CosmicElement, Theme,
 };
@@ -170,7 +170,7 @@ impl CosmicStack {
             if let Some(mut geo) = p.geometry.lock().unwrap().clone() {
                 geo.loc.y += TAB_HEIGHT;
                 geo.size.h -= TAB_HEIGHT;
-                window.set_geometry(geo);
+                window.set_geometry(geo, TAB_HEIGHT as u32);
             }
             window.send_configure();
             if let Some(idx) = idx {
@@ -420,48 +420,52 @@ impl CosmicStack {
     pub fn focus_under(
         &self,
         mut relative_pos: Point<f64, Logical>,
+        surface_type: WindowSurfaceType,
     ) -> Option<(PointerFocusTarget, Point<f64, Logical>)> {
         self.0.with_program(|p| {
             let mut stack_ui = None;
             let geo = p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry();
 
-            let point_i32 = relative_pos.to_i32_round::<i32>();
-            if (point_i32.x - geo.loc.x >= -RESIZE_BORDER && point_i32.x - geo.loc.x < 0)
-                || (point_i32.y - geo.loc.y >= -RESIZE_BORDER && point_i32.y - geo.loc.y < 0)
-                || (point_i32.x - geo.loc.x >= geo.size.w
-                    && point_i32.x - geo.loc.x < geo.size.w + RESIZE_BORDER)
-                || (point_i32.y - geo.loc.y >= geo.size.h
-                    && point_i32.y - geo.loc.y < geo.size.h + TAB_HEIGHT + RESIZE_BORDER)
-            {
-                stack_ui = Some((
-                    PointerFocusTarget::StackUI(self.clone()),
-                    Point::from((0., 0.)),
-                ));
-            }
+            if surface_type.contains(WindowSurfaceType::TOPLEVEL) {
+                let point_i32 = relative_pos.to_i32_round::<i32>();
+                if (point_i32.x - geo.loc.x >= -RESIZE_BORDER && point_i32.x - geo.loc.x < 0)
+                    || (point_i32.y - geo.loc.y >= -RESIZE_BORDER && point_i32.y - geo.loc.y < 0)
+                    || (point_i32.x - geo.loc.x >= geo.size.w
+                        && point_i32.x - geo.loc.x < geo.size.w + RESIZE_BORDER)
+                    || (point_i32.y - geo.loc.y >= geo.size.h
+                        && point_i32.y - geo.loc.y < geo.size.h + TAB_HEIGHT + RESIZE_BORDER)
+                {
+                    stack_ui = Some((
+                        PointerFocusTarget::StackUI(self.clone()),
+                        Point::from((0., 0.)),
+                    ));
+                }
 
-            if point_i32.y - geo.loc.y < TAB_HEIGHT {
-                stack_ui = Some((
-                    PointerFocusTarget::StackUI(self.clone()),
-                    Point::from((0., 0.)),
-                ));
+                if point_i32.y - geo.loc.y < TAB_HEIGHT {
+                    stack_ui = Some((
+                        PointerFocusTarget::StackUI(self.clone()),
+                        Point::from((0., 0.)),
+                    ));
+                }
             }
 
             relative_pos.y -= TAB_HEIGHT as f64;
 
             let active_window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
-            active_window
-                .0
-                .surface_under(relative_pos, WindowSurfaceType::ALL)
-                .map(|(surface, surface_offset)| {
-                    (
-                        PointerFocusTarget::WlSurface {
-                            surface,
-                            toplevel: Some(active_window.clone().into()),
-                        },
-                        surface_offset.to_f64() + Point::from((0., TAB_HEIGHT as f64)),
-                    )
-                })
-                .or(stack_ui)
+            stack_ui.or_else(|| {
+                active_window
+                    .0
+                    .surface_under(relative_pos, surface_type)
+                    .map(|(surface, surface_offset)| {
+                        (
+                            PointerFocusTarget::WlSurface {
+                                surface,
+                                toplevel: Some(active_window.clone().into()),
+                            },
+                            surface_offset.to_f64() + Point::from((0., TAB_HEIGHT as f64)),
+                        )
+                    })
+            })
         })
     }
 
@@ -486,7 +490,7 @@ impl CosmicStack {
 
             let win_geo = Rectangle::from_loc_and_size(loc, size);
             for window in p.windows.lock().unwrap().iter() {
-                window.set_geometry(win_geo);
+                window.set_geometry(win_geo, TAB_HEIGHT as u32);
             }
 
             *p.geometry.lock().unwrap() = Some(geo);
@@ -541,13 +545,40 @@ impl CosmicStack {
         self.0.loop_handle()
     }
 
-    pub fn split_render_elements<R, C>(
+    pub fn popup_render_elements<R, C>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
-    ) -> SplitRenderElements<C>
+    ) -> Vec<C>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        <R as Renderer>::TextureId: Send + Clone + 'static,
+        C: From<CosmicStackRenderElement<R>>,
+    {
+        let window_loc = location + Point::from((0, (TAB_HEIGHT as f64 * scale.y) as i32));
+        self.0.with_program(|p| {
+            let windows = p.windows.lock().unwrap();
+            let active = p.active.load(Ordering::SeqCst);
+
+            windows[active]
+                .popup_render_elements::<R, CosmicStackRenderElement<R>>(
+                    renderer, window_loc, scale, alpha,
+                )
+                .into_iter()
+                .map(C::from)
+                .collect()
+        })
+    }
+
+    pub fn render_elements<R, C>(
+        &self,
+        renderer: &mut R,
+        location: Point<i32, Physical>,
+        scale: Scale<f64>,
+        alpha: f32,
+    ) -> Vec<C>
     where
         R: Renderer + ImportAll + ImportMem,
         <R as Renderer>::TextureId: Send + Clone + 'static,
@@ -564,28 +595,20 @@ impl CosmicStack {
         let stack_loc = location + offset;
         let window_loc = location + Point::from((0, (TAB_HEIGHT as f64 * scale.y) as i32));
 
-        let w_elements = AsRenderElements::<R>::render_elements::<CosmicStackRenderElement<R>>(
+        let mut elements = AsRenderElements::<R>::render_elements::<CosmicStackRenderElement<R>>(
             &self.0, renderer, stack_loc, scale, alpha,
         );
 
-        let mut elements = SplitRenderElements {
-            w_elements: w_elements.into_iter().map(C::from).collect(),
-            p_elements: Vec::new(),
-        };
+        elements.extend(self.0.with_program(|p| {
+            let windows = p.windows.lock().unwrap();
+            let active = p.active.load(Ordering::SeqCst);
 
-        elements.extend_map(
-            self.0.with_program(|p| {
-                let windows = p.windows.lock().unwrap();
-                let active = p.active.load(Ordering::SeqCst);
+            windows[active].render_elements::<R, CosmicStackRenderElement<R>>(
+                renderer, window_loc, scale, alpha,
+            )
+        }));
 
-                windows[active].split_render_elements::<R, CosmicStackRenderElement<R>>(
-                    renderer, window_loc, scale, alpha,
-                )
-            }),
-            C::from,
-        );
-
-        elements
+        elements.into_iter().map(C::from).collect()
     }
 
     pub(crate) fn set_theme(&self, theme: cosmic::Theme) {
@@ -689,7 +712,7 @@ impl Program for CosmicStackInternal {
         &mut self,
         message: Self::Message,
         loop_handle: &LoopHandle<'static, crate::state::State>,
-    ) -> Command<Self::Message> {
+    ) -> Task<Self::Message> {
         match message {
             Message::DragStart => {
                 if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
@@ -851,7 +874,7 @@ impl Program for CosmicStackInternal {
             }
             _ => unreachable!(),
         }
-        Command::none()
+        Task::none()
     }
 
     fn view(&self) -> CosmicElement<'_, Self::Message> {
@@ -867,8 +890,8 @@ impl Program for CosmicStackInternal {
                 .size(16)
                 .prefer_svg(true)
                 .icon()
-                .style(if group_focused {
-                    theme::Svg::custom(|theme| iced_widget::svg::Appearance {
+                .class(if group_focused {
+                    theme::Svg::custom(|theme| iced_widget::svg::Style {
                         color: Some(if theme.cosmic().is_dark {
                             Color::BLACK
                         } else {
@@ -880,7 +903,7 @@ impl Program for CosmicStackInternal {
                 })
                 .apply(iced_widget::container)
                 .padding([4, 24])
-                .center_y()
+                .align_y(Alignment::Center)
                 .apply(iced_widget::mouse_area)
                 .on_press(Message::DragStart)
                 .on_right_press(Message::Menu)
@@ -912,7 +935,8 @@ impl Program for CosmicStackInternal {
                 .height(Length::Fill)
                 .width(Length::Fill),
             ),
-            iced_widget::horizontal_space(0)
+            iced_widget::horizontal_space()
+                .width(Length::Fixed(0.0))
                 .apply(iced_widget::container)
                 .padding([64, 24])
                 .apply(iced_widget::mouse_area)
@@ -930,10 +954,10 @@ impl Program for CosmicStackInternal {
 
         iced_widget::row(elements)
             .height(TAB_HEIGHT as u16)
-            .width(Length::Fill) //width as u16)
+            .width(Length::Fill)
             .apply(iced_widget::container)
-            .center_y()
-            .style(theme::Container::custom(move |theme| {
+            .align_y(Alignment::Center)
+            .class(theme::Container::custom(move |theme| {
                 let background = if group_focused {
                     Some(Background::Color(theme.cosmic().accent_color().into()))
                 } else {
@@ -942,7 +966,7 @@ impl Program for CosmicStackInternal {
                     )))
                 };
 
-                iced_widget::container::Appearance {
+                iced_widget::container::Style {
                     icon_color: Some(Color::from(theme.cosmic().background.on)),
                     text_color: Some(Color::from(theme.cosmic().background.on)),
                     background,
@@ -1015,7 +1039,7 @@ impl SpaceElement for CosmicStack {
         })
     }
     fn is_in_input_region(&self, point: &Point<f64, Logical>) -> bool {
-        self.focus_under(*point).is_some()
+        self.focus_under(*point, WindowSurfaceType::ALL).is_some()
     }
     fn set_activate(&self, activated: bool) {
         SpaceElement::set_activate(&self.0, activated);

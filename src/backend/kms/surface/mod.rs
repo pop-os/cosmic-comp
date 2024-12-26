@@ -5,6 +5,7 @@ use crate::{
         element::{CosmicElement, DamageElement},
         init_shaders, workspace_elements, CursorMode, ElementFilter, GlMultiRenderer, CLEAR_COLOR,
     },
+    config::AdaptiveSync,
     shell::Shell,
     state::SurfaceDmabufFeedback,
     utils::{prelude::*, quirks::workspace_overview_is_open},
@@ -27,7 +28,7 @@ use smithay::{
         },
         drm::{
             compositor::{BlitFrameResultError, DrmCompositor, FrameError, PrimaryPlaneElement},
-            DrmDeviceFd, DrmEventMetadata, DrmEventTime, DrmNode, DrmSurface,
+            DrmDeviceFd, DrmEventMetadata, DrmEventTime, DrmNode, DrmSurface, VrrSupport,
         },
         egl::EGLContext,
         renderer::{
@@ -67,6 +68,7 @@ use smithay::{
     utils::{Buffer as BufferCoords, Clock, Monotonic, Physical, Rectangle, Size, Transform},
     wayland::{
         dmabuf::{get_dmabuf, DmabufFeedbackBuilder},
+        presentation::Refresh,
         seat::WaylandFocus,
         shm::{shm_format_to_fourcc, with_buffer_contents},
     },
@@ -102,9 +104,9 @@ static NVIDIA_LOGO: &'static [u8] = include_bytes!("../../../../resources/icons/
 
 #[derive(Debug)]
 pub struct Surface {
-    pub(super) connector: connector::Handle,
-    pub(super) crtc: crtc::Handle,
-    pub(super) output: Output,
+    pub(crate) connector: connector::Handle,
+    pub(super) _crtc: crtc::Handle,
+    pub(crate) output: Output,
     known_nodes: HashSet<DrmNode>,
 
     active: Arc<AtomicBool>,
@@ -114,6 +116,8 @@ pub struct Surface {
     loop_handle: LoopHandle<'static, State>,
     thread_command: Sender<ThreadCommand>,
     thread_token: RegistrationToken,
+
+    dpms: bool,
 }
 
 pub struct SurfaceThreadState {
@@ -122,6 +126,7 @@ pub struct SurfaceThreadState {
     primary_node: DrmNode,
     target_node: DrmNode,
     active: Arc<AtomicBool>,
+    vrr_mode: AdaptiveSync,
     compositor: Option<GbmDrmCompositor>,
 
     state: QueueState,
@@ -217,12 +222,11 @@ impl Default for QueueState {
 
 #[derive(Debug)]
 pub enum ThreadCommand {
-    Suspend,
+    Suspend(SyncSender<()>),
     Resume {
         surface: DrmSurface,
         gbm: GbmDevice<DrmDeviceFd>,
         cursor_size: Size<u32, BufferCoords>,
-        vrr: bool,
         result: SyncSender<Result<()>>,
     },
     NodeAdded {
@@ -237,7 +241,10 @@ pub enum ThreadCommand {
     VBlank(Option<DrmEventMetadata>),
     ScheduleRender,
     SetMode(Mode, SyncSender<Result<()>>),
+    AdaptiveSyncAvailable(SyncSender<Result<VrrSupport>>),
+    UseAdaptiveSync(AdaptiveSync),
     End,
+    DpmsOff,
 }
 
 #[derive(Debug)]
@@ -341,7 +348,7 @@ impl Surface {
 
         Ok(Surface {
             connector,
-            crtc,
+            _crtc: crtc,
             output: output.clone(),
             known_nodes: HashSet::new(),
             active,
@@ -350,6 +357,7 @@ impl Surface {
             loop_handle: evlh.clone(),
             thread_command: tx,
             thread_token,
+            dpms: true,
         })
     }
 
@@ -380,7 +388,9 @@ impl Surface {
     }
 
     pub fn schedule_render(&self) {
-        let _ = self.thread_command.send(ThreadCommand::ScheduleRender);
+        if self.dpms {
+            let _ = self.thread_command.send(ThreadCommand::ScheduleRender);
+        }
     }
 
     pub fn set_mirroring(&mut self, output: Option<Output>) {
@@ -395,8 +405,37 @@ impl Surface {
         rx.recv().context("Surface thread died")?
     }
 
+    pub fn adaptive_sync_support(&self) -> Result<VrrSupport> {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let _ = self
+            .thread_command
+            .send(ThreadCommand::AdaptiveSyncAvailable(tx));
+        rx.recv().context("Surface thread died")?
+    }
+
+    pub fn use_adaptive_sync(&mut self, vrr: AdaptiveSync) -> Result<bool> {
+        if vrr != AdaptiveSync::Disabled {
+            let (tx, rx) = std::sync::mpsc::sync_channel(1);
+            let _ = self
+                .thread_command
+                .send(ThreadCommand::AdaptiveSyncAvailable(tx));
+            match rx.recv().context("Surface thread died")?? {
+                VrrSupport::RequiresModeset if vrr == AdaptiveSync::Enabled => return Ok(false),
+                VrrSupport::NotSupported => return Ok(false),
+                _ => {}
+            };
+        }
+
+        let _ = self
+            .thread_command
+            .send(ThreadCommand::UseAdaptiveSync(vrr));
+        Ok(true)
+    }
+
     pub fn suspend(&mut self) {
-        let _ = self.thread_command.send(ThreadCommand::Suspend);
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let _ = self.thread_command.send(ThreadCommand::Suspend(tx));
+        let _ = rx.recv();
     }
 
     pub fn resume(
@@ -404,7 +443,6 @@ impl Surface {
         surface: DrmSurface,
         gbm: GbmDevice<DrmDeviceFd>,
         cursor_size: Size<u32, BufferCoords>,
-        vrr: bool,
     ) -> Result<()> {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         self.plane_formats = surface
@@ -425,11 +463,25 @@ impl Surface {
             surface,
             gbm,
             cursor_size,
-            vrr,
             result: tx,
         });
 
         rx.recv().context("Surface thread died")?
+    }
+
+    pub fn get_dpms(&mut self) -> bool {
+        self.dpms
+    }
+
+    pub fn set_dpms(&mut self, on: bool) {
+        if self.dpms != on {
+            self.dpms = on;
+            if on {
+                self.schedule_render();
+            } else {
+                let _ = self.thread_command.send(ThreadCommand::DpmsOff);
+            }
+        }
     }
 }
 
@@ -481,6 +533,7 @@ fn surface_thread(
         target_node,
         active,
         compositor: None,
+        vrr_mode: AdaptiveSync::Disabled,
 
         state: QueueState::Idle,
         timings: Timings::new(None, false),
@@ -502,15 +555,14 @@ fn surface_thread(
     event_loop
         .handle()
         .insert_source(thread_receiver, move |command, _, state| match command {
-            Event::Msg(ThreadCommand::Suspend) => state.suspend(),
+            Event::Msg(ThreadCommand::Suspend(tx)) => state.suspend(tx),
             Event::Msg(ThreadCommand::Resume {
                 surface,
                 gbm,
                 cursor_size,
-                vrr,
                 result,
             }) => {
-                let _ = result.send(state.resume(surface, gbm, cursor_size, vrr));
+                let _ = result.send(state.resume(surface, gbm, cursor_size));
             }
             Event::Msg(ThreadCommand::NodeAdded { node, gbm, egl }) => {
                 if let Err(err) = state.node_added(node, gbm, egl) {
@@ -540,6 +592,46 @@ fn surface_thread(
                     let _ = result.send(Err(anyhow::anyhow!("Set mode with inactive surface")));
                 }
             }
+            Event::Msg(ThreadCommand::AdaptiveSyncAvailable(result)) => {
+                if let Some(compositor) = state.compositor.as_mut() {
+                    let _ = result.send(
+                        compositor
+                            .vrr_supported(
+                                compositor.pending_connectors().into_iter().next().unwrap(),
+                            )
+                            .map_err(Into::into),
+                    );
+                } else {
+                    let _ = result.send(Err(anyhow::anyhow!("Set vrr with inactive surface")));
+                }
+            }
+            Event::Msg(ThreadCommand::UseAdaptiveSync(vrr)) => {
+                state.vrr_mode = vrr;
+            }
+            Event::Msg(ThreadCommand::DpmsOff) => {
+                if let Some(compositor) = state.compositor.as_mut() {
+                    if let Err(err) = compositor.clear() {
+                        error!("Failed to set DPMS off: {:?}", err);
+                    }
+                    match std::mem::replace(&mut state.state, QueueState::Idle) {
+                        QueueState::Idle => {}
+                        QueueState::Queued(token)
+                        | QueueState::WaitingForEstimatedVBlank(token) => {
+                            state.loop_handle.remove(token);
+                        }
+                        QueueState::WaitingForVBlank { .. } => {
+                            state.timings.discard_current_frame()
+                        }
+                        QueueState::WaitingForEstimatedVBlankAndQueued {
+                            estimated_vblank,
+                            queued_render,
+                        } => {
+                            state.loop_handle.remove(estimated_vblank);
+                            state.loop_handle.remove(queued_render);
+                        }
+                    };
+                }
+            }
             Event::Closed | Event::Msg(ThreadCommand::End) => {
                 signal.stop();
                 signal.wakeup();
@@ -552,7 +644,7 @@ fn surface_thread(
 }
 
 impl SurfaceThreadState {
-    fn suspend(&mut self) {
+    fn suspend(&mut self, tx: SyncSender<()>) {
         self.active.store(false, Ordering::SeqCst);
         let _ = self.compositor.take();
 
@@ -570,6 +662,8 @@ impl SurfaceThreadState {
                 self.loop_handle.remove(queued_render);
             }
         };
+
+        let _ = tx.send(());
     }
 
     fn resume(
@@ -577,7 +671,6 @@ impl SurfaceThreadState {
         surface: DrmSurface,
         gbm: GbmDevice<DrmDeviceFd>,
         cursor_size: Size<u32, BufferCoords>,
-        vrr: bool,
     ) -> Result<()> {
         let driver = surface.get_driver().ok();
         let mut planes = surface.planes().clone();
@@ -603,7 +696,6 @@ impl SurfaceThreadState {
             .set_refresh_interval(Some(Duration::from_secs_f64(
                 1_000.0 / drm_helpers::calculate_refresh_rate(surface.pending_mode()) as f64,
             )));
-        self.timings.set_vrr(vrr);
 
         match DrmCompositor::new(
             &self.output,
@@ -712,15 +804,24 @@ impl SurfaceThreadState {
                     )
                 };
 
-                feedback.presented(
-                    clock,
-                    self.output
-                        .current_mode()
-                        .map(|mode| Duration::from_secs_f64(1_000.0 / mode.refresh as f64))
-                        .unwrap_or_default(),
-                    sequence as u64,
-                    flags,
-                );
+                let rate = self
+                    .output
+                    .current_mode()
+                    .map(|mode| Duration::from_secs_f64(1_000.0 / mode.refresh as f64));
+                let refresh = match rate {
+                    Some(rate)
+                        if self
+                            .compositor
+                            .as_ref()
+                            .is_some_and(|comp| comp.vrr_enabled()) =>
+                    {
+                        Refresh::Variable(rate)
+                    }
+                    Some(rate) => Refresh::Fixed(rate),
+                    None => Refresh::Unknown,
+                };
+
+                feedback.presented(clock, refresh, sequence as u64, flags);
 
                 self.timings.presented(clock);
 
@@ -865,6 +966,11 @@ impl SurfaceThreadState {
 
         self.timings.start_render(&self.clock);
 
+        let mut vrr = match self.vrr_mode {
+            AdaptiveSync::Force => true,
+            _ => false,
+        };
+
         let mut elements = {
             let shell = self.shell.read().unwrap();
             let output = self.mirroring.as_ref().unwrap_or(&self.output);
@@ -874,6 +980,9 @@ impl SurfaceThreadState {
             let previous_workspace = previous_workspace
                 .zip(previous_idx)
                 .map(|((w, start), idx)| (w.handle, idx, start));
+            if self.vrr_mode == AdaptiveSync::Enabled {
+                vrr = workspace.get_fullscreen().is_some();
+            }
             let workspace = (workspace.handle, idx);
 
             std::mem::drop(shell);
@@ -903,6 +1012,7 @@ impl SurfaceThreadState {
                 anyhow::format_err!("Failed to accumulate elements for rendering: {:?}", err)
             })?
         };
+        self.timings.set_vrr(vrr);
         self.timings.elements_done(&self.clock);
 
         // we can't use the elements after `compositor.render_frame`,
@@ -1058,8 +1168,14 @@ impl SurfaceThreadState {
             .collect::<Vec<_>>();
 
             renderer = self.api.single_renderer(&self.target_node).unwrap();
+            if let Err(err) = compositor.use_vrr(false) {
+                warn!("Unable to set adaptive VRR state: {}", err);
+            }
             compositor.render_frame(&mut renderer, &elements, [0.0, 0.0, 0.0, 1.0])
         } else {
+            if let Err(err) = compositor.use_vrr(vrr) {
+                warn!("Unable to set adaptive VRR state: {}", err);
+            }
             compositor.render_frame(
                 &mut renderer,
                 &elements,
@@ -1160,13 +1276,23 @@ impl SurfaceThreadState {
                                     .into_iter()
                                     .flatten();
 
+                                // If the screen is rotated, we must convert damage to match output.
+                                let adjusted = damage.iter().copied().map(|mut d| {
+                                    d.size = d
+                                        .size
+                                        .to_logical(1)
+                                        .to_buffer(1, output_transform)
+                                        .to_logical(1, Transform::Normal)
+                                        .to_physical(1);
+                                    d
+                                });
                                 match frame_result
                                     .blit_frame_result(
                                         output_size,
                                         output_transform,
                                         output_scale,
                                         &mut renderer,
-                                        damage.iter().copied(),
+                                        adjusted,
                                         filter,
                                     )
                                     .map_err(|err| match err {

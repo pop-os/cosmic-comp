@@ -35,7 +35,9 @@ use smithay::{
         },
         wayland_server::protocol::wl_surface::WlSurface,
     },
-    utils::{user_data::UserDataMap, IsAlive, Logical, Rectangle, Serial, Size},
+    utils::{
+        user_data::UserDataMap, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
+    },
     wayland::{
         compositor::{with_states, SurfaceData},
         seat::WaylandFocus,
@@ -45,7 +47,6 @@ use smithay::{
 };
 
 use crate::{
-    backend::render::SplitRenderElements,
     state::{State, SurfaceDmabufFeedback},
     utils::prelude::*,
     wayland::handlers::decoration::PreferredDecorationMode,
@@ -91,7 +92,7 @@ struct Minimized(AtomicBool);
 struct Sticky(AtomicBool);
 
 #[derive(Default)]
-pub struct GlobalGeometry(pub Mutex<Option<Rectangle<i32, Global>>>);
+struct GlobalGeometry(Mutex<Option<Rectangle<i32, Global>>>);
 
 pub const SSD_HEIGHT: i32 = 36;
 pub const RESIZE_BORDER: i32 = 10;
@@ -138,14 +139,30 @@ impl CosmicSurface {
         }
     }
 
-    pub fn set_geometry(&self, geo: Rectangle<i32, Global>) {
+    pub fn global_geometry(&self) -> Option<Rectangle<i32, Global>> {
         *self
             .0
             .user_data()
             .get_or_insert_threadsafe(GlobalGeometry::default)
             .0
             .lock()
-            .unwrap() = Some(geo);
+            .unwrap()
+    }
+
+    pub fn set_geometry(&self, geo: Rectangle<i32, Global>, ssd_height: u32) {
+        {
+            let mut geo = geo;
+            geo.size.h += ssd_height as i32;
+            geo.loc.y -= ssd_height as i32;
+
+            *self
+                .0
+                .user_data()
+                .get_or_insert_threadsafe(GlobalGeometry::default)
+                .0
+                .lock()
+                .unwrap() = Some(geo);
+        }
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 toplevel.with_pending_state(|state| state.size = Some(geo.size.as_logical()))
@@ -590,13 +607,13 @@ impl CosmicSurface {
         self.0.user_data()
     }
 
-    pub fn split_render_elements<R, C>(
+    pub fn popup_render_elements<R, C>(
         &self,
         renderer: &mut R,
-        location: smithay::utils::Point<i32, smithay::utils::Physical>,
-        scale: smithay::utils::Scale<f64>,
+        location: Point<i32, Physical>,
+        scale: Scale<f64>,
         alpha: f32,
-    ) -> SplitRenderElements<C>
+    ) -> Vec<C>
     where
         R: Renderer + ImportAll,
         <R as Renderer>::TextureId: Clone + 'static,
@@ -605,9 +622,8 @@ impl CosmicSurface {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 let surface = toplevel.wl_surface();
-
-                let p_elements = PopupManager::popups_for_surface(surface)
-                    .flat_map(|(popup, popup_offset)| {
+                PopupManager::popups_for_surface(surface)
+                    .flat_map(move |(popup, popup_offset)| {
                         let offset = (self.0.geometry().loc + popup_offset - popup.geometry().loc)
                             .to_physical_precise_round(scale);
 
@@ -620,26 +636,40 @@ impl CosmicSurface {
                             element::Kind::Unspecified,
                         )
                     })
-                    .collect();
+                    .collect()
+            }
+            WindowSurface::X11(_) => Vec::new(),
+        }
+    }
 
-                let w_elements = render_elements_from_surface_tree(
+    pub fn render_elements<R, C>(
+        &self,
+        renderer: &mut R,
+        location: Point<i32, Physical>,
+        scale: Scale<f64>,
+        alpha: f32,
+    ) -> Vec<C>
+    where
+        R: Renderer + ImportAll,
+        <R as Renderer>::TextureId: Clone + 'static,
+        C: From<WaylandSurfaceRenderElement<R>>,
+    {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => {
+                let surface = toplevel.wl_surface();
+
+                render_elements_from_surface_tree(
                     renderer,
                     surface,
                     location,
                     scale,
                     alpha,
                     element::Kind::Unspecified,
-                );
-
-                SplitRenderElements {
-                    w_elements,
-                    p_elements,
-                }
+                )
             }
-            WindowSurface::X11(surface) => SplitRenderElements {
-                w_elements: surface.render_elements(renderer, location, scale, alpha),
-                p_elements: Vec::new(),
-            },
+            WindowSurface::X11(surface) => {
+                surface.render_elements(renderer, location, scale, alpha)
+            }
         }
     }
 
@@ -663,10 +693,7 @@ impl SpaceElement for CosmicSurface {
         SpaceElement::bbox(&self.0)
     }
 
-    fn is_in_input_region(
-        &self,
-        point: &smithay::utils::Point<f64, smithay::utils::Logical>,
-    ) -> bool {
+    fn is_in_input_region(&self, point: &Point<f64, smithay::utils::Logical>) -> bool {
         SpaceElement::is_in_input_region(&self.0, point)
     }
 
@@ -784,8 +811,8 @@ where
     fn render_elements<C: From<Self::RenderElement>>(
         &self,
         renderer: &mut R,
-        location: smithay::utils::Point<i32, smithay::utils::Physical>,
-        scale: smithay::utils::Scale<f64>,
+        location: Point<i32, Physical>,
+        scale: Scale<f64>,
         alpha: f32,
     ) -> Vec<C> {
         self.0.render_elements(renderer, location, scale, alpha)

@@ -1,5 +1,5 @@
 use crate::{
-    backend::render::{cursor::CursorState, SplitRenderElements},
+    backend::render::cursor::CursorState,
     shell::{
         focus::target::PointerFocusTarget,
         grabs::{ReleaseMode, ResizeEdge},
@@ -11,7 +11,7 @@ use crate::{
     },
 };
 use calloop::LoopHandle;
-use cosmic::iced::{Color, Command};
+use cosmic::iced::{Color, Task};
 use smithay::{
     backend::{
         input::KeyState,
@@ -41,7 +41,7 @@ use smithay::{
     output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     render_elements,
-    utils::{IsAlive, Logical, Point, Rectangle, Serial, Size},
+    utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size},
     wayland::seat::WaylandFocus,
 };
 use std::{
@@ -210,16 +210,11 @@ impl CosmicWindow {
 
     pub fn set_geometry(&self, geo: Rectangle<i32, Global>) {
         self.0.with_program(|p| {
-            let loc = (
-                geo.loc.x,
-                geo.loc.y + if p.has_ssd(true) { SSD_HEIGHT } else { 0 },
-            );
-            let size = (
-                geo.size.w,
-                std::cmp::max(geo.size.h - if p.has_ssd(true) { SSD_HEIGHT } else { 0 }, 0),
-            );
+            let ssd_height = if p.has_ssd(true) { SSD_HEIGHT } else { 0 };
+            let loc = (geo.loc.x, geo.loc.y + ssd_height);
+            let size = (geo.size.w, std::cmp::max(geo.size.h - ssd_height, 0));
             p.window
-                .set_geometry(Rectangle::from_loc_and_size(loc, size));
+                .set_geometry(Rectangle::from_loc_and_size(loc, size), ssd_height as u32);
         });
     }
 
@@ -243,11 +238,12 @@ impl CosmicWindow {
     pub fn focus_under(
         &self,
         mut relative_pos: Point<f64, Logical>,
+        surface_type: WindowSurfaceType,
     ) -> Option<(PointerFocusTarget, Point<f64, Logical>)> {
         self.0.with_program(|p| {
             let mut offset = Point::from((0., 0.));
             let mut window_ui = None;
-            if p.has_ssd(false) {
+            if p.has_ssd(false) && surface_type.contains(WindowSurfaceType::TOPLEVEL) {
                 let geo = p.window.geometry();
 
                 let point_i32 = relative_pos.to_i32_round::<i32>();
@@ -255,7 +251,7 @@ impl CosmicWindow {
                     || (point_i32.y - geo.loc.y >= -RESIZE_BORDER && point_i32.y - geo.loc.y < 0)
                     || (point_i32.x - geo.loc.x >= geo.size.w
                         && point_i32.x - geo.loc.x < geo.size.w + RESIZE_BORDER)
-                    || (point_i32.y - geo.loc.y >= geo.size.h
+                    || (point_i32.y - geo.loc.y >= geo.size.h + SSD_HEIGHT
                         && point_i32.y - geo.loc.y < geo.size.h + SSD_HEIGHT + RESIZE_BORDER)
                 {
                     window_ui = Some((
@@ -270,24 +266,26 @@ impl CosmicWindow {
                         Point::from((0., 0.)),
                     ));
                 }
+            }
 
+            if p.has_ssd(false) {
                 relative_pos.y -= SSD_HEIGHT as f64;
                 offset.y += SSD_HEIGHT as f64;
             }
 
-            p.window
-                .0
-                .surface_under(relative_pos, WindowSurfaceType::ALL)
-                .map(|(surface, surface_offset)| {
-                    (
-                        PointerFocusTarget::WlSurface {
-                            surface,
-                            toplevel: Some(p.window.clone().into()),
-                        },
-                        (offset + surface_offset.to_f64()),
-                    )
-                })
-                .or(window_ui)
+            window_ui.or_else(|| {
+                p.window.0.surface_under(relative_pos, surface_type).map(
+                    |(surface, surface_offset)| {
+                        (
+                            PointerFocusTarget::WlSurface {
+                                surface,
+                                toplevel: Some(p.window.clone().into()),
+                            },
+                            (offset + surface_offset.to_f64()),
+                        )
+                    },
+                )
+            })
         })
     }
 
@@ -308,13 +306,13 @@ impl CosmicWindow {
         self.0.loop_handle()
     }
 
-    pub fn split_render_elements<R, C>(
+    pub fn popup_render_elements<R, C>(
         &self,
         renderer: &mut R,
-        location: smithay::utils::Point<i32, smithay::utils::Physical>,
-        scale: smithay::utils::Scale<f64>,
+        location: Point<i32, Physical>,
+        scale: Scale<f64>,
         alpha: f32,
-    ) -> SplitRenderElements<C>
+    ) -> Vec<C>
     where
         R: Renderer + ImportAll + ImportMem,
         <R as Renderer>::TextureId: Send + Clone + 'static,
@@ -328,17 +326,44 @@ impl CosmicWindow {
             location
         };
 
-        let mut elements = SplitRenderElements::default();
+        self.0.with_program(|p| {
+            p.window
+                .popup_render_elements::<R, CosmicWindowRenderElement<R>>(
+                    renderer, window_loc, scale, alpha,
+                )
+                .into_iter()
+                .map(C::from)
+                .collect()
+        })
+    }
 
-        elements.extend_map(
-            self.0.with_program(|p| {
-                p.window
-                    .split_render_elements::<R, CosmicWindowRenderElement<R>>(
-                        renderer, window_loc, scale, alpha,
-                    )
-            }),
-            C::from,
-        );
+    pub fn render_elements<R, C>(
+        &self,
+        renderer: &mut R,
+        location: Point<i32, Physical>,
+        scale: Scale<f64>,
+        alpha: f32,
+    ) -> Vec<C>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        <R as Renderer>::TextureId: Send + Clone + 'static,
+        C: From<CosmicWindowRenderElement<R>>,
+    {
+        let has_ssd = self.0.with_program(|p| p.has_ssd(false));
+
+        let window_loc = if has_ssd {
+            location + Point::from((0, (SSD_HEIGHT as f64 * scale.y) as i32))
+        } else {
+            location
+        };
+
+        let mut elements = Vec::new();
+
+        elements.extend(self.0.with_program(|p| {
+            p.window.render_elements::<R, CosmicWindowRenderElement<R>>(
+                renderer, window_loc, scale, alpha,
+            )
+        }));
 
         if has_ssd {
             let ssd_loc = location
@@ -346,16 +371,12 @@ impl CosmicWindow {
                     .0
                     .with_program(|p| p.window.geometry().loc)
                     .to_physical_precise_round(scale);
-            elements.w_elements.extend(
-                AsRenderElements::<R>::render_elements::<CosmicWindowRenderElement<R>>(
-                    &self.0, renderer, ssd_loc, scale, alpha,
-                )
-                .into_iter()
-                .map(C::from),
-            )
+            elements.extend(AsRenderElements::<R>::render_elements::<
+                CosmicWindowRenderElement<R>,
+            >(&self.0, renderer, ssd_loc, scale, alpha))
         }
 
-        elements
+        elements.into_iter().map(C::from).collect()
     }
 
     pub(crate) fn set_theme(&self, theme: cosmic::Theme) {
@@ -383,7 +404,7 @@ impl Program for CosmicWindowInternal {
         &mut self,
         message: Self::Message,
         loop_handle: &LoopHandle<'static, crate::state::State>,
-    ) -> Command<Self::Message> {
+    ) -> Task<Self::Message> {
         match message {
             Message::DragStart => {
                 if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
@@ -483,7 +504,7 @@ impl Program for CosmicWindowInternal {
                 }
             }
         }
-        Command::none()
+        Task::none()
     }
 
     fn background_color(&self, theme: &cosmic::Theme) -> Color {
@@ -496,7 +517,7 @@ impl Program for CosmicWindowInternal {
 
     fn view(&self) -> cosmic::Element<'_, Self::Message> {
         let mut header = cosmic::widget::header_bar()
-            .start(cosmic::widget::horizontal_space(32))
+            .start(cosmic::widget::horizontal_space().width(32))
             .title(self.last_title.lock().unwrap().clone())
             .on_drag(Message::DragStart)
             .on_close(Message::Close)
@@ -507,12 +528,12 @@ impl Program for CosmicWindowInternal {
         if cosmic::config::show_minimize() {
             header = header
                 .on_minimize(Message::Minimize)
-                .start(cosmic::widget::horizontal_space(40)); // 32 + 8 spacing
+                .start(cosmic::widget::horizontal_space().width(40)); // 32 + 8 spacing
         }
         if cosmic::config::show_maximize() {
             header = header
                 .on_maximize(Message::Maximize)
-                .start(cosmic::widget::horizontal_space(40)); // 32 + 8 spacing
+                .start(cosmic::widget::horizontal_space().width(40)); // 32 + 8 spacing
         }
 
         header.into()
@@ -538,7 +559,7 @@ impl SpaceElement for CosmicWindow {
         })
     }
     fn is_in_input_region(&self, point: &Point<f64, Logical>) -> bool {
-        self.focus_under(*point).is_some()
+        self.focus_under(*point, WindowSurfaceType::ALL).is_some()
     }
     fn set_activate(&self, activated: bool) {
         if self

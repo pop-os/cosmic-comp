@@ -2,7 +2,7 @@
 
 use cosmic_protocols::output_management::v1::server::zcosmic_output_configuration_v1;
 use smithay::{
-    output::{Mode, Output},
+    output::{Mode, Output, WeakOutput},
     reexports::{
         wayland_protocols_wlr::output_management::v1::server::{
             zwlr_output_configuration_head_v1::{self, ZwlrOutputConfigurationHeadV1},
@@ -26,7 +26,7 @@ impl<D> GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData, D> for OutputC
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, ()>
-        + Dispatch<ZwlrOutputHeadV1, Output>
+        + Dispatch<ZwlrOutputHeadV1, WeakOutput>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration>
@@ -63,7 +63,7 @@ impl<D> Dispatch<ZwlrOutputManagerV1, (), D> for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, ()>
-        + Dispatch<ZwlrOutputHeadV1, Output>
+        + Dispatch<ZwlrOutputHeadV1, WeakOutput>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration>
@@ -116,11 +116,11 @@ where
     }
 }
 
-impl<D> Dispatch<ZwlrOutputHeadV1, Output, D> for OutputConfigurationState<D>
+impl<D> Dispatch<ZwlrOutputHeadV1, WeakOutput, D> for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, ()>
-        + Dispatch<ZwlrOutputHeadV1, Output>
+        + Dispatch<ZwlrOutputHeadV1, WeakOutput>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration>
@@ -132,7 +132,7 @@ where
         _client: &Client,
         obj: &ZwlrOutputHeadV1,
         request: zwlr_output_head_v1::Request,
-        _data: &Output,
+        _data: &WeakOutput,
         _dh: &DisplayHandle,
         _data_init: &mut DataInit<'_, D>,
     ) {
@@ -146,7 +146,7 @@ where
         }
     }
 
-    fn destroyed(state: &mut D, _client: ClientId, obj: &ZwlrOutputHeadV1, _data: &Output) {
+    fn destroyed(state: &mut D, _client: ClientId, obj: &ZwlrOutputHeadV1, _data: &WeakOutput) {
         for instance in &mut state.output_configuration_state().instances {
             instance.heads.retain(|h| &h.obj != obj);
         }
@@ -157,7 +157,7 @@ impl<D> Dispatch<ZwlrOutputModeV1, Mode, D> for OutputConfigurationState<D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, ()>
-        + Dispatch<ZwlrOutputHeadV1, Output>
+        + Dispatch<ZwlrOutputHeadV1, WeakOutput>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration>
@@ -191,7 +191,7 @@ impl<D> Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration, D> for OutputC
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, ()>
-        + Dispatch<ZwlrOutputHeadV1, Output>
+        + Dispatch<ZwlrOutputHeadV1, WeakOutput>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration>
@@ -233,16 +233,10 @@ where
 
                 if pending.heads.iter().any(|(_, c)| match c {
                     Some(conf) => {
-                        if let Some(output_conf) = conf.data::<PendingOutputConfiguration>() {
-                            if let Some(output) = head.data::<Output>() {
-                                let pending_conf = output_conf.lock().unwrap();
-                                pending_conf.mirroring.as_ref().is_some_and(|o| o == output)
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
+                        let output_conf = conf.data::<PendingOutputConfiguration>().unwrap();
+                        let output = head.data::<WeakOutput>().unwrap();
+                        let pending_conf = output_conf.lock().unwrap();
+                        pending_conf.mirroring.as_ref().is_some_and(|o| o == output)
                     }
                     None => false,
                 }) {
@@ -382,7 +376,7 @@ impl<D> Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration, D>
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, ()>
-        + Dispatch<ZwlrOutputHeadV1, Output>
+        + Dispatch<ZwlrOutputHeadV1, WeakOutput>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration>
@@ -481,8 +475,8 @@ where
                 }
                 pending.adaptive_sync = Some(match state.into_result() {
                     Ok(state) => match state {
-                        zwlr_output_head_v1::AdaptiveSyncState::Enabled => true,
-                        _ => false,
+                        zwlr_output_head_v1::AdaptiveSyncState::Enabled => AdaptiveSync::Force,
+                        _ => AdaptiveSync::Disabled,
                     },
                     Err(err) => {
                         obj.post_error(

@@ -3,6 +3,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::{
+    backend::render::cursor::CursorState,
     shell::{
         element::CosmicMapped,
         focus::target::PointerFocusTarget,
@@ -15,7 +16,7 @@ use smithay::{
     desktop::{space::SpaceElement, WindowSurface},
     input::{
         pointer::{
-            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
+            AxisFrame, ButtonEvent, CursorIcon, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
             GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
             GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab, PointerInnerHandle,
@@ -390,6 +391,22 @@ impl ResizeSurfaceGrab {
             .0
             .store(true, Ordering::SeqCst);
 
+        let shape = match edges {
+            ResizeEdge::TOP_LEFT => Some(CursorIcon::NwResize),
+            ResizeEdge::TOP_RIGHT => Some(CursorIcon::NeResize),
+            ResizeEdge::BOTTOM_LEFT => Some(CursorIcon::SwResize),
+            ResizeEdge::BOTTOM_RIGHT => Some(CursorIcon::SeResize),
+            ResizeEdge::TOP => Some(CursorIcon::NResize),
+            ResizeEdge::RIGHT => Some(CursorIcon::EResize),
+            ResizeEdge::BOTTOM => Some(CursorIcon::SResize),
+            ResizeEdge::LEFT => Some(CursorIcon::WResize),
+            _ => None,
+        };
+        if let Some(shape) = shape {
+            let cursor_state = seat.user_data().get::<CursorState>().unwrap();
+            cursor_state.lock().unwrap().set_shape(shape);
+        }
+
         ResizeSurfaceGrab {
             start_data,
             seat: seat.clone(),
@@ -522,5 +539,12 @@ impl ResizeSurfaceGrab {
         } else {
             panic!("invalid resize state: {:?}", resize_state);
         }
+    }
+}
+
+impl Drop for ResizeSurfaceGrab {
+    fn drop(&mut self) {
+        let cursor_state = self.seat.user_data().get::<CursorState>().unwrap();
+        cursor_state.lock().unwrap().unset_shape();
     }
 }

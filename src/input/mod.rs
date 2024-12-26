@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
+    backend::render::ElementFilter,
     config::{
         key_bindings::{
             cosmic_keystate_from_smithay, cosmic_modifiers_eq_smithay,
@@ -10,7 +11,11 @@ use crate::{
     },
     input::gestures::{GestureState, SwipeAction},
     shell::{
-        focus::target::{KeyboardFocusTarget, PointerFocusTarget},
+        focus::{
+            render_input_order,
+            target::{KeyboardFocusTarget, PointerFocusTarget},
+            Stage,
+        },
         grabs::{ReleaseMode, ResizeEdge},
         layout::{
             floating::ResizeGrabMarker,
@@ -39,10 +44,7 @@ use smithay::{
         TabletToolButtonEvent, TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent,
         TabletToolTipState, TouchEvent,
     },
-    desktop::{
-        layer_map_for_output, space::SpaceElement, utils::under_from_surface_tree,
-        WindowSurfaceType,
-    },
+    desktop::{utils::under_from_surface_tree, WindowSurfaceType},
     input::{
         keyboard::{FilterResult, KeysymHandle, ModifiersState},
         pointer::{
@@ -58,15 +60,13 @@ use smithay::{
     reexports::{
         input::Device as InputDevice, wayland_server::protocol::wl_shm::Format as ShmFormat,
     },
-    utils::{Point, Serial, SERIAL_COUNTER},
+    utils::{Point, Rectangle, Serial, SERIAL_COUNTER},
     wayland::{
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
         pointer_constraints::{with_pointer_constraint, PointerConstraint},
         seat::WaylandFocus,
-        shell::wlr_layer::Layer as WlrLayer,
         tablet_manager::{TabletDescriptor, TabletSeatTrait},
     },
-    xwayland::X11Surface,
 };
 use tracing::{error, trace};
 use xkbcommon::xkb::{Keycode, Keysym};
@@ -76,6 +76,7 @@ use std::{
     borrow::Cow,
     cell::RefCell,
     collections::HashSet,
+    ops::ControlFlow,
     time::{Duration, Instant},
 };
 
@@ -163,6 +164,8 @@ impl State {
     where
         <B as InputBackend>::Device: 'static,
     {
+        crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
+
         use smithay::backend::input::Event;
         match event {
             InputEvent::DeviceAdded { device } => {
@@ -329,9 +332,8 @@ impl State {
                     } else if self.common.config.cosmic_conf.focus_follows_cursor {
                         let shell = self.common.shell.read().unwrap();
                         let old_keyboard_target =
-                            shell.keyboard_target_from_position(original_position, &current_output);
-                        let new_keyboard_target =
-                            shell.keyboard_target_from_position(position, &output);
+                            State::element_under(original_position, &current_output, &*shell);
+                        let new_keyboard_target = State::element_under(position, &output, &*shell);
 
                         if old_keyboard_target != new_keyboard_target
                             && new_keyboard_target.is_some()
@@ -497,7 +499,8 @@ impl State {
                         });
                     }
 
-                    let shell = self.common.shell.read().unwrap();
+                    let mut shell = self.common.shell.write().unwrap();
+                    shell.update_pointer_position(position.to_local(&output), &output);
 
                     if output != current_output {
                         for session in cursor_sessions_for_output(&*shell, &current_output) {
@@ -638,15 +641,15 @@ impl State {
 
                         let global_position =
                             seat.get_pointer().unwrap().current_location().as_global();
-                        let shell = self.common.shell.write().unwrap();
-                        let under = shell.keyboard_target_from_position(global_position, &output);
-                        // Don't check override redirect windows, because we don't set keyboard focus to them explicitly.
-                        // These cases are handled by the XwaylandKeyboardGrab.
-                        if let Some(target) = shell.element_under(global_position, &output) {
-                            if seat.get_keyboard().unwrap().modifier_state().logo
-                                && !shortcuts_inhibited
-                            {
-                                if let Some(surface) = target.toplevel().map(Cow::into_owned) {
+                        let under = {
+                            let shell = self.common.shell.read().unwrap();
+                            State::element_under(global_position, &output, &shell)
+                        };
+                        if let Some(target) = under {
+                            if let Some(surface) = target.toplevel().map(Cow::into_owned) {
+                                if seat.get_keyboard().unwrap().modifier_state().logo
+                                    && !shortcuts_inhibited
+                                {
                                     let seat_clone = seat.clone();
                                     let mouse_button = PointerButtonEvent::button(&event);
 
@@ -754,10 +757,9 @@ impl State {
                                     }
                                 }
                             }
-                        }
 
-                        std::mem::drop(shell);
-                        Shell::set_focus(self, under.as_ref(), &seat, Some(serial), false);
+                            Shell::set_focus(self, Some(&target), &seat, Some(serial), false);
+                        }
                     }
                 } else {
                     let mut shell = self.common.shell.write().unwrap();
@@ -1141,13 +1143,7 @@ impl State {
                         return;
                     };
 
-                    let geometry = output.geometry();
-
-                    let position = geometry.loc.to_f64()
-                        + event
-                            .position_transformed(geometry.size.as_logical())
-                            .as_global();
-
+                    let position = transform_output_mapped_position(&output, &event);
                     let under = State::surface_under(position, &output, &mut *shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -1178,13 +1174,7 @@ impl State {
                         return;
                     };
 
-                    let geometry = output.geometry();
-
-                    let position = geometry.loc.to_f64()
-                        + event
-                            .position_transformed(geometry.size.as_logical())
-                            .as_global();
-
+                    let position = transform_output_mapped_position(&output, &event);
                     let under = State::surface_under(position, &output, &mut *shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -1267,13 +1257,8 @@ impl State {
                     else {
                         return;
                     };
-                    let geometry = output.geometry();
 
-                    let position = event
-                        .position_transformed(geometry.size.as_logical())
-                        .as_global()
-                        + geometry.loc.to_f64();
-
+                    let position = transform_output_mapped_position(&output, &event);
                     let under = State::surface_under(position, &output, &mut *shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -1336,13 +1321,8 @@ impl State {
                     else {
                         return;
                     };
-                    let geometry = output.geometry();
 
-                    let position = event
-                        .position_transformed(geometry.size.as_logical())
-                        .as_global()
-                        + geometry.loc.to_f64();
-
+                    let position = transform_output_mapped_position(&output, &event);
                     let under = State::surface_under(position, &output, &mut *shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -1461,6 +1441,13 @@ impl State {
                 })
                 .unwrap_or(false)
         });
+
+        self.common.atspi_ei.input(
+            modifiers,
+            &handle,
+            event.state(),
+            event.time() as u64 * 1000,
+        );
 
         // Leave move overview mode, if any modifier was released
         if let Some(Trigger::KeyboardMove(action_modifiers)) =
@@ -1623,6 +1610,57 @@ impl State {
             )));
         }
 
+        if event.state() == KeyState::Released {
+            let removed = self
+                .common
+                .atspi_ei
+                .active_virtual_mods
+                .remove(&event.key_code());
+            // If `Caps_Lock` is a virtual modifier, and is in locked state, clear it
+            if removed && handle.modified_sym() == Keysym::Caps_Lock {
+                if (modifiers.serialized.locked & 2) != 0 {
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let time = self.common.clock.now().as_millis();
+                    keyboard.input(
+                        self,
+                        event.key_code(),
+                        KeyState::Pressed,
+                        serial,
+                        time,
+                        |_, _, _| FilterResult::<()>::Forward,
+                    );
+                    let serial = SERIAL_COUNTER.next_serial();
+                    keyboard.input(
+                        self,
+                        event.key_code(),
+                        KeyState::Released,
+                        serial,
+                        time,
+                        |_, _, _| FilterResult::<()>::Forward,
+                    );
+                }
+            }
+        } else if event.state() == KeyState::Pressed
+            && self
+                .common
+                .atspi_ei
+                .virtual_mods
+                .contains(&event.key_code())
+        {
+            self.common
+                .atspi_ei
+                .active_virtual_mods
+                .insert(event.key_code());
+
+            tracing::debug!(
+                "active virtual mods: {:?}",
+                self.common.atspi_ei.active_virtual_mods
+            );
+            seat.supressed_keys().add(&handle, None);
+
+            return FilterResult::Intercept(None);
+        }
+
         // Skip released events for initially surpressed keys
         if event.state() == KeyState::Released {
             if let Some(tokens) = seat.supressed_keys().filter(&handle) {
@@ -1644,6 +1682,15 @@ impl State {
                 error!(?err, "Failed switching virtual terminal.");
             }
             seat.supressed_keys().add(&handle, None);
+            return FilterResult::Intercept(None);
+        }
+
+        if self.common.atspi_ei.has_keyboard_grab()
+            || self
+                .common
+                .atspi_ei
+                .has_key_grab(modifiers.serialized.layout_effective, event.key_code())
+        {
             return FilterResult::Intercept(None);
         }
 
@@ -1814,142 +1861,263 @@ impl State {
         }
     }
 
-    // TODO: Try to get rid of the *mutable* Shell references (needed for hovered_stack in floating_layout)
+    pub fn element_under(
+        global_pos: Point<f64, Global>,
+        output: &Output,
+        shell: &Shell,
+    ) -> Option<KeyboardFocusTarget> {
+        let (previous_workspace, workspace) = shell.workspaces.active(output);
+        let (previous_idx, idx) = shell.workspaces.active_num(output);
+        let previous_workspace = previous_workspace
+            .zip(previous_idx)
+            .map(|((w, start), idx)| (w.handle, idx, start));
+        let workspace = (workspace.handle, idx);
+        let element_filter = if workspace_overview_is_open(output) {
+            ElementFilter::LayerShellOnly
+        } else {
+            ElementFilter::All
+        };
+
+        render_input_order(
+            shell,
+            output,
+            previous_workspace,
+            workspace,
+            element_filter,
+            |stage| {
+                match stage {
+                    Stage::SessionLock(lock_surface) => {
+                        return ControlFlow::Break(Ok(lock_surface
+                            .cloned()
+                            .map(KeyboardFocusTarget::LockSurface)))
+                    }
+                    Stage::LayerPopup {
+                        layer,
+                        popup,
+                        location,
+                    } => {
+                        if layer.can_receive_keyboard_focus() {
+                            let surface = popup.wl_surface();
+                            if under_from_surface_tree(
+                                surface,
+                                global_pos.as_logical(),
+                                location.as_logical(),
+                                WindowSurfaceType::POPUP | WindowSurfaceType::SUBSURFACE,
+                            )
+                            .is_some()
+                            {
+                                return ControlFlow::Break(Ok(Some(
+                                    KeyboardFocusTarget::LayerSurface(layer),
+                                )));
+                            }
+                        }
+                    }
+                    Stage::LayerSurface { layer, location } => {
+                        if layer.can_receive_keyboard_focus() {
+                            if under_from_surface_tree(
+                                layer.wl_surface(),
+                                global_pos.as_logical(),
+                                location.as_logical(),
+                                WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+                            )
+                            .is_some()
+                            {
+                                return ControlFlow::Break(Ok(Some(
+                                    KeyboardFocusTarget::LayerSurface(layer),
+                                )));
+                            }
+                        }
+                    }
+                    Stage::OverrideRedirect { .. } => {
+                        // Override redirect windows take a grab on their own via
+                        // the Xwayland keyboard grab protocol. Don't focus them via click.
+                    }
+                    Stage::StickyPopups(layout) => {
+                        if let Some(element) =
+                            layout.popup_element_under(global_pos.to_local(output))
+                        {
+                            return ControlFlow::Break(Ok(Some(element)));
+                        }
+                    }
+                    Stage::Sticky(layout) => {
+                        if let Some(element) =
+                            layout.toplevel_element_under(global_pos.to_local(output))
+                        {
+                            return ControlFlow::Break(Ok(Some(element)));
+                        }
+                    }
+                    Stage::WorkspacePopups { workspace, offset } => {
+                        let location = global_pos + offset.as_global().to_f64();
+                        let output = workspace.output();
+                        let output_geo = output.geometry().to_local(output);
+                        if Rectangle::from_loc_and_size(offset.as_local(), output_geo.size)
+                            .intersection(output_geo)
+                            .is_some_and(|geometry| {
+                                geometry.contains(global_pos.to_local(output).to_i32_round())
+                            })
+                        {
+                            if let Some(element) = workspace.popup_element_under(location) {
+                                return ControlFlow::Break(Ok(Some(element)));
+                            }
+                        }
+                    }
+                    Stage::Workspace { workspace, offset } => {
+                        let location = global_pos + offset.as_global().to_f64();
+                        let output = workspace.output();
+                        let output_geo = output.geometry().to_local(output);
+                        if Rectangle::from_loc_and_size(offset.as_local(), output_geo.size)
+                            .intersection(output_geo)
+                            .is_some_and(|geometry| {
+                                geometry.contains(global_pos.to_local(output).to_i32_round())
+                            })
+                        {
+                            if let Some(element) = workspace.toplevel_element_under(location) {
+                                return ControlFlow::Break(Ok(Some(element)));
+                            }
+                        }
+                    }
+                }
+                ControlFlow::Continue(())
+            },
+        )
+        .ok()
+        .flatten()
+    }
+
     pub fn surface_under(
         global_pos: Point<f64, Global>,
         output: &Output,
-        shell: &mut Shell,
+        shell: &Shell,
     ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
-        let session_lock = shell.session_lock.as_ref();
+        let (previous_workspace, workspace) = shell.workspaces.active(output);
+        let (previous_idx, idx) = shell.workspaces.active_num(output);
+        let previous_workspace = previous_workspace
+            .zip(previous_idx)
+            .map(|((w, start), idx)| (w.handle, idx, start));
+        let workspace = (workspace.handle, idx);
+
+        let element_filter = if workspace_overview_is_open(output) {
+            ElementFilter::LayerShellOnly
+        } else {
+            ElementFilter::All
+        };
+
         let relative_pos = global_pos.to_local(output);
         let output_geo = output.geometry();
+        let overview = shell.overview_mode().0;
 
-        if let Some(session_lock) = session_lock {
-            return session_lock.surfaces.get(output).map(|surface| {
-                (
-                    PointerFocusTarget::WlSurface {
-                        surface: surface.wl_surface().clone(),
-                        toplevel: None,
-                    },
-                    output_geo.loc.to_f64(),
-                )
-            });
-        }
-
-        if let Some(window) = shell.workspaces.active(output).1.get_fullscreen() {
-            let layers = layer_map_for_output(output);
-            if let Some(layer) = layers.layer_under(WlrLayer::Overlay, relative_pos.as_logical()) {
-                let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                if let Some((wl_surface, surface_loc)) = layer.surface_under(
-                    relative_pos.as_logical() - layer_loc.to_f64(),
-                    WindowSurfaceType::ALL,
-                ) {
-                    return Some((
-                        PointerFocusTarget::WlSurface {
-                            surface: wl_surface,
-                            toplevel: None,
-                        },
-                        (output_geo.loc + layer_loc.as_global() + surface_loc.as_global()).to_f64(),
-                    ));
-                }
-            }
-            if let Some((surface, geo)) = shell
-                .override_redirect_windows
-                .iter()
-                .find(|or| {
-                    or.is_in_input_region(
-                        &(global_pos.as_logical() - X11Surface::geometry(*or).loc.to_f64()),
-                    )
-                })
-                .and_then(|or| {
-                    or.wl_surface()
-                        .map(|surface| (surface, X11Surface::geometry(or).loc.as_global().to_f64()))
-                })
-            {
-                return Some((
-                    PointerFocusTarget::WlSurface {
-                        surface,
-                        toplevel: None,
-                    },
-                    geo,
-                ));
-            }
-            PointerFocusTarget::under_surface(window, relative_pos.as_logical()).map(
-                |(target, surface_loc)| {
-                    (target, (output_geo.loc + surface_loc.as_global()).to_f64())
-                },
-            )
-        } else {
-            {
-                let layers = layer_map_for_output(output);
-                if let Some(layer) = layers
-                    .layer_under(WlrLayer::Overlay, relative_pos.as_logical())
-                    .or_else(|| layers.layer_under(WlrLayer::Top, relative_pos.as_logical()))
-                {
-                    let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                    if let Some((wl_surface, surface_loc)) = layer.surface_under(
-                        relative_pos.as_logical() - layer_loc.to_f64(),
-                        WindowSurfaceType::ALL,
-                    ) {
-                        return Some((
-                            PointerFocusTarget::WlSurface {
-                                surface: wl_surface,
-                                toplevel: None,
-                            },
-                            (output_geo.loc + layer_loc.as_global() + surface_loc.as_global())
-                                .to_f64(),
-                        ));
+        render_input_order(
+            shell,
+            output,
+            previous_workspace,
+            workspace,
+            element_filter,
+            |stage| {
+                match stage {
+                    Stage::SessionLock(lock_surface) => {
+                        return ControlFlow::Break(Ok(lock_surface.map(|surface| {
+                            (
+                                PointerFocusTarget::WlSurface {
+                                    surface: surface.wl_surface().clone(),
+                                    toplevel: None,
+                                },
+                                output_geo.loc.to_f64(),
+                            )
+                        })));
+                    }
+                    Stage::LayerPopup {
+                        popup, location, ..
+                    } => {
+                        let surface = popup.wl_surface();
+                        if let Some((surface, surface_loc)) = under_from_surface_tree(
+                            surface,
+                            global_pos.as_logical(),
+                            location.as_logical(),
+                            WindowSurfaceType::ALL,
+                        ) {
+                            return ControlFlow::Break(Ok(Some((
+                                PointerFocusTarget::WlSurface {
+                                    surface,
+                                    toplevel: None,
+                                },
+                                surface_loc.as_global().to_f64(),
+                            ))));
+                        }
+                    }
+                    Stage::LayerSurface { layer, location } => {
+                        let surface = layer.wl_surface();
+                        if let Some((surface, surface_loc)) = under_from_surface_tree(
+                            surface,
+                            global_pos.as_logical(),
+                            location.as_logical(),
+                            WindowSurfaceType::ALL,
+                        ) {
+                            return ControlFlow::Break(Ok(Some((
+                                PointerFocusTarget::WlSurface {
+                                    surface,
+                                    toplevel: None,
+                                },
+                                surface_loc.as_global().to_f64(),
+                            ))));
+                        }
+                    }
+                    Stage::OverrideRedirect { surface, location } => {
+                        if let Some(surface) = surface.wl_surface() {
+                            if let Some((surface, surface_loc)) = under_from_surface_tree(
+                                &surface,
+                                global_pos.as_logical(),
+                                location.as_logical(),
+                                WindowSurfaceType::ALL,
+                            ) {
+                                return ControlFlow::Break(Ok(Some((
+                                    PointerFocusTarget::WlSurface {
+                                        surface,
+                                        toplevel: None,
+                                    },
+                                    surface_loc.as_global().to_f64(),
+                                ))));
+                            }
+                        }
+                    }
+                    Stage::StickyPopups(floating_layer) => {
+                        if let Some(under) = floating_layer
+                            .popup_surface_under(relative_pos)
+                            .map(|(target, point)| (target, point.to_global(output)))
+                        {
+                            return ControlFlow::Break(Ok(Some(under)));
+                        }
+                    }
+                    Stage::Sticky(floating_layer) => {
+                        if let Some(under) = floating_layer
+                            .toplevel_surface_under(relative_pos)
+                            .map(|(target, point)| (target, point.to_global(output)))
+                        {
+                            return ControlFlow::Break(Ok(Some(under)));
+                        }
+                    }
+                    Stage::WorkspacePopups { workspace, offset } => {
+                        let global_pos = global_pos + offset.to_f64().as_global();
+                        if let Some(under) =
+                            workspace.popup_surface_under(global_pos, overview.clone())
+                        {
+                            return ControlFlow::Break(Ok(Some(under)));
+                        }
+                    }
+                    Stage::Workspace { workspace, offset } => {
+                        let global_pos = global_pos + offset.to_f64().as_global();
+                        if let Some(under) =
+                            workspace.toplevel_surface_under(global_pos, overview.clone())
+                        {
+                            return ControlFlow::Break(Ok(Some(under)));
+                        }
                     }
                 }
-            }
-            if let Some((surface, geo)) = shell
-                .override_redirect_windows
-                .iter()
-                .find(|or| {
-                    or.is_in_input_region(
-                        &(global_pos.as_logical() - X11Surface::geometry(*or).loc.to_f64()),
-                    )
-                })
-                .and_then(|or| {
-                    or.wl_surface()
-                        .map(|surface| (surface, X11Surface::geometry(or).loc.as_global().to_f64()))
-                })
-            {
-                return Some((
-                    PointerFocusTarget::WlSurface {
-                        surface,
-                        toplevel: None,
-                    },
-                    geo,
-                ));
-            }
-            if let Some((target, loc)) = shell.surface_under(global_pos, output) {
-                return Some((target, loc));
-            }
-            {
-                let layers = layer_map_for_output(output);
-                if let Some(layer) = layers
-                    .layer_under(WlrLayer::Bottom, relative_pos.as_logical())
-                    .or_else(|| layers.layer_under(WlrLayer::Background, relative_pos.as_logical()))
-                {
-                    let layer_loc = layers.layer_geometry(layer).unwrap().loc;
-                    if let Some((wl_surface, surface_loc)) = layer.surface_under(
-                        relative_pos.as_logical() - layer_loc.to_f64(),
-                        WindowSurfaceType::ALL,
-                    ) {
-                        return Some((
-                            PointerFocusTarget::WlSurface {
-                                surface: wl_surface,
-                                toplevel: None,
-                            },
-                            (output_geo.loc + layer_loc.as_global() + surface_loc.as_global())
-                                .to_f64(),
-                        ));
-                    }
-                }
-            }
-            None
-        }
+
+                ControlFlow::Continue(())
+            },
+        )
+        .ok()
+        .flatten()
     }
 }
 
@@ -1969,6 +2137,23 @@ fn cursor_sessions_for_output(
                 .flatten(),
         )
         .chain(output.cursor_sessions().into_iter())
+}
+
+fn transform_output_mapped_position<'a, B, E>(output: &Output, event: &E) -> Point<f64, Global>
+where
+    B: InputBackend,
+    E: AbsolutePositionEvent<B>,
+    B::Device: 'static,
+{
+    let geometry = output.geometry();
+    let transform = output.current_transform();
+    let size = transform
+        .invert()
+        .transform_size(geometry.size.as_logical());
+    geometry.loc.to_f64()
+        + transform
+            .transform_point_in(event.position_transformed(size), &size.to_f64())
+            .as_global()
 }
 
 // TODO Is it possible to determine mapping for external touchscreen?

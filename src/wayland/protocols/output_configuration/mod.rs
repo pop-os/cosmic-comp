@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use calloop::{
+    timer::{TimeoutAction, Timer},
+    LoopHandle,
+};
 use cosmic_protocols::output_management::v1::server::{
     zcosmic_output_configuration_head_v1::ZcosmicOutputConfigurationHeadV1,
     zcosmic_output_configuration_v1::ZcosmicOutputConfigurationV1,
-    zcosmic_output_head_v1::ZcosmicOutputHeadV1, zcosmic_output_manager_v1::ZcosmicOutputManagerV1,
+    zcosmic_output_head_v1::{self, ZcosmicOutputHeadV1},
+    zcosmic_output_manager_v1::ZcosmicOutputManagerV1,
 };
 use smithay::{
-    output::{Mode, Output},
+    backend::drm::VrrSupport,
+    output::{Mode, Output, WeakOutput},
     reexports::{
         wayland_protocols_wlr::output_management::v1::server::{
             zwlr_output_configuration_head_v1::{self, ZwlrOutputConfigurationHeadV1},
@@ -23,9 +29,16 @@ use smithay::{
     utils::{Logical, Physical, Point, Size, Transform},
     wayland::output::WlOutputData,
 };
-use std::{convert::TryFrom, sync::Mutex};
+use std::{convert::TryFrom, sync::Mutex, time::Duration};
 
 mod handlers;
+
+pub fn head_is_enabled(output: &Output) -> bool {
+    output
+        .user_data()
+        .get::<OutputState>()
+        .map_or(false, |inner| inner.lock().unwrap().enabled)
+}
 
 #[derive(Debug)]
 pub struct OutputConfigurationState<D> {
@@ -36,6 +49,7 @@ pub struct OutputConfigurationState<D> {
     global: GlobalId,
     extension_global: GlobalId,
     dh: DisplayHandle,
+    event_loop_handle: LoopHandle<'static, D>,
     _dispatch: std::marker::PhantomData<D>,
 }
 
@@ -91,7 +105,7 @@ pub struct PendingOutputConfigurationInner {
     position: Option<Point<i32, Logical>>,
     transform: Option<Transform>,
     scale: Option<f64>,
-    adaptive_sync: Option<bool>,
+    adaptive_sync: Option<AdaptiveSync>,
 }
 pub type PendingOutputConfiguration = Mutex<PendingOutputConfigurationInner>;
 
@@ -103,7 +117,7 @@ pub enum OutputConfiguration {
         position: Option<Point<i32, Logical>>,
         transform: Option<Transform>,
         scale: Option<f64>,
-        adaptive_sync: Option<bool>,
+        adaptive_sync: Option<AdaptiveSync>,
     },
     Disabled,
 }
@@ -147,7 +161,7 @@ where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + GlobalDispatch<WlOutput, WlOutputData>
         + Dispatch<ZwlrOutputManagerV1, ()>
-        + Dispatch<ZwlrOutputHeadV1, Output>
+        + Dispatch<ZwlrOutputHeadV1, WeakOutput>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + Dispatch<ZwlrOutputConfigurationHeadV1, PendingOutputConfiguration>
@@ -159,7 +173,11 @@ where
         + OutputConfigurationHandler
         + 'static,
 {
-    pub fn new<F>(dh: &DisplayHandle, client_filter: F) -> OutputConfigurationState<D>
+    pub fn new<F>(
+        dh: &DisplayHandle,
+        event_loop_handle: LoopHandle<'static, D>,
+        client_filter: F,
+    ) -> OutputConfigurationState<D>
     where
         F: for<'a> Fn(&'a Client) -> bool + Clone + Send + Sync + 'static,
     {
@@ -171,7 +189,7 @@ where
         );
 
         let extension_global = dh.create_global::<D, ZcosmicOutputManagerV1, _>(
-            1,
+            2,
             OutputMngrGlobalData {
                 filter: Box::new(client_filter),
             },
@@ -185,6 +203,7 @@ where
             global,
             extension_global,
             dh: dh.clone(),
+            event_loop_handle: event_loop_handle.clone(),
             _dispatch: std::marker::PhantomData,
         }
     }
@@ -203,12 +222,22 @@ where
             .collect::<Vec<_>>();
 
         for output in new_outputs {
-            output.user_data().insert_if_missing(|| {
+            let added = output.user_data().insert_if_missing(|| {
                 OutputState::new(OutputStateInner {
                     enabled: true,
                     global: None,
                 })
             });
+            if !added {
+                // If head was previous added, enable it again
+                let mut inner = output
+                    .user_data()
+                    .get::<OutputState>()
+                    .unwrap()
+                    .lock()
+                    .unwrap();
+                inner.enabled = true;
+            }
             self.outputs.push(output.clone());
         }
     }
@@ -219,10 +248,9 @@ where
                 self.removed_outputs.push(output.clone());
                 if let Some(inner) = output.user_data().get::<OutputState>() {
                     let mut inner = inner.lock().unwrap();
-                    // if it gets re-added it should start with being enabled and no global
-                    inner.enabled = true;
+                    inner.enabled = false;
                     if let Some(global) = inner.global.take() {
-                        self.dh.remove_global::<D>(global);
+                        remove_global_with_timer(&self.dh, &self.event_loop_handle, global);
                     }
                 }
             }
@@ -274,7 +302,11 @@ where
                     inner.global = Some(output.create_global::<D>(&self.dh));
                 }
                 if !inner.enabled && inner.global.is_some() {
-                    self.dh.remove_global::<D>(inner.global.take().unwrap());
+                    remove_global_with_timer(
+                        &self.dh,
+                        &self.event_loop_handle,
+                        inner.global.take().unwrap(),
+                    );
                 }
             }
             for manager in self.instances.iter_mut() {
@@ -296,7 +328,7 @@ fn send_head_to_client<D>(dh: &DisplayHandle, mngr: &mut OutputMngrInstance, out
 where
     D: GlobalDispatch<ZwlrOutputManagerV1, OutputMngrGlobalData>
         + Dispatch<ZwlrOutputManagerV1, ()>
-        + Dispatch<ZwlrOutputHeadV1, Output>
+        + Dispatch<ZwlrOutputHeadV1, WeakOutput>
         + Dispatch<ZwlrOutputModeV1, Mode>
         + Dispatch<ZwlrOutputConfigurationV1, PendingConfiguration>
         + OutputConfigurationHandler
@@ -314,7 +346,7 @@ where
                 if let Ok(head) = client.create_resource::<ZwlrOutputHeadV1, _, D>(
                     dh,
                     mngr.obj.version(),
-                    output.clone(),
+                    output.downgrade(),
                 ) {
                     mngr.obj.head(&head);
                     let data = OutputHeadInstance {
@@ -418,18 +450,50 @@ where
 
         let scale = output.current_scale().fractional_scale();
         instance.obj.scale(scale);
+
+        if instance.obj.version() >= zwlr_output_head_v1::EVT_ADAPTIVE_SYNC_SINCE {
+            instance
+                .obj
+                .adaptive_sync(if output.adaptive_sync() == AdaptiveSync::Disabled {
+                    zwlr_output_head_v1::AdaptiveSyncState::Disabled
+                } else {
+                    zwlr_output_head_v1::AdaptiveSyncState::Enabled
+                });
+        }
+
         if let Some(extension_obj) = instance.extension_obj.as_ref() {
             extension_obj.scale_1000((scale * 1000.0).round() as i32);
 
             extension_obj.mirroring(output.mirroring().map(|o| o.name()));
-        }
 
-        if instance.obj.version() >= zwlr_output_head_v1::EVT_ADAPTIVE_SYNC_SINCE {
-            instance.obj.adaptive_sync(if output.adaptive_sync() {
-                zwlr_output_head_v1::AdaptiveSyncState::Enabled
-            } else {
-                zwlr_output_head_v1::AdaptiveSyncState::Disabled
-            });
+            if extension_obj.version() >= zcosmic_output_head_v1::EVT_ADAPTIVE_SYNC_EXT_SINCE {
+                extension_obj.adaptive_sync_ext(match output.adaptive_sync() {
+                    AdaptiveSync::Disabled => {
+                        zcosmic_output_head_v1::AdaptiveSyncStateExt::Disabled
+                    }
+                    AdaptiveSync::Enabled => {
+                        zcosmic_output_head_v1::AdaptiveSyncStateExt::Automatic
+                    }
+                    AdaptiveSync::Force => zcosmic_output_head_v1::AdaptiveSyncStateExt::Always,
+                });
+
+                extension_obj.adaptive_sync_available(
+                    match output
+                        .adaptive_sync_support()
+                        .unwrap_or(VrrSupport::NotSupported)
+                    {
+                        VrrSupport::NotSupported => {
+                            zcosmic_output_head_v1::AdaptiveSyncAvailability::Unsupported
+                        }
+                        VrrSupport::RequiresModeset => {
+                            zcosmic_output_head_v1::AdaptiveSyncAvailability::RequiresModeset
+                        }
+                        VrrSupport::Supported => {
+                            zcosmic_output_head_v1::AdaptiveSyncAvailability::Supported
+                        }
+                    },
+                );
+            }
         }
     }
 
@@ -443,6 +507,26 @@ where
     }
 }
 
+fn remove_global_with_timer<D: 'static>(
+    dh: &DisplayHandle,
+    event_loop_handle: &LoopHandle<D>,
+    id: GlobalId,
+) {
+    dh.disable_global::<D>(id.clone());
+    let source = Timer::from_duration(Duration::from_secs(5));
+    let dh = dh.clone();
+    let res = event_loop_handle.insert_source(source, move |_, _, _state| {
+        dh.remove_global::<D>(id.clone());
+        TimeoutAction::Drop
+    });
+    if let Err(err) = res {
+        tracing::error!(
+            "failed to insert timer source to destroy output global: {}",
+            err
+        );
+    }
+}
+
 macro_rules! delegate_output_configuration {
     ($(@<$( $lt:tt $( : $clt:tt $(+ $dlt:tt )* )? ),+>)? $ty: ty) => {
         smithay::reexports::wayland_server::delegate_global_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
@@ -452,7 +536,7 @@ macro_rules! delegate_output_configuration {
             smithay::reexports::wayland_protocols_wlr::output_management::v1::server::zwlr_output_manager_v1::ZwlrOutputManagerV1: ()
         ] => $crate::wayland::protocols::output_configuration::OutputConfigurationState<Self>);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            smithay::reexports::wayland_protocols_wlr::output_management::v1::server::zwlr_output_head_v1::ZwlrOutputHeadV1: smithay::output::Output
+            smithay::reexports::wayland_protocols_wlr::output_management::v1::server::zwlr_output_head_v1::ZwlrOutputHeadV1: smithay::output::WeakOutput
         ] => $crate::wayland::protocols::output_configuration::OutputConfigurationState<Self>);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
             smithay::reexports::wayland_protocols_wlr::output_management::v1::server::zwlr_output_mode_v1::ZwlrOutputModeV1: smithay::output::Mode
@@ -482,4 +566,4 @@ macro_rules! delegate_output_configuration {
 }
 pub(crate) use delegate_output_configuration;
 
-use crate::utils::prelude::OutputExt;
+use crate::{config::AdaptiveSync, utils::prelude::OutputExt};

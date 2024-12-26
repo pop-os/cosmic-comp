@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    config::{OutputConfig, OutputState},
+    config::{AdaptiveSync, OutputConfig, OutputState},
     shell::Shell,
     utils::prelude::*,
 };
@@ -253,8 +253,6 @@ impl State {
             self.backend.kms().drm_devices.insert(drm_node, device);
         }
 
-        self.backend.kms().refresh_used_devices()?;
-
         self.common
             .output_configuration_state
             .add_heads(wl_outputs.iter());
@@ -267,6 +265,8 @@ impl State {
             &self.common.xdg_activation_state,
             self.common.startup_done.clone(),
         );
+
+        self.backend.kms().refresh_used_devices()?;
         self.common.refresh();
 
         Ok(())
@@ -305,12 +305,12 @@ impl State {
                         .cloned()
                     {
                         let surface = device.surfaces.remove(&crtc).unwrap();
-                        // TODO: move up later outputs?
-                        w -= surface
-                            .output
-                            .current_mode()
-                            .map(|m| m.size.w as u32)
-                            .unwrap_or(0);
+                        if surface.output.mirroring().is_none() {
+                            // TODO: move up later outputs?
+                            w = w.saturating_sub(
+                                surface.output.config().transformed_size().w as u32,
+                            );
+                        }
                     }
 
                     if !changes.added.iter().any(|(c, _)| c == &conn) {
@@ -349,8 +349,6 @@ impl State {
             }
         }
 
-        self.backend.kms().refresh_used_devices()?;
-
         self.common
             .output_configuration_state
             .remove_heads(outputs_removed.iter());
@@ -375,6 +373,8 @@ impl State {
             }
             self.common.refresh();
         }
+
+        self.backend.kms().refresh_used_devices()?;
 
         Ok(())
     }
@@ -664,6 +664,10 @@ fn populate_modes(
         max_bpc,
         scale,
         transform,
+        // Try opportunistic VRR by default,
+        // if not supported this will be turned off on `resume`,
+        // when we have the `Surface` to actually check for support.
+        vrr: AdaptiveSync::Enabled,
         ..std::mem::take(&mut *output_config)
     };
 

@@ -62,7 +62,7 @@ pub struct ToplevelInfoGlobalData {
 #[derive(Default)]
 pub(super) struct ToplevelStateInner {
     foreign_handle: Option<ForeignToplevelHandle>,
-    instances: Vec<ZcosmicToplevelHandleV1>,
+    instances: Vec<(Weak<ZcosmicToplevelInfoV1>, ZcosmicToplevelHandleV1)>,
     outputs: Vec<Output>,
     workspaces: Vec<WorkspaceHandle>,
     pub(super) rectangles: Vec<(Weak<WlSurface>, Rectangle<i32, Logical>)>,
@@ -80,6 +80,10 @@ impl ToplevelStateInner {
     pub fn foreign_handle(&self) -> Option<&ForeignToplevelHandle> {
         self.foreign_handle.as_ref()
     }
+
+    pub fn in_workspace(&self, handle: &WorkspaceHandle) -> bool {
+        self.workspaces.contains(handle)
+    }
 }
 
 pub struct ToplevelHandleStateInner<W: Window> {
@@ -90,7 +94,7 @@ pub struct ToplevelHandleStateInner<W: Window> {
     title: String,
     app_id: String,
     states: Vec<States>,
-    pub(super) window: W,
+    pub(super) window: Option<W>,
 }
 pub type ToplevelHandleState<W> = Mutex<ToplevelHandleStateInner<W>>;
 
@@ -104,7 +108,20 @@ impl<W: Window> ToplevelHandleStateInner<W> {
             title: String::new(),
             app_id: String::new(),
             states: Vec::new(),
-            window: window.clone(),
+            window: Some(window.clone()),
+        })
+    }
+
+    fn empty() -> ToplevelHandleState<W> {
+        ToplevelHandleState::new(ToplevelHandleStateInner {
+            outputs: Vec::new(),
+            geometry: None,
+            wl_outputs: HashSet::new(),
+            workspaces: Vec::new(),
+            title: String::new(),
+            app_id: String::new(),
+            states: Vec::new(),
+            window: None,
         })
     }
 }
@@ -185,8 +202,9 @@ where
                         .lock()
                         .unwrap()
                         .instances
-                        .push(instance);
+                        .push((obj.downgrade(), instance));
                 } else {
+                    let _ = data_init.init(cosmic_toplevel, ToplevelHandleStateInner::empty());
                     error!(?foreign_toplevel, "Toplevel for foreign-toplevel-list not registered for cosmic-toplevel-info.");
                 }
             }
@@ -241,7 +259,11 @@ where
     ) {
         for toplevel in &state.toplevel_info_state_mut().toplevels {
             if let Some(state) = toplevel.user_data().get::<ToplevelState>() {
-                state.lock().unwrap().instances.retain(|i| i != resource);
+                state
+                    .lock()
+                    .unwrap()
+                    .instances
+                    .retain(|(_, i)| i != resource);
             }
         }
     }
@@ -322,7 +344,7 @@ where
     pub fn remove_toplevel(&mut self, toplevel: &W) {
         if let Some(state) = toplevel.user_data().get::<ToplevelState>() {
             let mut state_inner = state.lock().unwrap();
-            for handle in &state_inner.instances {
+            for (_info, handle) in &state_inner.instances {
                 // don't send events to stopped instances
                 if handle.version() < zcosmic_toplevel_info_v1::REQ_GET_COSMIC_TOPLEVEL_SINCE
                     && self
@@ -368,7 +390,7 @@ where
                 }
                 true
             } else {
-                for handle in &state.instances {
+                for (_info, handle) in &state.instances {
                     // don't send events to stopped instances
                     if handle.version() < zcosmic_toplevel_info_v1::REQ_GET_COSMIC_TOPLEVEL_SINCE
                         && self
@@ -424,11 +446,7 @@ where
         .unwrap()
         .lock()
         .unwrap();
-    let instance = match state
-        .instances
-        .iter()
-        .find(|i| i.id().same_client_as(&info.id()))
-    {
+    let (_info, instance) = match state.instances.iter().find(|(i, _)| i == info) {
         Some(i) => i,
         None => {
             if info.version() < zcosmic_toplevel_info_v1::REQ_GET_COSMIC_TOPLEVEL_SINCE {
@@ -441,7 +459,7 @@ where
                         )
                     {
                         info.toplevel(&toplevel_handle);
-                        state.instances.push(toplevel_handle);
+                        state.instances.push((info.downgrade(), toplevel_handle));
                         state.instances.last().unwrap()
                     } else {
                         return false;
@@ -509,14 +527,10 @@ where
         }
         handle_state.states = states.clone();
 
-        let states: Vec<u8> = {
-            let ratio = std::mem::size_of::<States>() / std::mem::size_of::<u8>();
-            let ptr = states.as_mut_ptr() as *mut u8;
-            let len = states.len() * ratio;
-            let cap = states.capacity() * ratio;
-            std::mem::forget(states);
-            unsafe { Vec::from_raw_parts(ptr, len, cap) }
-        };
+        let states = states
+            .iter()
+            .flat_map(|state| (*state as u32).to_ne_bytes())
+            .collect::<Vec<u8>>();
         instance.state(states);
         changed = true;
     }
@@ -604,7 +618,7 @@ where
 pub fn window_from_handle<W: Window + 'static>(handle: ZcosmicToplevelHandleV1) -> Option<W> {
     handle
         .data::<ToplevelHandleState<W>>()
-        .map(|state| state.lock().unwrap().window.clone())
+        .and_then(|state| state.lock().unwrap().window.clone())
 }
 
 macro_rules! delegate_toplevel_info {

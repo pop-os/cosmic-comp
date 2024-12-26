@@ -97,7 +97,8 @@ impl ClientDndGrabHandler for State {
             .lock()
             .unwrap() = icon.map(|surface| DnDIcon { surface, offset })
     }
-    fn dropped(&mut self, seat: Seat<Self>) {
+
+    fn dropped(&mut self, _target: Option<WlSurface>, _validated: bool, seat: Seat<Self>) {
         seat.user_data()
             .get::<Mutex<Option<DnDIcon>>>()
             .unwrap()

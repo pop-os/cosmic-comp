@@ -11,10 +11,14 @@ use crate::{
     input::{gestures::GestureState, PointerFocusState},
     shell::{grabs::SeatMoveGrabState, CosmicSurface, SeatExt, Shell},
     utils::prelude::OutputExt,
+    wayland::handlers::screencopy::SessionHolder,
     wayland::protocols::{
+        atspi::AtspiState,
         drm::WlDrmState,
         image_source::ImageSourceState,
         output_configuration::OutputConfigurationState,
+        output_power::OutputPowerState,
+        overlap_notify::OverlapNotifyState,
         screencopy::ScreencopyState,
         toplevel_info::ToplevelInfoState,
         toplevel_management::{ManagementCapabilities, ToplevelManagementState},
@@ -36,7 +40,7 @@ use smithay::{
         renderer::{
             element::{
                 default_primary_scanout_output_compare, utils::select_dmabuf_feedback,
-                RenderElementStates,
+                RenderElementState, RenderElementStates,
             },
             ImportDma,
         },
@@ -106,6 +110,7 @@ use time::UtcOffset;
 
 use std::{
     cell::RefCell,
+    cmp::min,
     collections::HashSet,
     ffi::OsString,
     process::Child,
@@ -198,6 +203,7 @@ pub struct Common {
     pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
     pub output_state: OutputManagerState,
     pub output_configuration_state: OutputConfigurationState<State>,
+    pub output_power_state: OutputPowerState,
     pub presentation_state: PresentationState,
     pub primary_selection_state: PrimarySelectionState,
     pub data_control_state: Option<DataControlState>,
@@ -214,6 +220,7 @@ pub struct Common {
     pub viewporter_state: ViewporterState,
     pub kde_decoration_state: KdeDecorationState,
     pub xdg_decoration_state: XdgDecorationState,
+    pub overlap_notify_state: OverlapNotifyState,
 
     // shell-related wayland state
     pub xdg_shell_state: XdgShellState,
@@ -227,6 +234,9 @@ pub struct Common {
     pub xwayland_state: Option<XWaylandState>,
     pub xwayland_shell_state: XWaylandShellState,
     pub pointer_focus_state: Option<PointerFocusState>,
+
+    pub atspi_state: AtspiState,
+    pub atspi_ei: crate::wayland::handlers::atspi::AtspiEiState,
 }
 
 #[derive(Debug)]
@@ -351,6 +361,9 @@ impl BackendData {
 
             self.schedule_render(&output);
         }
+
+        // Update layout for changes in resolution, scale, orientation
+        shell.workspaces.recalculate();
 
         loop_handle.insert_idle(|state| state.common.update_xwayland_scale());
 
@@ -486,7 +499,11 @@ impl State {
         let fractional_scale_state = FractionalScaleManagerState::new::<State>(dh);
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<Self>(dh);
         let output_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
-        let output_configuration_state = OutputConfigurationState::new(dh, client_is_privileged);
+        let output_configuration_state =
+            OutputConfigurationState::new(dh, handle.clone(), client_is_privileged);
+        let output_power_state = OutputPowerState::new::<Self, _>(dh, client_is_privileged);
+        let overlap_notify_state =
+            OverlapNotifyState::new::<Self, _>(dh, client_has_no_security_context);
         let presentation_state = PresentationState::new::<Self>(dh, clock.id() as u32);
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
         let image_source_state = ImageSourceState::new::<Self, _>(dh, client_is_privileged);
@@ -556,6 +573,9 @@ impl State {
             tracing::warn!(?err, "Failed to initialize dbus handlers");
         }
 
+        // TODO: Restrict to only specific client?
+        let atspi_state = AtspiState::new::<State, _>(dh, client_is_privileged);
+
         State {
             common: Common {
                 config,
@@ -593,6 +613,8 @@ impl State {
                 keyboard_shortcuts_inhibit_state,
                 output_state,
                 output_configuration_state,
+                output_power_state,
+                overlap_notify_state,
                 presentation_state,
                 primary_selection_state,
                 data_control_state,
@@ -611,6 +633,9 @@ impl State {
                 xwayland_state: None,
                 xwayland_shell_state,
                 pointer_focus_state: None,
+
+                atspi_state,
+                atspi_ei: Default::default(),
             },
             backend: BackendData::Unset,
             ready: Once::new(),
@@ -632,6 +657,19 @@ impl State {
     }
 }
 
+fn primary_scanout_output_compare<'a>(
+    current_output: &'a Output,
+    current_state: &RenderElementState,
+    next_output: &'a Output,
+    next_state: &RenderElementState,
+) -> &'a Output {
+    if !crate::wayland::protocols::output_configuration::head_is_enabled(current_output) {
+        return next_output;
+    }
+
+    default_primary_scanout_output_compare(current_output, current_state, next_output, next_state)
+}
+
 impl Common {
     pub fn update_primary_output(
         &self,
@@ -645,7 +683,7 @@ impl Common {
                 output,
                 states,
                 render_element_states,
-                default_primary_scanout_output_compare,
+                primary_scanout_output_compare,
             );
             if let Some(output) = primary_scanout_output {
                 with_fractional_scale(states, |fraction_scale| {
@@ -921,7 +959,17 @@ impl Common {
                 None
             }
         };
-        let throttle = Some(Duration::from_millis(995));
+        const THROTTLE: Option<Duration> = Some(Duration::from_millis(995));
+        const SCREENCOPY_THROTTLE: Option<Duration> = Some(Duration::from_nanos(16_666_666));
+
+        fn throttle(session_holder: &impl SessionHolder) -> Option<Duration> {
+            if session_holder.sessions().is_empty() && session_holder.cursor_sessions().is_empty() {
+                THROTTLE
+            } else {
+                SCREENCOPY_THROTTLE
+            }
+        }
+
         let shell = self.shell.read().unwrap();
 
         if let Some(session_lock) = shell.session_lock.as_ref() {
@@ -968,7 +1016,7 @@ impl Common {
             if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {
                 if let Some(grab_state) = move_grab.lock().unwrap().as_ref() {
                     for (window, _) in grab_state.element().windows() {
-                        window.send_frame(output, time, throttle, should_send);
+                        window.send_frame(output, time, throttle(&window), should_send);
                     }
                 }
             }
@@ -983,21 +1031,21 @@ impl Common {
             .mapped()
             .for_each(|mapped| {
                 for (window, _) in mapped.windows() {
-                    window.send_frame(output, time, throttle, should_send);
+                    window.send_frame(output, time, throttle(&window), should_send);
                 }
             });
 
         let active = shell.active_space(output);
         active.mapped().for_each(|mapped| {
             for (window, _) in mapped.windows() {
-                window.send_frame(output, time, throttle, should_send);
+                window.send_frame(output, time, throttle(&window), should_send);
             }
         });
 
         // other (throttled) windows
         active.minimized_windows.iter().for_each(|m| {
             for (window, _) in m.window.windows() {
-                window.send_frame(output, time, throttle, |_, _| None);
+                window.send_frame(output, time, throttle(&window), |_, _| None);
             }
         });
         for space in shell
@@ -1007,25 +1055,26 @@ impl Common {
         {
             space.mapped().for_each(|mapped| {
                 for (window, _) in mapped.windows() {
+                    let throttle = min(throttle(space), throttle(&window));
                     window.send_frame(output, time, throttle, |_, _| None);
                 }
             });
             space.minimized_windows.iter().for_each(|m| {
                 for (window, _) in m.window.windows() {
-                    window.send_frame(output, time, throttle, |_, _| None);
+                    window.send_frame(output, time, throttle(&window), |_, _| None);
                 }
             })
         }
 
         shell.override_redirect_windows.iter().for_each(|or| {
             if let Some(wl_surface) = or.wl_surface() {
-                send_frames_surface_tree(&wl_surface, output, time, throttle, should_send);
+                send_frames_surface_tree(&wl_surface, output, time, THROTTLE, should_send);
             }
         });
 
         let map = smithay::desktop::layer_map_for_output(output);
         for layer_surface in map.layers() {
-            layer_surface.send_frame(output, time, throttle, should_send);
+            layer_surface.send_frame(output, time, THROTTLE, should_send);
         }
     }
 }

@@ -8,7 +8,7 @@ use cosmic::{
         widget::{
             operation::{
                 scrollable::{AbsoluteOffset, RelativeOffset},
-                Operation, OperationOutputWrapper, Scrollable,
+                Operation, Scrollable,
             },
             tree::{self, Tree},
             Widget,
@@ -16,10 +16,9 @@ use cosmic::{
         Background, Border, Clipboard, Color, Length, Point, Rectangle, Renderer, Shell, Size,
         Vector,
     },
-    iced_style::container::StyleSheet as ContainerStyleSheet,
     iced_widget::container::draw_background,
     theme,
-    widget::icon::from_name,
+    widget::{container::Catalog, icon::from_name},
     Apply,
 };
 use keyframe::{
@@ -45,6 +44,7 @@ struct ScrollAnimationState {
     start_time: Instant,
     start: Offset,
     end: Offset,
+    extra: Offset,
 }
 
 #[derive(Debug, Clone)]
@@ -75,8 +75,23 @@ impl Scrollable for State {
             start_time: Instant::now(),
             start: self.offset_x,
             end: new_offset,
+            extra: Offset::Absolute(0.),
         });
         self.offset_x = new_offset;
+    }
+
+    fn scroll_by(
+        &mut self,
+        offset: AbsoluteOffset,
+        _bounds: Rectangle,
+        _content_bounds: Rectangle,
+    ) {
+        self.scroll_animation = Some(ScrollAnimationState {
+            start_time: Instant::now(),
+            start: self.offset_x,
+            end: self.offset_x,
+            extra: Offset::Absolute(offset.x.max(0.0)),
+        });
     }
 }
 
@@ -145,7 +160,7 @@ where
             Element::new(tab.internal(i))
         });
 
-        let tabs_rule = widget::vertical_rule(4).style(if tabs.len() - 1 == active {
+        let tabs_rule = widget::vertical_rule(4).class(if tabs.len() - 1 == active {
             if activated {
                 TabRuleTheme::ActiveActivated
             } else {
@@ -166,7 +181,7 @@ where
             .prefer_svg(true)
             .icon()
             .apply(widget::button)
-            .style(theme::iced::Button::Text)
+            .class(theme::iced::Button::Text)
             .on_press(Message::scroll_back());
 
         let next_button = from_name("go-next-symbolic")
@@ -174,17 +189,17 @@ where
             .prefer_svg(true)
             .icon()
             .apply(widget::button)
-            .style(theme::iced::Button::Text)
+            .class(theme::iced::Button::Text)
             .on_press(Message::scroll_further());
 
         let mut elements = Vec::with_capacity(tabs.len() + 5);
 
-        elements.push(widget::vertical_rule(4).style(rule_style).into());
+        elements.push(widget::vertical_rule(4).class(rule_style).into());
         elements.push(prev_button.into());
         elements.extend(tabs);
         elements.push(tabs_rule.into());
         elements.push(next_button.into());
-        elements.push(widget::vertical_rule(4).style(rule_style).into());
+        elements.push(widget::vertical_rule(4).class(rule_style).into());
 
         Tabs {
             elements,
@@ -239,6 +254,7 @@ impl State {
 
             Vector::new(
                 animation.start.absolute(bounds.width, content_bounds.width)
+                    + animation.extra.absolute(bounds.width, content_bounds.width) * percentage
                     + (animation.end.absolute(bounds.width, content_bounds.width)
                         - animation.start.absolute(bounds.width, content_bounds.width))
                         * percentage,
@@ -490,9 +506,9 @@ where
                 height: b.bounds().height,
             });
 
-        let background_style = ContainerStyleSheet::appearance(
+        let background_style = Catalog::style(
             theme,
-            &theme::Container::custom(|theme| widget::container::Appearance {
+            &theme::Container::custom(|theme| widget::container::Style {
                 icon_color: None,
                 text_color: None,
                 background: Some(Background::Color(super::tab::primary_container_color(
@@ -666,10 +682,12 @@ where
         tree: &mut Tree,
         layout: Layout<'_>,
         renderer: &cosmic::Renderer,
-        operation: &mut dyn Operation<OperationOutputWrapper<Message>>,
+        operation: &mut dyn Operation<()>,
     ) {
         let state = tree.state.downcast_mut::<State>();
         let bounds = layout.bounds();
+        let content_layout = layout.children().next().unwrap();
+        let content_bounds = content_layout.bounds();
 
         state.cleanup_old_animations();
 
@@ -677,6 +695,7 @@ where
             state,
             self.id.as_ref(),
             bounds,
+            content_bounds,
             Vector { x: 0.0, y: 0.0 }, /* seemingly unused */
         );
 
@@ -819,6 +838,7 @@ where
                         start_time: Instant::now(),
                         start: Offset::Absolute(offset.x),
                         end: Offset::Absolute(new_offset.x),
+                        extra: Offset::Absolute(0.),
                     });
                     state.offset_x = Offset::Absolute(new_offset.x);
                 }
@@ -993,7 +1013,8 @@ where
         tree: &'b mut Tree,
         layout: Layout<'_>,
         renderer: &cosmic::Renderer,
+        translation: cosmic::iced::Vector,
     ) -> Option<overlay::Element<'b, Message, cosmic::Theme, cosmic::Renderer>> {
-        overlay::from_children(&mut self.elements, tree, layout, renderer)
+        overlay::from_children(&mut self.elements, tree, layout, renderer, translation)
     }
 }
