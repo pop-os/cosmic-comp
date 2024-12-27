@@ -341,6 +341,14 @@ pub struct MinimizedTilingState {
     pub sizes: Vec<i32>,
 }
 
+struct OrientationTestResult {
+    start_windows: Vec<CosmicMapped>,
+    end_windows: Vec<CosmicMapped>,
+    separateness: i32,
+    orientation: Orientation,
+    position: i32,
+}
+
 impl TilingLayout {
     pub fn new(theme: cosmic::Theme, output: &Output) -> TilingLayout {
         TilingLayout {
@@ -2320,6 +2328,197 @@ impl TilingLayout {
 
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
         let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+        self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
+    }
+
+    fn split_candidates(orientation: Orientation, windows: &Vec<CosmicMapped>) -> Vec<i32> {
+        let mut window_positions: Vec<i32> = windows.into_iter()
+            .map(|w| w.last_geometry.lock().unwrap().expect("window should have geometry").clone())
+            .flat_map(|geo| match orientation {
+                Orientation::Vertical => vec![geo.loc.x, geo.loc.x + geo.size.w],
+                Orientation::Horizontal => vec![geo.loc.y, geo.loc.y + geo.size.h],
+            })
+            .collect();
+
+        window_positions.sort();
+        return window_positions.windows(2)
+            .filter(|w| (w[0] != w[1]))
+            .map(|w| (w[0] + w[1])/2) // midpoint between positions
+            .collect();
+    }
+
+    fn test_orientation(orientation: Orientation, windows: &Vec<CosmicMapped>, position: i32) -> OrientationTestResult {
+        let mut start_windows = Vec::new();
+        let mut end_windows = Vec::new();
+        let mut separateness = 0;
+
+        for window in windows.into_iter() {
+            let geometry = window.last_geometry.lock().unwrap().clone().expect("window should have geometry");
+            let (start_position, end_position) = match orientation {
+                Orientation::Vertical => (geometry.loc.x, geometry.loc.x + geometry.size.w),
+                Orientation::Horizontal => (geometry.loc.y, geometry.loc.y + geometry.size.h),
+            };
+
+            let size = end_position - start_position;
+            let (start_size, end_size) =
+                if position > start_position && position < end_position {
+                    (position - start_position, end_position - position)
+                } else if end_position < position {
+                    (size, 0)
+                } else {
+                    (0, size)
+                };
+
+            if start_size > end_size {
+                start_windows.push(window.clone());
+            } else {
+                end_windows.push(window.clone());
+            }
+
+            separateness += (start_size - end_size).abs();
+        }
+
+        return OrientationTestResult {
+            start_windows,
+            end_windows,
+            separateness,
+            orientation,
+            position,
+        };
+    }
+
+    #[profiling::function]
+    pub fn map_from_floating_windows(&mut self, windows: Vec<CosmicMapped>) {
+        let mut tree: Tree<Data> = Tree::new();
+        if windows.len() > 0 {
+            let geo = layer_map_for_output(&self.output)
+                .non_exclusive_zone()
+                .as_local();
+
+            let root_id = tree.insert(Node::new(Data::Placeholder {
+                last_geometry: geo,
+                initial_placeholder: false,
+            }), InsertBehavior::AsRoot).unwrap();
+
+            let mut nodes_to_solve: Vec<(NodeId, Vec<CosmicMapped>, Rectangle<i32, Local>, Orientation)> = Vec::new();
+            nodes_to_solve.push((root_id, windows, geo, Orientation::Horizontal));
+            while let Some((next_node_id, windows, geo, prev_orientation)) = nodes_to_solve.pop() {
+                let node = tree.get(&next_node_id).unwrap();
+                let parent_id = node.parent().cloned();
+                let pos = parent_id.as_ref().and_then(|parent_id| {
+                    tree.children_ids(parent_id)
+                        .unwrap()
+                        .position(|id| id == &next_node_id)
+                });
+                let insert_behavior = parent_id.as_ref()
+                    .map(|parent_id| InsertBehavior::UnderNode(parent_id))
+                    .unwrap_or(InsertBehavior::AsRoot);
+
+                let solved_id = if windows.len() < 2 {
+                    let mapped = windows.get(0).expect("windows should not be empty").clone();
+                    let new_id = tree.insert(Node::new(Data::Mapped {
+                        mapped: mapped.clone(),
+                        last_geometry: geo,
+                        minimize_rect: None,
+                    }), insert_behavior).unwrap();
+                    *mapped.tiling_node_id.lock().unwrap() = Some(new_id.clone());
+                    new_id
+                } else {
+                    let bbox = windows.iter()
+                        .map(|w| w.last_geometry.lock().unwrap().clone().expect("window should have geometry"))
+                        .reduce(|w1, w2| w1.merge(w2))
+                        .expect("should have windows");
+
+                    // Find candidate splits, test them, and select the best
+                    let result = [Orientation::Vertical, Orientation::Horizontal].into_iter()
+                        .flat_map(|o| TilingLayout::split_candidates(o, &windows).into_iter().map(move |c| (o, c)))
+                        .map(|(o, c)| TilingLayout::test_orientation(o, &windows, c))
+                        .filter(|r| r.start_windows.len() > 0 && r.end_windows.len() > 0)
+                        .max_by_key(|r| r.separateness);
+
+                    let (orientation, start_windows, end_windows, position) =
+                        result.map(|r| {
+                                (
+                                    r.orientation,
+                                    r.start_windows,
+                                    r.end_windows,
+                                    match r.orientation {
+                                        Orientation::Vertical => ((r.position - bbox.loc.x) as f32 / (bbox.loc.x + bbox.size.w) as f32) * geo.size.w as f32,
+                                        Orientation::Horizontal => ((r.position - bbox.loc.y) as f32 / (bbox.loc.y + bbox.size.h) as f32) * geo.size.h as f32,
+                                    } as i32
+                                )
+                            })
+                            .unwrap_or_else(|| {
+                                // We will find no solutions when all windows
+                                // have the same size and position - in that case,
+                                // do a 50/50 split in the opposite orientation as parent
+                                let idx = windows.len()/2;
+                                let mut windows = windows.clone();
+                                let (start, end) = windows.split_at_mut(idx);
+                                let orientation = match prev_orientation {
+                                        Orientation::Vertical => Orientation::Horizontal,
+                                        Orientation::Horizontal => Orientation::Vertical,
+                                    };
+                                (
+                                    orientation,
+                                    start.to_vec(),
+                                    end.to_vec(),
+                                    match orientation {
+                                        Orientation::Vertical => geo.loc.x + geo.size.w/2,
+                                        Orientation::Horizontal => geo.loc.y + geo.size.h/2,
+                                    }
+                                )
+                            });
+
+                    let solved_id = tree.insert(Node::new(Data::Group {
+                        orientation,
+                        sizes: vec![position, match orientation{
+                            Orientation::Vertical => geo.size.h - position,
+                            Orientation::Horizontal => geo.size.w - position,
+                        }],
+                        alive: Arc::new(()),
+                        last_geometry: geo,
+                        pill_indicator: None,
+                    }), insert_behavior).unwrap();
+
+                    let start_geo =
+                        match orientation {
+                            Orientation::Vertical => Rectangle::new(
+                                (geo.loc.x, geo.loc.y).into(), (position, geo.size.h).into()),
+                            Orientation::Horizontal => Rectangle::new(
+                                (geo.loc.x, geo.loc.y).into(), (geo.size.w, position).into()),
+                        };
+                    let end_geo =
+                        match orientation {
+                            Orientation::Vertical => Rectangle::new(
+                                (position, geo.loc.y).into(), (geo.size.w - position, geo.size.h).into()),
+                            Orientation::Horizontal => Rectangle::new(
+                                (geo.loc.x, position).into(), (geo.size.w, geo.size.h - position).into()),
+                        };
+
+                    let start_node_id = tree.insert(Node::new(Data::Placeholder {
+                            last_geometry: start_geo,
+                            initial_placeholder: false,
+                        }), InsertBehavior::UnderNode(&solved_id)).unwrap();
+                    let end_node_id = tree.insert(Node::new(Data::Placeholder {
+                            last_geometry: end_geo,
+                            initial_placeholder: false,
+                        }), InsertBehavior::UnderNode(&solved_id)).unwrap();
+
+                    nodes_to_solve.push((start_node_id, start_windows, start_geo, orientation));
+                    nodes_to_solve.push((end_node_id, end_windows, end_geo, orientation));
+
+                    solved_id
+                };
+
+                tree.remove_node(next_node_id, RemoveBehavior::OrphanChildren).unwrap();
+                if let Some(pos) = pos {
+                    tree.make_nth_sibling(&solved_id, pos).unwrap();
+                }
+            }
+        }
+
+        let blocker = TilingLayout::update_positions(&self.output, &mut tree, self.gaps());
         self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
     }
 
