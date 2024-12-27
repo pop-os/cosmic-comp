@@ -127,7 +127,7 @@ impl OverlapNotifyState {
                             if let Some(window_geo) = window.global_geometry() {
                                 if let Some(intersection) = layer_geo.intersection(window_geo) {
                                     // relative to layer location
-                                    let region = Rectangle::from_loc_and_size(
+                                    let region = Rectangle::new(
                                         intersection.loc - layer_geo.loc,
                                         intersection.size,
                                     )
@@ -148,7 +148,7 @@ impl OverlapNotifyState {
                                 .to_global(&output);
                             if let Some(intersection) = layer_geo.intersection(other_geo) {
                                 // relative to layer location
-                                let region = Rectangle::from_loc_and_size(
+                                let region = Rectangle::new(
                                     intersection.loc - layer_geo.loc,
                                     intersection.size,
                                 )
