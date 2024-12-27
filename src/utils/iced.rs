@@ -734,7 +734,7 @@ impl<P: Program + Send + 'static> IsAlive for IcedElement<P> {
 
 impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
     fn bbox(&self) -> Rectangle<i32, Logical> {
-        Rectangle::from_loc_and_size((0, 0), self.0.lock().unwrap().size)
+        Rectangle::from_size(self.0.lock().unwrap().size)
     }
 
     fn is_in_input_region(&self, _point: &Point<f64, Logical>) -> bool {
@@ -928,9 +928,9 @@ where
                         .map(|d| d * scale_x)
                         .filter_map(|x| x.snap())
                         .map(|damage_rect| {
-                            Rectangle::from_loc_and_size(
-                                (damage_rect.x as i32, damage_rect.y as i32),
-                                (damage_rect.width as i32, damage_rect.height as i32),
+                            Rectangle::new(
+                                (damage_rect.x as i32, damage_rect.y as i32).into(),
+                                (damage_rect.width as i32, damage_rect.height as i32).into(),
                             )
                         })
                         .collect::<Vec<_>>();
@@ -948,8 +948,7 @@ where
                 location.to_f64(),
                 &buffer,
                 Some(alpha),
-                Some(Rectangle::from_loc_and_size(
-                    (0., 0.),
+                Some(Rectangle::from_size(
                     size.to_f64()
                         .to_logical(1., Transform::Normal)
                         .to_i32_round(),

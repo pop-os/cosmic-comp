@@ -120,30 +120,33 @@ impl<C: Coordinate> SizeExt<C> for Size<C, Logical> {
 
 impl<C: Coordinate> RectExt<C> for Rectangle<C, Logical> {
     fn as_global(self) -> Rectangle<C, Global> {
-        Rectangle::from_loc_and_size(self.loc.as_global(), (self.size.w, self.size.h))
+        Rectangle::new(self.loc.as_global(), (self.size.w, self.size.h).into())
     }
 
     fn as_local(self) -> Rectangle<C, Local> {
-        Rectangle::from_loc_and_size(self.loc.as_local(), (self.size.w, self.size.h))
+        Rectangle::new(self.loc.as_local(), (self.size.w, self.size.h).into())
     }
 }
 
 impl<C: Coordinate> RectGlobalExt<C> for Rectangle<C, Global> {
     fn to_local(self, output: &Output) -> Rectangle<C, Local> {
-        Rectangle::from_loc_and_size(self.loc.to_local(output), (self.size.w, self.size.h))
+        Rectangle::new(self.loc.to_local(output), (self.size.w, self.size.h).into())
     }
 
     fn as_logical(self) -> Rectangle<C, Logical> {
-        Rectangle::from_loc_and_size(self.loc.as_logical(), self.size.as_logical())
+        Rectangle::new(self.loc.as_logical(), self.size.as_logical())
     }
 }
 
 impl<C: Coordinate> RectLocalExt<C> for Rectangle<C, Local> {
     fn to_global(self, output: &Output) -> Rectangle<C, Global> {
-        Rectangle::from_loc_and_size(self.loc.to_global(output), (self.size.w, self.size.h))
+        Rectangle::new(
+            self.loc.to_global(output),
+            (self.size.w, self.size.h).into(),
+        )
     }
 
     fn as_logical(self) -> Rectangle<C, Logical> {
-        Rectangle::from_loc_and_size(self.loc.as_logical(), self.size.as_logical())
+        Rectangle::new(self.loc.as_logical(), self.size.as_logical())
     }
 }
