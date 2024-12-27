@@ -438,8 +438,7 @@ impl Workspace {
         self.fullscreen.as_ref().map(|fullscreen| {
             let bbox = fullscreen.surface.bbox().as_local();
 
-            let mut full_geo =
-                Rectangle::from_loc_and_size((0, 0), self.output.geometry().size.as_local());
+            let mut full_geo = Rectangle::from_size(self.output.geometry().size.as_local());
             if bbox != full_geo {
                 if bbox.size.w < full_geo.size.w {
                     full_geo.loc.x += (full_geo.size.w - bbox.size.w) / 2;
@@ -1175,7 +1174,7 @@ impl Workspace {
         if let Some(fullscreen) = self.fullscreen.as_ref() {
             // fullscreen window
             let bbox = fullscreen.surface.bbox().as_local();
-            let element_geo = Rectangle::from_loc_and_size(
+            let element_geo = Rectangle::new(
                 self.element_for_surface(&fullscreen.surface)
                     .and_then(|elem| {
                         self.floating_layer
@@ -1191,8 +1190,7 @@ impl Workspace {
                 fullscreen.original_geometry.size.as_local(),
             );
 
-            let mut full_geo =
-                Rectangle::from_loc_and_size((0, 0), self.output.geometry().size.as_local());
+            let mut full_geo = Rectangle::from_size(self.output.geometry().size.as_local());
             if fullscreen.start_at.is_none() {
                 if bbox != full_geo {
                     if bbox.size.w < full_geo.size.w {
@@ -1339,10 +1337,7 @@ impl Workspace {
                     Into::<CosmicMappedRenderElement<R>>::into(BackdropShader::element(
                         renderer,
                         self.backdrop_id.clone(),
-                        Rectangle::from_loc_and_size(
-                            (0, 0),
-                            self.output.geometry().size.as_local(),
-                        ),
+                        Rectangle::from_size(self.output.geometry().size.as_local()),
                         0.,
                         alpha * 0.85,
                         [0.0, 0.0, 0.0],
@@ -1382,7 +1377,7 @@ impl Workspace {
         if let Some(fullscreen) = self.fullscreen.as_ref() {
             // fullscreen window
             let bbox = fullscreen.surface.bbox().as_local();
-            let element_geo = Rectangle::from_loc_and_size(
+            let element_geo = Rectangle::new(
                 self.element_for_surface(&fullscreen.surface)
                     .and_then(|elem| {
                         self.floating_layer
@@ -1398,8 +1393,7 @@ impl Workspace {
                 fullscreen.original_geometry.size.as_local(),
             );
 
-            let mut full_geo =
-                Rectangle::from_loc_and_size((0, 0), self.output.geometry().size.as_local());
+            let mut full_geo = Rectangle::from_size(self.output.geometry().size.as_local());
             if fullscreen.start_at.is_none() {
                 if bbox != full_geo {
                     if bbox.size.w < full_geo.size.w {

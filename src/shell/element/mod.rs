@@ -226,12 +226,12 @@ impl CosmicMapped {
                 let win = stack.active();
                 let location = stack.offset();
                 let size = win.geometry().size;
-                Rectangle::from_loc_and_size(location, size)
+                Rectangle::new(location, size)
             }
             CosmicMappedInternal::Window(win) => {
                 let location = win.offset();
                 let size = win.geometry().size;
-                Rectangle::from_loc_and_size(location, size)
+                Rectangle::new(location, size)
             }
             _ => unreachable!(),
         }
@@ -601,9 +601,9 @@ impl CosmicMapped {
     pub fn set_debug(&self, flag: bool) {
         let mut debug = self.debug.lock().unwrap();
         if flag {
-            *debug = Some(smithay_egui::EguiState::new(Rectangle::from_loc_and_size(
-                (10, 10),
-                (100, 100),
+            *debug = Some(smithay_egui::EguiState::new(Rectangle::new(
+                (10, 10).into(),
+                (100, 100).into(),
             )));
         } else {
             debug.take();
@@ -662,7 +662,7 @@ impl CosmicMapped {
                 window.geometry().size,
             );
 
-            let area = Rectangle::<i32, Logical>::from_loc_and_size(
+            let area = Rectangle::<i32, Logical>::new(
                 location.to_f64().to_logical(scale).to_i32_round(),
                 self.bbox().size,
             );

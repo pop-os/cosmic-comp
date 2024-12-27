@@ -165,7 +165,7 @@ impl MirroringState {
             .unwrap_or_default()
             .to_logical(1)
             .to_buffer(1, Transform::Normal);
-        let opaque_regions = vec![Rectangle::from_loc_and_size((0, 0), size)];
+        let opaque_regions = vec![Rectangle::from_size(size)];
 
         let texture = Offscreen::<GlesTexture>::create_buffer(renderer, format, size)?;
         let transform = output.current_transform();
@@ -512,10 +512,8 @@ fn surface_thread(
 
     #[cfg(feature = "debug")]
     let egui = {
-        let state = smithay_egui::EguiState::new(smithay::utils::Rectangle::from_loc_and_size(
-            (0, 0),
-            (400, 800),
-        ));
+        let state =
+            smithay_egui::EguiState::new(smithay::utils::Rectangle::from_size((400, 800).into()));
         let mut visuals: egui::style::Visuals = Default::default();
         visuals.window_shadow = egui::Shadow::NONE;
         state.context().set_visuals(visuals);
@@ -1114,8 +1112,7 @@ impl SurfaceThreadState {
             elements = constrain_render_elements(
                 std::iter::once(texture_elem),
                 (0, 0),
-                Rectangle::from_loc_and_size(
-                    (0, 0),
+                Rectangle::from_size(
                     self.output
                         .geometry()
                         .size

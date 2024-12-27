@@ -249,7 +249,7 @@ impl Program for ContextMenu {
                             let output = seat.active_output();
                             let position = [
                                 // to the right -> down
-                                Rectangle::from_loc_and_size(
+                                Rectangle::new(
                                     position
                                         + Point::from((
                                             bounds.width.ceil() as i32,
@@ -258,7 +258,7 @@ impl Program for ContextMenu {
                                     min_size.as_global(),
                                 ),
                                 // to the right -> up
-                                Rectangle::from_loc_and_size(
+                                Rectangle::new(
                                     position
                                         + Point::from((
                                             bounds.width.ceil() as i32,
@@ -268,12 +268,12 @@ impl Program for ContextMenu {
                                     min_size.as_global(),
                                 ),
                                 // to the left -> down
-                                Rectangle::from_loc_and_size(
+                                Rectangle::new(
                                     position + Point::from((-min_size.w, bounds.y.ceil() as i32)),
                                     min_size.as_global(),
                                 ),
                                 // to the left -> up
-                                Rectangle::from_loc_and_size(
+                                Rectangle::new(
                                     position
                                         + Point::from((
                                             -min_size.w,
@@ -669,16 +669,16 @@ impl MenuGrab {
 
         let output = seat.active_output();
         let position = [
-            Rectangle::from_loc_and_size(position, min_size.as_global()), // normal
-            Rectangle::from_loc_and_size(
+            Rectangle::new(position, min_size.as_global()), // normal
+            Rectangle::new(
                 position - Point::from((min_size.w, 0)),
                 min_size.as_global(),
             ), // flipped left
-            Rectangle::from_loc_and_size(
+            Rectangle::new(
                 position - Point::from((0, min_size.h)),
                 min_size.as_global(),
             ), // flipped up
-            Rectangle::from_loc_and_size(
+            Rectangle::new(
                 position - Point::from((min_size.w, min_size.h)),
                 min_size.as_global(),
             ), // flipped left & up

@@ -271,7 +271,7 @@ pub fn minimize_rectangle(output: &Output, window: &CosmicSurface) -> Rectangle<
             let map = layer_map_for_output(output);
             let layer = map.layer_for_surface(&surface, WindowSurfaceType::ALL);
             layer.and_then(|s| map.layer_geometry(s)).map(|local| {
-                Rectangle::from_loc_and_size(
+                Rectangle::new(
                     Point::from((local.loc.x + relative.loc.x, local.loc.y + relative.loc.y)),
                     relative.size,
                 )
@@ -279,7 +279,7 @@ pub fn minimize_rectangle(output: &Output, window: &CosmicSurface) -> Rectangle<
         })
         .unwrap_or_else(|| {
             let output_size = output.geometry().size;
-            Rectangle::from_loc_and_size(
+            Rectangle::new(
                 Point::from((
                     (output_size.w / 2) - 100,
                     output_size.h - (output_size.h / 3) - 50,

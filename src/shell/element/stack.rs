@@ -491,7 +491,7 @@ impl CosmicStack {
             let loc = (geo.loc.x, geo.loc.y + TAB_HEIGHT);
             let size = (geo.size.w, geo.size.h - TAB_HEIGHT);
 
-            let win_geo = Rectangle::from_loc_and_size(loc, size);
+            let win_geo = Rectangle::new(loc.into(), size.into());
             for window in p.windows.lock().unwrap().iter() {
                 window.set_geometry(win_geo, TAB_HEIGHT as u32);
             }
@@ -1045,9 +1045,9 @@ impl Program for CosmicStackInternal {
         theme: &Theme,
     ) {
         if self.group_focused.load(Ordering::SeqCst) {
-            let border = Rectangle::from_loc_and_size(
-                (0, ((TAB_HEIGHT as f32 * scale) - scale).floor() as i32),
-                (pixels.width() as i32, scale.ceil() as i32),
+            let border = Rectangle::new(
+                (0, ((TAB_HEIGHT as f32 * scale) - scale).floor() as i32).into(),
+                (pixels.width() as i32, scale.ceil() as i32).into(),
             );
 
             let mut paint = tiny_skia::Paint::default();

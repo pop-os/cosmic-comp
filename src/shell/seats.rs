@@ -347,8 +347,8 @@ impl SeatExt for Seat<State> {
                         .hotspot
                 });
                 let geo = bbox_from_surface_tree(&surface, (location.x, location.y));
-                let buffer_geo = Rectangle::from_loc_and_size(
-                    (geo.loc.x, geo.loc.y),
+                let buffer_geo = Rectangle::new(
+                    (geo.loc.x, geo.loc.y).into(),
                     geo.size.to_buffer(1, Transform::Normal),
                 );
                 Some((buffer_geo, (hotspot.x, hotspot.y).into()))
@@ -364,10 +364,7 @@ impl SeatExt for Seat<State> {
                     .get_image(1, time.as_millis());
 
                 Some((
-                    Rectangle::from_loc_and_size(
-                        location,
-                        (frame.width as i32, frame.height as i32),
-                    ),
+                    Rectangle::new(location, (frame.width as i32, frame.height as i32).into()),
                     (frame.xhot as i32, frame.yhot as i32).into(),
                 ))
             }
