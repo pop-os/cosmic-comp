@@ -244,7 +244,7 @@ where
                     } else {
                         toplevel_state.rectangles.push((
                             surface.downgrade(),
-                            Rectangle::from_loc_and_size((x, y), (width, height)),
+                            Rectangle::new((x, y).into(), (width, height).into()),
                         ));
                     }
                 }

@@ -112,7 +112,7 @@ impl ResizeSurfaceGrab {
         self.last_window_size = (new_window_width, new_window_height).into();
 
         self.window.set_resizing(true);
-        self.window.set_geometry(Rectangle::from_loc_and_size(
+        self.window.set_geometry(Rectangle::new(
             if let Some(s) = self.window.active_window().x11_surface() {
                 s.geometry().loc.as_global()
             } else {
@@ -523,7 +523,7 @@ impl ResizeSurfaceGrab {
         }
 
         self.window.set_resizing(false);
-        self.window.set_geometry(Rectangle::from_loc_and_size(
+        self.window.set_geometry(Rectangle::new(
             if let Some(x11_surface) = self.window.active_window().x11_surface() {
                 x11_surface.geometry().loc.as_global()
             } else {

@@ -214,7 +214,7 @@ impl CosmicWindow {
             let loc = (geo.loc.x, geo.loc.y + ssd_height);
             let size = (geo.size.w, std::cmp::max(geo.size.h - ssd_height, 0));
             p.window
-                .set_geometry(Rectangle::from_loc_and_size(loc, size), ssd_height as u32);
+                .set_geometry(Rectangle::new(loc.into(), size.into()), ssd_height as u32);
         });
     }
 

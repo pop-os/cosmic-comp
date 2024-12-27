@@ -379,7 +379,7 @@ impl Element for DamageElement {
     }
 
     fn src(&self) -> Rectangle<f64, BufferCoords> {
-        Rectangle::from_loc_and_size((0.0, 0.0), (1.0, 1.0))
+        Rectangle::from_size((1.0, 1.0).into())
     }
 
     fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
@@ -391,10 +391,7 @@ impl Element for DamageElement {
         scale: Scale<f64>,
         _commit: Option<CommitCounter>,
     ) -> DamageSet<i32, Physical> {
-        DamageSet::from_slice(&[Rectangle::from_loc_and_size(
-            (0, 0),
-            self.geometry(scale).size,
-        )])
+        DamageSet::from_slice(&[Rectangle::from_size(self.geometry(scale).size).into()])
     }
 }
 

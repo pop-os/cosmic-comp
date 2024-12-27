@@ -870,7 +870,7 @@ where
 
                 inner
                     .damage
-                    .push(Rectangle::from_loc_and_size((x, y), (width, height)));
+                    .push(Rectangle::new((x, y).into(), (width, height).into()));
             }
             zcosmic_screencopy_frame_v2::Request::Capture => {
                 let mut inner = data.inner.lock().unwrap();

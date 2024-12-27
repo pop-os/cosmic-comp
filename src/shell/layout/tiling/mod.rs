@@ -476,7 +476,7 @@ impl TilingLayout {
                     *current_sizes = sizes;
                     let new_node = Node::new(Data::Mapped {
                         mapped: window.clone(),
-                        last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
+                        last_geometry: Rectangle::from_size((100, 100).into()),
                         minimize_rect: Some(from),
                     });
                     let new_id = tree
@@ -499,7 +499,7 @@ impl TilingLayout {
                 let sibling_id = sibling.unwrap();
                 let new_node = Node::new(Data::Mapped {
                     mapped: window.clone(),
-                    last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
+                    last_geometry: Rectangle::from_size((100, 100).into()),
                     minimize_rect: Some(from),
                 });
 
@@ -546,7 +546,7 @@ impl TilingLayout {
         let window = window.into();
         let new_window = Node::new(Data::Mapped {
             mapped: window.clone(),
-            last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
+            last_geometry: Rectangle::from_size((100, 100).into()),
             minimize_rect,
         });
 
@@ -1511,7 +1511,7 @@ impl TilingLayout {
 
                     let new_node = Node::new(Data::Mapped {
                         mapped: mapped.clone(),
-                        last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
+                        last_geometry: Rectangle::from_size((100, 100).into()),
                         minimize_rect: None,
                     });
                     let new_id = tree.insert(new_node, InsertBehavior::AsRoot).unwrap();
@@ -2651,7 +2651,7 @@ impl TilingLayout {
                     .insert(
                         Node::new(Data::Mapped {
                             mapped: window.clone(),
-                            last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
+                            last_geometry: Rectangle::from_size((100, 100).into()),
                             minimize_rect: None,
                         }),
                         InsertBehavior::UnderNode(group_id),
@@ -2687,7 +2687,7 @@ impl TilingLayout {
                     .insert(
                         Node::new(Data::Mapped {
                             mapped: window.clone(),
-                            last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
+                            last_geometry: Rectangle::from_size((100, 100).into()),
                             minimize_rect: None,
                         }),
                         InsertBehavior::UnderNode(group_id),
@@ -2720,7 +2720,7 @@ impl TilingLayout {
                     .insert(
                         Node::new(Data::Mapped {
                             mapped: window.clone(),
-                            last_geometry: Rectangle::from_loc_and_size((0, 0), (100, 100)),
+                            last_geometry: Rectangle::from_size((100, 100).into()),
                             minimize_rect: None,
                         }),
                         InsertBehavior::UnderNode(&window_id),
@@ -2861,7 +2861,7 @@ impl TilingLayout {
     ) -> Result<NodeId, NodeIdError> {
         let new_group = Node::new(Data::new_group(
             orientation,
-            Rectangle::from_loc_and_size((0, 0), (100, 100)),
+            Rectangle::from_size((100, 100).into()),
         ));
         let old = tree.get(old_id)?;
         let parent_id = old.parent().cloned();
@@ -3059,9 +3059,9 @@ impl TilingLayout {
                                 let mut previous: i32 = sizes.iter().sum();
                                 for size in sizes.iter().rev() {
                                     previous -= *size;
-                                    stack.push(Rectangle::from_loc_and_size(
-                                        (geo.loc.x, geo.loc.y + previous),
-                                        (geo.size.w, *size),
+                                    stack.push(Rectangle::new(
+                                        (geo.loc.x, geo.loc.y + previous).into(),
+                                        (geo.size.w, *size).into(),
                                     ));
                                 }
                             }
@@ -3069,9 +3069,9 @@ impl TilingLayout {
                                 let mut previous: i32 = sizes.iter().sum();
                                 for size in sizes.iter().rev() {
                                     previous -= *size;
-                                    stack.push(Rectangle::from_loc_and_size(
-                                        (geo.loc.x + previous, geo.loc.y),
-                                        (*size, geo.size.h),
+                                    stack.push(Rectangle::new(
+                                        (geo.loc.x + previous, geo.loc.y).into(),
+                                        (*size, geo.size.h).into(),
                                     ));
                                 }
                             }
@@ -3422,18 +3422,18 @@ impl TilingLayout {
                             Some((_, TargetZone::GroupEdge(id, Direction::Left)))
                                 if *id == res_id =>
                             {
-                                let zone = Rectangle::from_loc_and_size(
+                                let zone = Rectangle::new(
                                     last_geometry.loc,
-                                    (80, last_geometry.size.h),
+                                    (80, last_geometry.size.h).into(),
                                 );
                                 last_geometry.loc.x += 80;
                                 last_geometry.size.w -= 80;
                                 zone
                             }
                             _ => {
-                                let zone = Rectangle::from_loc_and_size(
+                                let zone = Rectangle::new(
                                     last_geometry.loc,
-                                    (32, last_geometry.size.h),
+                                    (32, last_geometry.size.h).into(),
                                 );
                                 last_geometry.loc.x += 32;
                                 last_geometry.size.w -= 32;
@@ -3444,18 +3444,18 @@ impl TilingLayout {
                             Some((_, TargetZone::GroupEdge(id, Direction::Up)))
                                 if *id == res_id =>
                             {
-                                let zone = Rectangle::from_loc_and_size(
+                                let zone = Rectangle::new(
                                     last_geometry.loc,
-                                    (last_geometry.size.w, 80),
+                                    (last_geometry.size.w, 80).into(),
                                 );
                                 last_geometry.loc.y += 80;
                                 last_geometry.size.h -= 80;
                                 zone
                             }
                             _ => {
-                                let zone = Rectangle::from_loc_and_size(
+                                let zone = Rectangle::new(
                                     last_geometry.loc,
-                                    (last_geometry.size.w, 32),
+                                    (last_geometry.size.w, 32).into(),
                                 );
                                 last_geometry.loc.y += 32;
                                 last_geometry.size.h -= 32;
@@ -3466,23 +3466,25 @@ impl TilingLayout {
                             Some((_, TargetZone::GroupEdge(id, Direction::Right)))
                                 if *id == res_id =>
                             {
-                                let zone = Rectangle::from_loc_and_size(
+                                let zone = Rectangle::new(
                                     (
                                         last_geometry.loc.x + last_geometry.size.w - 80,
                                         last_geometry.loc.y,
-                                    ),
-                                    (80, last_geometry.size.h),
+                                    )
+                                        .into(),
+                                    (80, last_geometry.size.h).into(),
                                 );
                                 last_geometry.size.w -= 80;
                                 zone
                             }
                             _ => {
-                                let zone = Rectangle::from_loc_and_size(
+                                let zone = Rectangle::new(
                                     (
                                         last_geometry.loc.x + last_geometry.size.w - 32,
                                         last_geometry.loc.y,
-                                    ),
-                                    (32, last_geometry.size.h),
+                                    )
+                                        .into(),
+                                    (32, last_geometry.size.h).into(),
                                 );
                                 last_geometry.size.w -= 32;
                                 zone
@@ -3492,23 +3494,25 @@ impl TilingLayout {
                             Some((_, TargetZone::GroupEdge(id, Direction::Down)))
                                 if *id == res_id =>
                             {
-                                let zone = Rectangle::from_loc_and_size(
+                                let zone = Rectangle::new(
                                     (
                                         last_geometry.loc.x,
                                         last_geometry.loc.y + last_geometry.size.h - 80,
-                                    ),
-                                    (last_geometry.size.w, 80),
+                                    )
+                                        .into(),
+                                    (last_geometry.size.w, 80).into(),
                                 );
                                 last_geometry.size.h -= 80;
                                 zone
                             }
                             _ => {
-                                let zone = Rectangle::from_loc_and_size(
+                                let zone = Rectangle::new(
                                     (
                                         last_geometry.loc.x,
                                         last_geometry.loc.y + last_geometry.size.h - 32,
-                                    ),
-                                    (last_geometry.size.w, 32),
+                                    )
+                                        .into(),
+                                    (last_geometry.size.w, 32).into(),
                                 );
                                 last_geometry.size.h -= 32;
                                 zone
@@ -3722,9 +3726,8 @@ impl TilingLayout {
                                     let id = tree
                                         .insert(
                                             Node::new(Data::Placeholder {
-                                                last_geometry: Rectangle::from_loc_and_size(
-                                                    (0, 0),
-                                                    (100, 100),
+                                                last_geometry: Rectangle::from_size(
+                                                    (100, 100).into(),
                                                 ),
                                                 initial_placeholder: false,
                                             }),
@@ -4244,7 +4247,7 @@ fn swap_geometry(
         relative_to.loc.y,
     ));
 
-    Rectangle::from_loc_and_size(loc, new_size)
+    Rectangle::new(loc, new_size)
 }
 
 fn geometries_for_groupview<'a, R>(
@@ -4284,7 +4287,7 @@ where
     let mut stack = Vec::new();
     if swap_tree.is_some() {
         // push bogos value, that will get ignored anyway
-        stack.push((Rectangle::from_loc_and_size((0, 0), (320, 240)), 0));
+        stack.push((Rectangle::from_size((320, 240).into()), 0));
     }
     if root.is_some() {
         stack.push((non_exclusive_zone, 0));
@@ -4553,44 +4556,38 @@ where
                         if let Some(PillIndicator::Outer(direction)) = pill_indicator {
                             let (pill_geo, remaining_geo) = match direction {
                                 Direction::Left => (
-                                    Rectangle::from_loc_and_size(
-                                        (geo.loc.x, geo.loc.y),
-                                        (16, geo.size.h),
+                                    Rectangle::new(
+                                        (geo.loc.x, geo.loc.y).into(),
+                                        (16, geo.size.h).into(),
                                     ),
-                                    Rectangle::from_loc_and_size(
-                                        (geo.loc.x + 48, geo.loc.y),
-                                        (geo.size.w - 48, geo.size.h),
+                                    Rectangle::new(
+                                        (geo.loc.x + 48, geo.loc.y).into(),
+                                        (geo.size.w - 48, geo.size.h).into(),
                                     ),
                                 ),
                                 Direction::Up => (
-                                    Rectangle::from_loc_and_size(
-                                        (geo.loc.x, geo.loc.y),
-                                        (geo.size.w, 16),
+                                    Rectangle::new(
+                                        (geo.loc.x, geo.loc.y).into(),
+                                        (geo.size.w, 16).into(),
                                     ),
-                                    Rectangle::from_loc_and_size(
-                                        (geo.loc.x, geo.loc.y + 48),
-                                        (geo.size.w, geo.size.h - 48),
+                                    Rectangle::new(
+                                        (geo.loc.x, geo.loc.y + 48).into(),
+                                        (geo.size.w, geo.size.h - 48).into(),
                                     ),
                                 ),
                                 Direction::Right => (
-                                    Rectangle::from_loc_and_size(
-                                        (geo.loc.x + geo.size.w - 16, geo.loc.y),
-                                        (16, geo.size.h),
+                                    Rectangle::new(
+                                        (geo.loc.x + geo.size.w - 16, geo.loc.y).into(),
+                                        (16, geo.size.h).into(),
                                     ),
-                                    Rectangle::from_loc_and_size(
-                                        geo.loc,
-                                        (geo.size.w - 48, geo.size.h),
-                                    ),
+                                    Rectangle::new(geo.loc, (geo.size.w - 48, geo.size.h).into()),
                                 ),
                                 Direction::Down => (
-                                    Rectangle::from_loc_and_size(
-                                        (geo.loc.x, geo.loc.y + geo.size.h - 16),
-                                        (geo.size.w, 16),
+                                    Rectangle::new(
+                                        (geo.loc.x, geo.loc.y + geo.size.h - 16).into(),
+                                        (geo.size.w, 16).into(),
                                     ),
-                                    Rectangle::from_loc_and_size(
-                                        geo.loc,
-                                        (geo.size.w, geo.size.h - 48),
-                                    ),
+                                    Rectangle::new(geo.loc, (geo.size.w, geo.size.h - 48).into()),
                                 ),
                             };
 
@@ -4683,9 +4680,9 @@ where
                             let mut previous: i32 = sizes.iter().sum();
                             for (idx, size) in sizes.iter().enumerate().rev() {
                                 previous -= *size;
-                                let mut geo = Rectangle::from_loc_and_size(
-                                    (geo.loc.x, geo.loc.y + previous),
-                                    (geo.size.w, *size),
+                                let mut geo = Rectangle::new(
+                                    (geo.loc.x, geo.loc.y + previous).into(),
+                                    (geo.size.w, *size).into(),
                                 );
                                 if mouse_tiling.is_some() {
                                     if let Some(PillIndicator::Inner(pill_idx)) = pill_indicator {
@@ -4702,9 +4699,9 @@ where
                                                     BackdropShader::element(
                                                         *renderer,
                                                         placeholder_id.clone(),
-                                                        Rectangle::from_loc_and_size(
-                                                            (geo.loc.x, geo.loc.y - 8),
-                                                            (geo.size.w, 16),
+                                                        Rectangle::new(
+                                                            (geo.loc.x, geo.loc.y - 8).into(),
+                                                            (geo.size.w, 16).into(),
                                                         ),
                                                         8.,
                                                         alpha * 0.4,
@@ -4725,9 +4722,9 @@ where
                             let mut previous: i32 = sizes.iter().sum();
                             for (idx, size) in sizes.iter().enumerate().rev() {
                                 previous -= *size;
-                                let mut geo = Rectangle::from_loc_and_size(
-                                    (geo.loc.x + previous, geo.loc.y),
-                                    (*size, geo.size.h),
+                                let mut geo = Rectangle::new(
+                                    (geo.loc.x + previous, geo.loc.y).into(),
+                                    (*size, geo.size.h).into(),
                                 );
                                 if mouse_tiling.is_some() {
                                     if let Some(PillIndicator::Inner(pill_idx)) = pill_indicator {
@@ -4744,9 +4741,9 @@ where
                                                     BackdropShader::element(
                                                         *renderer,
                                                         placeholder_id.clone(),
-                                                        Rectangle::from_loc_and_size(
-                                                            (geo.loc.x - 8, geo.loc.y),
-                                                            (16, geo.size.h),
+                                                        Rectangle::new(
+                                                            (geo.loc.x - 8, geo.loc.y).into(),
+                                                            (16, geo.size.h).into(),
                                                         ),
                                                         8.,
                                                         alpha * 0.4,
@@ -5076,12 +5073,13 @@ fn render_old_tree(
                     .unwrap_or_else(|| (1.0.into(), (0, 0).into()));
                 let geo = scaled_geo
                     .map(|adapted_geo| {
-                        Rectangle::from_loc_and_size(
+                        Rectangle::new(
                             adapted_geo.loc + offset,
                             (
                                 (original_geo.size.w as f64 * scale).round() as i32,
                                 (original_geo.size.h as f64 * scale).round() as i32,
-                            ),
+                            )
+                                .into(),
                         )
                     })
                     .unwrap_or(*original_geo);
@@ -5643,12 +5641,13 @@ fn render_new_tree(
                     old_scaled_geo
                         .unwrap()
                         .map(|adapted_geo| {
-                            Rectangle::from_loc_and_size(
+                            Rectangle::new(
                                 adapted_geo.loc + offset,
                                 (
                                     (original_geo.size.w as f64 * scale).round() as i32,
                                     (original_geo.size.h as f64 * scale).round() as i32,
-                                ),
+                                )
+                                    .into(),
                             )
                         })
                         .unwrap_or(*original_geo),
@@ -5672,12 +5671,13 @@ fn render_new_tree(
                 .unwrap_or_else(|| (1.0.into(), (0, 0).into()));
             let new_geo = scaled_geo
                 .map(|adapted_geo| {
-                    Rectangle::from_loc_and_size(
+                    Rectangle::new(
                         adapted_geo.loc + offset,
                         (
                             (original_geo.size.w as f64 * scale).round() as i32,
                             (original_geo.size.h as f64 * scale).round() as i32,
-                        ),
+                        )
+                            .into(),
                     )
                 })
                 .unwrap_or(*original_geo);

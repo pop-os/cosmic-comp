@@ -114,7 +114,7 @@ impl MoveGrabState {
                 CosmicMappedRenderElement::from(IndicatorShader::focus_element(
                     renderer,
                     Key::Window(Usage::MoveGrabIndicator, self.window.key()),
-                    Rectangle::from_loc_and_size(
+                    Rectangle::new(
                         render_location,
                         self.window
                             .geometry()
@@ -350,15 +350,15 @@ impl MoveGrab {
     fn update_location(&mut self, state: &mut State, location: Point<f64, Logical>) {
         let mut shell = state.common.shell.write().unwrap();
 
-        let Some(current_output) =
-            shell
-                .outputs()
-                .find(|output| {
-                    output.geometry().as_logical().overlaps_or_touches(
-                        Rectangle::from_loc_and_size(location.to_i32_floor(), (0, 0)),
-                    )
-                })
-                .cloned()
+        let Some(current_output) = shell
+            .outputs()
+            .find(|output| {
+                output
+                    .geometry()
+                    .as_logical()
+                    .overlaps_or_touches(Rectangle::new(location.to_i32_floor(), (0, 0).into()))
+            })
+            .cloned()
         else {
             return;
         };
@@ -412,10 +412,7 @@ impl MoveGrab {
                     for output in &self.window_outputs {
                         element.output_enter(
                             output,
-                            Rectangle::from_loc_and_size(
-                                (0, 0),
-                                output.geometry().size.as_logical(),
-                            ),
+                            Rectangle::from_size(output.geometry().size.as_logical()),
                         );
                     }
                     (element, geo.loc.as_logical())
@@ -778,7 +775,7 @@ impl Drop for MoveGrab {
 
                     match previous {
                         ManagedLayer::Sticky => {
-                            grab_state.window.set_geometry(Rectangle::from_loc_and_size(
+                            grab_state.window.set_geometry(Rectangle::new(
                                 window_location,
                                 grab_state.window.geometry().size.as_global(),
                             ));
@@ -800,7 +797,7 @@ impl Drop for MoveGrab {
                             Some((window, location.to_global(&output)))
                         }
                         _ => {
-                            grab_state.window.set_geometry(Rectangle::from_loc_and_size(
+                            grab_state.window.set_geometry(Rectangle::new(
                                 window_location,
                                 grab_state.window.geometry().size.as_global(),
                             ));

@@ -678,11 +678,7 @@ where
         .as_logical()
         .to_physical_precise_round(scale);
     let crop_to_output = |element: WorkspaceRenderElement<R>| {
-        CropRenderElement::from_element(
-            element.into(),
-            scale,
-            Rectangle::from_loc_and_size((0, 0), output_size),
-        )
+        CropRenderElement::from_element(element.into(), scale, Rectangle::from_size(output_size))
     };
 
     render_input_order(

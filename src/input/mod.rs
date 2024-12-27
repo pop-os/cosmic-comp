@@ -1955,7 +1955,7 @@ impl State {
                         let location = global_pos + offset.as_global().to_f64();
                         let output = workspace.output();
                         let output_geo = output.geometry().to_local(output);
-                        if Rectangle::from_loc_and_size(offset.as_local(), output_geo.size)
+                        if Rectangle::new(offset.as_local(), output_geo.size)
                             .intersection(output_geo)
                             .is_some_and(|geometry| {
                                 geometry.contains(global_pos.to_local(output).to_i32_round())
@@ -1970,7 +1970,7 @@ impl State {
                         let location = global_pos + offset.as_global().to_f64();
                         let output = workspace.output();
                         let output_geo = output.geometry().to_local(output);
-                        if Rectangle::from_loc_and_size(offset.as_local(), output_geo.size)
+                        if Rectangle::new(offset.as_local(), output_geo.size)
                             .intersection(output_geo)
                             .is_some_and(|geometry| {
                                 geometry.contains(global_pos.to_local(output).to_i32_round())

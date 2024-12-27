@@ -2714,14 +2714,18 @@ impl Shell {
         let pointer = seat.get_pointer().unwrap();
         let pos = pointer.current_location().as_global();
 
-        let cursor_output = if let Some(output) =
-            self.outputs()
-                .find(|output| {
-                    output.geometry().as_logical().overlaps_or_touches(
-                        Rectangle::from_loc_and_size(start_data.location().to_i32_floor(), (0, 0)),
-                    )
-                })
-                .cloned()
+        let cursor_output = if let Some(output) = self
+            .outputs()
+            .find(|output| {
+                output
+                    .geometry()
+                    .as_logical()
+                    .overlaps_or_touches(Rectangle::new(
+                        start_data.location().to_i32_floor(),
+                        (0, 0).into(),
+                    ))
+            })
+            .cloned()
         {
             output
         } else {

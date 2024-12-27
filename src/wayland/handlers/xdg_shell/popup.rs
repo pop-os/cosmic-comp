@@ -166,7 +166,7 @@ fn unconstrain_layer_popup(surface: &PopupSurface, output: &Output, layer_surfac
     let layer_geo = map.layer_geometry(layer_surface).unwrap();
 
     // the output_rect represented relative to the parents coordinate system
-    let mut relative = Rectangle::from_loc_and_size((0, 0), output.geometry().size).as_logical();
+    let mut relative = Rectangle::from_size(output.geometry().size).as_logical();
     relative.loc -= layer_geo.loc;
     let toplevel_offset = get_popup_toplevel_coords(surface);
     let mut geometry = surface.with_pending_state(|state| state.positioner.get_geometry());

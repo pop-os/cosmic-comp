@@ -257,7 +257,7 @@ impl TiledCorners {
             ),
         };
 
-        Rectangle::from_loc_and_size(loc, size).as_local()
+        Rectangle::new(loc, size).as_local()
     }
 }
 
@@ -463,9 +463,9 @@ impl FloatingLayout {
                             && output_geometry.contains_rect(*geo)
                     })
                     .map(|geometry| {
-                        let mut geometry: Rectangle<u32, Logical> = Rectangle::from_loc_and_size(
-                            (geometry.loc.x as u32, geometry.loc.y as u32),
-                            (geometry.size.w as u32, geometry.size.h as u32),
+                        let mut geometry: Rectangle<u32, Logical> = Rectangle::new(
+                            (geometry.loc.x as u32, geometry.loc.y as u32).into(),
+                            (geometry.size.w as u32, geometry.size.h as u32).into(),
                         );
 
                         // move down
@@ -572,8 +572,7 @@ impl FloatingLayout {
             });
 
         mapped.set_tiled(false);
-        mapped
-            .set_geometry(Rectangle::from_loc_and_size(position, win_geo.size).to_global(&output));
+        mapped.set_geometry(Rectangle::new(position, win_geo.size).to_global(&output));
         mapped.configure();
 
         if let Some(previous_geometry) = prev.or(already_mapped) {
@@ -604,7 +603,7 @@ impl FloatingLayout {
             mapped.set_geometry(geometry.to_global(&output));
             mapped.configure();
         } else {
-            mapped.set_geometry(Rectangle::from_loc_and_size(
+            mapped.set_geometry(Rectangle::new(
                 position.to_global(&output),
                 window_size.as_global(),
             ));
@@ -633,7 +632,7 @@ impl FloatingLayout {
                 if let Some(location) = self.space.element_location(window) {
                     window.set_tiled(false);
                     window.set_geometry(
-                        Rectangle::from_loc_and_size(location, last_size.as_logical())
+                        Rectangle::new(location, last_size.as_logical())
                             .as_local()
                             .to_global(self.space.outputs().next().unwrap()),
                     );
@@ -644,7 +643,7 @@ impl FloatingLayout {
         } else if !window.is_maximized(true) && !window.is_fullscreen(true) {
             if let Some(location) = self.space.element_location(window) {
                 *window.last_geometry.lock().unwrap() = Some(
-                    Rectangle::from_loc_and_size(
+                    Rectangle::new(
                         location,
                         window
                             .pending_size()
