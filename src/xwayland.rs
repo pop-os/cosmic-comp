@@ -474,13 +474,14 @@ impl XwmHandler for State {
 
             if let Some(current_geo) = current_geo {
                 let ssd_height = if window.is_decorated() { 0 } else { SSD_HEIGHT };
-                mapped.set_geometry(Rectangle::from_loc_and_size(
+                mapped.set_geometry(Rectangle::new(
                     current_geo.loc,
                     (
                         w.map(|w| w as i32).unwrap_or(current_geo.size.w),
                         h.map(|h| h as i32 + ssd_height)
                             .unwrap_or(current_geo.size.h),
-                    ),
+                    )
+                        .into(),
                 ))
             } else {
                 let _ = window.configure(None); // ack and force old state

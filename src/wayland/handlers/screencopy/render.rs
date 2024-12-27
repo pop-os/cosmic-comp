@@ -98,8 +98,7 @@ where
             renderer.wait(&sync)?;
 
             let format = get_transparent(format).unwrap_or(format);
-            let mapping = renderer
-                .copy_framebuffer(Rectangle::from_loc_and_size((0, 0), buffer_size), format)?;
+            let mapping = renderer.copy_framebuffer(Rectangle::from_size(buffer_size), format)?;
             let gl_data = renderer.map_texture(&mapping)?;
             assert!((width * height * pixelsize) as usize <= gl_data.len());
 
@@ -496,7 +495,7 @@ pub fn render_window_to_buffer(
                         Transform::Normal,
                         &geometry.size.to_buffer(1, Transform::Normal),
                     );
-                    logical_rect.intersection(Rectangle::from_loc_and_size((0, 0), geometry.size))
+                    logical_rect.intersection(Rectangle::from_size(geometry.size))
                 })
                 .map(DamageElement::new)
                 .map(Into::<WindowCaptureElement<R>>::into),
@@ -733,7 +732,7 @@ pub fn render_cursor_to_buffer(
                 .into_iter()
                 .filter_map(|rect| {
                     let logical_rect = rect.to_logical(1, Transform::Normal, &Size::from((64, 64)));
-                    logical_rect.intersection(Rectangle::from_loc_and_size((0, 0), (64, 64)))
+                    logical_rect.intersection(Rectangle::from_size((64, 64).into()))
                 })
                 .map(DamageElement::new)
                 .map(Into::<WindowCaptureElement<R>>::into),

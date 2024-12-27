@@ -23,7 +23,7 @@ impl<N: Coordinate, Kind> CanTween for EaseSize<N, Kind> {
 
 impl<N: Coordinate, Kind> CanTween for EaseRectangle<N, Kind> {
     fn ease(from: Self, to: Self, time: impl Float) -> Self {
-        EaseRectangle(Rectangle::from_loc_and_size(
+        EaseRectangle(Rectangle::new(
             CanTween::ease(EasePoint(from.0.loc), EasePoint(to.0.loc), time).unwrap(),
             CanTween::ease(EaseSize(from.0.size), EaseSize(to.0.size), time).unwrap(),
         ))
