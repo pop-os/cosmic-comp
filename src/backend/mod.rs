@@ -66,6 +66,24 @@ pub fn init_backend_auto(
             .seats
             .add_seat(initial_seat);
 
+        // TODO
+        if let Some(shader_path) = state
+            .common
+            .config
+            .cosmic_conf
+            .postprocess_shader_path
+            .as_ref()
+        {
+            match std::fs::read_to_string(shader_path) {
+                Ok(shader) => {
+                    state.backend.update_postprocess_shader(Some(&shader));
+                }
+                Err(_) => {
+                    tracing::error!("failed to read shader at path: {}", shader_path.display());
+                }
+            }
+        }
+
         {
             {
                 state
