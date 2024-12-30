@@ -19,6 +19,7 @@ use crate::{
 };
 
 use cosmic::theme::CosmicTheme;
+use cosmic_comp_config::StackBehavior;
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::TilingState;
 use id_tree::Tree;
 use indexmap::IndexSet;
@@ -238,8 +239,9 @@ impl Workspace {
         output: Output,
         tiling_enabled: bool,
         theme: cosmic::Theme,
+        stack_behavior: StackBehavior,
     ) -> Workspace {
-        let tiling_layer = TilingLayout::new(theme.clone(), &output);
+        let tiling_layer = TilingLayout::new(theme.clone(), &output, stack_behavior);
         let floating_layer = FloatingLayout::new(theme, &output);
         let output_name = output.name();
 
