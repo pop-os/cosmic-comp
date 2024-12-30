@@ -731,6 +731,7 @@ pub enum Message {
     Menu,
     TabMenu(usize),
     PotentialTabDragStart(usize),
+    UpdateStackBehavior(StackBehavior),
     Activate(usize),
     Close(usize),
     ScrollForward,
@@ -936,6 +937,9 @@ impl Program for CosmicStackInternal {
                         });
                     }
                 }
+            }
+            Message::UpdateStackBehavior(behavior) => {
+                self.behavior = behavior;
             }
             _ => unreachable!(),
         }

@@ -19,12 +19,14 @@ use cosmic::{
     },
     iced_core::{clipboard::Null as NullClipboard, id::Id, renderer::Style, Color, Length, Pixels},
     iced_runtime::{
+        self,
         program::{Program as IcedProgram, State},
         task::into_stream,
         Action, Debug,
     },
     Theme,
 };
+use cosmic_comp_config::StackBehavior;
 use iced_tiny_skia::{
     graphics::{damage, Viewport},
     Layer,
@@ -67,6 +69,8 @@ use smithay::{
         Transform,
     },
 };
+
+use crate::shell::element::stack::CosmicStackInternal;
 
 static ID: Lazy<Id> = Lazy::new(|| Id::new("Program"));
 
@@ -406,9 +410,15 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
         }
         Vec::new()
     }
+}
 
-    pub fn program_mut(&mut self) -> &mut P {
-        &mut self.state.program_mut().0
+impl IcedElementInternal<CosmicStackInternal> {
+    pub fn update_stack_behavior(&mut self, behavior: &StackBehavior) {
+        self.state.queue_message(
+            <CosmicStackInternal as crate::utils::iced::Program>::Message::UpdateStackBehavior(
+                behavior.clone(),
+            ),
+        );
     }
 }
 

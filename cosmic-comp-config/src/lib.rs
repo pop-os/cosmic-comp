@@ -109,7 +109,7 @@ fn default_repeat_delay() -> u32 {
     600
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub struct StackBehavior {
     pub close_tab_on_middle_click: bool,
 }
