@@ -881,7 +881,7 @@ impl CosmicMapped {
     pub fn update_stack_behavior(&mut self, behavior: &StackBehavior) {
         if let CosmicMappedInternal::Stack(stack) = &mut self.element {
             let mut inner = stack.0 .0.lock().unwrap();
-            inner.program_mut().update_behavior(behavior.clone());
+            inner.update_stack_behavior(behavior);
         }
     }
 }

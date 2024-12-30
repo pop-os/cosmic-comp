@@ -731,6 +731,7 @@ pub enum Message {
     Menu,
     TabMenu(usize),
     PotentialTabDragStart(usize),
+    UpdateStackBehavior(StackBehavior),
     Activate(usize),
     Close(usize),
     ScrollForward,
