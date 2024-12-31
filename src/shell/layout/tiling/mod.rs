@@ -5075,11 +5075,7 @@ fn render_old_tree(
                     .map(|adapted_geo| {
                         Rectangle::new(
                             adapted_geo.loc + offset,
-                            (
-                                (original_geo.size.w as f64 * scale).round() as i32,
-                                (original_geo.size.h as f64 * scale).round() as i32,
-                            )
-                                .into(),
+                            (original_geo.size.to_f64() * scale).to_i32_round(),
                         )
                     })
                     .unwrap_or(*original_geo);
@@ -5643,11 +5639,7 @@ fn render_new_tree(
                         .map(|adapted_geo| {
                             Rectangle::new(
                                 adapted_geo.loc + offset,
-                                (
-                                    (original_geo.size.w as f64 * scale).round() as i32,
-                                    (original_geo.size.h as f64 * scale).round() as i32,
-                                )
-                                    .into(),
+                                (original_geo.size.to_f64() * scale).to_i32_round(),
                             )
                         })
                         .unwrap_or(*original_geo),
