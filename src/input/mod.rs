@@ -171,7 +171,8 @@ impl State {
             InputEvent::DeviceAdded { device } => {
                 let shell = self.common.shell.read().unwrap();
                 let seat = shell.seats.last_active();
-                seat.devices().add_device(&device);
+                let led_state = seat.get_keyboard().unwrap().led_state();
+                seat.devices().add_device(&device, led_state);
                 if device.has_capability(DeviceCapability::TabletTool) {
                     seat.tablet_seat().add_tablet::<Self>(
                         &self.common.display_handle,
