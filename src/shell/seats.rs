@@ -83,7 +83,11 @@ impl Seats {
 }
 
 impl Devices {
-    pub fn add_device<D: Device + 'static>(&self, device: &D) -> Vec<DeviceCapability> {
+    pub fn add_device<D: Device + 'static>(
+        &self,
+        device: &D,
+        led_state: LedState,
+    ) -> Vec<DeviceCapability> {
         let id = device.id();
         let mut map = self.capabilities.borrow_mut();
         let caps = [
@@ -104,7 +108,9 @@ impl Devices {
 
         if device.has_capability(DeviceCapability::Keyboard) {
             if let Some(device) = <dyn Any>::downcast_ref::<InputDevice>(device) {
-                self.keyboards.borrow_mut().push(device.clone());
+                let mut device = device.clone();
+                device.led_update(led_state.into());
+                self.keyboards.borrow_mut().push(device);
             }
         }
 
