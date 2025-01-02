@@ -253,6 +253,7 @@ pub enum BackendData {
 pub struct SurfaceDmabufFeedback {
     pub render_feedback: DmabufFeedback,
     pub scanout_feedback: DmabufFeedback,
+    pub primary_scanout_feedback: DmabufFeedback,
 }
 
 #[derive(Debug)]
@@ -800,7 +801,7 @@ impl Common {
                                 surface,
                                 render_element_states,
                                 &feedback.render_feedback,
-                                &feedback.scanout_feedback,
+                                &feedback.primary_scanout_feedback,
                             )
                         },
                     )

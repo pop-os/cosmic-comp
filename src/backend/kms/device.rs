@@ -13,8 +13,9 @@ use libc::dev_t;
 use smithay::{
     backend::{
         allocator::{
+            format::FormatSet,
             gbm::{GbmAllocator, GbmDevice},
-            Fourcc,
+            Format, Fourcc,
         },
         drm::{
             compositor::FrameFlags, output::DrmOutputManager, DrmDevice, DrmDeviceFd, DrmEvent,
@@ -612,25 +613,31 @@ impl Device {
         }
     }
 
-    pub fn allow_overlay_scanout(
+    fn allow_frame_flags(
         &mut self,
         flag: bool,
+        flags: FrameFlags,
         renderer: &mut GlMultiRenderer,
         clock: &Clock<Monotonic>,
         shell: &Arc<RwLock<Shell>>,
+        startup_done: bool,
     ) -> Result<()> {
         for surface in self.surfaces.values_mut() {
-            surface.allow_overlay_scanout(flag);
+            surface.allow_frame_flags(flag, flags);
         }
 
         if !flag {
             let now = clock.now();
 
-            let output_map = self
+            let mut output_map = self
                 .surfaces
                 .iter()
+                .filter(|(_, s)| s.is_active())
                 .map(|(crtc, surface)| (*crtc, surface.output.clone()))
                 .collect::<HashMap<_, _>>();
+            if !startup_done {
+                output_map.clear();
+            }
 
             self.drm.with_compositors::<Result<()>>(|map| {
                 for (crtc, compositor) in map.iter() {
@@ -661,6 +668,65 @@ impl Device {
                 Ok(())
             })?;
         }
+
+        Ok(())
+    }
+
+    pub fn allow_overlay_scanout(
+        &mut self,
+        flag: bool,
+        renderer: &mut GlMultiRenderer,
+        clock: &Clock<Monotonic>,
+        shell: &Arc<RwLock<Shell>>,
+    ) -> Result<()> {
+        self.allow_frame_flags(
+            flag,
+            FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT,
+            renderer,
+            clock,
+            shell,
+            true,
+        )
+    }
+
+    pub fn allow_primary_scanout_any(
+        &mut self,
+        flag: bool,
+        renderer: &mut GlMultiRenderer,
+        clock: &Clock<Monotonic>,
+        shell: &Arc<RwLock<Shell>>,
+        startup_done: bool,
+    ) -> Result<()> {
+        self.allow_frame_flags(
+            flag,
+            FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY,
+            renderer,
+            clock,
+            shell,
+            startup_done,
+        )?;
+
+        self.drm.with_compositors(|comps| {
+            for (crtc, comp) in comps {
+                let Some(surface) = self.surfaces.get_mut(crtc) else {
+                    continue;
+                };
+                let comp = comp.lock().unwrap();
+                surface.primary_plane_formats = if flag {
+                    comp.surface().plane_info().formats.clone()
+                } else {
+                    // This certainly isn't perfect and might still miss the happy path,
+                    // but it is surprisingly difficult to hack an api into smithay,
+                    // to get the actual framebuffer format
+                    let code = comp.format();
+                    FormatSet::from_iter(comp.modifiers().iter().map(|mo| Format {
+                        code,
+                        modifier: *mo,
+                    }))
+                };
+                surface.feedback.clear();
+            }
+        });
 
         Ok(())
     }
