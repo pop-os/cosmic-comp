@@ -8,6 +8,7 @@ const FRAME_TIME_WINDOW: usize = 3;
 
 pub struct Timings {
     refresh_interval_ns: Option<NonZeroU64>,
+    min_refresh_interval_ns: Option<NonZeroU64>,
     vrr: bool,
 
     pub pending_frame: Option<PendingFrame>,
@@ -44,8 +45,19 @@ impl Frame {
 impl Timings {
     const WINDOW_SIZE: usize = 360;
 
-    pub fn new(refresh_interval: Option<Duration>, vrr: bool) -> Self {
+    pub fn new(
+        refresh_interval: Option<Duration>,
+        min_interval: Option<Duration>,
+        vrr: bool,
+    ) -> Self {
         let refresh_interval_ns = if let Some(interval) = &refresh_interval {
+            assert_eq!(interval.as_secs(), 0);
+            Some(NonZeroU64::new(interval.subsec_nanos().into()).unwrap())
+        } else {
+            None
+        };
+
+        let min_refresh_interval_ns = if let Some(interval) = &min_interval {
             assert_eq!(interval.as_secs(), 0);
             Some(NonZeroU64::new(interval.subsec_nanos().into()).unwrap())
         } else {
@@ -54,6 +66,7 @@ impl Timings {
 
         Self {
             refresh_interval_ns,
+            min_refresh_interval_ns,
             vrr,
 
             pending_frame: None,
@@ -74,6 +87,12 @@ impl Timings {
             .and_then(NonZeroU64::new);
 
         self.previous_frames.clear();
+    }
+
+    pub fn set_min_refresh_interval(&mut self, min_interval: Option<Duration>) {
+        self.min_refresh_interval_ns = min_interval
+            .map(|duration| duration.subsec_nanos() as u64)
+            .and_then(NonZeroU64::new);
     }
 
     pub fn set_vrr(&mut self, vrr: bool) {
@@ -253,6 +272,28 @@ impl Timings {
         } else {
             last_presentation_time + Duration::from_nanos(to_next_ns) - now
         }
+    }
+
+    pub fn past_min_presentation_time(&self, clock: &Clock<Monotonic>) -> bool {
+        let now: Duration = clock.now().into();
+        let Some(refresh_interval_ns) = self.min_refresh_interval_ns else {
+            return true;
+        };
+        let Some(last_presentation_time): Option<Duration> = self
+            .previous_frames
+            .back()
+            .map(|frame| frame.presentation_presented.into())
+        else {
+            return true;
+        };
+
+        let refresh_interval_ns = refresh_interval_ns.get();
+        if now <= last_presentation_time {
+            return false;
+        }
+
+        let next = last_presentation_time + Duration::from_nanos(refresh_interval_ns);
+        now >= next
     }
 
     pub fn next_render_time(&self, clock: &Clock<Monotonic>) -> Duration {
