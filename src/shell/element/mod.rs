@@ -871,7 +871,7 @@ impl CosmicMapped {
         match &self.element {
             CosmicMappedInternal::Window(w) => (!w.surface().is_decorated(pending))
                 .then(|| crate::shell::element::window::SSD_HEIGHT),
-            CosmicMappedInternal::Stack(s) => Some(crate::shell::element::stack::TAB_HEIGHT),
+            CosmicMappedInternal::Stack(_) => Some(crate::shell::element::stack::TAB_HEIGHT),
             _ => unreachable!(),
         }
     }
