@@ -27,7 +27,9 @@ use smithay::{
             Fourcc,
         },
         drm::{
-            compositor::{BlitFrameResultError, DrmCompositor, FrameError, PrimaryPlaneElement},
+            compositor::{
+                BlitFrameResultError, DrmCompositor, FrameError, FrameFlags, PrimaryPlaneElement,
+            },
             DrmDeviceFd, DrmEventMetadata, DrmEventTime, DrmNode, DrmSurface, VrrSupport,
         },
         egl::EGLContext,
@@ -127,6 +129,7 @@ pub struct SurfaceThreadState {
     target_node: DrmNode,
     active: Arc<AtomicBool>,
     vrr_mode: AdaptiveSync,
+    frame_flags: FrameFlags,
     compositor: Option<GbmDrmCompositor>,
 
     state: QueueState,
@@ -533,6 +536,7 @@ fn surface_thread(
         target_node,
         active,
         compositor: None,
+        frame_flags: FrameFlags::DEFAULT,
         vrr_mode: AdaptiveSync::Disabled,
 
         state: QueueState::Idle,
@@ -706,7 +710,7 @@ impl SurfaceThreadState {
                 GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
             ),
             gbm.clone(),
-            &[
+            [
                 Fourcc::Abgr2101010,
                 Fourcc::Argb2101010,
                 Fourcc::Abgr8888,
@@ -716,9 +720,9 @@ impl SurfaceThreadState {
             cursor_size,
             Some(gbm),
         ) {
-            Ok(mut compositor) => {
+            Ok(compositor) => {
                 if crate::utils::env::bool_var("COSMIC_DISABLE_DIRECT_SCANOUT").unwrap_or(false) {
-                    compositor.use_direct_scanout(false);
+                    self.frame_flags.remove(FrameFlags::ALLOW_SCANOUT);
                 }
                 self.active.store(true, Ordering::SeqCst);
                 self.compositor = Some(compositor);
@@ -1171,7 +1175,12 @@ impl SurfaceThreadState {
             if let Err(err) = compositor.use_vrr(false) {
                 warn!("Unable to set adaptive VRR state: {}", err);
             }
-            compositor.render_frame(&mut renderer, &elements, [0.0, 0.0, 0.0, 1.0])
+            compositor.render_frame(
+                &mut renderer,
+                &elements,
+                [0.0, 0.0, 0.0, 1.0],
+                FrameFlags::DEFAULT,
+            )
         } else {
             if let Err(err) = compositor.use_vrr(vrr) {
                 warn!("Unable to set adaptive VRR state: {}", err);
@@ -1180,6 +1189,7 @@ impl SurfaceThreadState {
                 &mut renderer,
                 &elements,
                 CLEAR_COLOR, // TODO use a theme neutral color
+                FrameFlags::DEFAULT,
             )
         };
         self.timings.draw_done(&self.clock);
@@ -1234,10 +1244,10 @@ impl SurfaceThreadState {
                                 if let Ok(dmabuf) = get_dmabuf(&buffer) {
                                     renderer
                                         .bind(dmabuf.clone())
-                                        .map_err(RenderError::<GlMultiRenderer>::Rendering)?;
+                                        .map_err(RenderError::<<GlMultiRenderer as Renderer>::Error>::Rendering)?;
                                 } else {
                                     let size = buffer_dimensions(&buffer).ok_or(RenderError::<
-                                        GlMultiRenderer,
+                                        <GlMultiRenderer as Renderer>::Error,
                                     >::Rendering(
                                         MultiError::ImportFailed,
                                     ))?;
@@ -1251,10 +1261,10 @@ impl SurfaceThreadState {
                                             format,
                                             size,
                                         )
-                                        .map_err(RenderError::<GlMultiRenderer>::Rendering)?;
+                                        .map_err(RenderError::<<GlMultiRenderer as Renderer>::Error>::Rendering)?;
                                     renderer
                                         .bind(render_buffer)
-                                        .map_err(RenderError::<GlMultiRenderer>::Rendering)?;
+                                        .map_err(RenderError::<<GlMultiRenderer as Renderer>::Error>::Rendering)?;
                                 }
 
                                 let (output_size, output_scale, output_transform) = (
@@ -1296,14 +1306,16 @@ impl SurfaceThreadState {
                                         filter,
                                     )
                                     .map_err(|err| match err {
-                                        BlitFrameResultError::Rendering(err) => {
-                                            RenderError::<GlMultiRenderer>::Rendering(err)
-                                        }
-                                        BlitFrameResultError::Export(_) => {
-                                            RenderError::<GlMultiRenderer>::Rendering(
-                                                MultiError::DeviceMissing,
-                                            )
-                                        }
+                                        BlitFrameResultError::Rendering(err) => RenderError::<
+                                            <GlMultiRenderer as Renderer>::Error,
+                                        >::Rendering(
+                                            err
+                                        ),
+                                        BlitFrameResultError::Export(_) => RenderError::<
+                                            <GlMultiRenderer as Renderer>::Error,
+                                        >::Rendering(
+                                            MultiError::DeviceMissing,
+                                        ),
                                     }) {
                                     Ok(new_sync) => {
                                         sync = new_sync;

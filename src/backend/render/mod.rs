@@ -511,7 +511,7 @@ pub fn workspace_elements<R>(
     cursor_mode: CursorMode,
     element_filter: ElementFilter,
     _fps: Option<(&EguiState, &Timings)>,
-) -> Result<Vec<CosmicElement<R>>, RenderError<R>>
+) -> Result<Vec<CosmicElement<R>>, RenderError<<R as Renderer>::Error>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: Send + Clone + 'static,
@@ -867,7 +867,7 @@ pub fn render_output<'d, R, Target, OffTarget>(
     now: Time<Monotonic>,
     output: &Output,
     cursor_mode: CursorMode,
-) -> Result<RenderOutputResult<'d>, RenderError<R>>
+) -> Result<RenderOutputResult<'d>, RenderError<<R as Renderer>::Error>>
 where
     R: Renderer
         + ImportAll
@@ -1026,7 +1026,7 @@ pub fn render_workspace<'d, R, Target, OffTarget>(
     current: (WorkspaceHandle, usize),
     cursor_mode: CursorMode,
     element_filter: ElementFilter,
-) -> Result<(RenderOutputResult<'d>, Vec<CosmicElement<R>>), RenderError<R>>
+) -> Result<(RenderOutputResult<'d>, Vec<CosmicElement<R>>), RenderError<<R as Renderer>::Error>>
 where
     R: Renderer
         + ImportAll
