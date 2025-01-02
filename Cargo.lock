@@ -4688,7 +4688,7 @@ checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/smithay//smithay?rev=14c7e43#14c7e43255968e2d979a19e1fd9bd694e5a9726e"
+source = "git+https://github.com/smithay//smithay?rev=9fbc9fb#9fbc9fbbfe04c94e6716b89080145d061f66031f"
 dependencies = [
  "appendlist",
  "ash",
@@ -4711,7 +4711,6 @@ dependencies = [
  "libc",
  "libloading",
  "libseat",
- "once_cell",
  "pixman",
  "pkg-config",
  "profiling",
