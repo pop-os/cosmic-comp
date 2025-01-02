@@ -26,12 +26,31 @@ impl DrmLeaseHandler for State {
         node: DrmNode,
         request: DrmLeaseRequest,
     ) -> Result<DrmLeaseBuilder, LeaseRejected> {
-        let backend = self
-            .backend
-            .kms()
+        let kms = self.backend.kms();
+        let backend = kms
             .drm_devices
             .get_mut(&node)
             .ok_or(LeaseRejected::default())?;
+        let mut renderer = match kms.api.single_renderer(&backend.render_node) {
+            Ok(renderer) => renderer,
+            Err(err) => {
+                tracing::warn!(
+                    ?err,
+                    "Failed to create renderer to disable direct scanout, denying lease"
+                );
+                return Err(LeaseRejected::default());
+            }
+        };
+        if let Err(err) = backend.allow_overlay_scanout(
+            false,
+            &mut renderer,
+            &self.common.clock,
+            &self.common.shell,
+        ) {
+            tracing::warn!(?err, "Failed to disable direct scanout");
+            return Err(LeaseRejected::default());
+        }
+
         let mut builder = DrmLeaseBuilder::new(backend.drm.device());
         for conn in request.connectors {
             if let Some((_, crtc)) = backend
@@ -87,8 +106,27 @@ impl DrmLeaseHandler for State {
     }
 
     fn lease_destroyed(&mut self, node: DrmNode, lease: u32) {
-        if let Some(backend) = self.backend.kms().drm_devices.get_mut(&node) {
+        let kms = self.backend.kms();
+        if let Some(backend) = kms.drm_devices.get_mut(&node) {
             backend.active_leases.retain(|l| l.id() != lease);
+
+            if backend.active_leases.is_empty() {
+                let mut renderer = match kms.api.single_renderer(&backend.render_node) {
+                    Ok(renderer) => renderer,
+                    Err(err) => {
+                        tracing::warn!(?err, "Failed to create renderer to enable direct scanout.");
+                        return;
+                    }
+                };
+                if let Err(err) = backend.allow_overlay_scanout(
+                    true,
+                    &mut renderer,
+                    &self.common.clock,
+                    &self.common.shell,
+                ) {
+                    tracing::warn!(?err, "Failed to enable direct scanout");
+                }
+            }
         }
     }
 }

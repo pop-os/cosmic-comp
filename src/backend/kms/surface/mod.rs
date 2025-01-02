@@ -423,6 +423,14 @@ impl Surface {
         Ok(true)
     }
 
+    pub fn allow_overlay_scanout(&mut self, flag: bool) {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let _ = self
+            .thread_command
+            .send(ThreadCommand::AllowOverlayScanout(flag, tx));
+        let _ = rx.recv();
+    }
+
     pub fn suspend(&mut self) {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let _ = self.thread_command.send(ThreadCommand::Suspend(tx));
@@ -606,6 +614,23 @@ fn surface_thread(
                         }
                     };
                 }
+            }
+            Event::Msg(ThreadCommand::AllowOverlayScanout(flag, tx)) => {
+                if !crate::utils::env::bool_var("COSMIC_DISABLE_DIRECT_SCANOUT").unwrap_or(false)
+                    && !crate::utils::env::bool_var("COSMIC_DISABLE_OVERLAY_SCANOUT")
+                        .unwrap_or(false)
+                {
+                    if flag {
+                        state
+                            .frame_flags
+                            .insert(FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT);
+                    } else {
+                        state
+                            .frame_flags
+                            .remove(FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT);
+                    }
+                }
+                let _ = tx.send(());
             }
             Event::Closed | Event::Msg(ThreadCommand::End) => {
                 signal.stop();
