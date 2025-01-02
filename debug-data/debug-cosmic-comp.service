@@ -1,0 +1,12 @@
+[Unit]
+Description=Debug Cosmic wayland compositor
+BindsTo=cosmic-session.target
+Wants=cosmic-session-pre.target
+After=cosmic-session-pre.target
+Before=cosmic-session.target
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/debug-cosmic-comp
+Restart=never
+ExecStopPost=/usr/bin/systemctl --user unset-environment DISPLAY WAYLAND_DISPLAY
