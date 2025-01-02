@@ -531,7 +531,7 @@ fn surface_thread(
         vrr_mode: AdaptiveSync::Disabled,
 
         state: QueueState::Idle,
-        timings: Timings::new(None, false),
+        timings: Timings::new(None, None, false),
         frame_callback_seq: 0,
         thread_sender,
 
@@ -667,11 +667,28 @@ impl SurfaceThreadState {
     }
 
     fn resume(&mut self, compositor: GbmDrmOutput) -> Result<()> {
-        let mode = compositor.with_compositor(|c| c.surface().pending_mode());
-        self.timings
-            .set_refresh_interval(Some(Duration::from_secs_f64(
-                1_000.0 / drm_helpers::calculate_refresh_rate(mode) as f64,
-            )));
+        let (mode, min_hz) = compositor.with_compositor(|c| {
+            (
+                c.surface().pending_mode(),
+                drm_helpers::get_minimum_refresh_rate(
+                    c.surface(),
+                    c.pending_connectors().into_iter().next().unwrap(),
+                )
+                .ok()
+                .flatten(),
+            )
+        });
+        let interval =
+            Duration::from_secs_f64(1_000. / drm_helpers::calculate_refresh_rate(mode) as f64);
+        self.timings.set_refresh_interval(Some(interval));
+
+        let min_min_refresh_interval = Duration::from_secs_f64(1. / 30.); // 30Hz
+        self.timings.set_min_refresh_interval(Some(
+            min_hz
+                .map(|min| Duration::from_secs_f64(1. / min as f64))
+                .unwrap_or(min_min_refresh_interval) // alternatively use 30Hz
+                .max(min_min_refresh_interval),
+        ));
 
         if crate::utils::env::bool_var("COSMIC_DISABLE_DIRECT_SCANOUT").unwrap_or(false) {
             self.frame_flags.remove(FrameFlags::ALLOW_SCANOUT);
@@ -799,7 +816,7 @@ impl SurfaceThreadState {
         }
     }
 
-    fn on_estimated_vblank(&mut self) {
+    fn on_estimated_vblank(&mut self, force: bool) {
         match mem::replace(&mut self.state, QueueState::Idle) {
             QueueState::Idle => unreachable!(),
             QueueState::Queued(_) => unreachable!(),
@@ -814,7 +831,7 @@ impl SurfaceThreadState {
 
         self.frame_callback_seq = self.frame_callback_seq.wrapping_add(1);
 
-        if self.shell.read().unwrap().animations_going() {
+        if force || self.shell.read().unwrap().animations_going() {
             self.queue_redraw(false);
         } else {
             self.send_frame_callbacks();
@@ -924,10 +941,14 @@ impl SurfaceThreadState {
             _ => false,
         };
 
-        if self.vrr_mode == AdaptiveSync::Enabled {
+        let has_active_fullscreen = {
             let shell = self.shell.read().unwrap();
             let output = self.mirroring.as_ref().unwrap_or(&self.output);
-            vrr = shell.workspaces.active(output).1.get_fullscreen().is_some();
+            shell.workspaces.active(output).1.get_fullscreen().is_some()
+        };
+
+        if self.vrr_mode == AdaptiveSync::Enabled {
+            vrr = has_active_fullscreen;
         }
 
         let mut elements = output_elements(
@@ -945,6 +966,14 @@ impl SurfaceThreadState {
         .map_err(|err| {
             anyhow::format_err!("Failed to accumulate elements for rendering: {:?}", err)
         })?;
+        let additional_frame_flags = if vrr
+            && has_active_fullscreen
+            && !self.timings.past_min_presentation_time(&self.clock)
+        {
+            FrameFlags::SKIP_CURSOR_ONLY_UPDATES
+        } else {
+            FrameFlags::empty()
+        };
         self.timings.set_vrr(vrr);
         self.timings.elements_done(&self.clock);
 
@@ -1108,7 +1137,7 @@ impl SurfaceThreadState {
                 &mut renderer,
                 &elements,
                 [0.0, 0.0, 0.0, 1.0],
-                self.frame_flags,
+                self.frame_flags.union(additional_frame_flags),
             )
         } else {
             if let Err(err) = compositor.with_compositor(|c| c.use_vrr(vrr)) {
@@ -1118,7 +1147,7 @@ impl SurfaceThreadState {
                 &mut renderer,
                 &elements,
                 CLEAR_COLOR, // TODO use a theme neutral color
-                self.frame_flags,
+                self.frame_flags.union(additional_frame_flags),
             )
         };
         self.timings.draw_done(&self.clock);
@@ -1321,7 +1350,12 @@ impl SurfaceThreadState {
                                 self.send_frame_callbacks();
                             }
                         } else {
-                            self.queue_estimated_vblank(estimated_presentation);
+                            self.queue_estimated_vblank(
+                                estimated_presentation,
+                                // Make sure we redraw to reevaluate, if we intentionally missed content
+                                additional_frame_flags
+                                    .contains(FrameFlags::SKIP_CURSOR_ONLY_UPDATES),
+                            );
                         }
                     }
                     Err(err) => {
@@ -1348,7 +1382,7 @@ impl SurfaceThreadState {
         Ok(())
     }
 
-    fn queue_estimated_vblank(&mut self, target_presentation_time: Duration) {
+    fn queue_estimated_vblank(&mut self, target_presentation_time: Duration, force: bool) {
         match mem::take(&mut self.state) {
             QueueState::Idle => unreachable!(),
             QueueState::Queued(_) => (),
@@ -1378,7 +1412,7 @@ impl SurfaceThreadState {
         let token = self
             .loop_handle
             .insert_source(timer, move |_, _, data| {
-                data.on_estimated_vblank();
+                data.on_estimated_vblank(force);
                 TimeoutAction::Drop
             })
             .unwrap();

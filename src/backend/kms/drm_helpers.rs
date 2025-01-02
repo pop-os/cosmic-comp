@@ -239,6 +239,26 @@ pub fn calculate_refresh_rate(mode: Mode) -> u32 {
     refresh as u32
 }
 
+pub fn get_minimum_refresh_rate(
+    device: &impl ControlDevice,
+    connector: connector::Handle,
+) -> Result<Option<u32>> {
+    let info = edid_info(device, connector)?;
+    let edid = info.edid().context("EDID lacking into")?;
+    for descriptor in edid.display_descriptors() {
+        if descriptor.tag() == DisplayDescriptorTag::RangeLimits {
+            return Ok(Some(
+                descriptor
+                    .range_limits()
+                    .context("Invalid range limits descriptor")?
+                    .min_vert_rate_hz as u32,
+            ));
+        }
+    }
+
+    Ok(None)
+}
+
 pub fn get_max_bpc(
     dev: &impl ControlDevice,
     conn: connector::Handle,
