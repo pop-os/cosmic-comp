@@ -1,28 +1,40 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
+    backend::render::{output_elements, CursorMode, GlMultiRenderer, CLEAR_COLOR},
     config::{AdaptiveSync, OutputConfig, OutputState},
     shell::Shell,
     utils::prelude::*,
+    wayland::protocols::screencopy::Frame as ScreencopyFrame,
 };
 
 use anyhow::{Context, Result};
 use libc::dev_t;
 use smithay::{
     backend::{
-        allocator::gbm::GbmDevice,
-        drm::{DrmDevice, DrmDeviceFd, DrmEvent, DrmNode},
+        allocator::{
+            gbm::{GbmAllocator, GbmDevice},
+            Fourcc,
+        },
+        drm::{
+            compositor::FrameFlags, output::DrmOutputManager, DrmDevice, DrmDeviceFd, DrmEvent,
+            DrmNode,
+        },
         egl::{context::ContextPriority, EGLContext, EGLDevice, EGLDisplay},
         session::Session,
     },
+    desktop::utils::OutputPresentationFeedback,
     output::{Mode as OutputMode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
         calloop::{LoopHandle, RegistrationToken},
         drm::control::{connector, crtc, Device as ControlDevice, ModeTypeFlags},
+        gbm::BufferObjectFlags as GbmBufferFlags,
         rustix::fs::OFlags,
         wayland_server::{protocol::wl_buffer::WlBuffer, DisplayHandle, Weak},
     },
-    utils::{DevPath, DeviceFd, Point, Transform},
+    utils::{
+        Buffer as BufferCoords, Clock, DevPath, DeviceFd, Monotonic, Point, Rectangle, Transform,
+    },
     wayland::drm_lease::{DrmLease, DrmLeaseState},
 };
 use tracing::{error, info, warn};
@@ -32,7 +44,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     path::{Path, PathBuf},
-    sync::{atomic::AtomicBool, Arc, RwLock},
+    sync::{atomic::AtomicBool, mpsc::Receiver, Arc, RwLock},
 };
 
 use super::{drm_helpers, socket::Socket, surface::Surface};
@@ -44,6 +56,16 @@ pub struct EGLInternals {
     pub context: EGLContext,
 }
 
+pub type GbmDrmOutputManager = DrmOutputManager<
+    GbmAllocator<DrmDeviceFd>,
+    GbmDevice<DrmDeviceFd>,
+    Option<(
+        OutputPresentationFeedback,
+        Receiver<(ScreencopyFrame, Vec<Rectangle<i32, BufferCoords>>)>,
+    )>,
+    DrmDeviceFd,
+>;
+
 pub struct Device {
     pub dev_node: DrmNode,
     pub render_node: DrmNode,
@@ -51,8 +73,8 @@ pub struct Device {
 
     pub outputs: HashMap<connector::Handle, Output>,
     pub surfaces: HashMap<crtc::Handle, Surface>,
+    pub drm: GbmDrmOutputManager,
     pub gbm: GbmDevice<DrmDeviceFd>,
-    pub drm: DrmDevice,
 
     supports_atomic: bool,
 
@@ -72,8 +94,7 @@ impl fmt::Debug for Device {
             .field("render_node", &self.render_node)
             .field("outputs", &self.outputs)
             .field("surfaces", &self.surfaces)
-            .field("drm", &self.drm)
-            .field("gbm", &self.gbm)
+            .field("drm", &"..")
             .field("egl", &self.egl)
             .field("supports_atomic", &self.supports_atomic)
             .field("leased_connectors", &self.leased_connectors)
@@ -190,6 +211,23 @@ impl State {
             }
         };
 
+        let drm = GbmDrmOutputManager::new(
+            drm,
+            GbmAllocator::new(
+                gbm.clone(),
+                GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
+            ),
+            gbm.clone(),
+            Some(gbm.clone()),
+            [
+                Fourcc::Abgr2101010,
+                Fourcc::Argb2101010,
+                Fourcc::Abgr8888,
+                Fourcc::Argb8888,
+            ],
+            render_formats,
+        );
+
         let mut device = Device {
             dev_node: drm_node,
             render_node,
@@ -197,8 +235,8 @@ impl State {
 
             outputs: HashMap::new(),
             surfaces: HashMap::new(),
-            gbm: gbm.clone(),
             drm,
+            gbm,
 
             supports_atomic,
 
@@ -264,6 +302,7 @@ impl State {
             &mut self.common.workspace_state.update(),
             &self.common.xdg_activation_state,
             self.common.startup_done.clone(),
+            &self.common.clock,
         );
 
         self.backend.kms().refresh_used_devices()?;
@@ -364,6 +403,7 @@ impl State {
                 &mut self.common.workspace_state.update(),
                 &self.common.xdg_activation_state,
                 self.common.startup_done.clone(),
+                &self.common.clock,
             );
             // Don't remove the outputs, before potentially new ones have been initialized.
             // reading a new config means outputs might become enabled, that were previously disabled.
@@ -417,6 +457,7 @@ impl State {
                 &mut self.common.workspace_state.update(),
                 &self.common.xdg_activation_state,
                 self.common.startup_done.clone(),
+                &self.common.clock,
             );
             self.common.refresh();
         } else {
@@ -435,7 +476,8 @@ pub struct OutputChanges {
 impl Device {
     pub fn enumerate_surfaces(&mut self) -> Result<OutputChanges> {
         // enumerate our outputs
-        let config = drm_helpers::display_configuration(&mut self.drm, self.supports_atomic)?;
+        let config =
+            drm_helpers::display_configuration(self.drm.device_mut(), self.supports_atomic)?;
 
         let surfaces = self
             .surfaces
@@ -486,19 +528,20 @@ impl Device {
             .get(&conn)
             .cloned()
             .map(|output| Ok(output))
-            .unwrap_or_else(|| create_output_for_conn(&mut self.drm, conn))
+            .unwrap_or_else(|| create_output_for_conn(self.drm.device_mut(), conn))
             .context("Failed to create `Output`")?;
 
-        let non_desktop = match drm_helpers::get_property_val(&self.drm, conn, "non-desktop") {
-            Ok((val_type, value)) => val_type.convert_value(value).as_boolean().unwrap(),
-            Err(err) => {
-                warn!(
-                    ?err,
-                    "Failed to determine if connector is meant desktop usage, assuming so."
-                );
-                false
-            }
-        };
+        let non_desktop =
+            match drm_helpers::get_property_val(self.drm.device_mut(), conn, "non-desktop") {
+                Ok((val_type, value)) => val_type.convert_value(value).as_boolean().unwrap(),
+                Err(err) => {
+                    warn!(
+                        ?err,
+                        "Failed to determine if connector is meant desktop usage, assuming so."
+                    );
+                    false
+                }
+            };
 
         if non_desktop {
             if let Some(crtc) = maybe_crtc {
@@ -528,7 +571,7 @@ impl Device {
                 .user_data()
                 .insert_if_missing(|| RefCell::new(OutputConfig::default()));
 
-            populate_modes(&mut self.drm, &output, conn, position)
+            populate_modes(self.drm.device_mut(), &output, conn, position)
                 .with_context(|| "Failed to enumerate connector modes")?;
 
             let has_surface = if let Some(crtc) = maybe_crtc {
