@@ -140,7 +140,7 @@ pub fn render_session<F, R>(
     frame: Frame,
     transform: Transform,
     render_fn: F,
-) -> Result<Option<(Frame, Vec<Rectangle<i32, BufferCoords>>)>, DTError<R>>
+) -> Result<Option<(Frame, Vec<Rectangle<i32, BufferCoords>>)>, DTError<<R as Renderer>::Error>>
 where
     R: ExportMem,
     <R as Renderer>::Error: FromGlesError,
@@ -150,7 +150,7 @@ where
         &'d mut OutputDamageTracker,
         usize,
         Vec<Rectangle<i32, BufferCoords>>,
-    ) -> Result<RenderOutputResult<'d>, DTError<R>>,
+    ) -> Result<RenderOutputResult<'d>, DTError<<R as Renderer>::Error>>,
 {
     let mut session_damage_tracking = session.lock().unwrap();
 
@@ -225,7 +225,7 @@ pub fn render_workspace_to_buffer(
         common: &mut Common,
         output: &Output,
         handle: (WorkspaceHandle, usize),
-    ) -> Result<RenderOutputResult<'d>, DTError<R>>
+    ) -> Result<RenderOutputResult<'d>, DTError<<R as Renderer>::Error>>
     where
         R: Renderer
             + ImportAll
@@ -464,7 +464,7 @@ pub fn render_window_to_buffer(
         common: &mut Common,
         window: &CosmicSurface,
         geometry: Rectangle<i32, Logical>,
-    ) -> Result<RenderOutputResult<'d>, DTError<R>>
+    ) -> Result<RenderOutputResult<'d>, DTError<<R as Renderer>::Error>>
     where
         R: Renderer
             + ImportAll
@@ -700,7 +700,7 @@ pub fn render_cursor_to_buffer(
         additional_damage: Vec<Rectangle<i32, BufferCoords>>,
         common: &mut Common,
         seat: &Seat<State>,
-    ) -> Result<RenderOutputResult<'d>, DTError<R>>
+    ) -> Result<RenderOutputResult<'d>, DTError<<R as Renderer>::Error>>
     where
         R: Renderer
             + ImportAll
