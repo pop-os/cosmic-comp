@@ -44,7 +44,10 @@ use std::{
     borrow::BorrowMut,
     collections::{HashMap, HashSet},
     path::Path,
-    sync::{atomic::AtomicBool, Arc, RwLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, RwLock,
+    },
 };
 
 mod device;
@@ -646,16 +649,44 @@ impl KmsState {
                 .context("Failed to enable devices")?;
         }
 
+        let startup_done = startup_done.load(Ordering::SeqCst);
         let mut all_outputs = Vec::new();
         for device in self.drm_devices.values_mut() {
-            // reconfigure existing
             let now = clock.now();
-            let output_map = device
+            let mut output_map = device
                 .surfaces
                 .iter()
+                .filter(|(_, s)| s.is_active())
                 .map(|(crtc, surface)| (*crtc, surface.output.clone()))
                 .collect::<HashMap<_, _>>();
+            if !startup_done {
+                output_map.clear();
+            }
 
+            // configure primary scanout allowance
+            if !device.surfaces.is_empty() {
+                let mut renderer = self
+                    .api
+                    .single_renderer(&device.render_node)
+                    .with_context(|| "Failed to create renderer")?;
+
+                device
+                    .allow_primary_scanout_any(
+                        device
+                            .surfaces
+                            .values()
+                            .filter(|s| s.output.is_enabled())
+                            .count()
+                            <= 1,
+                        &mut renderer,
+                        clock,
+                        &shell,
+                        startup_done,
+                    )
+                    .context("Failed to switch primary-plane scanout flags")?;
+            }
+
+            // reconfigure existing
             for (crtc, surface) in device.surfaces.iter_mut() {
                 let output_config = surface.output.config();
 

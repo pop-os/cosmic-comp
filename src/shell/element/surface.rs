@@ -552,13 +552,19 @@ impl CosmicSurface {
     ) where
         F1: FnMut(&WlSurface, &SurfaceData) -> Option<Output> + Copy,
     {
+        let is_fullscreen = self.is_fullscreen(false);
+
         self.0
             .send_dmabuf_feedback(output, primary_scan_out_output, |surface, _| {
                 select_dmabuf_feedback(
                     surface,
                     render_element_states,
                     &feedback.render_feedback,
-                    &feedback.scanout_feedback,
+                    if is_fullscreen {
+                        &feedback.primary_scanout_feedback
+                    } else {
+                        &feedback.scanout_feedback
+                    },
                 )
             })
     }

@@ -108,8 +108,9 @@ pub struct Surface {
     known_nodes: HashSet<DrmNode>,
 
     active: Arc<AtomicBool>,
-    feedback: HashMap<DrmNode, SurfaceDmabufFeedback>,
-    plane_formats: FormatSet,
+    pub(super) feedback: HashMap<DrmNode, SurfaceDmabufFeedback>,
+    pub(super) primary_plane_formats: FormatSet,
+    overlay_plane_formats: FormatSet,
 
     loop_handle: LoopHandle<'static, State>,
     thread_command: Sender<ThreadCommand>,
@@ -239,7 +240,7 @@ pub enum ThreadCommand {
     ScheduleRender,
     AdaptiveSyncAvailable(SyncSender<Result<VrrSupport>>),
     UseAdaptiveSync(AdaptiveSync),
-    AllowOverlayScanout(bool, SyncSender<()>),
+    AllowFrameFlags(bool, FrameFlags, SyncSender<()>),
     End,
     DpmsOff,
 }
@@ -309,6 +310,7 @@ impl Surface {
                         .surfaces
                         .get_mut(&crtc)
                         .unwrap();
+
                     state
                         .common
                         .send_dmabuf_feedback(&output_clone, &states, |source_node| {
@@ -332,7 +334,8 @@ impl Surface {
                                             target_node,
                                             render_formats,
                                             target_formats,
-                                            surface.plane_formats.clone(),
+                                            surface.primary_plane_formats.clone(),
+                                            surface.overlay_plane_formats.clone(),
                                         )
                                     })
                                     .clone(),
@@ -350,7 +353,8 @@ impl Surface {
             known_nodes: HashSet::new(),
             active,
             feedback: HashMap::new(),
-            plane_formats: FormatSet::default(),
+            primary_plane_formats: FormatSet::default(),
+            overlay_plane_formats: FormatSet::default(),
             loop_handle: evlh.clone(),
             thread_command: tx,
             thread_token,
@@ -423,11 +427,11 @@ impl Surface {
         Ok(true)
     }
 
-    pub fn allow_overlay_scanout(&mut self, flag: bool) {
+    pub fn allow_frame_flags(&mut self, flag: bool, flags: FrameFlags) {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let _ = self
             .thread_command
-            .send(ThreadCommand::AllowOverlayScanout(flag, tx));
+            .send(ThreadCommand::AllowFrameFlags(flag, flags, tx));
         let _ = rx.recv();
     }
 
@@ -439,21 +443,18 @@ impl Surface {
 
     pub fn resume(&mut self, compositor: GbmDrmOutput) -> Result<()> {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
-        self.plane_formats = compositor.with_compositor(|c| {
-            c.surface()
-                .plane_info()
-                .formats
-                .iter()
-                .copied()
-                .chain(
+        (self.primary_plane_formats, self.overlay_plane_formats) =
+            compositor.with_compositor(|c| {
+                (
+                    c.surface().plane_info().formats.clone(),
                     c.surface()
                         .planes()
                         .overlay
                         .iter()
-                        .flat_map(|p| p.formats.iter().cloned()),
+                        .flat_map(|p| p.formats.iter().cloned())
+                        .collect::<FormatSet>(),
                 )
-                .collect::<FormatSet>()
-        });
+            });
 
         let _ = self.thread_command.send(ThreadCommand::Resume {
             compositor,
@@ -615,20 +616,18 @@ fn surface_thread(
                     };
                 }
             }
-            Event::Msg(ThreadCommand::AllowOverlayScanout(flag, tx)) => {
-                if !crate::utils::env::bool_var("COSMIC_DISABLE_DIRECT_SCANOUT").unwrap_or(false)
-                    && !crate::utils::env::bool_var("COSMIC_DISABLE_OVERLAY_SCANOUT")
-                        .unwrap_or(false)
-                {
-                    if flag {
-                        state
-                            .frame_flags
-                            .insert(FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT);
-                    } else {
-                        state
-                            .frame_flags
-                            .remove(FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT);
-                    }
+            Event::Msg(ThreadCommand::AllowFrameFlags(flag, mut flags, tx)) => {
+                if crate::utils::env::bool_var("COSMIC_DISABLE_DIRECT_SCANOUT").unwrap_or(false) {
+                    flags.remove(FrameFlags::ALLOW_SCANOUT);
+                }
+                if crate::utils::env::bool_var("COSMIC_DISABLE_OVERLAY_SCANOUT").unwrap_or(false) {
+                    flags.remove(FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT);
+                }
+
+                if flag {
+                    state.frame_flags.insert(flags);
+                } else {
+                    state.frame_flags.remove(flags);
                 }
                 let _ = tx.send(());
             }
@@ -1484,7 +1483,8 @@ fn get_surface_dmabuf_feedback(
     target_node: DrmNode,
     render_formats: FormatSet,
     target_formats: FormatSet,
-    plane_formats: FormatSet,
+    primary_plane_formats: FormatSet,
+    overlay_plane_formats: FormatSet,
 ) -> SurfaceDmabufFeedback {
     let combined_formats = render_formats
         .intersection(&target_formats)
@@ -1494,7 +1494,11 @@ fn get_surface_dmabuf_feedback(
     // We limit the scan-out trache to formats we can also render from
     // so that there is always a fallback render path available in case
     // the supplied buffer can not be scanned out directly
-    let planes_formats = plane_formats
+    let primary_plane_formats = primary_plane_formats
+        .intersection(&combined_formats)
+        .copied()
+        .collect::<FormatSet>();
+    let overlay_plane_formats = overlay_plane_formats
         .intersection(&combined_formats)
         .copied()
         .collect::<FormatSet>();
@@ -1514,12 +1518,29 @@ fn get_surface_dmabuf_feedback(
 
     let render_feedback = builder.clone().build().unwrap();
     // we would want to do this in other cases as well, but same thing as above applies
+    let primary_scanout_feedback = if target_node == render_node {
+        builder
+            .clone()
+            .add_preference_tranche(
+                target_node.dev_id(),
+                Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
+                primary_plane_formats.clone(),
+            )
+            .build()
+            .unwrap()
+    } else {
+        builder.clone().build().unwrap()
+    };
     let scanout_feedback = if target_node == render_node {
         builder
             .add_preference_tranche(
                 target_node.dev_id(),
                 Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
-                planes_formats,
+                FormatSet::from_iter(
+                    primary_plane_formats
+                        .into_iter()
+                        .chain(overlay_plane_formats.into_iter()),
+                ),
             )
             .build()
             .unwrap()
@@ -1530,5 +1551,6 @@ fn get_surface_dmabuf_feedback(
     SurfaceDmabufFeedback {
         render_feedback,
         scanout_feedback,
+        primary_scanout_feedback,
     }
 }
