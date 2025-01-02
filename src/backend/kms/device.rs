@@ -612,6 +612,59 @@ impl Device {
         }
     }
 
+    pub fn allow_overlay_scanout(
+        &mut self,
+        flag: bool,
+        renderer: &mut GlMultiRenderer,
+        clock: &Clock<Monotonic>,
+        shell: &Arc<RwLock<Shell>>,
+    ) -> Result<()> {
+        for surface in self.surfaces.values_mut() {
+            surface.allow_overlay_scanout(flag);
+        }
+
+        if !flag {
+            let now = clock.now();
+
+            let output_map = self
+                .surfaces
+                .iter()
+                .map(|(crtc, surface)| (*crtc, surface.output.clone()))
+                .collect::<HashMap<_, _>>();
+
+            self.drm.with_compositors::<Result<()>>(|map| {
+                for (crtc, compositor) in map.iter() {
+                    let elements = match output_map.get(crtc) {
+                        Some(output) => output_elements(
+                            Some(&self.render_node),
+                            renderer,
+                            shell,
+                            now,
+                            &output,
+                            CursorMode::All,
+                            None,
+                        )
+                        .with_context(|| "Failed to render outputs")?,
+                        None => Vec::new(),
+                    };
+
+                    let mut compositor = compositor.lock().unwrap();
+                    compositor.render_frame(
+                        renderer,
+                        &elements,
+                        CLEAR_COLOR,
+                        FrameFlags::empty(),
+                    )?;
+                    compositor.commit_frame()?;
+                }
+
+                Ok(())
+            })?;
+        }
+
+        Ok(())
+    }
+
     pub fn in_use(&self, primary: Option<&DrmNode>) -> bool {
         Some(&self.render_node) == primary
             || !self.surfaces.is_empty()
