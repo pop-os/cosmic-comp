@@ -1901,9 +1901,9 @@ dependencies = [
 
 [[package]]
 name = "gbm"
-version = "0.16.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c724107aa10444b1d2709aae4727c18a33c16b3e15ea8a46cc4ae226c084c88a"
+checksum = "ce852e998d3ca5e4a97014fb31c940dc5ef344ec7d364984525fd11e8a547e6a"
 dependencies = [
  "bitflags 2.6.0",
  "drm 0.14.0",
@@ -1914,9 +1914,9 @@ dependencies = [
 
 [[package]]
 name = "gbm-sys"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9cc2f64de9fa707b5c6b2d2f10d7a7e49e845018a9f5685891eb40d3bab2538"
+checksum = "c13a5f2acc785d8fb6bf6b7ab6bfb0ef5dad4f4d97e8e70bb8e470722312f76f"
 dependencies = [
  "libc",
 ]
@@ -3874,9 +3874,9 @@ dependencies = [
 
 [[package]]
 name = "pixman"
-version = "0.1.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d24a24da0bec14f4e43a495c1837a3c358b87532e7fe66bd75c348b89f0451b6"
+checksum = "cea217d496c19ac0a8e502b37078e1f683d16344adee9eb247a5d57c165e1edf"
 dependencies = [
  "drm-fourcc",
  "paste",
@@ -4638,7 +4638,7 @@ checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/smithay//smithay?rev=bc1d732#bc1d7320f95cdf17f9e7aa6867cccc5903548032"
+source = "git+https://github.com/smithay//smithay?rev=14c7e43#14c7e43255968e2d979a19e1fd9bd694e5a9726e"
 dependencies = [
  "appendlist",
  "ash",
