@@ -1,3 +1,4 @@
+use calloop::RegistrationToken;
 use cosmic_settings_config::shortcuts::action::Direction;
 use smithay::utils::{Logical, Point};
 use std::{collections::VecDeque, time::Duration};
@@ -16,6 +17,8 @@ pub struct SwipeEvent {
 pub enum SwipeAction {
     NextWorkspace,
     PrevWorkspace,
+    Drag,
+    DragEnd(RegistrationToken),
 }
 
 #[derive(Debug, Clone)]
@@ -26,16 +29,19 @@ pub struct GestureState {
     pub delta: f64,
     // Delta tracking inspired by Niri (GPL-3.0) https://github.com/YaLTeR/niri/tree/v0.1.3
     pub history: VecDeque<SwipeEvent>,
+    /// `true` if this is a continuation of a previous gesture.
+    pub continuation: bool,
 }
 
 impl GestureState {
-    pub fn new(fingers: u32) -> Self {
+    pub fn new(fingers: u32, continuation: bool) -> Self {
         GestureState {
             fingers,
             direction: None,
             action: None,
             delta: 0.0,
             history: VecDeque::new(),
+            continuation,
         }
     }
 
@@ -129,7 +135,7 @@ impl GestureState {
 
 impl Default for GestureState {
     fn default() -> Self {
-        GestureState::new(0)
+        GestureState::new(0, false)
     }
 }
 

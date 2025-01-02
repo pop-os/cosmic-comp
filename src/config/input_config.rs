@@ -80,6 +80,8 @@ pub fn for_device(device: &InputDevice) -> InputConfig {
             None
         },
         map_to_output: None,
+        three_finger_drag: (device.config_tap_finger_count() > 2).then_some(true),
+        three_finger_drag_delay: (device.config_tap_finger_count() > 2).then_some(1000),
     }
 }
 
